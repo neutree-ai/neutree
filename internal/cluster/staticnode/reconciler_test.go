@@ -265,6 +265,34 @@ func TestBuildStatusUpdatesTransitionTimeWhenPhaseChanges(t *testing.T) {
 	assert.NotEqual(t, previousTransitionTime, status.LastTransitionTime)
 }
 
+func TestBuildStatusWritesNodeDeviceSnapshotAllocations(t *testing.T) {
+	status := BuildStatus(&v1.StaticNode{}, &ReconcileResult{
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+			},
+		},
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{
+				WorkloadType: "endpoint",
+				Workspace:    "default",
+				Endpoint:     "chat",
+				ReplicaID:    "replica-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+				},
+			},
+		},
+	}, nil)
+
+	require.NotNil(t, status.Accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), status.Accelerator.Type)
+	require.Len(t, status.Allocations, 1)
+	assert.Equal(t, "chat", status.Allocations[0].Endpoint)
+	assert.Equal(t, "replica-a", status.Allocations[0].ReplicaID)
+}
+
 func TestBuildStatusEmptyComponentsReconciling(t *testing.T) {
 	status := BuildStatus(&v1.StaticNode{}, &ReconcileResult{
 		Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
@@ -274,6 +302,209 @@ func TestBuildStatusEmptyComponentsReconciling(t *testing.T) {
 
 	assert.Equal(t, v1.StaticNodePhaseReconciling, status.Phase)
 	assert.Empty(t, status.ErrorMessage)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotUsesAgentForDetails(t *testing.T) {
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &NodeDeviceSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+					{
+						UUID:         "GPU-abc",
+						ProductName:  "NVIDIA A100",
+						ProductModel: "NVIDIA_A100",
+						MinorNumber:  v1.StaticNodeAcceleratorDeviceMinorNumberUnknown,
+					},
+				},
+			},
+			Allocations: []v1.StaticNodeAllocationStatus{
+				{Endpoint: "chat", ReplicaID: "replica-a", Devices: []v1.DeviceAllocation{{UUID: "GPU-abc"}}},
+			},
+		},
+	}
+
+	accelerator, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		staticNodeForDeviceSnapshot(),
+		&v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ID: "3", MinorNumber: 3, MemoryMiB: 81920},
+			},
+		},
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), accelerator.Type)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", accelerator.Devices[0].UUID)
+	assert.Equal(t, "3", accelerator.Devices[0].ID)
+	assert.Equal(t, 3, accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, int64(81920), accelerator.Devices[0].MemoryMiB)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+	assert.Equal(t, 1, client.calls)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotKeepsMinorNumberZero(t *testing.T) {
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &NodeDeviceSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+					{UUID: "GPU-abc", MinorNumber: 0},
+				},
+			},
+		},
+	}
+
+	accelerator, _, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		staticNodeForDeviceSnapshot(),
+		&v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", MinorNumber: 3},
+			},
+		},
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, 0, accelerator.Devices[0].MinorNumber)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotBackfillsUnknownMinorNumber(t *testing.T) {
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &NodeDeviceSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+					{UUID: "GPU-abc", MinorNumber: v1.StaticNodeAcceleratorDeviceMinorNumberUnknown},
+				},
+			},
+		},
+	}
+
+	accelerator, _, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		staticNodeForDeviceSnapshot(),
+		&v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", MinorNumber: 3},
+			},
+		},
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, accelerator)
+	require.Len(t, accelerator.Devices, 1)
+	assert.Equal(t, 3, accelerator.Devices[0].MinorNumber)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotKeepsFallbackOnSnapshotError(t *testing.T) {
+	node := staticNodeForDeviceSnapshot()
+	node.Status = &v1.StaticNodeStatus{
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{Endpoint: "previous", ReplicaID: "replica-old"},
+		},
+	}
+	fallback := &v1.StaticNodeAcceleratorStatus{
+		Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+		},
+	}
+	client := &fakeNodeDeviceSnapshotClient{err: errors.New("snapshot timeout")}
+
+	accelerator, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		node,
+		fallback,
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, fallback, accelerator)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "previous", allocations[0].Endpoint)
+	assert.Equal(t, 1, client.calls)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotDoesNotDowngradeDetectedGPUToCPU(t *testing.T) {
+	fallback := &v1.StaticNodeAcceleratorStatus{
+		Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+		},
+	}
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &NodeDeviceSnapshot{
+			Accelerator: v1.CPUStaticNodeAcceleratorStatus(),
+			Allocations: []v1.StaticNodeAllocationStatus{
+				{Endpoint: "chat", ReplicaID: "replica-a"},
+			},
+		},
+	}
+
+	accelerator, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		staticNodeForDeviceSnapshot(),
+		fallback,
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, fallback, accelerator)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotWaitsForNodeAgentReady(t *testing.T) {
+	node := staticNodeForDeviceSnapshot()
+	node.Status = &v1.StaticNodeStatus{
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{Endpoint: "previous", ReplicaID: "replica-old"},
+		},
+	}
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &NodeDeviceSnapshot{
+			Allocations: []v1.StaticNodeAllocationStatus{{Endpoint: "new"}},
+		},
+	}
+	fallback := &v1.StaticNodeAcceleratorStatus{Type: v1.AcceleratorTypeNVIDIAGPU.String()}
+
+	accelerator, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		node,
+		fallback,
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: false, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, fallback, accelerator)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "previous", allocations[0].Endpoint)
+	assert.Equal(t, 0, client.calls)
 }
 
 func TestInspectDockerImageIgnoresSSHWarning(t *testing.T) {
@@ -1012,6 +1243,29 @@ type fakeHeadReadyChecker struct {
 
 func (f fakeHeadReadyChecker) HeadReady(_ context.Context, _ *v1.StaticNode) (bool, error) {
 	return f.ready, f.err
+}
+
+type fakeNodeDeviceSnapshotClient struct {
+	snapshot *NodeDeviceSnapshot
+	err      error
+	calls    int
+}
+
+func (f *fakeNodeDeviceSnapshotClient) DeviceSnapshot(_ context.Context, _ *v1.StaticNode) (*NodeDeviceSnapshot, error) {
+	f.calls++
+
+	return f.snapshot, f.err
+}
+
+func staticNodeForDeviceSnapshot() *v1.StaticNode {
+	return &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+		Spec: &v1.StaticNodeSpec{
+			Cluster: "static-a",
+			Role:    v1.StaticNodeRoleHead,
+			IP:      "10.0.0.10",
+		},
+	}
 }
 
 type fakeStaticNodeHeadReadyStore struct {

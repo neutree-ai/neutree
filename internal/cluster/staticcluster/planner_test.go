@@ -20,7 +20,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Env: map[string]string{
 					"ACCELERATOR_TYPE": "gpu",
 				},
-				Options: []string{"--gpus all"},
+				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
@@ -111,6 +111,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree-node-agent:v1.2.0",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -118,6 +119,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 		"ray-head",
 		nodeExporterComponentName,
 		acceleratorExporterComponentName,
+		nodeAgentComponentName,
 		vmagentComponentName,
 	})
 	nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
@@ -137,6 +139,33 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, 19400, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Equal(t, "registry.example.com/neutree/neutree-node-agent:v1.2.0", nodeAgent.Image)
+	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
+	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+	assert.Contains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
+	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:19400/metrics")
+	assert.Contains(t, nodeAgent.Args, "--procfs-root=/host/proc")
+	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
+	assert.Contains(t, nodeAgent.Args, "--node=head-0")
+	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
+	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
+	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
+	assert.NotContains(t, nodeAgent.Args, "--static-node-cluster=static-a")
+	assert.NotContains(t, nodeAgent.Args, "--node-role=head")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--net=host")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--pid=host")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--cgroupns=host")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--gpus all")
+	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
+	require.Len(t, nodeAgent.Ports, 1)
+	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
+	require.NotNil(t, nodeAgent.HealthCheck)
+	assert.Equal(t, "/health", nodeAgent.HealthCheck.HTTPPath)
+	assert.Equal(t, 19101, nodeAgent.HealthCheck.Port)
 	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
 	require.NotNil(t, vmagentComponent)
 	assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0", vmagentComponent.Image)
@@ -146,6 +175,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	require.NotNil(t, vmagentConfig)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
+	assert.Contains(t, vmagentConfig.Content, `honor_labels: true`)
+	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-agent.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-ray`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/ray.json`)
 	assert.Contains(t, vmagentConfig.Content, `metric_relabel_configs:`)
@@ -165,6 +197,11 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeTargets.Content, `"10.0.0.10:19100"`)
 	assert.Contains(t, nodeTargets.Content, `"10.0.0.11:19100"`)
 	assert.Contains(t, nodeTargets.Content, `"static_node_cluster": "static-a"`)
+	nodeAgentTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/node-agent.json")
+	require.NotNil(t, nodeAgentTargets)
+	assert.True(t, nodeAgentTargets.SkipRestartOnChange)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.10:19101"`)
+	assert.Contains(t, nodeAgentTargets.Content, `"10.0.0.11:19101"`)
 	rayTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/ray.json")
 	require.NotNil(t, rayTargets)
 	assert.True(t, rayTargets.SkipRestartOnChange)
@@ -198,10 +235,11 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, v1.RayletMetricsPort, rayWorker.HealthCheck.Port)
 	assert.Equal(t, "/root/.docker", rayWorker.Env["DOCKER_CONFIG"])
 	assert.Contains(t, rayWorker.DockerRunOptions, "--volume /etc/neutree/docker:/root/.docker:ro")
-	assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker", nodeExporterComponentName})
+	assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker", nodeExporterComponentName, nodeAgentComponentName})
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree-node-agent:v1.2.0",
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -561,6 +599,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree-node-agent:v1.2.0",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }

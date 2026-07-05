@@ -31,7 +31,7 @@ func buildNodeComponents(
 
 	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
 
-	return append(components, buildMetricsComponents(cluster, role, profile, metricsRemoteWriteURL)...)
+	return append(components, buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)...)
 }
 
 func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {

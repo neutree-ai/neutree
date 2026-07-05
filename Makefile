@@ -12,6 +12,7 @@ NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
+NEUTREE_NODE_AGENT_IMAGE := $(IMAGE_PREFIX)neutree-node-agent
 
 ARCH ?= amd64
 ALL_ARCH = amd64 arm64
@@ -91,8 +92,12 @@ build-neutree-cli: prepare-build-cli
 build-neutree-api:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
+build-neutree-node-agent:
+	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/neutree-node-agent.go
+
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts
+CLUSTER_DOCKER_BUILD ?= runtime node-agent
 
 .PHONY: docker-build-all ## Build all the architecture docker images
 docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
@@ -116,9 +121,17 @@ docker-build-api: # build api docker image
 docker-build-db-scripts:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
 
+.PHONY: docker-build-node-agent
+docker-build-node-agent:
+	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.node-agent
+
 .PHONY: docker-build-runtime
 docker-build-runtime:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.runtime
+
+.PHONY: docker-build-cluster
+docker-build-cluster: ## Build cluster-level images such as runtime and node-agent.
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(CLUSTER_DOCKER_BUILD))
 
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
@@ -142,9 +155,17 @@ docker-push-api: # push api docker image
 docker-push-db-scripts: # push db scripts docker image
 	docker push $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-node-agent
+docker-push-node-agent:
+	docker push $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-runtime
 docker-push-runtime: # push runtime docker image
 	docker push $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
+.PHONY: docker-push-cluster
+docker-push-cluster: ## Push cluster-level images such as runtime and node-agent.
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-push-,$(CLUSTER_DOCKER_BUILD))
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
@@ -161,9 +182,17 @@ docker-push-manifest-api: ## Push the api manifest docker image.
 docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
 
+.PHONY: docker-push-manifest-node-agent
+docker-push-manifest-node-agent: ## Push the node agent manifest docker image.
+	docker buildx imagetools create -t $(NEUTREE_NODE_AGENT_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_NODE_AGENT_IMAGE)\-&:$(IMAGE_TAG)~g")
+
 .PHONY: docker-push-manifest-runtime
 docker-push-manifest-runtime: ## Push the runtime manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
+
+.PHONY: docker-push-manifest-cluster
+docker-push-manifest-cluster: ## Push cluster-level multi-arch manifests.
+	$(MAKE) $(addprefix docker-push-manifest-,$(CLUSTER_DOCKER_BUILD))
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
@@ -298,6 +327,10 @@ docker-test-core: ## Redeploy local neutree-core for testing
 	$(MAKE) build-neutree-core
 	docker cp bin/neutree-core neutree-core:/neutree-core
 	docker restart neutree-core
+
+.PHONY: docker-test-node-agent
+docker-test-node-agent: ## Build local neutree-node-agent binary for testing
+	$(MAKE) build-neutree-node-agent
 
 .PHONY: docker-test-db-scripts
 docker-test-db-scripts: ## Overwrite db scripts for testing, and restart related services

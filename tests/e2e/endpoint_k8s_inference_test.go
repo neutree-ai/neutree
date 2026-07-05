@@ -53,6 +53,9 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 			Expect(ep.Spec.Engine.Version).To(Equal(profileEngineVersion()))
 			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+			By("Verifying node-agent exposes endpoint replica GPU usage from DCGM")
+			assertK8sNodeAgentEndpointGPUMetrics(clusterName, epName)
 		})
 
 		It("should serve inference requests", func() {

@@ -135,6 +135,17 @@ func (c *StaticNodeController) reconcileNormal(
 
 	result.Components, reconcileErr = reconciler.ReconcileComponents(ctx, node, runner, dockerRuntime)
 	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node component status", &reconcileErr)
+	if reconcileErr != nil {
+		return reconcileErr
+	}
+
+	result.Accelerator, result.Allocations, reconcileErr = reconciler.ReconcileNodeDeviceSnapshot(
+		ctx,
+		node,
+		result.Accelerator,
+		result.Components,
+	)
+	c.updateStatus(node, staticnode.BuildStatus(node, result, reconcileErr), "failed to update static node device snapshot status", &reconcileErr)
 
 	return reconcileErr
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,8 +18,11 @@ import (
 )
 
 const (
-	nodeExporterDaemonSetName = "neutree-node-exporter"
-	nodeExporterPort          = 19100
+	nodeExporterDaemonSetName   = "neutree-node-exporter"
+	nodeExporterPort            = 19100
+	neutreeNodeAgentMetricsName = "neutree-node-agent"
+	neutreeNodeAgentMetricsPort = 19101
+	externalDCGMExporterPort    = 9400
 
 	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultMetricsPath           = "/metrics"
@@ -247,6 +251,29 @@ func exporterMetricsPath(metricsPath string) string {
 	}
 
 	return metricsPath
+}
+
+func acceleratorExporterLocalMetricsURLs(exporters []metricsAcceleratorExporter) []string {
+	urls := make([]string, 0, len(exporters))
+
+	for _, exporter := range exporters {
+		if !exporter.HostNetwork || exporter.Port <= 0 {
+			continue
+		}
+
+		metricsPath := exporterMetricsPath(exporter.MetricsPath)
+		if !strings.HasPrefix(metricsPath, "/") {
+			metricsPath = "/" + metricsPath
+		}
+
+		urls = append(urls, "http://127.0.0.1:"+strconv.Itoa(exporter.Port)+metricsPath)
+	}
+
+	return urls
+}
+
+func externalDCGMExporterLocalMetricsURL() string {
+	return "http://127.0.0.1:" + strconv.Itoa(externalDCGMExporterPort) + defaultMetricsPath
 }
 
 func buildExporterEnv(env map[string]string) []corev1.EnvVar {

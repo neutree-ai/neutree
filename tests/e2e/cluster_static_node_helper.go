@@ -142,13 +142,32 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		}))
 		requireStaticNodeComponentRunning(node, "node-exporter")
 
+		nodeAgent := requireStaticNodeComponent(node, "neutree-node-agent")
+		ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--listen-address=:19101"))
+		ExpectWithOffset(1, nodeAgent.Ports).To(ContainElement(v1.NodeComponentPort{
+			Name:     "http",
+			Port:     19101,
+			Protocol: "TCP",
+		}))
+		ExpectWithOffset(1, nodeAgent.HealthCheck).NotTo(BeNil())
+		ExpectWithOffset(1, nodeAgent.HealthCheck.HTTPPath).To(Equal("/health"))
+		ExpectWithOffset(1, nodeAgent.HealthCheck.Port).To(Equal(19101))
+		requireStaticNodeComponentRunning(node, "neutree-node-agent")
+
 		if node.Spec.Role == v1.StaticNodeRoleHead {
 			vmagent := requireStaticNodeComponent(node, "vmagent")
 			requireStaticNodeComponentRunning(node, "vmagent")
 
 			vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
+			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-agent"))
+			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("/etc/neutree/vmagent/file_sd/node-agent.json"))
 			ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
+
+			nodeAgentTargets := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/file_sd/node-agent.json")
+			for _, target := range staticNodeTargets(nodes, 19101) {
+				ExpectWithOffset(1, nodeAgentTargets.Content).To(ContainSubstring(target))
+			}
 		}
 
 		isGPUNode := node.Status.Accelerator != nil &&
@@ -228,6 +247,19 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	for _, ip := range gpuNodeIPs {
 		ExpectWithOffset(1, acceleratorTargets.Content).To(ContainSubstring(fmt.Sprintf(`"%s:9400"`, ip)))
 	}
+}
+
+func staticNodeTargets(nodes []v1.StaticNode, port int) []string {
+	targets := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Spec == nil || node.Spec.IP == "" {
+			continue
+		}
+
+		targets = append(targets, fmt.Sprintf(`"%s:%d"`, node.Spec.IP, port))
+	}
+
+	return targets
 }
 
 func getStaticNodesForCluster(clusterName string) []v1.StaticNode {

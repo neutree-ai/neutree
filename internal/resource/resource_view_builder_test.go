@@ -16,12 +16,13 @@ type fakeResourceClient struct {
 	endpointErr       error
 	called            bool
 	endpointCalled    bool
-	listNodesOptions  ListNodesOptions
+	cluster           *v1.Cluster
+	endpoint          *v1.Endpoint
 }
 
-func (c *fakeResourceClient) ListNodes(_ context.Context, opts ListNodesOptions) ([]ResourceNode, error) {
+func (c *fakeResourceClient) ListNodes(_ context.Context, cluster *v1.Cluster) ([]ResourceNode, error) {
 	c.called = true
-	c.listNodesOptions = opts
+	c.cluster = cluster
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -31,9 +32,12 @@ func (c *fakeResourceClient) ListNodes(_ context.Context, opts ListNodesOptions)
 
 func (c *fakeResourceClient) ListEndpointInstances(
 	_ context.Context,
-	_ ListEndpointInstancesOptions,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
 ) ([]EndpointInstanceResource, error) {
 	c.endpointCalled = true
+	c.cluster = cluster
+	c.endpoint = endpoint
 	if c.endpointErr != nil {
 		return nil, c.endpointErr
 	}
@@ -147,7 +151,6 @@ func TestResourceViewBuilderBuildClusterResources(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, client.called)
-	require.True(t, client.listNodesOptions.AcceleratorVirtualizationEnabled)
 	require.Equal(t, float64(12), resources.Allocatable.CPU)
 	require.Equal(t, float64(48), resources.Allocatable.Memory)
 	require.Equal(t, float64(3), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
@@ -208,13 +211,14 @@ func TestResourceViewBuilderBuildEndpointResources(t *testing.T) {
 		},
 	}
 
-	resources, err := NewResourceViewBuilder(client).BuildEndpointResources(
-		context.Background(),
-		ListEndpointInstancesOptions{EndpointName: "endpoint"},
-	)
+	endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint"}}
+	cluster := &v1.Cluster{Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"}}
+	resources, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
 
 	require.NoError(t, err)
 	require.True(t, client.endpointCalled)
+	require.Same(t, cluster, client.cluster)
+	require.Same(t, endpoint, client.endpoint)
 	require.Len(t, resources.Replicas, 2)
 	require.Equal(t, "endpoint-abc", resources.Replicas[0].InstanceID)
 	require.Equal(t, int64(23040), resources.Summary.Products["Tesla-T4"].MemoryMiB)
@@ -224,12 +228,13 @@ func TestResourceViewBuilderBuildEndpointResources(t *testing.T) {
 func TestResourceViewBuilderBuildEndpointResourcesReturnsNilForEmptyInstances(t *testing.T) {
 	client := &fakeResourceClient{}
 
-	resources, err := NewResourceViewBuilder(client).BuildEndpointResources(
-		context.Background(),
-		ListEndpointInstancesOptions{EndpointName: "endpoint"},
-	)
+	endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint"}}
+	cluster := &v1.Cluster{Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"}}
+	resources, err := NewResourceViewBuilder(client).BuildEndpointResources(context.Background(), cluster, endpoint)
 
 	require.NoError(t, err)
 	require.True(t, client.endpointCalled)
+	require.Same(t, cluster, client.cluster)
+	require.Same(t, endpoint, client.endpoint)
 	require.Nil(t, resources)
 }

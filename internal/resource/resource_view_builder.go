@@ -9,7 +9,11 @@ import (
 
 type ResourceViewBuilder interface {
 	BuildClusterResources(ctx context.Context, cluster *v1.Cluster) (*v1.ClusterResources, error)
-	BuildEndpointResources(ctx context.Context, opts ListEndpointInstancesOptions) (*v1.EndpointResourceStatus, error)
+	BuildEndpointResources(
+		ctx context.Context,
+		cluster *v1.Cluster,
+		endpoint *v1.Endpoint,
+	) (*v1.EndpointResourceStatus, error)
 }
 
 type resourceViewBuilder struct {
@@ -22,14 +26,6 @@ func NewResourceViewBuilder(resourceClient ResourceClient) ResourceViewBuilder {
 	}
 }
 
-func ListNodesOptionsFromCluster(cluster *v1.Cluster) ListNodesOptions {
-	return ListNodesOptions{
-		AcceleratorVirtualizationEnabled: cluster != nil &&
-			cluster.Spec != nil &&
-			cluster.Spec.AcceleratorVirtualizationEnabled(),
-	}
-}
-
 func (b *resourceViewBuilder) BuildClusterResources(
 	ctx context.Context,
 	cluster *v1.Cluster,
@@ -38,7 +34,7 @@ func (b *resourceViewBuilder) BuildClusterResources(
 		return nil, fmt.Errorf("resource client is nil")
 	}
 
-	nodes, err := b.resourceClient.ListNodes(ctx, ListNodesOptionsFromCluster(cluster))
+	nodes, err := b.resourceClient.ListNodes(ctx, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -48,13 +44,14 @@ func (b *resourceViewBuilder) BuildClusterResources(
 
 func (b *resourceViewBuilder) BuildEndpointResources(
 	ctx context.Context,
-	opts ListEndpointInstancesOptions,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
 ) (*v1.EndpointResourceStatus, error) {
 	if b.resourceClient == nil {
 		return nil, fmt.Errorf("resource client is nil")
 	}
 
-	instances, err := b.resourceClient.ListEndpointInstances(ctx, opts)
+	instances, err := b.resourceClient.ListEndpointInstances(ctx, cluster, endpoint)
 	if err != nil {
 		return nil, err
 	}

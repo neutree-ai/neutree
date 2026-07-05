@@ -114,6 +114,8 @@ type StaticNodeStatus struct {
 	Phase StaticNodePhase `json:"phase,omitempty"`
 	// Accelerator records the detected accelerator type and device inventory.
 	Accelerator *StaticNodeAcceleratorStatus `json:"accelerator,omitempty"`
+	// Allocations records workload-to-device assignments observed by the node agent.
+	Allocations []StaticNodeAllocationStatus `json:"allocations,omitempty"`
 	// Warm records image warm-up progress for this node.
 	Warm *WarmStatus `json:"warm,omitempty"`
 	// Components records observed state for each desired or stale component.
@@ -133,6 +135,8 @@ type StaticNodeAcceleratorStatus struct {
 	Devices []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
 }
 
+const StaticNodeAcceleratorDeviceMinorNumberUnknown = -1
+
 type StaticNodeAcceleratorDeviceStatus struct {
 	// ID is the plugin-provided local device identifier.
 	ID string `json:"id,omitempty"`
@@ -143,11 +147,23 @@ type StaticNodeAcceleratorDeviceStatus struct {
 	// ProductModel is the normalized model key used for resource grouping when available.
 	ProductModel string `json:"product_model,omitempty"`
 	// MinorNumber is the Linux device minor number, for example the X in /dev/nvidiaX.
+	// StaticNodeAcceleratorDeviceMinorNumberUnknown means the minor number is unknown.
 	MinorNumber int `json:"minor_number,omitempty"`
 	// MemoryMiB is the device memory capacity in MiB.
 	MemoryMiB int64 `json:"memory_mib,omitempty"`
 	// Healthy reports whether the plugin considers this device usable.
 	Healthy bool `json:"healthy,omitempty"`
+}
+
+type StaticNodeAllocationStatus struct {
+	WorkloadType string             `json:"workload_type,omitempty"`
+	Workspace    string             `json:"workspace,omitempty"`
+	Endpoint     string             `json:"endpoint,omitempty"`
+	InstanceID   string             `json:"instance_id,omitempty"`
+	ReplicaID    string             `json:"replica_id,omitempty"`
+	RuntimeID    string             `json:"runtime_id,omitempty"`
+	PID          int                `json:"pid,omitempty"`
+	Devices      []DeviceAllocation `json:"devices,omitempty"`
 }
 
 func CPUStaticNodeAcceleratorStatus() StaticNodeAcceleratorStatus {

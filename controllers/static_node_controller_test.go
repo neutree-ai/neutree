@@ -56,12 +56,13 @@ func TestStaticNodeControllerReconcile(t *testing.T) {
 	assert.Equal(t, v1.StaticNodePhaseReconciling, statusObj.Status.Phase)
 	require.NotNil(t, statusObj.Status.Warm)
 	assert.True(t, statusObj.Status.Warm.Ready)
-	require.Len(t, updatedStatusHistory, 3)
+	require.Len(t, updatedStatusHistory, 4)
 	assert.NotNil(t, updatedStatusHistory[0].Status.Accelerator)
 	assert.Nil(t, updatedStatusHistory[0].Status.Warm)
 	require.NotNil(t, updatedStatusHistory[1].Status.Warm)
 	assert.True(t, updatedStatusHistory[1].Status.Warm.Ready)
 	assert.Equal(t, v1.StaticNodePhaseReconciling, updatedStatusHistory[2].Status.Phase)
+	assert.Equal(t, v1.StaticNodePhaseReconciling, updatedStatusHistory[3].Status.Phase)
 	assert.Equal(t, 2, runner.calls)
 }
 
@@ -155,6 +156,80 @@ func TestStaticNodeControllerReconcileUsesParentClusterImageRegistryAuth(t *test
 	require.NotNil(t, statusObj.Status)
 	require.NotNil(t, statusObj.Status.Warm)
 	assert.True(t, statusObj.Status.Warm.Ready)
+}
+
+func TestStaticNodeControllerReconcileWritesNodeDeviceSnapshot(t *testing.T) {
+	updatedStatus := map[string]*v1.StaticNode{}
+	var updatedStatusHistory []*v1.StaticNode
+	node := controllerStaticNode()
+	node.Spec.Warm = nil
+	node.Spec.Components = []v1.NodeComponentSpec{
+		{
+			Name:  "neutree-node-agent",
+			Image: "registry.example.com/neutree-node-agent:v1.2.0",
+		},
+	}
+	runner := &fakeControllerStaticNodeRunner{
+		responses: []fakeControllerStaticNodeRunnerResponse{
+			{
+				command: "mkdir -p '/etc/neutree/docker'",
+			},
+			{
+				output: "",
+			},
+			{},
+			{},
+			{},
+		},
+	}
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage: newMockStaticNodeStorage(
+			t,
+			nil,
+			nil,
+			func(id string, data *v1.StaticNode) {
+				updatedStatus[id] = data
+				updatedStatusHistory = append(updatedStatusHistory, data)
+			},
+			nil,
+			nil,
+		),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			runner: runner,
+		},
+		Reconciler: &staticnode.Reconciler{
+			NodeDeviceSnapshotClient: &fakeControllerNodeDeviceSnapshotClient{
+				snapshot: &staticnode.NodeDeviceSnapshot{
+					Accelerator: v1.StaticNodeAcceleratorStatus{
+						Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+							{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+						},
+					},
+					Allocations: []v1.StaticNodeAllocationStatus{
+						{Endpoint: "chat", ReplicaID: "replica-a"},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	err = controller.Reconcile(node)
+
+	require.NoError(t, err)
+	statusObj := updatedStatus["8"]
+	require.NotNil(t, statusObj)
+	require.NotNil(t, statusObj.Status)
+	require.NotNil(t, statusObj.Status.Accelerator)
+	require.Len(t, statusObj.Status.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", statusObj.Status.Accelerator.Devices[0].UUID)
+	require.Len(t, statusObj.Status.Allocations, 1)
+	assert.Equal(t, "chat", statusObj.Status.Allocations[0].Endpoint)
+	assert.Equal(t, "replica-a", statusObj.Status.Allocations[0].ReplicaID)
+	require.Len(t, updatedStatusHistory, 4)
+	assert.Empty(t, updatedStatusHistory[2].Status.Allocations)
+	require.Len(t, updatedStatusHistory[3].Status.Allocations, 1)
 }
 
 func TestStaticNodeControllerUpdateStatusDoesNotWriteParentStaticNodeCluster(t *testing.T) {
@@ -412,6 +487,18 @@ func (f *fakeControllerStaticNodeRunner) Close() error {
 
 func (f *fakeControllerStaticNodeRunner) Files() commandrunner.FileClient {
 	return nil
+}
+
+type fakeControllerNodeDeviceSnapshotClient struct {
+	snapshot *staticnode.NodeDeviceSnapshot
+	err      error
+}
+
+func (f *fakeControllerNodeDeviceSnapshotClient) DeviceSnapshot(
+	_ context.Context,
+	_ *v1.StaticNode,
+) (*staticnode.NodeDeviceSnapshot, error) {
+	return f.snapshot, f.err
 }
 
 func controllerStaticNode() *v1.StaticNode {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -322,6 +323,19 @@ func (h *K8sHelper) ServiceProxyGet(ctx context.Context, namespace, svcName, por
 	_, err := result.DoRaw(ctx)
 
 	return err
+}
+
+// PodProxyGetRaw sends a GET request to a pod through the Kubernetes API server proxy.
+func (h *K8sHelper) PodProxyGetRaw(ctx context.Context, namespace, podName, port, path string) ([]byte, error) {
+	result := h.clientset.CoreV1().Pods(namespace).ProxyGet(
+		"http",
+		podName,
+		port,
+		strings.TrimPrefix(path, "/"),
+		nil,
+	)
+
+	return result.DoRaw(ctx)
 }
 
 // CreateDockerRegistrySecret creates a docker-registry type secret.

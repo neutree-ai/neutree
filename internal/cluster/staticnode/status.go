@@ -21,6 +21,10 @@ func BuildStatus(
 			status.Accelerator = result.Accelerator
 		}
 
+		if result.Allocations != nil {
+			status.Allocations = result.Allocations
+		}
+
 		if result.Warm != nil {
 			status.Warm = result.Warm
 		}

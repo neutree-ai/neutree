@@ -729,6 +729,55 @@ func eventuallyDaemonSetReady(ctx context.Context, k8sH *K8sHelper, namespace, n
 	return daemonSet
 }
 
+func eventuallyDaemonSetPodReady(ctx context.Context, k8sH *K8sHelper, namespace, appLabel string) corev1.Pod {
+	var readyPod corev1.Pod
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		pods, err := k8sH.ListPods(ctx, namespace, "app="+appLabel)
+		g.Expect(err).NotTo(HaveOccurred(), "should list %s pods", appLabel)
+		g.Expect(pods).NotTo(BeEmpty(), "%s should have pods", appLabel)
+
+		for _, pod := range pods {
+			if pod.Status.Phase != corev1.PodRunning {
+				continue
+			}
+			for _, condition := range pod.Status.Conditions {
+				if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+					readyPod = pod
+					return
+				}
+			}
+		}
+
+		g.Expect(readyPod.Name).NotTo(BeEmpty(), "%s should have a ready pod", appLabel)
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return readyPod
+}
+
+func eventuallyPodProxyBodyContains(
+	ctx context.Context,
+	k8sH *K8sHelper,
+	namespace string,
+	podName string,
+	port string,
+	path string,
+	substrings ...string,
+) string {
+	var body []byte
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		got, err := k8sH.PodProxyGetRaw(ctx, namespace, podName, port, path)
+		g.Expect(err).NotTo(HaveOccurred(), "pod proxy GET %s/%s should succeed", podName, path)
+		body = got
+		for _, substring := range substrings {
+			g.Expect(string(body)).To(ContainSubstring(substring))
+		}
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return string(body)
+}
+
 func clusterVersionSupportsKubeStateMetrics(version string) bool {
 	return clusterVersionAtLeast(version, "v1.1.0")
 }

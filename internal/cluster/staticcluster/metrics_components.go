@@ -16,16 +16,19 @@ import (
 
 const (
 	nodeExporterComponentName           = "node-exporter"
+	nodeAgentComponentName              = "neutree-node-agent"
 	vmagentComponentName                = "vmagent"
 	acceleratorExporterComponentName    = "accelerator-exporter"
 	defaultVMAgentPort                  = 8429
 	defaultNodeExporterPort             = 19100
+	defaultNodeAgentPort                = 19101
 	defaultPrometheusHTTPPath           = "/metrics"
 	externalDCGMExporterPort            = 9400
 	defaultHealthHTTPPath               = "/health"
 	vmagentConfigPath                   = "/etc/neutree/vmagent/config.yaml"
 	vmagentFileSDDir                    = "/etc/neutree/vmagent/file_sd"
 	vmagentNodeExporterFileSDPath       = vmagentFileSDDir + "/node-exporter.json"
+	vmagentNodeAgentFileSDPath          = vmagentFileSDDir + "/node-agent.json"
 	vmagentRayFileSDPath                = vmagentFileSDDir + "/ray.json"
 	managedAcceleratorExporterJobPrefix = "accelerator-exporter"
 	defaultNodeExporterImage            = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
@@ -36,7 +39,8 @@ const staticVMAgentConfigTemplateText = `global:
   scrape_interval: 15s
 scrape_configs:
 {{ range .ScrapeConfigs }}- job_name: {{ .JobName }}
-{{ if .MetricsPath }}  metrics_path: {{ .MetricsPath }}
+{{ if .HonorLabels }}  honor_labels: true
+{{ end }}{{ if .MetricsPath }}  metrics_path: {{ .MetricsPath }}
 {{ end }}  file_sd_configs:
   - files:
     - {{ .FileSDPath }}
@@ -69,6 +73,7 @@ type staticVMAgentConfigData struct {
 
 type staticVMAgentScrapeConfig struct {
 	JobName              string
+	HonorLabels          bool
 	MetricsPath          string
 	FileSDPath           string
 	MetricRelabelConfigs string
@@ -76,6 +81,7 @@ type staticVMAgentScrapeConfig struct {
 
 func buildMetricsComponents(
 	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
 	role v1.StaticNodeRole,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
@@ -91,6 +97,8 @@ func buildMetricsComponents(
 			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 		}
 	}
+
+	components = append(components, buildNodeAgentComponent(cluster, node, profile))
 
 	if role == v1.StaticNodeRoleHead {
 		components = append(components, buildVMAgentComponent(cluster, metricsRemoteWriteURL))
@@ -164,6 +172,102 @@ func buildAcceleratorExporterComponent(
 			Port:     exporter.Port,
 		},
 	}
+}
+
+func buildNodeAgentComponent(
+	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
+	profile *v1.AcceleratorProfile,
+) v1.NodeComponentSpec {
+	args := []string{
+		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
+		"--cluster-type=ray",
+		fmt.Sprintf("--node-exporter-url=http://127.0.0.1:%d%s", defaultNodeExporterPort, defaultPrometheusHTTPPath),
+		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), defaultRayDashboardPort),
+		"--procfs-root=/host/proc",
+		"--cgroupfs-root=/host/sys/fs/cgroup",
+	}
+
+	if node != nil && node.Metadata != nil {
+		args = append(args, "--node="+node.Metadata.Name)
+	}
+	if node != nil && node.Spec != nil {
+		args = append(args, "--node-ip="+node.Spec.IP)
+	}
+
+	if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
+		args = append(args, fmt.Sprintf(
+			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
+			exporter.Port,
+			exporterMetricsPath(exporter),
+		))
+	} else if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeExternal {
+		args = append(args, fmt.Sprintf(
+			"--accelerator-exporter-url=http://127.0.0.1:%d%s",
+			externalDCGMExporterPort,
+			defaultPrometheusHTTPPath,
+		))
+	}
+
+	return v1.NodeComponentSpec{
+		Name:             nodeAgentComponentName,
+		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
+		Args:             args,
+		DockerRunOptions: nodeAgentDockerRunOptions(profile),
+		Volumes: []v1.NodeComponentVolume{
+			{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
+			{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
+		},
+		Ports: []v1.NodeComponentPort{
+			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
+		},
+		HealthCheck: &v1.NodeComponentHealthCheck{
+			HTTPPath: defaultHealthHTTPPath,
+			Port:     defaultNodeAgentPort,
+		},
+	}
+}
+
+func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
+	return "neutree-node-agent:" + staticNodeClusterVersion(cluster)
+}
+
+func staticNodeClusterVersion(cluster *v1.StaticNodeCluster) string {
+	if cluster == nil || cluster.Spec == nil {
+		return ""
+	}
+
+	return cluster.Spec.Version
+}
+
+func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
+	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil || exporter.Runtime == nil {
+		return options
+	}
+
+	// Until AcceleratorProfile exposes a dedicated NodeAgentRuntime, reuse the
+	// metrics exporter runtime because both components need accelerator visibility.
+	return appendDockerRunOptionsUnique(options, acceleratorExporterDockerRunOptions(exporter.Runtime)...)
+}
+
+func appendDockerRunOptionsUnique(options []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(options)+len(values))
+	result := make([]string, 0, len(options)+len(values))
+	for _, option := range append(append([]string{}, options...), values...) {
+		option = strings.TrimSpace(option)
+		if option == "" {
+			continue
+		}
+		if _, ok := seen[option]; ok {
+			continue
+		}
+		seen[option] = struct{}{}
+		result = append(result, option)
+	}
+
+	return result
 }
 
 func copyMetricsStringMap(values map[string]string) map[string]string {
@@ -249,6 +353,14 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 		})
 	}
 
+	if len(nodeAgentTargets(plans)) > 0 {
+		scrapeConfigs = append(scrapeConfigs, staticVMAgentScrapeConfig{
+			JobName:     "static-node-node-agent",
+			HonorLabels: true,
+			FileSDPath:  strconv.Quote(vmagentNodeAgentFileSDPath),
+		})
+	}
+
 	scrapeConfigs = append(scrapeConfigs, staticVMAgentScrapeConfig{
 		JobName:              "static-node-ray",
 		FileSDPath:           strconv.Quote(vmagentRayFileSDPath),
@@ -295,6 +407,13 @@ func renderVMAgentFileSDConfigFiles(
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
 			vmagentNodeExporterFileSDPath,
 			renderVMAgentNodeExporterFileSDTargets(cluster, plans),
+		))
+	}
+
+	if len(nodeAgentTargets(plans)) > 0 {
+		configFiles = append(configFiles, vmagentFileSDConfigFile(
+			vmagentNodeAgentFileSDPath,
+			renderVMAgentNodeAgentFileSDTargets(cluster, plans),
 		))
 	}
 
@@ -348,6 +467,36 @@ func nodeExporterTargets(plans []DesiredNodePlan) []DesiredNodePlan {
 
 	for _, plan := range plans {
 		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasComponent(plan.Node, nodeExporterComponentName) {
+			continue
+		}
+
+		targets = append(targets, plan)
+	}
+
+	return targets
+}
+
+func renderVMAgentNodeAgentFileSDTargets(
+	cluster *v1.StaticNodeCluster,
+	plans []DesiredNodePlan,
+) string {
+	targets := make([]vmagentFileSDTarget, 0, len(plans))
+
+	for _, plan := range nodeAgentTargets(plans) {
+		targets = append(targets, vmagentFileSDTarget{
+			Targets: []string{fmt.Sprintf("%s:%d", plan.Node.Spec.IP, defaultNodeAgentPort)},
+			Labels:  vmagentTargetLabels(cluster, plan.Node, nodeAgentComponentName),
+		})
+	}
+
+	return mustMarshalVMAgentFileSDTargets(targets)
+}
+
+func nodeAgentTargets(plans []DesiredNodePlan) []DesiredNodePlan {
+	targets := make([]DesiredNodePlan, 0, len(plans))
+
+	for _, plan := range plans {
+		if plan.Node == nil || plan.Node.Spec == nil || !staticNodeHasComponent(plan.Node, nodeAgentComponentName) {
 			continue
 		}
 

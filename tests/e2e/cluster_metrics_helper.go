@@ -35,9 +35,12 @@ func assertK8sMetricsResources(
 	if !clusterVersionSupportsManagedMetricsExporters(clusterVersion) {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")
+		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-agent")
+		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-agent should not exist before cluster version v1.1.0")
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist before cluster version v1.1.0")
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-http'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'neutree-node-agent'"))
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'dcgm-exporter'"))
 
 		assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
@@ -53,6 +56,33 @@ func assertK8sMetricsResources(
 		HaveField("ContainerPort", int32(19100)),
 	))
 	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
+
+	By("Checking neutree-node-agent DaemonSet")
+	nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
+	ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+	nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
+	ExpectWithOffset(1, nodeAgentContainer.Ports).To(ContainElement(
+		HaveField("ContainerPort", int32(19101)),
+	))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--listen-address=:19101"))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--cluster-type=kubernetes"))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--node=$(NODE_NAME)"))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--node-ip=$(NODE_IP)"))
+	ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
+	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'neutree-node-agent'"))
+	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("replacement: $1:19101"))
+
+	nodeAgentPod := eventuallyDaemonSetPodReady(ctx, k8sH, namespace, "neutree-node-agent")
+	health, err := k8sH.PodProxyGetRaw(ctx, namespace, nodeAgentPod.Name, "19101", "/health")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "node-agent /health should be reachable")
+	ExpectWithOffset(1, string(health)).To(ContainSubstring(`"status":"ok"`))
+
+	metrics := eventuallyPodProxyBodyContains(ctx, k8sH, namespace, nodeAgentPod.Name, "19101", "/metrics",
+		"neutree_node_ready",
+		"neutree_metrics_scrape_up",
+		"neutree_node_memory_total_bytes",
+	)
+	ExpectWithOffset(1, metrics).To(ContainSubstring("neutree_node_cpu_seconds_total"))
 
 	gpuNodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
@@ -100,6 +130,12 @@ func assertK8sExternalAcceleratorExporterResources(
 		nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
 		ExpectWithOffset(1, nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
+
+		nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
+		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).To(ContainElement(
+			"--accelerator-exporter-url=http://127.0.0.1:9400/metrics",
+		))
 	} else {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")

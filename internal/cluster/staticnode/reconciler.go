@@ -2,6 +2,7 @@ package staticnode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +20,9 @@ import (
 )
 
 const (
+	nodeAgentComponentName = "neutree-node-agent"
+	defaultNodeAgentPort   = 19101
+
 	warmReasonImageInspectFailed = "ImageInspectFailed"
 	warmReasonImagePullFailed    = "ImagePullFailed"
 	warmReasonImagePulled        = "ImagePulled"
@@ -45,12 +49,14 @@ type CommandRunner interface {
 }
 
 type Reconciler struct {
-	AcceleratorManager AcceleratorManager
-	HeadReadyChecker   HeadReadyChecker
+	AcceleratorManager       AcceleratorManager
+	HeadReadyChecker         HeadReadyChecker
+	NodeDeviceSnapshotClient NodeDeviceSnapshotClient
 }
 
 type ReconcileResult struct {
 	Accelerator *v1.StaticNodeAcceleratorStatus
+	Allocations []v1.StaticNodeAllocationStatus
 	Warm        *v1.WarmStatus
 	Components  []v1.NodeComponentStatus
 }
@@ -61,6 +67,19 @@ type AcceleratorManager interface {
 
 type HeadReadyChecker interface {
 	HeadReady(ctx context.Context, node *v1.StaticNode) (bool, error)
+}
+
+type NodeDeviceSnapshot struct {
+	Accelerator v1.StaticNodeAcceleratorStatus  `json:"accelerator,omitempty"`
+	Allocations []v1.StaticNodeAllocationStatus `json:"allocations,omitempty"`
+}
+
+type NodeDeviceSnapshotClient interface {
+	DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*NodeDeviceSnapshot, error)
+}
+
+type HTTPNodeDeviceSnapshotClient struct {
+	HTTPClient *http.Client
 }
 
 type ClusterHeadReadyChecker struct {
@@ -94,43 +113,6 @@ func (c *ClusterHeadReadyChecker) HeadReady(ctx context.Context, node *v1.Static
 	return false, nil
 }
 
-func (r *Reconciler) Reconcile(
-	ctx context.Context,
-	node *v1.StaticNode,
-	runner CommandRunner,
-	registryAuth *RegistryAuth,
-) (*ReconcileResult, error) {
-	dockerRuntime, err := NewDockerRuntime(ctx, runner, registryAuth)
-	if err != nil {
-		return &ReconcileResult{}, err
-	}
-
-	acceleratorStatus, err := r.ReconcileAccelerator(ctx, node, runner)
-	if err != nil {
-		return &ReconcileResult{Accelerator: acceleratorStatus}, err
-	}
-
-	warmStatus, err := r.ReconcileWarmImages(ctx, node, dockerRuntime)
-	if err != nil {
-		return &ReconcileResult{Accelerator: acceleratorStatus, Warm: warmStatus}, err
-	}
-
-	componentStatuses, err := r.ReconcileComponents(ctx, node, runner, dockerRuntime)
-	if err != nil {
-		return &ReconcileResult{
-			Accelerator: acceleratorStatus,
-			Warm:        warmStatus,
-			Components:  componentStatuses,
-		}, err
-	}
-
-	return &ReconcileResult{
-		Accelerator: acceleratorStatus,
-		Warm:        warmStatus,
-		Components:  componentStatuses,
-	}, nil
-}
-
 func (r *Reconciler) ReconcileAccelerator(
 	ctx context.Context,
 	node *v1.StaticNode,
@@ -155,6 +137,168 @@ func (r *Reconciler) ReconcileAccelerator(
 	}
 
 	return r.AcceleratorManager.DetectAccelerator(ctx, node.Spec.IP, *node.Spec.SSHAuth)
+}
+
+func (r *Reconciler) ReconcileNodeDeviceSnapshot(
+	ctx context.Context,
+	node *v1.StaticNode,
+	fallback *v1.StaticNodeAcceleratorStatus,
+	componentStatuses ...[]v1.NodeComponentStatus,
+) (*v1.StaticNodeAcceleratorStatus, []v1.StaticNodeAllocationStatus, error) {
+	if !nodeAgentReady(componentStatuses...) {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	client := r.nodeDeviceSnapshotClient()
+	if client == nil {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	snapshot, err := client.DeviceSnapshot(ctx, node)
+	if err != nil {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	if snapshot == nil {
+		return fallback, currentStaticNodeAllocations(node), nil
+	}
+
+	accelerator := mergeStaticNodeDeviceSnapshotAccelerator(fallback, snapshot.Accelerator)
+	if accelerator.Type == "" {
+		return fallback, snapshot.Allocations, nil
+	}
+
+	if accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
+		fallback != nil &&
+		fallback.Type != "" &&
+		fallback.Type != v1.StaticNodeAcceleratorTypeCPU {
+		return fallback, snapshot.Allocations, nil
+	}
+
+	return &accelerator, snapshot.Allocations, nil
+}
+
+func mergeStaticNodeDeviceSnapshotAccelerator(
+	fallback *v1.StaticNodeAcceleratorStatus,
+	snapshot v1.StaticNodeAcceleratorStatus,
+) v1.StaticNodeAcceleratorStatus {
+	if fallback == nil || len(fallback.Devices) == 0 || len(snapshot.Devices) == 0 {
+		return snapshot
+	}
+
+	if snapshot.Type == "" {
+		return snapshot
+	}
+
+	fallbackByUUID := make(map[string]v1.StaticNodeAcceleratorDeviceStatus, len(fallback.Devices))
+	for _, device := range fallback.Devices {
+		if device.UUID != "" {
+			fallbackByUUID[device.UUID] = device
+		}
+	}
+
+	for i := range snapshot.Devices {
+		fallbackDevice, ok := fallbackByUUID[snapshot.Devices[i].UUID]
+		if !ok {
+			continue
+		}
+
+		snapshot.Devices[i] = mergeStaticNodeDeviceSnapshotDevice(fallbackDevice, snapshot.Devices[i])
+	}
+
+	return snapshot
+}
+
+func mergeStaticNodeDeviceSnapshotDevice(
+	fallback v1.StaticNodeAcceleratorDeviceStatus,
+	snapshot v1.StaticNodeAcceleratorDeviceStatus,
+) v1.StaticNodeAcceleratorDeviceStatus {
+	if snapshot.ID == "" {
+		snapshot.ID = fallback.ID
+	}
+	if snapshot.ProductName == "" {
+		snapshot.ProductName = fallback.ProductName
+	}
+	if snapshot.ProductModel == "" {
+		snapshot.ProductModel = fallback.ProductModel
+	}
+	if snapshot.MemoryMiB == 0 {
+		snapshot.MemoryMiB = fallback.MemoryMiB
+	}
+	if snapshot.MinorNumber == v1.StaticNodeAcceleratorDeviceMinorNumberUnknown && fallback.MinorNumber >= 0 {
+		snapshot.MinorNumber = fallback.MinorNumber
+	}
+
+	return snapshot
+}
+
+func (r *Reconciler) nodeDeviceSnapshotClient() NodeDeviceSnapshotClient {
+	if r != nil && r.NodeDeviceSnapshotClient != nil {
+		return r.NodeDeviceSnapshotClient
+	}
+
+	return HTTPNodeDeviceSnapshotClient{}
+}
+
+func nodeAgentReady(statusGroups ...[]v1.NodeComponentStatus) bool {
+	if len(statusGroups) == 0 {
+		return true
+	}
+
+	for _, statuses := range statusGroups {
+		for _, status := range statuses {
+			if status.Name == nodeAgentComponentName {
+				return status.Ready && status.Phase == v1.NodeComponentPhaseRunning
+			}
+		}
+	}
+
+	return false
+}
+
+func currentStaticNodeAllocations(node *v1.StaticNode) []v1.StaticNodeAllocationStatus {
+	if node == nil || node.Status == nil {
+		return nil
+	}
+
+	return append([]v1.StaticNodeAllocationStatus{}, node.Status.Allocations...)
+}
+
+func (c HTTPNodeDeviceSnapshotClient) DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*NodeDeviceSnapshot, error) {
+	if node == nil || node.Spec == nil || node.Spec.IP == "" {
+		return nil, errors.New("static node ip is required for node device snapshot")
+	}
+
+	client := c.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, staticNodeDeviceSnapshotURL(node), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("node device snapshot %s returned %s", request.URL.String(), response.Status)
+	}
+
+	var snapshot NodeDeviceSnapshot
+	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+		return nil, err
+	}
+
+	return &snapshot, nil
+}
+
+func staticNodeDeviceSnapshotURL(node *v1.StaticNode) string {
+	return fmt.Sprintf("http://%s:%d/v1/node/device-snapshot", node.Spec.IP, defaultNodeAgentPort)
 }
 
 func (r *Reconciler) ReconcileWarmImages(

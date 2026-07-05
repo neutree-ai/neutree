@@ -579,7 +579,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}
 	}
 
-	resources, err := k.buildEndpointResourceStatus(ctrlClient, namespace, cluster, endpoint, dep.Spec.Selector.MatchLabels)
+	resources, err := k.buildEndpointResourceStatus(ctrlClient, cluster, endpoint)
 	if err != nil {
 		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
 	}
@@ -619,10 +619,8 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 
 func (k *kubernetesOrchestrator) buildEndpointResourceStatus(
 	ctrlClient client.Client,
-	namespace string,
 	cluster *v1.Cluster,
 	endpoint *v1.Endpoint,
-	selectorLabels map[string]string,
 ) (*v1.EndpointResourceStatus, error) {
 	if k.acceleratorMgr == nil {
 		return nil, nil
@@ -632,12 +630,7 @@ func (k *kubernetesOrchestrator) buildEndpointResourceStatus(
 	resourceClient := resourceview.NewK8sResourceClient(ctrlClient, parsers)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 
-	return resourceBuilder.BuildEndpointResources(context.Background(), resourceview.ListEndpointInstancesOptions{
-		EndpointName:                     endpoint.Metadata.Name,
-		Namespace:                        namespace,
-		SelectorLabels:                   selectorLabels,
-		AcceleratorVirtualizationEnabled: cluster != nil && cluster.Spec != nil && cluster.Spec.AcceleratorVirtualizationEnabled(),
-	})
+	return resourceBuilder.BuildEndpointResources(context.Background(), cluster, endpoint)
 }
 
 // listPods lists pods matching the given labels in the specified namespace.

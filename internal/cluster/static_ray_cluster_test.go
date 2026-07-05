@@ -12,6 +12,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
@@ -273,13 +274,16 @@ func TestStaticRayReconcilerWaitsWhenStaticNodeClusterReadyButSpecChanged(t *tes
 	store.AssertExpectations(t)
 }
 
-func TestStaticRayReconcilerCalculateResourcesFromRayDashboard(t *testing.T) {
+func TestStaticRayReconcilerCalculateResourcesReturnsBaseResourcesWithoutStaticNodes(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	mockDashboard := &dashboardmocks.MockDashboardService{}
-	mockAcceleratorManager := &acceleratormocks.MockManager{}
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
 	reconciler := &staticRayReconciler{
 		storage:            store,
-		acceleratorManager: mockAcceleratorManager,
+		acceleratorManager: acceleratorMgr,
 	}
 
 	prevFactory := dashboard.NewDashboardService
@@ -290,23 +294,27 @@ func TestStaticRayReconcilerCalculateResourcesFromRayDashboard(t *testing.T) {
 		dashboard.NewDashboardService = prevFactory
 	})
 
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{}, nil).Once()
 	mockDashboard.On("ListNodes").Return([]v1.NodeSummary{
 		{
 			IP: "192.168.19.218",
 			Raylet: v1.Raylet{
 				State: v1.AliveNodeState,
-				Labels: map[string]string{
-					v1.NeutreeServingVersionLabel: "v1.0.2",
-				},
 				Resources: map[string]float64{
 					"CPU":             32,
-					"GPU":             2,
 					"memory":          64 * resourceview.BytesPerGiB,
+					"GPU":             2,
 					"NVIDIA_Tesla_T4": 2,
 				},
 				CoreWorkersStats: []v1.CoreWorkerStats{
 					{
 						UsedResources: map[string]v1.RayResourceAllocations{
+							"CPU": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 8}},
+							},
+							"memory": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 16 * resourceview.BytesPerGiB}},
+							},
 							"GPU": {
 								ResourceSlots: []v1.RayResourceSlot{{Allocation: 1}},
 							},
@@ -318,10 +326,7 @@ func TestStaticRayReconcilerCalculateResourcesFromRayDashboard(t *testing.T) {
 				},
 			},
 		},
-	}, nil).Maybe()
-	mockAcceleratorManager.On("GetAllParsers").Return(map[string]resourceview.ResourceParser{
-		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
-	}).Once()
+	}, nil).Once()
 
 	resources, err := reconciler.calculateResources(&v1.StaticNodeCluster{
 		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
@@ -335,19 +340,298 @@ func TestStaticRayReconcilerCalculateResourcesFromRayDashboard(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, resources)
+	assert.Equal(t, float64(32), resources.Allocatable.CPU)
+	assert.Equal(t, float64(64), resources.Allocatable.Memory)
+	assert.Equal(t, float64(24), resources.Available.CPU)
+	assert.Equal(t, float64(48), resources.Available.Memory)
 	require.Contains(t, resources.Allocatable.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	require.Contains(t, resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
-	assert.Equal(t, float64(2),
-		resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(2), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	require.Contains(t, resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups, v1.AcceleratorProduct("NVIDIA_Tesla_T4"))
-	assert.Equal(t, float64(1),
-		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(1), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	require.Contains(t, resources.NodeResources, "192.168.19.218")
-	assert.Empty(t, resources.NodeResources["192.168.19.218"].Devices)
+	require.Empty(t, resources.NodeResources["192.168.19.218"].Devices)
 
 	mockDashboard.AssertExpectations(t)
-	mockAcceleratorManager.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+	reconciler := &staticRayReconciler{storage: store, acceleratorManager: acceleratorMgr}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleHead,
+				IP:      "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Phase: v1.StaticNodePhaseReady,
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 3, MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 0, MemoryMiB: 15360, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						Endpoint:  "chat",
+						ReplicaID: "replica-a",
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", Product: "NVIDIA_Tesla_T4", MemoryMiB: 15360, CoreUnits: 100},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+	mockDashboard.On("ListNodes").Return([]v1.NodeSummary{
+		{
+			IP: "192.168.19.218",
+			Raylet: v1.Raylet{
+				State: v1.AliveNodeState,
+				Resources: map[string]float64{
+					"CPU":             32,
+					"memory":          64 * resourceview.BytesPerGiB,
+					"GPU":             2,
+					"NVIDIA_Tesla_T4": 2,
+				},
+				CoreWorkersStats: []v1.CoreWorkerStats{
+					{
+						UsedResources: map[string]v1.RayResourceAllocations{
+							"CPU": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 8}},
+							},
+							"memory": {
+								ResourceSlots: []v1.RayResourceSlot{{Allocation: 16 * resourceview.BytesPerGiB}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	resources, err := reconciler.calculateResources(&v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Version: "v1.0.2",
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "head-0", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+	require.Contains(t, resources.Allocatable.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
+	assert.Equal(t, float64(2), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(2),
+		resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
+	allocatableProduct := resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
+		Products["NVIDIA_Tesla_T4"]
+	require.NotNil(t, allocatableProduct.Virtualization)
+	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
+	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
+	assert.Equal(t, float64(1), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(1),
+		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
+	availableProduct := resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
+		Products["NVIDIA_Tesla_T4"]
+	require.NotNil(t, availableProduct.Virtualization)
+	assert.Equal(t, float64(15360), availableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(100), availableProduct.Virtualization.CoreUnits)
+	assert.Equal(t, float64(32), resources.Allocatable.CPU)
+	assert.Equal(t, float64(64), resources.Allocatable.Memory)
+	assert.Equal(t, float64(24), resources.Available.CPU)
+	assert.Equal(t, float64(48), resources.Available.Memory)
+	require.Contains(t, resources.NodeResources, "192.168.19.218")
+	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
+	assert.Equal(t, float64(32), resources.NodeResources["192.168.19.218"].Allocatable.CPU)
+	assert.Equal(t, float64(64), resources.NodeResources["192.168.19.218"].Allocatable.Memory)
+	assert.Equal(t, float64(24), resources.NodeResources["192.168.19.218"].Available.CPU)
+	assert.Equal(t, float64(48), resources.NodeResources["192.168.19.218"].Available.Memory)
+	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[0].Available.MemoryMiB)
+	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[1].Available.MemoryMiB)
+	require.NotNil(t, resources.NodeResources["192.168.19.218"].Devices[0].MinorNumber)
+	assert.Equal(t, 3, *resources.NodeResources["192.168.19.218"].Devices[0].MinorNumber)
+	require.NotNil(t, resources.NodeResources["192.168.19.218"].Devices[0].Order)
+	assert.Equal(t, 1, *resources.NodeResources["192.168.19.218"].Devices[0].Order)
+	require.NotNil(t, resources.NodeResources["192.168.19.218"].Devices[1].MinorNumber)
+	assert.Equal(t, 0, *resources.NodeResources["192.168.19.218"].Devices[1].MinorNumber)
+	require.NotNil(t, resources.NodeResources["192.168.19.218"].Devices[1].Order)
+	assert.Equal(t, 0, *resources.NodeResources["192.168.19.218"].Devices[1].Order)
+
+	mockDashboard.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsRequiresFullCoverage(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	reconciler := &staticRayReconciler{storage: store}
+
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleHead,
+				IP:      "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Phase: v1.StaticNodePhaseReady,
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+					},
+				},
+			},
+		},
+		{
+			Metadata: &v1.Metadata{Name: "worker-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleWorker,
+				IP:      "192.168.19.219",
+			},
+			Status: &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
+		},
+	}, nil).Once()
+
+	resources, ok, err := reconciler.calculateResourcesFromStaticNodes(&v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Version: "v1.0.2",
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "head-0", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+				{Name: "worker-0", IP: "192.168.19.219", Role: v1.StaticNodeRoleWorker},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Nil(t, resources)
+	store.AssertExpectations(t)
+}
+
+func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkipsUnhealthyAllocatable(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+	reconciler := &staticRayReconciler{storage: store, acceleratorManager: acceleratorMgr}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleHead,
+				IP:      "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Phase: v1.StaticNodePhaseReady,
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: false},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+	mockDashboard.On("ListNodes").Return([]v1.NodeSummary{
+		{
+			IP: "192.168.19.218",
+			Raylet: v1.Raylet{
+				State: v1.AliveNodeState,
+				Resources: map[string]float64{
+					"CPU":             32,
+					"memory":          64 * resourceview.BytesPerGiB,
+					"GPU":             2,
+					"NVIDIA_Tesla_T4": 2,
+				},
+			},
+		},
+	}, nil).Once()
+
+	resources, ok, err := reconciler.calculateResourcesFromStaticNodes(&v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Version: "v1.0.2",
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "head-0", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, resources)
+	assert.Equal(t, float64(1), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	allocatableProduct := resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
+		Products["NVIDIA_Tesla_T4"]
+	require.NotNil(t, allocatableProduct.Virtualization)
+	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
+	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
+	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
+	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[0].Allocatable.MemoryMiB)
+	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[1].Allocatable.MemoryMiB)
+	mockDashboard.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func TestStaticRayReconcilerCalculateResourcesReturnsStaticNodeListError(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	reconciler := &staticRayReconciler{
+		storage: store,
+	}
+
+	expectedErr := errors.New("storage unavailable")
+	store.On("ListStaticNode", mock.Anything).Return(nil, expectedErr).Once()
+
+	resources, err := reconciler.calculateResources(&v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "head-0", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+			},
+		},
+	})
+
+	require.ErrorIs(t, err, expectedErr)
+	require.Nil(t, resources)
+
 	store.AssertExpectations(t)
 }
 
@@ -437,6 +721,7 @@ func TestStaticRayReconcilerDoesNotBlockWhenResourceCalculationFails(t *testing.
 	}, nil).Once()
 	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedStaticNodeImageRegistry()}, nil).Once()
 	store.On("UpdateStaticNodeCluster", "58", mock.Anything).Return(nil).Once()
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{}, nil).Once()
 	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
 
 	err := reconciler.Reconcile(context.Background(), cluster)

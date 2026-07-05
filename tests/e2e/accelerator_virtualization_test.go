@@ -121,6 +121,9 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 				v1.AcceleratorVirtualizationCorePercentKey, vgpuEndpointCorePercent))
 
 			expectEndpointVGPUResources(endpoint, productName)
+
+			By("Verifying node-agent exposes vGPU endpoint replica GPU usage")
+			assertK8sNodeAgentEndpointGPUMetrics(clusterName, endpointName)
 		})
 
 		It("should deploy a full-card endpoint without virtualization resource keys", func() {

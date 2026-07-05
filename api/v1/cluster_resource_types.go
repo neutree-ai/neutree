@@ -142,6 +142,8 @@ type DeviceResource struct {
 	UUID        string              `json:"uuid"`
 	Product     string              `json:"product"`
 	Health      bool                `json:"health"`
+	MinorNumber *int                `json:"minor_number,omitempty"`
+	Order       *int                `json:"order,omitempty"`
 	Allocatable *DeviceResourcePool `json:"allocatable,omitempty"`
 	Available   *DeviceResourcePool `json:"available,omitempty"`
 }

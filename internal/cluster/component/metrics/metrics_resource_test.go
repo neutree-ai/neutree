@@ -364,6 +364,55 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
 }
 
+func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	assert.Equal(t, "test-namespace", nodeAgent.Namespace)
+	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
+	assert.Equal(t, "test-image-prefix/neutree-node-agent:v1.1.0",
+		nodeAgent.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
+	assert.Assert(t, nodeAgent.Spec.Template.Spec.HostNetwork)
+	assert.Equal(t, "test-image-pull-secret", nodeAgent.Spec.Template.Spec.ImagePullSecrets[0].Name)
+	assert.Equal(t, int32(19101), nodeAgent.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+
+	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
+	assert.Assert(t, strings.Contains(args, "--listen-address=:19101"))
+	assert.Assert(t, strings.Contains(args, "--cluster-type=kubernetes"))
+	assert.Assert(t, strings.Contains(args, "--node=$(NODE_NAME)"))
+	assert.Assert(t, strings.Contains(args, "--node-ip=$(NODE_IP)"))
+	assert.Assert(t, strings.Contains(args, "--node-exporter-url=http://127.0.0.1:19100/metrics"))
+	assert.Assert(t, strings.Contains(args, "--kubelet-pod-resources-socket=/var/lib/kubelet/pod-resources/kubelet.sock"))
+	assert.Assert(t, !strings.Contains(args, "--cluster=test-cluster"))
+	assert.Assert(t, !strings.Contains(args, "--workspace=test-workspace"))
+	assert.Assert(t, !strings.Contains(args, "--enable-kubernetes-annotation-writer"))
+	assert.Assert(t, !strings.Contains(args, "--node-exporter-url=http://127.0.0.1:9100/metrics"))
+
+	requireVolumeMount(t, nodeAgent, "kubelet-pod-resources", "/var/lib/kubelet/pod-resources")
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=neutree-node-agent"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
+}
+
 func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	metricsCmpt := &MetricsComponent{
@@ -390,12 +439,14 @@ func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
 
 	for _, obj := range objs.Items {
 		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "neutree-node-exporter"))
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "neutree-node-agent"))
 		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
 		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
 	}
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
 }
 
@@ -443,6 +494,10 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
+	assert.Assert(t, strings.Contains(args, "--accelerator-exporter-url=http://127.0.0.1:9400/metrics"))
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {
