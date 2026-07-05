@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
@@ -111,6 +112,274 @@ func assertStaticRayNodeAgentEndpointAcceleratorMetrics(clusterName, endpointNam
 		g.Expect(strings.Join(lastErrs, "; ")).To(BeEmpty(),
 			"static node-agent metrics should contain endpoint accelerator samples")
 	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
+func assertStaticRayEndpointAcceleratorResourceSync(clusterName, endpointName string) {
+	snapshotAllocations := eventuallyStaticRayNodeAgentEndpointAllocations(clusterName, endpointName)
+	ExpectWithOffset(1, snapshotAllocations).NotTo(BeEmpty(),
+		"node-agent device snapshot should expose endpoint allocations for %s", endpointName)
+
+	staticNodeAllocations := eventuallyStaticNodeEndpointAllocations(clusterName, endpointName)
+	ExpectWithOffset(1, staticNodeAllocations).NotTo(BeEmpty(),
+		"StaticNode.status.allocations should persist endpoint allocations for %s", endpointName)
+
+	assertAllocationDeviceSetContains(staticNodeAllocations, snapshotAllocations)
+
+	cluster := eventuallyStaticRayClusterResourcesReflectAllocations(clusterName, staticNodeAllocations)
+	assertEndpointResourcesReflectAllocations(endpointName, cluster, staticNodeAllocations)
+}
+
+func eventuallyStaticRayNodeAgentEndpointAllocations(
+	clusterName string,
+	endpointName string,
+) []v1.StaticNodeAllocationStatus {
+	nodes := getStaticNodesForCluster(clusterName)
+	ExpectWithOffset(1, nodes).NotTo(BeEmpty(), "static nodes should exist for cluster %s", clusterName)
+
+	sshUser := profileSSHUser()
+	if sshUser == "" {
+		sshUser = "root"
+	}
+	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
+
+	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
+	ExpectWithOffset(1, keyFile).NotTo(BeEmpty(), "ssh key file must be configured")
+
+	var matched []v1.StaticNodeAllocationStatus
+	EventuallyWithOffset(1, func(g Gomega) {
+		var errors []string
+		current := make([]v1.StaticNodeAllocationStatus, 0, len(matched))
+		for _, node := range nodes {
+			if node.Spec == nil || node.Spec.IP == "" {
+				continue
+			}
+
+			result := RunSSH(sshUser, node.Spec.IP, keyFile,
+				"curl -fsS --max-time 5 http://127.0.0.1:19101/v1/node/device-snapshot")
+			if result.ExitCode != 0 {
+				errors = append(errors, fmt.Sprintf("%s: %s", staticNodeName(node), result.Stderr))
+				continue
+			}
+
+			var snapshot v1.NodeDeviceSnapshot
+			if err := json.Unmarshal([]byte(result.Stdout), &snapshot); err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", staticNodeName(node), err))
+				continue
+			}
+
+			current = append(current, endpointAllocations(snapshot.Allocations, endpointName)...)
+		}
+
+		matched = current
+		g.Expect(strings.Join(errors, "; ")).To(BeEmpty(),
+			"node-agent device snapshots should contain endpoint allocations for %s", endpointName)
+		g.Expect(matched).NotTo(BeEmpty(),
+			"node-agent device snapshots should contain endpoint allocations for %s", endpointName)
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return append([]v1.StaticNodeAllocationStatus(nil), matched...)
+}
+
+func eventuallyStaticNodeEndpointAllocations(
+	clusterName string,
+	endpointName string,
+) []v1.StaticNodeAllocationStatus {
+	var matched []v1.StaticNodeAllocationStatus
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		nodes := getStaticNodesForCluster(clusterName)
+		g.Expect(nodes).NotTo(BeEmpty(), "static nodes should exist for cluster %s", clusterName)
+
+		matched = matched[:0]
+		for _, node := range nodes {
+			if node.Status == nil {
+				continue
+			}
+			matched = append(matched, endpointAllocations(node.Status.Allocations, endpointName)...)
+		}
+
+		g.Expect(matched).NotTo(BeEmpty(),
+			"StaticNode.status.allocations should include endpoint %s", endpointName)
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return append([]v1.StaticNodeAllocationStatus(nil), matched...)
+}
+
+func eventuallyStaticRayClusterResourcesReflectAllocations(
+	clusterName string,
+	allocations []v1.StaticNodeAllocationStatus,
+) v1.Cluster {
+	var cluster v1.Cluster
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		cluster = getClusterFullJSON(clusterName)
+		g.Expect(cluster.Status).NotTo(BeNil())
+		g.Expect(cluster.Status.ResourceInfo).NotTo(BeNil())
+		g.Expect(cluster.Status.ResourceInfo.NodeResources).NotTo(BeEmpty())
+
+		for _, allocation := range allocations {
+			for _, device := range allocation.Devices {
+				if device.UUID == "" || device.NodeID == "" {
+					continue
+				}
+
+				nodeResources := cluster.Status.ResourceInfo.NodeResources[device.NodeID]
+				g.Expect(nodeResources).NotTo(BeNil(),
+					"cluster resource node %s should exist for allocation %s", device.NodeID, device.UUID)
+
+				clusterDevice := findClusterDevice(nodeResources.Devices, device.UUID)
+				g.Expect(clusterDevice).NotTo(BeNil(),
+					"cluster resource device %s should exist on node %s", device.UUID, device.NodeID)
+				g.Expect(clusterDevice.Allocatable).NotTo(BeNil(),
+					"cluster resource device %s should include allocatable", device.UUID)
+				g.Expect(clusterDevice.Available).NotTo(BeNil(),
+					"cluster resource device %s should include available", device.UUID)
+				g.Expect(clusterDevice.Available.CoreUnits).To(BeNumerically("<", clusterDevice.Allocatable.CoreUnits),
+					"allocated device %s should reduce available core units", device.UUID)
+				g.Expect(clusterDevice.Available.MemoryMiB).To(BeNumerically("<", clusterDevice.Allocatable.MemoryMiB),
+					"allocated device %s should reduce available memory", device.UUID)
+			}
+		}
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return cluster
+}
+
+func assertEndpointResourcesReflectAllocations(
+	endpointName string,
+	cluster v1.Cluster,
+	allocations []v1.StaticNodeAllocationStatus,
+) {
+	var endpoint v1.Endpoint
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		endpoint = getEndpoint(endpointName)
+		g.Expect(endpoint.Status).NotTo(BeNil())
+		g.Expect(endpoint.Status.Resources).NotTo(BeNil(),
+			"endpoint %s status.resources should be populated", endpointName)
+		g.Expect(endpoint.Status.Resources.Replicas).NotTo(BeEmpty(),
+			"endpoint %s status.resources.replicas should be populated", endpointName)
+		g.Expect(endpoint.Status.Resources.Summary).NotTo(BeNil(),
+			"endpoint %s status.resources.summary should be populated", endpointName)
+		g.Expect(endpoint.Status.Resources.Summary.Products).NotTo(BeEmpty(),
+			"endpoint %s status.resources.summary.products should be populated", endpointName)
+
+		for _, allocation := range allocations {
+			replica := findEndpointResourceReplica(endpoint.Status.Resources.Replicas, allocation.ReplicaID)
+			g.Expect(replica).NotTo(BeNil(),
+				"endpoint %s resources should include replica %s", endpointName, allocation.ReplicaID)
+			g.Expect(replica.InstanceID).To(Equal(allocation.ReplicaID),
+				"endpoint %s replica %s should use replica id as instance id", endpointName, allocation.ReplicaID)
+			g.Expect(replica.NodeID).NotTo(BeEmpty(),
+				"endpoint %s replica %s should include node id", endpointName, allocation.ReplicaID)
+			g.Expect(replica.Devices).NotTo(BeEmpty(),
+				"endpoint %s replica %s should include devices", endpointName, allocation.ReplicaID)
+
+			for _, allocated := range allocation.Devices {
+				device := findEndpointResourceDevice(replica.Devices, allocated.UUID)
+				g.Expect(device).NotTo(BeNil(),
+					"endpoint %s replica %s should include device %s",
+					endpointName, allocation.ReplicaID, allocated.UUID)
+				g.Expect(device.Product).NotTo(BeEmpty(),
+					"endpoint %s device %s should include product", endpointName, allocated.UUID)
+				g.Expect(device.MemoryMiB).To(BeNumerically(">", 0),
+					"endpoint %s device %s should include memory", endpointName, allocated.UUID)
+				g.Expect(device.CoreUnits).To(BeNumerically(">", 0),
+					"endpoint %s device %s should include core units", endpointName, allocated.UUID)
+
+				clusterDevice := clusterDeviceForAllocation(cluster, allocated)
+				if clusterDevice != nil && clusterDevice.Order != nil {
+					g.Expect(device.Order).NotTo(BeNil(),
+						"endpoint %s device %s should include cluster device order", endpointName, allocated.UUID)
+					g.Expect(*device.Order).To(Equal(*clusterDevice.Order),
+						"endpoint %s device %s order should match cluster resource order", endpointName, allocated.UUID)
+				}
+			}
+		}
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
+func endpointAllocations(
+	allocations []v1.StaticNodeAllocationStatus,
+	endpointName string,
+) []v1.StaticNodeAllocationStatus {
+	result := make([]v1.StaticNodeAllocationStatus, 0, len(allocations))
+	for _, allocation := range allocations {
+		if allocation.Endpoint != endpointName || len(allocation.Devices) == 0 {
+			continue
+		}
+		result = append(result, allocation)
+	}
+
+	return result
+}
+
+func assertAllocationDeviceSetContains(
+	actual []v1.StaticNodeAllocationStatus,
+	expected []v1.StaticNodeAllocationStatus,
+) {
+	actualDevices := allocationDeviceSet(actual)
+	for key := range allocationDeviceSet(expected) {
+		ExpectWithOffset(1, actualDevices).To(HaveKey(key),
+			"StaticNode.status.allocations should contain node-agent allocation device %s", key)
+	}
+}
+
+func allocationDeviceSet(allocations []v1.StaticNodeAllocationStatus) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, allocation := range allocations {
+		for _, device := range allocation.Devices {
+			result[allocation.Endpoint+"|"+allocation.ReplicaID+"|"+device.NodeID+"|"+device.UUID] = struct{}{}
+		}
+	}
+
+	return result
+}
+
+func findClusterDevice(devices []*v1.DeviceResource, uuid string) *v1.DeviceResource {
+	for _, device := range devices {
+		if device != nil && device.UUID == uuid {
+			return device
+		}
+	}
+
+	return nil
+}
+
+func clusterDeviceForAllocation(cluster v1.Cluster, allocation v1.DeviceAllocation) *v1.DeviceResource {
+	if cluster.Status == nil || cluster.Status.ResourceInfo == nil {
+		return nil
+	}
+
+	node := cluster.Status.ResourceInfo.NodeResources[allocation.NodeID]
+	if node == nil {
+		return nil
+	}
+
+	return findClusterDevice(node.Devices, allocation.UUID)
+}
+
+func findEndpointResourceReplica(
+	replicas []v1.ReplicaDeviceAllocation,
+	replicaID string,
+) *v1.ReplicaDeviceAllocation {
+	for i := range replicas {
+		if replicas[i].ReplicaID == replicaID {
+			return &replicas[i]
+		}
+	}
+
+	return nil
+}
+
+func findEndpointResourceDevice(devices []v1.DeviceAllocation, uuid string) *v1.DeviceAllocation {
+	for i := range devices {
+		if devices[i].UUID == uuid {
+			return &devices[i]
+		}
+	}
+
+	return nil
 }
 
 func assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, endpointName string) {
