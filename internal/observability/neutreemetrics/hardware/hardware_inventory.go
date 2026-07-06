@@ -31,7 +31,7 @@ func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 	infosByUUID := map[string]model.GPUHardwareInfo{}
 
 	for _, s := range samples {
-		uuid := promtext.LabelValue(s, "UUID", "uuid", "DCGM_FI_DEV_GPU_UUID", "gpu_uuid")
+		uuid := promtext.LabelValue(s, "UUID", "uuid", "gpu_uuid")
 		if uuid == "" {
 			continue
 		}
@@ -44,7 +44,7 @@ func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 			info.Index = gpuIndex
 		}
 
-		if model := promtext.LabelValue(s, "modelName", "model", "DCGM_FI_DEV_GPU_NAME"); model != "" {
+		if model := promtext.LabelValue(s, "modelName", "model"); model != "" {
 			info.Product = model
 		}
 
@@ -73,8 +73,6 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 		info.MemoryTotalMiB = formatFloat(value)
 	case "DCGM_FI_DEV_NVML_INDEX":
 		info.Index = firstKnownHardwareValue(info.Index, formatFloat(value))
-	case "DCGM_FI_DEV_GPU_MINOR_NUMBER":
-		info.MinorNumber = firstKnownHardwareValue(info.MinorNumber, formatFloat(value))
 	case "DCGM_FI_DRIVER_VERSION", "DCGM_FI_SYSTEM_DRIVER_VERSION":
 		info.DriverVersion = firstKnownHardwareValue(
 			info.DriverVersion,
@@ -97,12 +95,11 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 			info.CUDACapability,
 			formatCUDAComputeCapability(value),
 		)
-	case "DCGM_FI_DEV_PCI_BUSID", "DCGM_FI_DEV_PCI_BUS_ID", "DCGM_FI_DEV_PCIE_BUS_ID":
+	case "DCGM_FI_DEV_PCI_BUSID", "DCGM_FI_DEV_PCIE_BUS_ID":
 		info.PCIEBusID = firstKnownHardwareValue(
 			info.PCIEBusID,
 			hardwareLabelValue(
 				labels,
-				"DCGM_FI_DEV_PCI_BUS_ID",
 				"DCGM_FI_DEV_PCI_BUSID",
 				"pci_bus_id",
 				"pcie_bus_id",
@@ -134,9 +131,6 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 		info.Product,
 		hardwareLabelValue(
 			labels,
-			"DCGM_FI_DEV_GPU_NAME",
-			"DCGM_FI_DEV_NAME",
-			"DCGM_FI_DEV_BRAND",
 			"gpu_name",
 			"GPU_Name",
 			"device_name",
@@ -172,7 +166,6 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 		info.PCIEBusID,
 		hardwareLabelValue(
 			labels,
-			"DCGM_FI_DEV_PCI_BUS_ID",
 			"DCGM_FI_DEV_PCI_BUSID",
 			"pci_bus_id",
 			"pcie_bus_id",
@@ -194,7 +187,7 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 	)
 	info.MinorNumber = firstKnownHardwareValue(
 		info.MinorNumber,
-		hardwareLabelValue(labels, "DCGM_FI_DEV_GPU_MINOR_NUMBER", "gpu_minor_number", "minor_number"),
+		hardwareLabelValue(labels, "gpu_minor_number", "minor_number"),
 	)
 	info.NUMANode = firstKnownHardwareValue(info.NUMANode, hardwareLabelValue(labels, "numa_node", "numa"))
 	info.NVLink = firstKnownHardwareValue(info.NVLink, hardwareLabelValue(labels, "nvlink"))

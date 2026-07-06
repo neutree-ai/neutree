@@ -582,13 +582,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	collectors := config.Data["default-counters.csv"]
 	for _, metric := range []string{
 		"DCGM_FI_DEV_GPU_UTIL",
-		"DCGM_FI_DEV_GPU_NAME",
-		"DCGM_FI_DEV_NAME",
-		"DCGM_FI_DEV_BRAND",
 		"DCGM_FI_DEV_NVML_INDEX",
-		"DCGM_FI_DEV_GPU_UUID",
-		"DCGM_FI_DEV_GPU_MINOR_NUMBER",
-		"DCGM_FI_DEV_PCI_BUS_ID",
 		"DCGM_FI_DEV_PCI_BUSID",
 		"DCGM_FI_CUDA_DRIVER_VERSION",
 		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
@@ -618,6 +612,11 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		assert.Assert(t, strings.Contains(collectors, metric))
 	}
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_CUSTOM_"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_NAME"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_BRAND"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_GPU_UUID"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_GPU_MINOR_NUMBER"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_PCI_BUS_ID"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS"))
 

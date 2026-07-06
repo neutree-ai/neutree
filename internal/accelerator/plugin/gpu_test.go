@@ -344,16 +344,10 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	collectors := profile.MetricsExporter.ConfigFiles[0].Content
 	for _, metric := range []string{
 		"DCGM_FI_DEV_GPU_UTIL",
-		"DCGM_FI_DEV_GPU_NAME",
-		"DCGM_FI_DEV_NAME",
-		"DCGM_FI_DEV_BRAND",
 		"DCGM_FI_DEV_NVML_INDEX",
-		"DCGM_FI_DEV_GPU_UUID",
-		"DCGM_FI_DEV_GPU_MINOR_NUMBER",
 		"DCGM_FI_DEV_FB_USED",
 		"DCGM_FI_DEV_FB_TOTAL",
 		"DCGM_FI_DEV_FB_USED_PERCENT",
-		"DCGM_FI_DEV_PCI_BUS_ID",
 		"DCGM_FI_DEV_PCI_BUSID",
 		"DCGM_FI_CUDA_DRIVER_VERSION",
 		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
@@ -383,6 +377,11 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 		assert.Contains(t, collectors, metric)
 	}
 	assert.NotContains(t, collectors, "DCGM_CUSTOM_")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_NAME")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_BRAND")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_GPU_UUID")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_GPU_MINOR_NUMBER")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_PCI_BUS_ID")
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_CLOCKS_EVENT_REASONS")
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS")
 }

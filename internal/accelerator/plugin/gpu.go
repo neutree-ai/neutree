@@ -44,13 +44,7 @@ DCGM_FI_DEV_BAR1_FREE, gauge, BAR1 memory free (in MB).
 DCGM_FI_DEV_BAR1_USED, gauge, BAR1 memory used (in MB).
 DCGM_FI_DEV_BAR1_TOTAL, gauge, Total BAR1 memory (in MB).
 DCGM_FI_DEV_MEMORY_TEMP, gauge, Memory temperature (in C).
-DCGM_FI_DEV_GPU_NAME, label, Name of the GPU device.
-DCGM_FI_DEV_NAME, label, Name of the GPU device.
-DCGM_FI_DEV_BRAND, label, Device brand.
 DCGM_FI_DEV_NVML_INDEX, gauge, NVML device index.
-DCGM_FI_DEV_GPU_UUID, label, GPU UUID.
-DCGM_FI_DEV_GPU_MINOR_NUMBER, gauge, GPU minor number.
-DCGM_FI_DEV_PCI_BUS_ID, label, PCI bus ID for the device.
 DCGM_FI_DEV_PCI_BUSID, label, PCI attributes for the device.
 DCGM_FI_CUDA_DRIVER_VERSION, gauge, CUDA driver version.
 DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, gauge, CUDA compute capability for the device.
