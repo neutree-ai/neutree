@@ -1,0 +1,378 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 8,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "count(count by (node) (neutree_node_ready{neutree_cluster=~\"$Cluster\"}))",
+          "refId": "A"
+        }
+      ],
+      "title": "Nodes",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 9,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(neutree_node_accelerator_total{neutree_cluster=~\"$Cluster\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "avg(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU avg",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_accelerator_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU memory",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(vllm:request_success_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or on() vector(0)) + ((sum(rate(sglang:num_requests_total{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or sum(rate(sglang:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval]))) or on() vector(0))",
+          "refId": "A"
+        }
+      ],
+      "title": "Current QPS",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
+      "id": 2,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "((sum(rate(vllm:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or on() vector(0)) + (sum(rate(sglang:e2e_request_latency_seconds_sum{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or on() vector(0))) / clamp_min((sum(rate(vllm:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or on() vector(0)) + (sum(rate(sglang:e2e_request_latency_seconds_count{neutree_cluster=~\"$Cluster\"}[$__rate_interval])) or on() vector(0)), 1e-9)",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg latency",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 4
+      },
+      "id": 3,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "1 - avg(rate(neutree_node_cpu_seconds_total{neutree_cluster=~\"$Cluster\",mode=\"idle\"}[$__rate_interval]))",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU avg",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 4
+      },
+      "id": 4,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(neutree_node_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_node_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory avg",
+      "type": "stat"
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum by (product) (neutree_node_accelerator_total{neutree_cluster=~\"$Cluster\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{product}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (product) (neutree_node_accelerator_free{neutree_cluster=~\"$Cluster\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{product}}",
+          "refId": "B"
+        }
+      ],
+      "title": "GPU inventory by model",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "product": 0,
+              "Value": 1,
+              "Value #A": 1,
+              "Value #B": 2
+            },
+            "renameByName": {
+              "product": "Model",
+              "Value": "Total",
+              "Value #A": "Total",
+              "Value #B": "Free"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": "${datasource}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "1 - avg(rate(neutree_node_cpu_seconds_total{neutree_cluster=~\"$Cluster\",mode=\"idle\"}[$__rate_interval]))",
+          "legendFormat": "CPU",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(neutree_node_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_node_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "legendFormat": "Memory",
+          "refId": "B"
+        },
+        {
+          "expr": "avg(neutree_accelerator_utilization_ratio{neutree_cluster=~\"$Cluster\"})",
+          "legendFormat": "GPU",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(neutree_accelerator_memory_used_bytes{neutree_cluster=~\"$Cluster\"}) / clamp_min(sum(neutree_accelerator_memory_total_bytes{neutree_cluster=~\"$Cluster\"}), 1)",
+          "legendFormat": "GPU memory",
+          "refId": "D"
+        }
+      ],
+      "title": "Cluster utilization",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": [
+    "neutree",
+    "overview",
+    "embed"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "hide": 0,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "datasource": "${datasource}",
+        "definition": "label_values(neutree_node_ready, neutree_cluster)",
+        "includeAll": true,
+        "multi": false,
+        "name": "Cluster",
+        "query": "label_values(neutree_node_ready, neutree_cluster)",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Neutree Overview Embed",
+  "uid": "neutree-overview-embed",
+  "version": 1
+}
