@@ -115,13 +115,38 @@ func (p *ImagePusher) buildTargetImage(imagePrefix string, imgSpec *ImageSpec) s
 	// Remove any existing registry from the image name
 	imageName := extractImageNameWithoutRegistry(imgSpec.ImageName)
 
-	// If the image name doesn't contain a slash, it's a Docker Hub library image
-	// We need to add the "library" prefix to maintain the correct path structure
-	if !strings.Contains(imageName, "/") {
+	if shouldAddDockerHubLibraryPrefix(imgSpec.ImageName, imageName) {
 		imageName = "library/" + imageName
 	}
 
 	return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, imgSpec.Tag)
+}
+
+func shouldAddDockerHubLibraryPrefix(originalImageName, imageName string) bool {
+	return !strings.Contains(imageName, "/") && isDockerHubImageName(originalImageName)
+}
+
+func isDockerHubImageName(imageName string) bool {
+	registry, ok := imageRegistry(imageName)
+	if !ok {
+		return true
+	}
+
+	return registry == "docker.io" || registry == "index.docker.io" || registry == "registry-1.docker.io"
+}
+
+func imageRegistry(imageName string) (string, bool) {
+	idx := strings.Index(imageName, "/")
+	if idx == -1 {
+		return "", false
+	}
+
+	firstPart := imageName[:idx]
+	if strings.Contains(firstPart, ".") || strings.Contains(firstPart, ":") {
+		return firstPart, true
+	}
+
+	return "", false
 }
 
 // loadImage loads a Docker image from a tar file
@@ -201,15 +226,9 @@ func (w *klogWriter) Write(p []byte) (int, error) {
 
 // extractImageNameWithoutRegistry removes any existing registry prefix from the image name
 func extractImageNameWithoutRegistry(imageName string) string {
-	// Check if there's a registry prefix (contains / before any other structure)
-	if idx := strings.Index(imageName, "/"); idx != -1 {
-		// Check if this is a registry prefix (contains . or :)
-		firstPart := imageName[:idx]
-		if strings.Contains(firstPart, ".") || strings.Contains(firstPart, ":") {
-			// This is a registry, remove it
-			return imageName[idx+1:]
-		}
+	if registry, ok := imageRegistry(imageName); ok {
+		return strings.TrimPrefix(imageName, registry+"/")
 	}
-	// No registry prefix found, return as-is
+
 	return imageName
 }

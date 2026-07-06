@@ -80,6 +80,51 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			},
 			expected: "registry.example.com/neutree/library/postgres:v13.0.0",
 		},
+		{
+			name:        "push explicit dockerhub official image to custom registry",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "docker.io/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/library/postgres:v13.0.0",
+		},
+		{
+			name:        "push index dockerhub official image to custom registry",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "index.docker.io/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/library/postgres:v13.0.0",
+		},
+		{
+			name:        "push registry-1 dockerhub official image to custom registry",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "registry-1.docker.io/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/library/postgres:v13.0.0",
+		},
+		{
+			name:        "push non dockerhub registry image without namespace",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "private.example.com/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/postgres:v13.0.0",
+		},
+		{
+			name:        "push registry port image without namespace",
+			imagePrefix: "registry.example.com",
+			imgSpec: &ImageSpec{
+				ImageName: "private.example.com:5000/postgres",
+				Tag:       "v13.0.0",
+			},
+			expected: "registry.example.com/postgres:v13.0.0",
+		},
 	}
 
 	for _, tt := range tests {
