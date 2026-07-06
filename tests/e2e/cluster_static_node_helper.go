@@ -130,9 +130,11 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 
 	hasGPUNode := false
 	sshUser := profileSSHUser()
+
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = defaultSSHUser
 	}
+
 	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
 	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
 	ExpectWithOffset(1, keyFile).NotTo(BeEmpty(), "ssh key file must be configured")
@@ -180,6 +182,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		isGPUNode := node.Status.Accelerator != nil &&
 			node.Status.Accelerator.Type == v1.AcceleratorTypeNVIDIAGPU.String()
 		assertStaticNodeAgentDeviceSnapshotAPI(node, sshUser, keyFile, isGPUNode)
+
 		if !isGPUNode {
 			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
 			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
@@ -308,6 +311,7 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 
 func staticNodeTargets(nodes []v1.StaticNode, port int) []string {
 	targets := make([]string, 0, len(nodes))
+
 	for _, node := range nodes {
 		if node.Spec == nil || node.Spec.IP == "" {
 			continue

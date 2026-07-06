@@ -38,9 +38,11 @@ func main() {
 	}
 
 	klog.InitFlags(nil)
+
 	if err := flag.Set("v", "2"); err != nil {
 		klog.Fatalf("Failed to set default log verbosity: %v", err)
 	}
+
 	defer klog.Flush()
 
 	opts := newOptions()
@@ -52,6 +54,7 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to build neutree-node-agent config: %v", err)
 	}
+
 	klog.V(2).InfoS(
 		"Built neutree-node-agent config",
 		"listen_address", opts.listenAddress,
@@ -129,9 +132,11 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	config.AllocationProvider = o.allocationProvider(writer)
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
+
 	if err != nil {
 		return neutreemetrics.Config{}, err
 	}
+
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil

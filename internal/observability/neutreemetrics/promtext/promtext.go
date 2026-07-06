@@ -15,6 +15,7 @@ func ParseVector(raw string) prommodel.Vector {
 
 	var parser expfmt.TextParser
 	families, err := parser.TextToMetricFamilies(strings.NewReader(raw))
+
 	if err != nil {
 		return nil
 	}
@@ -23,9 +24,11 @@ func ParseVector(raw string) prommodel.Vector {
 	for name := range families {
 		familyNames = append(familyNames, name)
 	}
+
 	sort.Strings(familyNames)
 
 	result := prommodel.Vector{}
+
 	for _, familyName := range familyNames {
 		vector, err := expfmt.ExtractSamples(&expfmt.DecodeOptions{}, families[familyName])
 		if err != nil {
@@ -96,12 +99,15 @@ func Value(sample *prommodel.Sample) float64 {
 
 func labelsKey(labels prommodel.Metric) string {
 	keys := make([]string, 0, len(labels))
+
 	for key := range labels {
 		if key == prommodel.MetricNameLabel {
 			continue
 		}
+
 		keys = append(keys, string(key))
 	}
+
 	sort.Strings(keys)
 
 	var builder strings.Builder

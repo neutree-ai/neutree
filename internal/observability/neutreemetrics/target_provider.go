@@ -69,6 +69,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 
 	mode := normalizeMetricsMode(p.MetricsMode)
 	port, ok := targetPort(mode, targetType)
+
 	if !ok {
 		return nil, nil
 	}
@@ -80,20 +81,25 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 
 	hosts := make([]string, 0)
 	seen := map[string]struct{}{}
+
 	for _, pod := range pods.Items {
 		if pod.Spec.NodeName != p.NodeName || pod.Status.PodIP == "" {
 			continue
 		}
+
 		if !matchesTargetPod(mode, targetType, pod.Labels) {
 			continue
 		}
+
 		if _, exists := seen[pod.Status.PodIP]; exists {
 			continue
 		}
 
 		seen[pod.Status.PodIP] = struct{}{}
+
 		hosts = append(hosts, pod.Status.PodIP)
 	}
+
 	sort.Strings(hosts)
 
 	result := make([]ScrapeTarget, 0, len(hosts))

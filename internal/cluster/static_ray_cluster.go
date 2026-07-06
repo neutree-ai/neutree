@@ -442,6 +442,7 @@ func (r *staticRayReconciler) calculateResources(
 	if err != nil {
 		return nil, err
 	}
+
 	if !ok {
 		return nil, nil
 	}
@@ -460,12 +461,15 @@ func (r *staticRayReconciler) calculateResourcesFromStaticNodes(
 	resourceClient := resourceview.NewStaticNodeClusterResourceClient(r.storage, baseResourceClient)
 	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
 	resources, err := resourceBuilder.BuildClusterResources(context.Background(), clusterFromStaticNodeCluster(staticCluster))
+
 	if errors.Is(err, resourceview.ErrIncompleteStaticNodeDeviceSnapshots) {
 		return nil, false, nil
 	}
+
 	if err != nil {
 		return nil, false, errors.Wrap(err, "failed to build static node cluster resources")
 	}
+
 	if resources == nil || len(resources.NodeResources) == 0 {
 		return nil, false, nil
 	}

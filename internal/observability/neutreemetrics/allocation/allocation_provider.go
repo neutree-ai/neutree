@@ -208,7 +208,6 @@ func (p RayServeAllocationProvider) Allocations(
 				}
 
 				allocation, ok, err := rayReplicaAllocation(
-					ctx,
 					service,
 					envReader,
 					appName,
@@ -382,6 +381,7 @@ func parseNvidiaSMIComputeProcesses(raw string) []GPUProcess {
 		}
 
 		process := GPUProcess{UUID: uuid, PID: pid}
+
 		if len(parts) >= 3 {
 			if usedMemoryMiB, ok := parseFirstInt64(parts[2]); ok {
 				process.UsedMemoryMiB = usedMemoryMiB
@@ -524,7 +524,6 @@ func containerDeviceRefs(containers []model.ContainerDevices) []string {
 }
 
 func rayReplicaAllocation(
-	ctx context.Context,
 	service dashboard.DashboardService,
 	envReader ProcessEnvReader,
 	appName string,
@@ -596,10 +595,12 @@ func mergeAllocationDeviceUsage(
 	}
 
 	usedMemoryMiBByUUID := make(map[string]int64, len(processDevices))
+
 	for _, device := range processDevices {
 		if device.UUID == "" {
 			continue
 		}
+
 		usedMemoryMiBByUUID[device.UUID] += device.UsedMemoryMiB
 	}
 
@@ -607,31 +608,11 @@ func mergeAllocationDeviceUsage(
 		if allocatedDevices[i].UUID == "" {
 			continue
 		}
+
 		allocatedDevices[i].UsedMemoryMiB = usedMemoryMiBByUUID[allocatedDevices[i].UUID]
 	}
 
 	return allocatedDevices
-}
-
-func rayActorByID(
-	_ context.Context,
-	service dashboard.DashboardService,
-	actorID string,
-) (*dashboard.Actor, error) {
-	actors, err := service.ListActors(
-		[]dashboard.ActorFilter{{Key: "actor_id", Predicate: "=", Value: actorID}},
-		true,
-		1,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if actors == nil || len(actors.Data.Result.Result) == 0 {
-		return nil, nil
-	}
-
-	return &actors.Data.Result.Result[0], nil
 }
 
 func visibleDeviceRefs(env map[string]string, deviceLookup acceleratorDeviceLookup) []string {
@@ -784,69 +765,6 @@ func deviceFromRef(
 	}
 
 	return v1.StaticNodeAcceleratorDeviceStatus{}, false
-}
-
-func sortedServeApplicationNames(resp *dashboard.RayServeApplicationsResponse) []string {
-	if resp == nil {
-		return nil
-	}
-
-	names := make([]string, 0, len(resp.Applications))
-	for name := range resp.Applications {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
-}
-
-func sortedDeploymentNames(deployments map[string]dashboard.Deployment) []string {
-	names := make([]string, 0, len(deployments))
-	for name := range deployments {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
-
-	return names
-}
-
-func splitServeApplicationName(appName string) (string, string) {
-	workspace, endpoint, ok := strings.Cut(appName, "_")
-	if !ok {
-		return "", appName
-	}
-
-	return workspace, endpoint
-}
-
-func serveApplicationIdentity(
-	appName string,
-	status dashboard.RayServeApplicationStatus,
-) (string, string) {
-	if status.DeployedAppConfig != nil {
-		workspace, endpoint, ok := parseServeRoutePrefix(status.DeployedAppConfig.RoutePrefix)
-		if ok {
-			return workspace, endpoint
-		}
-	}
-
-	return splitServeApplicationName(appName)
-}
-
-func parseServeRoutePrefix(routePrefix string) (string, string, bool) {
-	routePrefix = strings.Trim(routePrefix, "/")
-	if routePrefix == "" {
-		return "", "", false
-	}
-
-	workspace, endpoint, ok := strings.Cut(routePrefix, "/")
-	if !ok || workspace == "" || endpoint == "" || strings.Contains(endpoint, "/") {
-		return "", "", false
-	}
-
-	return workspace, endpoint, true
 }
 
 func sortStaticNodeAllocations(allocations []v1.StaticNodeAllocationStatus) {

@@ -308,7 +308,7 @@ func TestEngineVersion_GetImageForK8sAccelerator(t *testing.T) {
 			name: "k8s-specific image exists, returns k8s image",
 			engineVersion: &EngineVersion{
 				Images: map[string]*EngineImage{
-					"nvidia_gpu":                    genericImage,
+					"nvidia_gpu":                     genericImage,
 					K8sImageKeyPrefix + "nvidia_gpu": k8sImage,
 				},
 			},

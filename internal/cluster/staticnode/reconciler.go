@@ -190,6 +190,7 @@ func mergeStaticNodeDeviceSnapshotAccelerator(
 	}
 
 	fallbackByUUID := make(map[string]v1.StaticNodeAcceleratorDeviceStatus, len(fallback.Devices))
+
 	for _, device := range fallback.Devices {
 		if device.UUID != "" {
 			fallbackByUUID[device.UUID] = device
@@ -215,15 +216,19 @@ func mergeStaticNodeDeviceSnapshotDevice(
 	if snapshot.ID == "" {
 		snapshot.ID = fallback.ID
 	}
+
 	if snapshot.ProductName == "" {
 		snapshot.ProductName = fallback.ProductName
 	}
+
 	if snapshot.ProductModel == "" {
 		snapshot.ProductModel = fallback.ProductModel
 	}
+
 	if snapshot.MemoryMiB == 0 {
 		snapshot.MemoryMiB = fallback.MemoryMiB
 	}
+
 	if snapshot.MinorNumber == v1.StaticNodeAcceleratorDeviceMinorNumberUnknown && fallback.MinorNumber >= 0 {
 		snapshot.MinorNumber = fallback.MinorNumber
 	}

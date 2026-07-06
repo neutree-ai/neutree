@@ -119,6 +119,7 @@ func (w *AnnotationWriter) writePodAllocations(
 		if reflect.DeepEqual(annotations, pod.Annotations) {
 			continue
 		}
+
 		pod.Annotations = annotations
 
 		if err := w.Client.Patch(ctx, pod, client.MergeFrom(original)); err != nil {
@@ -182,6 +183,7 @@ func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus)
 		}
 
 		var minorNumber *int
+
 		if device.MinorNumber >= 0 {
 			value := device.MinorNumber
 			minorNumber = &value

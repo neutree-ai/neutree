@@ -179,6 +179,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 	if cluster != nil {
 		namespace = util.ClusterNamespace(cluster)
 	}
+
 	if namespace == "" {
 		return nil, fmt.Errorf("endpoint namespace is empty")
 	}
@@ -257,6 +258,7 @@ func transformKubernetesNodeResources(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to parse Neutree accelerator annotations for node %s: %w", input.NodeName, err)
 	}
+
 	if matched && result != nil {
 		enhanceKubernetesResourceStatusWithNeutreeAnnotations(status, result)
 		return status, result.Devices, result.AcceleratorMetadata, nil
@@ -393,6 +395,7 @@ func parseKubernetesNeutreeDeviceResources(
 	}
 
 	devicesWithMinor := make([]kubernetesNeutreeDeviceAnnotation, 0, len(devices))
+
 	for _, device := range devices {
 		uuid := kubernetesNeutreeDeviceUUID(device)
 		if uuid == "" || device.MinorNumber == nil {
@@ -408,6 +411,7 @@ func parseKubernetesNeutreeDeviceResources(
 	})
 
 	orders := make(map[string]kubernetesNeutreeDeviceOrder, len(devicesWithMinor))
+
 	for order, device := range devicesWithMinor {
 		minorNumber := *device.MinorNumber
 		displayOrder := order
@@ -418,6 +422,7 @@ func parseKubernetesNeutreeDeviceResources(
 	}
 
 	result := make([]kubernetesNeutreeDeviceResource, 0, len(devices))
+
 	for _, device := range devices {
 		uuid := kubernetesNeutreeDeviceUUID(device)
 		if uuid == "" {
@@ -508,6 +513,7 @@ func buildKubernetesNeutreeAcceleratorResources(
 		}
 
 		addKubernetesNeutreeProductResource(allocatableGroup, product, 1, allocatable)
+
 		if hasDeviceAvailableCapacity(available) {
 			addKubernetesNeutreeProductResource(availableGroup, product, 1, available)
 		}
@@ -601,7 +607,9 @@ func mergeKubernetesNeutreeResourceInfoEnhancement(target, enhancement *v1.Resou
 			if product == "" || sourceProduct == nil || sourceProduct.Virtualization == nil {
 				continue
 			}
+
 			baseQuantity, ok := kubernetesBaseProductQuantity(targetGroup, product)
+
 			if !ok {
 				continue
 			}
@@ -609,7 +617,9 @@ func mergeKubernetesNeutreeResourceInfoEnhancement(target, enhancement *v1.Resou
 			if targetGroup.Products == nil {
 				targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
 			}
+
 			targetProduct := targetGroup.Products[product]
+
 			if targetProduct == nil {
 				targetProduct = &v1.AcceleratorProductResource{
 					Quantity: baseQuantity,
@@ -633,6 +643,7 @@ func kubernetesBaseProductQuantity(group *v1.AcceleratorGroup, product v1.Accele
 	if quantity, ok := group.ProductGroups[product]; ok {
 		return quantity, true
 	}
+
 	if productResource := group.Products[product]; productResource != nil {
 		return productResource.Quantity, true
 	}
@@ -646,6 +657,7 @@ func kubernetesBaseAcceleratorProduct(status *v1.ResourceStatus) (v1.Accelerator
 	}
 
 	products := map[v1.AcceleratorType]map[v1.AcceleratorProduct]struct{}{}
+
 	for _, info := range []*v1.ResourceInfo{status.Allocatable, status.Available} {
 		if info == nil {
 			continue
@@ -655,6 +667,7 @@ func kubernetesBaseAcceleratorProduct(status *v1.ResourceStatus) (v1.Accelerator
 			if group == nil {
 				continue
 			}
+
 			if products[acceleratorType] == nil {
 				products[acceleratorType] = map[v1.AcceleratorProduct]struct{}{}
 			}
@@ -664,6 +677,7 @@ func kubernetesBaseAcceleratorProduct(status *v1.ResourceStatus) (v1.Accelerator
 					products[acceleratorType][product] = struct{}{}
 				}
 			}
+
 			for product := range group.Products {
 				if product != "" {
 					products[acceleratorType][product] = struct{}{}
@@ -680,6 +694,7 @@ func kubernetesBaseAcceleratorProduct(status *v1.ResourceStatus) (v1.Accelerator
 		if len(acceleratorProducts) != 1 {
 			return "", "", false
 		}
+
 		for product := range acceleratorProducts {
 			return acceleratorType, product, true
 		}

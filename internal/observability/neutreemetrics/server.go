@@ -11,6 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/klog/v2"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
@@ -19,9 +23,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -149,6 +150,7 @@ func (s *Server) writeKubernetesAnnotations(ctx context.Context) {
 	if err != nil {
 		return
 	}
+
 	if isEmptyCPUDeviceSnapshot(snapshot) {
 		return
 	}
@@ -281,12 +283,15 @@ func applyGPUHardwareInfoToSnapshot(snapshot *v1.NodeDeviceSnapshot, infos []mod
 				snapshot.Accelerator.Devices[i].MinorNumber = minorNumber
 			}
 		}
+
 		if snapshot.Accelerator.Devices[i].ProductName == "" {
 			snapshot.Accelerator.Devices[i].ProductName = info.Product
 		}
+
 		if snapshot.Accelerator.Devices[i].ProductModel == "" {
 			snapshot.Accelerator.Devices[i].ProductModel = info.Product
 		}
+
 		if snapshot.Accelerator.Devices[i].MemoryMiB == 0 {
 			memoryMiB, err := strconv.ParseInt(info.MemoryTotalMiB, 10, 64)
 			if err == nil {
@@ -298,6 +303,7 @@ func applyGPUHardwareInfoToSnapshot(snapshot *v1.NodeDeviceSnapshot, infos []mod
 
 func gpuHardwareInfoByUUID(infos []model.GPUHardwareInfo) map[string]model.GPUHardwareInfo {
 	result := map[string]model.GPUHardwareInfo{}
+
 	for _, info := range infos {
 		if info.UUID == "" {
 			continue
@@ -392,15 +398,19 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 	targets, err := s.scrapeTargets(ctx, metricsnormalizer.TargetAcceleratorExporter)
 	if err != nil {
 		klog.V(2).InfoS("Failed to discover scrape targets", "target", metricsnormalizer.TargetAcceleratorExporter, "error", err)
+
 		return &model.ScrapeResult{
 			Target: metricsnormalizer.TargetAcceleratorExporter,
 			Error:  err.Error(),
 		}
 	}
+
 	if len(targets) == 0 {
 		klog.V(2).InfoS("No scrape targets discovered", "target", metricsnormalizer.TargetAcceleratorExporter)
+
 		return &model.ScrapeResult{Target: metricsnormalizer.TargetAcceleratorExporter}
 	}
+
 	klog.V(2).InfoS("Discovered scrape targets", "target", metricsnormalizer.TargetAcceleratorExporter, "count", len(targets))
 
 	var body strings.Builder
@@ -418,6 +428,7 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 		result := s.scrape(ctx, metricsnormalizer.TargetAcceleratorExporter, target.URL)
 		if !result.Up {
 			klog.V(2).InfoS("Scrape target failed", "target", metricsnormalizer.TargetAcceleratorExporter, "url", target.URL, "error", result.Error)
+
 			if result.Error != "" {
 				errors = append(errors, result.Error)
 			}
@@ -426,8 +437,11 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 		}
 
 		klog.V(2).InfoS("Scrape target succeeded", "target", metricsnormalizer.TargetAcceleratorExporter, "url", target.URL, "body_bytes", len(result.Body))
+
 		succeeded++
+
 		successfulFallbacks[fallbackKey] = struct{}{}
+
 		body.WriteString(result.Body)
 
 		if !strings.HasSuffix(result.Body, "\n") {
@@ -441,6 +455,7 @@ func (s *Server) scrapeAcceleratorExporters(ctx context.Context) *model.ScrapeRe
 		Body:   body.String(),
 		Error:  strings.Join(errors, "; "),
 	}
+
 	klog.V(2).InfoS("Scraped accelerator exporters", "target", metricsnormalizer.TargetAcceleratorExporter, "discovered", len(targets), "succeeded", succeeded)
 
 	return result
@@ -450,22 +465,29 @@ func (s *Server) scrapeFirstTarget(ctx context.Context, targetType string) model
 	targets, err := s.scrapeTargets(ctx, targetType)
 	if err != nil {
 		klog.V(2).InfoS("Failed to discover scrape targets", "target", targetType, "error", err)
+
 		return model.ScrapeResult{Target: targetType, Error: err.Error()}
 	}
+
 	if len(targets) == 0 {
 		klog.V(2).InfoS("No scrape targets discovered", "target", targetType)
+
 		return model.ScrapeResult{Target: targetType}
 	}
+
 	klog.V(2).InfoS("Discovered scrape targets", "target", targetType, "count", len(targets))
 
 	errors := make([]string, 0)
+
 	for _, target := range targets {
 		result := s.scrape(ctx, targetType, target.URL)
 		if result.Up {
 			klog.V(2).InfoS("Scrape target succeeded", "target", targetType, "url", target.URL, "body_bytes", len(result.Body))
 			return result
 		}
+
 		klog.V(2).InfoS("Scrape target failed", "target", targetType, "url", target.URL, "error", result.Error)
+
 		if result.Error != "" {
 			errors = append(errors, result.Error)
 		}

@@ -189,6 +189,7 @@ func buildNodeAgentComponent(
 	if node != nil && node.Metadata != nil {
 		args = append(args, "--node="+node.Metadata.Name)
 	}
+
 	if node != nil && node.Spec != nil {
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
@@ -227,6 +228,7 @@ func staticNodeClusterVersion(cluster *v1.StaticNodeCluster) string {
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
 	exporter := acceleratorExporterProfile(profile)
+
 	if exporter == nil || exporter.Runtime == nil {
 		return options
 	}
@@ -239,15 +241,20 @@ func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 func appendDockerRunOptionsUnique(options []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(options)+len(values))
 	result := make([]string, 0, len(options)+len(values))
-	for _, option := range append(append([]string{}, options...), values...) {
+	merged := append(append([]string{}, options...), values...)
+
+	for _, option := range merged {
 		option = strings.TrimSpace(option)
 		if option == "" {
 			continue
 		}
+
 		if _, ok := seen[option]; ok {
 			continue
 		}
+
 		seen[option] = struct{}{}
+
 		result = append(result, option)
 	}
 

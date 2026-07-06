@@ -58,6 +58,7 @@ func assertK8sMetricsResources(
 	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
 
 	By("Checking neutree-node-agent DaemonSet")
+
 	nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
 	ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 	nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
@@ -84,9 +85,11 @@ func assertK8sMetricsResources(
 		"neutree_node_memory_total_bytes",
 	)
 	ExpectWithOffset(1, metrics).To(ContainSubstring("neutree_node_cpu_seconds_total"))
+
 	for _, name := range obsoleteEndpointAcceleratorMetricNames {
 		ExpectWithOffset(1, metrics).NotTo(ContainSubstring(name))
 	}
+
 	ExpectWithOffset(1, metrics).NotTo(ContainSubstring("neutree_gpu_"))
 	ExpectWithOffset(1, metrics).NotTo(ContainSubstring("neutree_node_gpu_"))
 

@@ -70,6 +70,7 @@ func (p KubernetesProvider) Usages(ctx context.Context) ([]model.EndpointReplica
 	if err != nil {
 		return nil, err
 	}
+
 	if len(pods) == 0 {
 		return nil, nil
 	}
@@ -106,6 +107,7 @@ func (p KubernetesProvider) Allocations(
 	}
 
 	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(pods))
+
 	for _, pod := range pods {
 		devices, err := hamiDeviceAllocationsFromAnnotation(
 			pod.Annotations[hamiVGPUDevicesAllocated],
@@ -115,6 +117,7 @@ func (p KubernetesProvider) Allocations(
 		if err != nil {
 			return nil, fmt.Errorf("parse HAMi allocation for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
+
 		if len(devices) == 0 {
 			continue
 		}
@@ -148,6 +151,7 @@ func (p KubernetesProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod
 	}
 
 	pods := make([]corev1.Pod, 0)
+
 	for _, pod := range podList.Items {
 		if pod.Spec.NodeName != p.NodeName || terminalPodPhase(pod.Status.Phase) {
 			continue
@@ -187,6 +191,7 @@ func (p KubernetesProvider) localMonitorPod(ctx context.Context) (corev1.Pod, bo
 		if pod.Spec.NodeName != p.NodeName || terminalPodPhase(pod.Status.Phase) || pod.Status.PodIP == "" {
 			continue
 		}
+
 		if pod.Labels["app.kubernetes.io/component"] != hamiDevicePluginComponent {
 			continue
 		}
@@ -204,6 +209,7 @@ func (p KubernetesProvider) scrapeMonitor(ctx context.Context, podIP string) (st
 
 	url := fmt.Sprintf("http://%s:%d/metrics", podIP, hamiMonitorPort)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+
 	if err != nil {
 		return "", err
 	}
@@ -212,6 +218,7 @@ func (p KubernetesProvider) scrapeMonitor(ctx context.Context, podIP string) (st
 	if err != nil {
 		return "", err
 	}
+
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -249,6 +256,7 @@ func (p KubernetesProvider) deviceProducts(ctx context.Context) (map[string]stri
 
 func podIdentities(pods []corev1.Pod) map[podKey]podIdentity {
 	identities := make(map[podKey]podIdentity, len(pods))
+
 	for _, pod := range pods {
 		labels := pod.GetLabels()
 		identities[podKey{namespace: pod.Namespace, name: pod.Name}] = podIdentity{
@@ -329,9 +337,11 @@ func endpointGPUUsagesFromHAMiMetrics(
 		if result[i].Endpoint != result[j].Endpoint {
 			return result[i].Endpoint < result[j].Endpoint
 		}
+
 		if result[i].InstanceID != result[j].InstanceID {
 			return result[i].InstanceID < result[j].InstanceID
 		}
+
 		if result[i].Container != result[j].Container {
 			return result[i].Container < result[j].Container
 		}
@@ -352,6 +362,7 @@ func hamiDeviceAllocationsFromAnnotation(
 	}
 
 	devices := make([]v1.DeviceAllocation, 0)
+
 	for _, entry := range strings.Split(value, ";") {
 		for _, segment := range strings.Split(entry, ":") {
 			segment = strings.TrimSpace(segment)
@@ -366,6 +377,7 @@ func hamiDeviceAllocationsFromAnnotation(
 
 			uuid := strings.TrimSpace(fields[0])
 			memoryMiB, err := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+
 			if err != nil {
 				return nil, fmt.Errorf("invalid memory value %q: %w", fields[2], err)
 			}
@@ -408,6 +420,7 @@ func deviceProductsFromHAMiNodeAnnotation(value string) (map[string]string, erro
 	}
 
 	products := make(map[string]string, len(devices))
+
 	for _, device := range devices {
 		if device.ID == "" || device.Type == "" {
 			continue
@@ -424,6 +437,7 @@ func sortStaticNodeAllocations(allocations []v1.StaticNodeAllocationStatus) {
 		if allocations[i].Endpoint != allocations[j].Endpoint {
 			return allocations[i].Endpoint < allocations[j].Endpoint
 		}
+
 		if allocations[i].InstanceID != allocations[j].InstanceID {
 			return allocations[i].InstanceID < allocations[j].InstanceID
 		}

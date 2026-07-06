@@ -77,7 +77,7 @@ func assertStaticRayNodeAgentEndpointAcceleratorMetrics(clusterName, endpointNam
 
 	sshUser := profileSSHUser()
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = defaultSSHUser
 	}
 	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
 
@@ -138,7 +138,7 @@ func eventuallyStaticRayNodeAgentEndpointAllocations(
 
 	sshUser := profileSSHUser()
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = defaultSSHUser
 	}
 	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
 

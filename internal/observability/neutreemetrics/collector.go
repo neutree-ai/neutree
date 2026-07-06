@@ -1,8 +1,9 @@
 package neutreemetrics
 
 import (
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 )
 
 const missingLabelValue = "unknown"
@@ -128,6 +129,7 @@ func labelValue(labels map[string]string, key string) string {
 	if value := labels[key]; value != "" {
 		return value
 	}
+
 	if key == "vdevice_index" {
 		return "0"
 	}

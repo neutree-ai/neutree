@@ -12,9 +12,10 @@ import (
 	"strconv"
 	"strings"
 
+	prommodel "github.com/prometheus/common/model"
+
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
-	prommodel "github.com/prometheus/common/model"
 )
 
 const unknownHardwareValue = "unknown"
@@ -43,10 +44,6 @@ var (
 	}
 )
 
-func firstNonEmpty(values ...string) string {
-	return model.FirstNonEmpty(values...)
-}
-
 type GPUHardwareInfoProvider interface {
 	GPUHardwareInfos(ctx context.Context) ([]model.GPUHardwareInfo, error)
 }
@@ -72,19 +69,23 @@ func (p NvidiaSMIGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) 
 	if err != nil {
 		infos, err = p.queryGPUHardwareInfos(ctx, command, nvidiaSMIMinimalHardwareFields)
 	}
+
 	if err != nil {
 		return nil, nil
 	}
 
 	cudaDriverVersion := p.cudaDriverVersion(ctx, command)
 	architecturesByUUID := p.productArchitectures(ctx, command)
+
 	for i := range infos {
 		if infos[i].Architecture == "" {
 			infos[i].Architecture = architecturesByUUID[infos[i].UUID]
 		}
+
 		if infos[i].CUDADriverVersion == "" {
 			infos[i].CUDADriverVersion = cudaDriverVersion
 		}
+
 		if infos[i].NUMANode == "" {
 			infos[i].NUMANode = numaNodeFromSysFS(p.SysFSRoot, infos[i].PCIEBusID)
 		}
@@ -145,9 +146,11 @@ func parseNvidiaSMIProductArchitecturesXML(raw string) map[string]string {
 	}
 
 	architecturesByUUID := make(map[string]string, len(query.GPUs))
+
 	for _, gpu := range query.GPUs {
 		uuid := cleanHardwareValue(gpu.UUID)
 		architecture := cleanHardwareValue(gpu.ProductArchitecture)
+
 		if uuid == "" || isUnknownHardwareLiteral(uuid) || isUnknownHardwareLiteral(architecture) {
 			continue
 		}
@@ -168,6 +171,7 @@ func parseNvidiaSMIGPUHardwareCSV(raw string, fields []string) []model.GPUHardwa
 	}
 
 	infos := make([]model.GPUHardwareInfo, 0, len(records))
+
 	for _, record := range records {
 		info := model.GPUHardwareInfo{}
 
@@ -250,6 +254,7 @@ func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 		if gpuIndex := promtext.LabelValue(s, "gpu", "GPU_I_ID"); gpuIndex != "" {
 			info.Index = gpuIndex
 		}
+
 		if model := promtext.LabelValue(s, "modelName", "model"); model != "" {
 			info.Product = model
 		}
@@ -395,12 +400,14 @@ func Merge(primary, fallback []model.GPUHardwareInfo) []model.GPUHardwareInfo {
 
 	result := make([]model.GPUHardwareInfo, 0, len(order))
 	seen := map[string]struct{}{}
+
 	for _, uuid := range order {
 		if _, ok := seen[uuid]; ok {
 			continue
 		}
 
 		seen[uuid] = struct{}{}
+
 		result = append(result, merged[uuid])
 	}
 
@@ -439,10 +446,6 @@ func LabelValue(value string) string {
 	return value
 }
 
-func hardwareInfoLabelValue(value string) string {
-	return LabelValue(value)
-}
-
 func firstKnownHardwareValue(values ...string) string {
 	for _, value := range values {
 		value = cleanHardwareValue(value)
@@ -457,6 +460,7 @@ func firstKnownHardwareValue(values ...string) string {
 func maxKnownHardwareNumber(values ...string) string {
 	maxValue := ""
 	maxNumber := 0.0
+
 	for _, value := range values {
 		value = cleanHardwareValue(value)
 		if isUnknownHardwareLiteral(value) {
@@ -467,6 +471,7 @@ func maxKnownHardwareNumber(values ...string) string {
 		if err != nil {
 			return firstKnownHardwareValue(values...)
 		}
+
 		if maxValue == "" || number > maxNumber {
 			maxValue = value
 			maxNumber = number
@@ -534,6 +539,7 @@ func formatCUDADriverVersion(value float64) string {
 
 	major := version / 1000
 	minor := (version % 1000) / 10
+
 	if major <= 0 {
 		return ""
 	}
@@ -557,6 +563,7 @@ func formatCUDAComputeCapability(value float64) string {
 	if raw > 1<<16 {
 		major := (raw >> 16) & 0xffff
 		minor := raw & 0xffff
+
 		if major > 0 {
 			return fmt.Sprintf("%d.%d", major, minor)
 		}

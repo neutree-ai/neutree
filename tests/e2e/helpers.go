@@ -64,6 +64,7 @@ var cleanupCLIBinary bool
 const (
 	IntermediatePhaseTimeout = 30 * time.Second
 	TerminalPhaseTimeout     = 10 * time.Minute
+	defaultSSHUser           = "root"
 )
 
 // --- Suite setup / teardown ---
@@ -419,7 +420,7 @@ func requireSSHProfile() (headIP string, workerIPs []string, sshUser, sshPrivate
 
 	sshUser = profileSSHUser()
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = defaultSSHUser
 	}
 
 	sshPrivateKey = profileSSHPrivateKey()

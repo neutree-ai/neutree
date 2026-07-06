@@ -76,12 +76,14 @@ func (c *StaticNodeResourceClient) ListEndpointInstances(
 	if err != nil {
 		return nil, err
 	}
+
 	if len(nodes) == 0 {
 		return nil, nil
 	}
 
 	instances := make([]EndpointInstanceResource, 0)
 	product := endpointAcceleratorProduct(endpoint)
+
 	for _, node := range nodes {
 		if node == nil || node.Status == nil {
 			continue
@@ -128,16 +130,19 @@ func (c *StaticNodeResourceClient) staticNodes(cluster *v1.Cluster) ([]*v1.Stati
 			{Column: "spec->>cluster", Operator: "eq", Value: clusterName},
 		},
 	})
+
 	if err != nil {
 		return nil, err
 	}
 
 	nodes := make([]*v1.StaticNode, 0, len(items))
+
 	for i := range items {
 		node := &items[i]
 		if node.Spec == nil || node.Metadata == nil {
 			continue
 		}
+
 		if node.Metadata.Workspace != workspace || node.Spec.Cluster != clusterName {
 			continue
 		}
@@ -170,6 +175,7 @@ func baseResourceNode(node *v1.StaticNode, baseNodes map[string]ResourceNode) *R
 	if key == "" {
 		return nil
 	}
+
 	if base, ok := baseNodes[key]; ok {
 		return &base
 	}
@@ -186,6 +192,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 	if acceleratorType == "" {
 		return ResourceNode{}, false
 	}
+
 	if acceleratorType == v1.AcceleratorType(v1.StaticNodeAcceleratorTypeCPU) ||
 		len(node.Status.Accelerator.Devices) == 0 {
 		return staticNodeBaseResourceNode(node, base)
@@ -203,10 +210,12 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		Devices: make([]*v1.DeviceResource, 0, len(node.Status.Accelerator.Devices)),
 	}
 	completeStaticNodeCPUAndMemory(nodeStatus, base)
+
 	metadata := make(map[v1.AcceleratorType]*v1.AcceleratorMetadata)
 	allocationsByUUID := staticNodeAllocationsByUUID(node.Status.Allocations)
 	ordersByUUID := staticNodeDeviceOrders(node.Status.Accelerator.Devices)
 	baseProduct := staticNodeBaseAcceleratorProduct(base, acceleratorType)
+
 	if baseProduct == "" {
 		return ResourceNode{}, false
 	}
@@ -219,6 +228,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		allocation := allocationsByUUID[device.UUID]
 		allocatablePool := staticNodeDeviceAllocatablePool(device)
 		availablePool := staticNodeDeviceAvailablePool(device, allocation)
+
 		if !device.Healthy {
 			allocatablePool = &v1.DeviceResourcePool{}
 			availablePool = &v1.DeviceResourcePool{}
@@ -233,6 +243,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 			Allocatable: allocatablePool,
 			Available:   availablePool,
 		})
+
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
 		if device.Healthy {
@@ -267,6 +278,7 @@ func staticNodeBaseResourceNode(node *v1.StaticNode, base *ResourceNode) (Resour
 
 	status := *base.Status
 	resourceNode.Status = &status
+
 	if resourceNode.Status.Devices == nil {
 		resourceNode.Status.Devices = []*v1.DeviceResource{}
 	}
@@ -276,6 +288,7 @@ func staticNodeBaseResourceNode(node *v1.StaticNode, base *ResourceNode) (Resour
 
 func staticNodeBaseResourceNodes(nodes []ResourceNode) map[string]ResourceNode {
 	result := map[string]ResourceNode{}
+
 	for _, node := range nodes {
 		if node.ID == "" {
 			continue
@@ -296,6 +309,7 @@ func completeStaticNodeCPUAndMemory(status *v1.NodeResourceStatus, base *Resourc
 		status.Allocatable.CPU = base.Status.Allocatable.CPU
 		status.Allocatable.Memory = base.Status.Allocatable.Memory
 	}
+
 	if status.Available != nil && base.Status.Available != nil {
 		status.Available.CPU = base.Status.Available.CPU
 		status.Available.Memory = base.Status.Available.Memory
@@ -309,6 +323,7 @@ func staticNodeAllocationMatchesEndpoint(
 	if allocation.Endpoint != endpoint.Metadata.Name {
 		return false
 	}
+
 	if allocation.Workspace != endpoint.Metadata.Workspace {
 		return false
 	}
@@ -330,6 +345,7 @@ func staticNodeEndpointAllocationDevices(
 	product string,
 ) []v1.DeviceAllocation {
 	result := make([]v1.DeviceAllocation, 0, len(devices))
+
 	for _, device := range devices {
 		if device.UUID == "" {
 			continue
@@ -355,6 +371,7 @@ type staticNodeDeviceOrder struct {
 
 func staticNodeDeviceOrders(devices []v1.StaticNodeAcceleratorDeviceStatus) map[string]staticNodeDeviceOrder {
 	devicesWithMinor := make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(devices))
+
 	for _, device := range devices {
 		if device.UUID == "" || device.MinorNumber < 0 {
 			continue
@@ -368,6 +385,7 @@ func staticNodeDeviceOrders(devices []v1.StaticNodeAcceleratorDeviceStatus) map[
 	})
 
 	result := make(map[string]staticNodeDeviceOrder, len(devicesWithMinor))
+
 	for order, device := range devicesWithMinor {
 		minorNumber := device.MinorNumber
 		displayOrder := order
@@ -382,6 +400,7 @@ func staticNodeDeviceOrders(devices []v1.StaticNodeAcceleratorDeviceStatus) map[
 
 func staticNodeAllocationsByUUID(allocations []v1.StaticNodeAllocationStatus) map[string]*v1.DeviceAllocation {
 	result := map[string]*v1.DeviceAllocation{}
+
 	for i := range allocations {
 		for j := range allocations[i].Devices {
 			device := &allocations[i].Devices[j]
@@ -393,6 +412,7 @@ func staticNodeAllocationsByUUID(allocations []v1.StaticNodeAllocationStatus) ma
 			if existing == nil {
 				copied := *device
 				result[device.UUID] = &copied
+
 				continue
 			}
 
@@ -410,6 +430,7 @@ func staticNodeBaseAcceleratorProduct(base *ResourceNode, acceleratorType v1.Acc
 	}
 
 	products := map[string]struct{}{}
+
 	for _, info := range []*v1.ResourceInfo{base.Status.Allocatable, base.Status.Available} {
 		if info == nil {
 			continue
@@ -425,6 +446,7 @@ func staticNodeBaseAcceleratorProduct(base *ResourceNode, acceleratorType v1.Acc
 				products[string(product)] = struct{}{}
 			}
 		}
+
 		for product := range group.Products {
 			if product != "" {
 				products[string(product)] = struct{}{}
@@ -491,9 +513,11 @@ func addStaticNodeAcceleratorResource(
 		}
 		info.AcceleratorGroups[acceleratorType] = group
 	}
+
 	if group.ProductGroups == nil {
 		group.ProductGroups = make(map[v1.AcceleratorProduct]float64)
 	}
+
 	if group.Products == nil {
 		group.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
 	}
@@ -502,18 +526,22 @@ func addStaticNodeAcceleratorResource(
 	group.Quantity += quantity
 	group.ProductGroups[acceleratorProduct] += quantity
 	productResource := group.Products[acceleratorProduct]
+
 	if productResource == nil {
 		productResource = &v1.AcceleratorProductResource{}
 		group.Products[acceleratorProduct] = productResource
 	}
+
 	productResource.Quantity += quantity
 
 	if pool == nil {
 		return
 	}
+
 	if productResource.Virtualization == nil {
 		productResource.Virtualization = &v1.AcceleratorVirtualizationResource{}
 	}
+
 	productResource.Virtualization.MemoryMiB += float64(pool.MemoryMiB)
 	productResource.Virtualization.CoreUnits += float64(pool.CoreUnits)
 }
@@ -535,6 +563,7 @@ func addStaticNodeAcceleratorMetadata(
 		}
 		metadata[acceleratorType] = acceleratorMetadata
 	}
+
 	if acceleratorMetadata.Products == nil {
 		acceleratorMetadata.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata)
 	}
@@ -544,6 +573,7 @@ func addStaticNodeAcceleratorMetadata(
 		productMetadata = &v1.AcceleratorProductMetadata{}
 		acceleratorMetadata.Products[v1.AcceleratorProduct(product)] = productMetadata
 	}
+
 	if productMetadata.MemoryTotalMiB == 0 {
 		productMetadata.MemoryTotalMiB = float64(memoryMiB)
 	}

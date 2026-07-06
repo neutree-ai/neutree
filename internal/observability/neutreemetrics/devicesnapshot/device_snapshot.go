@@ -4,13 +4,8 @@ import (
 	"strconv"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
 )
-
-func firstNonEmpty(values ...string) string {
-	return model.FirstNonEmpty(values...)
-}
 
 func FromAcceleratorMetrics(raw string) *v1.NodeDeviceSnapshot {
 	devices := acceleratorDevicesFromMetrics(raw)
@@ -47,6 +42,7 @@ func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceS
 		if device.UUID == "" {
 			device.MinorNumber = v1.StaticNodeAcceleratorDeviceMinorNumberUnknown
 		}
+
 		device.UUID = uuid
 		device.Healthy = true
 
@@ -70,6 +66,7 @@ func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceS
 	}
 
 	devices := make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(devicesByUUID))
+
 	for _, device := range devicesByUUID {
 		if _, ok := discoveredUUIDs[device.UUID]; !ok {
 			continue

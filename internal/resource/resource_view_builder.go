@@ -55,6 +55,7 @@ func (b *resourceViewBuilder) BuildEndpointResources(
 	if err != nil {
 		return nil, err
 	}
+
 	if len(instances) == 0 {
 		return nil, nil
 	}
@@ -156,6 +157,7 @@ func buildEndpointResourcesFromEndpointInstances(
 	}
 
 	applyClusterDeviceOrdersToEndpointResources(result, clusterResources)
+
 	if len(result.Summary.Products) == 0 {
 		result.Summary = nil
 	}
@@ -192,6 +194,7 @@ func applyClusterDeviceOrdersToEndpointResources(
 
 func clusterDeviceOrdersByUUID(devices []*v1.DeviceResource) map[string]*int {
 	result := make(map[string]*int, len(devices))
+
 	for _, device := range devices {
 		if device == nil || device.UUID == "" || device.Order == nil {
 			continue
