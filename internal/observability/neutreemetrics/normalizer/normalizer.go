@@ -19,6 +19,9 @@ import (
 const (
 	TargetNodeExporter        = "node-exporter"
 	TargetAcceleratorExporter = "accelerator-exporter"
+
+	unknownLabelValue      = "unknown"
+	dcgmDeviceFBUsedMetric = "DCGM_FI_DEV_FB_USED"
 )
 
 type NormalizeRequest struct {
@@ -193,7 +196,7 @@ func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sam
 				Labels: metricLabels,
 				Value:  value,
 			})
-		case "DCGM_FI_DEV_FB_USED":
+		case dcgmDeviceFBUsedMetric:
 			result = append(result, Sample{
 				Name:   "neutree_accelerator_memory_used_bytes",
 				Labels: metricLabels,
@@ -397,11 +400,13 @@ func normalizeEndpointAllocationSamples(
 				continue
 			}
 
-			physicalVRAM := physicalVRAMs[device.UUID]
 			var derivedUsedBytes *float64
+			physicalVRAM := physicalVRAMs[device.UUID]
+
 			if _, ok := uniqueAllocations[device.UUID]; ok && device.UsedMemoryMiB <= 0 && physicalVRAM.hasUsed {
 				derivedUsedBytes = &physicalVRAM.usedBytes
 			}
+
 			metricLabels := endpointAllocationLabels(labels, allocation, device, acceleratorIndexes[device.UUID])
 
 			result = append(result, Sample{
@@ -476,20 +481,22 @@ func allocationVRAMLabel(device v1.DeviceAllocation, physicalVRAM vramSnapshot, 
 	usedBytes := mibToBytes(device.UsedMemoryMiB)
 	if usedBytes <= 0 {
 		if derivedUsedBytes == nil {
-			return "unknown"
+			return unknownLabelValue
 		}
+
 		usedBytes = *derivedUsedBytes
 	}
 
 	if usedBytes <= 0 {
-		return "unknown"
+		return unknownLabelValue
 	}
 
 	allocatedBytes := mibToBytes(device.MemoryMiB)
 	if allocatedBytes <= 0 {
 		if !physicalVRAM.hasTotal {
-			return "unknown"
+			return unknownLabelValue
 		}
+
 		allocatedBytes = physicalVRAM.totalBytes
 	}
 
@@ -498,7 +505,7 @@ func allocationVRAMLabel(device v1.DeviceAllocation, physicalVRAM vramSnapshot, 
 
 func vramLabel(snapshot vramSnapshot) string {
 	if !snapshot.hasUsed || !snapshot.hasTotal {
-		return "unknown"
+		return unknownLabelValue
 	}
 
 	return displayBytes(snapshot.usedBytes) + " / " + displayBytes(snapshot.totalBytes)
@@ -514,8 +521,9 @@ func physicalVRAMByUUID(raw string) map[string]vramSnapshot {
 		}
 
 		snapshot := result[uuid]
+
 		switch promtext.MetricName(s) {
-		case "DCGM_FI_DEV_FB_USED":
+		case dcgmDeviceFBUsedMetric:
 			snapshot.usedBytes = promtext.Value(s) * 1024 * 1024
 			snapshot.hasUsed = true
 		case "DCGM_FI_DEV_FB_TOTAL":
@@ -550,7 +558,7 @@ func gpuUsageSnapshotByUUID(samples prommodel.Vector) map[string]gpuUsageSnapsho
 		}
 
 		switch promtext.MetricName(s) {
-		case "DCGM_FI_DEV_FB_USED":
+		case dcgmDeviceFBUsedMetric:
 			usedBytes := promtext.Value(s) * 1024 * 1024
 			snapshot.memoryUsedBytes = &usedBytes
 		case "DCGM_FI_DEV_GPU_UTIL":
@@ -676,7 +684,7 @@ func mibStringToBytes(value string) float64 {
 func memoryMiBLabelToBytes(value string) string {
 	bytes := mibStringToBytes(value)
 	if bytes <= 0 {
-		return "unknown"
+		return unknownLabelValue
 	}
 
 	return formatFloat(bytes)
@@ -935,7 +943,7 @@ func acceleratorBaseLabels(labels model.CanonicalLabels) map[string]string {
 
 func labelValueOrUnknown(value string) string {
 	if value == "" {
-		return "unknown"
+		return unknownLabelValue
 	}
 
 	return value

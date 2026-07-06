@@ -39,12 +39,15 @@ type nvmlGPUHardwareDevice interface {
 
 func (p NVMLGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([]model.GPUHardwareInfo, error) {
 	client := p.client
+
 	if client == nil {
 		client = newNVMLGPUHardwareClient()
 	}
+
 	if client == nil || !client.Init() {
 		return nil, nil
 	}
+
 	defer client.Shutdown()
 
 	count, ok := client.DeviceCount()
@@ -70,6 +73,7 @@ func (p NVMLGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([]mo
 		if value, ok := device.UUID(); ok {
 			info.UUID = cleanHardwareValue(value)
 		}
+
 		if info.UUID == "" {
 			continue
 		}
@@ -77,9 +81,11 @@ func (p NVMLGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([]mo
 		info.DriverVersion = driverVersion
 		info.CUDADriverVersion = cudaDriverVersion
 		applyNVMLDeviceHardwareInfo(&info, device)
+
 		if info.Index == "" {
 			info.Index = strconv.Itoa(index)
 		}
+
 		if info.NUMANode == "" {
 			info.NUMANode = numaNodeFromSysFS(p.SysFSRoot, info.PCIEBusID)
 		}
@@ -94,30 +100,39 @@ func applyNVMLDeviceHardwareInfo(info *model.GPUHardwareInfo, device nvmlGPUHard
 	if value, ok := device.Index(); ok {
 		info.Index = strconv.Itoa(value)
 	}
+
 	if value, ok := device.MinorNumber(); ok {
 		info.MinorNumber = strconv.Itoa(value)
 	}
+
 	if value, ok := device.Product(); ok {
 		info.Product = value
 	}
+
 	if value, ok := device.Architecture(); ok {
 		info.Architecture = nvmlArchitectureLabel(value)
 	}
+
 	if major, minor, ok := device.CUDACapability(); ok {
 		info.CUDACapability = strconv.Itoa(major) + "." + strconv.Itoa(minor)
 	}
+
 	if value, ok := device.PCIEBusID(); ok {
 		info.PCIEBusID = value
 	}
+
 	if value, ok := device.PCIEGeneration(); ok {
 		info.PCIEGeneration = strconv.Itoa(value)
 	}
+
 	if value, ok := device.PCIEWidth(); ok {
 		info.PCIEWidth = strconv.Itoa(value)
 	}
+
 	if value, ok := device.MemoryTotalBytes(); ok && value > 0 {
 		info.MemoryTotalMiB = strconv.FormatUint(value/bytesPerMiB, 10)
 	}
+
 	if value, ok := device.NUMANode(); ok && value >= 0 {
 		info.NUMANode = strconv.Itoa(value)
 	}

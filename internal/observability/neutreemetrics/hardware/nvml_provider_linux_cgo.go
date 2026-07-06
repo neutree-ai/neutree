@@ -121,10 +121,12 @@ func (d realNVMLGPUHardwareDevice) NUMANode() (int, bool) {
 
 func cStringFromInt8(value []int8) string {
 	bytes := make([]byte, 0, len(value))
+
 	for _, char := range value {
 		if char == 0 {
 			break
 		}
+
 		bytes = append(bytes, byte(char))
 	}
 
