@@ -69,12 +69,13 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 				req.Labels,
 				req.EndpointAllocations,
 				acceleratorIndexes,
+				req.AcceleratorExporter.Body,
 			)...)
 		} else {
-			samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil)...)
+			samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil, "")...)
 		}
 	} else {
-		samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil)...)
+		samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil, "")...)
 	}
 
 	if req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
@@ -384,8 +385,10 @@ func normalizeEndpointAllocationSamples(
 	labels model.CanonicalLabels,
 	allocations []model.EndpointAllocation,
 	acceleratorIndexes map[string]string,
+	acceleratorRaw string,
 ) []Sample {
 	result := make([]Sample, 0)
+	physicalVRAMs := physicalVRAMByUUID(acceleratorRaw)
 
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
@@ -418,7 +421,7 @@ func normalizeEndpointAllocationSamples(
 
 			result = append(result, Sample{
 				Name:   "neutree_node_accelerator_allocation",
-				Labels: metricLabels,
+				Labels: nodeAllocationLabels(metricLabels, device, physicalVRAMs[device.UUID]),
 				Value:  1,
 			})
 			if device.MemoryMiB > 0 {
@@ -462,6 +465,66 @@ func endpointAllocationLabels(
 	)
 
 	return metricLabels
+}
+
+type vramSnapshot struct {
+	usedBytes  float64
+	totalBytes float64
+	hasUsed    bool
+	hasTotal   bool
+}
+
+func nodeAllocationLabels(
+	base map[string]string,
+	device v1.DeviceAllocation,
+	physicalVRAM vramSnapshot,
+) map[string]string {
+	labels := cloneLabels(base)
+	labels["vram"] = allocationVRAMLabel(device)
+	labels["physical_vram"] = vramLabel(physicalVRAM)
+
+	return labels
+}
+
+func allocationVRAMLabel(device v1.DeviceAllocation) string {
+	if device.UsedMemoryMiB <= 0 || device.MemoryMiB <= 0 {
+		return "unknown"
+	}
+
+	return displayBytes(mibToBytes(device.UsedMemoryMiB)) + " / " + displayBytes(mibToBytes(device.MemoryMiB))
+}
+
+func vramLabel(snapshot vramSnapshot) string {
+	if !snapshot.hasUsed || !snapshot.hasTotal {
+		return "unknown"
+	}
+
+	return displayBytes(snapshot.usedBytes) + " / " + displayBytes(snapshot.totalBytes)
+}
+
+func physicalVRAMByUUID(raw string) map[string]vramSnapshot {
+	result := map[string]vramSnapshot{}
+
+	for _, s := range promtext.ParseVector(raw) {
+		uuid := promtext.LabelValue(s, "UUID", "uuid")
+		if uuid == "" {
+			continue
+		}
+
+		snapshot := result[uuid]
+		switch promtext.MetricName(s) {
+		case "DCGM_FI_DEV_FB_USED":
+			snapshot.usedBytes = promtext.Value(s) * 1024 * 1024
+			snapshot.hasUsed = true
+		case "DCGM_FI_DEV_FB_TOTAL":
+			snapshot.totalBytes = promtext.Value(s) * 1024 * 1024
+			snapshot.hasTotal = true
+		}
+
+		result[uuid] = snapshot
+	}
+
+	return result
 }
 
 type gpuUsageSnapshot struct {
@@ -578,6 +641,25 @@ func uniqueEndpointAllocationsByGPUUUID(
 
 func mibToBytes(value int64) float64 {
 	return float64(value) * 1024 * 1024
+}
+
+func displayBytes(value float64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	unitIndex := 0
+
+	for value >= 1024 && unitIndex < len(units)-1 {
+		value /= 1024
+		unitIndex++
+	}
+
+	if math.Trunc(value) == value {
+		return strconv.FormatInt(int64(value), 10) + " " + units[unitIndex]
+	}
+
+	formatted := strconv.FormatFloat(value, 'f', 1, 64)
+	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+
+	return formatted + " " + units[unitIndex]
 }
 
 func mibStringToBytes(value string) float64 {

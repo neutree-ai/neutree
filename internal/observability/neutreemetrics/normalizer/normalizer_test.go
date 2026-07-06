@@ -61,7 +61,7 @@ func TestNormalizerNormalizesAcceleratorExporterAndEndpointAllocations(t *testin
 			Target: TargetAcceleratorExporter,
 			Up:     true,
 			Body: `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 87
-DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 1024
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 43008
 DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 81920
 	DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 72
 	DCGM_FI_PROF_PCIE_TX_BYTES{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 1024
@@ -118,7 +118,7 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",target="node-exporter"} 0`)
 	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="ray",node="head-0",node_ip="10.0.0.10",node_role="head",source="neutree-node-agent",target="accelerator-exporter"} 1`)
 	assert.Contains(t, output, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 0.87`)
-	assert.Contains(t, output, `neutree_accelerator_memory_used_bytes{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 1073741824`)
+	assert.Contains(t, output, `neutree_accelerator_memory_used_bytes{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 45097156608`)
 	assert.Contains(t, output, `neutree_accelerator_memory_total_bytes{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 85899345920`)
 	assert.Contains(t, output, `neutree_accelerator_temperature_celsius{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 72`)
 	assert.Contains(t, output, `neutree_accelerator_pcie_tx_bytes_total{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",node="head-0",product="A100"} 1024`)
@@ -130,10 +130,11 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.Contains(t, output, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",memory_total_bytes="unknown",node="head-0",numa_node="1",pcie_bus_id="00000000:3B:00.0",pcie_generation="unknown",pcie_width="unknown",product="A100"} 1`)
 	assert.Contains(t, output, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="ray",cuda_capability="unknown",cuda_driver_version="unknown",driver_version="unknown",node="head-0",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
 	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-replica-a",node="head-0",product="NVIDIA_A100",replica="replica-a",vdevice_index="0"`
+	nodeAllocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-replica-a",node="head-0",physical_vram="42 GiB / 80 GiB",product="NVIDIA_A100",replica="replica-a",vdevice_index="0",vram="4 GiB / 80 GiB"`
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationLabels+`} 1`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+allocationLabels+`} 85899345920`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+allocationLabels+`} 4294967296`)
-	assert.Contains(t, output, `neutree_node_accelerator_allocation{`+allocationLabels+`} 1`)
+	assert.Contains(t, output, `neutree_node_accelerator_allocation{`+nodeAllocationLabels+`} 1`)
 	assert.Contains(t, output, `neutree_node_accelerator_allocation_memory_allocated_bytes{`+allocationLabels+`} 85899345920`)
 	assert.Contains(t, output, `neutree_node_accelerator_allocation_memory_used_bytes{`+allocationLabels+`} 4294967296`)
 	assert.NotContains(t, output, "neutree_node_gpu_allocation_info")

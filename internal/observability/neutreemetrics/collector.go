@@ -42,6 +42,10 @@ var (
 		"vdevice_index",
 		"product",
 	}
+	nodeAcceleratorAllocationLabelNames = appendLabels(endpointAcceleratorLabelNames,
+		"vram",
+		"physical_vram",
+	)
 	endpointRuntimeLabelNames = []string{
 		"cluster_type",
 		"node",
@@ -174,7 +178,7 @@ func newMetricDescriptors() []*metricDescriptor {
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_allocated_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_used_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_utilization_ratio", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-		newMetricDescriptor("neutree_node_accelerator_allocation", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
+		newMetricDescriptor("neutree_node_accelerator_allocation", nodeAcceleratorAllocationLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_node_accelerator_allocation_memory_allocated_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_node_accelerator_allocation_memory_used_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 
