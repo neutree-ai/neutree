@@ -68,21 +68,20 @@ type EndpointReplicaRuntimeUsage struct {
 }
 
 type EndpointReplicaGPUUsage struct {
-	Workspace            string
-	Cluster              string
-	Endpoint             string
-	InstanceID           string
-	ReplicaID            string
-	NodeID               string
-	Container            string
-	GPUUUID              string
-	AcceleratorType      string
-	AcceleratorIndex     string
-	VDeviceIndex         string
-	Product              string
-	MemoryAllocatedBytes *float64
-	MemoryUsedBytes      *float64
-	UtilizationRatio     *float64
+	Workspace        string
+	Cluster          string
+	Endpoint         string
+	InstanceID       string
+	ReplicaID        string
+	NodeID           string
+	Container        string
+	GPUUUID          string
+	AcceleratorType  string
+	AcceleratorIndex string
+	VDeviceIndex     string
+	Product          string
+	MemoryUsedBytes  *float64
+	UtilizationRatio *float64
 }
 
 type GPUHardwareInfo struct {

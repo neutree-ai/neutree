@@ -397,7 +397,7 @@ func normalizeEndpointAllocationSamples(
 	result := make([]Sample, 0)
 	physicalVRAMs := physicalVRAMByUUID(acceleratorRaw)
 	uniqueAllocations := uniqueEndpointAllocationsByGPUUUID(allocations)
-	explicitUsageMemoryUsedBytes := explicitEndpointReplicaGPUUsageMemoryUsedBytes(explicitUsages)
+	explicitUsageMemoryUsedBytes := explicitEndpointReplicaGPUUsageMemoryUsedBytes(labels, explicitUsages)
 
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
@@ -459,7 +459,7 @@ func endpointAllocationLabels(
 		v1.AcceleratorTypeNVIDIAGPU.String(),
 		device.UUID,
 		acceleratorIndex,
-		"",
+		device.VDeviceIndex,
 		device.Product,
 	)
 
@@ -639,6 +639,7 @@ type endpointReplicaGPUUsageKey struct {
 }
 
 func explicitEndpointReplicaGPUUsageMemoryUsedBytes(
+	labels model.CanonicalLabels,
 	usages []model.EndpointReplicaGPUUsage,
 ) map[endpointReplicaGPUUsageKey]float64 {
 	result := map[endpointReplicaGPUUsageKey]float64{}
@@ -648,14 +649,7 @@ func explicitEndpointReplicaGPUUsageMemoryUsedBytes(
 			continue
 		}
 
-		result[endpointReplicaGPUUsageKey{
-			endpoint:     usage.Endpoint,
-			instanceID:   usage.InstanceID,
-			replicaID:    usage.ReplicaID,
-			nodeID:       usage.NodeID,
-			uuid:         usage.GPUUUID,
-			vdeviceIndex: vdeviceIndexOrDefault(usage.VDeviceIndex),
-		}] = *usage.MemoryUsedBytes
+		result[endpointReplicaGPUUsageKeyFromUsage(labels, usage)] = *usage.MemoryUsedBytes
 	}
 
 	return result
@@ -672,7 +666,7 @@ func endpointReplicaGPUUsageKeyFromAllocation(
 		replicaID:    allocation.ReplicaID,
 		nodeID:       firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node),
 		uuid:         device.UUID,
-		vdeviceIndex: vdeviceIndexOrDefault(""),
+		vdeviceIndex: vdeviceIndexOrDefault(device.VDeviceIndex),
 	}
 }
 
@@ -876,7 +870,7 @@ func endpointReplicaGPUUsageAllocationContext(
 				replicaID:    allocation.ReplicaID,
 				nodeID:       firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node),
 				uuid:         device.UUID,
-				vdeviceIndex: vdeviceIndexOrDefault(""),
+				vdeviceIndex: vdeviceIndexOrDefault(device.VDeviceIndex),
 			}] = endpointReplicaGPUUsageContext{
 				product:          device.Product,
 				acceleratorIndex: acceleratorIndexes[device.UUID],

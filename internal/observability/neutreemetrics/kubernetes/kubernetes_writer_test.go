@@ -67,7 +67,14 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 				Endpoint:     "chat",
 				ReplicaID:    "default/replica-a",
 				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 8192, CoreUnits: 50},
+					{
+						UUID:          "GPU-abc",
+						Product:       "NVIDIA_A100",
+						VDeviceIndex:  "1",
+						MemoryMiB:     8192,
+						UsedMemoryMiB: 4096,
+						CoreUnits:     50,
+					},
 				},
 			},
 		},
@@ -90,7 +97,9 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 	var patchedPod corev1.Pod
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "replica-a"}, &patchedPod))
 	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], "GPU-abc")
+	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"vdevice_index":"1"`)
 	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"memory_mib":8192`)
+	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"used_memory_mib":4096`)
 	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"core_units":50`)
 
 	var sameNameOtherNamespacePod corev1.Pod

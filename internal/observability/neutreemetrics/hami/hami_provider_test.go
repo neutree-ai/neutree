@@ -46,8 +46,6 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 	assert.Equal(t, "GPU-abc", usages[0].GPUUUID)
 	assert.Equal(t, "0", usages[0].VDeviceIndex)
 	assert.Equal(t, "NVIDIA_A100", usages[0].Product)
-	require.NotNil(t, usages[0].MemoryAllocatedBytes)
-	assert.Equal(t, 8589934592.0, *usages[0].MemoryAllocatedBytes)
 	require.NotNil(t, usages[0].MemoryUsedBytes)
 	assert.Equal(t, 4294967296.0, *usages[0].MemoryUsedBytes)
 	require.NotNil(t, usages[0].UtilizationRatio)
@@ -184,6 +182,23 @@ func TestKubernetesProviderNormalizesHAMiAllocationProductFromSnapshot(t *testin
 	assert.Equal(t, "Tesla-T4", allocations[0].Devices[0].Product)
 	assert.Equal(t, int64(8192), allocations[0].Devices[0].MemoryMiB)
 	assert.Equal(t, int64(0), allocations[0].Devices[0].CoreUnits)
+}
+
+func TestHAMiDeviceAllocationsAssignVDeviceIndexForRepeatedUUID(t *testing.T) {
+	devices, err := hamiDeviceAllocationsFromAnnotation(
+		";GPU-abc,NVIDIA,4096,50:GPU-abc,NVIDIA,8192,50:;",
+		"node-a",
+		map[string]string{"GPU-abc": "Tesla-T4"},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, devices, 2)
+	assert.Equal(t, "GPU-abc", devices[0].UUID)
+	assert.Equal(t, "0", devices[0].VDeviceIndex)
+	assert.Equal(t, int64(4096), devices[0].MemoryMiB)
+	assert.Equal(t, "GPU-abc", devices[1].UUID)
+	assert.Equal(t, "1", devices[1].VDeviceIndex)
+	assert.Equal(t, int64(8192), devices[1].MemoryMiB)
 }
 
 func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {

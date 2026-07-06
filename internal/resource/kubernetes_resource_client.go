@@ -207,14 +207,11 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		pods = append(pods, kubernetesPodResourceContext(pod))
 	}
 
-	instances, err := endpointInstancesFromNeutreeAnnotations(resourceparser.KubernetesEndpointResourceContext{
+	instances := endpointInstancesFromNeutreeAnnotations(resourceparser.KubernetesEndpointResourceContext{
 		EndpointName: endpoint.Metadata.Name,
 		Namespace:    namespace,
 		Pods:         pods,
 	})
-	if err != nil {
-		return nil, err
-	}
 
 	if len(instances) == 0 {
 		return nil, nil
@@ -256,7 +253,8 @@ func transformKubernetesNodeResources(
 		input.Pods,
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to parse Neutree accelerator annotations for node %s: %w", input.NodeName, err)
+		klog.Warningf("Skipping Neutree accelerator annotation enhancement for node %s: %v", input.NodeName, err)
+		return status, nil, nil, nil
 	}
 
 	if matched && result != nil {
@@ -319,17 +317,14 @@ func kubernetesNeutreeAcceleratorResourcesFromAnnotations(
 		return nil, true, nil
 	}
 
-	usage, err := kubernetesNeutreeDeviceUsageByUUID(pods)
-	if err != nil {
-		return nil, true, err
-	}
+	usage := kubernetesNeutreeDeviceUsageByUUID(pods)
 
 	return buildKubernetesNeutreeAcceleratorResources(devices, usage, acceleratorType, product), true, nil
 }
 
 func endpointInstancesFromNeutreeAnnotations(
 	input resourceparser.KubernetesEndpointResourceContext,
-) ([]EndpointInstanceResource, error) {
+) []EndpointInstanceResource {
 	instances := make([]EndpointInstanceResource, 0, len(input.Pods))
 
 	for _, pod := range input.Pods {
@@ -338,8 +333,9 @@ func endpointInstancesFromNeutreeAnnotations(
 			pod.NodeName,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Neutree accelerator allocation for pod %s/%s: %w",
+			klog.Warningf("Skipping malformed Neutree accelerator allocation annotation for pod %s/%s: %v",
 				pod.Namespace, pod.Name, err)
+			continue
 		}
 
 		if len(devices) == 0 {
@@ -354,7 +350,7 @@ func endpointInstancesFromNeutreeAnnotations(
 		})
 	}
 
-	return instances, nil
+	return instances
 }
 
 func parseKubernetesNeutreeEndpointAllocations(
@@ -445,7 +441,7 @@ func parseKubernetesNeutreeDeviceResources(
 
 func kubernetesNeutreeDeviceUsageByUUID(
 	pods []resourceparser.KubernetesPodResourceContext,
-) (map[string]kubernetesNeutreeDeviceUsage, error) {
+) map[string]kubernetesNeutreeDeviceUsage {
 	result := make(map[string]kubernetesNeutreeDeviceUsage)
 
 	for _, pod := range pods {
@@ -454,8 +450,9 @@ func kubernetesNeutreeDeviceUsageByUUID(
 			pod.NodeName,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse Neutree accelerator allocation for pod %s/%s: %w",
+			klog.Warningf("Skipping malformed Neutree accelerator allocation annotation for pod %s/%s: %v",
 				pod.Namespace, pod.Name, err)
+			continue
 		}
 
 		for _, allocation := range allocations {
@@ -466,7 +463,7 @@ func kubernetesNeutreeDeviceUsageByUUID(
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 func buildKubernetesNeutreeAcceleratorResources(

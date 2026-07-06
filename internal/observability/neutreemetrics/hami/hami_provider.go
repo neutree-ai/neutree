@@ -30,7 +30,6 @@ const (
 	hamiNodeNvidiaRegister     = "hami.io/node-nvidia-register"
 	hamiVGPUDevicesAllocated   = "hami.io/vgpu-devices-allocated"
 	nvidiaGPUProductLabel      = "nvidia.com/gpu.product"
-	hamiMetricMemoryLimitBytes = "hami_vgpu_memory_limit_bytes"
 	hamiMetricMemoryUsedBytes  = "hami_vgpu_memory_used_bytes"
 	hamiMetricUtilizationRatio = "hami_container_device_utilization_ratio"
 )
@@ -346,8 +345,6 @@ func endpointGPUUsagesFromHAMiMetrics(
 		}
 
 		switch promtext.MetricName(sample) {
-		case hamiMetricMemoryLimitBytes:
-			usage.MemoryAllocatedBytes = addFloat64Pointer(usage.MemoryAllocatedBytes, promtext.Value(sample))
 		case hamiMetricMemoryUsedBytes:
 			usage.MemoryUsedBytes = addFloat64Pointer(usage.MemoryUsedBytes, promtext.Value(sample))
 		case hamiMetricUtilizationRatio:
@@ -390,6 +387,7 @@ func hamiDeviceAllocationsFromAnnotation(
 	}
 
 	devices := make([]v1.DeviceAllocation, 0)
+	vdeviceIndexesByUUID := map[string]int{}
 
 	for _, entry := range strings.Split(value, ";") {
 		for _, segment := range strings.Split(entry, ":") {
@@ -415,12 +413,16 @@ func hamiDeviceAllocationsFromAnnotation(
 				return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
 			}
 
+			vdeviceIndex := strconv.Itoa(vdeviceIndexesByUUID[uuid])
+			vdeviceIndexesByUUID[uuid]++
+
 			devices = append(devices, v1.DeviceAllocation{
-				UUID:      uuid,
-				Product:   firstNonEmpty(products[uuid], strings.TrimSpace(fields[1])),
-				NodeID:    nodeName,
-				MemoryMiB: memoryMiB,
-				CoreUnits: coreUnits,
+				UUID:         uuid,
+				Product:      firstNonEmpty(products[uuid], strings.TrimSpace(fields[1])),
+				NodeID:       nodeName,
+				VDeviceIndex: vdeviceIndex,
+				MemoryMiB:    memoryMiB,
+				CoreUnits:    coreUnits,
 			})
 		}
 	}

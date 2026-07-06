@@ -167,11 +167,13 @@ type kubernetesDeviceAnnotation struct {
 }
 
 type kubernetesAllocationAnnotation struct {
-	UUID      string `json:"uuid,omitempty"`
-	Product   string `json:"product,omitempty"`
-	NodeID    string `json:"node_id,omitempty"`
-	MemoryMiB int64  `json:"memory_mib,omitempty"`
-	CoreUnits int64  `json:"core_units,omitempty"`
+	UUID          string `json:"uuid,omitempty"`
+	Product       string `json:"product,omitempty"`
+	NodeID        string `json:"node_id,omitempty"`
+	VDeviceIndex  string `json:"vdevice_index,omitempty"`
+	MemoryMiB     int64  `json:"memory_mib,omitempty"`
+	UsedMemoryMiB int64  `json:"used_memory_mib,omitempty"`
+	CoreUnits     int64  `json:"core_units,omitempty"`
 }
 
 func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus) []kubernetesDeviceAnnotation {
@@ -213,11 +215,13 @@ func kubernetesAllocationAnnotations(allocations []v1.StaticNodeAllocationStatus
 			}
 
 			result = append(result, kubernetesAllocationAnnotation{
-				UUID:      device.UUID,
-				Product:   device.Product,
-				NodeID:    device.NodeID,
-				MemoryMiB: device.MemoryMiB,
-				CoreUnits: device.CoreUnits,
+				UUID:          device.UUID,
+				Product:       device.Product,
+				NodeID:        device.NodeID,
+				VDeviceIndex:  device.VDeviceIndex,
+				MemoryMiB:     device.MemoryMiB,
+				UsedMemoryMiB: device.UsedMemoryMiB,
+				CoreUnits:     device.CoreUnits,
 			})
 		}
 	}

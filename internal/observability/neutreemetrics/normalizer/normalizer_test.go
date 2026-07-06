@@ -185,7 +185,6 @@ func TestNormalizerNormalizesEndpointReplicaRuntimeUsage(t *testing.T) {
 }
 
 func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
-	allocatedBytes := 8192.0 * 1024 * 1024
 	usedBytes := 4096.0 * 1024 * 1024
 	utilization := 0.75
 
@@ -197,20 +196,19 @@ func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
 		},
 		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
 			{
-				Workspace:            "default",
-				Cluster:              "static-a",
-				Endpoint:             "chat",
-				InstanceID:           "chat-abc",
-				ReplicaID:            "chat-abc",
-				NodeID:               "head-0",
-				Container:            "engine",
-				GPUUUID:              "GPU-abc",
-				AcceleratorIndex:     "0",
-				VDeviceIndex:         "2",
-				Product:              "NVIDIA_A100",
-				MemoryAllocatedBytes: &allocatedBytes,
-				MemoryUsedBytes:      &usedBytes,
-				UtilizationRatio:     &utilization,
+				Workspace:        "default",
+				Cluster:          "static-a",
+				Endpoint:         "chat",
+				InstanceID:       "chat-abc",
+				ReplicaID:        "chat-abc",
+				NodeID:           "head-0",
+				Container:        "engine",
+				GPUUUID:          "GPU-abc",
+				AcceleratorIndex: "0",
+				VDeviceIndex:     "2",
+				Product:          "NVIDIA_A100",
+				MemoryUsedBytes:  &usedBytes,
+				UtilizationRatio: &utilization,
 			},
 		},
 	})
@@ -224,6 +222,52 @@ func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
 	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`}`)
 	assert.NotContains(t, output, "container=")
 	assert.NotContains(t, output, "gpu_uuid=")
+}
+
+func TestNormalizerKeepsRepeatedGPUAllocationsDistinctByVDeviceIndex(t *testing.T) {
+	output := normalizeForTest(NormalizeRequest{
+		Labels: testLabels(),
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		EndpointAllocations: []model.EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "static-a",
+				Endpoint:   "chat",
+				InstanceID: "chat-abc",
+				ReplicaID:  "chat-abc",
+				NodeID:     "head-0",
+				Devices: []v1.DeviceAllocation{
+					{
+						UUID:         "GPU-abc",
+						Product:      "NVIDIA_A100",
+						VDeviceIndex: "0",
+						MemoryMiB:    4096,
+						NodeID:       "head-0",
+					},
+					{
+						UUID:         "GPU-abc",
+						Product:      "NVIDIA_A100",
+						VDeviceIndex: "1",
+						MemoryMiB:    8192,
+						NodeID:       "head-0",
+					},
+				},
+			},
+		},
+	})
+
+	firstLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="ray",endpoint="chat",instance_id="chat-abc",` +
+		`node="head-0",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"`
+	secondLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="ray",endpoint="chat",instance_id="chat-abc",` +
+		`node="head-0",product="NVIDIA_A100",replica="chat-abc",vdevice_index="1"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+firstLabels+`} 4294967296`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+secondLabels+`} 8589934592`)
+	assert.Equal(t, 2, strings.Count(output, "neutree_endpoint_replica_accelerator_memory_allocated_bytes"))
 }
 
 func TestNormalizerDerivesEndpointReplicaGPUUsageFromUniqueDCGMAllocation(t *testing.T) {
@@ -435,6 +479,53 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`+chatBCommonLabels+`} 0.75`)
 	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{accelerator_index="unknown"`)
 	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="unknown"`)
+}
+
+func TestNormalizerMatchesExplicitGPUUsageToAllocationWithNodeFallback(t *testing.T) {
+	usedBytes := 4096.0 * 1024 * 1024
+
+	output := normalizeForTest(NormalizeRequest{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		EndpointAllocations: []model.EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "k8s-a",
+				Endpoint:   "chat",
+				InstanceID: "chat-abc",
+				ReplicaID:  "chat-abc",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 8192, CoreUnits: 50},
+				},
+			},
+		},
+		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
+			{
+				Endpoint:         "chat",
+				InstanceID:       "chat-abc",
+				ReplicaID:        "chat-abc",
+				GPUUUID:          "GPU-abc",
+				AcceleratorIndex: "0",
+				VDeviceIndex:     "0",
+				Product:          "Tesla-T4",
+				MemoryUsedBytes:  &usedBytes,
+			},
+		},
+	})
+
+	allocationInfoLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",physical_vram_usage="unknown",product="Tesla-T4",replica="chat-abc",vdevice_index="0",vram_usage="4 GiB / 8 GiB"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
 }
 
 func TestGPUHardwareInfosFromAcceleratorMetrics(t *testing.T) {

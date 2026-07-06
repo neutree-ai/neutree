@@ -232,7 +232,6 @@ node_memory_MemAvailable_bytes 6442450944
 	}))
 	t.Cleanup(nodeExporter.Close)
 
-	allocatedBytes := 8192.0 * 1024 * 1024
 	usedBytes := 4096.0 * 1024 * 1024
 	utilization := 0.75
 	server, err := NewServer(Config{
@@ -248,18 +247,17 @@ node_memory_MemAvailable_bytes 6442450944
 		EndpointGPUUsageProvider: fakeEndpointGPUUsageProvider{
 			usages: []model.EndpointReplicaGPUUsage{
 				{
-					Workspace:            "default",
-					Cluster:              "k8s-a",
-					Endpoint:             "chat",
-					InstanceID:           "chat-abc",
-					ReplicaID:            "chat-abc",
-					NodeID:               "node-a",
-					Container:            "engine",
-					GPUUUID:              "GPU-abc",
-					Product:              "NVIDIA_A100",
-					MemoryAllocatedBytes: &allocatedBytes,
-					MemoryUsedBytes:      &usedBytes,
-					UtilizationRatio:     &utilization,
+					Workspace:        "default",
+					Cluster:          "k8s-a",
+					Endpoint:         "chat",
+					InstanceID:       "chat-abc",
+					ReplicaID:        "chat-abc",
+					NodeID:           "node-a",
+					Container:        "engine",
+					GPUUUID:          "GPU-abc",
+					Product:          "NVIDIA_A100",
+					MemoryUsedBytes:  &usedBytes,
+					UtilizationRatio: &utilization,
 				},
 			},
 		},
