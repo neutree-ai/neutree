@@ -11,8 +11,8 @@ import (
 )
 
 func TestParseNvidiaSMIGPUHardwareCSV(t *testing.T) {
-	raw := `0, 3, GPU-abc, NVIDIA A100-SXM4-80GB, 535.104.05, 8.0, 00000000:3B:00.0, 4, 16, 81920
-1, 7, GPU-def, NVIDIA A100-SXM4-80GB, 535.104.05, [Not Supported], 00000000:86:00.0, N/A, N/A, 81920`
+	raw := `0, GPU-abc, NVIDIA A100-SXM4-80GB, 535.104.05, 8.0, 00000000:3B:00.0, 4, 16, 81920
+1, GPU-def, NVIDIA A100-SXM4-80GB, 535.104.05, [Not Supported], 00000000:86:00.0, N/A, N/A, 81920`
 
 	infos := parseNvidiaSMIGPUHardwareCSV(raw, nvidiaSMIFullHardwareFields)
 
@@ -20,7 +20,6 @@ func TestParseNvidiaSMIGPUHardwareCSV(t *testing.T) {
 	assert.Equal(t, model.GPUHardwareInfo{
 		UUID:           "GPU-abc",
 		Index:          "0",
-		MinorNumber:    "3",
 		Product:        "NVIDIA A100-SXM4-80GB",
 		CUDACapability: "8.0",
 		DriverVersion:  "535.104.05",
@@ -79,6 +78,30 @@ func TestParseNvidiaSMIProductArchitecturesXML(t *testing.T) {
 		"GPU-def": "Ampere",
 	}, architecturesByUUID)
 	assert.Nil(t, parseNvidiaSMIProductArchitecturesXML("not xml"))
+}
+
+func TestParseNvidiaSMIProductArchitecturesXMLFromQueryOutput(t *testing.T) {
+	raw := `<?xml version="1.0" ?>
+<!DOCTYPE nvidia_smi_log SYSTEM "nvsmi_device_v12.dtd">
+<nvidia_smi_log>
+	<gpu id="00000000:00:0A.0">
+		<product_name>Tesla T4</product_name>
+		<product_architecture>Turing</product_architecture>
+		<uuid>GPU-7df37ae3-c725-bb48-c43b-7854629083ac</uuid>
+		<minor_number>0</minor_number>
+	</gpu>
+</nvidia_smi_log>`
+
+	architecturesByUUID := parseNvidiaSMIProductArchitecturesXML(raw)
+	detailsByUUID := parseNvidiaSMIProductDetailsXML(raw)
+
+	assert.Equal(t, map[string]string{
+		"GPU-7df37ae3-c725-bb48-c43b-7854629083ac": "Turing",
+	}, architecturesByUUID)
+	assert.Equal(t, nvidiaSMIProductDetails{
+		MinorNumber:  "0",
+		Architecture: "Turing",
+	}, detailsByUUID["GPU-7df37ae3-c725-bb48-c43b-7854629083ac"])
 }
 
 func TestFormatCUDAComputeCapability(t *testing.T) {
