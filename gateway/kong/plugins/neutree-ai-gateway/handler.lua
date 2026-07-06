@@ -18,6 +18,10 @@ local function is_table(v)
     return type(v) == "table"
 end
 
+local function is_empty_table(v)
+    return is_table(v) and next(v) == nil
+end
+
 local function string_or_empty(v)
     return type(v) == "string" and v or ""
 end
@@ -594,7 +598,7 @@ local function convert_request(anthropic_req)
     end
     openai_req.messages = messages
 
-    if anthropic_req.stop_sequences then
+    if anthropic_req.stop_sequences and not is_empty_table(anthropic_req.stop_sequences) then
         openai_req.stop = anthropic_req.stop_sequences
     end
     if anthropic_req.stream then
@@ -1353,6 +1357,12 @@ function AIGatewayHandler:access(conf)
             kong.service.request.set_path(build_upstream_path(matched_entry, strip_api_version_prefix(suffix)))
         end
         ai_request.model = matched_entry.model_mapping[ai_request.model]
+        if is_empty_table(ai_request.tools) then
+            ai_request.tools = nil
+        end
+        if is_empty_table(ai_request.stop) then
+            ai_request.stop = nil
+        end
         local new_body = cjson.encode(ai_request)
         if new_body then
             kong.service.request.set_raw_body(new_body)
