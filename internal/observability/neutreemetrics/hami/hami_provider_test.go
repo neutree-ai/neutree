@@ -75,6 +75,17 @@ func TestKubernetesProviderScrapesLocalHAMiMonitor(t *testing.T) {
 		},
 		Spec: corev1.PodSpec{NodeName: "node-a"},
 	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Labels: map[string]string{
+				nvidiaGPUProductLabel: "Tesla-T4",
+			},
+			Annotations: map[string]string{
+				hamiNodeNvidiaRegister: `[{"id":"GPU-abc","type":"NVIDIA-Tesla T4"}]`,
+			},
+		},
+	}
 	monitorPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "kube-system",
@@ -94,7 +105,7 @@ func TestKubernetesProviderScrapesLocalHAMiMonitor(t *testing.T) {
 	ctrClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
-		WithObjects(endpointPod, monitorPod, remoteMonitorPod).
+		WithObjects(endpointPod, node, monitorPod, remoteMonitorPod).
 		Build()
 	provider := KubernetesProvider{
 		Client:   ctrClient,
@@ -125,9 +136,54 @@ hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",conta
 	assert.Equal(t, "default/chat-abc", allocations[0].RuntimeID)
 	require.Len(t, allocations[0].Devices, 1)
 	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+	assert.Equal(t, "Tesla-T4", allocations[0].Devices[0].Product)
 	assert.Equal(t, int64(8192), allocations[0].Devices[0].MemoryMiB)
 	assert.Equal(t, int64(50), allocations[0].Devices[0].CoreUnits)
 	assert.Equal(t, "node-a", allocations[0].Devices[0].NodeID)
+}
+
+func TestKubernetesProviderNormalizesHAMiAllocationProductFromSnapshot(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	endpointPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "chat-abc",
+			Labels: map[string]string{
+				"app":       "inference",
+				"endpoint":  "chat",
+				"workspace": "team-a",
+			},
+			Annotations: map[string]string{
+				hamiVGPUDevicesAllocated: ";GPU-abc,NVIDIA,8192,0:;",
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
+		WithObjects(endpointPod, node).
+		Build()
+	provider := KubernetesProvider{Client: ctrClient, NodeName: "node-a"}
+
+	allocations, err := provider.Allocations(context.Background(), &v1.NodeDeviceSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductName: "Tesla T4"},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "Tesla-T4", allocations[0].Devices[0].Product)
+	assert.Equal(t, int64(8192), allocations[0].Devices[0].MemoryMiB)
+	assert.Equal(t, int64(0), allocations[0].Devices[0].CoreUnits)
 }
 
 func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {

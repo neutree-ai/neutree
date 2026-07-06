@@ -29,6 +29,7 @@ const (
 	hamiMemoryBytesPerMiB      = 1024 * 1024
 	hamiNodeNvidiaRegister     = "hami.io/node-nvidia-register"
 	hamiVGPUDevicesAllocated   = "hami.io/vgpu-devices-allocated"
+	nvidiaGPUProductLabel      = "nvidia.com/gpu.product"
 	hamiMetricMemoryLimitBytes = "hami_vgpu_memory_limit_bytes"
 	hamiMetricMemoryUsedBytes  = "hami_vgpu_memory_used_bytes"
 	hamiMetricUtilizationRatio = "hami_container_device_utilization_ratio"
@@ -90,7 +91,7 @@ func (p KubernetesProvider) Usages(ctx context.Context) ([]model.EndpointReplica
 
 func (p KubernetesProvider) Allocations(
 	ctx context.Context,
-	_ *v1.NodeDeviceSnapshot,
+	snapshot *v1.NodeDeviceSnapshot,
 ) ([]v1.StaticNodeAllocationStatus, error) {
 	if p.Client == nil || p.NodeName == "" {
 		return nil, nil
@@ -101,7 +102,7 @@ func (p KubernetesProvider) Allocations(
 		return nil, err
 	}
 
-	products, err := p.deviceProducts(ctx)
+	products, err := p.deviceProducts(ctx, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,10 @@ func (p KubernetesProvider) httpClient() *http.Client {
 	return &http.Client{Timeout: defaultHAMiHTTPTimeout}
 }
 
-func (p KubernetesProvider) deviceProducts(ctx context.Context) (map[string]string, error) {
+func (p KubernetesProvider) deviceProducts(
+	ctx context.Context,
+	snapshot *v1.NodeDeviceSnapshot,
+) (map[string]string, error) {
 	node := &corev1.Node{}
 	if err := p.Client.Get(ctx, client.ObjectKey{Name: p.NodeName}, node); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -251,7 +255,31 @@ func (p KubernetesProvider) deviceProducts(ctx context.Context) (map[string]stri
 		return nil, fmt.Errorf("get local node %s for HAMi device products: %w", p.NodeName, err)
 	}
 
-	return deviceProductsFromHAMiNodeAnnotation(node.Annotations[hamiNodeNvidiaRegister])
+	products, err := deviceProductsFromHAMiNodeAnnotation(node.Annotations[hamiNodeNvidiaRegister])
+	if err != nil {
+		return nil, err
+	}
+
+	// HAMi reports vendor-flavored product names such as "NVIDIA-Tesla T4".
+	// Neutree resource views group Kubernetes GPUs by nvidia.com/gpu.product,
+	// so allocations must use the same product key as cluster capacity.
+	if product := strings.TrimSpace(node.Labels[nvidiaGPUProductLabel]); product != "" {
+		for uuid := range products {
+			products[uuid] = product
+		}
+	}
+
+	if len(products) == 0 {
+		products = make(map[string]string)
+	}
+
+	for uuid, product := range deviceProductsFromSnapshot(snapshot) {
+		if products[uuid] == "" {
+			products[uuid] = product
+		}
+	}
+
+	return products, nil
 }
 
 func podIdentities(pods []corev1.Pod) map[podKey]podIdentity {
@@ -430,6 +458,33 @@ func deviceProductsFromHAMiNodeAnnotation(value string) (map[string]string, erro
 	}
 
 	return products, nil
+}
+
+func deviceProductsFromSnapshot(snapshot *v1.NodeDeviceSnapshot) map[string]string {
+	if snapshot == nil {
+		return nil
+	}
+
+	products := make(map[string]string, len(snapshot.Accelerator.Devices))
+
+	for _, device := range snapshot.Accelerator.Devices {
+		if device.UUID == "" {
+			continue
+		}
+
+		product := normalizeKubernetesProductKey(firstNonEmpty(device.ProductModel, device.ProductName))
+		if product == "" {
+			continue
+		}
+
+		products[device.UUID] = product
+	}
+
+	return products
+}
+
+func normalizeKubernetesProductKey(product string) string {
+	return strings.ReplaceAll(strings.TrimSpace(product), " ", "-")
 }
 
 func sortStaticNodeAllocations(allocations []v1.StaticNodeAllocationStatus) {

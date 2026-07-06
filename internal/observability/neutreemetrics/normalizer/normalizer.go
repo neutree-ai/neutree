@@ -44,6 +44,7 @@ type Sample struct {
 
 func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 	var samples []Sample
+	acceleratorIndexes := acceleratorIndexesByUUIDFromRequest(req)
 
 	samples = append(samples, nodeReadySample(req.Labels))
 	samples = append(samples, scrapeUpSample(req.Labels, TargetNodeExporter, req.NodeExporter.Up))
@@ -56,7 +57,6 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
 
 		if req.AcceleratorExporter.Up {
-			acceleratorIndexes := acceleratorIndexesByUUID(req.AcceleratorExporter.Body, req.GPUHardwareInfos)
 			samples = append(samples, normalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
 			samples = append(samples, normalizeNodeGPUSamples(
 				req.Labels,
@@ -71,14 +71,15 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 			samples = append(samples, normalizeEndpointAllocationSamples(
 				req.Labels,
 				req.EndpointAllocations,
+				req.EndpointReplicaGPUUsages,
 				acceleratorIndexes,
 				req.AcceleratorExporter.Body,
 			)...)
 		} else {
-			samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil, "")...)
+			samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
 		}
 	} else {
-		samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, nil, "")...)
+		samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
 	}
 
 	if req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
@@ -97,6 +98,8 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 	samples = append(samples, normalizeEndpointReplicaGPUUsageSamples(
 		req.Labels,
 		req.EndpointReplicaGPUUsages,
+		req.EndpointAllocations,
+		acceleratorIndexes,
 	)...)
 
 	sort.SliceStable(samples, func(i, j int) bool {
@@ -387,12 +390,14 @@ func discoveredGPUUUIDs(raw string) map[string]struct{} {
 func normalizeEndpointAllocationSamples(
 	labels model.CanonicalLabels,
 	allocations []model.EndpointAllocation,
+	explicitUsages []model.EndpointReplicaGPUUsage,
 	acceleratorIndexes map[string]string,
 	acceleratorRaw string,
 ) []Sample {
 	result := make([]Sample, 0)
 	physicalVRAMs := physicalVRAMByUUID(acceleratorRaw)
 	uniqueAllocations := uniqueEndpointAllocationsByGPUUUID(allocations)
+	explicitUsageMemoryUsedBytes := explicitEndpointReplicaGPUUsageMemoryUsedBytes(explicitUsages)
 
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
@@ -403,8 +408,12 @@ func normalizeEndpointAllocationSamples(
 			var derivedUsedBytes *float64
 			physicalVRAM := physicalVRAMs[device.UUID]
 
-			if _, ok := uniqueAllocations[device.UUID]; ok && device.UsedMemoryMiB <= 0 && physicalVRAM.hasUsed {
-				derivedUsedBytes = &physicalVRAM.usedBytes
+			if device.UsedMemoryMiB <= 0 {
+				if explicitUsedBytes, ok := explicitUsageMemoryUsedBytes[endpointReplicaGPUUsageKeyFromAllocation(labels, allocation, device)]; ok {
+					derivedUsedBytes = &explicitUsedBytes
+				} else if _, ok := uniqueAllocations[device.UUID]; ok && physicalVRAM.hasUsed {
+					derivedUsedBytes = &physicalVRAM.usedBytes
+				}
 			}
 
 			metricLabels := endpointAllocationLabels(labels, allocation, device, acceleratorIndexes[device.UUID])
@@ -620,6 +629,53 @@ type endpointDeviceAllocation struct {
 	device     v1.DeviceAllocation
 }
 
+type endpointReplicaGPUUsageKey struct {
+	endpoint     string
+	instanceID   string
+	replicaID    string
+	nodeID       string
+	uuid         string
+	vdeviceIndex string
+}
+
+func explicitEndpointReplicaGPUUsageMemoryUsedBytes(
+	usages []model.EndpointReplicaGPUUsage,
+) map[endpointReplicaGPUUsageKey]float64 {
+	result := map[endpointReplicaGPUUsageKey]float64{}
+
+	for _, usage := range usages {
+		if usage.GPUUUID == "" || usage.MemoryUsedBytes == nil {
+			continue
+		}
+
+		result[endpointReplicaGPUUsageKey{
+			endpoint:     usage.Endpoint,
+			instanceID:   usage.InstanceID,
+			replicaID:    usage.ReplicaID,
+			nodeID:       usage.NodeID,
+			uuid:         usage.GPUUUID,
+			vdeviceIndex: vdeviceIndexOrDefault(usage.VDeviceIndex),
+		}] = *usage.MemoryUsedBytes
+	}
+
+	return result
+}
+
+func endpointReplicaGPUUsageKeyFromAllocation(
+	labels model.CanonicalLabels,
+	allocation model.EndpointAllocation,
+	device v1.DeviceAllocation,
+) endpointReplicaGPUUsageKey {
+	return endpointReplicaGPUUsageKey{
+		endpoint:     allocation.Endpoint,
+		instanceID:   allocation.InstanceID,
+		replicaID:    allocation.ReplicaID,
+		nodeID:       firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node),
+		uuid:         device.UUID,
+		vdeviceIndex: vdeviceIndexOrDefault(""),
+	}
+}
+
 func uniqueEndpointAllocationsByGPUUUID(
 	allocations []model.EndpointAllocation,
 ) map[string]endpointDeviceAllocation {
@@ -761,15 +817,21 @@ func endpointReplicaRuntimeUsageLabels(
 func normalizeEndpointReplicaGPUUsageSamples(
 	labels model.CanonicalLabels,
 	usages []model.EndpointReplicaGPUUsage,
+	allocations []model.EndpointAllocation,
+	acceleratorIndexes map[string]string,
 ) []Sample {
 	result := make([]Sample, 0, len(usages)*4)
+	allocationContext := endpointReplicaGPUUsageAllocationContext(labels, allocations, acceleratorIndexes)
 
 	for _, usage := range usages {
 		if usage.GPUUUID == "" {
 			continue
 		}
 
-		metricLabels := endpointReplicaGPUUsageLabels(labels, usage)
+		metricLabels := endpointReplicaGPUUsageLabels(
+			labels,
+			enrichEndpointReplicaGPUUsage(labels, usage, allocationContext),
+		)
 		if usage.MemoryUsedBytes != nil {
 			result = append(result, Sample{
 				Name:   "neutree_endpoint_replica_accelerator_memory_used_bytes",
@@ -788,6 +850,71 @@ func normalizeEndpointReplicaGPUUsageSamples(
 	}
 
 	return result
+}
+
+type endpointReplicaGPUUsageContext struct {
+	product          string
+	acceleratorIndex string
+}
+
+func endpointReplicaGPUUsageAllocationContext(
+	labels model.CanonicalLabels,
+	allocations []model.EndpointAllocation,
+	acceleratorIndexes map[string]string,
+) map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext {
+	result := map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext{}
+
+	for _, allocation := range allocations {
+		for _, device := range allocation.Devices {
+			if device.UUID == "" {
+				continue
+			}
+
+			result[endpointReplicaGPUUsageKey{
+				endpoint:     allocation.Endpoint,
+				instanceID:   allocation.InstanceID,
+				replicaID:    allocation.ReplicaID,
+				nodeID:       firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node),
+				uuid:         device.UUID,
+				vdeviceIndex: vdeviceIndexOrDefault(""),
+			}] = endpointReplicaGPUUsageContext{
+				product:          device.Product,
+				acceleratorIndex: acceleratorIndexes[device.UUID],
+			}
+		}
+	}
+
+	return result
+}
+
+func enrichEndpointReplicaGPUUsage(
+	labels model.CanonicalLabels,
+	usage model.EndpointReplicaGPUUsage,
+	allocationContext map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext,
+) model.EndpointReplicaGPUUsage {
+	context, ok := allocationContext[endpointReplicaGPUUsageKeyFromUsage(labels, usage)]
+	if !ok {
+		return usage
+	}
+
+	usage.Product = firstNonEmpty(usage.Product, context.product)
+	usage.AcceleratorIndex = firstNonEmpty(usage.AcceleratorIndex, context.acceleratorIndex)
+
+	return usage
+}
+
+func endpointReplicaGPUUsageKeyFromUsage(
+	labels model.CanonicalLabels,
+	usage model.EndpointReplicaGPUUsage,
+) endpointReplicaGPUUsageKey {
+	return endpointReplicaGPUUsageKey{
+		endpoint:     usage.Endpoint,
+		instanceID:   usage.InstanceID,
+		replicaID:    usage.ReplicaID,
+		nodeID:       firstNonEmpty(usage.NodeID, labels.Node),
+		uuid:         usage.GPUUUID,
+		vdeviceIndex: vdeviceIndexOrDefault(usage.VDeviceIndex),
+	}
 }
 
 func normalizeEndpointReplicaGPUUsageFromDCGMSamples(
@@ -852,6 +979,14 @@ func endpointReplicaGPUUsageLabels(
 		usage.VDeviceIndex,
 		usage.Product,
 	)
+}
+
+func acceleratorIndexesByUUIDFromRequest(req NormalizeRequest) map[string]string {
+	if req.AcceleratorExporter == nil || !req.AcceleratorExporter.Up {
+		return nil
+	}
+
+	return acceleratorIndexesByUUID(req.AcceleratorExporter.Body, req.GPUHardwareInfos)
 }
 
 func nodeReadySample(labels model.CanonicalLabels) Sample {

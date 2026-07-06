@@ -335,6 +335,108 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",endpoint="chat-b"`)
 }
 
+func TestNormalizerUsesExplicitEndpointReplicaGPUUsageForSharedAllocationDisplay(t *testing.T) {
+	chatAUsedBytes := 4096.0 * 1024 * 1024
+	chatBUsedBytes := 3072.0 * 1024 * 1024
+	chatAUtilization := 0.25
+	chatBUtilization := 0.75
+
+	output := normalizeForTest(NormalizeRequest{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		AcceleratorExporter: &model.ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body: `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 62
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 12288
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
+`,
+		},
+		EndpointAllocations: []model.EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "k8s-a",
+				Endpoint:   "chat-a",
+				InstanceID: "chat-a-abc",
+				ReplicaID:  "chat-a-abc",
+				NodeID:     "node-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 8192, CoreUnits: 50, NodeID: "node-a"},
+				},
+			},
+			{
+				Workspace:  "default",
+				Cluster:    "k8s-a",
+				Endpoint:   "chat-b",
+				InstanceID: "chat-b-abc",
+				ReplicaID:  "chat-b-abc",
+				NodeID:     "node-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 7168, CoreUnits: 50, NodeID: "node-a"},
+				},
+			},
+		},
+		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
+			{
+				Endpoint:         "chat-a",
+				InstanceID:       "chat-a-abc",
+				ReplicaID:        "chat-a-abc",
+				NodeID:           "node-a",
+				GPUUUID:          "GPU-abc",
+				AcceleratorIndex: "0",
+				VDeviceIndex:     "0",
+				Product:          "Tesla-T4",
+				MemoryUsedBytes:  &chatAUsedBytes,
+				UtilizationRatio: &chatAUtilization,
+			},
+			{
+				Endpoint:         "chat-b",
+				InstanceID:       "chat-b-abc",
+				ReplicaID:        "chat-b-abc",
+				NodeID:           "node-a",
+				GPUUUID:          "GPU-abc",
+				AcceleratorIndex: "0",
+				VDeviceIndex:     "0",
+				Product:          "Tesla-T4",
+				MemoryUsedBytes:  &chatBUsedBytes,
+				UtilizationRatio: &chatBUtilization,
+			},
+		},
+	})
+
+	chatACommonLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat-a",instance_id="chat-a-abc",` +
+		`node="node-a",product="Tesla-T4",replica="chat-a-abc",vdevice_index="0"`
+	chatBCommonLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat-b",instance_id="chat-b-abc",` +
+		`node="node-a",product="Tesla-T4",replica="chat-b-abc",vdevice_index="0"`
+	chatAAllocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat-a",instance_id="chat-a-abc",` +
+		`node="node-a",physical_vram_usage="12 GiB / 15 GiB",product="Tesla-T4",replica="chat-a-abc",vdevice_index="0",vram_usage="4 GiB / 8 GiB"`
+	chatBAllocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat-b",instance_id="chat-b-abc",` +
+		`node="node-a",physical_vram_usage="12 GiB / 15 GiB",product="Tesla-T4",replica="chat-b-abc",vdevice_index="0",vram_usage="3 GiB / 7 GiB"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+chatAAllocationInfoLabels+`} 1`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+chatBAllocationInfoLabels+`} 1`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+chatACommonLabels+`} 8589934592`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+chatACommonLabels+`} 4294967296`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`+chatACommonLabels+`} 0.25`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+chatBCommonLabels+`} 7516192768`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+chatBCommonLabels+`} 3221225472`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`+chatBCommonLabels+`} 0.75`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{accelerator_index="unknown"`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="unknown"`)
+}
+
 func TestGPUHardwareInfosFromAcceleratorMetrics(t *testing.T) {
 	raw := `DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 DCGM_FI_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100",Driver_Version="535.104.05"} 1
