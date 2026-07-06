@@ -322,6 +322,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, profile.MetricsExporter.Env)
 	assert.Equal(t,
 		[]string{
 			"--collectors",

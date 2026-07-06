@@ -567,6 +567,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		dcgm.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19400), dcgm.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	assert.Equal(t, "all", envValue(dcgm.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
 	assert.DeepEqual(t,
 		map[string]string{"nvidia.com/gpu.present": "true"},
 		dcgm.Spec.Template.Spec.NodeSelector)
@@ -619,6 +620,9 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Assert(t, strings.Contains(vmagentConfig, "accelerator_type"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: nvidia_gpu"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	assert.Equal(t, "all", envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFiles(t *testing.T) {
@@ -1045,6 +1049,16 @@ func requireContainerCapability(t *testing.T, daemonSet *appsv1.DaemonSet, capab
 	}
 
 	t.Fatalf("capability %s not found in %#v", capability, securityContext.Capabilities.Add)
+}
+
+func envValue(env []corev1.EnvVar, name string) string {
+	for _, item := range env {
+		if item.Name == name {
+			return item.Value
+		}
+	}
+
+	return ""
 }
 
 func findMetricsDaemonSet(t *testing.T, objs *unstructured.UnstructuredList, name string) *appsv1.DaemonSet {

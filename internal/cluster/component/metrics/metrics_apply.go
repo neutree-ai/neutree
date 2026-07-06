@@ -41,6 +41,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	variables.AcceleratorExporters = acceleratorExporters
+	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 
 	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 	if err != nil {

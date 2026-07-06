@@ -26,7 +26,10 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Name:  "dcgm-exporter",
 				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
 				Args:  []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
-				Port:  19400,
+				Env: map[string]string{
+					"NVIDIA_VISIBLE_DEVICES": "all",
+				},
+				Port: 19400,
 				ConfigFiles: []v1.AcceleratorExporterConfigFile{
 					{
 						Path:    "/etc/neutree/dcgm-exporter/default-counters.csv",
@@ -133,6 +136,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	require.NotNil(t, exporter)
 	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
 	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
 	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
@@ -152,6 +156,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
 	assert.Contains(t, nodeAgent.Args, "--node=head-0")
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nodeAgent.Env)
 	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
 	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
 	assert.NotContains(t, nodeAgent.Args, "--static-node-cluster=static-a")

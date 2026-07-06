@@ -130,13 +130,10 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.Contains(t, output, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",memory_total_bytes="unknown",node="head-0",numa_node="1",pcie_bus_id="00000000:3B:00.0",pcie_generation="unknown",pcie_width="unknown",product="A100"} 1`)
 	assert.Contains(t, output, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="ray",cuda_capability="unknown",cuda_driver_version="unknown",driver_version="unknown",node="head-0",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
 	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-replica-a",node="head-0",product="NVIDIA_A100",replica="replica-a",vdevice_index="0"`
-	nodeAllocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-replica-a",node="head-0",physical_vram="42 GiB / 80 GiB",product="NVIDIA_A100",replica="replica-a",vdevice_index="0",vram="4 GiB / 80 GiB"`
-	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationLabels+`} 1`)
+	allocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-replica-a",node="head-0",physical_vram_usage="42 GiB / 80 GiB",product="NVIDIA_A100",replica="replica-a",vdevice_index="0",vram_usage="4 GiB / 80 GiB"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+allocationLabels+`} 85899345920`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+allocationLabels+`} 4294967296`)
-	assert.Contains(t, output, `neutree_node_accelerator_allocation{`+nodeAllocationLabels+`} 1`)
-	assert.Contains(t, output, `neutree_node_accelerator_allocation_memory_allocated_bytes{`+allocationLabels+`} 85899345920`)
-	assert.Contains(t, output, `neutree_node_accelerator_allocation_memory_used_bytes{`+allocationLabels+`} 4294967296`)
 	assert.NotContains(t, output, "neutree_node_gpu_allocation_info")
 	assert.NotContains(t, output, "gpu_uuid=")
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
@@ -274,7 +271,10 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	commonLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
 		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
 		`node="node-a",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"`
-	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+commonLabels+`} 1`)
+	allocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",physical_vram_usage="2 GiB / 80 GiB",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0",vram_usage="2 GiB / 80 GiB"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+commonLabels+`} 85899345920`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+commonLabels+`} 2147483648`)
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`+commonLabels+`} 0.62`)

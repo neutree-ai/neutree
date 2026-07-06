@@ -273,6 +273,26 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	return envVars
 }
 
+func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter) []corev1.EnvVar {
+	allowed := map[string]struct{}{
+		"NVIDIA_VISIBLE_DEVICES":     {},
+		"NVIDIA_DRIVER_CAPABILITIES": {},
+	}
+	env := map[string]string{}
+
+	for _, exporter := range exporters {
+		for _, item := range exporter.Env {
+			if _, ok := allowed[item.Name]; !ok {
+				continue
+			}
+
+			env[item.Name] = item.Value
+		}
+	}
+
+	return buildExporterEnv(env)
+}
+
 func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) map[string]string {
 	if runtime == nil {
 		return nil

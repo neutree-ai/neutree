@@ -32,6 +32,59 @@ var endpointAcceleratorMetricLabelNames = []string{
 	"product",
 }
 
+var endpointAcceleratorAllocationMetricLabelNames = []string{
+	"cluster_type",
+	"endpoint",
+	"instance_id",
+	"replica",
+	"node",
+	"accelerator_type",
+	"accelerator_uuid",
+	"accelerator_index",
+	"vdevice_index",
+	"product",
+	"vram_usage",
+	"physical_vram_usage",
+}
+
+var physicalAcceleratorMetricLabelNames = []string{
+	"cluster_type",
+	"node",
+	"accelerator_type",
+	"accelerator_uuid",
+	"accelerator_index",
+	"product",
+}
+
+var hardwareInfoMetricLabelNames = []string{
+	"cluster_type",
+	"node",
+	"accelerator_type",
+	"accelerator_uuid",
+	"accelerator_index",
+	"product",
+	"memory_total_bytes",
+	"pcie_bus_id",
+	"pcie_generation",
+	"pcie_width",
+	"numa_node",
+}
+
+var nvidiaInfoMetricLabelNames = []string{
+	"cluster_type",
+	"node",
+	"accelerator_type",
+	"accelerator_uuid",
+	"accelerator_index",
+	"product",
+	"architecture",
+	"cuda_capability",
+	"driver_version",
+	"cuda_driver_version",
+	"nvlink",
+	"nvswitch",
+}
+
 var forbiddenEndpointAcceleratorMetricLabels = []string{
 	"workspace",
 	"neutree_cluster",
@@ -484,62 +537,270 @@ func validateEndpointAcceleratorMetricContract(body, endpointName, expectedVDevi
 		return fmt.Errorf("parse node-agent metrics: %w", err)
 	}
 
-	required := []string{
-		"neutree_endpoint_replica_accelerator_allocation",
-		"neutree_endpoint_replica_accelerator_memory_allocated_bytes",
-		"neutree_endpoint_replica_accelerator_memory_used_bytes",
-		"neutree_endpoint_replica_accelerator_utilization_ratio",
+	allocation, allocationLabels, err := findEndpointAllocationMetric(families, endpointName, expectedVDeviceIndex)
+	if err != nil {
+		return err
 	}
-	for _, name := range required {
-		family := families[name]
-		if family == nil {
-			return fmt.Errorf("metric %s is missing", name)
+	if err := validateMetricValueEquals("neutree_endpoint_replica_accelerator_allocation", allocation, 1); err != nil {
+		return err
+	}
+	if err := validateEndpointAcceleratorUtilization(families, allocationLabels); err != nil {
+		return err
+	}
+	if err := validateAcceleratorHardwareInfo(families, allocationLabels); err != nil {
+		return err
+	}
+	if err := validateAcceleratorNVIDIAInfo(families, allocationLabels); err != nil {
+		return err
+	}
+	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_tx_bytes_total"); err != nil {
+		return err
+	}
+	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_rx_bytes_total"); err != nil {
+		return err
+	}
+	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_temperature_celsius"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func findEndpointAllocationMetric(
+	families map[string]*dto.MetricFamily,
+	endpointName string,
+	expectedVDeviceIndex string,
+) (*dto.Metric, map[string]string, error) {
+	const metricName = "neutree_endpoint_replica_accelerator_allocation"
+	family := families[metricName]
+	if family == nil {
+		return nil, nil, fmt.Errorf("metric %s is missing", metricName)
+	}
+
+	for _, metric := range family.GetMetric() {
+		labels := metricLabels(metric)
+		if labels["endpoint"] != endpointName {
+			continue
 		}
-		if err := validateEndpointAcceleratorMetricFamily(name, endpointName, expectedVDeviceIndex, family); err != nil {
-			return err
+
+		if err := validateLabelSet(metricName, labels, endpointAcceleratorAllocationMetricLabelNames); err != nil {
+			return nil, nil, err
+		}
+		if expectedVDeviceIndex != "" && labels["vdevice_index"] != expectedVDeviceIndex {
+			return nil, nil, fmt.Errorf("metric %s vdevice_index = %q, want %q",
+				metricName, labels["vdevice_index"], expectedVDeviceIndex)
+		}
+		if err := validateKnownLabels(metricName, labels, endpointAcceleratorAllocationMetricLabelNames, nil); err != nil {
+			return nil, nil, err
+		}
+
+		return metric, labels, nil
+	}
+
+	return nil, nil, fmt.Errorf("metric %s has no sample for endpoint %s", metricName, endpointName)
+}
+
+func validateEndpointAcceleratorUtilization(
+	families map[string]*dto.MetricFamily,
+	allocationLabels map[string]string,
+) error {
+	const metricName = "neutree_endpoint_replica_accelerator_utilization_ratio"
+	metric, labels, err := findMetricByLabels(families, metricName, map[string]string{
+		"endpoint":          allocationLabels["endpoint"],
+		"replica":           allocationLabels["replica"],
+		"node":              allocationLabels["node"],
+		"accelerator_uuid":  allocationLabels["accelerator_uuid"],
+		"accelerator_index": allocationLabels["accelerator_index"],
+	})
+	if err != nil {
+		return err
+	}
+	if err := validateLabelSet(metricName, labels, endpointAcceleratorMetricLabelNames); err != nil {
+		return err
+	}
+	if err := validateKnownLabels(metricName, labels, endpointAcceleratorMetricLabelNames, nil); err != nil {
+		return err
+	}
+
+	value, ok := metricValue(metric)
+	if !ok {
+		return fmt.Errorf("metric %s has no scalar value", metricName)
+	}
+	if value < 0 || value > 1 {
+		return fmt.Errorf("metric %s value = %v, want 0-1 ratio", metricName, value)
+	}
+
+	return nil
+}
+
+func validateAcceleratorHardwareInfo(
+	families map[string]*dto.MetricFamily,
+	allocationLabels map[string]string,
+) error {
+	const metricName = "neutree_node_accelerator_hardware_info"
+	metric, labels, err := findMetricByLabels(families, metricName, map[string]string{
+		"node":             allocationLabels["node"],
+		"accelerator_uuid": allocationLabels["accelerator_uuid"],
+	})
+	if err != nil {
+		return err
+	}
+	if err := validateLabelSet(metricName, labels, hardwareInfoMetricLabelNames); err != nil {
+		return err
+	}
+	if err := validateKnownLabels(metricName, labels, hardwareInfoMetricLabelNames, map[string]struct{}{"numa_node": {}}); err != nil {
+		return err
+	}
+
+	return validateMetricHasValue(metricName, metric)
+}
+
+func validateAcceleratorNVIDIAInfo(
+	families map[string]*dto.MetricFamily,
+	allocationLabels map[string]string,
+) error {
+	const metricName = "neutree_node_accelerator_nvidia_info"
+	metric, labels, err := findMetricByLabels(families, metricName, map[string]string{
+		"node":             allocationLabels["node"],
+		"accelerator_uuid": allocationLabels["accelerator_uuid"],
+	})
+	if err != nil {
+		return err
+	}
+	if err := validateLabelSet(metricName, labels, nvidiaInfoMetricLabelNames); err != nil {
+		return err
+	}
+	if err := validateKnownLabels(metricName, labels, nvidiaInfoMetricLabelNames, map[string]struct{}{
+		"nvlink":   {},
+		"nvswitch": {},
+	}); err != nil {
+		return err
+	}
+
+	return validateMetricHasValue(metricName, metric)
+}
+
+func validatePhysicalAcceleratorMetric(
+	families map[string]*dto.MetricFamily,
+	allocationLabels map[string]string,
+	metricName string,
+) error {
+	metric, labels, err := findMetricByLabels(families, metricName, map[string]string{
+		"node":             allocationLabels["node"],
+		"accelerator_uuid": allocationLabels["accelerator_uuid"],
+	})
+	if err != nil {
+		return err
+	}
+	if err := validateLabelSet(metricName, labels, physicalAcceleratorMetricLabelNames); err != nil {
+		return err
+	}
+	if err := validateKnownLabels(metricName, labels, physicalAcceleratorMetricLabelNames, nil); err != nil {
+		return err
+	}
+
+	return validateMetricHasValue(metricName, metric)
+}
+
+func findMetricByLabels(
+	families map[string]*dto.MetricFamily,
+	metricName string,
+	match map[string]string,
+) (*dto.Metric, map[string]string, error) {
+	family := families[metricName]
+	if family == nil {
+		return nil, nil, fmt.Errorf("metric %s is missing", metricName)
+	}
+
+	for _, metric := range family.GetMetric() {
+		labels := metricLabels(metric)
+		matched := true
+		for key, want := range match {
+			if labels[key] != want {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return metric, labels, nil
+		}
+	}
+
+	return nil, nil, fmt.Errorf("metric %s has no sample matching %v", metricName, match)
+}
+
+func validateLabelSet(metricName string, labels map[string]string, want []string) error {
+	if got := sortedMapKeys(labels); !stringSlicesEqual(got, sortedStrings(want)) {
+		return fmt.Errorf("metric %s labels = %v, want %v", metricName, got, sortedStrings(want))
+	}
+	for _, label := range forbiddenEndpointAcceleratorMetricLabels {
+		if _, exists := labels[label]; exists {
+			return fmt.Errorf("metric %s has forbidden label %s", metricName, label)
 		}
 	}
 
 	return nil
 }
 
-func validateEndpointAcceleratorMetricFamily(
+func validateKnownLabels(
 	metricName string,
-	endpointName string,
-	expectedVDeviceIndex string,
-	family *dto.MetricFamily,
+	labels map[string]string,
+	labelNames []string,
+	allowUnknown map[string]struct{},
 ) error {
-	for _, metric := range family.GetMetric() {
-		labels := map[string]string{}
-		for _, pair := range metric.GetLabel() {
-			labels[pair.GetName()] = pair.GetValue()
+	for _, label := range labelNames {
+		value := labels[label]
+		if value == "" {
+			return fmt.Errorf("metric %s label %s is empty", metricName, label)
 		}
-		if labels["endpoint"] != endpointName {
-			continue
+		if _, ok := allowUnknown[label]; !ok && strings.EqualFold(value, "unknown") {
+			return fmt.Errorf("metric %s label %s is unknown", metricName, label)
 		}
-
-		if got, want := sortedMapKeys(labels), endpointAcceleratorMetricLabelNames; !stringSlicesEqual(got, sortedStrings(want)) {
-			return fmt.Errorf("metric %s labels = %v, want %v", metricName, got, sortedStrings(want))
-		}
-		for _, label := range forbiddenEndpointAcceleratorMetricLabels {
-			if _, exists := labels[label]; exists {
-				return fmt.Errorf("metric %s has forbidden label %s", metricName, label)
-			}
-		}
-		for _, label := range endpointAcceleratorMetricLabelNames {
-			if labels[label] == "" {
-				return fmt.Errorf("metric %s label %s is empty", metricName, label)
-			}
-		}
-		if expectedVDeviceIndex != "" && labels["vdevice_index"] != expectedVDeviceIndex {
-			return fmt.Errorf("metric %s vdevice_index = %q, want %q",
-				metricName, labels["vdevice_index"], expectedVDeviceIndex)
-		}
-
-		return nil
 	}
 
-	return fmt.Errorf("metric %s has no sample for endpoint %s", metricName, endpointName)
+	return nil
+}
+
+func validateMetricHasValue(metricName string, metric *dto.Metric) error {
+	if _, ok := metricValue(metric); !ok {
+		return fmt.Errorf("metric %s has no scalar value", metricName)
+	}
+
+	return nil
+}
+
+func validateMetricValueEquals(metricName string, metric *dto.Metric, want float64) error {
+	value, ok := metricValue(metric)
+	if !ok {
+		return fmt.Errorf("metric %s has no scalar value", metricName)
+	}
+	if value != want {
+		return fmt.Errorf("metric %s value = %v, want %v", metricName, value, want)
+	}
+
+	return nil
+}
+
+func metricLabels(metric *dto.Metric) map[string]string {
+	labels := map[string]string{}
+	for _, pair := range metric.GetLabel() {
+		labels[pair.GetName()] = pair.GetValue()
+	}
+
+	return labels
+}
+
+func metricValue(metric *dto.Metric) (float64, bool) {
+	switch {
+	case metric.GetGauge() != nil:
+		return metric.GetGauge().GetValue(), true
+	case metric.GetCounter() != nil:
+		return metric.GetCounter().GetValue(), true
+	case metric.GetUntyped() != nil:
+		return metric.GetUntyped().GetValue(), true
+	default:
+		return 0, false
+	}
 }
 
 func validateEndpointAllocationAnnotation(annotations map[string]string) error {

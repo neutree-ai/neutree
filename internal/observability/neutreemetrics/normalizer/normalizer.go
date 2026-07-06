@@ -389,6 +389,7 @@ func normalizeEndpointAllocationSamples(
 ) []Sample {
 	result := make([]Sample, 0)
 	physicalVRAMs := physicalVRAMByUUID(acceleratorRaw)
+	uniqueAllocations := uniqueEndpointAllocationsByGPUUUID(allocations)
 
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
@@ -396,11 +397,16 @@ func normalizeEndpointAllocationSamples(
 				continue
 			}
 
+			physicalVRAM := physicalVRAMs[device.UUID]
+			var derivedUsedBytes *float64
+			if _, ok := uniqueAllocations[device.UUID]; ok && device.UsedMemoryMiB <= 0 && physicalVRAM.hasUsed {
+				derivedUsedBytes = &physicalVRAM.usedBytes
+			}
 			metricLabels := endpointAllocationLabels(labels, allocation, device, acceleratorIndexes[device.UUID])
 
 			result = append(result, Sample{
 				Name:   "neutree_endpoint_replica_accelerator_allocation",
-				Labels: metricLabels,
+				Labels: allocationInfoLabels(metricLabels, device, physicalVRAM, derivedUsedBytes),
 				Value:  1,
 			})
 			if device.MemoryMiB > 0 {
@@ -414,27 +420,6 @@ func normalizeEndpointAllocationSamples(
 			if device.UsedMemoryMiB > 0 {
 				result = append(result, Sample{
 					Name:   "neutree_endpoint_replica_accelerator_memory_used_bytes",
-					Labels: metricLabels,
-					Value:  mibToBytes(device.UsedMemoryMiB),
-				})
-			}
-
-			result = append(result, Sample{
-				Name:   "neutree_node_accelerator_allocation",
-				Labels: nodeAllocationLabels(metricLabels, device, physicalVRAMs[device.UUID]),
-				Value:  1,
-			})
-			if device.MemoryMiB > 0 {
-				result = append(result, Sample{
-					Name:   "neutree_node_accelerator_allocation_memory_allocated_bytes",
-					Labels: metricLabels,
-					Value:  mibToBytes(device.MemoryMiB),
-				})
-			}
-
-			if device.UsedMemoryMiB > 0 {
-				result = append(result, Sample{
-					Name:   "neutree_node_accelerator_allocation_memory_used_bytes",
 					Labels: metricLabels,
 					Value:  mibToBytes(device.UsedMemoryMiB),
 				})
@@ -474,24 +459,41 @@ type vramSnapshot struct {
 	hasTotal   bool
 }
 
-func nodeAllocationLabels(
+func allocationInfoLabels(
 	base map[string]string,
 	device v1.DeviceAllocation,
 	physicalVRAM vramSnapshot,
+	derivedUsedBytes *float64,
 ) map[string]string {
 	labels := cloneLabels(base)
-	labels["vram"] = allocationVRAMLabel(device)
-	labels["physical_vram"] = vramLabel(physicalVRAM)
+	labels["vram_usage"] = allocationVRAMLabel(device, physicalVRAM, derivedUsedBytes)
+	labels["physical_vram_usage"] = vramLabel(physicalVRAM)
 
 	return labels
 }
 
-func allocationVRAMLabel(device v1.DeviceAllocation) string {
-	if device.UsedMemoryMiB <= 0 || device.MemoryMiB <= 0 {
+func allocationVRAMLabel(device v1.DeviceAllocation, physicalVRAM vramSnapshot, derivedUsedBytes *float64) string {
+	usedBytes := mibToBytes(device.UsedMemoryMiB)
+	if usedBytes <= 0 {
+		if derivedUsedBytes == nil {
+			return "unknown"
+		}
+		usedBytes = *derivedUsedBytes
+	}
+
+	if usedBytes <= 0 {
 		return "unknown"
 	}
 
-	return displayBytes(mibToBytes(device.UsedMemoryMiB)) + " / " + displayBytes(mibToBytes(device.MemoryMiB))
+	allocatedBytes := mibToBytes(device.MemoryMiB)
+	if allocatedBytes <= 0 {
+		if !physicalVRAM.hasTotal {
+			return "unknown"
+		}
+		allocatedBytes = physicalVRAM.totalBytes
+	}
+
+	return displayBytes(usedBytes) + " / " + displayBytes(allocatedBytes)
 }
 
 func vramLabel(snapshot vramSnapshot) string {

@@ -239,6 +239,9 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				":" + strconv.Itoa(nvidiaDCGMExporterPort),
 			},
 			Port: nvidiaDCGMExporterPort,
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES": "all",
+			},
 			ConfigFiles: []v1.AcceleratorExporterConfigFile{
 				{
 					Path:         nvidiaDCGMExporterCollectorsPath,

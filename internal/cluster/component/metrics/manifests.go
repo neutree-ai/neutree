@@ -3,6 +3,8 @@ package metrics
 import (
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -339,6 +341,9 @@ spec:
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
         env:
+{{ if .NeutreeNodeAgentMetricsEnv }}
+{{ .NeutreeNodeAgentMetricsEnv | toYaml | indent 8 }}
+{{ end }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:
@@ -540,6 +545,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsName      string
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
+	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
 	KubeStateMetricsVersion          string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string

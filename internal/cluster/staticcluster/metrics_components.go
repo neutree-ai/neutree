@@ -198,6 +198,7 @@ func buildNodeAgentComponent(
 		Name:             nodeAgentComponentName,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
 		Args:             args,
+		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
 		Volumes: []v1.NodeComponentVolume{
 			{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
@@ -211,6 +212,29 @@ func buildNodeAgentComponent(
 			Port:     defaultNodeAgentPort,
 		},
 	}
+}
+
+func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil || len(exporter.Env) == 0 {
+		return nil
+	}
+
+	allowed := map[string]struct{}{
+		"NVIDIA_VISIBLE_DEVICES":     {},
+		"NVIDIA_DRIVER_CAPABILITIES": {},
+	}
+	env := map[string]string{}
+
+	for key, value := range exporter.Env {
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+
+		env[key] = value
+	}
+
+	return env
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {

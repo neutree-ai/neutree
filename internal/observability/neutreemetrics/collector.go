@@ -42,9 +42,9 @@ var (
 		"vdevice_index",
 		"product",
 	}
-	nodeAcceleratorAllocationLabelNames = appendLabels(endpointAcceleratorLabelNames,
-		"vram",
-		"physical_vram",
+	endpointAcceleratorAllocationLabelNames = appendLabels(endpointAcceleratorLabelNames,
+		"vram_usage",
+		"physical_vram_usage",
 	)
 	endpointRuntimeLabelNames = []string{
 		"cluster_type",
@@ -174,13 +174,10 @@ func newMetricDescriptors() []*metricDescriptor {
 		newMetricDescriptor("neutree_node_accelerator_hardware_info", hardwareInfoLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_node_accelerator_nvidia_info", nvidiaInfoLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 
-		newMetricDescriptor("neutree_endpoint_replica_accelerator_allocation", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
+		newMetricDescriptor("neutree_endpoint_replica_accelerator_allocation", endpointAcceleratorAllocationLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_allocated_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_used_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_utilization_ratio", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-		newMetricDescriptor("neutree_node_accelerator_allocation", nodeAcceleratorAllocationLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-		newMetricDescriptor("neutree_node_accelerator_allocation_memory_allocated_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-		newMetricDescriptor("neutree_node_accelerator_allocation_memory_used_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 
 		newMetricDescriptor("neutree_endpoint_replica_cpu_usage_seconds_total", endpointRuntimeLabelNames, prometheus.CounterValue, nil),
 		newMetricDescriptor("neutree_endpoint_replica_memory_usage_bytes", endpointRuntimeLabelNames, prometheus.GaugeValue, nil),
