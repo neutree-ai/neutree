@@ -333,7 +333,6 @@ spec:
       containers:
       - name: neutree-node-agent
         image: {{ .NeutreeNodeAgentMetricsImage }}
-        imagePullPolicy: Always
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
         - --cluster-type=kubernetes
