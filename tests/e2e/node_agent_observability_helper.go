@@ -132,6 +132,7 @@ func assertStaticRayNodeAgentEndpointAcceleratorMetrics(clusterName, endpointNam
 	if sshUser == "" {
 		sshUser = defaultSSHUser
 	}
+
 	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
 
 	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
@@ -193,6 +194,7 @@ func eventuallyStaticRayNodeAgentEndpointAllocations(
 	if sshUser == "" {
 		sshUser = defaultSSHUser
 	}
+
 	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
 
 	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
@@ -357,10 +359,12 @@ func endpointAllocations(
 	endpointName string,
 ) []v1.StaticNodeAllocationStatus {
 	result := make([]v1.StaticNodeAllocationStatus, 0, len(allocations))
+
 	for _, allocation := range allocations {
 		if allocation.Endpoint != endpointName || len(allocation.Devices) == 0 {
 			continue
 		}
+
 		result = append(result, allocation)
 	}
 
@@ -380,6 +384,7 @@ func assertAllocationDeviceSetContains(
 
 func allocationDeviceSet(allocations []v1.StaticNodeAllocationStatus) map[string]struct{} {
 	result := map[string]struct{}{}
+
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
 			result[allocation.Endpoint+"|"+allocation.ReplicaID+"|"+device.NodeID+"|"+device.UUID] = struct{}{}
@@ -541,24 +546,31 @@ func validateEndpointAcceleratorMetricContract(body, endpointName, expectedVDevi
 	if err != nil {
 		return err
 	}
+
 	if err := validateMetricValueEquals("neutree_endpoint_replica_accelerator_allocation", allocation, 1); err != nil {
 		return err
 	}
+
 	if err := validateEndpointAcceleratorUtilization(families, allocationLabels); err != nil {
 		return err
 	}
+
 	if err := validateAcceleratorHardwareInfo(families, allocationLabels); err != nil {
 		return err
 	}
+
 	if err := validateAcceleratorNVIDIAInfo(families, allocationLabels); err != nil {
 		return err
 	}
+
 	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_tx_bytes_total"); err != nil {
 		return err
 	}
+
 	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_rx_bytes_total"); err != nil {
 		return err
 	}
+
 	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_temperature_celsius"); err != nil {
 		return err
 	}
@@ -572,6 +584,7 @@ func findEndpointAllocationMetric(
 	expectedVDeviceIndex string,
 ) (*dto.Metric, map[string]string, error) {
 	const metricName = "neutree_endpoint_replica_accelerator_allocation"
+
 	family := families[metricName]
 	if family == nil {
 		return nil, nil, fmt.Errorf("metric %s is missing", metricName)
@@ -586,10 +599,12 @@ func findEndpointAllocationMetric(
 		if err := validateLabelSet(metricName, labels, endpointAcceleratorAllocationMetricLabelNames); err != nil {
 			return nil, nil, err
 		}
+
 		if expectedVDeviceIndex != "" && labels["vdevice_index"] != expectedVDeviceIndex {
 			return nil, nil, fmt.Errorf("metric %s vdevice_index = %q, want %q",
 				metricName, labels["vdevice_index"], expectedVDeviceIndex)
 		}
+
 		if err := validateKnownLabels(metricName, labels, endpointAcceleratorAllocationMetricLabelNames, nil); err != nil {
 			return nil, nil, err
 		}
@@ -612,12 +627,15 @@ func validateEndpointAcceleratorUtilization(
 		"accelerator_uuid":  allocationLabels["accelerator_uuid"],
 		"accelerator_index": allocationLabels["accelerator_index"],
 	})
+
 	if err != nil {
 		return err
 	}
+
 	if err := validateLabelSet(metricName, labels, endpointAcceleratorMetricLabelNames); err != nil {
 		return err
 	}
+
 	if err := validateKnownLabels(metricName, labels, endpointAcceleratorMetricLabelNames, nil); err != nil {
 		return err
 	}
@@ -626,6 +644,7 @@ func validateEndpointAcceleratorUtilization(
 	if !ok {
 		return fmt.Errorf("metric %s has no scalar value", metricName)
 	}
+
 	if value < 0 || value > 1 {
 		return fmt.Errorf("metric %s value = %v, want 0-1 ratio", metricName, value)
 	}
@@ -642,12 +661,15 @@ func validateAcceleratorHardwareInfo(
 		"node":             allocationLabels["node"],
 		"accelerator_uuid": allocationLabels["accelerator_uuid"],
 	})
+
 	if err != nil {
 		return err
 	}
+
 	if err := validateLabelSet(metricName, labels, hardwareInfoMetricLabelNames); err != nil {
 		return err
 	}
+
 	if err := validateKnownLabels(metricName, labels, hardwareInfoMetricLabelNames, map[string]struct{}{"numa_node": {}}); err != nil {
 		return err
 	}
@@ -664,12 +686,15 @@ func validateAcceleratorNVIDIAInfo(
 		"node":             allocationLabels["node"],
 		"accelerator_uuid": allocationLabels["accelerator_uuid"],
 	})
+
 	if err != nil {
 		return err
 	}
+
 	if err := validateLabelSet(metricName, labels, nvidiaInfoMetricLabelNames); err != nil {
 		return err
 	}
+
 	if err := validateKnownLabels(metricName, labels, nvidiaInfoMetricLabelNames, map[string]struct{}{
 		"nvlink":   {},
 		"nvswitch": {},
@@ -692,9 +717,11 @@ func validatePhysicalAcceleratorMetric(
 	if err != nil {
 		return err
 	}
+
 	if err := validateLabelSet(metricName, labels, physicalAcceleratorMetricLabelNames); err != nil {
 		return err
 	}
+
 	if err := validateKnownLabels(metricName, labels, physicalAcceleratorMetricLabelNames, nil); err != nil {
 		return err
 	}
@@ -715,12 +742,14 @@ func findMetricByLabels(
 	for _, metric := range family.GetMetric() {
 		labels := metricLabels(metric)
 		matched := true
+
 		for key, want := range match {
 			if labels[key] != want {
 				matched = false
 				break
 			}
 		}
+
 		if matched {
 			return metric, labels, nil
 		}
@@ -733,6 +762,7 @@ func validateLabelSet(metricName string, labels map[string]string, want []string
 	if got := sortedMapKeys(labels); !stringSlicesEqual(got, sortedStrings(want)) {
 		return fmt.Errorf("metric %s labels = %v, want %v", metricName, got, sortedStrings(want))
 	}
+
 	for _, label := range forbiddenEndpointAcceleratorMetricLabels {
 		if _, exists := labels[label]; exists {
 			return fmt.Errorf("metric %s has forbidden label %s", metricName, label)
@@ -753,6 +783,7 @@ func validateKnownLabels(
 		if value == "" {
 			return fmt.Errorf("metric %s label %s is empty", metricName, label)
 		}
+
 		if _, ok := allowUnknown[label]; !ok && strings.EqualFold(value, "unknown") {
 			return fmt.Errorf("metric %s label %s is unknown", metricName, label)
 		}
@@ -774,6 +805,7 @@ func validateMetricValueEquals(metricName string, metric *dto.Metric, want float
 	if !ok {
 		return fmt.Errorf("metric %s has no scalar value", metricName)
 	}
+
 	if value != want {
 		return fmt.Errorf("metric %s value = %v, want %v", metricName, value, want)
 	}
@@ -816,9 +848,11 @@ func validateEndpointAllocationAnnotation(annotations map[string]string) error {
 		MemoryMiB int64  `json:"memory_mib"`
 		CoreUnits int64  `json:"core_units"`
 	}
+
 	if err := json.Unmarshal([]byte(value), &allocations); err != nil {
 		return fmt.Errorf("parse allocation annotation: %w", err)
 	}
+
 	for _, allocation := range allocations {
 		if allocation.UUID != "" &&
 			allocation.Product != "" &&
@@ -844,9 +878,11 @@ func validateNodeDeviceAnnotation(annotations map[string]string) error {
 		ProductModel string `json:"product_model"`
 		MemoryMiB    int64  `json:"memory_mib"`
 	}
+
 	if err := json.Unmarshal([]byte(value), &devices); err != nil {
 		return fmt.Errorf("parse device annotation: %w", err)
 	}
+
 	for _, device := range devices {
 		if device.UUID != "" &&
 			(device.ProductName != "" || device.ProductModel != "") &&
@@ -863,6 +899,7 @@ func sortedMapKeys(values map[string]string) []string {
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	return keys
@@ -879,6 +916,7 @@ func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
+
 	for i := range a {
 		if a[i] != b[i] {
 			return false
