@@ -48,6 +48,7 @@ func (c *realNVMLGPUHardwareClient) CUDADriverVersion() (string, bool) {
 	if ret != nvml.SUCCESS {
 		version, ret = c.api.SystemGetCudaDriverVersion()
 	}
+
 	if ret != nvml.SUCCESS {
 		return "", false
 	}
