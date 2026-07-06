@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/NVIDIA/go-nvml v0.13.3-0
 	github.com/anthropics/anthropic-sdk-go v1.26.0
 	github.com/compose-spec/compose-go v1.20.2
 	github.com/docker/docker v28.5.2+incompatible
@@ -31,7 +32,7 @@ require (
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	github.com/supabase-community/gotrue-go v1.2.1
 	github.com/supabase-community/postgrest-go v0.0.12
 	github.com/tidwall/gjson v1.18.0

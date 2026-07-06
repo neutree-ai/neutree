@@ -57,6 +57,10 @@ GO_BUILD_ARGS = \
 	-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
 	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
 	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+NODE_AGENT_GO_BUILD_ARGS = \
+	-ldflags="-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
+	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
+	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'"
 
 MOCKERY_DIRS=./ internal/model_registry pkg/storage pkg/command internal/orchestrator internal/cluster internal/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway internal/accelerator internal/auth internal/util
 MOCKERY_OUTPUT_DIRS=testing/mocks internal/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/cluster/mocks internal/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks internal/accelerator/mocks internal/auth/mocks internal/util/mocks
@@ -93,7 +97,7 @@ build-neutree-api:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
 build-neutree-node-agent:
-	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/neutree-node-agent.go
+	$(GO) build ${NODE_AGENT_GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/neutree-node-agent.go
 
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts
@@ -123,7 +127,7 @@ docker-build-db-scripts:
 
 .PHONY: docker-build-node-agent
 docker-build-node-agent:
-	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(GO_BUILD_ARGS) . -t $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.node-agent
+	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(NODE_AGENT_GO_BUILD_ARGS) . -t $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.node-agent
 
 .PHONY: docker-build-runtime
 docker-build-runtime:

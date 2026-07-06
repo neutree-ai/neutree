@@ -1,13 +1,9 @@
 package hardware
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
-	"encoding/xml"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,30 +16,6 @@ import (
 
 const unknownHardwareValue = "unknown"
 
-var (
-	nvidiaSMIFullHardwareFields = []string{
-		"index",
-		"minor_number",
-		"uuid",
-		"name",
-		"driver_version",
-		"compute_cap",
-		"pci.bus_id",
-		"pcie.link.gen.max",
-		"pcie.link.width.max",
-		"memory.total",
-	}
-	nvidiaSMIMinimalHardwareFields = []string{
-		"index",
-		"minor_number",
-		"uuid",
-		"name",
-		"driver_version",
-		"pci.bus_id",
-		"memory.total",
-	}
-)
-
 type GPUHardwareInfoProvider interface {
 	GPUHardwareInfos(ctx context.Context) ([]model.GPUHardwareInfo, error)
 }
@@ -54,195 +26,12 @@ func (f GPUHardwareInfoProviderFunc) GPUHardwareInfos(ctx context.Context) ([]mo
 	return f(ctx)
 }
 
-type NvidiaSMIGPUHardwareInfoProvider struct {
-	Command   string
-	SysFSRoot string
-}
-
-func (p NvidiaSMIGPUHardwareInfoProvider) GPUHardwareInfos(ctx context.Context) ([]model.GPUHardwareInfo, error) {
-	command := p.Command
-	if command == "" {
-		command = "nvidia-smi"
-	}
-
-	infos, err := p.queryGPUHardwareInfos(ctx, command, nvidiaSMIFullHardwareFields)
-	if err != nil {
-		infos, err = p.queryGPUHardwareInfos(ctx, command, nvidiaSMIMinimalHardwareFields)
-	}
-
-	if err != nil {
-		return nil, nil
-	}
-
-	cudaDriverVersion := p.cudaDriverVersion(ctx, command)
-	architecturesByUUID := p.productArchitectures(ctx, command)
-
-	for i := range infos {
-		if infos[i].Architecture == "" {
-			infos[i].Architecture = architecturesByUUID[infos[i].UUID]
-		}
-
-		if infos[i].CUDADriverVersion == "" {
-			infos[i].CUDADriverVersion = cudaDriverVersion
-		}
-
-		if infos[i].NUMANode == "" {
-			infos[i].NUMANode = numaNodeFromSysFS(p.SysFSRoot, infos[i].PCIEBusID)
-		}
-	}
-
-	return infos, nil
-}
-
-func (p NvidiaSMIGPUHardwareInfoProvider) queryGPUHardwareInfos(
-	ctx context.Context,
-	command string,
-	fields []string,
-) ([]model.GPUHardwareInfo, error) {
-	args := []string{
-		"--query-gpu=" + strings.Join(fields, ","),
-		"--format=csv,noheader,nounits",
-	}
-
-	out, err := exec.CommandContext(ctx, command, args...).Output()
-	if err != nil {
-		return nil, err
-	}
-
-	return parseNvidiaSMIGPUHardwareCSV(string(out), fields), nil
-}
-
-func (p NvidiaSMIGPUHardwareInfoProvider) cudaDriverVersion(ctx context.Context, command string) string {
-	out, err := exec.CommandContext(ctx, command).Output()
-	if err != nil {
-		return ""
-	}
-
-	return parseNvidiaSMICUDAVersion(string(out))
-}
-
-func (p NvidiaSMIGPUHardwareInfoProvider) productArchitectures(ctx context.Context, command string) map[string]string {
-	out, err := exec.CommandContext(ctx, command, "-q", "-x").Output()
-	if err != nil {
-		return nil
-	}
-
-	return parseNvidiaSMIProductArchitecturesXML(string(out))
-}
-
-type nvidiaSMIQueryXML struct {
-	GPUs []nvidiaSMIQueryGPUXML `xml:"gpu"`
-}
-
-type nvidiaSMIQueryGPUXML struct {
-	UUID                string `xml:"uuid"`
-	ProductArchitecture string `xml:"product_architecture"`
-}
-
-func parseNvidiaSMIProductArchitecturesXML(raw string) map[string]string {
-	var query nvidiaSMIQueryXML
-	if err := xml.Unmarshal([]byte(raw), &query); err != nil {
-		return nil
-	}
-
-	architecturesByUUID := make(map[string]string, len(query.GPUs))
-
-	for _, gpu := range query.GPUs {
-		uuid := cleanHardwareValue(gpu.UUID)
-		architecture := cleanHardwareValue(gpu.ProductArchitecture)
-
-		if uuid == "" || isUnknownHardwareLiteral(uuid) || isUnknownHardwareLiteral(architecture) {
-			continue
-		}
-
-		architecturesByUUID[uuid] = architecture
-	}
-
-	return architecturesByUUID
-}
-
-func parseNvidiaSMIGPUHardwareCSV(raw string, fields []string) []model.GPUHardwareInfo {
-	reader := csv.NewReader(bytes.NewBufferString(raw))
-	reader.TrimLeadingSpace = true
-
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil
-	}
-
-	infos := make([]model.GPUHardwareInfo, 0, len(records))
-
-	for _, record := range records {
-		info := model.GPUHardwareInfo{}
-
-		for i, field := range fields {
-			if i >= len(record) {
-				continue
-			}
-
-			applyNvidiaSMIHardwareField(&info, field, record[i])
-		}
-
-		if info.UUID != "" {
-			infos = append(infos, info)
-		}
-	}
-
-	return infos
-}
-
-func applyNvidiaSMIHardwareField(info *model.GPUHardwareInfo, field, value string) {
-	value = cleanHardwareValue(value)
-	if isUnknownHardwareLiteral(value) {
-		return
-	}
-
-	switch field {
-	case "index":
-		info.Index = value
-	case "minor_number":
-		info.MinorNumber = value
-	case "uuid":
-		info.UUID = value
-	case "name":
-		info.Product = value
-	case "driver_version":
-		info.DriverVersion = value
-	case "compute_cap":
-		info.CUDACapability = value
-	case "pci.bus_id":
-		info.PCIEBusID = value
-	case "pcie.link.gen.max":
-		info.PCIEGeneration = value
-	case "pcie.link.width.max":
-		info.PCIEWidth = value
-	case "memory.total":
-		info.MemoryTotalMiB = value
-	}
-}
-
-func parseNvidiaSMICUDAVersion(raw string) string {
-	const marker = "CUDA Version:"
-
-	index := strings.Index(raw, marker)
-	if index < 0 {
-		return ""
-	}
-
-	value := strings.TrimSpace(raw[index+len(marker):])
-	if value == "" {
-		return ""
-	}
-
-	return strings.Fields(value)[0]
-}
-
 func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 	samples := promtext.ParseVector(raw)
 	infosByUUID := map[string]model.GPUHardwareInfo{}
 
 	for _, s := range samples {
-		uuid := promtext.LabelValue(s, "UUID", "uuid")
+		uuid := promtext.LabelValue(s, "UUID", "uuid", "DCGM_FI_DEV_GPU_UUID", "gpu_uuid")
 		if uuid == "" {
 			continue
 		}
@@ -251,11 +40,11 @@ func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 		info.UUID = uuid
 		applyHardwareLabelHints(&info, promtext.Labels(s))
 
-		if gpuIndex := promtext.LabelValue(s, "gpu", "GPU_I_ID"); gpuIndex != "" {
+		if gpuIndex := promtext.LabelValue(s, "gpu", "GPU_I_ID", "DCGM_FI_DEV_NVML_INDEX", "nvml_index"); gpuIndex != "" {
 			info.Index = gpuIndex
 		}
 
-		if model := promtext.LabelValue(s, "modelName", "model"); model != "" {
+		if model := promtext.LabelValue(s, "modelName", "model", "DCGM_FI_DEV_GPU_NAME"); model != "" {
 			info.Product = model
 		}
 
@@ -282,10 +71,21 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 	switch promtext.MetricName(s) {
 	case "DCGM_FI_DEV_FB_TOTAL":
 		info.MemoryTotalMiB = formatFloat(value)
+	case "DCGM_FI_DEV_NVML_INDEX":
+		info.Index = firstKnownHardwareValue(info.Index, formatFloat(value))
+	case "DCGM_FI_DEV_GPU_MINOR_NUMBER":
+		info.MinorNumber = firstKnownHardwareValue(info.MinorNumber, formatFloat(value))
 	case "DCGM_FI_DRIVER_VERSION", "DCGM_FI_SYSTEM_DRIVER_VERSION":
 		info.DriverVersion = firstKnownHardwareValue(
 			info.DriverVersion,
-			hardwareLabelValue(labels, "DCGM_FI_DRIVER_VERSION", "driver_version", "Driver_Version", "version"),
+			hardwareLabelValue(
+				labels,
+				"DCGM_FI_DRIVER_VERSION",
+				"DCGM_FI_SYSTEM_DRIVER_VERSION",
+				"driver_version",
+				"Driver_Version",
+				"version",
+			),
 		)
 	case "DCGM_FI_CUDA_DRIVER_VERSION":
 		info.CUDADriverVersion = firstKnownHardwareValue(
@@ -300,7 +100,15 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 	case "DCGM_FI_DEV_PCI_BUSID", "DCGM_FI_DEV_PCI_BUS_ID", "DCGM_FI_DEV_PCIE_BUS_ID":
 		info.PCIEBusID = firstKnownHardwareValue(
 			info.PCIEBusID,
-			hardwareLabelValue(labels, "DCGM_FI_DEV_PCI_BUSID", "pci_bus_id", "pcie_bus_id", "pci_busid", "bus_id"),
+			hardwareLabelValue(
+				labels,
+				"DCGM_FI_DEV_PCI_BUS_ID",
+				"DCGM_FI_DEV_PCI_BUSID",
+				"pci_bus_id",
+				"pcie_bus_id",
+				"pci_busid",
+				"bus_id",
+			),
 		)
 	case "DCGM_FI_DEV_PCIE_MAX_LINK_GEN":
 		info.PCIEGeneration = firstKnownHardwareValue(formatFloat(value), info.PCIEGeneration)
@@ -326,6 +134,7 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 		info.Product,
 		hardwareLabelValue(
 			labels,
+			"DCGM_FI_DEV_GPU_NAME",
 			"DCGM_FI_DEV_NAME",
 			"DCGM_FI_DEV_BRAND",
 			"gpu_name",
@@ -346,7 +155,14 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 	)
 	info.DriverVersion = firstKnownHardwareValue(
 		info.DriverVersion,
-		hardwareLabelValue(labels, "DCGM_FI_DRIVER_VERSION", "driver_version", "Driver_Version", "driver"),
+		hardwareLabelValue(
+			labels,
+			"DCGM_FI_DRIVER_VERSION",
+			"DCGM_FI_SYSTEM_DRIVER_VERSION",
+			"driver_version",
+			"Driver_Version",
+			"driver",
+		),
 	)
 	info.CUDADriverVersion = firstKnownHardwareValue(
 		info.CUDADriverVersion,
@@ -354,7 +170,15 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 	)
 	info.PCIEBusID = firstKnownHardwareValue(
 		info.PCIEBusID,
-		hardwareLabelValue(labels, "DCGM_FI_DEV_PCI_BUSID", "pci_bus_id", "pcie_bus_id", "pci_busid", "bus_id"),
+		hardwareLabelValue(
+			labels,
+			"DCGM_FI_DEV_PCI_BUS_ID",
+			"DCGM_FI_DEV_PCI_BUSID",
+			"pci_bus_id",
+			"pcie_bus_id",
+			"pci_busid",
+			"bus_id",
+		),
 	)
 	info.PCIEGeneration = firstKnownHardwareValue(
 		info.PCIEGeneration,
@@ -363,6 +187,14 @@ func applyHardwareLabelHints(info *model.GPUHardwareInfo, labels map[string]stri
 	info.PCIEWidth = firstKnownHardwareValue(
 		info.PCIEWidth,
 		hardwareLabelValue(labels, "pcie_max_width", "pcie_max_link_width", "pcie_width", "pcie_link_width"),
+	)
+	info.Index = firstKnownHardwareValue(
+		info.Index,
+		hardwareLabelValue(labels, "DCGM_FI_DEV_NVML_INDEX", "nvml_index"),
+	)
+	info.MinorNumber = firstKnownHardwareValue(
+		info.MinorNumber,
+		hardwareLabelValue(labels, "DCGM_FI_DEV_GPU_MINOR_NUMBER", "gpu_minor_number", "minor_number"),
 	)
 	info.NUMANode = firstKnownHardwareValue(info.NUMANode, hardwareLabelValue(labels, "numa_node", "numa"))
 	info.NVLink = firstKnownHardwareValue(info.NVLink, hardwareLabelValue(labels, "nvlink"))

@@ -1,6 +1,6 @@
 ARG ARCH
 
-FROM golang:1.23 as builder
+FROM --platform=linux/${ARCH} golang:1.23 as builder
 WORKDIR /workspace
 
 ARG ARCH
@@ -13,7 +13,7 @@ COPY ./ ./
 
 ARG GO_BUILD_ARGS
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} \
     go build "${GO_BUILD_ARGS}" \
     -o neutree-node-agent cmd/neutree-node-agent/neutree-node-agent.go
 

@@ -582,11 +582,18 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	collectors := config.Data["default-counters.csv"]
 	for _, metric := range []string{
 		"DCGM_FI_DEV_GPU_UTIL",
+		"DCGM_FI_DEV_GPU_NAME",
 		"DCGM_FI_DEV_NAME",
 		"DCGM_FI_DEV_BRAND",
+		"DCGM_FI_DEV_NVML_INDEX",
+		"DCGM_FI_DEV_GPU_UUID",
+		"DCGM_FI_DEV_GPU_MINOR_NUMBER",
+		"DCGM_FI_DEV_PCI_BUS_ID",
 		"DCGM_FI_DEV_PCI_BUSID",
 		"DCGM_FI_CUDA_DRIVER_VERSION",
 		"DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY",
+		"DCGM_FI_DEV_PCIE_MAX_LINK_GEN",
+		"DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH",
 		"DCGM_FI_DEV_PCIE_LINK_GEN",
 		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
 		"DCGM_FI_DEV_FB_USED_PERCENT",

@@ -368,7 +368,7 @@ func (s *Server) gpuHardwareInfosFromScrape(
 
 	provider := s.config.GPUHardwareProvider
 	if provider == nil {
-		provider = hardware.NvidiaSMIGPUHardwareInfoProvider{}
+		provider = hardware.NVMLGPUHardwareInfoProvider{}
 	}
 
 	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
