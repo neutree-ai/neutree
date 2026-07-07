@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -16,6 +17,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -701,6 +703,11 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		}, nil
 	}
 
+	resources, err := o.buildEndpointResourceStatus(endpoint)
+	if err != nil {
+		klog.Warningf("failed to build resource status for endpoint %s: %v", endpoint.Metadata.WorkspaceName(), err)
+	}
+
 	proxyReady := allProxiesHealthy(currentAppsResp.Proxies)
 
 	currentModelHash, hashErr := util.ComputeEndpointModelHash(endpoint)
@@ -739,6 +746,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		endpointStatus := &v1.EndpointStatus{
 			Phase:        phase,
 			ErrorMessage: "",
+			Resources:    resources,
 		}
 		if currentModelHash != "" {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
@@ -785,6 +793,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	endpointStatus := &v1.EndpointStatus{
 		Phase:        phase,
 		ErrorMessage: errorMsg, // Use merged error message
+		Resources:    resources,
 	}
 
 	if currentModelHash != "" {
@@ -796,6 +805,17 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 	}
 
 	return endpointStatus, nil
+}
+
+func (o *RayOrchestrator) buildEndpointResourceStatus(endpoint *v1.Endpoint) (*v1.EndpointResourceStatus, error) {
+	if o == nil || o.storage == nil {
+		return nil, nil
+	}
+
+	resourceClient := resourceview.NewStaticNodeClusterResourceClient(o.storage, nil)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
+
+	return resourceBuilder.BuildEndpointResources(context.Background(), o.cluster, endpoint)
 }
 
 // endpointToApplication converts Neutree Endpoint and ModelRegistry to a RayServeApplication.

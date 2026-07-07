@@ -118,6 +118,17 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 					ObservedImage: "registry.example.com/neutree/serve:v1.2.0",
 				},
 			},
+			Allocations: []StaticNodeAllocationStatus{
+				{
+					WorkloadType: "endpoint",
+					Workspace:    "default",
+					Endpoint:     "chat",
+					ReplicaID:    "replica-a",
+					Devices: []DeviceAllocation{
+						{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920},
+					},
+				},
+			},
 		},
 	}
 
@@ -140,6 +151,10 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, int64(81920), decoded.Status.Accelerator.Devices[0].MemoryMiB)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
+	require.Len(t, decoded.Status.Allocations, 1)
+	assert.Equal(t, "chat", decoded.Status.Allocations[0].Endpoint)
+	require.Len(t, decoded.Status.Allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", decoded.Status.Allocations[0].Devices[0].UUID)
 }
 
 func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
@@ -167,7 +182,7 @@ func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
 
 	staticNodeStatusType := reflect.TypeOf(StaticNodeStatus{})
 	_, hasAllocations := staticNodeStatusType.FieldByName("Allocations")
-	assert.False(t, hasAllocations, "StaticNode.status must not expose allocation state in static Ray scope")
+	assert.True(t, hasAllocations, "StaticNode.status.allocations is required for node-agent snapshot writeback")
 
 	acceleratorStatusType := reflect.TypeOf(StaticNodeAcceleratorStatus{})
 	_, hasRuntimeProfile := acceleratorStatusType.FieldByName("RuntimeProfile")

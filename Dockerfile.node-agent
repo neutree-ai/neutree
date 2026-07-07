@@ -1,0 +1,25 @@
+ARG ARCH
+
+FROM --platform=linux/${ARCH} golang:1.23 as builder
+WORKDIR /workspace
+
+ARG ARCH
+
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+
+COPY ./ ./
+
+ARG GO_BUILD_ARGS
+
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} \
+    go build "${GO_BUILD_ARGS}" \
+    -o neutree-node-agent cmd/neutree-node-agent/neutree-node-agent.go
+
+FROM --platform=linux/${ARCH} ubuntu:22.04
+
+WORKDIR /
+COPY --from=builder /workspace/neutree-node-agent .
+
+ENTRYPOINT ["/neutree-node-agent"]

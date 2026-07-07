@@ -32,7 +32,7 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'StaticNode',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
 			ROW($3::text, $1::text, 'head', NULL, NULL, jsonb_build_array())::api.static_node_spec,
-			ROW('Ready', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
+			ROW('Ready', NULL, NULL, jsonb_build_array(), NULL, NULL, NULL)::api.static_node_status
 		)
 	`, "10.0.0.10", workspace, clusterName)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 					'StaticNode',
 					ROW('10.0.0.11', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
 					ROW('static-write-a', '10.0.0.11', 'worker', NULL, NULL, jsonb_build_array())::api.static_node_spec,
-					ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
+					ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL, NULL)::api.static_node_status
 				)
 			`,
 		},
@@ -229,7 +229,7 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 			name: "update node",
 			sql: `
 				UPDATE api.static_nodes
-				SET status = ROW('Failed', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
+				SET status = ROW('Failed', NULL, NULL, jsonb_build_array(), NULL, NULL, NULL)::api.static_node_status
 				WHERE (metadata).workspace = 'static-node-rbac-write'
 			`,
 		},
@@ -325,7 +325,7 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 
 	if _, err = tx2.ExecContext(ctx, `
 		UPDATE api.static_nodes
-		SET status = ROW('Reconciling', NULL, NULL, jsonb_build_array(), NULL, 'warming')::api.static_node_status
+		SET status = ROW('Reconciling', NULL, NULL, jsonb_build_array(), NULL, 'warming', NULL)::api.static_node_status
 		WHERE (metadata).workspace = $1
 	`, workspace); err != nil {
 		t.Fatalf("failed to update static node as service_role: %v", err)
@@ -352,7 +352,7 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 			'StaticNode',
 			ROW('10.0.0.11', NULL, $1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
 			ROW($2::text, '10.0.0.11', 'worker', NULL, NULL, jsonb_build_array())::api.static_node_spec,
-			ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_status
+			ROW('Pending', NULL, NULL, jsonb_build_array(), NULL, NULL, NULL)::api.static_node_status
 		)
 	`, workspace, insertedCluster); err != nil {
 		t.Fatalf("failed to insert static node as service_role: %v", err)
@@ -370,5 +370,56 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 		WHERE (metadata).workspace = $1 AND (metadata).name = $2
 	`, workspace, insertedCluster); err != nil {
 		t.Fatalf("failed to delete static node cluster as service_role: %v", err)
+	}
+}
+
+func TestStaticNodeStatusPersistsAllocations(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	workspace := "static-node-allocations"
+	clusterName := "static-allocations-a"
+	createStaticNodeResources(t, tx, workspace, clusterName)
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE api.static_nodes
+		SET status = ROW(
+			'Ready',
+			jsonb_build_object('type', 'nvidia_gpu'),
+			NULL,
+			jsonb_build_array(),
+			NULL,
+			NULL,
+			jsonb_build_array(jsonb_build_object(
+				'workload_type', 'endpoint',
+				'endpoint', 'chat',
+				'replica_id', 'replica-a'
+			))
+		)::api.static_node_status
+		WHERE (metadata).workspace = $1
+	`, workspace)
+	if err != nil {
+		t.Fatalf("failed to update static node allocations: %v", err)
+	}
+
+	var allocationCount int
+	if err = tx.QueryRowContext(ctx, `
+		SELECT jsonb_array_length((status).allocations)
+		FROM api.static_nodes
+		WHERE (metadata).workspace = $1
+	`, workspace).Scan(&allocationCount); err != nil {
+		t.Fatalf("failed to read static node allocations: %v", err)
+	}
+
+	if allocationCount != 1 {
+		t.Fatalf("expected one static node allocation, got %d", allocationCount)
 	}
 }

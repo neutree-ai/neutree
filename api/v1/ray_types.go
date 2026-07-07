@@ -2,6 +2,7 @@ package v1
 
 // Ray Metrics Ports.
 const (
+	RayDashboardPort     = 8265
 	RayletMetricsPort    = 54311
 	DashboardMetricsPort = 44227
 	AutoScaleMetricsPort = 44217

@@ -44,11 +44,12 @@ DCGM_FI_DEV_BAR1_FREE, gauge, BAR1 memory free (in MB).
 DCGM_FI_DEV_BAR1_USED, gauge, BAR1 memory used (in MB).
 DCGM_FI_DEV_BAR1_TOTAL, gauge, Total BAR1 memory (in MB).
 DCGM_FI_DEV_MEMORY_TEMP, gauge, Memory temperature (in C).
-DCGM_FI_DEV_NAME, label, Name of the GPU device.
-DCGM_FI_DEV_BRAND, label, Device brand.
+DCGM_FI_DEV_NVML_INDEX, gauge, NVML device index.
 DCGM_FI_DEV_PCI_BUSID, label, PCI attributes for the device.
 DCGM_FI_CUDA_DRIVER_VERSION, gauge, CUDA driver version.
 DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY, gauge, CUDA compute capability for the device.
+DCGM_FI_DEV_PCIE_MAX_LINK_GEN, gauge, PCIe max link generation.
+DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH, gauge, PCIe max link width.
 DCGM_FI_DEV_PCIE_LINK_GEN, gauge, PCIe current link generation.
 DCGM_FI_DEV_PCIE_LINK_WIDTH, gauge, PCIe current link width.
 DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL, counter, Total NVLink bandwidth counter.
@@ -239,6 +240,9 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				":" + strconv.Itoa(nvidiaDCGMExporterPort),
 			},
 			Port: nvidiaDCGMExporterPort,
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES": "all",
+			},
 			ConfigFiles: []v1.AcceleratorExporterConfigFile{
 				{
 					Path:         nvidiaDCGMExporterCollectorsPath,

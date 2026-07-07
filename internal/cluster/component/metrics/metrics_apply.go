@@ -32,6 +32,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	variables.EnableNodeExporter = enableManagedMetricsExporters
+	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
 	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
@@ -40,6 +41,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	variables.AcceleratorExporters = acceleratorExporters
+	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 
 	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 	if err != nil {

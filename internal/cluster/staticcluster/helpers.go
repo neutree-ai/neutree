@@ -2,18 +2,16 @@ package staticcluster
 
 import (
 	"context"
-	"strings"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
 	staticNodeClusterLabelKey = "neutree.ai/static-node-cluster"
 	staticNodeRoleLabelKey    = "neutree.ai/static-node-role"
-
-	defaultRayDashboardPort = 8265
 )
 
 func normalizeStaticNodeRole(role v1.StaticNodeRole) v1.StaticNodeRole {
@@ -76,37 +74,12 @@ func (r *Planner) runtimeProfile(
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
-	if image == "" {
-		return ""
+	imageRegistry := ""
+	if cluster != nil && cluster.Spec != nil {
+		imageRegistry = cluster.Spec.ImageRegistry
 	}
 
-	if cluster == nil || cluster.Spec == nil || cluster.Spec.ImageRegistry == "" {
-		return image
-	}
-
-	imageRegistry := strings.TrimRight(cluster.Spec.ImageRegistry, "/")
-	if strings.HasPrefix(image, imageRegistry+"/") {
-		return image
-	}
-
-	return imageRegistry + "/" + stripSourceImageRegistry(image)
-}
-
-func stripSourceImageRegistry(image string) string {
-	parts := strings.SplitN(image, "/", 2)
-	if len(parts) < 2 {
-		return image
-	}
-
-	if isSourceImageRegistry(parts[0]) {
-		return parts[1]
-	}
-
-	return image
-}
-
-func isSourceImageRegistry(segment string) bool {
-	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
+	return util.RewriteImageRef(imageRegistry, image)
 }
 
 func copyAuth(auth *v1.Auth) *v1.Auth {

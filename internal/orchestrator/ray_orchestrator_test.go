@@ -228,6 +228,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 			if tt.setupMock != nil {
 				tt.setupMock(mockDashboard, mockStorage)
 			}
+			mockStorage.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{}, nil).Maybe()
 
 			dashboard.NewDashboardService = func(dashboardUrl string) dashboard.DashboardService {
 				return mockDashboard
@@ -252,6 +253,122 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 			mockStorage.AssertExpectations(t)
 		})
 	}
+}
+
+func TestRayOrchestratorGetEndpointStatusBuildsEndpointResources(t *testing.T) {
+	deviceOrder := 2
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{
+			Workspace: "production",
+			Name:      "chat-model",
+		},
+		Spec: &v1.EndpointSpec{
+			Model: &v1.ModelSpec{
+				Registry: "test-registry",
+				Name:     "test-model",
+				Version:  "v1",
+			},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{
+					v1.AcceleratorProductKey: "NVIDIA-L20",
+				},
+			},
+			Replicas: v1.ReplicaSpec{Num: pointy.Int(1)},
+		},
+	}
+
+	mockDashboard := dashboardmocks.NewMockDashboardService(t)
+	mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+		Applications: map[string]dashboard.RayServeApplicationStatus{
+			EndpointToServeApplicationName(endpoint): {
+				Status: dashboard.ApplicationStatusRunning,
+			},
+		},
+		Proxies: map[string]dashboard.ProxyStatus{
+			"proxy-actor": {
+				Status: dashboard.ProxyStatusHealthy,
+			},
+		},
+	}, nil)
+
+	mockStorage := storagemocks.NewMockStorage(t)
+	mockStorage.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "production"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "test-cluster",
+				IP:      "10.0.0.1",
+			},
+			Status: &v1.StaticNodeStatus{
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						Workspace: "production",
+						Endpoint:  "chat-model",
+						ReplicaID: "replica-a",
+						Devices: []v1.DeviceAllocation{
+							{
+								UUID:          "GPU-abc",
+								Product:       "raw-device-product",
+								MemoryMiB:     49152,
+								UsedMemoryMiB: 2048,
+								CoreUnits:     100,
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() { dashboard.NewDashboardService = prevFactory })
+
+	o := &RayOrchestrator{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "production"},
+			Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType},
+			Status: &v1.ClusterStatus{
+				DashboardURL: "http://127.0.0.1:8265",
+				ResourceInfo: &v1.ClusterResources{
+					NodeResources: map[string]*v1.NodeResourceStatus{
+						"10.0.0.1": {
+							Devices: []*v1.DeviceResource{
+								{UUID: "GPU-abc", Order: &deviceOrder},
+							},
+						},
+					},
+				},
+			},
+		},
+		storage: mockStorage,
+	}
+
+	status, err := o.GetEndpointStatus(endpoint)
+
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, v1.EndpointPhaseRUNNING, status.Phase)
+	require.NotNil(t, status.Resources)
+	require.Len(t, status.Resources.Replicas, 1)
+	replica := status.Resources.Replicas[0]
+	assert.Equal(t, "replica-a", replica.InstanceID)
+	assert.Equal(t, "replica-a", replica.ReplicaID)
+	assert.Equal(t, "10.0.0.1", replica.NodeID)
+	require.Len(t, replica.Devices, 1)
+	assert.Equal(t, "GPU-abc", replica.Devices[0].UUID)
+	assert.Equal(t, "NVIDIA-L20", replica.Devices[0].Product)
+	assert.Equal(t, "10.0.0.1", replica.Devices[0].NodeID)
+	require.NotNil(t, replica.Devices[0].Order)
+	assert.Equal(t, 2, *replica.Devices[0].Order)
+	require.NotNil(t, status.Resources.Summary)
+	assert.Equal(t, int64(49152), status.Resources.Summary.Products["NVIDIA-L20"].MemoryMiB)
+	assert.Equal(t, int64(100), status.Resources.Summary.Products["NVIDIA-L20"].CoreUnits)
+
+	mockDashboard.AssertExpectations(t)
+	mockStorage.AssertExpectations(t)
 }
 
 func TestRayOrchestrator_createOrUpdateEndpoint_ApplicationNameConsistency(t *testing.T) {

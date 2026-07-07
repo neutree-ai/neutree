@@ -12,6 +12,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -3226,9 +3227,6 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 				plugin.NvidiaGPUVirtualizationLabelKey:    "true",
 				plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
 			},
-			Annotations: map[string]string{
-				plugin.HAMiNodeNvidiaRegisterAnnotation: `[{"id":"GPU-1","devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}]`,
-			},
 		},
 	}))
 	require.NoError(t, fakeClient.Create(context.Background(), &corev1.Pod{
@@ -3240,7 +3238,7 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 				"endpoint": endpoint.Metadata.Name,
 			},
 			Annotations: map[string]string{
-				plugin.HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,invalid-memory,100:;",
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: "invalid-json",
 			},
 		},
 		Spec: corev1.PodSpec{

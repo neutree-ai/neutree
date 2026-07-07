@@ -31,7 +31,7 @@ func buildNodeComponents(
 
 	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
 
-	return append(components, buildMetricsComponents(cluster, role, profile, metricsRemoteWriteURL)...)
+	return append(components, buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)...)
 }
 
 func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
@@ -150,7 +150,7 @@ func rayStartCommand(
 		parts = append(parts, strings.Join([]string{
 			"python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0",
 			commonArgs,
-			"--dashboard-port=8265",
+			fmt.Sprintf("--dashboard-port=%d", v1.RayDashboardPort),
 			"--ray-client-server-port=10001",
 			"--block",
 			rayNodeLabelArg(cluster, role),

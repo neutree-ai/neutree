@@ -121,6 +121,12 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 				v1.AcceleratorVirtualizationCorePercentKey, vgpuEndpointCorePercent))
 
 			expectEndpointVGPUResources(endpoint, productName)
+
+			By("Verifying node-agent exposes vGPU endpoint replica accelerator usage")
+			assertK8sNodeAgentEndpointAcceleratorMetricsWithVDeviceIndex(clusterName, endpointName, "")
+
+			By("Verifying node-agent writes vGPU endpoint allocation annotations")
+			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, endpointName)
 		})
 
 		It("should deploy a full-card endpoint without virtualization resource keys", func() {
@@ -162,6 +168,12 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			Expect(endpoint.Spec.Resources.Accelerator).NotTo(HaveKey(v1.AcceleratorVirtualizationCorePercentKey))
 
 			expectEndpointNVIDIAGPUResourcesWithExpected(endpoint, productName, memoryMiB, vgpuFullCardCoreUnits)
+
+			By("Verifying node-agent exposes full-card endpoint replica accelerator usage")
+			assertK8sNodeAgentEndpointAcceleratorMetrics(clusterName, fullCardEndpointName)
+
+			By("Verifying node-agent writes full-card endpoint allocation annotations")
+			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, fullCardEndpointName)
 		})
 	})
 

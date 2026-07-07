@@ -133,6 +133,40 @@ scrape_configs:
   - target_label: workspace
     replacement: {{ .Workspace }}
 {{ end }}
+{{ if .EnableNeutreeNodeAgentMetrics }}
+# Scrape Neutree normalized node and accelerator metrics.
+- job_name: 'neutree-node-agent'
+  kubernetes_sd_configs:
+  - role: pod
+    namespaces:
+      names:
+      - {{ .Namespace }}
+    selectors:
+    - role: pod
+      label: app={{ .NeutreeNodeAgentMetricsName }}
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_container_port_name]
+    action: keep
+    regex: metrics
+  - source_labels: [__meta_kubernetes_pod_ip]
+    action: replace
+    target_label: __address__
+    regex: (.+)
+    replacement: $1:{{ .NeutreeNodeAgentMetricsPort }}
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    action: replace
+    target_label: node
+  - source_labels: [__meta_kubernetes_namespace]
+    action: replace
+    target_label: namespace
+  - source_labels: [__meta_kubernetes_pod_name]
+    action: replace
+    target_label: pod
+  - target_label: neutree_cluster
+    replacement: {{ .ClusterName }}
+  - target_label: workspace
+    replacement: {{ .Workspace }}
+{{ end }}
 {{ range .AcceleratorExporters }}
 # Scrape accelerator exporter metrics from detected accelerator nodes.
 - job_name: '{{ .JobName }}'

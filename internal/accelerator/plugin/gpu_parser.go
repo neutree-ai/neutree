@@ -33,7 +33,7 @@ func parseStandardNvidiaKubernetesResources(
 		return nil, nil
 	}
 
-	totalGPUs := float64(gpuQuantity.Value())
+	totalGPUs := nvidiaKubernetesGPUQuantity(gpuQuantity, labels)
 	resourceInfo := &v1.ResourceInfo{
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeNVIDIAGPU: {
@@ -74,6 +74,31 @@ func parseStandardNvidiaKubernetesResources(
 	}
 
 	return resourceInfo, nil
+}
+
+func nvidiaKubernetesGPUQuantity(
+	gpuQuantity resource.Quantity,
+	labels map[string]string,
+) float64 {
+	if count, ok := parseNvidiaGPUCount(labels[NvidiaGPUCountResource]); ok {
+		return count
+	}
+
+	return float64(gpuQuantity.Value())
+}
+
+func parseNvidiaGPUCount(value string) (float64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+
+	count, err := strconv.ParseFloat(value, 64)
+	if err != nil || count < 0 {
+		return 0, false
+	}
+
+	return count, true
 }
 
 func parseNodeMemoryMiB(value string) float64 {

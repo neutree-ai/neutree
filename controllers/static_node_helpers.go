@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/pkg/errors"
@@ -35,7 +36,7 @@ func upsertStaticNode(store storage.Storage, node *v1.StaticNode) error {
 
 	node.ID = existing.ID
 
-	return store.UpdateStaticNode(existing.GetID(), node)
+	return store.UpdateStaticNode(existing.GetID(), staticNodeDesiredUpdate(node))
 }
 
 func validateStaticNodeOwner(existing *v1.StaticNode, desired *v1.StaticNode) error {
@@ -66,7 +67,7 @@ func softDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
 		node.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	return store.UpdateStaticNode(node.GetID(), node)
+	return store.UpdateStaticNode(node.GetID(), staticNodeMetadataUpdate(node))
 }
 
 func hardDeleteStaticNode(store storage.Storage, node *v1.StaticNode) error {
@@ -132,9 +133,40 @@ func updateStaticNodeStatus(
 
 	prepareStaticNode(node)
 
+	if node.Status != nil && reflect.DeepEqual(*node.Status, status) {
+		return nil
+	}
+
 	return store.UpdateStaticNode(node.GetID(), &v1.StaticNode{
 		Status: &status,
 	})
+}
+
+func staticNodeDesiredUpdate(node *v1.StaticNode) *v1.StaticNode {
+	if node == nil {
+		return nil
+	}
+
+	return &v1.StaticNode{
+		ID:         node.ID,
+		APIVersion: node.APIVersion,
+		Kind:       node.Kind,
+		Metadata:   node.Metadata,
+		Spec:       node.Spec,
+	}
+}
+
+func staticNodeMetadataUpdate(node *v1.StaticNode) *v1.StaticNode {
+	if node == nil {
+		return nil
+	}
+
+	return &v1.StaticNode{
+		ID:         node.ID,
+		APIVersion: node.APIVersion,
+		Kind:       node.Kind,
+		Metadata:   node.Metadata,
+	}
 }
 
 func findStaticNode(store storage.Storage, workspace, name string) (*v1.StaticNode, bool, error) {

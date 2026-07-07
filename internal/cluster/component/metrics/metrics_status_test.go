@@ -180,6 +180,7 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
 			readyMetricsDaemonSet("neutree-node-exporter", 2),
+			readyMetricsDaemonSet("neutree-node-agent", 2),
 		).
 		Build()
 
@@ -200,6 +201,8 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.True(t, status.KubeStateMetricsRequired)
 	assert.True(t, status.KubeStateMetricsDeploymentReady)
 	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeNodeAgentMetricsRequired)
+	assert.True(t, status.NeutreeNodeAgentMetricsDaemonSetReady)
 	assert.Equal(t, 1, status.PodsReady)
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
@@ -239,6 +242,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
 			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("neutree-node-agent", 1),
 			readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", 1),
 			&corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -266,6 +270,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 	assert.NoError(t, err)
 	assert.True(t, status.Ready())
 	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeNodeAgentMetricsDaemonSetReady)
 	assert.True(t, status.AcceleratorExporterRequired)
 	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }

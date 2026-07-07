@@ -57,6 +57,12 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 			Expect(ep.Spec.Engine.Version).To(Equal(profileEngineVersion()))
 			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+			By("Verifying node-agent exposes Static Ray endpoint replica accelerator usage")
+			assertStaticRayNodeAgentEndpointAcceleratorMetrics(clusterName, epName)
+
+			By("Verifying StaticNode and endpoint resources reflect node-agent accelerator allocations")
+			assertStaticRayEndpointAcceleratorResourceSync(clusterName, epName)
 		})
 
 		It("should serve inference requests", func() {

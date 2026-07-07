@@ -157,6 +157,86 @@ func TestStaticNodeControllerReconcileUsesParentClusterImageRegistryAuth(t *test
 	assert.True(t, statusObj.Status.Warm.Ready)
 }
 
+func TestStaticNodeControllerReconcileWritesNodeDeviceSnapshot(t *testing.T) {
+	updatedStatus := map[string]*v1.StaticNode{}
+	var updatedStatusHistory []*v1.StaticNode
+	node := controllerStaticNode()
+	node.Spec.SSHAuth = &v1.Auth{}
+	node.Spec.Warm = nil
+	node.Spec.Components = []v1.NodeComponentSpec{
+		{
+			Name:  "neutree-node-agent",
+			Image: "registry.example.com/neutree-node-agent:v1.2.0",
+		},
+	}
+	runner := &fakeControllerStaticNodeRunner{
+		responses: []fakeControllerStaticNodeRunnerResponse{
+			{
+				command: "mkdir -p '/etc/neutree/docker'",
+			},
+			{
+				output: "",
+			},
+			{},
+			{},
+			{},
+		},
+	}
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage: newMockStaticNodeStorage(
+			t,
+			nil,
+			nil,
+			func(id string, data *v1.StaticNode) {
+				updatedStatus[id] = data
+				updatedStatusHistory = append(updatedStatusHistory, data)
+			},
+			nil,
+			nil,
+		),
+		RunnerFactory: &fakeControllerStaticNodeRunnerFactory{
+			runner: runner,
+		},
+		Reconciler: &staticnode.Reconciler{
+			AcceleratorManager: fakeControllerAcceleratorManager{
+				accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				},
+			},
+			NodeDeviceSnapshotClient: &fakeControllerNodeDeviceSnapshotClient{
+				snapshot: &v1.NodeDeviceSnapshot{
+					Accelerator: v1.StaticNodeAcceleratorStatus{
+						Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+							{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+						},
+					},
+					Allocations: []v1.StaticNodeAllocationStatus{
+						{Endpoint: "chat", ReplicaID: "replica-a"},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	err = controller.Reconcile(node)
+
+	require.NoError(t, err)
+	statusObj := updatedStatus["8"]
+	require.NotNil(t, statusObj)
+	require.NotNil(t, statusObj.Status)
+	require.NotNil(t, statusObj.Status.Accelerator)
+	require.Len(t, statusObj.Status.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", statusObj.Status.Accelerator.Devices[0].UUID)
+	require.Len(t, statusObj.Status.Allocations, 1)
+	assert.Equal(t, "chat", statusObj.Status.Allocations[0].Endpoint)
+	assert.Equal(t, "replica-a", statusObj.Status.Allocations[0].ReplicaID)
+	require.Len(t, updatedStatusHistory, 4)
+	assert.Empty(t, updatedStatusHistory[2].Status.Allocations)
+	require.Len(t, updatedStatusHistory[3].Status.Allocations, 1)
+}
+
 func TestStaticNodeControllerUpdateStatusDoesNotWriteParentStaticNodeCluster(t *testing.T) {
 	updatedStaticNodeClusterStatus := map[string]*v1.StaticNodeCluster{}
 	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
@@ -182,6 +262,40 @@ func TestStaticNodeControllerUpdateStatusDoesNotWriteParentStaticNodeCluster(t *
 
 	require.NoError(t, reconcileErr)
 	assert.Empty(t, updatedStaticNodeClusterStatus)
+}
+
+func TestStaticNodeControllerUpdateStatusSkipsUnchangedStatus(t *testing.T) {
+	updateCount := 0
+	controller, err := NewStaticNodeController(&StaticNodeControllerOption{
+		Storage: newMockStaticNodeStorage(
+			t,
+			nil,
+			nil,
+			func(string, *v1.StaticNode) {
+				updateCount++
+			},
+			nil,
+			nil,
+		),
+	})
+	require.NoError(t, err)
+	reconcileErr := error(nil)
+	node := controllerStaticNode()
+	node.Status = &v1.StaticNodeStatus{
+		Phase: v1.StaticNodePhaseReady,
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4"},
+			},
+		},
+		Warm: &v1.WarmStatus{Ready: true},
+	}
+
+	controller.updateStatus(node, *node.Status, "failed to update static node status", &reconcileErr)
+
+	require.NoError(t, reconcileErr)
+	assert.Equal(t, 0, updateCount)
 }
 
 func TestStaticNodeControllerReconcileRejectsWrongType(t *testing.T) {
@@ -412,6 +526,31 @@ func (f *fakeControllerStaticNodeRunner) Close() error {
 
 func (f *fakeControllerStaticNodeRunner) Files() commandrunner.FileClient {
 	return nil
+}
+
+type fakeControllerAcceleratorManager struct {
+	accelerator *v1.StaticNodeAcceleratorStatus
+	err         error
+}
+
+func (f fakeControllerAcceleratorManager) DetectAccelerator(
+	_ context.Context,
+	_ string,
+	_ v1.Auth,
+) (*v1.StaticNodeAcceleratorStatus, error) {
+	return f.accelerator, f.err
+}
+
+type fakeControllerNodeDeviceSnapshotClient struct {
+	snapshot *v1.NodeDeviceSnapshot
+	err      error
+}
+
+func (f *fakeControllerNodeDeviceSnapshotClient) DeviceSnapshot(
+	_ context.Context,
+	_ *v1.StaticNode,
+) (*v1.NodeDeviceSnapshot, error) {
+	return f.snapshot, f.err
 }
 
 func controllerStaticNode() *v1.StaticNode {

@@ -438,18 +438,66 @@ func staticClusterStatusObserved(status *v1.StaticNodeClusterStatus, desired *v1
 func (r *staticRayReconciler) calculateResources(
 	staticCluster *v1.StaticNodeCluster,
 ) (*v1.ClusterResources, error) {
+	resources, ok, err := r.calculateResourcesFromStaticNodes(staticCluster)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ok {
+		return nil, nil
+	}
+
+	return resources, nil
+}
+
+func (r *staticRayReconciler) calculateResourcesFromStaticNodes(
+	staticCluster *v1.StaticNodeCluster,
+) (*v1.ClusterResources, bool, error) {
+	if r == nil || r.storage == nil || staticCluster == nil || staticCluster.Metadata == nil {
+		return nil, false, nil
+	}
+
+	baseResourceClient := r.rayResourceClient(staticCluster)
+	resourceClient := resourceview.NewStaticNodeClusterResourceClient(r.storage, baseResourceClient)
+	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
+	resources, err := resourceBuilder.BuildClusterResources(context.Background(), clusterFromStaticNodeCluster(staticCluster))
+
+	if errors.Is(err, resourceview.ErrIncompleteStaticNodeDeviceSnapshots) {
+		return nil, false, err
+	}
+
+	if err != nil {
+		return nil, false, errors.Wrap(err, "failed to build static node cluster resources")
+	}
+
+	if resources == nil || len(resources.NodeResources) == 0 {
+		return nil, false, nil
+	}
+
+	return resources, true, nil
+}
+
+func clusterFromStaticNodeCluster(staticCluster *v1.StaticNodeCluster) *v1.Cluster {
+	return &v1.Cluster{
+		Metadata: staticCluster.Metadata,
+		Spec: &v1.ClusterSpec{
+			Type: v1.SSHClusterType,
+		},
+	}
+}
+
+func (r *staticRayReconciler) rayResourceClient(
+	staticCluster *v1.StaticNodeCluster,
+) resourceview.ResourceClient {
 	var resourceParsers map[string]resourceparser.ResourceParser
-	if r.acceleratorManager != nil {
+	if r != nil && r.acceleratorManager != nil {
 		resourceParsers = r.acceleratorManager.GetAllParsers()
 	}
 
-	var resourceClient resourceview.ResourceClient = resourceview.NewRayResourceClient(
+	return resourceview.NewRayResourceClient(
 		dashboard.NewDashboardService(staticcluster.DashboardURL(staticCluster)),
 		resourceParsers,
 	)
-	resourceBuilder := resourceview.NewResourceViewBuilder(resourceClient)
-
-	return resourceBuilder.BuildClusterResources(context.Background(), nil)
 }
 
 func staticNodeClusterNotReadyError(staticCluster *v1.StaticNodeCluster) error {

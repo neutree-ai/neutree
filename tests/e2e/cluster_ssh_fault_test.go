@@ -114,7 +114,7 @@ var _ = Describe("SSH Cluster Fault & Anomaly", Ordered, Label("cluster", "ssh")
 			yaml := renderSSHClusterYAML(map[string]any{
 				"name":            clusterName,
 				"head_ip":         headIP,
-				"ssh_user":        "root",
+				"ssh_user":        defaultSSHUser,
 				"ssh_private_key": base64.StdEncoding.EncodeToString([]byte("invalid-ssh-key-content")),
 			})
 			r := ClusterH.Apply(yaml)

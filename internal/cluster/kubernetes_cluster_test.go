@@ -285,7 +285,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 			},
 		},
 		{
-			name:                             "Single node with HAMi NVIDIA vGPU resources",
+			name:                             "Single node with Neutree NVIDIA vGPU resources",
 			acceleratorVirtualizationEnabled: true,
 			nodes: []client.Object{
 				newNodeWithAnnotations("node-1", true, map[corev1.ResourceName]resource.Quantity{
@@ -297,9 +297,9 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					plugin.NvidiaGPUVirtualizationLabelKey:    "true",
 					plugin.NvidiaGPUCountResource:             "2",
 				}, map[string]string{
-					plugin.HAMiNodeNvidiaRegisterAnnotation: `[
-						{"id":"GPU-1","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true},
-						{"id":"GPU-2","count":100,"devmem":15360,"devcore":100,"type":"NVIDIA-Tesla T4","health":true}
+					resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+						{"uuid":"GPU-1","product_model":"Tesla-T4","memory_mib":15360,"healthy":true},
+						{"uuid":"GPU-2","product_model":"Tesla-T4","memory_mib":15360,"healthy":true}
 					]`,
 				}),
 			},
@@ -311,7 +311,9 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					corev1.ResourceCPU:                       resource.MustParse("4"),
 					corev1.ResourceMemory:                    resource.MustParse("16Gi"),
 				}, map[string]string{
-					plugin.HAMiVGPUDevicesAllocatedAnnotation: ";GPU-1,NVIDIA,15360,100:;",
+					resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+						{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}
+					]`,
 				}, corev1.PodRunning),
 			},
 			expectedResources: v1.ClusterResources{
@@ -349,13 +351,13 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					Available: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 							v1.AcceleratorTypeNVIDIAGPU: {
-								Quantity: 1,
+								Quantity: 2,
 								ProductGroups: map[v1.AcceleratorProduct]float64{
-									"Tesla-T4": 1,
+									"Tesla-T4": 2,
 								},
 								Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 									"Tesla-T4": {
-										Quantity: 1,
+										Quantity: 2,
 										Virtualization: &v1.AcceleratorVirtualizationResource{
 											MemoryMiB: 15360,
 											CoreUnits: 100,
@@ -395,13 +397,13 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 							Available: &v1.ResourceInfo{
 								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 									v1.AcceleratorTypeNVIDIAGPU: {
-										Quantity: 1,
+										Quantity: 2,
 										ProductGroups: map[v1.AcceleratorProduct]float64{
-											"Tesla-T4": 1,
+											"Tesla-T4": 2,
 										},
 										Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 											"Tesla-T4": {
-												Quantity: 1,
+												Quantity: 2,
 												Virtualization: &v1.AcceleratorVirtualizationResource{
 													MemoryMiB: 15360,
 													CoreUnits: 100,
@@ -447,7 +449,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 			},
 		},
 		{
-			name:                             "Virtualized NVIDIA node without HAMi context does not use standard GPU resources",
+			name:                             "NVIDIA node without Neutree annotations uses standard GPU resources",
 			acceleratorVirtualizationEnabled: true,
 			nodes: []client.Object{
 				newNode("node-1", true, map[corev1.ResourceName]resource.Quantity{
@@ -462,28 +464,56 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 			expectedResources: v1.ClusterResources{
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
-						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{},
-						CPU:               16,
-						Memory:            64,
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 20,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"Tesla-T4": 20,
+								},
+							},
+						},
+						CPU:    16,
+						Memory: 64,
 					},
 					Available: &v1.ResourceInfo{
-						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{},
-						CPU:               16,
-						Memory:            64,
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 20,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"Tesla-T4": 20,
+								},
+							},
+						},
+						CPU:    16,
+						Memory: 64,
 					},
 				},
 				NodeResources: map[string]*v1.NodeResourceStatus{
 					"node-1": {
 						ResourceStatus: v1.ResourceStatus{
 							Allocatable: &v1.ResourceInfo{
-								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{},
-								CPU:               16,
-								Memory:            64,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 20,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"Tesla-T4": 20,
+										},
+									},
+								},
+								CPU:    16,
+								Memory: 64,
 							},
 							Available: &v1.ResourceInfo{
-								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{},
-								CPU:               16,
-								Memory:            64,
+								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+									v1.AcceleratorTypeNVIDIAGPU: {
+										Quantity: 20,
+										ProductGroups: map[v1.AcceleratorProduct]float64{
+											"Tesla-T4": 20,
+										},
+									},
+								},
+								CPU:    16,
+								Memory: 64,
 							},
 						},
 					},

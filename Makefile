@@ -12,9 +12,10 @@ NEUTREE_CORE_IMAGE := $(IMAGE_PREFIX)neutree-core
 NEUTREE_API_IMAGE := $(IMAGE_PREFIX)neutree-api
 NEUTREE_DB_SCRIPTS_IMAGE := $(IMAGE_PREFIX)neutree-db-scripts
 NEUTREE_RUNTIME_IMAGE := $(IMAGE_PREFIX)neutree-runtime
+NEUTREE_NODE_AGENT_IMAGE := $(IMAGE_PREFIX)neutree-node-agent
 
 ARCH ?= amd64
-ALL_ARCH = amd64 arm64
+ALL_ARCH ?= amd64 arm64
 
 TOOLS_BIN_DIR := $(shell pwd)/bin
 
@@ -55,7 +56,11 @@ GO_BUILD_ARGS = \
 	-ldflags="-extldflags=-static \
 	-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
 	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
-	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date --iso-8601=seconds)'"
+	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+NODE_AGENT_GO_BUILD_ARGS = \
+	-ldflags="-X '$(MODULE_PATH)/internal/version.gitCommit=$(GIT_COMMIT)' \
+	-X '$(MODULE_PATH)/internal/version.appVersion=$(IMAGE_TAG)' \
+	-X '$(MODULE_PATH)/internal/version.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'"
 
 MOCKERY_DIRS=./ internal/model_registry pkg/storage pkg/command internal/orchestrator internal/cluster internal/ray/dashboard internal/registry controllers/ internal/observability/monitoring internal/observability/config internal/gateway internal/accelerator internal/auth internal/util
 MOCKERY_OUTPUT_DIRS=testing/mocks internal/model_registry/mocks pkg/storage/mocks pkg/command/mocks internal/orchestrator/mocks internal/cluster/mocks internal/ray/dashboard/mocks internal/registry/mocks controllers/mocks internal/observability/monitoring/mocks internal/observability/config/mocks internal/gateway/mocks internal/accelerator/mocks internal/auth/mocks internal/util/mocks
@@ -91,8 +96,12 @@ build-neutree-cli: prepare-build-cli
 build-neutree-api:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
+build-neutree-node-agent:
+	$(GO) build ${NODE_AGENT_GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/neutree-node-agent.go
+
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts
+CLUSTER_DOCKER_BUILD ?= runtime node-agent
 
 .PHONY: docker-build-all ## Build all the architecture docker images
 docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
@@ -116,9 +125,17 @@ docker-build-api: # build api docker image
 docker-build-db-scripts:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.db-scripts
 
+.PHONY: docker-build-node-agent
+docker-build-node-agent:
+	docker build --build-arg ARCH=$(ARCH) --build-arg GO_BUILD_ARGS=$(NODE_AGENT_GO_BUILD_ARGS) . -t $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.node-agent
+
 .PHONY: docker-build-runtime
 docker-build-runtime:
 	docker build --build-arg ARCH=$(ARCH) . -t $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG) -f Dockerfile.runtime
+
+.PHONY: docker-build-cluster
+docker-build-cluster: ## Build cluster-level images such as runtime and node-agent.
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(CLUSTER_DOCKER_BUILD))
 
 .PHONY: docker-push-all ## Push all the architecture docker images
 docker-push-all:
@@ -142,9 +159,17 @@ docker-push-api: # push api docker image
 docker-push-db-scripts: # push db scripts docker image
 	docker push $(NEUTREE_DB_SCRIPTS_IMAGE)-$(ARCH):$(IMAGE_TAG)
 
+.PHONY: docker-push-node-agent
+docker-push-node-agent:
+	docker push $(NEUTREE_NODE_AGENT_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
 .PHONY: docker-push-runtime
 docker-push-runtime: # push runtime docker image
 	docker push $(NEUTREE_RUNTIME_IMAGE)-$(ARCH):$(IMAGE_TAG)
+
+.PHONY: docker-push-cluster
+docker-push-cluster: ## Push cluster-level images such as runtime and node-agent.
+	$(MAKE) ARCH=$(ARCH) $(addprefix docker-push-,$(CLUSTER_DOCKER_BUILD))
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ALL_DOCKER_BUILD))
@@ -161,9 +186,17 @@ docker-push-manifest-api: ## Push the api manifest docker image.
 docker-push-manifest-db-scripts: ## Push the db scripts manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_DB_SCRIPTS_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_DB_SCRIPTS_IMAGE)\-&:$(IMAGE_TAG)~g")
 
+.PHONY: docker-push-manifest-node-agent
+docker-push-manifest-node-agent: ## Push the node agent manifest docker image.
+	docker buildx imagetools create -t $(NEUTREE_NODE_AGENT_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_NODE_AGENT_IMAGE)\-&:$(IMAGE_TAG)~g")
+
 .PHONY: docker-push-manifest-runtime
 docker-push-manifest-runtime: ## Push the runtime manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_RUNTIME_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_RUNTIME_IMAGE)\-&:$(IMAGE_TAG)~g")
+
+.PHONY: docker-push-manifest-cluster
+docker-push-manifest-cluster: ## Push cluster-level multi-arch manifests.
+	$(MAKE) $(addprefix docker-push-manifest-,$(CLUSTER_DOCKER_BUILD))
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 
@@ -299,6 +332,10 @@ docker-test-core: ## Redeploy local neutree-core for testing
 	docker cp bin/neutree-core neutree-core:/neutree-core
 	docker restart neutree-core
 
+.PHONY: docker-test-node-agent
+docker-test-node-agent: ## Build local neutree-node-agent binary for testing
+	$(MAKE) build-neutree-node-agent
+
 .PHONY: docker-test-db-scripts
 docker-test-db-scripts: ## Overwrite db scripts for testing, and restart related services
 	docker cp db copy-db-scripts:/
@@ -367,6 +404,28 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		-d "$(ENGINE_DESCRIPTION)"
+
+##@ Cluster Package
+
+CLUSTER_PACKAGE_SCRIPT := scripts/builder/build-package.sh
+CLUSTER_PACKAGE_SCRIPT_DIR := $(dir $(CLUSTER_PACKAGE_SCRIPT))
+CLUSTER_PACKAGE_SCRIPT_NAME := $(notdir $(CLUSTER_PACKAGE_SCRIPT))
+CLUSTER_PACKAGE_OUTPUT_DIR ?= dist
+CLUSTER_PACKAGE_TYPE ?= k8s
+CLUSTER_PACKAGE_ACCELERATOR ?=
+CLUSTER_PACKAGE_MIRROR_REGISTRY ?=
+
+.PHONY: build-cluster-package
+build-cluster-package: ## Build cluster package (CLUSTER_PACKAGE_TYPE=k8s|ssh, optional CLUSTER_PACKAGE_ACCELERATOR=nvidia_gpu|amd_gpu)
+	@mkdir -p $(CLUSTER_PACKAGE_OUTPUT_DIR)
+	cd $(CLUSTER_PACKAGE_SCRIPT_DIR) && bash $(CLUSTER_PACKAGE_SCRIPT_NAME) \
+		--type cluster \
+		--cluster-type $(CLUSTER_PACKAGE_TYPE) \
+		--version $(IMAGE_TAG) \
+		--arch $(ARCH) \
+		--output-dir $(abspath $(CLUSTER_PACKAGE_OUTPUT_DIR)) \
+		$(if $(CLUSTER_PACKAGE_ACCELERATOR),--accelerator $(CLUSTER_PACKAGE_ACCELERATOR)) \
+		$(if $(CLUSTER_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(CLUSTER_PACKAGE_MIRROR_REGISTRY))
 
 .PHONY: sync-images-list
 sync-images-list: ## Sync images list for building package

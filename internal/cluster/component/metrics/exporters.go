@@ -14,11 +14,16 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
-	nodeExporterDaemonSetName = "neutree-node-exporter"
-	nodeExporterPort          = 19100
+	nodeExporterDaemonSetName   = "neutree-node-exporter"
+	nodeExporterPort            = 19100
+	neutreeNodeAgentMetricsName = "neutree-node-agent"
+	neutreeNodeAgentImageName   = "neutree/neutree-node-agent"
+	neutreeNodeAgentMetricsPort = 19101
+	externalDCGMExporterPort    = 9400
 
 	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultMetricsPath           = "/metrics"
@@ -35,8 +40,6 @@ type metricsAcceleratorExporter struct {
 	Port            int
 	MetricsPath     string
 
-	HostNetwork  bool
-	HostPID      bool
 	Capabilities []corev1.Capability
 
 	NodeSelector   map[string]string
@@ -136,17 +139,17 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	configFileData, volumeMounts, volumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
 	runtime := exporterProfile.Runtime
 
+	// Kubernetes managed exporters intentionally do not project host network/PID
+	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
 		Name:            name,
 		AcceleratorType: acceleratorType,
 		ExporterName:    exporterProfile.Name,
-		Image:           rewriteMetricsImage(m.imagePrefix, exporterProfile.Image),
+		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
 		Args:            append([]string{}, exporterProfile.Args...),
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,
 		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		HostNetwork:     exporterRuntimeHostNetwork(runtime),
-		HostPID:         exporterRuntimeHostPID(runtime),
 		Capabilities:    exporterRuntimeCapabilities(runtime),
 		NodeSelector:    exporterRuntimeNodeSelector(runtime),
 		ConfigFileData:  configFileData,
@@ -270,12 +273,24 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	return envVars
 }
 
-func exporterRuntimeHostNetwork(runtime *v1.AcceleratorExporterRuntimeProfile) bool {
-	return runtime != nil && runtime.HostNetwork
-}
+func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter) []corev1.EnvVar {
+	allowed := map[string]struct{}{
+		"NVIDIA_VISIBLE_DEVICES":     {},
+		"NVIDIA_DRIVER_CAPABILITIES": {},
+	}
+	env := map[string]string{}
 
-func exporterRuntimeHostPID(runtime *v1.AcceleratorExporterRuntimeProfile) bool {
-	return runtime != nil && runtime.HostPID
+	for _, exporter := range exporters {
+		for _, item := range exporter.Env {
+			if _, ok := allowed[item.Name]; !ok {
+				continue
+			}
+
+			env[item.Name] = item.Value
+		}
+	}
+
+	return buildExporterEnv(env)
 }
 
 func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) map[string]string {
@@ -539,36 +554,6 @@ func configVolumeName(baseName string, index int) string {
 	}
 
 	return trimmed + suffix
-}
-
-func rewriteMetricsImage(imagePrefix string, image string) string {
-	if image == "" {
-		return ""
-	}
-
-	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
-	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
-		return image
-	}
-
-	return imagePrefix + "/" + stripMetricsSourceImageRegistry(image)
-}
-
-func stripMetricsSourceImageRegistry(image string) string {
-	parts := strings.SplitN(image, "/", 2)
-	if len(parts) < 2 {
-		return image
-	}
-
-	if isMetricsSourceImageRegistry(parts[0]) {
-		return parts[1]
-	}
-
-	return image
-}
-
-func isMetricsSourceImageRegistry(segment string) bool {
-	return segment == "localhost" || strings.Contains(segment, ".") || strings.Contains(segment, ":")
 }
 
 func sanitizeKubernetesName(value string) string {

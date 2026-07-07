@@ -53,6 +53,12 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
 			Expect(ep.Spec.Engine.Version).To(Equal(profileEngineVersion()))
 			Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+			By("Verifying node-agent exposes endpoint replica accelerator usage from DCGM")
+			assertK8sNodeAgentEndpointAcceleratorMetrics(clusterName, epName)
+
+			By("Verifying node-agent writes endpoint allocation annotations")
+			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, epName)
 		})
 
 		It("should serve inference requests", func() {
