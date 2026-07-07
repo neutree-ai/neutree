@@ -140,6 +140,34 @@ func countMessagesByRole(messages []any, role string) int {
 	return count
 }
 
+func assertFieldOmitted(upstreamReq map[string]any, field string) {
+	_, ok := upstreamReq[field]
+	Expect(ok).To(BeFalse(), "%s must be omitted instead of encoded as {}", field)
+}
+
+func assertStringArrayField(upstreamReq map[string]any, field string, expected ...string) {
+	values, ok := upstreamReq[field].([]any)
+	Expect(ok).To(BeTrue(), "%s must be encoded as a JSON array", field)
+	Expect(values).To(HaveLen(len(expected)))
+	for i, value := range values {
+		Expect(value).To(Equal(expected[i]))
+	}
+}
+
+func assertOpenAIFunctionTool(upstreamReq map[string]any, expectedName string) {
+	tools, ok := upstreamReq["tools"].([]any)
+	Expect(ok).To(BeTrue(), "tools must be encoded as a JSON array")
+	Expect(tools).To(HaveLen(1))
+
+	tool, ok := tools[0].(map[string]any)
+	Expect(ok).To(BeTrue(), "tool entries should be objects")
+	Expect(tool["type"]).To(Equal("function"))
+
+	function, ok := tool["function"].(map[string]any)
+	Expect(ok).To(BeTrue(), "function tool should contain a function object")
+	Expect(function["name"]).To(Equal(expectedName))
+}
+
 func assertMalformedToolUseBlocks(content []anthropic.ContentBlockUnion) {
 	toolUses := make(map[string]anthropic.ContentBlockUnion)
 	for _, block := range content {
@@ -267,6 +295,58 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			last, _ := waitForUpstreamRequest()
 			Expect(last.Headers.Get("Authorization")).To(Equal("Bearer "+mockAuthToken),
 				"upstream should receive the configured auth header")
+		})
+
+		// TestRail: C2728777
+		It("should omit empty array fields before upstream rewrite", Label("C2728777", "empty-array-request-fields"), func() {
+			mockUpstream.ClearRequests()
+
+			status, body, err := doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
+				"model": "fast",
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello empty arrays"},
+				},
+				"tools": []map[string]any{},
+				"stop":  []string{},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(http.StatusOK), "unexpected OpenAI response: %s", body)
+
+			last, upstreamReq := waitForUpstreamRequest()
+			Expect(last.Path).To(Equal("/v1/chat/completions"))
+			assertFieldOmitted(upstreamReq, "tools")
+			assertFieldOmitted(upstreamReq, "stop")
+
+			mockUpstream.ClearRequests()
+
+			status, body, err = doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
+				"model": "fast",
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello non-empty fields"},
+				},
+				"stop": []string{"END"},
+				"tools": []map[string]any{
+					{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "lookup_weather",
+							"description": "Look up weather.",
+							"parameters": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"city": map[string]any{"type": "string"},
+								},
+							},
+						},
+					},
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal(http.StatusOK), "unexpected OpenAI response: %s", body)
+
+			_, upstreamReq = waitForUpstreamRequest()
+			assertStringArrayField(upstreamReq, "stop", "END")
+			assertOpenAIFunctionTool(upstreamReq, "lookup_weather")
 		})
 	})
 
@@ -433,6 +513,57 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			Expect(ok).To(BeTrue())
 			Expect(first["role"]).To(Equal("developer"))
 			Expect(first["content"]).To(Equal("unsupported"))
+		})
+
+		// TestRail: C2728776
+		It("should omit empty arrays before OpenAI upstream conversion", Label("C2728776", "empty-array-request-fields"), func() {
+			mockUpstream.ClearRequests()
+
+			resp, status := sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello empty arrays"},
+				},
+				"tools":          []map[string]any{},
+				"stop_sequences": []string{},
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			last, upstreamReq := waitForUpstreamRequest()
+			Expect(last.Path).To(Equal("/v1/chat/completions"))
+			assertFieldOmitted(upstreamReq, "tools")
+			assertFieldOmitted(upstreamReq, "stop")
+
+			mockUpstream.ClearRequests()
+
+			resp, status = sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello non-empty stop sequences"},
+				},
+				"stop_sequences": []string{"END"},
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			_, upstreamReq = waitForUpstreamRequest()
+			assertStringArrayField(upstreamReq, "stop", "END")
+
+			mockUpstream.ClearRequests()
+
+			resp, status = sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello null stop sequences"},
+				},
+				"stop_sequences": nil,
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			_, upstreamReq = waitForUpstreamRequest()
+			assertFieldOmitted(upstreamReq, "stop")
 		})
 
 		// NEU-428: when an OpenAI-compatible upstream returns "tool_calls": null
