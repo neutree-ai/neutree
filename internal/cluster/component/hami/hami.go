@@ -95,7 +95,7 @@ func (h *HAMiComponent) Reconcile() error {
 
 	if !status.Ready {
 		h.setNotReadyStatus(status.Reason, status.Message)
-		return fmt.Errorf("accelerator virtualization component is not fully ready: %s", status.Message)
+		return hamiStatusError(status)
 	}
 
 	h.writeStatus(status.ComponentStatus())
@@ -154,6 +154,15 @@ func (h *HAMiComponent) setNotReadyStatus(reason, message string) {
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+func hamiStatusError(status *HAMiStatus) error {
+	if status == nil {
+		return fmt.Errorf("accelerator virtualization component is not ready")
+	}
+
+	return fmt.Errorf("accelerator virtualization component is not ready: %s %s",
+		status.Reason, status.Message)
 }
 
 func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
