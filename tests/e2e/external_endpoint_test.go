@@ -549,6 +549,21 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 
 			_, upstreamReq = waitForUpstreamRequest()
 			assertStringArrayField(upstreamReq, "stop", "END")
+
+			mockUpstream.ClearRequests()
+
+			resp, status = sendRawAnthropicMessage(serviceURL, map[string]any{
+				"model":      "fast",
+				"max_tokens": 32,
+				"messages": []map[string]any{
+					{"role": "user", "content": "hello null stop sequences"},
+				},
+				"stop_sequences": nil,
+			})
+			Expect(status).To(Equal(http.StatusOK), "unexpected Anthropic response: %v", resp)
+
+			_, upstreamReq = waitForUpstreamRequest()
+			assertFieldOmitted(upstreamReq, "stop")
 		})
 
 		// NEU-428: when an OpenAI-compatible upstream returns "tool_calls": null

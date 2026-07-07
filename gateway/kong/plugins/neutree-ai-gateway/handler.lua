@@ -598,7 +598,7 @@ local function convert_request(anthropic_req)
     end
     openai_req.messages = messages
 
-    if anthropic_req.stop_sequences and not is_empty_table(anthropic_req.stop_sequences) then
+    if is_table(anthropic_req.stop_sequences) and not is_empty_table(anthropic_req.stop_sequences) then
         openai_req.stop = anthropic_req.stop_sequences
     end
     if anthropic_req.stream then
