@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,11 +21,6 @@ func CredentialOwnerFilter(userID string) storage.Filter {
 		Operator: "eq",
 		Value:    userID,
 	}
-}
-
-func AddCredentialOwnerQuery(query url.Values, userID string) url.Values {
-	query.Set(credentialOwnerFilterColumn, "eq."+userID)
-	return query
 }
 
 // StampCredentialOwnerLabel stamps newly created resources with the current

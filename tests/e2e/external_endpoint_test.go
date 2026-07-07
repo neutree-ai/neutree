@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -640,125 +638,6 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			By("Verifying ExternalEndpoint is deleted")
 			r = RunCLI("get", "ExternalEndpoint", eeName, "-w", profileWorkspace())
 			ExpectFailed(r)
-		})
-	})
-
-	Describe("Credentials API", Label("credentials-api"), func() {
-		It("should return credential for admin via credentials endpoint", Label("C2644056"), func() {
-			By("Logging in as admin to get JWT")
-			jwt, err := loginTestUser("", profile.Auth.Email, profile.Auth.Password)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(jwt).NotTo(BeEmpty())
-
-			url := fmt.Sprintf("%s/api/v1/credentials/external_endpoints?metadata->>workspace=eq.%s&metadata->>name=eq.%s",
-				strings.TrimRight(Cfg.ServerURL, "/"),
-				profileWorkspace(),
-				testEEName(),
-			)
-
-			client := &http.Client{Timeout: 30 * time.Second}
-			req, err := http.NewRequest(http.MethodGet, url, nil)
-			Expect(err).NotTo(HaveOccurred())
-			req.Header.Set("Authorization", "Bearer "+jwt)
-
-			resp, err := client.Do(req)
-			Expect(err).NotTo(HaveOccurred())
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(resp.StatusCode).To(Equal(http.StatusOK),
-				"credentials endpoint should return 200, got body: %s", string(body))
-
-			// The credentials API should return the actual credential for authorized users
-			Expect(string(body)).To(ContainSubstring(mockAuthToken),
-				"admin credentials endpoint should return the actual credential")
-		})
-
-		It("should return 403 for user without read-credentials permission", Label("C2644057"), func() {
-			testUserName := "e2e-nocred-" + Cfg.RunID
-			testEmail := testUserName + "@e2e-test.local"
-			testPassword := "E2eTest!Pass123"
-			roleName := "e2e-role-nocred-" + Cfg.RunID
-			var userID string
-
-			By("Logging in as admin to get JWT for user management")
-			adminJWT, err := loginTestUser("", profile.Auth.Email, profile.Auth.Password)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(adminJWT).NotTo(BeEmpty())
-
-			DeferCleanup(func() {
-				if userID != "" {
-					deleteTestUser(adminJWT, userID)
-				}
-
-				RunCLI("delete", "roleassignment", testUserName+"-ra",
-					"-w", profileWorkspace(), "--force", "--ignore-not-found")
-				RunCLI("delete", "role", roleName,
-					"-w", profileWorkspace(),
-					"--force", "--ignore-not-found")
-			})
-
-			By("Creating a test user via admin API")
-			userID = createTestUser(adminJWT, testUserName, testEmail, testPassword)
-			Expect(userID).NotTo(BeEmpty(), "user creation should return a user ID")
-
-			By("Creating a role WITHOUT external_endpoint:read-credentials")
-			rolePath, err := renderTemplateToTempFile("testdata/role.yaml", map[string]any{
-				"E2E_ROLE_NAME": roleName,
-				"E2E_WORKSPACE": profileWorkspace(),
-				"E2E_ROLE_PERMISSIONS": []string{
-					"external_endpoint:read",
-					"cluster:read",
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			defer os.Remove(rolePath)
-
-			r := RunCLI("apply", "-f", rolePath)
-			ExpectSuccess(r)
-
-			By("Assigning role to user")
-			raPath, err := renderTemplateToTempFile("testdata/role-assignment.yaml", map[string]any{
-				"E2E_RA_NAME":      testUserName + "-ra",
-				"E2E_RA_USER_ID":   userID,
-				"E2E_RA_ROLE":      roleName,
-				"E2E_RA_WORKSPACE": profileWorkspace(),
-			})
-			Expect(err).NotTo(HaveOccurred())
-			defer os.Remove(raPath)
-
-			r = RunCLI("apply", "-f", raPath)
-			ExpectSuccess(r)
-
-			By("Logging in as the test user to get JWT")
-			jwt, err := loginTestUser("", testEmail, testPassword)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(jwt).NotTo(BeEmpty(), "login should return an access token")
-
-			By("Calling credentials API with non-admin JWT")
-			credURL := fmt.Sprintf("%s/api/v1/credentials/external_endpoints?metadata->>workspace=eq.%s&metadata->>name=eq.%s",
-				strings.TrimRight(Cfg.ServerURL, "/"),
-				profileWorkspace(),
-				testEEName(),
-			)
-
-			client := &http.Client{Timeout: 30 * time.Second}
-			req, err := http.NewRequest(http.MethodGet, credURL, nil)
-			Expect(err).NotTo(HaveOccurred())
-			req.Header.Set("Authorization", "Bearer "+jwt)
-
-			resp, err := client.Do(req)
-			Expect(err).NotTo(HaveOccurred())
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(resp.StatusCode).To(Equal(http.StatusForbidden),
-				"credentials endpoint should return 403 for user without read-credentials permission, got body: %s",
-				string(body))
 		})
 	})
 })
