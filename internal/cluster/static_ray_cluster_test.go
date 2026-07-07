@@ -485,7 +485,20 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *t
 
 func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsRequiresFullCoverage(t *testing.T) {
 	store := &storagemocks.MockStorage{}
-	reconciler := &staticRayReconciler{storage: store}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+	reconciler := &staticRayReconciler{storage: store, acceleratorManager: acceleratorMgr}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
 
 	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
 		{
@@ -515,6 +528,7 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsRequi
 			Status: &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
 		},
 	}, nil).Once()
+	mockDashboard.On("ListNodes").Return(staticRayDashboardNodesForTest(), nil).Once()
 
 	resources, ok, err := reconciler.calculateResourcesFromStaticNodes(&v1.StaticNodeCluster{
 		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
@@ -527,10 +541,115 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsRequi
 		},
 	})
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, resourceview.ErrIncompleteStaticNodeDeviceSnapshots)
 	assert.False(t, ok)
 	assert.Nil(t, resources)
+	mockDashboard.AssertExpectations(t)
 	store.AssertExpectations(t)
+}
+
+func TestStaticRayReconcilerUpdateResourceInfoPreservesExistingOnIncompleteDeviceSnapshots(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	mockDashboard := &dashboardmocks.MockDashboardService{}
+	acceleratorMgr := acceleratormocks.NewMockManager(t)
+	acceleratorMgr.On("GetAllParsers").Return(map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+	reconciler := &staticRayReconciler{storage: store, acceleratorManager: acceleratorMgr}
+
+	prevFactory := dashboard.NewDashboardService
+	dashboard.NewDashboardService = func(_ string) dashboard.DashboardService {
+		return mockDashboard
+	}
+	t.Cleanup(func() {
+		dashboard.NewDashboardService = prevFactory
+	})
+	existingResources := &v1.ClusterResources{
+		ResourceStatus: v1.ResourceStatus{
+			Allocatable: &v1.ResourceInfo{CPU: 32},
+			Available:   &v1.ResourceInfo{CPU: 16},
+		},
+	}
+	cluster := &v1.Cluster{
+		Status: &v1.ClusterStatus{
+			ResourceInfo: existingResources,
+		},
+	}
+	staticCluster := &v1.StaticNodeCluster{
+		Metadata: &v1.Metadata{Name: "static-a", Workspace: "default"},
+		Spec: &v1.StaticNodeClusterSpec{
+			Version: "v1.0.2",
+			Nodes: []v1.StaticNodeClusterNodeSpec{
+				{Name: "head-0", IP: "192.168.19.218", Role: v1.StaticNodeRoleHead},
+				{Name: "worker-0", IP: "192.168.19.219", Role: v1.StaticNodeRoleWorker},
+			},
+		},
+	}
+
+	store.On("ListStaticNode", mock.Anything).Return([]v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleHead,
+				IP:      "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Phase: v1.StaticNodePhaseReady,
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+					},
+				},
+			},
+		},
+		{
+			Metadata: &v1.Metadata{Name: "worker-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				Cluster: "static-a",
+				Role:    v1.StaticNodeRoleWorker,
+				IP:      "192.168.19.219",
+			},
+			Status: &v1.StaticNodeStatus{Phase: v1.StaticNodePhaseReady},
+		},
+	}, nil).Once()
+	mockDashboard.On("ListNodes").Return(staticRayDashboardNodesForTest(), nil).Once()
+
+	reconciler.updateResourceInfo(cluster, staticCluster)
+
+	assert.Same(t, existingResources, cluster.Status.ResourceInfo)
+	mockDashboard.AssertExpectations(t)
+	store.AssertExpectations(t)
+}
+
+func staticRayDashboardNodesForTest() []v1.NodeSummary {
+	return []v1.NodeSummary{
+		{
+			IP: "192.168.19.218",
+			Raylet: v1.Raylet{
+				State: v1.AliveNodeState,
+				Resources: map[string]float64{
+					"CPU":             32,
+					"memory":          64 * resourceview.BytesPerGiB,
+					"GPU":             1,
+					"NVIDIA_Tesla_T4": 1,
+				},
+			},
+		},
+		{
+			IP: "192.168.19.219",
+			Raylet: v1.Raylet{
+				State: v1.AliveNodeState,
+				Resources: map[string]float64{
+					"CPU":             16,
+					"memory":          32 * resourceview.BytesPerGiB,
+					"GPU":             1,
+					"NVIDIA_Tesla_T4": 1,
+				},
+			},
+		},
+	}
 }
 
 func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkipsUnhealthyAllocatable(t *testing.T) {
