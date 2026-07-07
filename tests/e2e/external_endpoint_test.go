@@ -154,6 +154,20 @@ func assertStringArrayField(upstreamReq map[string]any, field string, expected .
 	}
 }
 
+func assertOpenAIFunctionTool(upstreamReq map[string]any, expectedName string) {
+	tools, ok := upstreamReq["tools"].([]any)
+	Expect(ok).To(BeTrue(), "tools must be encoded as a JSON array")
+	Expect(tools).To(HaveLen(1))
+
+	tool, ok := tools[0].(map[string]any)
+	Expect(ok).To(BeTrue(), "tool entries should be objects")
+	Expect(tool["type"]).To(Equal("function"))
+
+	function, ok := tool["function"].(map[string]any)
+	Expect(ok).To(BeTrue(), "function tool should contain a function object")
+	Expect(function["name"]).To(Equal(expectedName))
+}
+
 func assertMalformedToolUseBlocks(content []anthropic.ContentBlockUnion) {
 	toolUses := make(map[string]anthropic.ContentBlockUnion)
 	for _, block := range content {
@@ -308,15 +322,31 @@ var _ = Describe("ExternalEndpoint", Ordered, Label("external-endpoint"), func()
 			status, body, err = doInferenceRequest(serviceURL, "/v1/chat/completions", map[string]any{
 				"model": "fast",
 				"messages": []map[string]any{
-					{"role": "user", "content": "hello non-empty stop"},
+					{"role": "user", "content": "hello non-empty fields"},
 				},
 				"stop": []string{"END"},
+				"tools": []map[string]any{
+					{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "lookup_weather",
+							"description": "Look up weather.",
+							"parameters": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"city": map[string]any{"type": "string"},
+								},
+							},
+						},
+					},
+				},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(http.StatusOK), "unexpected OpenAI response: %s", body)
 
 			_, upstreamReq = waitForUpstreamRequest()
 			assertStringArrayField(upstreamReq, "stop", "END")
+			assertOpenAIFunctionTool(upstreamReq, "lookup_weather")
 		})
 	})
 
