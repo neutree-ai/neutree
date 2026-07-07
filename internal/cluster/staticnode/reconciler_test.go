@@ -622,6 +622,110 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestComponentRestartReason(t *testing.T) {
+	tests := []struct {
+		name             string
+		configChanged    bool
+		containerMatches bool
+		inspectErr       error
+		want             string
+	}{
+		{
+			name:             "config changed",
+			configChanged:    true,
+			containerMatches: true,
+			want:             "config changed",
+		},
+		{
+			name:             "container mismatch",
+			configChanged:    false,
+			containerMatches: false,
+			want:             "container does not match desired state",
+		},
+		{
+			name:             "config changed and container mismatch",
+			configChanged:    true,
+			containerMatches: false,
+			want:             "config changed; container does not match desired state",
+		},
+		{
+			name:             "inspect error",
+			configChanged:    false,
+			containerMatches: false,
+			inspectErr:       errors.New("docker inspect failed"),
+			want:             "container inspect failed: docker inspect failed",
+		},
+		{
+			name:             "config changed and inspect error",
+			configChanged:    true,
+			containerMatches: false,
+			inspectErr:       errors.New("docker inspect failed"),
+			want:             "config changed; container inspect failed: docker inspect failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(
+				t,
+				tt.want,
+				componentRestartReason(tt.configChanged, tt.containerMatches, tt.inspectErr),
+			)
+		})
+	}
+}
+
+func TestStaticNodeLogIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		node          *v1.StaticNode
+		wantWorkspace string
+		wantNode      string
+		wantCluster   string
+	}{
+		{
+			name: "metadata and spec",
+			node: &v1.StaticNode{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "172.21.151.131",
+				},
+				Spec: &v1.StaticNodeSpec{
+					Cluster: "docker-t4",
+					IP:      "172.21.151.131",
+				},
+			},
+			wantWorkspace: "default",
+			wantNode:      "172.21.151.131",
+			wantCluster:   "docker-t4",
+		},
+		{
+			name: "missing metadata falls back to ip",
+			node: &v1.StaticNode{
+				Spec: &v1.StaticNodeSpec{
+					Cluster: "docker-t4",
+					IP:      "172.21.151.131",
+				},
+			},
+			wantNode:    "172.21.151.131",
+			wantCluster: "docker-t4",
+		},
+		{
+			name: "nil node",
+			node: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace, nodeName, cluster := staticNodeLogIdentity(tt.node)
+			assert.Equal(t, tt.wantWorkspace, workspace)
+			assert.Equal(t, tt.wantNode, nodeName)
+			assert.Equal(t, tt.wantCluster, cluster)
+		})
+	}
+}
+
 func TestReconcilerReconcileComponentsFailsWhenImageMissing(t *testing.T) {
 	node := &v1.StaticNode{
 		Spec: &v1.StaticNodeSpec{

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/staticcomponent"
@@ -520,7 +521,7 @@ func (r *Reconciler) reconcileComponent(
 		return status, err
 	}
 
-	running, err := dockerRuntime.ComponentContainerMatches(
+	containerMatches, err := dockerRuntime.ComponentContainerMatches(
 		ctx,
 		componentContainerName(node, component),
 		status.ObservedHash,
@@ -530,8 +531,22 @@ func (r *Reconciler) reconcileComponent(
 		status.Reason = dockerReason(err, componentReasonInspectFailed)
 	}
 
-	restarted := configChanged || !running
+	restarted := configChanged || !containerMatches
 	if restarted {
+		workspace, nodeName, cluster := staticNodeLogIdentity(node)
+		klog.Infof(
+			"Restarting static node component: workspace=%q node=%q cluster=%q component=%q image=%q desired_hash=%q config_changed=%t container_matches=%t reason=%q",
+			workspace,
+			nodeName,
+			cluster,
+			component.Name,
+			component.Image,
+			status.ObservedHash,
+			configChanged,
+			containerMatches,
+			componentRestartReason(configChanged, containerMatches, err),
+		)
+
 		if err := dockerRuntime.RestartComponentContainer(ctx, node, component, status.ObservedHash); err != nil {
 			status.Phase = v1.NodeComponentPhaseFailed
 			status.Reason = dockerReason(err, componentReasonRunFailed)
@@ -554,6 +569,48 @@ func (r *Reconciler) reconcileComponent(
 	status.Reason = componentReasonRunning
 
 	return status, nil
+}
+
+func staticNodeLogIdentity(node *v1.StaticNode) (string, string, string) {
+	if node == nil {
+		return "", "", ""
+	}
+
+	workspace := ""
+	nodeName := ""
+	cluster := ""
+
+	if node.Metadata != nil {
+		workspace = node.Metadata.Workspace
+		nodeName = node.Metadata.Name
+	}
+
+	if node.Spec != nil {
+		cluster = node.Spec.Cluster
+	}
+
+	if nodeName == "" && node.Spec != nil {
+		nodeName = node.Spec.IP
+	}
+
+	return workspace, nodeName, cluster
+}
+
+func componentRestartReason(configChanged bool, containerMatches bool, inspectErr error) string {
+	reasons := []string{}
+	if configChanged {
+		reasons = append(reasons, "config changed")
+	}
+
+	if !containerMatches && inspectErr == nil {
+		reasons = append(reasons, "container does not match desired state")
+	}
+
+	if inspectErr != nil {
+		reasons = append(reasons, "container inspect failed: "+inspectErr.Error())
+	}
+
+	return strings.Join(reasons, "; ")
 }
 
 func stopStaleComponents(
