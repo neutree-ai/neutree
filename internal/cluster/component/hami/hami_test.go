@@ -257,6 +257,13 @@ func TestHAMiStatusErrorMessageIncludesReason(t *testing.T) {
 	)
 }
 
+func TestHAMiStatusErrorMessageOmitsEmptyDetails(t *testing.T) {
+	err := hamiStatusError(&HAMiStatus{})
+
+	require.Error(t, err)
+	assert.Equal(t, "accelerator virtualization component is not ready", err.Error())
+}
+
 func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	fakeClient := newHAMiFakeClient(t,
 		newHAMiNode("plugin-candidate", map[string]string{}),

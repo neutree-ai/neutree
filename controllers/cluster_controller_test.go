@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClusterController(s *storagemocks.MockStorage,
@@ -461,6 +463,45 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 					obj := args.Get(1).(*v1.Cluster)
 					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
 					assert.NotEmpty(t, obj.Status.ErrorMessage)
+				}).Return(nil)
+			},
+			wantErr: true,
+		},
+		{
+			name: "Failed: HAMi reconcile status reason is preserved in error message",
+			input: &v1.Cluster{
+				ID:       1,
+				Metadata: &v1.Metadata{Name: "test"},
+				Spec:     specV2,
+				Status: &v1.ClusterStatus{
+					Phase:            v1.ClusterPhaseRunning,
+					Initialized:      true,
+					ObservedSpecHash: specV2Hash,
+				},
+			},
+			mockSetup: func(s *storagemocks.MockStorage, o *clustermocks.MockClusterReconcile) {
+				reconcileErr := errors.New(
+					"accelerator virtualization component is not ready: DaemonSetNotReady daemonset hami-device-plugin ready 0/1",
+				)
+				o.On("Reconcile", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+					c := args.Get(1).(*v1.Cluster)
+					c.Status.ComponentStatus = map[string]*v1.ComponentStatus{
+						v1.ComponentStatusAcceleratorVirtualizationKey: {
+							Phase:   v1.ComponentPhaseNotReady,
+							Managed: true,
+							Version: "v2.6.0",
+							Reason:  "DaemonSetNotReady",
+							Message: "daemonset hami-device-plugin ready 0/1",
+						},
+					}
+				}).Return(reconcileErr)
+				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.Cluster)
+					assert.Equal(t, v1.ClusterPhaseFailed, obj.Status.Phase)
+					assert.Contains(t, obj.Status.ErrorMessage, reconcileErr.Error())
+					require.NotNil(t, obj.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey])
+					assert.Equal(t, "DaemonSetNotReady", obj.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Reason)
+					assert.Equal(t, "daemonset hami-device-plugin ready 0/1", obj.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Message)
 				}).Return(nil)
 			},
 			wantErr: true,

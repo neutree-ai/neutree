@@ -3,6 +3,7 @@ package hami
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -161,8 +162,12 @@ func hamiStatusError(status *HAMiStatus) error {
 		return fmt.Errorf("accelerator virtualization component is not ready")
 	}
 
-	return fmt.Errorf("accelerator virtualization component is not ready: %s %s",
-		status.Reason, status.Message)
+	detail := strings.TrimSpace(strings.Join([]string{status.Reason, status.Message}, " "))
+	if detail == "" {
+		return fmt.Errorf("accelerator virtualization component is not ready")
+	}
+
+	return fmt.Errorf("accelerator virtualization component is not ready: %s", detail)
 }
 
 func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
