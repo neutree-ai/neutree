@@ -35,7 +35,7 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", StampCredentialOwnerLabel(), handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.PATCH("", PinCredentialOwnerLabel(deps, storage.EXTERNAL_ENDPOINT_TABLE), handler)
 
 	// Test connectivity endpoint
 	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))

@@ -30,45 +30,53 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 	}
 
 	// Cluster credentials (kubeconfig, SSH keys, etc.)
+	// Shared infrastructure credential, visibility governed by RBAC only.
 	credGroup.GET("/clusters",
 		middleware.RequirePermission("cluster:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleResourceCredentials(proxyDeps, "clusters"))
+		handleResourceCredentials(proxyDeps, "clusters", false))
 
 	// Image registry credentials (username, password, token)
+	// Shared infrastructure credential, visibility governed by RBAC only.
 	credGroup.GET("/image_registries",
 		middleware.RequirePermission("image_registry:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleResourceCredentials(proxyDeps, "image_registries"))
+		handleResourceCredentials(proxyDeps, "image_registries", false))
 
 	// Model registry credentials
+	// Shared infrastructure credential, visibility governed by RBAC only.
 	credGroup.GET("/model_registries",
 		middleware.RequirePermission("model_registry:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleResourceCredentials(proxyDeps, "model_registries"))
+		handleResourceCredentials(proxyDeps, "model_registries", false))
 
 	// External endpoint credentials (auth tokens)
+	// Users bring their own third-party API keys here, so access is restricted
+	// to the creating user even for callers holding external_endpoint:read-credentials.
 	credGroup.GET("/external_endpoints",
 		middleware.RequirePermission("external_endpoint:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,
 		}),
-		handleResourceCredentials(proxyDeps, "external_endpoints"))
+		handleResourceCredentials(proxyDeps, "external_endpoints", true))
 }
 
-func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {
+func handleResourceCredentials(deps *proxies.Dependencies, tabelName string, restrictToOwner bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID := c.GetString("user_id")
-		if userID == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
-			c.Abort()
+		if restrictToOwner {
+			userID := c.GetString("user_id")
+			if userID == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+				c.Abort()
 
-			return
+				return
+			}
+
+			c.Request.URL.RawQuery = proxies.AddCredentialOwnerQuery(c.Request.URL.Query(), userID).Encode()
 		}
 
-		c.Request.URL.RawQuery = proxies.AddCredentialOwnerQuery(c.Request.URL.Query(), userID).Encode()
 		proxyHandler := proxies.CreateProxyHandler(deps.StorageAccessURL, tabelName, proxies.CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
