@@ -18,7 +18,10 @@ func StartCrons(ctx context.Context, storage storage.Storage) error {
 		return errors.Wrapf(err, "failed to init cron scheduler")
 	}
 
-	_, err = s.NewJob(gocron.DurationJob(time.Minute*5), gocron.NewTask(func() {
+	// Runs frequently (vs. the other jobs below) to bound how long an API key's
+	// token_quota usage can lag actual consumption, since get_api_key_remaining
+	// reads from the aggregated api_daily_usage table, not the raw usage records.
+	_, err = s.NewJob(gocron.DurationJob(time.Second*30), gocron.NewTask(func() {
 		klog.V(4).Infof("Start to aggregate usage records")
 
 		jobErr := storage.CallDatabaseFunction("aggregate_usage_records", map[string]interface{}{
