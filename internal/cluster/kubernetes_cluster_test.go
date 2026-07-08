@@ -659,8 +659,11 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 			Name: util.ClusterNamespace(cluster),
 		},
 	}
-	gpuNode := newNode("gpu-node", true, nil, map[string]string{
+	gpuNode := newNodeWithAnnotations("gpu-node", true, nil, map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	}, map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-delete-path"}]`,
+		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-delete-path"}]`,
 	})
 	metricsClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
 		"", "vmagent-node-reader-test")
@@ -692,6 +695,8 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScope(t *te
 	gotNode := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "gpu-node"}, gotNode))
 	require.NotContains(t, gotNode.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+	require.NotContains(t, gotNode.Annotations, "hami.io/node-nvidia-register")
+	require.NotContains(t, gotNode.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 
 	gotClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
 		"", "vmagent-node-reader-test")
@@ -729,8 +734,11 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScopeFromSt
 			Name: util.ClusterNamespace(cluster),
 		},
 	}
-	gpuNode := newNode("gpu-node", true, nil, map[string]string{
+	gpuNode := newNodeWithAnnotations("gpu-node", true, nil, map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
+	}, map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-delete-status"}]`,
+		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-delete-status"}]`,
 	})
 	metricsClusterRole := newUnstructuredObject("rbac.authorization.k8s.io/v1", "ClusterRole",
 		"", "vmagent-node-reader-test")
@@ -762,6 +770,8 @@ func TestKubernetesReconcileDeleteCleansAcceleratorVirtualizationNodeScopeFromSt
 	gotNode := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.TODO(), client.ObjectKey{Name: "gpu-node"}, gotNode))
 	require.NotContains(t, gotNode.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
+	require.NotContains(t, gotNode.Annotations, "hami.io/node-nvidia-register")
+	require.NotContains(t, gotNode.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 }
 
 func newUnstructuredObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {

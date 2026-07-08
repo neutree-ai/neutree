@@ -67,10 +67,15 @@ func (m *MetricsComponent) Reconcile() error {
 }
 
 func (m *MetricsComponent) Delete() error {
-	// Implement the logic to delete the metrics component from the cluster
-	deleted, err := m.DeleteResources(context.Background())
+	ctx := context.Background()
+
+	deleted, err := m.DeleteResources(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to delete metrics resources")
+	}
+
+	if err := m.cleanupNodeAnnotations(ctx); err != nil {
+		return errors.Wrap(err, "failed to cleanup metrics node annotations")
 	}
 
 	if !deleted {

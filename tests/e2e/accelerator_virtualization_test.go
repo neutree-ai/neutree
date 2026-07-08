@@ -175,6 +175,7 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			By("Verifying node-agent writes full-card endpoint allocation annotations")
 			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, fullCardEndpointName)
 		})
+
 	})
 
 func requireAcceleratorVirtualizationProfile() {

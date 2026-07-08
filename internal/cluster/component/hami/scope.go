@@ -11,6 +11,20 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
+const (
+	hamiNodeNVIDIARegisterAnnotation  = "hami.io/node-nvidia-register"
+	hamiNodeNVIDIAScoreAnnotation     = "hami.io/node-nvidia-score"
+	hamiNodeNVIDIAHandshakeAnnotation = "hami.io/node-handshake"
+	hamiNodeLockAnnotation            = "hami.io/mutex.lock"
+)
+
+var hamiNodeAnnotations = []string{
+	hamiNodeNVIDIARegisterAnnotation,
+	hamiNodeNVIDIAScoreAnnotation,
+	hamiNodeNVIDIAHandshakeAnnotation,
+	hamiNodeLockAnnotation,
+}
+
 func (h *HAMiComponent) ReconcileNodeScope(ctx context.Context) (NodeScopePlan, error) {
 	nodeList := &corev1.NodeList{}
 	if err := h.ctrlClient.List(ctx, nodeList); err != nil {
@@ -55,12 +69,12 @@ func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
 		return errors.Wrap(err, "failed to list nodes")
 	}
 
-	// Remove only the enabled scope label written while HAMi is active.
-	// Existing disabled labels are preserved because users can set them
-	// explicitly to keep a node out of virtualization.
+	// Remove only HAMi-owned node scope state. Existing disabled labels are
+	// preserved because users can set them explicitly to keep a node out of
+	// virtualization.
 	label := nodeScopeLabelFromPlugin(config.NodeScopeLabel)
 	for _, item := range nodeList.Items {
-		if item.Labels[label.Key] != label.EnabledValue {
+		if !nodeNeedsScopeCleanup(item, label) {
 			continue
 		}
 
@@ -69,11 +83,9 @@ func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
 			return errors.Wrapf(err, "failed to get node %s", item.Name)
 		}
 
-		if node.Labels == nil || node.Labels[label.Key] != label.EnabledValue {
+		if !cleanupNodeScope(node, label) {
 			continue
 		}
-
-		delete(node.Labels, label.Key)
 
 		if err := h.ctrlClient.Update(ctx, node); err != nil {
 			return errors.Wrapf(err, "failed to patch node %s", item.Name)
@@ -81,6 +93,61 @@ func (h *HAMiComponent) DisableNodeScope(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func nodeNeedsScopeCleanup(node corev1.Node, label NodeScopeLabel) bool {
+	if node.Labels[label.Key] == label.EnabledValue {
+		return true
+	}
+
+	return hasHAMiNodeAnnotation(node.Annotations)
+}
+
+func cleanupNodeScope(node *corev1.Node, label NodeScopeLabel) bool {
+	changed := cleanupEnabledNodeScopeLabel(node, label)
+	if cleanupHAMiNodeAnnotations(node) {
+		changed = true
+	}
+
+	return changed
+}
+
+func cleanupEnabledNodeScopeLabel(node *corev1.Node, label NodeScopeLabel) bool {
+	if node.Labels == nil || node.Labels[label.Key] != label.EnabledValue {
+		return false
+	}
+
+	delete(node.Labels, label.Key)
+
+	return true
+}
+
+func cleanupHAMiNodeAnnotations(node *corev1.Node) bool {
+	if node.Annotations == nil {
+		return false
+	}
+
+	changed := false
+
+	for _, key := range hamiNodeAnnotations {
+		if _, ok := node.Annotations[key]; ok {
+			delete(node.Annotations, key)
+
+			changed = true
+		}
+	}
+
+	return changed
+}
+
+func hasHAMiNodeAnnotation(annotations map[string]string) bool {
+	for _, key := range hamiNodeAnnotations {
+		if _, ok := annotations[key]; ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (h *HAMiComponent) planNodeScope(ctx context.Context, nodes []corev1.Node, enabled bool) (NodeScopePlan, error) {
