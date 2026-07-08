@@ -15,6 +15,8 @@ import (
 )
 
 const unknownHardwareValue = "unknown"
+const hardwareAbsentValue = "0"
+const hardwarePresentValue = "1"
 
 type GPUHardwareInfoProvider interface {
 	GPUHardwareInfos(ctx context.Context) ([]model.GPUHardwareInfo, error)
@@ -52,12 +54,37 @@ func FromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
 		infosByUUID[uuid] = info
 	}
 
+	if nvswitch, ok := nvswitchPresenceFromLinkStatus(samples); ok {
+		for uuid, info := range infosByUUID {
+			info.NVSwitch = firstKnownHardwareValue(info.NVSwitch, nvswitch)
+			infosByUUID[uuid] = info
+		}
+	}
+
 	infos := make([]model.GPUHardwareInfo, 0, len(infosByUUID))
 	for _, info := range infosByUUID {
 		infos = append(infos, info)
 	}
 
 	return infos
+}
+
+func nvswitchPresenceFromLinkStatus(samples prommodel.Vector) (string, bool) {
+	result := ""
+
+	for _, s := range samples {
+		if promtext.MetricName(s) != "DCGM_FI_DEV_NVSWITCH_LINK_STATUS" {
+			continue
+		}
+
+		if promtext.Value(s) != 0 {
+			return hardwarePresentValue, true
+		}
+
+		result = hardwareAbsentValue
+	}
+
+	return result, result != ""
 }
 
 func gpuHardwareInfosFromAcceleratorMetrics(raw string) []model.GPUHardwareInfo {
@@ -117,11 +144,15 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 		info.PCIEWidth = firstKnownHardwareValue(info.PCIEWidth, formatFloat(value))
 	case "DCGM_FI_DEV_P2P_NVLINK_STATUS", "DCGM_FI_DEV_NVLINK_P2P_STATUS", "DCGM_FI_SYSTEM_NVLINK_TOPOLOGY":
 		if value > 0 {
-			info.NVLink = "present"
+			info.NVLink = hardwarePresentValue
 		}
 	case "DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL":
 		if value > 0 {
-			info.NVLink = "present"
+			info.NVLink = hardwarePresentValue
+		}
+	case "DCGM_FI_DEV_NVSWITCH_LINK_STATUS":
+		if value >= 0 {
+			info.NVSwitch = hardwarePresentValue
 		}
 	}
 }
@@ -269,6 +300,20 @@ func LabelValue(value string) string {
 	}
 
 	return value
+}
+
+func PresenceLabelValue(value string) string {
+	value = strings.ToLower(cleanHardwareValue(value))
+	if value == "" || isUnknownHardwareLiteral(value) {
+		return unknownHardwareValue
+	}
+
+	switch value {
+	case "0", "false", "no", "none", "absent":
+		return hardwareAbsentValue
+	default:
+		return hardwarePresentValue
+	}
 }
 
 func firstKnownHardwareValue(values ...string) string {

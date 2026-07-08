@@ -39,17 +39,13 @@ func acceleratorDevicesFromMetrics(raw string) []v1.StaticNodeAcceleratorDeviceS
 		}
 
 		device := devicesByUUID[uuid]
-		if device.UUID == "" {
-			device.MinorNumber = v1.StaticNodeAcceleratorDeviceMinorNumberUnknown
-		}
-
 		device.UUID = uuid
 		device.Healthy = true
 
 		if id := promtext.LabelValue(metric, "gpu", "GPU_I_ID"); id != "" {
 			device.ID = id
 			if minorNumber, err := strconv.Atoi(id); err == nil {
-				device.MinorNumber = minorNumber
+				device.MinorNumber = &minorNumber
 			}
 		}
 

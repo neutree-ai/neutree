@@ -281,7 +281,7 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 			Allocatable: corev1.ResourceList{
 				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
 				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
-				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("2"),
+				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
 			},
 		},
 	}
@@ -328,8 +328,84 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 	require.Equal(t, float64(2), allocatable.Quantity)
 	require.Equal(t, float64(30720), allocatable.Products["Tesla-T4"].Virtualization.MemoryMiB)
 	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(2), available.Quantity)
+	require.Equal(t, float64(1), available.Quantity)
+	require.Equal(t, float64(1), available.ProductGroups["Tesla-T4"])
+	require.Equal(t, float64(1), available.Products["Tesla-T4"].Quantity)
 	require.Equal(t, float64(15360), available.Products["Tesla-T4"].Virtualization.MemoryMiB)
+}
+
+func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQuantity(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA-L20",
+				plugin.NvidiaGPUCountResource:             "2",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+					{"uuid":"GPU-1","memory_mib":46068,"healthy":true,"minor_number":0},
+					{"uuid":"GPU-2","memory_mib":46068,"healthy":true,"minor_number":1}
+				]`,
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infer-1",
+			Namespace: "default",
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46068,"core_units":100},
+					{"uuid":"GPU-2","product":"NVIDIA-L20","memory_mib":46068,"core_units":100}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node, pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+
+	nodes, err := client.ListNodes(context.Background(), nil)
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Len(t, nodes[0].Status.Devices, 2)
+	require.Equal(t, int64(0), nodes[0].Status.Devices[0].Available.MemoryMiB)
+	require.Equal(t, int64(0), nodes[0].Status.Devices[0].Available.CoreUnits)
+	require.Equal(t, int64(0), nodes[0].Status.Devices[1].Available.MemoryMiB)
+	require.Equal(t, int64(0), nodes[0].Status.Devices[1].Available.CoreUnits)
+
+	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(2), allocatable.Quantity)
+	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA-L20"])
+	require.Equal(t, float64(2), allocatable.Products["NVIDIA-L20"].Quantity)
+
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(0), available.Quantity)
+	require.Equal(t, float64(0), available.ProductGroups["NVIDIA-L20"])
+	require.Equal(t, float64(0), available.Products["NVIDIA-L20"].Quantity)
 }
 
 func TestK8sResourceClientListNodesEnhancesBaseResourcesWithoutGPUCountLabel(t *testing.T) {
@@ -374,8 +450,8 @@ func TestK8sResourceClientListNodesEnhancesBaseResourcesWithoutGPUCountLabel(t *
 	require.Equal(t, "Tesla-T4", nodes[0].Status.Devices[0].Product)
 
 	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(20), allocatable.Quantity)
-	require.Equal(t, float64(20), allocatable.ProductGroups["Tesla-T4"])
+	require.Equal(t, float64(1), allocatable.Quantity)
+	require.Equal(t, float64(1), allocatable.ProductGroups["Tesla-T4"])
 	require.Equal(t, float64(15360), allocatable.Products["Tesla-T4"].Virtualization.MemoryMiB)
 }
 
@@ -445,6 +521,71 @@ func TestK8sResourceClientListNodesUsesStandardParserWithoutNeutreeDeviceAnnotat
 	require.Equal(t, float64(1), available.ProductGroups["NVIDIA_A100"])
 	require.Equal(t, float64(81920),
 		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_A100"].MemoryTotalMiB)
+}
+
+func TestK8sResourceClientListNodesSubtractsGPURequestsWhenGPUCountLabelExists(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA-L20",
+				plugin.NvidiaGPUCountResource:             "2",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("2"),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infer-1",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+			Containers: []corev1.Container{
+				{
+					Name: "main",
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node, pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+
+	nodes, err := client.ListNodes(context.Background(), nil)
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+
+	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(2), allocatable.Quantity)
+	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA-L20"])
+
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(1), available.Quantity)
+	require.Equal(t, float64(1), available.ProductGroups["NVIDIA-L20"])
 }
 
 func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnnotationMalformed(t *testing.T) {

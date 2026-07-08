@@ -14,7 +14,8 @@ DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87`)
 
 	require.NotNil(t, snapshot)
 	require.Len(t, snapshot.Accelerator.Devices, 1)
-	assert.Equal(t, 0, snapshot.Accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 0, *snapshot.Accelerator.Devices[0].MinorNumber)
 }
 
 func TestFromAcceleratorMetricsRequiresGPUUtilWithUUIDForDevice(t *testing.T) {
@@ -37,16 +38,17 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`)
 	require.Len(t, snapshot.Accelerator.Devices, 1)
 	assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
 	assert.Equal(t, "0", snapshot.Accelerator.Devices[0].ID)
-	assert.Equal(t, 0, snapshot.Accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 0, *snapshot.Accelerator.Devices[0].MinorNumber)
 	assert.Equal(t, "A100", snapshot.Accelerator.Devices[0].ProductName)
 	assert.Equal(t, int64(81920), snapshot.Accelerator.Devices[0].MemoryMiB)
 }
 
-func TestFromAcceleratorMetricsUsesUnknownMinorNumberWhenMissing(t *testing.T) {
+func TestFromAcceleratorMetricsOmitsMinorNumberWhenMissing(t *testing.T) {
 	snapshot := FromAcceleratorMetrics(`# TYPE DCGM_FI_DEV_GPU_UTIL gauge
 DCGM_FI_DEV_GPU_UTIL{UUID="GPU-abc",modelName="A100"} 87`)
 
 	require.NotNil(t, snapshot)
 	require.Len(t, snapshot.Accelerator.Devices, 1)
-	assert.Equal(t, v1.StaticNodeAcceleratorDeviceMinorNumberUnknown, snapshot.Accelerator.Devices[0].MinorNumber)
+	assert.Nil(t, snapshot.Accelerator.Devices[0].MinorNumber)
 }

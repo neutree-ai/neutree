@@ -353,8 +353,8 @@ func normalizeGPUHardwareInfoSamples(labels model.CanonicalLabels, infos []model
 		nvidiaLabels["cuda_capability"] = hardware.LabelValue(info.CUDACapability)
 		nvidiaLabels["driver_version"] = hardware.LabelValue(info.DriverVersion)
 		nvidiaLabels["cuda_driver_version"] = hardware.LabelValue(info.CUDADriverVersion)
-		nvidiaLabels["nvlink"] = hardware.LabelValue(info.NVLink)
-		nvidiaLabels["nvswitch"] = hardware.LabelValue(info.NVSwitch)
+		nvidiaLabels["nvlink"] = hardware.PresenceLabelValue(info.NVLink)
+		nvidiaLabels["nvswitch"] = hardware.PresenceLabelValue(info.NVSwitch)
 
 		result = append(result,
 			Sample{
@@ -409,7 +409,7 @@ func normalizeEndpointAllocationSamples(
 			physicalVRAM := physicalVRAMs[device.UUID]
 
 			if device.UsedMemoryMiB <= 0 {
-				if explicitUsedBytes, ok := explicitUsageMemoryUsedBytes[endpointReplicaGPUUsageKeyFromAllocation(labels, allocation, device)]; ok {
+				if explicitUsedBytes, ok := explicitEndpointReplicaGPUUsageMemoryUsedBytesForAllocation(explicitUsageMemoryUsedBytes, labels, allocation, device); ok {
 					derivedUsedBytes = &explicitUsedBytes
 				} else if _, ok := uniqueAllocations[device.UUID]; ok && physicalVRAM.hasUsed {
 					derivedUsedBytes = &physicalVRAM.usedBytes
@@ -643,16 +643,48 @@ func explicitEndpointReplicaGPUUsageMemoryUsedBytes(
 	usages []model.EndpointReplicaGPUUsage,
 ) map[endpointReplicaGPUUsageKey]float64 {
 	result := map[endpointReplicaGPUUsageKey]float64{}
+	fallbackCounts := map[endpointReplicaGPUUsageKey]int{}
+	fallbackValues := map[endpointReplicaGPUUsageKey]float64{}
 
 	for _, usage := range usages {
 		if usage.GPUUUID == "" || usage.MemoryUsedBytes == nil {
 			continue
 		}
 
-		result[endpointReplicaGPUUsageKeyFromUsage(labels, usage)] = *usage.MemoryUsedBytes
+		key := endpointReplicaGPUUsageKeyFromUsage(labels, usage)
+		result[key] = *usage.MemoryUsedBytes
+
+		key.vdeviceIndex = ""
+		fallbackCounts[key]++
+		fallbackValues[key] = *usage.MemoryUsedBytes
+	}
+
+	for key, count := range fallbackCounts {
+		if count != 1 {
+			continue
+		}
+
+		result[key] = fallbackValues[key]
 	}
 
 	return result
+}
+
+func explicitEndpointReplicaGPUUsageMemoryUsedBytesForAllocation(
+	usages map[endpointReplicaGPUUsageKey]float64,
+	labels model.CanonicalLabels,
+	allocation model.EndpointAllocation,
+	device v1.DeviceAllocation,
+) (float64, bool) {
+	key := endpointReplicaGPUUsageKeyFromAllocation(labels, allocation, device)
+	value, ok := usages[key]
+	if ok {
+		return value, true
+	}
+
+	key.vdeviceIndex = ""
+	value, ok = usages[key]
+	return value, ok
 }
 
 func endpointReplicaGPUUsageKeyFromAllocation(
@@ -857,6 +889,8 @@ func endpointReplicaGPUUsageAllocationContext(
 	acceleratorIndexes map[string]string,
 ) map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext {
 	result := map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext{}
+	fallbackCounts := map[endpointReplicaGPUUsageKey]int{}
+	fallbackContexts := map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext{}
 
 	for _, allocation := range allocations {
 		for _, device := range allocation.Devices {
@@ -864,18 +898,33 @@ func endpointReplicaGPUUsageAllocationContext(
 				continue
 			}
 
-			result[endpointReplicaGPUUsageKey{
+			key := endpointReplicaGPUUsageKey{
 				endpoint:     allocation.Endpoint,
 				instanceID:   allocation.InstanceID,
 				replicaID:    allocation.ReplicaID,
 				nodeID:       firstNonEmpty(allocation.NodeID, device.NodeID, labels.Node),
 				uuid:         device.UUID,
 				vdeviceIndex: vdeviceIndexOrDefault(device.VDeviceIndex),
-			}] = endpointReplicaGPUUsageContext{
+			}
+			context := endpointReplicaGPUUsageContext{
 				product:          device.Product,
 				acceleratorIndex: acceleratorIndexes[device.UUID],
 			}
+
+			result[key] = context
+
+			key.vdeviceIndex = ""
+			fallbackCounts[key]++
+			fallbackContexts[key] = context
 		}
+	}
+
+	for key, count := range fallbackCounts {
+		if count != 1 {
+			continue
+		}
+
+		result[key] = fallbackContexts[key]
 	}
 
 	return result
@@ -886,7 +935,12 @@ func enrichEndpointReplicaGPUUsage(
 	usage model.EndpointReplicaGPUUsage,
 	allocationContext map[endpointReplicaGPUUsageKey]endpointReplicaGPUUsageContext,
 ) model.EndpointReplicaGPUUsage {
-	context, ok := allocationContext[endpointReplicaGPUUsageKeyFromUsage(labels, usage)]
+	key := endpointReplicaGPUUsageKeyFromUsage(labels, usage)
+	context, ok := allocationContext[key]
+	if !ok {
+		key.vdeviceIndex = ""
+		context, ok = allocationContext[key]
+	}
 	if !ok {
 		return usage
 	}

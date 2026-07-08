@@ -135,8 +135,6 @@ type StaticNodeAcceleratorStatus struct {
 	Devices []StaticNodeAcceleratorDeviceStatus `json:"devices,omitempty"`
 }
 
-const StaticNodeAcceleratorDeviceMinorNumberUnknown = -1
-
 type StaticNodeAcceleratorDeviceStatus struct {
 	// ID is the plugin-provided local device identifier.
 	ID string `json:"id,omitempty"`
@@ -147,8 +145,8 @@ type StaticNodeAcceleratorDeviceStatus struct {
 	// ProductModel is the normalized model key used for resource grouping when available.
 	ProductModel string `json:"product_model,omitempty"`
 	// MinorNumber is the Linux device minor number, for example the X in /dev/nvidiaX.
-	// StaticNodeAcceleratorDeviceMinorNumberUnknown means the minor number is unknown.
-	MinorNumber int `json:"minor_number,omitempty"`
+	// Nil means the minor number is unknown.
+	MinorNumber *int `json:"minor_number,omitempty"`
 	// MemoryMiB is the device memory capacity in MiB.
 	MemoryMiB int64 `json:"memory_mib,omitempty"`
 	// Healthy reports whether the plugin considers this device usable.

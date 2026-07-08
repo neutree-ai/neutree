@@ -186,8 +186,8 @@ func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus)
 
 		var minorNumber *int
 
-		if device.MinorNumber >= 0 {
-			value := device.MinorNumber
+		if device.MinorNumber != nil {
+			value := *device.MinorNumber
 			minorNumber = &value
 		}
 

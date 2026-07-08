@@ -7,6 +7,7 @@ import (
 
 const kubernetesVMAgentConfigTemplateText = `global:
   scrape_interval: 30s # Set the scrape interval to every 30 seconds. Default is every 1 minute.
+  scrape_timeout: 30s
 
 scrape_configs:
 # Scrape from Kubernetes pods using service discovery

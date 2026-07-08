@@ -18,6 +18,7 @@ import (
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -358,6 +359,7 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 		"--path.rootfs=/host"))
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
+	assert.Assert(t, strings.Contains(vmagentConfig, "scrape_timeout: 30s"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
@@ -371,7 +373,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 				Name:      "test-cluster",
 				Workspace: "test-workspace",
 			},
-			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+			Spec: &v1.ClusterSpec{Version: "v9.9.9"},
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
@@ -386,12 +388,14 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Equal(t, "test-namespace", nodeAgent.Namespace)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
-	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0",
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-alpha.7",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, !nodeAgent.Spec.Template.Spec.HostNetwork)
 	assert.Equal(t, "test-image-pull-secret", nodeAgent.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19101), nodeAgent.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	assert.Equal(t, "500m", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Limits.Cpu().String())
+	assert.Equal(t, "500m", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String())
 
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
 	assert.Assert(t, strings.Contains(args, "--listen-address=:19101"))
@@ -503,6 +507,42 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
+func TestBuildMetricsResourcesGrantsNodeAgentExternalNodeExporterAccess(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				Config: &v1.ClusterConfig{
+					Metrics: &v1.ClusterMetricsConfig{
+						AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+							Mode: v1.ClusterAcceleratorExporterModeExternal,
+						},
+					},
+				},
+			},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	clusterRole := findMetricsClusterRoleByApp(t, objs, "neutree-node-agent")
+	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes", "get", "list", "watch", "patch"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/metrics", "get", "list", "watch"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/proxy", "get"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "pods", "get", "list", "watch", "patch"))
+	assert.Assert(t, hasNonResourceURLRule(clusterRole, "/metrics", "get"))
+}
+
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {
 	t.Helper()
 
@@ -589,6 +629,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		"DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH",
 		"DCGM_FI_DEV_PCIE_LINK_GEN",
 		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
+		"DCGM_FI_DEV_NVSWITCH_LINK_STATUS",
 		"DCGM_FI_DEV_FB_USED_PERCENT",
 		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
 		"DCGM_FI_DEV_RETIRED_PENDING",
@@ -1104,6 +1145,66 @@ func findMetricsConfigMap(t *testing.T, objs *unstructured.UnstructuredList, nam
 	t.Fatalf("ConfigMap %s not found", name)
 
 	return nil
+}
+
+func findMetricsClusterRoleByApp(t *testing.T, objs *unstructured.UnstructuredList, app string) *rbacv1.ClusterRole {
+	t.Helper()
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ClusterRole" && obj.GetLabels()["app"] == app {
+			objContent, _ := json.Marshal(obj.Object)
+			clusterRole := &rbacv1.ClusterRole{}
+			if err := json.Unmarshal(objContent, clusterRole); err != nil {
+				t.Fatalf("Failed to unmarshal ClusterRole for app %s: %v", app, err)
+			}
+
+			return clusterRole
+		}
+	}
+
+	t.Fatalf("ClusterRole for app %s not found", app)
+
+	return nil
+}
+
+func hasResourceRule(clusterRole *rbacv1.ClusterRole, apiGroup, resource string, verbs ...string) bool {
+	for _, rule := range clusterRole.Rules {
+		if containsString(rule.APIGroups, apiGroup) && containsString(rule.Resources, resource) && containsAll(rule.Verbs, verbs) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasNonResourceURLRule(clusterRole *rbacv1.ClusterRole, nonResourceURL string, verbs ...string) bool {
+	for _, rule := range clusterRole.Rules {
+		if containsString(rule.NonResourceURLs, nonResourceURL) && containsAll(rule.Verbs, verbs) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsAll(values []string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if !containsString(values, candidate) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func containsString(values []string, candidate string) bool {
+	for _, value := range values {
+		if value == candidate {
+			return true
+		}
+	}
+
+	return false
 }
 
 func assertValidPrometheusYAML(t *testing.T, config string) {

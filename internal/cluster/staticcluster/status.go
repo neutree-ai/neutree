@@ -305,12 +305,55 @@ func aggregateDesiredStaticNodeComponentStatus(
 		}
 
 		ctx.HasStatusDrift = true
-		ctx.BlockingMessages = append(ctx.BlockingMessages, fmt.Sprintf(
-			"static node %s component %s is not running desired config",
-			nodeName,
-			component.Name,
-		))
+		ctx.BlockingMessages = append(ctx.BlockingMessages, desiredComponentStatusMessage(nodeName, component, statuses))
 	}
+}
+
+func desiredComponentStatusMessage(
+	nodeName string,
+	component v1.NodeComponentSpec,
+	statuses []v1.NodeComponentStatus,
+) string {
+	message := fmt.Sprintf(
+		"static node %s component %s is not running desired config",
+		nodeName,
+		component.Name,
+	)
+
+	status, ok := nodeComponentStatusByName(statuses, component.Name)
+	if !ok {
+		return message
+	}
+
+	details := []string{}
+	if status.Phase != "" {
+		details = append(details, "phase="+string(status.Phase))
+	}
+	if status.Reason != "" {
+		details = append(details, "reason="+status.Reason)
+	}
+	if status.Message != "" {
+		details = append(details, "message="+status.Message)
+	}
+
+	if len(details) == 0 {
+		return message
+	}
+
+	return message + ": " + strings.Join(details, " ")
+}
+
+func nodeComponentStatusByName(
+	statuses []v1.NodeComponentStatus,
+	name string,
+) (v1.NodeComponentStatus, bool) {
+	for _, status := range statuses {
+		if status.Name == name {
+			return status, true
+		}
+	}
+
+	return v1.NodeComponentStatus{}, false
 }
 
 func determineStaticNodeClusterPhase(ctx staticNodeClusterStatusContext) v1.StaticNodeClusterPhase {

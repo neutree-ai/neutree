@@ -1,3 +1,3 @@
 quay.io/prometheus/node-exporter:v1.8.2
 victoriametrics/vmagent:v1.115.0
-neutree/neutree-node-agent:latest
+neutree/neutree-node-agent:v1.1.0-alpha.7

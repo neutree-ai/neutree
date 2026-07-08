@@ -160,8 +160,8 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 				Accelerator: &v1.StaticNodeAcceleratorStatus{
 					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 3, MemoryMiB: 15360, Healthy: true},
-						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 0, MemoryMiB: 15360, Healthy: false},
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: intPtr(3), MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: intPtr(0), MemoryMiB: 15360, Healthy: false},
 					},
 				},
 				Allocations: []v1.StaticNodeAllocationStatus{
@@ -245,6 +245,151 @@ func TestStaticNodeResourceClientCompletesCPUAndMemoryFromBaseResources(t *testi
 	assert.Equal(t, float64(64), resources.Allocatable.Memory)
 	assert.Equal(t, float64(24), resources.Available.CPU)
 	assert.Equal(t, float64(48), resources.Available.Memory)
+}
+
+func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) {
+	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				IP: "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 100},
+							{UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50},
+						},
+					},
+				},
+			},
+		},
+	}, staticNodeBaseClient{nodes: []ResourceNode{
+		{
+			ID: "192.168.19.218",
+			Status: &v1.NodeResourceStatus{
+				ResourceStatus: v1.ResourceStatus{
+					Allocatable: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 1.5,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 1.5,
+								},
+							},
+						},
+					},
+					Available: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 0.5,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 0.5,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	nodes, err := client.ListNodes(context.Background(), staticNodeClusterForTest())
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, allocatable)
+	assert.Equal(t, float64(1.5), allocatable.Quantity)
+	assert.Equal(t, float64(1.5), allocatable.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(1.5), allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Equal(t, float64(23040), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(150), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
+
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, available)
+	assert.Equal(t, float64(0.5), available.Quantity)
+	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
+}
+
+func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAvailableDevices(t *testing.T) {
+	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				IP: "192.168.19.218",
+			},
+			Status: &v1.StaticNodeStatus{
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 100},
+							{UUID: "GPU-def", MemoryMiB: 15360, CoreUnits: 100},
+						},
+					},
+				},
+			},
+		},
+	}, staticNodeBaseClient{nodes: []ResourceNode{
+		{
+			ID: "192.168.19.218",
+			Status: &v1.NodeResourceStatus{
+				ResourceStatus: v1.ResourceStatus{
+					Allocatable: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 2,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 2,
+								},
+							},
+						},
+					},
+					Available: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 0.5,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 0.5,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	nodes, err := client.ListNodes(context.Background(), staticNodeClusterForTest())
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, available)
+	assert.Equal(t, float64(0.5), available.Quantity)
+	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	require.NotNil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
+	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
 
 func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T) {
@@ -517,4 +662,8 @@ func TestStaticNodeResourceClientReturnsBaseResourceClientError(t *testing.T) {
 
 	require.ErrorIs(t, err, expectedErr)
 	assert.Nil(t, nodes)
+}
+
+func intPtr(value int) *int {
+	return &value
 }

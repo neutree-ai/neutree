@@ -385,8 +385,8 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *t
 				Accelerator: &v1.StaticNodeAcceleratorStatus{
 					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-						{UUID: "GPU-abc", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 3, MemoryMiB: 15360, Healthy: true},
-						{UUID: "GPU-def", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: 0, MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-abc", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: intPtr(3), MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductName: "NVIDIA Tesla T4", ProductModel: "NVIDIA_Tesla_T4", MinorNumber: intPtr(0), MemoryMiB: 15360, Healthy: true},
 					},
 				},
 				Allocations: []v1.StaticNodeAllocationStatus{
@@ -450,12 +450,13 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *t
 	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
 	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	assert.Equal(t, float64(1), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
-	assert.Equal(t, float64(1),
+	assert.Equal(t, float64(2), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(2),
 		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
 	availableProduct := resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
+	assert.Equal(t, float64(2), availableProduct.Quantity)
 	assert.Equal(t, float64(15360), availableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), availableProduct.Virtualization.CoreUnits)
 	assert.Equal(t, float64(32), resources.Allocatable.CPU)
@@ -717,10 +718,13 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkips
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, resources)
-	assert.Equal(t, float64(1), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(2), resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(2),
+		resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
 	allocatableProduct := resources.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, allocatableProduct.Virtualization)
+	assert.Equal(t, float64(2), allocatableProduct.Quantity)
 	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
 	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
@@ -850,4 +854,8 @@ func TestStaticRayReconcilerDoesNotBlockWhenResourceCalculationFails(t *testing.
 	assert.Nil(t, cluster.Status.ResourceInfo)
 	mockDashboard.AssertExpectations(t)
 	store.AssertExpectations(t)
+}
+
+func intPtr(value int) *int {
+	return &value
 }

@@ -53,6 +53,7 @@ DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH, gauge, PCIe max link width.
 DCGM_FI_DEV_PCIE_LINK_GEN, gauge, PCIe current link generation.
 DCGM_FI_DEV_PCIE_LINK_WIDTH, gauge, PCIe current link width.
 DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL, counter, Total NVLink bandwidth counter.
+DCGM_FI_DEV_NVSWITCH_LINK_STATUS, gauge, NVSwitch link status.
 DCGM_FI_PROF_GR_ENGINE_ACTIVE, gauge, Ratio of time the graphics or compute engine is active.
 DCGM_FI_PROF_SM_ACTIVE, gauge, Ratio of cycles an SM has at least one active warp.
 DCGM_FI_PROF_SM_OCCUPANCY, gauge, Ratio of resident warps on an SM.
