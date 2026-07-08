@@ -40,6 +40,113 @@ func TestSSHFileClient_WriteFileIfChanged_SkipsWhenContentMatches(t *testing.T) 
 	mockExec.AssertExpectations(t)
 }
 
+func TestSSHFileClient_WriteFileIfChanged_SkipsWhenRemoteHashOutputHasWarnings(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := newSSHCommandRunner(mockExec)
+	content := []byte("scrape_configs: []\n")
+
+	mockExec.On("Execute", mock.Anything, "ssh", sshArgsContaining("uptime")).
+		Return([]byte("success"), nil).
+		Once()
+	mockExec.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		joined := strings.Join(args, " ")
+		return strings.Contains(joined, "sha256sum") &&
+			strings.Contains(joined, "/etc/vmagent/config.yaml")
+	})).
+		Return([]byte(strings.Join([]string{
+			"sudo: unable to resolve host x86-2204: Name or service not known",
+			strings.ToUpper(sha256Hex(content)) + "  /etc/vmagent/config.yaml",
+			"sudo: unable to resolve host x86-2204: Name or service not known",
+			"",
+		}, "\n")), nil).
+		Once()
+
+	changed, err := runner.Files().WriteFileIfChanged(
+		context.Background(),
+		"/etc/vmagent/config.yaml",
+		content,
+		WriteFileOptions{Sudo: true},
+	)
+
+	require.NoError(t, err)
+	assert.False(t, changed)
+	mockExec.AssertNotCalled(t, "Execute", mock.Anything, "scp", mock.Anything)
+	mockExec.AssertExpectations(t)
+}
+
+func TestRemoteSHA256FromOutput(t *testing.T) {
+	firstHash := strings.Repeat("a", 64)
+	secondHash := strings.Repeat("b", 64)
+
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			name:   "clean hash",
+			output: firstHash + "\n",
+			want:   firstHash,
+		},
+		{
+			name:   "sha256sum default output",
+			output: firstHash + "  /etc/neutree/config.yaml\n",
+			want:   firstHash,
+		},
+		{
+			name:   "warning before hash",
+			output: "sudo: unable to resolve host x86-2204: Name or service not known\n" + firstHash + "\n",
+			want:   firstHash,
+		},
+		{
+			name:   "warning after hash",
+			output: firstHash + "\nsudo: unable to resolve host x86-2204: Name or service not known\n",
+			want:   firstHash,
+		},
+		{
+			name:   "uppercase hash is normalized",
+			output: strings.ToUpper(firstHash) + "\n",
+			want:   firstHash,
+		},
+		{
+			name:   "last valid hash wins",
+			output: firstHash + "\n" + secondHash + "\n",
+			want:   secondHash,
+		},
+		{
+			name:   "hash-looking path does not override line hash",
+			output: firstHash + "  /etc/neutree/" + secondHash + "\n",
+			want:   firstHash,
+		},
+		{
+			name:   "warning only",
+			output: "sudo: unable to resolve host x86-2204: Name or service not known\n",
+			want:   "",
+		},
+		{
+			name:   "truncated hash",
+			output: strings.Repeat("c", 63) + "\n",
+			want:   "",
+		},
+		{
+			name:   "same length non-hex token",
+			output: strings.Repeat("g", 64) + "\n",
+			want:   "",
+		},
+		{
+			name:   "empty output",
+			output: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, remoteSHA256FromOutput(tt.output))
+		})
+	}
+}
+
 func TestSSHFileClient_WriteFile_UploadsAndInstallsAtomically(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)

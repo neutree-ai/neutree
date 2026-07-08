@@ -117,7 +117,40 @@ func (f *sshFileClient) remoteSha256(ctx context.Context, remotePath string, sud
 		return "", errors.Wrap(err, "failed to calculate remote file hash")
 	}
 
-	return strings.TrimSpace(output), nil
+	return remoteSHA256FromOutput(output), nil
+}
+
+func remoteSHA256FromOutput(output string) string {
+	hash := ""
+
+	for _, line := range strings.Split(output, "\n") {
+		for _, field := range strings.Fields(line) {
+			if isSHA256Hex(field) {
+				hash = strings.ToLower(field)
+				break
+			}
+		}
+	}
+
+	return hash
+}
+
+func isSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+
+	for _, char := range value {
+		if (char >= '0' && char <= '9') ||
+			(char >= 'a' && char <= 'f') ||
+			(char >= 'A' && char <= 'F') {
+			continue
+		}
+
+		return false
+	}
+
+	return true
 }
 
 func (f *sshFileClient) upload(ctx context.Context, localPath, remotePath string) error {

@@ -29,6 +29,10 @@ const (
 	testRayFileSDPath             = "/etc/neutree/ray/file_sd/ray.json"
 )
 
+func testStaticNodeMetadata(name string) *v1.Metadata {
+	return &v1.Metadata{Workspace: "default", Name: name}
+}
+
 func TestReconcilerReconcileWarmImages(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -622,8 +626,62 @@ func TestComponentContainerMatchesIgnoresSSHWarning(t *testing.T) {
 	assert.True(t, matches)
 }
 
+func TestComponentRestartReason(t *testing.T) {
+	tests := []struct {
+		name             string
+		configChanged    bool
+		containerMatches bool
+		inspectErr       error
+		want             string
+	}{
+		{
+			name:             "config changed",
+			configChanged:    true,
+			containerMatches: true,
+			want:             "config changed",
+		},
+		{
+			name:             "container mismatch",
+			configChanged:    false,
+			containerMatches: false,
+			want:             "container does not match desired state",
+		},
+		{
+			name:             "config changed and container mismatch",
+			configChanged:    true,
+			containerMatches: false,
+			want:             "config changed; container does not match desired state",
+		},
+		{
+			name:             "inspect error",
+			configChanged:    false,
+			containerMatches: false,
+			inspectErr:       errors.New("docker inspect failed"),
+			want:             "container inspect failed: docker inspect failed",
+		},
+		{
+			name:             "config changed and inspect error",
+			configChanged:    true,
+			containerMatches: false,
+			inspectErr:       errors.New("docker inspect failed"),
+			want:             "config changed; container inspect failed: docker inspect failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(
+				t,
+				tt.want,
+				componentRestartReason(tt.configChanged, tt.containerMatches, tt.inspectErr),
+			)
+		})
+	}
+}
+
 func TestReconcilerReconcileComponentsFailsWhenImageMissing(t *testing.T) {
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("node-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			Components: []v1.NodeComponentSpec{
@@ -669,6 +727,7 @@ func TestBuildDockerRunCommandQuotesDockerRunOptions(t *testing.T) {
 func TestReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("worker-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -729,6 +788,7 @@ func TestReconcilerReconcileComponentsStartsContainer(t *testing.T) {
 func TestReconcilerReconcileComponentsContinuesAfterIndependentFailure(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -802,6 +862,7 @@ func TestReconcilerReconcileComponentsContinuesAfterIndependentFailure(t *testin
 func TestReconcilerReconcileComponentsUsesLocalImageWithoutPull(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultPrometheusHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("worker-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -853,6 +914,7 @@ func TestReconcilerReconcileComponentsUsesLocalImageWithoutPull(t *testing.T) {
 func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -929,6 +991,7 @@ func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 func TestReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestartConfigChanged(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -983,6 +1046,7 @@ func TestReconcilerReconcileComponentsDoesNotRestartWhenOnlySkipRestartConfigCha
 
 func TestReconcilerReconcileComponentsStopsRemovedComponent(t *testing.T) {
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("node-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster:    "static-a",
 			IP:         "10.0.0.11",
@@ -1074,6 +1138,7 @@ func TestReconcilerDeleteRemovesDesiredAndObservedComponents(t *testing.T) {
 func TestReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("worker-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -1110,7 +1175,7 @@ func TestReconcilerReconcileComponentsChecksRayWorkerHTTPProbe(t *testing.T) {
 
 func TestReconcilerReconcileComponentsWaitsForHeadBeforeWorkerComponent(t *testing.T) {
 	node := &v1.StaticNode{
-		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
+		Metadata: testStaticNodeMetadata("worker-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      "10.0.0.11",
@@ -1153,7 +1218,7 @@ func TestClusterHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testing.T) {
 	}
 	checker := &ClusterHeadReadyChecker{Storage: store}
 	node := &v1.StaticNode{
-		Metadata: &v1.Metadata{Workspace: "default", Name: "worker-0"},
+		Metadata: testStaticNodeMetadata("worker-0"),
 		Spec:     &v1.StaticNodeSpec{Cluster: "static-a", Role: v1.StaticNodeRoleWorker},
 	}
 
@@ -1168,6 +1233,7 @@ func TestClusterHeadReadyCheckerReadsHeadStatusFromClusterNodes(t *testing.T) {
 func TestReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -1205,6 +1271,7 @@ func TestReconcilerReconcileComponentsChecksRayHeadHTTPProbe(t *testing.T) {
 func TestReconcilerReconcileComponentsChecksHTTPRootWhenHTTPPathEmpty(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, "/", `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
@@ -1240,6 +1307,7 @@ func TestReconcilerReconcileComponentsChecksHTTPRootWhenHTTPPathEmpty(t *testing
 func TestReconcilerReconcileComponentsReportsHealthCheckFailureWithoutRestart(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, "/health", `ok`)
 	node := &v1.StaticNode{
+		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
 			Cluster: "static-a",
 			IP:      healthHost,
