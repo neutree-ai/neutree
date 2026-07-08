@@ -13,6 +13,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/mock"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
@@ -21,6 +22,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -31,6 +33,57 @@ func metricsTestNode(name string, labels map[string]string) *corev1.Node {
 			Labels: labels,
 		},
 	}
+}
+
+func metricsTestNodeWithAnnotations(name string, annotations map[string]string) *corev1.Node {
+	node := metricsTestNode(name, nil)
+	node.Annotations = annotations
+
+	return node
+}
+
+func TestMetricsDeleteRemovesNeutreeAcceleratorDevicesAnnotation(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithObjects(
+		metricsTestNodeWithAnnotations("gpu-node", map[string]string{
+			resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-metrics"}]`,
+			"hami.io/node-nvidia-register":                     `[{"id":"GPU-hami"}]`,
+			"example.com/keep":                                 "value",
+		}),
+		metricsTestNodeWithAnnotations("cpu-node", map[string]string{
+			"example.com/keep": "value",
+		}),
+	).Build()
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:  "test-namespace",
+		ctrlClient: fakeClient,
+	}
+
+	err := metricsCmpt.Delete()
+
+	assert.NilError(t, err)
+
+	gotGPUNode := &corev1.Node{}
+	assert.NilError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-node"}, gotGPUNode))
+	assert.Assert(t, !hasKey(gotGPUNode.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation))
+	assert.Equal(t, gotGPUNode.Annotations["hami.io/node-nvidia-register"], `[{"id":"GPU-hami"}]`)
+	assert.Equal(t, gotGPUNode.Annotations["example.com/keep"], "value")
+
+	gotCPUNode := &corev1.Node{}
+	assert.NilError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "cpu-node"}, gotCPUNode))
+	assert.Equal(t, gotCPUNode.Annotations["example.com/keep"], "value")
+}
+
+func hasKey(values map[string]string, key string) bool {
+	_, ok := values[key]
+
+	return ok
 }
 
 func TestBuildVMAgentDeployment(t *testing.T) {
