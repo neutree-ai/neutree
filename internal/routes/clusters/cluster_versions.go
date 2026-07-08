@@ -112,6 +112,12 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		minClusterVersion, err := semver.NewVersion(v1.MinimumSelectableClusterVersionGate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("invalid minimum cluster version: %v", err)})
+			return
+		}
+
 		// Fetch labels concurrently for all tags
 		type tagResult struct {
 			version *semver.Version
@@ -148,6 +154,10 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 
 				v, parseErr := semver.NewVersion(versionStr)
 				if parseErr != nil {
+					return
+				}
+
+				if !minClusterVersion.LessThan(v) {
 					return
 				}
 
