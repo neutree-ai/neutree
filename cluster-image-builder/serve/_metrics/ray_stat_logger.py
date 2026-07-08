@@ -14,6 +14,7 @@ RayKVConnectorProm = getattr(
     "RayKVConnectorPrometheus",
     getattr(_ray_wrappers, "RayKVConnectorProm", None),
 )
+RayPerfMetricsProm = getattr(_ray_wrappers, "RayPerfMetricsProm", None)
 
 logger = logging.getLogger("ray.serve")
 
@@ -57,6 +58,15 @@ def _make_extended_kv_connector_cls(base_cls, extra_labels):
     return Extended
 
 
+def _make_extended_perf_metrics_cls(base_cls, extra_labels):
+    """Extend PerfMetricsProm counters with custom labels via its _cls vars."""
+
+    class Extended(base_cls):
+        _counter_cls = _make_extended_metric_cls(RayCounterWrapper, extra_labels)
+
+    return Extended
+
+
 class NeutreeRayStatLogger(RayPrometheusStatLogger):
     """RayPrometheusStatLogger with Ray Serve context labels injected.
 
@@ -94,6 +104,9 @@ class NeutreeRayStatLogger(RayPrometheusStatLogger):
             if RayKVConnectorProm is not None:
                 self._kv_connector_cls = _make_extended_kv_connector_cls(
                     RayKVConnectorProm, extra_labels)
+            if RayPerfMetricsProm is not None:
+                self._perf_metrics_cls = _make_extended_perf_metrics_cls(
+                    RayPerfMetricsProm, extra_labels)
 
         super().__init__(vllm_config, engine_indexes)
 
