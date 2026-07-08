@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 
+	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -165,7 +166,7 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if err := validateStaticNodeClusterFlowVersionUpdate(current, desiredVersion); err != nil {
+		if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
 			c.JSON(http.StatusBadRequest, &validationError{
 				Code:    "10212",
 				Message: "invalid cluster version update",
@@ -257,35 +258,59 @@ func resolveClusterForVersionUpdate(
 	return current, nil
 }
 
-func validateStaticNodeClusterFlowVersionUpdate(current *v1.Cluster, desiredVersion string) error {
-	if current.Spec.Type != v1.SSHClusterType {
-		return nil
-	}
-
-	currentUsesStaticFlow, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, current.GetVersion())
+func validateClusterVersionNotDowngrade(current *v1.Cluster, desiredVersion string) error {
+	baseline, err := currentClusterSpecVersionBaseline(current)
 	if err != nil {
-		return fmt.Errorf("invalid current cluster version %q: %w", current.GetVersion(), err)
+		return err
 	}
 
-	if !currentUsesStaticFlow {
+	if baseline == "" {
+		if err := validateDesiredClusterVersion(desiredVersion); err != nil {
+			return err
+		}
+
 		return nil
 	}
 
-	desiredUsesStaticFlow, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, desiredVersion)
+	desiredIsOlder, err := semver.LessThan(desiredVersion, baseline)
 	if err != nil {
 		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
 	}
 
-	if desiredUsesStaticFlow {
-		return nil
+	if desiredIsOlder {
+		return fmt.Errorf(
+			"cluster version downgrade is not supported: current version is %s, desired version is %s",
+			baseline,
+			desiredVersion,
+		)
 	}
 
-	return fmt.Errorf(
-		"cluster version downgrade from static flow to legacy flow is not supported for %s clusters; "+
-			"keep spec.version greater than %s or recreate the cluster if legacy flow is required",
-		current.Spec.Type,
-		v1.StaticNodeClusterFlowVersionGate,
-	)
+	return nil
+}
+
+func validateDesiredClusterVersion(desiredVersion string) error {
+	if _, err := mastermindssemver.NewVersion(desiredVersion); err != nil {
+		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
+	}
+
+	return nil
+}
+
+func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
+	if current == nil || current.Spec == nil {
+		return "", fmt.Errorf("current cluster spec is required")
+	}
+
+	baseline := current.GetVersion()
+	if baseline == "" {
+		return "", nil
+	}
+
+	if _, err := mastermindssemver.NewVersion(baseline); err != nil {
+		return "", nil
+	}
+
+	return baseline, nil
 }
 
 func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {

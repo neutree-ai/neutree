@@ -26,6 +26,10 @@ const (
 // backed lifecycle.
 const StaticNodeClusterFlowVersionGate = "v1.0.1"
 
+// MinimumSelectableClusterVersionGate is the highest cluster version hidden
+// from version selection and available-version responses.
+const MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
+
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
