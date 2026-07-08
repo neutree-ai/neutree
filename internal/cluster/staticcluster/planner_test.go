@@ -114,7 +114,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.7",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -145,15 +145,15 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.7", nodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8", nodeAgent.Image)
 	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
 	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
 	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
 	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
 	assert.NotContains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
 	assert.NotContains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:19400/metrics")
-	assert.NotContains(t, nodeAgent.Args, "--procfs-root=/host/proc")
-	assert.NotContains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
+	assert.Contains(t, nodeAgent.Args, "--procfs-root=/host/proc")
+	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
 	assert.Contains(t, nodeAgent.Args, "--node=head-0")
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nodeAgent.Env)
@@ -167,8 +167,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--gpus all")
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
-	assertNotContainsVolume(t, nodeAgent.Volumes, "host-proc")
-	assertNotContainsVolume(t, nodeAgent.Volumes, "host-cgroup")
+	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
+	requireVolume(t, nodeAgent, "host-cgroup", "/sys/fs/cgroup", "/host/sys/fs/cgroup")
 	require.Len(t, nodeAgent.Ports, 1)
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
@@ -249,7 +249,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.7",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -569,7 +569,7 @@ func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v9.9.9"
 
-	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-alpha.7", defaultNodeAgentImage(cluster))
+	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-alpha.8", defaultNodeAgentImage(cluster))
 }
 
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
@@ -616,7 +616,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.7",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }
@@ -1313,6 +1313,33 @@ func assertNotContainsVolume(t *testing.T, volumes []v1.NodeComponentVolume, nam
 	for _, volume := range volumes {
 		assert.NotEqual(t, name, volume.Name)
 	}
+}
+
+func requireVolume(
+	t *testing.T,
+	component *v1.NodeComponentSpec,
+	name string,
+	hostPath string,
+	mountPath string,
+) v1.NodeComponentVolume {
+	t.Helper()
+
+	require.NotNil(t, component)
+	for _, volume := range component.Volumes {
+		if volume.Name != name {
+			continue
+		}
+
+		assert.Equal(t, hostPath, volume.HostPath)
+		assert.Equal(t, mountPath, volume.MountPath)
+		assert.True(t, volume.ReadOnly)
+
+		return volume
+	}
+
+	t.Fatalf("expected component %s to have volume %s", component.Name, name)
+
+	return v1.NodeComponentVolume{}
 }
 
 func findStaticNode(nodes []*v1.StaticNode, name string) *v1.StaticNode {

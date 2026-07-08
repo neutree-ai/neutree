@@ -183,6 +183,8 @@ func buildNodeAgentComponent(
 		"--cluster-type=ray",
 		"--metrics-mode=" + string(acceleratorExporterMode(cluster)),
 		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
+		"--procfs-root=/host/proc",
+		"--cgroupfs-root=/host/sys/fs/cgroup",
 	}
 
 	if node != nil && node.Metadata != nil {
@@ -199,6 +201,20 @@ func buildNodeAgentComponent(
 		Args:             args,
 		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
+		Volumes: []v1.NodeComponentVolume{
+			{
+				Name:      "host-proc",
+				HostPath:  "/proc",
+				MountPath: "/host/proc",
+				ReadOnly:  true,
+			},
+			{
+				Name:      "host-cgroup",
+				HostPath:  "/sys/fs/cgroup",
+				MountPath: "/host/sys/fs/cgroup",
+				ReadOnly:  true,
+			},
+		},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
