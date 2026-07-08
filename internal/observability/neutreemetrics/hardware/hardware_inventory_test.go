@@ -89,6 +89,17 @@ DCGM_FI_DEV_NVSWITCH_LINK_STATUS{nvswitch="0",link="0"} 0
 	assert.Equal(t, "0", infos[0].NVSwitch)
 }
 
+func TestGPUHardwareInfosFromAcceleratorMetricsTreatsPerGPUNVSwitchZeroAsAbsent(t *testing.T) {
+	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="H100"} 87
+DCGM_FI_DEV_NVSWITCH_LINK_STATUS{gpu="0",UUID="GPU-abc",nvswitch="0",link="0"} 0
+`
+
+	infos := gpuHardwareInfosFromAcceleratorMetrics(raw)
+
+	require.Len(t, infos, 1)
+	assert.Equal(t, "0", infos[0].NVSwitch)
+}
+
 func TestNVMLGPUHardwareInfoProviderUsesClientFields(t *testing.T) {
 	provider := NVMLGPUHardwareInfoProvider{
 		client: fakeNVMLGPUHardwareClient{

@@ -151,8 +151,10 @@ func applyDCGMHardwareSample(info *model.GPUHardwareInfo, s *prommodel.Sample) {
 			info.NVLink = hardwarePresentValue
 		}
 	case "DCGM_FI_DEV_NVSWITCH_LINK_STATUS":
-		if value >= 0 {
+		if value != 0 {
 			info.NVSwitch = hardwarePresentValue
+		} else if info.NVSwitch == "" || isUnknownHardwareLiteral(info.NVSwitch) {
+			info.NVSwitch = hardwareAbsentValue
 		}
 	}
 }
