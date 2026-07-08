@@ -164,6 +164,7 @@ func (r *Reconciler) ReconcileNodeDeviceSnapshot(
 
 	allocations := snapshotStaticNodeAllocations(snapshot)
 	accelerator := mergeStaticNodeDeviceSnapshotAccelerator(fallback, snapshot.Accelerator)
+
 	if accelerator.Type == "" {
 		return fallback, allocations, nil
 	}

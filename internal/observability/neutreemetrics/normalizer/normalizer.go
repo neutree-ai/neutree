@@ -678,12 +678,14 @@ func explicitEndpointReplicaGPUUsageMemoryUsedBytesForAllocation(
 ) (float64, bool) {
 	key := endpointReplicaGPUUsageKeyFromAllocation(labels, allocation, device)
 	value, ok := usages[key]
+
 	if ok {
 		return value, true
 	}
 
 	key.vdeviceIndex = ""
 	value, ok = usages[key]
+
 	return value, ok
 }
 
@@ -937,10 +939,12 @@ func enrichEndpointReplicaGPUUsage(
 ) model.EndpointReplicaGPUUsage {
 	key := endpointReplicaGPUUsageKeyFromUsage(labels, usage)
 	context, ok := allocationContext[key]
+
 	if !ok {
 		key.vdeviceIndex = ""
 		context, ok = allocationContext[key]
 	}
+
 	if !ok {
 		return usage
 	}

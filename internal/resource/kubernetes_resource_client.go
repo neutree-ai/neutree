@@ -622,6 +622,7 @@ func replaceKubernetesNeutreeResourceInfo(target, enhancement *v1.ResourceInfo) 
 				targetProduct = &v1.AcceleratorProductResource{}
 				targetGroup.Products[product] = targetProduct
 			}
+
 			targetProduct.Quantity = sourceQuantity
 
 			sourceProduct := sourceGroup.Products[product]
@@ -640,6 +641,7 @@ func replaceKubernetesNeutreeResourceInfo(target, enhancement *v1.ResourceInfo) 
 
 func kubernetesAcceleratorGroupProducts(groups ...*v1.AcceleratorGroup) []v1.AcceleratorProduct {
 	productSet := make(map[v1.AcceleratorProduct]struct{})
+
 	for _, group := range groups {
 		if group == nil {
 			continue

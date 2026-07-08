@@ -329,9 +329,11 @@ func desiredComponentStatusMessage(
 	if status.Phase != "" {
 		details = append(details, "phase="+string(status.Phase))
 	}
+
 	if status.Reason != "" {
 		details = append(details, "reason="+status.Reason)
 	}
+
 	if status.Message != "" {
 		details = append(details, "message="+status.Message)
 	}

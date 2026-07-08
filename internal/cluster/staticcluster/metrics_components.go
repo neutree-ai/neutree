@@ -252,14 +252,6 @@ func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
 	return "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 }
 
-func staticNodeClusterVersion(cluster *v1.StaticNodeCluster) string {
-	if cluster == nil || cluster.Spec == nil {
-		return ""
-	}
-
-	return cluster.Spec.Version
-}
-
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
 	exporter := acceleratorExporterProfile(profile)

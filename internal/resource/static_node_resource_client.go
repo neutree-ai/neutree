@@ -247,6 +247,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		})
 
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
+
 		if productMemoryMiB == 0 && device.MemoryMiB > 0 {
 			productMemoryMiB = float64(device.MemoryMiB)
 		}
@@ -362,6 +363,7 @@ func completeStaticNodeAcceleratorQuantity(
 	}
 
 	targetGroups := targetInfo.AcceleratorGroups
+
 	targetGroup := targetGroups[acceleratorType]
 	if targetGroup == nil {
 		targetGroup = &v1.AcceleratorGroup{}
@@ -375,16 +377,19 @@ func completeStaticNodeAcceleratorQuantity(
 	if targetGroup.ProductGroups == nil {
 		targetGroup.ProductGroups = make(map[v1.AcceleratorProduct]float64)
 	}
+
 	targetGroup.ProductGroups[productName] = productQuantity
 
 	if targetGroup.Products == nil {
 		targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
 	}
+
 	targetProduct := targetGroup.Products[productName]
 	if targetProduct == nil {
 		targetProduct = &v1.AcceleratorProductResource{}
 		targetGroup.Products[productName] = targetProduct
 	}
+
 	targetProduct.Quantity = productQuantity
 	completeStaticNodeFractionalAcceleratorVirtualization(targetProduct, productQuantity, productMemoryMiB)
 }

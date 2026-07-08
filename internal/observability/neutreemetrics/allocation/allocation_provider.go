@@ -703,15 +703,6 @@ func allocationDevicesFromRefsWithQuantity(
 	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, nil, gpuQuantity)
 }
 
-func allocationDevicesFromRefsWithUsage(
-	refs []string,
-	deviceLookup acceleratorDeviceLookup,
-	nodeID string,
-	usedMemoryMiBByUUID map[string]int64,
-) []v1.DeviceAllocation {
-	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, usedMemoryMiBByUUID, 0)
-}
-
 func allocationDevicesFromRefsWithUsageAndQuantity(
 	refs []string,
 	deviceLookup acceleratorDeviceLookup,
@@ -807,6 +798,7 @@ func rayDeploymentGPUQuantity(status dashboard.RayServeApplicationStatus, deploy
 		}
 
 		quantity, ok := numberAsFloat64(deploymentOptions["num_gpus"])
+
 		return quantity, ok
 	}
 
