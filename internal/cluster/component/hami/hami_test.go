@@ -26,6 +26,13 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
+var testHAMiNodeAnnotations = []string{
+	"hami.io/node-nvidia-register",
+	"hami.io/node-nvidia-score",
+	"hami.io/node-handshake",
+	"hami.io/mutex.lock",
+}
+
 func TestHAMiComponentResources(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
@@ -545,21 +552,27 @@ func TestHAMiDeleteRemovesComponentStatus(t *testing.T) {
 	assert.NotContains(t, cluster.Status.ComponentStatus, v1.ComponentStatusAcceleratorVirtualizationKey)
 }
 
-func TestHAMiDeleteRemovesEnabledNodeScopeLabels(t *testing.T) {
+func TestHAMiDeleteRemovesOwnedNodeScopeState(t *testing.T) {
 	enabledNode := newHAMiNode("gpu-enabled", map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
 	})
 	enabledNode.Annotations = map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-enabled"}]`,
+		"hami.io/node-nvidia-score":                        `[{"uuid":"GPU-enabled"}]`,
+		"hami.io/node-handshake":                           "Reported",
+		"hami.io/mutex.lock":                               "lock-values,default,pod-gpu",
 		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-enabled"}]`,
 	}
 	disabledNode := newHAMiNode("gpu-disabled", map[string]string{
 		plugin.NvidiaGPUVirtualizationLabelKey: "false",
 	})
 	disabledNode.Annotations = map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-disabled"}]`,
 		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-disabled"}]`,
 	}
 	unlabeledNode := newHAMiNode("gpu-unlabeled", map[string]string{})
 	unlabeledNode.Annotations = map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-unlabeled"}]`,
 		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-unlabeled"}]`,
 	}
 	fakeClient := newHAMiFakeClient(t, enabledNode, disabledNode, unlabeledNode)
@@ -575,17 +588,20 @@ func TestHAMiDeleteRemovesEnabledNodeScopeLabels(t *testing.T) {
 	gotEnabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
 	assert.NotContains(t, gotEnabled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
-	assert.NotContains(t, gotEnabled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
+	assertHAMiNodeAnnotationsRemoved(t, gotEnabled.Annotations)
+	assert.Contains(t, gotEnabled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 
 	gotDisabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-disabled"}, gotDisabled))
 	assert.Equal(t, "false", gotDisabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
-	assert.NotContains(t, gotDisabled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
+	assertHAMiNodeAnnotationsRemoved(t, gotDisabled.Annotations)
+	assert.Contains(t, gotDisabled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 
 	gotUnlabeled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-unlabeled"}, gotUnlabeled))
 	assert.NotContains(t, gotUnlabeled.Labels, plugin.NvidiaGPUVirtualizationLabelKey)
-	assert.NotContains(t, gotUnlabeled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
+	assertHAMiNodeAnnotationsRemoved(t, gotUnlabeled.Annotations)
+	assert.Contains(t, gotUnlabeled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 }
 
 func TestHAMiDeleteSkipsNodeScopeCleanupWhenClusterDoesNotOwnVirtualization(t *testing.T) {
@@ -593,6 +609,7 @@ func TestHAMiDeleteSkipsNodeScopeCleanupWhenClusterDoesNotOwnVirtualization(t *t
 		plugin.NvidiaGPUVirtualizationLabelKey: "true",
 	})
 	enabledNode.Annotations = map[string]string{
+		"hami.io/node-nvidia-register":                     `[{"id":"GPU-owned-by-other"}]`,
 		resourceparser.NeutreeAcceleratorDevicesAnnotation: `[{"uuid":"GPU-owned-by-other"}]`,
 	}
 	fakeClient := newHAMiFakeClient(t, enabledNode)
@@ -608,6 +625,7 @@ func TestHAMiDeleteSkipsNodeScopeCleanupWhenClusterDoesNotOwnVirtualization(t *t
 	gotEnabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "gpu-enabled"}, gotEnabled))
 	assert.Equal(t, "true", gotEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+	assert.Contains(t, gotEnabled.Annotations, "hami.io/node-nvidia-register")
 	assert.Contains(t, gotEnabled.Annotations, resourceparser.NeutreeAcceleratorDevicesAnnotation)
 }
 
@@ -666,6 +684,14 @@ func TestHAMiDeleteUsesPluginNodeScopeLabel(t *testing.T) {
 	gotDefaultEnabled := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "default-enabled"}, gotDefaultEnabled))
 	assert.Equal(t, "true", gotDefaultEnabled.Labels[plugin.NvidiaGPUVirtualizationLabelKey])
+}
+
+func assertHAMiNodeAnnotationsRemoved(t *testing.T, annotations map[string]string) {
+	t.Helper()
+
+	for _, key := range testHAMiNodeAnnotations {
+		assert.NotContains(t, annotations, key)
+	}
 }
 
 func assertHasObject(t *testing.T, items []unstructured.Unstructured, kind, name string) {

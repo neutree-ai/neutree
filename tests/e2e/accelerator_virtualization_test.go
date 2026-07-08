@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -178,30 +177,6 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, fullCardEndpointName)
 		})
 
-		It("should clean node device annotations when deleting the virtualized cluster", Label("C2729471"), func() {
-			ctx := context.Background()
-			k8sH := NewK8sHelper(kubeconfig)
-
-			By("Capturing GPU nodes with Neutree device annotations")
-			nodeNames := expectK8sNodeAcceleratorDeviceAnnotations(ctx, k8sH)
-
-			if endpointName != "" {
-				deleteEndpoint(endpointName)
-				endpointName = ""
-			}
-
-			if fullCardEndpointName != "" {
-				deleteEndpoint(fullCardEndpointName)
-				fullCardEndpointName = ""
-			}
-
-			By("Deleting virtualized cluster")
-			teardownCluster(clusterName)
-			clusterName = ""
-
-			By("Verifying HAMi cleanup removed Neutree device annotations")
-			assertK8sNodeAcceleratorDeviceAnnotationsRemoved(ctx, k8sH, nodeNames)
-		})
 	})
 
 func requireAcceleratorVirtualizationProfile() {
