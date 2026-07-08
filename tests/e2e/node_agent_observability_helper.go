@@ -477,6 +477,59 @@ func assertK8sNodeAcceleratorDeviceAnnotations(ctx context.Context, k8sH *K8sHel
 	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
 }
 
+func expectK8sNodeAcceleratorDeviceAnnotations(ctx context.Context, k8sH *K8sHelper) []string {
+	var nodeNames []string
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		nodes, err := k8sH.ListNodes(ctx, "nvidia.com/gpu.present=true")
+		g.Expect(err).NotTo(HaveOccurred(), "should list NVIDIA GPU nodes")
+		g.Expect(nodes).NotTo(BeEmpty(), "GPU nodes should exist")
+
+		nodeNames = nodeNames[:0]
+		var missing []string
+		for _, node := range nodes {
+			nodeNames = append(nodeNames, node.Name)
+			if err := validateNodeDeviceAnnotation(node.Annotations); err != nil {
+				missing = append(missing, fmt.Sprintf("%s: %v", node.Name, err))
+			}
+		}
+
+		g.Expect(missing).To(BeEmpty(), "all GPU nodes should have accelerator device annotations")
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+
+	return nodeNames
+}
+
+func assertK8sNodeAcceleratorDeviceAnnotationsRemoved(
+	ctx context.Context,
+	k8sH *K8sHelper,
+	nodeNames []string,
+) {
+	ExpectWithOffset(1, nodeNames).NotTo(BeEmpty(), "captured GPU nodes should not be empty")
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		nodes, err := k8sH.ListNodes(ctx, "")
+		g.Expect(err).NotTo(HaveOccurred(), "should list cluster nodes")
+
+		nodeByName := make(map[string]corev1.Node, len(nodes))
+		for _, node := range nodes {
+			nodeByName[node.Name] = node
+		}
+
+		var remaining []string
+		for _, name := range nodeNames {
+			node, ok := nodeByName[name]
+			g.Expect(ok).To(BeTrue(), "captured node %s should still exist", name)
+
+			if _, ok := node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation]; ok {
+				remaining = append(remaining, name)
+			}
+		}
+
+		g.Expect(remaining).To(BeEmpty(), "Neutree device annotations should be removed")
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
 func k8sClusterNamespace(clusterName string) string {
 	cluster := getClusterFullJSON(clusterName)
 	ExpectWithOffset(1, cluster.Metadata).NotTo(BeNil())
