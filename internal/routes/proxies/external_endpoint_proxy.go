@@ -34,8 +34,8 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", StampCredentialOwnerLabel(), handler)
-	proxyGroup.PATCH("", PinCredentialOwnerLabel(deps, storage.EXTERNAL_ENDPOINT_TABLE), handler)
+	proxyGroup.POST("", handler)
+	proxyGroup.PATCH("", handler)
 
 	// Test connectivity endpoint
 	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))
@@ -267,7 +267,6 @@ func backfillAuthCredential(c *gin.Context, deps *Dependencies, req *testConnect
 		Filters: []storage.Filter{
 			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(*req.Name)},
 			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
-			CredentialOwnerFilter(userID),
 		},
 	})
 	if err != nil || len(ees) == 0 {

@@ -379,11 +379,7 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 
 				if granted {
 					mockStorage.On("ListExternalEndpoint", mock.MatchedBy(func(opt storage.ListOption) bool {
-						if len(opt.Filters) != 3 {
-							return false
-						}
-
-						return opt.Filters[2] == CredentialOwnerFilter("test-user-uuid")
+						return len(opt.Filters) == 2
 					})).Return([]v1.ExternalEndpoint{
 						{
 							Spec: &v1.ExternalEndpointSpec{
