@@ -491,6 +491,19 @@
             },
             "properties": [
               {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "unknown": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
                 "id": "custom.wrapText",
                 "value": true
               }
