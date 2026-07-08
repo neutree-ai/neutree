@@ -390,6 +390,7 @@ func hamiDeviceAllocationsFromAnnotation(
 
 	for _, entry := range strings.Split(value, ";") {
 		vdeviceIndex := 0
+
 		for _, segment := range strings.Split(entry, ":") {
 			segment = strings.TrimSpace(segment)
 			if segment == "" {
