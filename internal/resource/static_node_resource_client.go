@@ -3,7 +3,6 @@ package resource
 import (
 	"context"
 	"errors"
-	"math"
 	"sort"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -216,7 +215,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 	allocationsByUUID := staticNodeAllocationsByUUID(node.Status.Allocations)
 	ordersByUUID := staticNodeDeviceOrders(node.Status.Accelerator.Devices)
 	baseProduct := staticNodeBaseAcceleratorProduct(base, acceleratorType)
-	var productMemoryMiB float64
 
 	if baseProduct == "" {
 		return ResourceNode{}, false
@@ -248,10 +246,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
-		if productMemoryMiB == 0 && device.MemoryMiB > 0 {
-			productMemoryMiB = float64(device.MemoryMiB)
-		}
-
 		if device.Healthy {
 			addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 		}
@@ -265,7 +259,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
-	completeStaticNodeAcceleratorQuantities(nodeStatus, base, acceleratorType, baseProduct, productMemoryMiB)
+	completeStaticNodeAcceleratorQuantities(nodeStatus, base, acceleratorType, baseProduct)
 
 	return ResourceNode{
 		ID:                  staticNodeResourceKey(node),
@@ -329,7 +323,6 @@ func completeStaticNodeAcceleratorQuantities(
 	base *ResourceNode,
 	acceleratorType v1.AcceleratorType,
 	product string,
-	productMemoryMiB float64,
 ) {
 	if status == nil || base == nil || base.Status == nil {
 		return
@@ -337,9 +330,9 @@ func completeStaticNodeAcceleratorQuantities(
 
 	// Static clusters support fractional GPU quantities. Keep the group-level
 	// quantity aligned with the native Ray dashboard resources, while device
-	// pools still come from the node-agent snapshot.
-	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product, productMemoryMiB)
-	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product, productMemoryMiB)
+	// pools and virtualization details still come from the node-agent snapshot.
+	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
+	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
 }
 
 func completeStaticNodeAcceleratorQuantity(
@@ -347,7 +340,6 @@ func completeStaticNodeAcceleratorQuantity(
 	baseInfo *v1.ResourceInfo,
 	acceleratorType v1.AcceleratorType,
 	product string,
-	productMemoryMiB float64,
 ) {
 	if targetInfo == nil || baseInfo == nil || acceleratorType == "" || product == "" {
 		return
@@ -391,26 +383,6 @@ func completeStaticNodeAcceleratorQuantity(
 	}
 
 	targetProduct.Quantity = productQuantity
-	completeStaticNodeFractionalAcceleratorVirtualization(targetProduct, productQuantity, productMemoryMiB)
-}
-
-func completeStaticNodeFractionalAcceleratorVirtualization(
-	productResource *v1.AcceleratorProductResource,
-	quantity float64,
-	productMemoryMiB float64,
-) {
-	if productResource == nil || quantity <= 0 || productMemoryMiB <= 0 || !isFractionalQuantity(quantity) {
-		return
-	}
-
-	productResource.Virtualization = &v1.AcceleratorVirtualizationResource{
-		MemoryMiB: productMemoryMiB * quantity,
-		CoreUnits: 100 * quantity,
-	}
-}
-
-func isFractionalQuantity(quantity float64) bool {
-	return math.Abs(quantity-math.Trunc(quantity)) > 1e-9
 }
 
 func baseStaticNodeProductQuantity(

@@ -311,8 +311,8 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 	assert.Equal(t, float64(1.5), allocatable.Quantity)
 	assert.Equal(t, float64(1.5), allocatable.ProductGroups["NVIDIA_Tesla_T4"])
 	assert.Equal(t, float64(1.5), allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
-	assert.Equal(t, float64(23040), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
-	assert.Equal(t, float64(150), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
+	assert.Equal(t, float64(30720), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(200), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 
 	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 	require.NotNil(t, available)
@@ -387,9 +387,7 @@ func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAv
 	assert.Equal(t, float64(0.5), available.Quantity)
 	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
 	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
-	require.NotNil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
-	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
-	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
+	assert.Nil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
 }
 
 func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T) {
