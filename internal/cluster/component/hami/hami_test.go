@@ -244,6 +244,26 @@ func TestHAMiComponentReconcileWritesNotReadyStatusWhenDaemonSetMissing(t *testi
 	assert.Equal(t, "DaemonSetNotReady", cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey].Reason)
 }
 
+func TestHAMiStatusErrorMessageIncludesReason(t *testing.T) {
+	err := hamiStatusError(&HAMiStatus{
+		Reason:  "DaemonSetNotReady",
+		Message: "daemonset hami-device-plugin ready 0/1",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t,
+		"accelerator virtualization component is not ready: DaemonSetNotReady daemonset hami-device-plugin ready 0/1",
+		err.Error(),
+	)
+}
+
+func TestHAMiStatusErrorMessageOmitsEmptyDetails(t *testing.T) {
+	err := hamiStatusError(&HAMiStatus{})
+
+	require.Error(t, err)
+	assert.Equal(t, "accelerator virtualization component is not ready", err.Error())
+}
+
 func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	fakeClient := newHAMiFakeClient(t,
 		newHAMiNode("plugin-candidate", map[string]string{}),

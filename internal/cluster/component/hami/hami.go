@@ -3,6 +3,7 @@ package hami
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -95,7 +96,7 @@ func (h *HAMiComponent) Reconcile() error {
 
 	if !status.Ready {
 		h.setNotReadyStatus(status.Reason, status.Message)
-		return fmt.Errorf("accelerator virtualization component is not fully ready: %s", status.Message)
+		return hamiStatusError(status)
 	}
 
 	h.writeStatus(status.ComponentStatus())
@@ -154,6 +155,19 @@ func (h *HAMiComponent) setNotReadyStatus(reason, message string) {
 		Reason:  reason,
 		Message: message,
 	})
+}
+
+func hamiStatusError(status *HAMiStatus) error {
+	if status == nil {
+		return fmt.Errorf("accelerator virtualization component is not ready")
+	}
+
+	detail := strings.TrimSpace(strings.Join([]string{status.Reason, status.Message}, " "))
+	if detail == "" {
+		return fmt.Errorf("accelerator virtualization component is not ready")
+	}
+
+	return fmt.Errorf("accelerator virtualization component is not ready: %s", detail)
 }
 
 func (h *HAMiComponent) writeStatus(status *v1.ComponentStatus) {
