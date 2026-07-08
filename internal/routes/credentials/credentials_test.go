@@ -36,7 +36,7 @@ func TestHandleResourceCredentialsForwardsRequestUnmodified(t *testing.T) {
 	// RBAC (RequirePermission on the route), not by an owner filter.
 	c.Request = httptest.NewRequest(
 		http.MethodGet,
-		"/credentials/model_registries?metadata-%3Eworkspace=eq.%22default%22",
+		"/credentials/model_registries?metadata-%3E%3Eworkspace=eq.default",
 		nil,
 	)
 
@@ -46,5 +46,23 @@ func TestHandleResourceCredentialsForwardsRequestUnmodified(t *testing.T) {
 	handler(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, `metadata-%3Eworkspace=eq.%22default%22`, capturedQuery)
+	assert.Equal(t, `metadata-%3E%3Eworkspace=eq.default`, capturedQuery)
+}
+
+func TestRegisterCredentialsRoutesOmitsExternalEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	RegisterCredentialsRoutes(router.Group("/api/v1"), nil, &Dependencies{})
+
+	var paths []string
+	for _, r := range router.Routes() {
+		paths = append(paths, r.Path)
+	}
+
+	assert.Contains(t, paths, "/api/v1/credentials/clusters")
+	assert.Contains(t, paths, "/api/v1/credentials/image_registries")
+	assert.Contains(t, paths, "/api/v1/credentials/model_registries")
+	assert.NotContains(t, paths, "/api/v1/credentials/external_endpoints",
+		"external endpoint credentials must never be exported via the credentials API")
 }

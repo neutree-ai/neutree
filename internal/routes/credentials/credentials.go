@@ -16,13 +16,13 @@ type Dependencies struct {
 
 // RegisterCredentialsRoutes registers credentials retrieval routes
 // This is a separate API group to ensure explicit intent when accessing sensitive data
-// For every resource, we will check the permission before return the sensitive data
-// Now only support clusters, image registries, and model registries.
+// For every resource, we will check the permission before returning the sensitive data
+// Now only supports clusters, image registries, and model registries.
 // External endpoint credentials are intentionally NOT exposed here: users
 // attach their own third-party API keys to external endpoints, and those
 // keys are write-only (never readable back via the API, by anyone,
-// including the owner or an admin). Edits that don't change the key reuse
-// the stored value server-side via backfillAuthCredential.
+// including the owner or an admin). Edits that don't change the key will
+// reuse the stored value server-side via backfillAuthCredential.
 func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	credGroup := group.Group("/credentials")
 	credGroup.Use(middlewares...)
