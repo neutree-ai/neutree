@@ -712,7 +712,6 @@ func allocationDevicesFromRefsWithUsageAndQuantity(
 ) []v1.DeviceAllocation {
 	devices := make([]v1.DeviceAllocation, 0, len(refs))
 	seen := map[string]struct{}{}
-	remainingQuantity := gpuQuantity
 
 	for _, ref := range refs {
 		device, ok := deviceFromRef(ref, deviceLookup)
@@ -725,13 +724,7 @@ func allocationDevicesFromRefsWithUsageAndQuantity(
 		}
 
 		seen[device.UUID] = struct{}{}
-
-		deviceQuantity := allocationDeviceQuantity(&remainingQuantity)
-		if gpuQuantity > 0 && deviceQuantity <= 0 {
-			break
-		}
-
-		memoryMiB, coreUnits := allocationDeviceCapacity(device, deviceQuantity)
+		memoryMiB, coreUnits := allocationDeviceCapacity(device, gpuQuantity)
 
 		allocation := v1.DeviceAllocation{
 			UUID:      device.UUID,
@@ -776,19 +769,8 @@ func allocationDevicesFromGPUProcesses(
 	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, usedMemoryMiBByUUID, gpuQuantity), nil
 }
 
-func allocationDeviceQuantity(remainingQuantity *float64) float64 {
-	if remainingQuantity == nil || *remainingQuantity <= 0 {
-		return 0
-	}
-
-	quantity := math.Min(*remainingQuantity, 1)
-	*remainingQuantity -= quantity
-
-	return quantity
-}
-
 func allocationDeviceCapacity(device v1.StaticNodeAcceleratorDeviceStatus, gpuQuantity float64) (int64, int64) {
-	if gpuQuantity > 0 {
+	if gpuQuantity > 0 && gpuQuantity < 1 {
 		return int64(math.Round(float64(device.MemoryMiB) * gpuQuantity)), int64(math.Round(100 * gpuQuantity))
 	}
 
