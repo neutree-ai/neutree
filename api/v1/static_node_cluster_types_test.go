@@ -97,7 +97,7 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 						UUID:         "GPU-abc",
 						ProductName:  "NVIDIA A100",
 						ProductModel: "NVIDIA_A100",
-						MinorNumber:  0,
+						MinorNumber:  intPtr(0),
 						MemoryMiB:    81920,
 						Healthy:      true,
 					},
@@ -136,6 +136,7 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"docker_run_options":["--net=host"]`)
 	assert.Contains(t, string(data), `"config_files"`)
+	assert.Contains(t, string(data), `"minor_number":0`)
 
 	decoded := &StaticNode{}
 	require.NoError(t, json.Unmarshal(data, decoded))
@@ -148,6 +149,8 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.Len(t, decoded.Status.Accelerator.Devices, 1)
 	assert.Equal(t, "GPU-abc", decoded.Status.Accelerator.Devices[0].UUID)
 	assert.Equal(t, "NVIDIA_A100", decoded.Status.Accelerator.Devices[0].ProductModel)
+	require.NotNil(t, decoded.Status.Accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 0, *decoded.Status.Accelerator.Devices[0].MinorNumber)
 	assert.Equal(t, int64(81920), decoded.Status.Accelerator.Devices[0].MemoryMiB)
 	require.Len(t, decoded.Status.Components, 1)
 	assert.Equal(t, NodeComponentPhaseRunning, decoded.Status.Components[0].Phase)
@@ -262,4 +265,8 @@ func TestStaticNodeListSetItems(t *testing.T) {
 	assert.Equal(t, "node-1", list.Items[0].GetName())
 	assert.Equal(t, "node-2", list.Items[1].GetName())
 	assert.Len(t, list.GetItems(), 2)
+}
+
+func intPtr(value int) *int {
+	return &value
 }

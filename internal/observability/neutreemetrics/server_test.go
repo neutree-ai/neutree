@@ -608,7 +608,8 @@ func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&snapshot))
 	require.Len(t, snapshot.Accelerator.Devices, 1)
 	assert.Equal(t, "7", snapshot.Accelerator.Devices[0].ID)
-	assert.Equal(t, 3, snapshot.Accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 3, *snapshot.Accelerator.Devices[0].MinorNumber)
 }
 
 func TestServerNodeDeviceSnapshotAllowsRequests(t *testing.T) {

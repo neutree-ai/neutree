@@ -297,6 +297,22 @@ func TestBuildStatusWritesNodeDeviceSnapshotAllocations(t *testing.T) {
 	assert.Equal(t, "replica-a", status.Allocations[0].ReplicaID)
 }
 
+func TestBuildStatusClearsNodeDeviceSnapshotAllocations(t *testing.T) {
+	node := &v1.StaticNode{
+		Status: &v1.StaticNodeStatus{
+			Allocations: []v1.StaticNodeAllocationStatus{
+				{Endpoint: "previous", ReplicaID: "replica-old"},
+			},
+		},
+	}
+
+	status := BuildStatus(node, &ReconcileResult{
+		Allocations: []v1.StaticNodeAllocationStatus{},
+	}, nil)
+
+	assert.Empty(t, status.Allocations)
+}
+
 func TestBuildStatusEmptyComponentsReconciling(t *testing.T) {
 	status := BuildStatus(&v1.StaticNode{}, &ReconcileResult{
 		Accelerator: &v1.StaticNodeAcceleratorStatus{Type: v1.StaticNodeAcceleratorTypeCPU},
@@ -362,7 +378,6 @@ func TestReconcilerReconcileNodeDeviceSnapshotUsesAgentForDetails(t *testing.T) 
 						UUID:         "GPU-abc",
 						ProductName:  "NVIDIA A100",
 						ProductModel: "NVIDIA_A100",
-						MinorNumber:  v1.StaticNodeAcceleratorDeviceMinorNumberUnknown,
 					},
 				},
 			},
@@ -378,7 +393,7 @@ func TestReconcilerReconcileNodeDeviceSnapshotUsesAgentForDetails(t *testing.T) 
 		&v1.StaticNodeAcceleratorStatus{
 			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-				{UUID: "GPU-abc", ID: "3", MinorNumber: 3, MemoryMiB: 81920},
+				{UUID: "GPU-abc", ID: "3", MinorNumber: intPtr(3), MemoryMiB: 81920},
 			},
 		},
 		[]v1.NodeComponentStatus{
@@ -392,10 +407,49 @@ func TestReconcilerReconcileNodeDeviceSnapshotUsesAgentForDetails(t *testing.T) 
 	require.Len(t, accelerator.Devices, 1)
 	assert.Equal(t, "GPU-abc", accelerator.Devices[0].UUID)
 	assert.Equal(t, "3", accelerator.Devices[0].ID)
-	assert.Equal(t, 3, accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 3, *accelerator.Devices[0].MinorNumber)
 	assert.Equal(t, int64(81920), accelerator.Devices[0].MemoryMiB)
 	require.Len(t, allocations, 1)
 	assert.Equal(t, "chat", allocations[0].Endpoint)
+	assert.Equal(t, 1, client.calls)
+}
+
+func TestReconcilerReconcileNodeDeviceSnapshotClearsAllocationsWhenSnapshotHasNone(t *testing.T) {
+	node := staticNodeForDeviceSnapshot()
+	node.Status = &v1.StaticNodeStatus{
+		Allocations: []v1.StaticNodeAllocationStatus{
+			{Endpoint: "previous", ReplicaID: "replica-old"},
+		},
+	}
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &v1.NodeDeviceSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+					{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+				},
+			},
+		},
+	}
+
+	_, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		node,
+		&v1.StaticNodeAcceleratorStatus{
+			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+			},
+		},
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, allocations)
+	assert.Empty(t, allocations)
 	assert.Equal(t, 1, client.calls)
 }
 
@@ -405,7 +459,7 @@ func TestReconcilerReconcileNodeDeviceSnapshotKeepsMinorNumberZero(t *testing.T)
 			Accelerator: v1.StaticNodeAcceleratorStatus{
 				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-					{UUID: "GPU-abc", MinorNumber: 0},
+					{UUID: "GPU-abc", MinorNumber: intPtr(0)},
 				},
 			},
 		},
@@ -417,7 +471,7 @@ func TestReconcilerReconcileNodeDeviceSnapshotKeepsMinorNumberZero(t *testing.T)
 		&v1.StaticNodeAcceleratorStatus{
 			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-				{UUID: "GPU-abc", MinorNumber: 3},
+				{UUID: "GPU-abc", MinorNumber: intPtr(3)},
 			},
 		},
 		[]v1.NodeComponentStatus{
@@ -428,16 +482,17 @@ func TestReconcilerReconcileNodeDeviceSnapshotKeepsMinorNumberZero(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, accelerator)
 	require.Len(t, accelerator.Devices, 1)
-	assert.Equal(t, 0, accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 0, *accelerator.Devices[0].MinorNumber)
 }
 
-func TestReconcilerReconcileNodeDeviceSnapshotBackfillsUnknownMinorNumber(t *testing.T) {
+func TestReconcilerReconcileNodeDeviceSnapshotBackfillsMissingMinorNumber(t *testing.T) {
 	client := &fakeNodeDeviceSnapshotClient{
 		snapshot: &v1.NodeDeviceSnapshot{
 			Accelerator: v1.StaticNodeAcceleratorStatus{
 				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 				Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-					{UUID: "GPU-abc", MinorNumber: v1.StaticNodeAcceleratorDeviceMinorNumberUnknown},
+					{UUID: "GPU-abc"},
 				},
 			},
 		},
@@ -449,7 +504,7 @@ func TestReconcilerReconcileNodeDeviceSnapshotBackfillsUnknownMinorNumber(t *tes
 		&v1.StaticNodeAcceleratorStatus{
 			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-				{UUID: "GPU-abc", MinorNumber: 3},
+				{UUID: "GPU-abc", MinorNumber: intPtr(3)},
 			},
 		},
 		[]v1.NodeComponentStatus{
@@ -460,7 +515,8 @@ func TestReconcilerReconcileNodeDeviceSnapshotBackfillsUnknownMinorNumber(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, accelerator)
 	require.Len(t, accelerator.Devices, 1)
-	assert.Equal(t, 3, accelerator.Devices[0].MinorNumber)
+	require.NotNil(t, accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 3, *accelerator.Devices[0].MinorNumber)
 }
 
 func TestReconcilerReconcileNodeDeviceSnapshotKeepsFallbackOnSnapshotError(t *testing.T) {
@@ -1125,6 +1181,9 @@ func TestReconcilerDeleteRemovesDesiredAndObservedComponents(t *testing.T) {
 				command: "containers=$(docker ps -aq --filter label='neutree.ai/static-node-cluster=static-a'); " +
 					"if [ -n \"$containers\" ]; then docker rm -f $containers >/dev/null 2>&1; fi",
 			},
+			{
+				command: "sudo rm -rf /etc/neutree",
+			},
 		},
 	}
 
@@ -1529,4 +1588,8 @@ func (f *fakeStaticNodeFileClient) Remove(
 	f.removedPaths = append(f.removedPaths, remotePath)
 
 	return nil
+}
+
+func intPtr(value int) *int {
+	return &value
 }

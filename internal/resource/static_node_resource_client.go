@@ -259,6 +259,8 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
+	completeStaticNodeAcceleratorQuantities(nodeStatus, base, acceleratorType, baseProduct)
+
 	return ResourceNode{
 		ID:                  staticNodeResourceKey(node),
 		Status:              nodeStatus,
@@ -314,6 +316,96 @@ func completeStaticNodeCPUAndMemory(status *v1.NodeResourceStatus, base *Resourc
 		status.Available.CPU = base.Status.Available.CPU
 		status.Available.Memory = base.Status.Available.Memory
 	}
+}
+
+func completeStaticNodeAcceleratorQuantities(
+	status *v1.NodeResourceStatus,
+	base *ResourceNode,
+	acceleratorType v1.AcceleratorType,
+	product string,
+) {
+	if status == nil || base == nil || base.Status == nil {
+		return
+	}
+
+	// Static clusters support fractional GPU quantities. Keep the group-level
+	// quantity aligned with the native Ray dashboard resources, while device
+	// pools and virtualization details still come from the node-agent snapshot.
+	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
+	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
+}
+
+func completeStaticNodeAcceleratorQuantity(
+	targetInfo *v1.ResourceInfo,
+	baseInfo *v1.ResourceInfo,
+	acceleratorType v1.AcceleratorType,
+	product string,
+) {
+	if targetInfo == nil || baseInfo == nil || acceleratorType == "" || product == "" {
+		return
+	}
+
+	baseGroup := baseInfo.AcceleratorGroups[acceleratorType]
+	if baseGroup == nil {
+		return
+	}
+
+	if targetInfo.AcceleratorGroups == nil {
+		targetInfo.AcceleratorGroups = make(map[v1.AcceleratorType]*v1.AcceleratorGroup)
+	}
+
+	targetGroups := targetInfo.AcceleratorGroups
+
+	targetGroup := targetGroups[acceleratorType]
+	if targetGroup == nil {
+		targetGroup = &v1.AcceleratorGroup{}
+		targetGroups[acceleratorType] = targetGroup
+	}
+
+	productName := v1.AcceleratorProduct(product)
+	productQuantity := baseStaticNodeProductQuantity(baseGroup, productName)
+	targetGroup.Quantity = baseGroup.Quantity
+
+	if targetGroup.ProductGroups == nil {
+		targetGroup.ProductGroups = make(map[v1.AcceleratorProduct]float64)
+	}
+
+	targetGroup.ProductGroups[productName] = productQuantity
+
+	if targetGroup.Products == nil {
+		targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
+	}
+
+	targetProduct := targetGroup.Products[productName]
+	if targetProduct == nil {
+		targetProduct = &v1.AcceleratorProductResource{}
+		targetGroup.Products[productName] = targetProduct
+	}
+
+	targetProduct.Quantity = productQuantity
+}
+
+func baseStaticNodeProductQuantity(
+	group *v1.AcceleratorGroup,
+	product v1.AcceleratorProduct,
+) float64 {
+	if group == nil {
+		return 0
+	}
+
+	if group.ProductGroups != nil {
+		if quantity, ok := group.ProductGroups[product]; ok {
+			return quantity
+		}
+	}
+
+	if group.Products != nil {
+		if productResource := group.Products[product]; productResource != nil {
+			return productResource.Quantity
+		}
+	}
+
+	return group.Quantity
 }
 
 func staticNodeAllocationMatchesEndpoint(
@@ -373,7 +465,7 @@ func staticNodeDeviceOrders(devices []v1.StaticNodeAcceleratorDeviceStatus) map[
 	devicesWithMinor := make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(devices))
 
 	for _, device := range devices {
-		if device.UUID == "" || device.MinorNumber < 0 {
+		if device.UUID == "" || device.MinorNumber == nil {
 			continue
 		}
 
@@ -381,13 +473,13 @@ func staticNodeDeviceOrders(devices []v1.StaticNodeAcceleratorDeviceStatus) map[
 	}
 
 	sort.SliceStable(devicesWithMinor, func(i, j int) bool {
-		return devicesWithMinor[i].MinorNumber < devicesWithMinor[j].MinorNumber
+		return *devicesWithMinor[i].MinorNumber < *devicesWithMinor[j].MinorNumber
 	})
 
 	result := make(map[string]staticNodeDeviceOrder, len(devicesWithMinor))
 
 	for order, device := range devicesWithMinor {
-		minorNumber := device.MinorNumber
+		minorNumber := *device.MinorNumber
 		displayOrder := order
 		result[device.UUID] = staticNodeDeviceOrder{
 			MinorNumber: &minorNumber,

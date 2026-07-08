@@ -114,7 +114,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -145,7 +145,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0", nodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8", nodeAgent.Image)
 	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
 	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
 	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
@@ -167,6 +167,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--gpus all")
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
+	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
+	requireVolume(t, nodeAgent, "host-cgroup", "/sys/fs/cgroup", "/host/sys/fs/cgroup")
 	require.Len(t, nodeAgent.Ports, 1)
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
@@ -179,6 +181,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.NotEmpty(t, vmagentComponent.ConfigHash)
 	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
 	require.NotNil(t, vmagentConfig)
+	assert.Contains(t, vmagentConfig.Content, `scrape_interval: 30s`)
+	assert.Contains(t, vmagentConfig.Content, `scrape_timeout: 30s`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `/etc/neutree/vmagent/file_sd/node-exporter.json`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
@@ -245,7 +249,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -563,8 +567,9 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 
 func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v9.9.9"
 
-	assert.Equal(t, "neutree/neutree-node-agent:v1.2.0", defaultNodeAgentImage(cluster))
+	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-alpha.8", defaultNodeAgentImage(cluster))
 }
 
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
@@ -611,7 +616,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-alpha.8",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }
@@ -728,6 +733,14 @@ func TestPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 			nil,
 		),
 	}
+	currentNodes[1].Status.Components = []v1.NodeComponentStatus{
+		{
+			Name:    "ray-worker",
+			Phase:   v1.NodeComponentPhasePending,
+			Reason:  "HeadNodePending",
+			Message: "head static node is not ready",
+		},
+	}
 
 	desiredNodePlans, err := (&Planner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
@@ -748,6 +761,9 @@ func TestPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Phase)
 	assert.Contains(t, status.ErrorMessage, "static node head-0 component ray-head is not running desired config")
 	assert.Contains(t, status.ErrorMessage, "static node worker-0 component ray-worker is not running desired config")
+	assert.Contains(t, status.ErrorMessage, "phase=Pending")
+	assert.Contains(t, status.ErrorMessage, "reason=HeadNodePending")
+	assert.Contains(t, status.ErrorMessage, "message=head static node is not ready")
 }
 
 func TestPlannerPlansRayRecreateUpgradeOrder(t *testing.T) {
@@ -1289,6 +1305,41 @@ func findComponent(components []v1.NodeComponentSpec, name string) *v1.NodeCompo
 	}
 
 	return nil
+}
+
+func assertNotContainsVolume(t *testing.T, volumes []v1.NodeComponentVolume, name string) {
+	t.Helper()
+
+	for _, volume := range volumes {
+		assert.NotEqual(t, name, volume.Name)
+	}
+}
+
+func requireVolume(
+	t *testing.T,
+	component *v1.NodeComponentSpec,
+	name string,
+	hostPath string,
+	mountPath string,
+) v1.NodeComponentVolume {
+	t.Helper()
+
+	require.NotNil(t, component)
+	for _, volume := range component.Volumes {
+		if volume.Name != name {
+			continue
+		}
+
+		assert.Equal(t, hostPath, volume.HostPath)
+		assert.Equal(t, mountPath, volume.MountPath)
+		assert.True(t, volume.ReadOnly)
+
+		return volume
+	}
+
+	t.Fatalf("expected component %s to have volume %s", component.Name, name)
+
+	return v1.NodeComponentVolume{}
 }
 
 func findStaticNode(nodes []*v1.StaticNode, name string) *v1.StaticNode {

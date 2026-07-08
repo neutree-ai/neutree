@@ -57,8 +57,8 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 		Accelerator: v1.StaticNodeAcceleratorStatus{
 			Type: v1.AcceleratorTypeNVIDIAGPU.String(),
 			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MinorNumber: 0, MemoryMiB: 81920, Healthy: true},
-				{ID: "1", UUID: "GPU-unknown", ProductModel: "NVIDIA_A100", MinorNumber: v1.StaticNodeAcceleratorDeviceMinorNumberUnknown, MemoryMiB: 81920, Healthy: true},
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MinorNumber: intPtr(0), MemoryMiB: 81920, Healthy: true},
+				{ID: "1", UUID: "GPU-unknown", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
 			},
 		},
 		Allocations: []v1.StaticNodeAllocationStatus{
@@ -122,4 +122,8 @@ func podNodeNameIndex(object client.Object) []string {
 	}
 
 	return []string{pod.Spec.NodeName}
+}
+
+func intPtr(value int) *int {
+	return &value
 }

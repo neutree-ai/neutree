@@ -387,9 +387,10 @@ func hamiDeviceAllocationsFromAnnotation(
 	}
 
 	devices := make([]v1.DeviceAllocation, 0)
-	vdeviceIndexesByUUID := map[string]int{}
 
 	for _, entry := range strings.Split(value, ";") {
+		vdeviceIndex := 0
+
 		for _, segment := range strings.Split(entry, ":") {
 			segment = strings.TrimSpace(segment)
 			if segment == "" {
@@ -413,17 +414,15 @@ func hamiDeviceAllocationsFromAnnotation(
 				return nil, fmt.Errorf("invalid core value %q: %w", fields[3], err)
 			}
 
-			vdeviceIndex := strconv.Itoa(vdeviceIndexesByUUID[uuid])
-			vdeviceIndexesByUUID[uuid]++
-
 			devices = append(devices, v1.DeviceAllocation{
 				UUID:         uuid,
 				Product:      firstNonEmpty(products[uuid], strings.TrimSpace(fields[1])),
 				NodeID:       nodeName,
-				VDeviceIndex: vdeviceIndex,
+				VDeviceIndex: strconv.Itoa(vdeviceIndex),
 				MemoryMiB:    memoryMiB,
 				CoreUnits:    coreUnits,
 			})
+			vdeviceIndex++
 		}
 	}
 

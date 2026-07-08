@@ -351,13 +351,13 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 					Available: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 							v1.AcceleratorTypeNVIDIAGPU: {
-								Quantity: 2,
+								Quantity: 1,
 								ProductGroups: map[v1.AcceleratorProduct]float64{
-									"Tesla-T4": 2,
+									"Tesla-T4": 1,
 								},
 								Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 									"Tesla-T4": {
-										Quantity: 2,
+										Quantity: 1,
 										Virtualization: &v1.AcceleratorVirtualizationResource{
 											MemoryMiB: 15360,
 											CoreUnits: 100,
@@ -397,13 +397,13 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 							Available: &v1.ResourceInfo{
 								AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 									v1.AcceleratorTypeNVIDIAGPU: {
-										Quantity: 2,
+										Quantity: 1,
 										ProductGroups: map[v1.AcceleratorProduct]float64{
-											"Tesla-T4": 2,
+											"Tesla-T4": 1,
 										},
 										Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 											"Tesla-T4": {
-												Quantity: 2,
+												Quantity: 1,
 												Virtualization: &v1.AcceleratorVirtualizationResource{
 													MemoryMiB: 15360,
 													CoreUnits: 100,

@@ -504,13 +504,13 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "same phase, resources removed",
+			name: "same phase, omitted resources that will be preserved",
 			oldStatus: &v1.EndpointStatus{
 				Phase:     v1.EndpointPhaseRUNNING,
 				Resources: endpointResources(8192, 50),
 			},
 			newStatus: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
-			want:      true,
+			want:      false,
 		},
 	}
 
@@ -522,6 +522,69 @@ func Test_ShouldUpdateStatus(t *testing.T) {
 				t.Errorf("shouldUpdateStatus() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEndpointControllerPrepareStatusForUpdatePreservesResourcesWhenNewStatusOmitsThem(t *testing.T) {
+	oldResources := endpointResourcesForTest(8192, 50)
+	endpoint := &v1.Endpoint{
+		Status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseRUNNING,
+			Resources: oldResources,
+		},
+	}
+	newStatus := &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED}
+
+	(&EndpointController{}).prepareStatusForUpdate(endpoint, newStatus)
+
+	assert.Equal(t, oldResources, newStatus.Resources)
+}
+
+func TestEndpointControllerPrepareStatusForUpdateKeepsNewResourcesWhenPresent(t *testing.T) {
+	oldResources := endpointResourcesForTest(8192, 50)
+	newResources := endpointResourcesForTest(16384, 100)
+	endpoint := &v1.Endpoint{
+		Status: &v1.EndpointStatus{
+			Phase:     v1.EndpointPhaseRUNNING,
+			Resources: oldResources,
+		},
+	}
+	newStatus := &v1.EndpointStatus{
+		Phase:     v1.EndpointPhaseRUNNING,
+		Resources: newResources,
+	}
+
+	(&EndpointController{}).prepareStatusForUpdate(endpoint, newStatus)
+
+	assert.Equal(t, newResources, newStatus.Resources)
+}
+
+func endpointResourcesForTest(memoryMiB, coreUnits int64) *v1.EndpointResourceStatus {
+	return &v1.EndpointResourceStatus{
+		Replicas: []v1.ReplicaDeviceAllocation{
+			{
+				InstanceID: "pod-1",
+				ReplicaID:  "replica-1",
+				NodeID:     "node-1",
+				Devices: []v1.DeviceAllocation{
+					{
+						UUID:      "GPU-1",
+						Product:   "Tesla-T4",
+						MemoryMiB: memoryMiB,
+						CoreUnits: coreUnits,
+						NodeID:    "node-1",
+					},
+				},
+			},
+		},
+		Summary: &v1.EndpointResourceSummary{
+			Products: map[v1.AcceleratorProduct]*v1.ProductUsage{
+				"Tesla-T4": {
+					MemoryMiB: memoryMiB,
+					CoreUnits: coreUnits,
+				},
+			},
+		},
 	}
 }
 

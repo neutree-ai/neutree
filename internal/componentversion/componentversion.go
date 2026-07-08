@@ -1,5 +1,5 @@
-// Package componentversion pins the versions of bundled third-party
-// infrastructure components (VictoriaMetrics, Grafana, Vector, Kong) that
+// Package componentversion pins the versions of bundled infrastructure
+// components (VictoriaMetrics, Grafana, Vector, Kong, Neutree node-agent) that
 // Neutree deploys for both compose-based control-plane installs and the
 // in-cluster metrics stack. The constants live in internal/ so they can be
 // shared between cmd/neutree-cli (deployer) and internal/cluster/component
@@ -17,6 +17,9 @@ const KubeStateMetrics = "v2.15.0"
 
 // NodeExporter image version.
 const NodeExporter = "v1.8.2"
+
+// NeutreeNodeAgent image version.
+const NeutreeNodeAgent = "v1.1.0-alpha.8"
 
 // Grafana image version.
 const Grafana = "11.5.3"

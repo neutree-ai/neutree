@@ -230,11 +230,18 @@ rules:
   resources: ["nodes"]
   verbs: ["get", "list", "watch", "patch"]
 - apiGroups: [""]
+  resources: ["nodes/metrics"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
   resources: ["nodes/proxy"]
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch", "patch"]
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -577,7 +584,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		"memory": "128Mi",
 	}
 	neutreeNodeAgentMetricsResources := map[string]string{
-		"cpu":    "100m",
+		"cpu":    "500m",
 		"memory": "128Mi",
 	}
 
@@ -592,7 +599,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+m.cluster.GetVersion()),
+		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
 		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,
 		ClusterVersion:                   m.cluster.GetVersion(),

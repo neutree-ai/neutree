@@ -548,8 +548,8 @@ func enhanceKubernetesResourceStatusWithNeutreeAnnotations(
 		return
 	}
 
-	mergeKubernetesNeutreeResourceInfoEnhancement(status.Allocatable, result.Allocatable)
-	mergeKubernetesNeutreeResourceInfoEnhancement(status.Available, result.Available)
+	replaceKubernetesNeutreeResourceInfo(status.Allocatable, result.Allocatable)
+	replaceKubernetesNeutreeResourceInfo(status.Available, result.Available)
 }
 
 func kubernetesNeutreeDeviceUUID(device kubernetesNeutreeDeviceAnnotation) string {
@@ -585,11 +585,14 @@ func addKubernetesNeutreeProductResource(
 	productResource.Virtualization.CoreUnits += float64(pool.CoreUnits)
 }
 
-func mergeKubernetesNeutreeResourceInfoEnhancement(target, enhancement *v1.ResourceInfo) {
+func replaceKubernetesNeutreeResourceInfo(target, enhancement *v1.ResourceInfo) {
 	if target == nil || enhancement == nil {
 		return
 	}
 
+	// Kubernetes virtualization can scale native device resources such as
+	// nvidia.com/gpu beyond the physical card count. Neutree annotations carry
+	// the device-level view, so use them to replace group quantities precisely.
 	for acceleratorType, sourceGroup := range enhancement.AcceleratorGroups {
 		if sourceGroup == nil {
 			continue
@@ -600,28 +603,32 @@ func mergeKubernetesNeutreeResourceInfoEnhancement(target, enhancement *v1.Resou
 			continue
 		}
 
-		for product, sourceProduct := range sourceGroup.Products {
-			if product == "" || sourceProduct == nil || sourceProduct.Virtualization == nil {
-				continue
-			}
+		targetGroup.Quantity = sourceGroup.Quantity
 
-			baseQuantity, ok := kubernetesBaseProductQuantity(targetGroup, product)
+		if targetGroup.ProductGroups == nil {
+			targetGroup.ProductGroups = make(map[v1.AcceleratorProduct]float64)
+		}
 
-			if !ok {
-				continue
-			}
+		if targetGroup.Products == nil {
+			targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
+		}
 
-			if targetGroup.Products == nil {
-				targetGroup.Products = make(map[v1.AcceleratorProduct]*v1.AcceleratorProductResource)
-			}
+		for _, product := range kubernetesAcceleratorGroupProducts(targetGroup, sourceGroup) {
+			sourceQuantity := sourceGroup.ProductGroups[product]
+			targetGroup.ProductGroups[product] = sourceQuantity
 
 			targetProduct := targetGroup.Products[product]
-
 			if targetProduct == nil {
-				targetProduct = &v1.AcceleratorProductResource{
-					Quantity: baseQuantity,
-				}
+				targetProduct = &v1.AcceleratorProductResource{}
 				targetGroup.Products[product] = targetProduct
+			}
+
+			targetProduct.Quantity = sourceQuantity
+
+			sourceProduct := sourceGroup.Products[product]
+			if sourceProduct == nil || sourceProduct.Virtualization == nil {
+				targetProduct.Virtualization = nil
+				continue
 			}
 
 			targetProduct.Virtualization = &v1.AcceleratorVirtualizationResource{
@@ -632,20 +639,37 @@ func mergeKubernetesNeutreeResourceInfoEnhancement(target, enhancement *v1.Resou
 	}
 }
 
-func kubernetesBaseProductQuantity(group *v1.AcceleratorGroup, product v1.AcceleratorProduct) (float64, bool) {
-	if group == nil || product == "" {
-		return 0, false
+func kubernetesAcceleratorGroupProducts(groups ...*v1.AcceleratorGroup) []v1.AcceleratorProduct {
+	productSet := make(map[v1.AcceleratorProduct]struct{})
+
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+
+		for product := range group.ProductGroups {
+			if product != "" {
+				productSet[product] = struct{}{}
+			}
+		}
+
+		for product := range group.Products {
+			if product != "" {
+				productSet[product] = struct{}{}
+			}
+		}
 	}
 
-	if quantity, ok := group.ProductGroups[product]; ok {
-		return quantity, true
+	products := make([]v1.AcceleratorProduct, 0, len(productSet))
+	for product := range productSet {
+		products = append(products, product)
 	}
 
-	if productResource := group.Products[product]; productResource != nil {
-		return productResource.Quantity, true
-	}
+	sort.Slice(products, func(i, j int) bool {
+		return products[i] < products[j]
+	})
 
-	return 0, false
+	return products
 }
 
 func kubernetesBaseAcceleratorProduct(status *v1.ResourceStatus) (v1.AcceleratorType, v1.AcceleratorProduct, bool) {

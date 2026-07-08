@@ -481,6 +481,84 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
 	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="unknown"`)
 }
 
+func TestNormalizerEnrichesMultiPhysicalGPUUsageWhenVDeviceIndexDiffersFromAllocation(t *testing.T) {
+	firstUsedBytes := 2048.0 * 1024 * 1024
+	secondUsedBytes := 4096.0 * 1024 * 1024
+
+	output := normalizeForTest(NormalizeRequest{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		AcceleratorExporter: &model.ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body: `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="NVIDIA L20"} 62
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="NVIDIA L20"} 2048
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="NVIDIA L20"} 46068
+DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 63
+DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 4096
+DCGM_FI_DEV_FB_TOTAL{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 46068
+`,
+		},
+		EndpointAllocations: []model.EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "k8s-a",
+				Endpoint:   "chat",
+				InstanceID: "chat-abc",
+				ReplicaID:  "chat-abc",
+				NodeID:     "node-a",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
+					{UUID: "GPU-def", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
+				},
+			},
+		},
+		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
+			{
+				Endpoint:        "chat",
+				InstanceID:      "chat-abc",
+				ReplicaID:       "chat-abc",
+				NodeID:          "node-a",
+				GPUUUID:         "GPU-abc",
+				VDeviceIndex:    "0",
+				MemoryUsedBytes: &firstUsedBytes,
+			},
+			{
+				Endpoint:        "chat",
+				InstanceID:      "chat-abc",
+				ReplicaID:       "chat-abc",
+				NodeID:          "node-a",
+				GPUUUID:         "GPU-def",
+				VDeviceIndex:    "1",
+				MemoryUsedBytes: &secondUsedBytes,
+			},
+		},
+	})
+
+	firstLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",product="NVIDIA-L20",replica="chat-abc",vdevice_index="0"`
+	secondLabels := `accelerator_index="1",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-def",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",product="NVIDIA-L20",replica="chat-abc",vdevice_index="1"`
+	unknownSecondProductLabels := `accelerator_index="1",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-def",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",product="unknown"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+firstLabels+`} 2147483648`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+secondLabels+`} 4294967296`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{accelerator_index="unknown"`)
+	assert.NotContains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+unknownSecondProductLabels)
+}
+
 func TestNormalizerMatchesExplicitGPUUsageToAllocationWithNodeFallback(t *testing.T) {
 	usedBytes := 4096.0 * 1024 * 1024
 
@@ -528,6 +606,52 @@ func TestNormalizerMatchesExplicitGPUUsageToAllocationWithNodeFallback(t *testin
 	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
 }
 
+func TestNormalizerDerivesAllocationVRAMFromUniqueExplicitGPUUsageWhenVDeviceIndexDiffers(t *testing.T) {
+	usedBytes := 28038.0 * 1024 * 1024
+
+	output := normalizeForTest(NormalizeRequest{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		EndpointAllocations: []model.EndpointAllocation{
+			{
+				Workspace:  "default",
+				Cluster:    "k8s-a",
+				Endpoint:   "chat",
+				InstanceID: "chat-abc",
+				ReplicaID:  "chat-abc",
+				Devices: []v1.DeviceAllocation{
+					{UUID: "GPU-def", Product: "NVIDIA-L20", VDeviceIndex: "0", MemoryMiB: 30720, CoreUnits: 50, NodeID: "node-a"},
+				},
+			},
+		},
+		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
+			{
+				Endpoint:        "chat",
+				InstanceID:      "chat-abc",
+				ReplicaID:       "chat-abc",
+				NodeID:          "node-a",
+				GPUUUID:         "GPU-def",
+				VDeviceIndex:    "1",
+				MemoryUsedBytes: &usedBytes,
+			},
+		},
+	})
+
+	allocationInfoLabels := `accelerator_index="unknown",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-def",` +
+		`cluster_type="kubernetes",endpoint="chat",instance_id="chat-abc",` +
+		`node="node-a",physical_vram_usage="unknown",product="NVIDIA-L20",replica="chat-abc",vdevice_index="0",vram_usage="27.4 GiB / 30 GiB"`
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
+}
+
 func TestGPUHardwareInfosFromAcceleratorMetrics(t *testing.T) {
 	raw := `DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 DCGM_FI_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100",Driver_Version="535.104.05"} 1
@@ -537,6 +661,7 @@ DCGM_FI_DEV_PCI_BUSID{gpu="0",UUID="GPU-abc",modelName="A100",pci_bus_id="000000
 DCGM_FI_DEV_PCIE_LINK_GEN{gpu="0",UUID="GPU-abc",modelName="A100"} 4
 DCGM_FI_DEV_PCIE_LINK_WIDTH{gpu="0",UUID="GPU-abc",modelName="A100"} 16
 DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 1
+DCGM_FI_DEV_NVSWITCH_LINK_STATUS{nvswitch="0",link="0"} 2
 `
 
 	infos := hardware.FromAcceleratorMetrics(raw)
@@ -552,7 +677,8 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 1
 	assert.Equal(t, "00000000:3B:00.0", infos[0].PCIEBusID)
 	assert.Equal(t, "4", infos[0].PCIEGeneration)
 	assert.Equal(t, "16", infos[0].PCIEWidth)
-	assert.Equal(t, "present", infos[0].NVLink)
+	assert.Equal(t, "1", infos[0].NVLink)
+	assert.Equal(t, "1", infos[0].NVSwitch)
 }
 
 func TestNormalizerParsesDCGMLabelsWithSpaces(t *testing.T) {

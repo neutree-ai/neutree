@@ -36,7 +36,8 @@ const (
 )
 
 const staticVMAgentConfigTemplateText = `global:
-  scrape_interval: 15s
+  scrape_interval: 30s
+  scrape_timeout: 30s
 scrape_configs:
 {{ range .ScrapeConfigs }}- job_name: {{ .JobName }}
 {{ if .MetricsPath }}  metrics_path: {{ .MetricsPath }}
@@ -201,8 +202,18 @@ func buildNodeAgentComponent(
 		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
 		Volumes: []v1.NodeComponentVolume{
-			{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
-			{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
+			{
+				Name:      "host-proc",
+				HostPath:  "/proc",
+				MountPath: "/host/proc",
+				ReadOnly:  true,
+			},
+			{
+				Name:      "host-cgroup",
+				HostPath:  "/sys/fs/cgroup",
+				MountPath: "/host/sys/fs/cgroup",
+				ReadOnly:  true,
+			},
 		},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
@@ -238,15 +249,7 @@ func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	return "neutree/neutree-node-agent:" + staticNodeClusterVersion(cluster)
-}
-
-func staticNodeClusterVersion(cluster *v1.StaticNodeCluster) string {
-	if cluster == nil || cluster.Spec == nil {
-		return ""
-	}
-
-	return cluster.Spec.Version
+	return "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 }
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {

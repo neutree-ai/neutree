@@ -199,6 +199,118 @@ func TestRayServeAllocationProviderMapsActorProcessVisibleDevices(t *testing.T) 
 	assert.Equal(t, "head-0", allocations[0].Devices[0].NodeID)
 }
 
+func TestRayServeAllocationProviderScalesFractionalGPUAllocation(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						DeployedAppConfig: &dashboard.RayServeApplication{
+							Args: map[string]interface{}{
+								"deployment_options": map[string]interface{}{
+									"backend": map[string]interface{}{
+										"num_gpus": 0.5,
+									},
+								},
+							},
+						},
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "actor-a", ReplicaID: "replica-a"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"actor-a": {ActorID: "actor-a", PID: 1234},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(_ int) (map[string]string, error) {
+			return map[string]string{"CUDA_VISIBLE_DEVICES": "0"}, nil
+		}),
+	}
+	snapshot := &v1.NodeDeviceSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	require.Len(t, allocations, 1)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+	assert.Equal(t, int64(40960), allocations[0].Devices[0].MemoryMiB)
+	assert.Equal(t, int64(50), allocations[0].Devices[0].CoreUnits)
+}
+
+func TestRayServeAllocationProviderSkipsExplicitZeroGPUDeployment(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applications: &dashboard.RayServeApplicationsResponse{
+				Applications: map[string]dashboard.RayServeApplicationStatus{
+					"default_chat": {
+						Status: dashboard.ApplicationStatusRunning,
+						DeployedAppConfig: &dashboard.RayServeApplication{
+							Args: map[string]interface{}{
+								"deployment_options": map[string]interface{}{
+									"backend": map[string]interface{}{
+										"num_gpus": 0,
+									},
+								},
+							},
+						},
+						Deployments: map[string]dashboard.Deployment{
+							"Backend": {
+								Name: "Backend",
+								Replicas: []dashboard.Replica{
+									{NodeID: "node-a", ActorID: "actor-a", ReplicaID: "replica-a"},
+								},
+							},
+						},
+					},
+				},
+			},
+			actors: map[string]dashboard.Actor{
+				"actor-a": {ActorID: "actor-a", PID: 1234},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		Node:   "head-0",
+		ProcEnv: ProcessEnvReaderFunc(func(_ int) (map[string]string, error) {
+			return map[string]string{"CUDA_VISIBLE_DEVICES": "0"}, nil
+		}),
+	}
+	snapshot := &v1.NodeDeviceSnapshot{
+		Accelerator: v1.StaticNodeAcceleratorStatus{
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+				{ID: "0", UUID: "GPU-abc", ProductModel: "NVIDIA_A100", MemoryMiB: 81920, Healthy: true},
+			},
+		},
+	}
+
+	allocations, err := provider.Allocations(context.Background(), snapshot)
+
+	require.NoError(t, err)
+	assert.Empty(t, allocations)
+}
+
 func TestRayServeAllocationProviderPrefersExactNVIDIAUUIDOverRelativeCUDAIndex(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{

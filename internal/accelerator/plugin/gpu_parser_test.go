@@ -122,7 +122,7 @@ func TestNVIDIAGPU_ParseFromKubernetes(t *testing.T) {
 	}
 }
 
-func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesStandardSemantics(t *testing.T) {
+func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesNativeGPUResourceQuantity(t *testing.T) {
 	parser := &GPUResourceParser{}
 	result, err := parser.ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity{
 		NvidiaGPUKubernetesResource: resource.MustParse("20"),
@@ -150,13 +150,13 @@ func TestNVIDIAGPU_ParseFromKubernetesVirtualizationLabelUsesStandardSemantics(t
 		},
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity: 2,
+				Quantity: 20,
 				ProductGroups: map[v1.AcceleratorProduct]float64{
-					"Tesla-T4": 2,
+					"Tesla-T4": 20,
 				},
 				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 					"Tesla-T4": {
-						Quantity: 2,
+						Quantity: 20,
 					},
 				},
 			},
@@ -199,13 +199,13 @@ func TestNVIDIAGPU_ParseFromKubernetesDoesNotInferVirtualizationFromHAMiResource
 		},
 		AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
 			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity: 2,
+				Quantity: 20,
 				ProductGroups: map[v1.AcceleratorProduct]float64{
-					"Tesla-T4": 2,
+					"Tesla-T4": 20,
 				},
 				Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 					"Tesla-T4": {
-						Quantity: 2,
+						Quantity: 20,
 					},
 				},
 			},
@@ -237,11 +237,11 @@ func TestNVIDIAGPU_ParseFromKubernetesDoesNotAddVirtualizationDetailsWithoutMemo
 	}
 
 	group := result.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	if group.Quantity != 2 {
-		t.Fatalf("expected base parser to use Kubernetes GPU count label, got %v", group.Quantity)
+	if group.Quantity != 20 {
+		t.Fatalf("expected base parser to use native Kubernetes GPU resource quantity, got %v", group.Quantity)
 	}
-	if group.ProductGroups["Tesla-T4"] != 2 {
-		t.Fatalf("expected product group quantity to use Kubernetes GPU count label, got %v", group.ProductGroups["Tesla-T4"])
+	if group.ProductGroups["Tesla-T4"] != 20 {
+		t.Fatalf("expected product group quantity to use native Kubernetes GPU resource quantity, got %v", group.ProductGroups["Tesla-T4"])
 	}
 	if group.Products != nil {
 		t.Fatalf("expected no product detail without memory label, got %v", group.Products)

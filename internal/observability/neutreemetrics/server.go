@@ -280,7 +280,7 @@ func applyGPUHardwareInfoToSnapshot(snapshot *v1.NodeDeviceSnapshot, infos []mod
 		if info.MinorNumber != "" {
 			minorNumber, err := strconv.Atoi(info.MinorNumber)
 			if err == nil {
-				snapshot.Accelerator.Devices[i].MinorNumber = minorNumber
+				snapshot.Accelerator.Devices[i].MinorNumber = &minorNumber
 			}
 		}
 

@@ -739,6 +739,9 @@ func (s KubernetesNodeProxyCAdvisorScraper) Scrape(ctx context.Context) (string,
 		return "", fmt.Errorf("kubernetes cAdvisor scraper requires REST client and node name")
 	}
 
+	// TODO: Switch Kubernetes runtime usage collection to kubelet /stats/summary
+	// in the next version. cAdvisor metrics are only kept here for the current
+	// release compatibility path.
 	raw, err := s.RESTClient.Get().
 		Resource("nodes").
 		Name(s.NodeName).

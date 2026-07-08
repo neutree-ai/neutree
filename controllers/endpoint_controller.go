@@ -255,7 +255,7 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
-	if !reflect.DeepEqual(obj.Status.Resources, newStatus.Resources) {
+	if !reflect.DeepEqual(obj.Status.Resources, normalizedStatus.Resources) {
 		return true
 	}
 
@@ -302,7 +302,20 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
+	c.preserveResources(obj, status)
 	c.preserveModelDownloadStatus(obj, status)
+}
+
+func (c *EndpointController) preserveResources(obj *v1.Endpoint, status *v1.EndpointStatus) {
+	if obj.Status == nil || obj.Status.Resources == nil {
+		return
+	}
+
+	if status.Resources != nil {
+		return
+	}
+
+	status.Resources = obj.Status.Resources
 }
 
 func (c *EndpointController) preserveModelDownloadStatus(obj *v1.Endpoint, status *v1.EndpointStatus) {

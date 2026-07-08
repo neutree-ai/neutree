@@ -163,19 +163,21 @@ func (r *Reconciler) ReconcileNodeDeviceSnapshot(
 		return fallback, currentStaticNodeAllocations(node), nil
 	}
 
+	allocations := snapshotStaticNodeAllocations(snapshot)
 	accelerator := mergeStaticNodeDeviceSnapshotAccelerator(fallback, snapshot.Accelerator)
+
 	if accelerator.Type == "" {
-		return fallback, snapshot.Allocations, nil
+		return fallback, allocations, nil
 	}
 
 	if accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
 		fallback != nil &&
 		fallback.Type != "" &&
 		fallback.Type != v1.StaticNodeAcceleratorTypeCPU {
-		return fallback, snapshot.Allocations, nil
+		return fallback, allocations, nil
 	}
 
-	return &accelerator, snapshot.Allocations, nil
+	return &accelerator, allocations, nil
 }
 
 func mergeStaticNodeDeviceSnapshotAccelerator(
@@ -230,7 +232,7 @@ func mergeStaticNodeDeviceSnapshotDevice(
 		snapshot.MemoryMiB = fallback.MemoryMiB
 	}
 
-	if snapshot.MinorNumber == v1.StaticNodeAcceleratorDeviceMinorNumberUnknown && fallback.MinorNumber >= 0 {
+	if snapshot.MinorNumber == nil && fallback.MinorNumber != nil {
 		snapshot.MinorNumber = fallback.MinorNumber
 	}
 
@@ -267,6 +269,18 @@ func currentStaticNodeAllocations(node *v1.StaticNode) []v1.StaticNodeAllocation
 	}
 
 	return append([]v1.StaticNodeAllocationStatus{}, node.Status.Allocations...)
+}
+
+func snapshotStaticNodeAllocations(snapshot *v1.NodeDeviceSnapshot) []v1.StaticNodeAllocationStatus {
+	if snapshot == nil {
+		return nil
+	}
+
+	if snapshot.Allocations == nil {
+		return []v1.StaticNodeAllocationStatus{}
+	}
+
+	return append([]v1.StaticNodeAllocationStatus{}, snapshot.Allocations...)
 }
 
 func (c HTTPNodeDeviceSnapshotClient) DeviceSnapshot(ctx context.Context, node *v1.StaticNode) (*v1.NodeDeviceSnapshot, error) {
@@ -371,6 +385,10 @@ func (r *Reconciler) Delete(
 		if _, err := runner.Run(ctx, command); err != nil {
 			errs = append(errs, errors.Wrapf(err, "failed to remove static node cluster containers %s", node.Spec.Cluster))
 		}
+	}
+
+	if _, err := runner.Run(ctx, "sudo rm -rf /etc/neutree"); err != nil {
+		errs = append(errs, errors.Wrap(err, "failed to remove static node Neutree data directory"))
 	}
 
 	return apierrors.NewAggregate(errs)

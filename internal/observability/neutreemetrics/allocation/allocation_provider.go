@@ -2,6 +2,7 @@ package allocation
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -212,6 +213,7 @@ func (p RayServeAllocationProvider) Allocations(
 					envReader,
 					appName,
 					status,
+					deploymentName,
 					replica,
 					deviceLookup,
 					nodeLabel,
@@ -528,6 +530,7 @@ func rayReplicaAllocation(
 	envReader ProcessEnvReader,
 	appName string,
 	status dashboard.RayServeApplicationStatus,
+	deploymentName string,
 	replica dashboard.Replica,
 	deviceLookup acceleratorDeviceLookup,
 	nodeLabel string,
@@ -548,7 +551,12 @@ func rayReplicaAllocation(
 		return v1.StaticNodeAllocationStatus{}, false, err
 	}
 
-	devices := allocationDevicesFromRefs(visibleDeviceRefs(env, deviceLookup), deviceLookup, nodeLabel)
+	gpuQuantity, hasGPUQuantity := rayDeploymentGPUQuantity(status, deploymentName)
+	if hasGPUQuantity && gpuQuantity <= 0 {
+		return v1.StaticNodeAllocationStatus{}, false, nil
+	}
+
+	devices := allocationDevicesFromRefsWithQuantity(visibleDeviceRefs(env, deviceLookup), deviceLookup, nodeLabel, gpuQuantity)
 
 	if processTree != nil {
 		processDevices, err := allocationDevicesFromGPUProcesses(
@@ -557,6 +565,7 @@ func rayReplicaAllocation(
 			actor.PID,
 			deviceLookup,
 			nodeLabel,
+			gpuQuantity,
 		)
 		if err != nil {
 			return v1.StaticNodeAllocationStatus{}, false, err
@@ -682,14 +691,24 @@ func allocationDevicesFromRefs(
 	deviceLookup acceleratorDeviceLookup,
 	nodeID string,
 ) []v1.DeviceAllocation {
-	return allocationDevicesFromRefsWithUsage(refs, deviceLookup, nodeID, nil)
+	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, nil, 0)
 }
 
-func allocationDevicesFromRefsWithUsage(
+func allocationDevicesFromRefsWithQuantity(
+	refs []string,
+	deviceLookup acceleratorDeviceLookup,
+	nodeID string,
+	gpuQuantity float64,
+) []v1.DeviceAllocation {
+	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, nil, gpuQuantity)
+}
+
+func allocationDevicesFromRefsWithUsageAndQuantity(
 	refs []string,
 	deviceLookup acceleratorDeviceLookup,
 	nodeID string,
 	usedMemoryMiBByUUID map[string]int64,
+	gpuQuantity float64,
 ) []v1.DeviceAllocation {
 	devices := make([]v1.DeviceAllocation, 0, len(refs))
 	seen := map[string]struct{}{}
@@ -705,12 +724,13 @@ func allocationDevicesFromRefsWithUsage(
 		}
 
 		seen[device.UUID] = struct{}{}
+		memoryMiB, coreUnits := allocationDeviceCapacity(device, gpuQuantity)
 
 		allocation := v1.DeviceAllocation{
 			UUID:      device.UUID,
 			Product:   firstNonEmpty(device.ProductModel, device.ProductName),
-			MemoryMiB: device.MemoryMiB,
-			CoreUnits: 100,
+			MemoryMiB: memoryMiB,
+			CoreUnits: coreUnits,
 			NodeID:    nodeID,
 		}
 		if usedMemoryMiBByUUID != nil {
@@ -729,6 +749,7 @@ func allocationDevicesFromGPUProcesses(
 	actorPID int,
 	deviceLookup acceleratorDeviceLookup,
 	nodeID string,
+	gpuQuantity float64,
 ) ([]v1.DeviceAllocation, error) {
 	refs := make([]string, 0, len(gpuProcesses))
 	usedMemoryMiBByUUID := map[string]int64{}
@@ -745,7 +766,66 @@ func allocationDevicesFromGPUProcesses(
 		}
 	}
 
-	return allocationDevicesFromRefsWithUsage(refs, deviceLookup, nodeID, usedMemoryMiBByUUID), nil
+	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, usedMemoryMiBByUUID, gpuQuantity), nil
+}
+
+func allocationDeviceCapacity(device v1.StaticNodeAcceleratorDeviceStatus, gpuQuantity float64) (int64, int64) {
+	if gpuQuantity > 0 && gpuQuantity < 1 {
+		return int64(math.Round(float64(device.MemoryMiB) * gpuQuantity)), int64(math.Round(100 * gpuQuantity))
+	}
+
+	return device.MemoryMiB, 100
+}
+
+func rayDeploymentGPUQuantity(status dashboard.RayServeApplicationStatus, deploymentName string) (float64, bool) {
+	if status.DeployedAppConfig == nil || status.DeployedAppConfig.Args == nil || deploymentName == "" {
+		return 0, false
+	}
+
+	options, ok := status.DeployedAppConfig.Args["deployment_options"].(map[string]interface{})
+	if !ok {
+		return 0, false
+	}
+
+	for name, raw := range options {
+		if !strings.EqualFold(name, deploymentName) {
+			continue
+		}
+
+		deploymentOptions, ok := raw.(map[string]interface{})
+		if !ok {
+			return 0, false
+		}
+
+		quantity, ok := numberAsFloat64(deploymentOptions["num_gpus"])
+
+		return quantity, ok
+	}
+
+	return 0, false
+}
+
+func numberAsFloat64(value interface{}) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case uint:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case uint32:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func deviceFromRef(
