@@ -34,6 +34,45 @@ func TestGetVLLMV0_17_1EngineSchema(t *testing.T) {
 	}
 }
 
+func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
+	schema, err := GetVLLMV0_24_0EngineSchema()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if schema == nil {
+		t.Fatal("expected schema to be non-nil")
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("schema.properties missing or wrong type")
+	}
+
+	for _, key := range []string{
+		"device_ids",
+		"quantization_config",
+		"diffusion_config",
+		"fingerprint_mode",
+		"fingerprint_value",
+		"enable_flash_late_interaction",
+		"enable_log_requests",
+	} {
+		if _, ok := props[key].(map[string]interface{}); !ok {
+			t.Errorf("schema missing required vLLM v0.24.0 property %q", key)
+		}
+	}
+
+	for _, key := range []string{"swap_space", "use_gpu_for_pooling_score", "lora_modules", "log_config_file"} {
+		if _, ok := props[key]; ok {
+			t.Errorf("schema must not include unsupported or obsolete property %q", key)
+		}
+	}
+
+	if _, err := GetEngineSchema("vllm-v0.24.0"); err != nil {
+		t.Fatalf("EngineSchemas lookup for vLLM v0.24.0 failed: %v", err)
+	}
+}
+
 func TestGetLlamaCppDefaultEngineSchema(t *testing.T) {
 	schema, err := GetLlamaCppDefaultEngineSchema()
 	if err != nil {
