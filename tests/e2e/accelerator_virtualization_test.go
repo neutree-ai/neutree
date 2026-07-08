@@ -26,13 +26,12 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			clusterName          string
 			endpointName         string
 			fullCardEndpointName string
-			kubeconfig           string
 			productName          string
 		)
 
 		BeforeAll(func() {
 			requireAcceleratorVirtualizationProfile()
-			kubeconfig = requireK8sProfile()
+			kubeconfig := requireK8sProfile()
 
 			By("Setting up image registry")
 			SetupImageRegistry()
