@@ -201,6 +201,23 @@ func TestHAMiDeviceAllocationsAssignVDeviceIndexForRepeatedUUID(t *testing.T) {
 	assert.Equal(t, int64(8192), devices[1].MemoryMiB)
 }
 
+func TestHAMiDeviceAllocationsAssignVDeviceIndexByContainerDeviceOrder(t *testing.T) {
+	devices, err := hamiDeviceAllocationsFromAnnotation(
+		";GPU-def,NVIDIA,4096,50:GPU-abc,NVIDIA,8192,50:;",
+		"node-a",
+		map[string]string{"GPU-abc": "Tesla-T4", "GPU-def": "Tesla-T4"},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, devices, 2)
+	assert.Equal(t, "GPU-abc", devices[0].UUID)
+	assert.Equal(t, "1", devices[0].VDeviceIndex)
+	assert.Equal(t, int64(8192), devices[0].MemoryMiB)
+	assert.Equal(t, "GPU-def", devices[1].UUID)
+	assert.Equal(t, "0", devices[1].VDeviceIndex)
+	assert.Equal(t, int64(4096), devices[1].MemoryMiB)
+}
+
 func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
