@@ -26,7 +26,14 @@ type neutreeCoreInstallOptions struct {
 	grafanaURL            string
 	version               string
 	adminPassword         string
+
+	victorialogsRetentionPeriod string
 }
+
+// defaultVictoriaLogsRetentionPeriod is the default VictoriaLogs log retention
+// period rendered into the neutree-core compose file. Overridable at deploy time
+// via --victorialogs-retention-period.
+const defaultVictoriaLogsRetentionPeriod = "30d"
 
 func NewNeutreeCoreInstallCmd(exector command.Executor, commonOptions *commonOptions) *cobra.Command {
 	options := neutreeCoreInstallOptions{
@@ -48,6 +55,7 @@ Configuration Options:
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
   --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
+  --victorialogs-retention-period VictoriaLogs log retention period (default: 30d; e.g. 30d, 90d, 1y)
 
 Examples:
   # Basic installation
@@ -77,6 +85,8 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
+		defaultVictoriaLogsRetentionPeriod, "VictoriaLogs log retention period (e.g. 30d, 90d, 1y)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
@@ -176,19 +186,27 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		return errors.Wrap(err, "create jwt token failed")
 	}
 
+	// Fall back to the default when unset (e.g. options constructed directly
+	// rather than via the CLI flag) so the compose never renders an empty
+	// -retentionPeriod= argument.
+	if options.victorialogsRetentionPeriod == "" {
+		options.victorialogsRetentionPeriod = defaultVictoriaLogsRetentionPeriod
+	}
+
 	templateParams := map[string]string{
-		"NeutreeCoreWorkDir":     coreWorkDir,
-		"JwtSecret":              options.jwtSecret,
-		"DbPassword":             options.dbPassword,
-		"MetricsRemoteWriteURL":  options.metricsRemoteWriteURL,
-		"GrafanaURL":             options.grafanaURL,
-		"VictoriaMetricsVersion": componentversion.VictoriaMetrics,
-		"NeutreeVersion":         options.version,
-		"JwtToken":               *jwtToken,
-		"VectorVersion":          componentversion.Vector,
-		"KongVersion":            componentversion.Kong,
-		"NodeIP":                 options.nodeIP,
-		"AdminPassword":          options.adminPassword,
+		"NeutreeCoreWorkDir":          coreWorkDir,
+		"JwtSecret":                   options.jwtSecret,
+		"DbPassword":                  options.dbPassword,
+		"MetricsRemoteWriteURL":       options.metricsRemoteWriteURL,
+		"GrafanaURL":                  options.grafanaURL,
+		"VictoriaMetricsVersion":      componentversion.VictoriaMetrics,
+		"VictoriaLogsRetentionPeriod": options.victorialogsRetentionPeriod,
+		"NeutreeVersion":              options.version,
+		"JwtToken":                    *jwtToken,
+		"VectorVersion":               componentversion.Vector,
+		"KongVersion":                 componentversion.Kong,
+		"NodeIP":                      options.nodeIP,
+		"AdminPassword":               options.adminPassword,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

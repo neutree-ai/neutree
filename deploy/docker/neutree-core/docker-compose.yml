@@ -319,6 +319,9 @@ services:
     image: victoriametrics/victoria-logs:v1.50.0
     command:
       - -storageDataPath=/victoria-logs-data
+      # Log retention period. Defaults to 30d; override at deploy time with
+      # `neutree-cli launch neutree-core --victorialogs-retention-period <period>`.
+      - -retentionPeriod={{ .VictoriaLogsRetentionPeriod }}
       # AI-trace request/response bodies can be large; raise the per-line
       # ingest limit to 16MiB so VictoriaLogs does not drop them.
       - -insert.maxLineSizeBytes=16777216
