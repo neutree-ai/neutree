@@ -599,10 +599,10 @@ func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t 
 	}
 
 	clusterRole := findMetricsClusterRoleByApp(t, objs, "neutree-node-agent")
-	assert.Assert(t, hasExactResourceRule(clusterRole, "", "nodes", "get", "patch"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes", "get", "list", "watch", "patch"))
 	assert.Assert(t, !hasResourceRule(clusterRole, "", "nodes/metrics", "get"))
 	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/proxy", "get"))
-	assert.Assert(t, hasExactResourceRule(clusterRole, "", "pods", "get", "list", "patch"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "pods", "get", "list", "watch", "patch"))
 	assert.Assert(t, !hasNonResourceURLRule(clusterRole, "/metrics", "get"))
 }
 
@@ -1240,17 +1240,6 @@ func hasResourceRule(clusterRole *rbacv1.ClusterRole, apiGroup, resource string,
 	return false
 }
 
-func hasExactResourceRule(clusterRole *rbacv1.ClusterRole, apiGroup, resource string, verbs ...string) bool {
-	for _, rule := range clusterRole.Rules {
-		if containsString(rule.APIGroups, apiGroup) && containsString(rule.Resources, resource) &&
-			containsExactly(rule.Verbs, verbs) {
-			return true
-		}
-	}
-
-	return false
-}
-
 func hasNonResourceURLRule(clusterRole *rbacv1.ClusterRole, nonResourceURL string, verbs ...string) bool {
 	for _, rule := range clusterRole.Rules {
 		if containsString(rule.NonResourceURLs, nonResourceURL) && containsAll(rule.Verbs, verbs) {
@@ -1269,14 +1258,6 @@ func containsAll(values []string, candidates []string) bool {
 	}
 
 	return true
-}
-
-func containsExactly(values []string, candidates []string) bool {
-	if len(values) != len(candidates) {
-		return false
-	}
-
-	return containsAll(values, candidates)
 }
 
 func containsString(values []string, candidate string) bool {

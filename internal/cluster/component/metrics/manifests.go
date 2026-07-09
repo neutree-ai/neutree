@@ -228,13 +228,13 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["nodes"]
-  verbs: ["get", "patch"]
+  verbs: ["get", "list", "watch", "patch"]
 - apiGroups: [""]
   resources: ["nodes/proxy"]
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "patch"]
+  verbs: ["get", "list", "watch", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
