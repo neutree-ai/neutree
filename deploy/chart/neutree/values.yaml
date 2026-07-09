@@ -267,6 +267,9 @@ victorialogs:
     repository: victoriametrics/victoria-logs
     tag: "v1.50.0"
     pullPolicy: IfNotPresent
+  # Log retention period. Override at deploy time with
+  # `--set victorialogs.retentionPeriod=<period>` (e.g. 30d, 90d, 1y).
+  retentionPeriod: 30d
   # AI-trace request/response bodies can be large; raise the per-line ingest
   # limit (bytes) so VictoriaLogs does not drop them. Matches docker-compose.
   maxLineSizeBytes: 16777216

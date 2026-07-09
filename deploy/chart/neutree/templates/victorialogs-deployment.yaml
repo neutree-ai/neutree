@@ -27,6 +27,9 @@ spec:
           imagePullPolicy: {{ .Values.victorialogs.image.pullPolicy }}
           args:
             - -storageDataPath=/victoria-logs-data
+            # Log retention period. Defaults to 30d; override with
+            # `--set victorialogs.retentionPeriod=<period>`.
+            - -retentionPeriod={{ .Values.victorialogs.retentionPeriod }}
             # AI-trace request/response bodies can be large; raise the per-line
             # ingest limit so VictoriaLogs does not drop them.
             - -insert.maxLineSizeBytes={{ int64 .Values.victorialogs.maxLineSizeBytes }}
