@@ -19,14 +19,12 @@ const (
 	defaultMetricsPath = "/metrics"
 
 	managedNodeExporterPort          = 19100
-	externalNodeExporterPort         = 9100
 	managedAcceleratorExporterPort   = 19400
 	externalAcceleratorExporterPort  = 9400
 	ManagedAcceleratorExporterLabel  = "neutree.ai/metrics-target"
 	ManagedAcceleratorExporterValue  = "accelerator-exporter"
 	managedNodeExporterApp           = "neutree-node-exporter"
 	managedAcceleratorExporterSuffix = "-dcgm-exporter"
-	externalNodeExporterApp          = "node-exporter"
 	externalAcceleratorExporterApp   = "nvidia-dcgm-exporter"
 )
 
@@ -49,7 +47,7 @@ func (p StaticScrapeTargetProvider) Targets(_ context.Context, targetType string
 		return nil, nil
 	}
 
-	return scrapeTargets(targetType, "127.0.0.1", port, schemesForMetricsMode(p.metricsMode())), nil
+	return scrapeTargets(targetType, "127.0.0.1", port, targetSchemes(p.metricsMode(), targetType)), nil
 }
 
 func (p StaticScrapeTargetProvider) metricsMode() string {
@@ -104,7 +102,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 
 	result := make([]ScrapeTarget, 0, len(hosts))
 	for _, host := range hosts {
-		result = append(result, scrapeTargets(targetType, host, port, schemesForMetricsMode(mode))...)
+		result = append(result, scrapeTargets(targetType, host, port, targetSchemes(mode, targetType))...)
 	}
 
 	return result, nil
@@ -113,10 +111,6 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 func targetPort(metricsMode string, targetType string) (int, bool) {
 	switch targetType {
 	case metricsnormalizer.TargetNodeExporter:
-		if metricsMode == MetricsModeExternal {
-			return externalNodeExporterPort, true
-		}
-
 		return managedNodeExporterPort, true
 	case metricsnormalizer.TargetAcceleratorExporter:
 		if metricsMode == MetricsModeExternal {
@@ -145,8 +139,8 @@ func scrapeTargets(targetType string, host string, port int, schemes []string) [
 	return result
 }
 
-func schemesForMetricsMode(metricsMode string) []string {
-	if metricsMode == MetricsModeExternal {
+func targetSchemes(metricsMode string, targetType string) []string {
+	if targetType == metricsnormalizer.TargetAcceleratorExporter && metricsMode == MetricsModeExternal {
 		return []string{"http", "https"}
 	}
 
@@ -172,12 +166,7 @@ func matchesTargetPod(metricsMode string, targetType string, labels map[string]s
 	}
 }
 
-func matchesNodeExporterPod(metricsMode string, labels map[string]string) bool {
-	if metricsMode == MetricsModeExternal {
-		return labels["app"] == externalNodeExporterApp ||
-			labels["app.kubernetes.io/name"] == externalNodeExporterApp
-	}
-
+func matchesNodeExporterPod(_ string, labels map[string]string) bool {
 	return labels["app"] == managedNodeExporterApp
 }
 

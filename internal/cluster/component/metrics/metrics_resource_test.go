@@ -560,7 +560,7 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
-func TestBuildMetricsResourcesGrantsNodeAgentExternalNodeExporterAccess(t *testing.T) {
+func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
@@ -589,11 +589,13 @@ func TestBuildMetricsResourcesGrantsNodeAgentExternalNodeExporterAccess(t *testi
 	}
 
 	clusterRole := findMetricsClusterRoleByApp(t, objs, "neutree-node-agent")
-	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes", "get", "list", "watch", "patch"))
-	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/metrics", "get", "list", "watch"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes", "get", "patch"))
+	assert.Assert(t, !hasResourceRule(clusterRole, "", "nodes", "watch"))
+	assert.Assert(t, !hasResourceRule(clusterRole, "", "nodes/metrics", "get"))
 	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/proxy", "get"))
-	assert.Assert(t, hasResourceRule(clusterRole, "", "pods", "get", "list", "watch", "patch"))
-	assert.Assert(t, hasNonResourceURLRule(clusterRole, "/metrics", "get"))
+	assert.Assert(t, hasResourceRule(clusterRole, "", "pods", "get", "list", "patch"))
+	assert.Assert(t, !hasResourceRule(clusterRole, "", "pods", "watch"))
+	assert.Assert(t, !hasNonResourceURLRule(clusterRole, "/metrics", "get"))
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {
