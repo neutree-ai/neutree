@@ -1986,6 +1986,9 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 			name: "serve_name with version when registry is BentoML",
 			endpoint: &v1.Endpoint{
 				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: v1.EngineNameVLLM,
+					},
 					Model: &v1.ModelSpec{
 						Name:     "gpt-model",
 						Version:  "v2.0",
@@ -2011,6 +2014,40 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 				"path":          "gpt-model",
 				"registry_type": string(v1.BentoMLModelRegistryType),
 				"serve_name":    "gpt-model:v2.0",
+			},
+		},
+		{
+			name: "sglang serve_name omits version when registry is BentoML",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: v1.EngineNameSGLang,
+					},
+					Model: &v1.ModelSpec{
+						Name:     "gpt-model",
+						Version:  "v2.0",
+						Task:     "text-generation",
+						Registry: "bentoml",
+					},
+				},
+			},
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			expectedModelArgs: map[string]interface{}{
+				"name":          "gpt-model",
+				"version":       "v2.0",
+				"file":          "",
+				"task":          "text-generation",
+				"path":          "gpt-model",
+				"registry_type": string(v1.BentoMLModelRegistryType),
+				"serve_name":    "gpt-model",
 			},
 		},
 	}

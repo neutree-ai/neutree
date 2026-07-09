@@ -34,6 +34,19 @@ func engineTPArgKey(engineName string) string {
 	}
 }
 
+func endpointModelServeName(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) string {
+	serveName := endpoint.Spec.Model.Name
+	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameSGLang {
+		return serveName
+	}
+
+	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
+		serveName = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
+	}
+
+	return serveName
+}
+
 func getEndpointDeployCluster(s storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, error) { //nolint:unparam
 	clusterFilter := []storage.Filter{
 		{
