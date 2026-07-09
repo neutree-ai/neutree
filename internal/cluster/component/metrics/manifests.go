@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	MinKubeStateMetricsClusterVersion       = "v1.1.0"
+	MinKubeStateMetricsClusterVersion = "v1.1.0"
+	// Clusters before v1.1.0 do not support Neutree-managed metrics exporters.
 	MinManagedMetricsExporterClusterVersion = "v1.1.0"
 )
 
@@ -558,7 +559,6 @@ type MetricsManifestVariables struct {
 	EnableKubeStateMetrics           bool
 	EnableNeutreeNodeAgentMetrics    bool
 	EnableNodeExporter               bool
-	EnableLegacyNodeExporterScrape   bool
 	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
 	VMAgentConfig                    string

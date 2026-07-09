@@ -39,14 +39,10 @@ func assertK8sMetricsResources(
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-agent should not exist before cluster version v1.1.0")
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "DCGM exporter should not exist before cluster version v1.1.0")
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-https'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("replacement: '$1:9100'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("replacement: '$1:19100'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-http'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-https'"))
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'neutree-node-agent'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'dcgm-exporter'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("label: app=nvidia-dcgm-exporter"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("replacement: $1:9400"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'dcgm-exporter'"))
 
 		assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
 
@@ -157,9 +153,8 @@ func assertK8sExternalAcceleratorExporterResources(
 	} else {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-https'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("replacement: '$1:9100'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-http'"))
+		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-https'"))
 	}
 
 	assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)

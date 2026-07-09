@@ -33,9 +33,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
-	variables.EnableLegacyNodeExporterScrape = !enableManagedMetricsExporters
-	variables.EnableExternalDCGMScrape = !enableManagedMetricsExporters ||
-		m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
 	if err != nil {
