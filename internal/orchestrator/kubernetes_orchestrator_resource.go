@@ -358,12 +358,7 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 		"registry_type": string(modelRegistry.Spec.Type),
 	}
 
-	modelArgs["serve_name"] = endpoint.Spec.Model.Name
-
-	// only set serve_name with version when version is specified and not latest for non-huggingface model registry
-	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
-		modelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
-	}
+	modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
 
 	maps.Copy(data.ModelArgs, modelArgs)
 }

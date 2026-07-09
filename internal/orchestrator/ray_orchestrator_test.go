@@ -1045,7 +1045,7 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 						Task:    v1.TextGenerationModelTask,
 					},
 					Resources:         &v1.ResourceSpec{},
-					Engine:            &v1.EndpointEngineSpec{},
+					Engine:            &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM},
 					DeploymentOptions: map[string]interface{}{},
 				},
 			},
@@ -1220,6 +1220,49 @@ func TestEndpointToApplication_setModelArgs(t *testing.T) {
 				v1.HFTokenEnv: "test-token",
 			},
 			wantErr: false,
+		},
+		{
+			name: "SGLang BentoML modelRegistry - specific version omits version from serve_name",
+			modelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{
+					Name: "bentoml-registry",
+				},
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.BentoMLModelRegistryType,
+					Url:  "nfs://192.168.1.100/bentoml",
+				},
+			},
+			endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "sglang-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Model: &v1.ModelSpec{
+						Name:    "qwen",
+						Version: "v1.0",
+						Task:    v1.TextGenerationModelTask,
+					},
+					Resources: &v1.ResourceSpec{},
+					Engine: &v1.EndpointEngineSpec{
+						Engine: v1.EngineNameSGLang,
+					},
+					DeploymentOptions: map[string]interface{}{},
+				},
+			},
+			cluster: &v1.Cluster{},
+			expectedModelArgs: map[string]string{
+				"registry_type": "bentoml",
+				"name":          "qwen",
+				"version":       "v1.0",
+				"file":          "",
+				"task":          v1.TextGenerationModelTask,
+				"serve_name":    "qwen",
+				"path":          filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, v1.DefaultModelCacheRelativePath, "qwen", "v1.0"),
+				"registry_path": filepath.Join("/mnt", "default", "sglang-endpoint", "models", "qwen", "v1.0"),
+			},
+			expectedEnvs: map[string]string{},
+			wantErr:      false,
 		},
 		{
 			name: "HuggingFace modelRegistry - without specific version",

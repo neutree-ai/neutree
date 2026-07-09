@@ -893,10 +893,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		"task":          endpoint.Spec.Model.Task,
 	}
 
-	modelArgs["serve_name"] = endpoint.Spec.Model.Name
-	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
-		modelArgs["serve_name"] = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
-	}
+	modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
 
 	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
 
