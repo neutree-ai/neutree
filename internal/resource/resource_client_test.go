@@ -89,6 +89,9 @@ func TestK8sResourceClientListEndpointInstancesReportsEndpointProduct(t *testing
 
 	require.NoError(t, err)
 	require.NotNil(t, resources)
+	require.Len(t, resources.Replicas, 1)
+	require.Len(t, resources.Replicas[0].Devices, 1)
+	require.Equal(t, "NVIDIA-L20", resources.Replicas[0].Devices[0].Product)
 	require.NotNil(t, resources.Summary)
 	require.Contains(t, resources.Summary.Products, v1.AcceleratorProduct("NVIDIA-L20"))
 	require.NotContains(t, resources.Summary.Products, v1.AcceleratorProduct("raw-device-product"))
@@ -146,8 +149,9 @@ func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocation(t *testing.
 		WithObjects(pod).
 		Build()
 	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	endpoint := endpointForTest("chat")
 
-	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpointForTest("chat"))
+	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpoint)
 
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
@@ -162,6 +166,15 @@ func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocation(t *testing.
 	require.Equal(t, int64(4096), instances[0].Devices[0].UsedMemoryMiB)
 	require.Equal(t, int64(100), instances[0].Devices[0].CoreUnits)
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
+
+	resources, err := resourceview.NewResourceViewBuilder(client).
+		BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+	require.Len(t, resources.Replicas, 1)
+	require.Len(t, resources.Replicas[0].Devices, 1)
+	require.Equal(t, "Tesla-T4", resources.Replicas[0].Devices[0].Product)
 }
 
 func TestK8sResourceClientListEndpointInstancesSkipsMalformedNeutreeAllocation(t *testing.T) {
