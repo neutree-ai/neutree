@@ -441,7 +441,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Equal(t, "test-namespace", nodeAgent.Namespace)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
-	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-alpha.9",
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-rc.1",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, !nodeAgent.Spec.Template.Spec.HostNetwork)
