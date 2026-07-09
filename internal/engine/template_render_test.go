@@ -80,6 +80,49 @@ func TestVLLMTemplateTaskTranslation(t *testing.T) {
 	}
 }
 
+func TestLlamaCppTemplateEmbeddingMode(t *testing.T) {
+	tests := []struct {
+		name                string
+		task                string
+		wantEmbeddingValue  string
+		wantEmbeddingAbsent bool
+	}{
+		{
+			name:               "text-embedding enables llama.cpp embedding mode",
+			task:               "text-embedding",
+			wantEmbeddingValue: "true",
+		},
+		{
+			name:                "text-generation leaves llama.cpp embedding mode disabled",
+			task:                "text-generation",
+			wantEmbeddingAbsent: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := newTestVLLMVars("v0.3.7", tc.task)
+			vars["EngineName"] = "llama-cpp-engine"
+			vars["ImageRepo"] = "neutree/engine-llama-cpp"
+
+			objs, err := util.RenderKubernetesManifest(llamaCppDefaultDeployTemplate, vars)
+			require.NoError(t, err)
+			require.NotEmpty(t, objs.Items)
+
+			deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+			args := mustExtractContainerArgs(t, deploy.Object, "llama-cpp-engine")
+			tokens := strings.Fields(strings.Join(args, " "))
+
+			if tc.wantEmbeddingAbsent {
+				assert.NotContains(t, tokens, "--embedding", "full args=%v", args)
+				return
+			}
+
+			assert.Equal(t, tc.wantEmbeddingValue, flagValue(tokens, "--embedding"), "full args=%v", args)
+		})
+	}
+}
+
 func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -235,6 +278,34 @@ func assertAntiAffinityEndpointValue(t *testing.T, obj map[string]any, want stri
 	}
 
 	require.Fail(t, "endpoint anti-affinity match expression not found")
+}
+
+// mustExtractContainerArgs pulls the named container's args list out of a
+// rendered unstructured Deployment object.
+func mustExtractContainerArgs(t *testing.T, obj map[string]any, containerName string) []string {
+	t.Helper()
+	spec := requireMap(t, obj["spec"], "spec")
+	tmpl := requireMap(t, spec["template"], "spec.template")
+	pod := requireMap(t, tmpl["spec"], "spec.template.spec")
+	containers := requireSlice(t, pod["containers"], "spec.template.spec.containers")
+
+	for _, c := range containers {
+		cm := requireMap(t, c, "container")
+		name, ok := cm["name"].(string)
+		if ok && name == containerName {
+			args := requireSlice(t, cm["args"], "container.args")
+			out := make([]string, 0, len(args))
+
+			for i, s := range args {
+				out = append(out, mustString(t, s, "args", i))
+			}
+
+			return out
+		}
+	}
+	require.Failf(t, "container not found in rendered deployment", "%q", containerName)
+
+	return nil
 }
 
 // mustExtractContainerCommand pulls the named container's command list out of
