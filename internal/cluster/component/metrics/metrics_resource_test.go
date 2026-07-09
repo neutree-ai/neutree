@@ -441,7 +441,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Equal(t, "test-namespace", nodeAgent.Namespace)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
-	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-alpha.8",
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-rc.1",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, !nodeAgent.Spec.Template.Spec.HostNetwork)
@@ -471,7 +471,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
 }
 
-func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
+func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -504,6 +504,7 @@ func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
 }
@@ -548,10 +549,20 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
+
+	nodeExporter := findMetricsDaemonSet(t, objs, "neutree-node-exporter")
+	assert.Equal(t, int32(19100), nodeExporter.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	assert.Assert(t, strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
+		"--web.listen-address=:19100"))
+	assert.Assert(t, !strings.Contains(strings.Join(nodeExporter.Spec.Template.Spec.Containers[0].Args, "\n"),
+		"--web.listen-address=:9100"))
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
@@ -560,7 +571,7 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
-func TestBuildMetricsResourcesGrantsNodeAgentExternalNodeExporterAccess(t *testing.T) {
+func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
@@ -590,10 +601,10 @@ func TestBuildMetricsResourcesGrantsNodeAgentExternalNodeExporterAccess(t *testi
 
 	clusterRole := findMetricsClusterRoleByApp(t, objs, "neutree-node-agent")
 	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes", "get", "list", "watch", "patch"))
-	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/metrics", "get", "list", "watch"))
+	assert.Assert(t, !hasResourceRule(clusterRole, "", "nodes/metrics", "get"))
 	assert.Assert(t, hasResourceRule(clusterRole, "", "nodes/proxy", "get"))
 	assert.Assert(t, hasResourceRule(clusterRole, "", "pods", "get", "list", "watch", "patch"))
-	assert.Assert(t, hasNonResourceURLRule(clusterRole, "/metrics", "get"))
+	assert.Assert(t, !hasNonResourceURLRule(clusterRole, "/metrics", "get"))
 }
 
 func requireVolumeMount(t *testing.T, daemonSet *appsv1.DaemonSet, name, mountPath string) corev1.VolumeMount {

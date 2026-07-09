@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	MinKubeStateMetricsClusterVersion       = "v1.1.0"
+	MinKubeStateMetricsClusterVersion = "v1.1.0"
+	// Clusters before v1.1.0 do not support Neutree-managed metrics exporters.
 	MinManagedMetricsExporterClusterVersion = "v1.1.0"
 )
 
@@ -230,18 +231,11 @@ rules:
   resources: ["nodes"]
   verbs: ["get", "list", "watch", "patch"]
 - apiGroups: [""]
-  resources: ["nodes/metrics"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
   resources: ["nodes/proxy"]
   verbs: ["get"]
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch", "patch"]
-- nonResourceURLs:
-  - /metrics
-  verbs:
-  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

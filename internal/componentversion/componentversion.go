@@ -19,7 +19,7 @@ const KubeStateMetrics = "v2.15.0"
 const NodeExporter = "v1.8.2"
 
 // NeutreeNodeAgent image version.
-const NeutreeNodeAgent = "v1.1.0-alpha.8"
+const NeutreeNodeAgent = "v1.1.0-rc.1"
 
 // Grafana image version.
 const Grafana = "11.5.3"

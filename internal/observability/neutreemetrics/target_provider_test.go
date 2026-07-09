@@ -31,14 +31,13 @@ func TestStaticScrapeTargetProviderUsesManagedPorts(t *testing.T) {
 	}, acceleratorTargets)
 }
 
-func TestStaticScrapeTargetProviderUsesExternalPortsWithHTTPSFallback(t *testing.T) {
+func TestStaticScrapeTargetProviderKeepsManagedNodeExporterInExternalMode(t *testing.T) {
 	provider := StaticScrapeTargetProvider{MetricsMode: MetricsModeExternal}
 
 	nodeTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetNodeExporter)
 	require.NoError(t, err)
 	assert.Equal(t, []ScrapeTarget{
-		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "http://127.0.0.1:9100/metrics"},
-		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "https://127.0.0.1:9100/metrics"},
+		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "http://127.0.0.1:19100/metrics"},
 	}, nodeTargets)
 
 	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
@@ -74,10 +73,10 @@ func TestKubernetesScrapeTargetProviderDiscoversManagedPodsOnLocalNode(t *testin
 	}, acceleratorTargets)
 }
 
-func TestKubernetesScrapeTargetProviderDiscoversExternalPodsOnLocalNode(t *testing.T) {
+func TestKubernetesScrapeTargetProviderKeepsManagedNodeExporterInExternalMode(t *testing.T) {
 	provider := newKubernetesTargetProvider(t,
-		pod("monitoring", "node-exporter-a", "node-a", "10.244.0.20", map[string]string{"app.kubernetes.io/name": "node-exporter"}),
-		pod("monitoring", "node-exporter-b", "node-b", "10.244.0.21", map[string]string{"app.kubernetes.io/name": "node-exporter"}),
+		pod("metrics", "node-exporter-a", "node-a", "10.244.0.20", map[string]string{"app": "neutree-node-exporter"}),
+		pod("monitoring", "external-node-exporter-a", "node-a", "10.244.0.21", map[string]string{"app.kubernetes.io/name": "node-exporter"}),
 		pod("gpu", "dcgm-a", "node-a", "10.244.0.22", map[string]string{"app": "nvidia-dcgm-exporter"}),
 		pod("gpu", "dcgm-empty-ip", "node-a", "", map[string]string{"app": "nvidia-dcgm-exporter"}),
 	)
@@ -87,8 +86,7 @@ func TestKubernetesScrapeTargetProviderDiscoversExternalPodsOnLocalNode(t *testi
 	nodeTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetNodeExporter)
 	require.NoError(t, err)
 	assert.Equal(t, []ScrapeTarget{
-		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "http://10.244.0.20:9100/metrics"},
-		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "https://10.244.0.20:9100/metrics"},
+		{TargetType: metricsnormalizer.TargetNodeExporter, URL: "http://10.244.0.20:19100/metrics"},
 	}, nodeTargets)
 
 	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
