@@ -558,6 +558,7 @@ type MetricsManifestVariables struct {
 	EnableKubeStateMetrics           bool
 	EnableNeutreeNodeAgentMetrics    bool
 	EnableNodeExporter               bool
+	EnableLegacyNodeExporterScrape   bool
 	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
 	VMAgentConfig                    string

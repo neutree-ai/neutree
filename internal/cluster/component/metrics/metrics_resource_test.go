@@ -471,7 +471,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
 }
 
-func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
+func TestBuildMetricsResourcesKeepsLegacyScrapesBeforeV110(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -503,9 +503,16 @@ func TestBuildMetricsResourcesSkipsManagedExportersBeforeV110(t *testing.T) {
 	}
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assertValidPrometheusYAML(t, vmagentConfig)
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-http'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'node-exporter-https'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: '$1:9100'"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "replacement: '$1:19100'"))
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'neutree-node-agent'"))
-	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'dcgm-exporter'"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-dcgm-exporter"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:9400"))
+	assert.Assert(t, !strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
 }
 
 func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T) {
