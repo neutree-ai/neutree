@@ -211,7 +211,7 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		EndpointName: endpoint.Metadata.Name,
 		Namespace:    namespace,
 		Pods:         pods,
-	})
+	}, endpointAcceleratorProduct(endpoint))
 
 	if len(instances) == 0 {
 		return nil, nil
@@ -324,6 +324,7 @@ func kubernetesNeutreeAcceleratorResourcesFromAnnotations(
 
 func endpointInstancesFromNeutreeAnnotations(
 	input resourceparser.KubernetesEndpointResourceContext,
+	product string,
 ) []EndpointInstanceResource {
 	instances := make([]EndpointInstanceResource, 0, len(input.Pods))
 
@@ -340,6 +341,12 @@ func endpointInstancesFromNeutreeAnnotations(
 
 		if len(devices) == 0 {
 			continue
+		}
+
+		if product != "" {
+			for i := range devices {
+				devices[i].Product = product
+			}
 		}
 
 		instances = append(instances, EndpointInstanceResource{

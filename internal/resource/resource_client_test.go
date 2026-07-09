@@ -25,10 +25,74 @@ func endpointForTest(name string) *v1.Endpoint {
 	}
 }
 
+func endpointForTestWithProduct(name, product string) *v1.Endpoint {
+	endpoint := endpointForTest(name)
+	endpoint.Spec.Resources = &v1.ResourceSpec{}
+	endpoint.Spec.Resources.SetAcceleratorProduct(product)
+
+	return endpoint
+}
+
 func k8sClusterForTest() *v1.Cluster {
 	return &v1.Cluster{
 		Metadata: &v1.Metadata{Name: "cluster", Workspace: "default"},
 	}
+}
+
+func TestK8sResourceClientListEndpointInstancesReportsEndpointProduct(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: k8sClusterNamespaceForTest(),
+			UID:       types.UID("uid-1"),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"raw-device-product","memory_mib":15360,"core_units":100}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
+
+	instances, err := client.ListEndpointInstances(
+		context.Background(),
+		k8sClusterForTest(),
+		endpoint,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	require.Len(t, instances[0].Devices, 1)
+	require.Equal(t, "NVIDIA-L20", instances[0].Devices[0].Product)
+
+	resources, err := resourceview.NewResourceViewBuilder(client).
+		BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+
+	require.NoError(t, err)
+	require.NotNil(t, resources)
+	require.NotNil(t, resources.Summary)
+	require.Contains(t, resources.Summary.Products, v1.AcceleratorProduct("NVIDIA-L20"))
+	require.NotContains(t, resources.Summary.Products, v1.AcceleratorProduct("raw-device-product"))
+	require.Equal(t, int64(15360), resources.Summary.Products["NVIDIA-L20"].MemoryMiB)
 }
 
 func k8sClusterNamespaceForTest() string {
