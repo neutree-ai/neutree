@@ -113,6 +113,7 @@ func assertK8sMetricsResources(
 
 		dcgmConfig, err := k8sH.GetConfigMap(ctx, namespace, "nvidia-gpu-dcgm-exporter-config")
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "DCGM exporter config should exist")
+
 		collectors := dcgmConfig.Data["default-counters.csv"]
 		ExpectWithOffset(1, collectors).NotTo(ContainSubstring("DCGM_FI_DEV_NVSWITCH_LINK_STATUS"))
 		ExpectWithOffset(1, collectors).To(ContainSubstring("DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL"))
