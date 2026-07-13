@@ -111,6 +111,14 @@ func assertK8sMetricsResources(
 		))
 		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'accelerator-exporter-nvidia-gpu'"))
 
+		dcgmConfig, err := k8sH.GetConfigMap(ctx, namespace, "nvidia-gpu-dcgm-exporter-config")
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "DCGM exporter config should exist")
+		collectors := dcgmConfig.Data["default-counters.csv"]
+		ExpectWithOffset(1, collectors).NotTo(ContainSubstring("DCGM_FI_DEV_NVSWITCH_LINK_STATUS"))
+		ExpectWithOffset(1, collectors).To(ContainSubstring("DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL"))
+		ExpectWithOffset(1, collectors).To(ContainSubstring("DCGM_FI_PROF_NVLINK_RX_BYTES"))
+		ExpectWithOffset(1, collectors).To(ContainSubstring("DCGM_FI_PROF_NVLINK_TX_BYTES"))
+
 		By("Checking node-agent writes node accelerator device annotations")
 		assertK8sNodeAcceleratorDeviceAnnotations(ctx, k8sH)
 	}

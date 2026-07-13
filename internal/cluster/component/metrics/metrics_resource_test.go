@@ -693,7 +693,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		"DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH",
 		"DCGM_FI_DEV_PCIE_LINK_GEN",
 		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
-		"DCGM_FI_DEV_NVSWITCH_LINK_STATUS",
+		"DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL",
 		"DCGM_FI_DEV_FB_USED_PERCENT",
 		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
 		"DCGM_FI_DEV_RETIRED_PENDING",
@@ -716,6 +716,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		assert.Assert(t, strings.Contains(collectors, metric))
 	}
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_CUSTOM_"))
+	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_NVSWITCH_LINK_STATUS"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_NAME"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_BRAND"))
 	assert.Assert(t, !strings.Contains(collectors, "DCGM_FI_DEV_GPU_UUID"))

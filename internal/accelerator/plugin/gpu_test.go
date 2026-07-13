@@ -355,7 +355,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 		"DCGM_FI_DEV_PCIE_MAX_LINK_WIDTH",
 		"DCGM_FI_DEV_PCIE_LINK_GEN",
 		"DCGM_FI_DEV_PCIE_LINK_WIDTH",
-		"DCGM_FI_DEV_NVSWITCH_LINK_STATUS",
+		"DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL",
 		"DCGM_FI_DEV_XID_ERRORS",
 		"DCGM_FI_DEV_ECC_DBE_VOL_TOTAL",
 		"DCGM_FI_DEV_RETIRED_PENDING",
@@ -378,6 +378,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 		assert.Contains(t, collectors, metric)
 	}
 	assert.NotContains(t, collectors, "DCGM_CUSTOM_")
+	assert.NotContains(t, collectors, "DCGM_FI_DEV_NVSWITCH_LINK_STATUS")
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_NAME")
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_BRAND")
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_GPU_UUID")
