@@ -30,8 +30,13 @@ type ApiKeyLimits struct {
 // set) restricts to one specific endpoint, so the same model name exposed by a
 // different IE/EE is not allowed.
 type AllowedModel struct {
-	Model        string `json:"model"`
-	Type         string `json:"type,omitempty"`          // "internal" | "external" | "" (any source)
+	Model string `json:"model"`
+	// Type is the IE/EE token "internal" | "external" (or "" for any source).
+	// Note this is NOT the DB `source` that get_workspace_models returns
+	// ("endpoint" | "external_endpoint"); the UI maps source -> type when it
+	// builds this entry. The gateway enforces against the same "internal" /
+	// "external" tokens (see endpointTypeInternal/External in internal/gateway).
+	Type         string `json:"type,omitempty"`
 	EndpointName string `json:"endpoint_name,omitempty"` // "" = any endpoint of this model
 }
 

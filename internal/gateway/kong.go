@@ -444,6 +444,20 @@ end`,
 	}
 }
 
+// Endpoint-type tokens for the IE/EE dimension of the API key model allowlist.
+// The gateway plugin stamps one of these into every endpoint route's config and
+// stashes it for neutree-ai-access to match against AllowedModel.Type.
+//
+// This is a distinct vocabulary from the ACL resource strings ("endpoint" /
+// "external-endpoint") and from the DB `source` labels that get_workspace_models
+// (migration 070) returns to populate the UI dropdown ("endpoint" /
+// "external_endpoint"). The UI maps that source to this type when it writes an
+// AllowedModel: source "endpoint" -> internal, "external_endpoint" -> external.
+const (
+	endpointTypeInternal = "internal"
+	endpointTypeExternal = "external"
+)
+
 func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *kong.Plugin {
 	return &kong.Plugin{
 		Name:         pointy.String("neutree-ai-gateway"),
@@ -462,7 +476,7 @@ func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *k
 			// the consumer-scoped neutree-ai-access plugin can enforce endpoint-level
 			// model allowlists. The gateway plugin stashes these into kong.ctx.shared
 			// for the access plugin (which is not bound to a route) to read.
-			"endpoint_type": "internal",
+			"endpoint_type": endpointTypeInternal,
 			"endpoint_name": ep.Metadata.Name,
 		},
 	}
@@ -1121,7 +1135,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			// "internal" flag is a routing detail; from the API key's perspective the
 			// request entered through this external endpoint, so the dimension is fixed
 			// to (external, ee.name) regardless of which upstream the model resolves to.
-			"endpoint_type": "external",
+			"endpoint_type": endpointTypeExternal,
 			"endpoint_name": ee.Metadata.Name,
 		},
 	}, nil

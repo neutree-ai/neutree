@@ -61,17 +61,21 @@ end
 -- pins — the endpoint identity stashed by neutree-ai-gateway matches. An entry
 -- with empty type/endpoint_name is "any endpoint serving this model" (legacy
 -- name-only keys, migrated to this shape). An empty list permits nothing (deny-all).
+-- A pinned dimension matches when it is unset (nil/"" = any) or equals the
+-- endpoint the request actually hit.
+local function pin_ok(pin, actual)
+    return pin == nil or pin == "" or pin == actual
+end
+
 local function allow_match(list, model, ep_type, ep_name)
     if type(list) ~= "table" then
         return false
     end
     for _, entry in ipairs(list) do
-        if type(entry) == "table" and entry.model == model then
-            local type_ok = entry.type == nil or entry.type == "" or entry.type == ep_type
-            local name_ok = entry.endpoint_name == nil or entry.endpoint_name == "" or entry.endpoint_name == ep_name
-            if type_ok and name_ok then
-                return true
-            end
+        if type(entry) == "table" and entry.model == model
+            and pin_ok(entry.type, ep_type)
+            and pin_ok(entry.endpoint_name, ep_name) then
+            return true
         end
     end
     return false
