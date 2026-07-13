@@ -29,6 +29,16 @@ type ApiKeyLimits struct {
 // semantics old keys are migrated to). A fully pinned entry (Type + EndpointName
 // set) restricts to one specific endpoint, so the same model name exposed by a
 // different IE/EE is not allowed.
+//
+// EndpointName is deliberately not workspace-qualified. An API key is bound to a
+// single workspace (Metadata.Workspace) and its Kong ACL groups are derived only
+// from that workspace's endpoints (see desiredAPIKeyACLGroups), so a request
+// through the key can only ever reach endpoints in its own workspace — the ACL
+// plugin rejects anything else before this allowlist is consulted. Endpoint
+// names are unique within a workspace, so (Type, EndpointName) is unambiguous
+// here. This relies on that invariant: if a key could ever access endpoints
+// across workspaces, EndpointName would need a workspace qualifier to avoid
+// same-name collisions.
 type AllowedModel struct {
 	Model string `json:"model"`
 	// Type is the IE/EE token "internal" | "external" (or "" for any source).

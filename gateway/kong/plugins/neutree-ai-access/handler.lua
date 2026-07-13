@@ -62,7 +62,10 @@ end
 -- with empty type/endpoint_name is "any endpoint serving this model" (legacy
 -- name-only keys, migrated to this shape). An empty list permits nothing (deny-all).
 -- A pinned dimension matches when it is unset (nil/"" = any) or equals the
--- endpoint the request actually hit.
+-- endpoint the request actually hit. endpoint_name is matched bare (not
+-- workspace-qualified): an API key only reaches endpoints in its own workspace
+-- (the route ACL rejects anything else before this plugin), and names are unique
+-- within a workspace, so there is no cross-workspace collision to guard against.
 local function pin_ok(pin, actual)
     return pin == nil or pin == "" or pin == actual
 end
