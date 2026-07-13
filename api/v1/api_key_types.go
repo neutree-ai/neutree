@@ -17,8 +17,22 @@ type ApiKeyLimits struct {
 	RPS           int               `json:"rps,omitempty"`
 	RPM           int               `json:"rpm,omitempty"`
 	Concurrency   int               `json:"concurrency,omitempty"`
-	AllowedModels []string          `json:"allowed_models,omitempty"`
+	AllowedModels []AllowedModel    `json:"allowed_models,omitempty"`
 	Disabled      bool              `json:"disabled,omitempty"`
+}
+
+// AllowedModel is one entry of an API key's model allowlist, scoped to the
+// IE/EE (internal/external endpoint) dimension. A request is permitted when its
+// client-facing model equals Model AND — for each of Type / EndpointName that is
+// set — the endpoint the request actually hit matches it. Empty Type and
+// EndpointName mean "any endpoint serving this model" (the legacy name-only
+// semantics old keys are migrated to). A fully pinned entry (Type + EndpointName
+// set) restricts to one specific endpoint, so the same model name exposed by a
+// different IE/EE is not allowed.
+type AllowedModel struct {
+	Model        string `json:"model"`
+	Type         string `json:"type,omitempty"`          // "internal" | "external" | "" (any source)
+	EndpointName string `json:"endpoint_name,omitempty"` // "" = any endpoint of this model
 }
 
 type ApiKeyTokenQuota struct {

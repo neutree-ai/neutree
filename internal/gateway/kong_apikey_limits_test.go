@@ -44,7 +44,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 		ID: "key-1",
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{
 			Disabled:      true,
-			AllowedModels: []string{"gpt-4o"},
+			AllowedModels: []v1.AllowedModel{{Model: "gpt-4o", Type: "internal", EndpointName: "ep-a"}},
 			Concurrency:   8,
 			RPS:           10,
 			RPM:           600,
@@ -57,7 +57,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	assert.Equal(t, cid, p.Consumer.ID)
 	assert.ElementsMatch(t, []*string{pointy.String("http"), pointy.String("https")}, p.Protocols)
 	assert.Equal(t, true, p.Config["disabled"])
-	assert.Equal(t, []string{"gpt-4o"}, p.Config["allowed_models"])
+	assert.Equal(t, []v1.AllowedModel{{Model: "gpt-4o", Type: "internal", EndpointName: "ep-a"}}, p.Config["allowed_models"])
 	assert.Equal(t, 8, p.Config["concurrency"])
 	rl, ok := p.Config["rate_limits"].([]map[string]interface{})
 	require.True(t, ok)
@@ -86,10 +86,10 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	// (distinct from the unset case above which is nil/unrestricted).
 	p2d := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
 		ID:   "k2d",
-		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{AllowedModels: []string{}}},
+		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{AllowedModels: []v1.AllowedModel{}}},
 	})
 	require.NotNil(t, p2d)
-	assert.Equal(t, []string{}, p2d.Config["allowed_models"])
+	assert.Equal(t, []v1.AllowedModel{}, p2d.Config["allowed_models"])
 
 	// RPS only -> single second-window rate limit; disabled present and false
 	p3 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{

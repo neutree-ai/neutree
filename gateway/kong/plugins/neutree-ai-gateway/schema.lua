@@ -72,6 +72,21 @@ local schema = {
             },
           },
           {
+            -- IE/EE dimension this route serves ("internal" | "external"). Stashed
+            -- into kong.ctx.shared for the consumer-scoped neutree-ai-access plugin
+            -- to enforce endpoint-level model allowlists.
+            endpoint_type = {
+              type = "string",
+              required = false,
+            },
+          },
+          {
+            endpoint_name = {
+              type = "string",
+              required = false,
+            },
+          },
+          {
             upstreams = {
               type = "array",
               required = false,

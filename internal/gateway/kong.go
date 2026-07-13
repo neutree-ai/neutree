@@ -458,6 +458,12 @@ func (k *Kong) generateAIGatewayPlugin(ep *v1.Endpoint, curRoute *kong.Route) *k
 			// endpoint behavior. Without it the suffix never matches and the raw
 			// Anthropic request is forwarded to the engine, which 404s.
 			"route_prefix": getEndpointRoutePath(ep),
+			// endpoint_type/endpoint_name identify the IE/EE this route serves so
+			// the consumer-scoped neutree-ai-access plugin can enforce endpoint-level
+			// model allowlists. The gateway plugin stashes these into kong.ctx.shared
+			// for the access plugin (which is not bound to a route) to read.
+			"endpoint_type": "internal",
+			"endpoint_name": ep.Metadata.Name,
 		},
 	}
 }
@@ -1110,6 +1116,13 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 		Config: map[string]interface{}{
 			"route_prefix": getExternalEndpointRoutePath(ee),
 			"upstreams":    upstreams,
+			// See generateAIGatewayPlugin: identify the EE this route serves so the
+			// access plugin can enforce endpoint-level allowlists. Note the per-upstream
+			// "internal" flag is a routing detail; from the API key's perspective the
+			// request entered through this external endpoint, so the dimension is fixed
+			// to (external, ee.name) regardless of which upstream the model resolves to.
+			"endpoint_type": "external",
+			"endpoint_name": ee.Metadata.Name,
 		},
 	}, nil
 }

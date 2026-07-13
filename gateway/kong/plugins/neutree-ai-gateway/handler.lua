@@ -1188,6 +1188,16 @@ function AIGatewayHandler:access(conf)
     local request_path = kong.request.get_path()
     local suffix = extract_suffix(request_path, conf.route_prefix or "")
 
+    -- Expose the IE/EE identity this route serves to later consumer plugins
+    -- (neutree-ai-access endpoint-level allowlist). It is static per route/config,
+    -- so stash it unconditionally regardless of request format or upstream match.
+    if conf.endpoint_type and conf.endpoint_type ~= "" then
+        kong.ctx.shared.neutree_endpoint_type = conf.endpoint_type
+    end
+    if conf.endpoint_name and conf.endpoint_name ~= "" then
+        kong.ctx.shared.neutree_endpoint_name = conf.endpoint_name
+    end
+
     if maybe_return_model_list(conf, suffix) then
         return
     end
