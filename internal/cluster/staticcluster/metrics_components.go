@@ -85,10 +85,6 @@ func buildMetricsComponents(
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
 ) []v1.NodeComponentSpec {
-	if !util.IsHTTPOrHTTPSURL(metricsRemoteWriteURL) {
-		return nil
-	}
-
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
@@ -99,7 +95,7 @@ func buildMetricsComponents(
 
 	components = append(components, buildNodeAgentComponent(cluster, node, profile))
 
-	if role == v1.StaticNodeRoleHead {
+	if role == v1.StaticNodeRoleHead && util.IsHTTPOrHTTPSURL(metricsRemoteWriteURL) {
 		components = append(components, buildVMAgentComponent(cluster, metricsRemoteWriteURL))
 	}
 

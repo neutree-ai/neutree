@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/mock"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
@@ -95,9 +96,10 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -141,9 +143,10 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 				},
 			},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -178,9 +181,10 @@ func TestBuildVMAgentConfigNormalizesSGLangMetricNames(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -225,9 +229,10 @@ func TestBuildMetricsResourcesSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.0.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -258,9 +263,10 @@ func TestBuildVMAgentConfigSkipsHAMiMonitorScrapeWhenAcceleratorVirtualizationDi
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -293,9 +299,10 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVir
 				},
 			},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -324,9 +331,10 @@ func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -385,9 +393,10 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -428,9 +437,10 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v9.9.9"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -471,8 +481,285 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19101"))
 }
 
-func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testing.T) {
+func TestBuildMetricsResourcesDefaultsToNodeAgentWithoutRemoteWrite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	findMetricsDaemonSet(t, objs, "neutree-node-exporter")
+	findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "Deployment" && obj.GetName() == "vmagent"))
+		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config"))
+		assert.Assert(t, !(obj.GetKind() == "Deployment" && obj.GetName() == "neutree-kube-state-metrics"))
+	}
+}
+
+func TestBuildMetricsResourcesSelectsSubComponentManifests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name                  string
+		clusterVersion        string
+		metricsRemoteWriteURL string
+		ctrlClient            client.Client
+		wantObjects           []metricsObjectRef
+		forbiddenObjects      []metricsObjectRef
+	}{
+		{
+			name:           "local metrics mode renders node-agent node-exporter and accelerator-exporter",
+			clusterVersion: "v1.1.0",
+			ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+				"nvidia.com/gpu.present": "true",
+			})).Build(),
+			wantObjects: []metricsObjectRef{
+				{kind: "ServiceAccount", name: "neutree-node-agent"},
+				{kind: "DaemonSet", name: "neutree-node-agent"},
+				{kind: "DaemonSet", name: "neutree-node-exporter"},
+				{kind: "DaemonSet", name: "nvidia-gpu-dcgm-exporter"},
+			},
+			forbiddenObjects: []metricsObjectRef{
+				{kind: "Deployment", name: "vmagent"},
+				{kind: "ConfigMap", name: "vmagent-config"},
+				{kind: "Deployment", name: "neutree-kube-state-metrics"},
+			},
+		},
+		{
+			name:                  "full pipeline renders all managed subcomponents",
+			clusterVersion:        "v1.1.0",
+			metricsRemoteWriteURL: "http://example.com/write",
+			ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+				"nvidia.com/gpu.present": "true",
+			})).Build(),
+			wantObjects: []metricsObjectRef{
+				{kind: "ConfigMap", name: "vmagent-config"},
+				{kind: "Deployment", name: "vmagent"},
+				{kind: "Deployment", name: "neutree-kube-state-metrics"},
+				{kind: "DaemonSet", name: "neutree-node-exporter"},
+				{kind: "DaemonSet", name: "neutree-node-agent"},
+				{kind: "DaemonSet", name: "nvidia-gpu-dcgm-exporter"},
+			},
+		},
+		{
+			name:                  "old version full pipeline skips managed subcomponents",
+			clusterVersion:        "v1.0.0",
+			metricsRemoteWriteURL: "http://example.com/write",
+			ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+				"nvidia.com/gpu.present": "true",
+			})).Build(),
+			wantObjects: []metricsObjectRef{
+				{kind: "ConfigMap", name: "vmagent-config"},
+				{kind: "Deployment", name: "vmagent"},
+			},
+			forbiddenObjects: []metricsObjectRef{
+				{kind: "Deployment", name: "neutree-kube-state-metrics"},
+				{kind: "DaemonSet", name: "neutree-node-exporter"},
+				{kind: "DaemonSet", name: "neutree-node-agent"},
+				{kind: "DaemonSet", name: "nvidia-gpu-dcgm-exporter"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrlClient := tc.ctrlClient
+			if ctrlClient == nil {
+				ctrlClient = fake.NewClientBuilder().Build()
+			}
+
+			metricsCmpt := &MetricsComponent{
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{
+						Name:      "test-cluster",
+						Workspace: "test-workspace",
+					},
+					Spec: &v1.ClusterSpec{Version: tc.clusterVersion},
+				},
+				namespace:             "test-namespace",
+				imagePrefix:           "test-image-prefix",
+				imagePullSecret:       "test-image-pull-secret",
+				metricsRemoteWriteURL: tc.metricsRemoteWriteURL,
+				acceleratorMgr:        accelerator.NewManager(gin.New()),
+				ctrlClient:            ctrlClient,
+			}
+
+			objs, err := metricsCmpt.GetMetricsResources(context.Background())
+			assert.NilError(t, err)
+
+			for _, want := range tc.wantObjects {
+				assert.Assert(t, hasMetricsObject(objs, want.kind, want.name), "missing %s/%s", want.kind, want.name)
+			}
+
+			for _, forbidden := range tc.forbiddenObjects {
+				assert.Assert(t, !hasMetricsObject(objs, forbidden.kind, forbidden.name), "unexpected %s/%s", forbidden.kind, forbidden.name)
+			}
+		})
+	}
+}
+
+func TestBuildMetricsManifestTemplateRendersLegacyFullPipelineObjects(t *testing.T) {
+	variables := metricsManifestTestVariables()
+	variables.EnableVMAgent = true
+	variables.EnableKubeStateMetrics = true
+	variables.EnableNeutreeNodeAgentMetrics = true
+	variables.EnableNodeExporter = true
+	variables.VMAgentConfig = "global:\n  scrape_interval: 15s\n"
+	variables.AcceleratorExporters = []metricsAcceleratorExporter{
+		{
+			Name:            "nvidia-gpu-dcgm-exporter",
+			AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
+			ExporterName:    "dcgm-exporter",
+			Image:           "test-image-prefix/nvidia/dcgm-exporter:latest",
+			Port:            9400,
+			MetricsPath:     "/metrics",
+			ConfigFileData: map[string]string{
+				"dcgm-exporter.csv": "DCGM_FI_DEV_GPU_TEMP,gauge,temperature",
+			},
+		},
+	}
+
+	objs, err := util.RenderKubernetesManifest(buildMetricsManifestTemplate(variables), variables)
+	assert.NilError(t, err)
+
+	hashSuffix := variables.HashSuffix
+	assert.DeepEqual(t, metricsObjectRefStrings(objs), []string{
+		"ConfigMap/vmagent-config",
+		"ServiceAccount/vmagent-service-account",
+		"Role/vmagent-pod-reader",
+		"RoleBinding/vmagent-rolebinding",
+		"ClusterRole/vmagent-node-reader-" + hashSuffix,
+		"ClusterRoleBinding/vmagent-node-reader-" + hashSuffix,
+		"Deployment/vmagent",
+		"ServiceAccount/neutree-kube-state-metrics",
+		"Role/neutree-kube-state-metrics",
+		"RoleBinding/neutree-kube-state-metrics",
+		"Service/neutree-kube-state-metrics",
+		"Deployment/neutree-kube-state-metrics",
+		"ServiceAccount/neutree-node-agent",
+		"ClusterRole/neutree-node-agent-" + hashSuffix,
+		"ClusterRoleBinding/neutree-node-agent-" + hashSuffix,
+		"DaemonSet/neutree-node-agent",
+		"DaemonSet/neutree-node-exporter",
+		"ConfigMap/nvidia-gpu-dcgm-exporter-config",
+		"DaemonSet/nvidia-gpu-dcgm-exporter",
+	})
+}
+
+func TestBuildMetricsManifestTemplateFiltersSubComponentManifests(t *testing.T) {
+	cases := []struct {
+		name      string
+		variables MetricsManifestVariables
+		want      []string
+	}{
+		{
+			name: "remote write disabled renders local metrics components without vmagent pipeline",
+			variables: func() MetricsManifestVariables {
+				variables := metricsManifestTestVariables()
+				variables.EnableNeutreeNodeAgentMetrics = true
+				variables.EnableNodeExporter = true
+				variables.AcceleratorExporters = []metricsAcceleratorExporter{
+					{
+						Name:            "nvidia-gpu-dcgm-exporter",
+						AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
+						ExporterName:    "dcgm-exporter",
+						Image:           "test-image-prefix/nvidia/dcgm-exporter:latest",
+						Port:            9400,
+						MetricsPath:     "/metrics",
+					},
+				}
+				return variables
+			}(),
+			want: []string{
+				"ServiceAccount/neutree-node-agent",
+				"ClusterRole/neutree-node-agent-{{hash}}",
+				"ClusterRoleBinding/neutree-node-agent-{{hash}}",
+				"DaemonSet/neutree-node-agent",
+				"DaemonSet/neutree-node-exporter",
+				"DaemonSet/nvidia-gpu-dcgm-exporter",
+			},
+		},
+		{
+			name: "remote pipeline without managed exporters renders vmagent only",
+			variables: func() MetricsManifestVariables {
+				variables := metricsManifestTestVariables()
+				variables.EnableVMAgent = true
+				variables.VMAgentConfig = "global:\n  scrape_interval: 15s\n"
+				return variables
+			}(),
+			want: []string{
+				"ConfigMap/vmagent-config",
+				"ServiceAccount/vmagent-service-account",
+				"Role/vmagent-pod-reader",
+				"RoleBinding/vmagent-rolebinding",
+				"ClusterRole/vmagent-node-reader-{{hash}}",
+				"ClusterRoleBinding/vmagent-node-reader-{{hash}}",
+				"Deployment/vmagent",
+			},
+		},
+		{
+			name: "remote pipeline without accelerator exporters omits exporter manifests",
+			variables: func() MetricsManifestVariables {
+				variables := metricsManifestTestVariables()
+				variables.EnableVMAgent = true
+				variables.EnableKubeStateMetrics = true
+				variables.EnableNeutreeNodeAgentMetrics = true
+				variables.EnableNodeExporter = true
+				variables.VMAgentConfig = "global:\n  scrape_interval: 15s\n"
+				return variables
+			}(),
+			want: []string{
+				"ConfigMap/vmagent-config",
+				"ServiceAccount/vmagent-service-account",
+				"Role/vmagent-pod-reader",
+				"RoleBinding/vmagent-rolebinding",
+				"ClusterRole/vmagent-node-reader-{{hash}}",
+				"ClusterRoleBinding/vmagent-node-reader-{{hash}}",
+				"Deployment/vmagent",
+				"ServiceAccount/neutree-kube-state-metrics",
+				"Role/neutree-kube-state-metrics",
+				"RoleBinding/neutree-kube-state-metrics",
+				"Service/neutree-kube-state-metrics",
+				"Deployment/neutree-kube-state-metrics",
+				"ServiceAccount/neutree-node-agent",
+				"ClusterRole/neutree-node-agent-{{hash}}",
+				"ClusterRoleBinding/neutree-node-agent-{{hash}}",
+				"DaemonSet/neutree-node-agent",
+				"DaemonSet/neutree-node-exporter",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs, err := util.RenderKubernetesManifest(buildMetricsManifestTemplate(tc.variables), tc.variables)
+			assert.NilError(t, err)
+
+			assert.DeepEqual(t, metricsObjectRefStrings(objs), expandMetricsObjectRefHashes(tc.want, tc.variables.HashSuffix))
+		})
+	}
+}
+
+func TestBuildMetricsResourcesSkipsAllResourcesWhenUnsupportedWithoutRemoteWrite(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
@@ -484,7 +771,31 @@ func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testin
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
 		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  accelerator.NewManager(gin.New()),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	assert.Equal(t, len(objs.Items), 0)
+}
+
+func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),
@@ -528,10 +839,11 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 				},
 			},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),
@@ -589,9 +901,10 @@ func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t 
 				},
 			},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -648,10 +961,11 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),
@@ -767,10 +1081,11 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFi
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
 			"accelerator.example.com/custom": "true",
 		})).Build(),
@@ -814,10 +1129,11 @@ func TestBuildMetricsResourcesProjectsDuplicateAcceleratorExporterConfigBasename
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
 			"accelerator.example.com/custom": "true",
 		})).Build(),
@@ -874,10 +1190,11 @@ func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
 			"accelerator.example.com/custom": "true",
 		})).Build(),
@@ -921,10 +1238,11 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *tes
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", map[string]string{
 			"kubernetes.io/os": "linux",
 		})).Build(),
@@ -965,10 +1283,11 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutName(t *testing.T) 
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -1009,10 +1328,11 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterProfileErrors(t *testing.T
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
 			"accelerator.example.com/custom": "true",
 		})).Build(),
@@ -1066,10 +1386,11 @@ func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *te
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
-		acceleratorMgr:  acceleratorMgr,
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        acceleratorMgr,
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("accelerator-node", map[string]string{
 			"accelerator.example.com/enabled": "true",
 		})).Build(),
@@ -1093,9 +1414,10 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -1118,9 +1440,10 @@ func TestBuildVMAgentConfigIncludesKubeStateMetricsScrape(t *testing.T) {
 			},
 			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
-		namespace:       "test-namespace",
-		imagePrefix:     "test-image-prefix",
-		imagePullSecret: "test-image-pull-secret",
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -1169,6 +1492,55 @@ func envValue(env []corev1.EnvVar, name string) string {
 	}
 
 	return ""
+}
+
+type metricsObjectRef struct {
+	kind string
+	name string
+}
+
+func hasMetricsObject(objs *unstructured.UnstructuredList, kind, name string) bool {
+	for _, obj := range objs.Items {
+		if obj.GetKind() == kind && obj.GetName() == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func metricsObjectRefStrings(objs *unstructured.UnstructuredList) []string {
+	refs := make([]string, 0, len(objs.Items))
+	for _, obj := range objs.Items {
+		refs = append(refs, obj.GetKind()+"/"+obj.GetName())
+	}
+
+	return refs
+}
+
+func expandMetricsObjectRefHashes(refs []string, hashSuffix string) []string {
+	expanded := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		expanded = append(expanded, strings.ReplaceAll(ref, "{{hash}}", hashSuffix))
+	}
+
+	return expanded
+}
+
+func metricsManifestTestVariables() MetricsManifestVariables {
+	return (&MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "http://example.com/write",
+	}).buildManifestVariables()
 }
 
 func findMetricsDaemonSet(t *testing.T, objs *unstructured.UnstructuredList, name string) *appsv1.DaemonSet {

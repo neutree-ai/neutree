@@ -381,6 +381,71 @@ func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
 	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
 }
 
+func TestPlannerKeepsStaticNodeAgentAndNodeExporterWhenAcceleratorExporterMissing(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+				},
+			},
+		},
+		MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
+	}, cluster, currentNodes)
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	assertNodeComponentNames(t, head.Spec.Components, []string{
+		"ray-head",
+		nodeExporterComponentName,
+		nodeAgentComponentName,
+		vmagentComponentName,
+	})
+	assert.NotEqual(t, "", warmImageRef(head.Spec.Warm.Images, nodeExporterComponentName))
+	assert.NotEqual(t, "", warmImageRef(head.Spec.Warm.Images, nodeAgentComponentName))
+	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
+
+	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
+	require.NotNil(t, vmagentComponent)
+	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
+	require.NotNil(t, vmagentConfig)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
+	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-agent`)
+	assert.NotContains(t, vmagentConfig.Content, `accelerator-exporter`)
+	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
+	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeAgentFileSDPath))
+	assert.Nil(t, findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json"))
+
+	worker := findStaticNode(nodes, "worker-0")
+	require.NotNil(t, worker)
+	assertNodeComponentNames(t, worker.Spec.Components, []string{
+		"ray-worker",
+		nodeExporterComponentName,
+		nodeAgentComponentName,
+	})
+	assert.Nil(t, findComponent(worker.Spec.Components, acceleratorExporterComponentName))
+}
+
 func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
@@ -443,7 +508,7 @@ func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {
 	assert.NotContains(t, acceleratorTargets.Content, `"10.0.0.11:9400"`)
 }
 
-func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
+func TestPlannerSkipsOnlyVMAgentWithoutValidRemoteWriteURL(t *testing.T) {
 	tests := []struct {
 		name                  string
 		metricsRemoteWriteURL string
@@ -462,7 +527,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 					v1.StaticNodeRoleHead,
 					v1.StaticNodePhaseReady,
 					true,
-					cpuAcceleratorStatus(),
+					nvidiaAcceleratorStatus(),
 					nil,
 				),
 				staticNodeStatusWithAccelerator(
@@ -476,21 +541,48 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			}
 
 			nodes := plannedStaticNodes(t, &Planner{
+				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+					profiles: map[string]*v1.AcceleratorProfile{
+						v1.AcceleratorTypeNVIDIAGPU.String(): {
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+							MetricsExporter: &v1.AcceleratorExporterProfile{
+								Name:  "dcgm-exporter",
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
+							},
+						},
+					},
+				},
 				MetricsRemoteWriteURL: tt.metricsRemoteWriteURL,
 			}, cluster, currentNodes)
 
 			head := findStaticNode(nodes, "head-0")
 			require.NotNil(t, head)
-			assertNodeComponentNames(t, head.Spec.Components, []string{"ray-head"})
-			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+			assertNodeComponentNames(t, head.Spec.Components, []string{
+				"ray-head",
+				nodeExporterComponentName,
+				acceleratorExporterComponentName,
+				nodeAgentComponentName,
 			})
+			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
+				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+			})
+			assert.Nil(t, findComponent(head.Spec.Components, vmagentComponentName))
 
 			worker := findStaticNode(nodes, "worker-0")
 			require.NotNil(t, worker)
-			assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker"})
+			assertNodeComponentNames(t, worker.Spec.Components, []string{
+				"ray-worker",
+				nodeExporterComponentName,
+				nodeAgentComponentName,
+			})
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
 			})
 		})
 	}

@@ -589,14 +589,14 @@ func TestComputeAdditionalComponents_Metrics(t *testing.T) {
 		{
 			name:                   "URL without HTTP/HTTPS scheme for metrics",
 			metricsRemoteWriteURL:  "invalid-url",
-			expectedReconcileCount: 0,
-			expectedDeleteCount:    2,
+			expectedReconcileCount: 1,
+			expectedDeleteCount:    1,
 		},
 		{
 			name:                   "Empty URL for metrics",
 			metricsRemoteWriteURL:  "",
-			expectedReconcileCount: 0,
-			expectedDeleteCount:    2,
+			expectedReconcileCount: 1,
+			expectedDeleteCount:    1,
 		},
 	}
 
@@ -636,11 +636,11 @@ func TestComputeAdditionalComponents_HAMi(t *testing.T) {
 
 	reconcileComps, deleteComps := reconciler.ComputeAdditionalComponents(reconcileCtx, "test-prefix/")
 
-	if len(reconcileComps) != 1 {
-		t.Fatalf("expected accelerator virtualization component to be reconciled, got %d components", len(reconcileComps))
+	if len(reconcileComps) != 2 {
+		t.Fatalf("expected metrics and accelerator virtualization components to be reconciled, got %d components", len(reconcileComps))
 	}
-	if len(deleteComps) != 1 {
-		t.Fatalf("expected metrics component to be deleted when metrics URL is empty, got %d components", len(deleteComps))
+	if len(deleteComps) != 0 {
+		t.Fatalf("expected no components to be deleted when virtualization needs node-agent annotations, got %d components", len(deleteComps))
 	}
 }
 

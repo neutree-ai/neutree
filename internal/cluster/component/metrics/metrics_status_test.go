@@ -155,8 +155,9 @@ func Test_checkDeploymentStatus(t *testing.T) {
 				Build()
 
 			metricsCmpt := &MetricsComponent{
-				ctrlClient: fakeClient,
-				namespace:  "default",
+				ctrlClient:            fakeClient,
+				namespace:             "default",
+				metricsRemoteWriteURL: "http://example.com/write",
 				cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 					Spec:     &v1.ClusterSpec{},
@@ -185,8 +186,9 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient: fakeClient,
-		namespace:  "default",
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "http://example.com/write",
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
@@ -216,8 +218,9 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient: fakeClient,
-		namespace:  "default",
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "http://example.com/write",
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
@@ -233,6 +236,49 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	assert.False(t, status.KubeStateMetricsDeploymentReady)
 	assert.False(t, status.NodeExporterRequired)
 	assert.False(t, status.NodeExporterDaemonSetReady)
+}
+
+func TestCheckResourcesStatusRequiresLocalMetricsComponentsWithoutRemoteWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			readyMetricsDaemonSet("neutree-node-agent", 1),
+			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("nvidia-gpu-dcgm-exporter", 1),
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					},
+				},
+			},
+		).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient:     fakeClient,
+		namespace:      "default",
+		acceleratorMgr: accelerator.NewManager(gin.New()),
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.False(t, status.DeploymentRequired)
+	assert.False(t, status.DeploymentReady)
+	assert.True(t, status.NodeExporterRequired)
+	assert.True(t, status.NodeExporterDaemonSetReady)
+	assert.True(t, status.NeutreeNodeAgentMetricsRequired)
+	assert.True(t, status.NeutreeNodeAgentMetricsDaemonSetReady)
+	assert.False(t, status.KubeStateMetricsRequired)
+	assert.True(t, status.AcceleratorExporterRequired)
+	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
 func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) {
@@ -256,9 +302,10 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient:     fakeClient,
-		namespace:      "default",
-		acceleratorMgr: accelerator.NewManager(gin.New()),
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "http://example.com/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},

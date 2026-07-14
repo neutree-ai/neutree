@@ -15,6 +15,7 @@ import (
 // GetMetricsResources returns all Kubernetes resources for the metrics component.
 func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructured.UnstructuredList, error) {
 	variables := m.buildManifestVariables()
+	enableMetricsPipeline := util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL)
 
 	enableKubeStateMetrics, err := m.supportsKubeStateMetrics()
 	if err != nil {
@@ -23,8 +24,9 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	// HAMi monitor scraping depends on virtualization being enabled. The
 	// kube-state-metrics sidecar is a cluster-version capability and is not
 	// HAMi-specific.
-	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
-	variables.EnableKubeStateMetrics = enableKubeStateMetrics
+	variables.EnableVMAgent = enableMetricsPipeline
+	variables.EnableHAMiMonitorScrape = enableMetricsPipeline && m.cluster.Spec.AcceleratorVirtualizationEnabled()
+	variables.EnableKubeStateMetrics = enableMetricsPipeline && enableKubeStateMetrics
 
 	enableManagedMetricsExporters, err := m.supportsManagedMetricsExporters()
 	if err != nil {
@@ -33,7 +35,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
-	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+	variables.EnableExternalDCGMScrape = enableMetricsPipeline && m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
 	if err != nil {
@@ -43,6 +45,10 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	variables.AcceleratorExporters = acceleratorExporters
 	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 
+	if !variables.EnableVMAgent && !variables.EnableNeutreeNodeAgentMetrics {
+		return &unstructured.UnstructuredList{}, nil
+	}
+
 	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
@@ -50,7 +56,7 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	variables.VMAgentConfig = vmagentConfig
 
-	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
+	objs, err := util.RenderKubernetesManifest(buildMetricsManifestTemplate(variables), variables)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to render metrics manifest for cluster %s", m.cluster.Metadata.Name)
 	}

@@ -14,6 +14,7 @@ import (
 
 // MetricsStatus represents the status of metrics component resources
 type MetricsStatus struct {
+	DeploymentRequired                    bool
 	DeploymentReady                       bool
 	NodeExporterRequired                  bool
 	NodeExporterDaemonSetReady            bool
@@ -39,13 +40,13 @@ type MetricsStatus struct {
 
 func (m MetricsStatus) String() string {
 	base := fmt.Sprintf(
-		"DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
+		"DeploymentRequired: %v, DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
 			"NodeExporterRequired: %v, NodeExporterPodsReady: %d/%d, NeutreeNodeAgentMetricsRequired: %v, "+
 			"NeutreeNodeAgentMetricsDaemonSetReady: %v, NeutreeNodeAgentMetricsPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
 			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, "+
 			"AcceleratorExporterRequired: %v, AcceleratorExporterDaemonSetsReady: %v, "+
 			"AcceleratorExporterPodsReady: %d/%d, Errors: %v",
-		m.DeploymentReady, m.PodsReady, m.TotalPods,
+		m.DeploymentRequired, m.DeploymentReady, m.PodsReady, m.TotalPods,
 		m.NodeExporterDaemonSetReady, m.NodeExporterRequired, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
 		m.NeutreeNodeAgentMetricsRequired, m.NeutreeNodeAgentMetricsDaemonSetReady,
 		m.NeutreeNodeAgentMetricsPodsReady, m.NeutreeNodeAgentMetricsTotalPods,
@@ -63,7 +64,7 @@ func (m MetricsStatus) Ready() bool {
 		return false
 	}
 
-	return m.DeploymentReady &&
+	return (!m.DeploymentRequired || m.DeploymentReady) &&
 		(!m.NodeExporterRequired || m.NodeExporterDaemonSetReady) &&
 		(!m.NeutreeNodeAgentMetricsRequired || m.NeutreeNodeAgentMetricsDaemonSetReady) &&
 		(!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady) &&
@@ -73,21 +74,23 @@ func (m MetricsStatus) Ready() bool {
 // CheckResourcesStatus checks the status of all metrics resources
 func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsStatus, error) {
 	status := &MetricsStatus{
-		Errors: []string{},
+		DeploymentRequired: util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL),
+		Errors:             []string{},
 	}
 
-	// Check Deployment status
-	deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
-		status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
-	} else {
-		status.DeploymentReady = deploymentReady
-		status.PodsReady = podsReady
-		status.TotalPods = totalPods
-
-		if !deploymentReady {
+	if status.DeploymentRequired {
+		deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
 			status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+		} else {
+			status.DeploymentReady = deploymentReady
+			status.PodsReady = podsReady
+			status.TotalPods = totalPods
+
+			if !deploymentReady {
+				status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+			}
 		}
 	}
 
@@ -100,7 +103,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 	status.NodeExporterRequired = nodeExporterRequired
 	status.NeutreeNodeAgentMetricsRequired = nodeExporterRequired
 
-	if nodeExporterRequired {
+	if status.NodeExporterRequired {
 		nodeExporterReady, nodeExporterPodsReady, nodeExporterTotalPods, err := m.checkDaemonSetStatus(ctx, nodeExporterDaemonSetName)
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("node-exporter daemonset check failed: %v", err))
@@ -109,7 +112,9 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterPodsReady = nodeExporterPodsReady
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
+	}
 
+	if status.NeutreeNodeAgentMetricsRequired {
 		neutreeNodeAgentMetricsReady, neutreeNodeAgentMetricsPodsReady, neutreeNodeAgentMetricsTotalPods, err := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, err))
@@ -152,9 +157,9 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		return status, nil
 	}
 
-	status.KubeStateMetricsRequired = kubeStateMetricsRequired
+	status.KubeStateMetricsRequired = status.DeploymentRequired && kubeStateMetricsRequired
 
-	if kubeStateMetricsRequired {
+	if status.KubeStateMetricsRequired {
 		kubeStateMetricsReady, kubeStateMetricsPodsReady, kubeStateMetricsTotalPods, err := m.checkKubeStateMetricsDeploymentStatus(ctx)
 		kubeStateMetricsDiagnostics := func() []string {
 			return component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "neutree-kube-state-metrics", m.kubeStateMetricsPodLabels())

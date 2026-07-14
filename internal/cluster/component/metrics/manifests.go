@@ -16,7 +16,8 @@ const (
 	MinManagedMetricsExporterClusterVersion = "v1.1.0"
 )
 
-var metricsManifestTemplate = `
+const (
+	vmagentRBACMetricsManifestTemplate = `
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -103,7 +104,9 @@ roleRef:
   kind: ClusterRole
   name: vmagent-node-reader-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
-{{ if .EnableKubeStateMetrics }}
+`
+
+	kubeStateMetricsManifestTemplate = `
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -207,8 +210,9 @@ spec:
             {{- range $key, $value := .KubeStateMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
-{{ end }}
-{{ if .EnableNeutreeNodeAgentMetrics }}
+`
+
+	neutreeNodeAgentRBACMetricsManifestTemplate = `
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -253,8 +257,9 @@ roleRef:
   kind: ClusterRole
   name: {{ .NeutreeNodeAgentMetricsName }}-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
-{{ end }}
-{{ if .EnableNodeExporter }}
+`
+
+	nodeExporterMetricsManifestTemplate = `
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -301,8 +306,9 @@ spec:
       - name: host-root
         hostPath:
           path: /
-{{ end }}
-{{ if .EnableNeutreeNodeAgentMetrics }}
+`
+
+	neutreeNodeAgentDaemonSetMetricsManifestTemplate = `
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -384,7 +390,9 @@ spec:
         hostPath:
           path: /var/lib/kubelet/pod-resources
           type: DirectoryOrCreate
-{{ end }}
+`
+
+	acceleratorExporterMetricsManifestTemplate = `
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
 ---
@@ -467,6 +475,9 @@ spec:
 {{ .Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ end }}
+`
+
+	vmagentDeploymentMetricsManifestTemplate = `
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -530,6 +541,7 @@ spec:
         configMap:
           name: vmagent-config
 `
+)
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
 type MetricsManifestVariables struct {
@@ -556,12 +568,45 @@ type MetricsManifestVariables struct {
 	KubeStateMetricsResources        map[string]string
 	HashSuffix                       string
 	EnableHAMiMonitorScrape          bool
+	EnableVMAgent                    bool
 	EnableKubeStateMetrics           bool
 	EnableNeutreeNodeAgentMetrics    bool
 	EnableNodeExporter               bool
 	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
 	VMAgentConfig                    string
+}
+
+func buildMetricsManifestTemplate(variables MetricsManifestVariables) string {
+	var templates []string
+
+	if variables.EnableVMAgent {
+		templates = append(templates,
+			vmagentRBACMetricsManifestTemplate,
+			vmagentDeploymentMetricsManifestTemplate,
+		)
+	}
+
+	if variables.EnableKubeStateMetrics {
+		templates = append(templates, kubeStateMetricsManifestTemplate)
+	}
+
+	if variables.EnableNeutreeNodeAgentMetrics {
+		templates = append(templates,
+			neutreeNodeAgentRBACMetricsManifestTemplate,
+			neutreeNodeAgentDaemonSetMetricsManifestTemplate,
+		)
+	}
+
+	if variables.EnableNodeExporter {
+		templates = append(templates, nodeExporterMetricsManifestTemplate)
+	}
+
+	if len(variables.AcceleratorExporters) > 0 {
+		templates = append(templates, acceleratorExporterMetricsManifestTemplate)
+	}
+
+	return strings.Join(templates, "\n")
 }
 
 // buildManifestVariables creates the data structure for rendering manifests

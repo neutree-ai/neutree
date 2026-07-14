@@ -20,6 +20,8 @@ import (
 // Mutate is a callback function to modify objects before applying
 type Mutate func(obj *unstructured.Unstructured) error
 
+var ErrManifestDeletePending = errors.New("manifest resources are still deleting")
+
 // ManifestApply handles Kubernetes manifest lifecycle operations
 // It focuses on comparing, applying, and deleting manifests
 type ManifestApply struct {
@@ -225,26 +227,64 @@ func (m *ManifestApply) ApplyManifests(
 			"namespace", obj.GetNamespace())
 	}
 
-	deleteObjects := diff.DeletedObjects
+	deleteCount, deleteFinished, err := m.deleteRemovedObjects(ctx, diff.DeletedObjects)
+	if err != nil {
+		return 0, err
+	}
+
+	if !deleteFinished {
+		return len(objects) + deleteCount, ErrManifestDeletePending
+	}
+
+	return len(objects) + deleteCount, nil
+}
+
+func (m *ManifestApply) deleteRemovedObjects(ctx context.Context,
+	deleteObjects []unstructured.Unstructured) (int, bool, error) {
+	deleteFinished := true
 
 	for i := range deleteObjects {
 		obj := &deleteObjects[i]
+		liveObj := &unstructured.Unstructured{}
+		liveObj.SetAPIVersion(obj.GetAPIVersion())
+		liveObj.SetKind(obj.GetKind())
+
+		err := m.ctrlClient.Get(ctx, client.ObjectKey{
+			Namespace: obj.GetNamespace(),
+			Name:      obj.GetName(),
+		}, liveObj)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+
+			return 0, false, errors.Wrapf(err, "failed to get removed object %s/%s/%s",
+				obj.GetKind(), obj.GetNamespace(), obj.GetName())
+		}
+
+		deleteFinished = false
+
+		if liveObj.GetDeletionTimestamp() != nil {
+			continue
+		}
+
 		m.logger.Info("Deleting resource",
 			"kind", obj.GetKind(),
 			"name", obj.GetName(),
-			"namespace", m.namespace)
+			"namespace", obj.GetNamespace())
 
-		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
-			if !apierrors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to delete resource",
-					"kind", obj.GetKind(),
-					"name", obj.GetName())
-				// Continue with other resources
+		if err := m.ctrlClient.Delete(ctx, liveObj); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
 			}
+
+			klog.ErrorS(err, "Failed to delete resource",
+				"kind", obj.GetKind(),
+				"name", obj.GetName())
 		}
 	}
 
-	return len(objects) + len(deleteObjects), nil
+	return len(deleteObjects), deleteFinished, nil
 }
 
 func (m *ManifestApply) addLiveDriftedObjects(ctx context.Context, diff *ManifestDiff) error {

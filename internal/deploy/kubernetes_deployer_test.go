@@ -309,6 +309,76 @@ func TestKubernetesDeployer_DeleteCleansConfigMapOnSecondPass(t *testing.T) {
 	}
 }
 
+func TestKubernetesDeployer_ApplyWaitsForPrunedResourcesToDisappearBeforeSavingConfig(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+
+	baseClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeClient := &fakeApplyClient{Client: baseClient}
+	ctx := context.Background()
+
+	resourceName := "test-cluster"
+	componentName := "metrics"
+	store := NewConfigStore(fakeClient)
+	oldCM := createTestConfigMap("old-cm", "default", "key", "old")
+	lastApplied := []unstructured.Unstructured{*oldCM}
+	lastConfigBytes, err := json.Marshal(lastApplied)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	lastConfig := string(lastConfigBytes)
+	if err := store.Set(ctx, "default", resourceName, componentName, lastConfig, nil); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	if err := fakeClient.Create(ctx, oldCM); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	newCM := createTestConfigMap("new-cm", "default", "key", "new")
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*newCM},
+	}
+	applier := NewKubernetesDeployer(fakeClient, "default", resourceName, componentName).
+		WithNewObjects(newObjects).
+		WithLogger(klog.Background())
+
+	_, err = applier.Apply(ctx)
+	if err == nil {
+		t.Fatalf("First Apply() error = nil, want pending prune error")
+	}
+
+	configAfterFirstApply, err := store.Get(ctx, "default", resourceName, componentName)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if configAfterFirstApply != lastConfig {
+		t.Fatalf("config after first Apply() = %s, want old config %s", configAfterFirstApply, lastConfig)
+	}
+
+	staleCM := &corev1.ConfigMap{}
+	if err := fakeClient.Get(ctx, client.ObjectKey{Namespace: "default", Name: "old-cm"}, staleCM); err == nil {
+		if deleteErr := fakeClient.Delete(ctx, staleCM); deleteErr != nil {
+			t.Fatalf("Delete stale old ConfigMap error = %v", deleteErr)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		t.Fatalf("Get stale old ConfigMap error = %v", err)
+	}
+
+	_, err = applier.Apply(ctx)
+	if err != nil {
+		t.Fatalf("Second Apply() error = %v", err)
+	}
+
+	configAfterSecondApply, err := store.Get(ctx, "default", resourceName, componentName)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if configAfterSecondApply == lastConfig {
+		t.Fatalf("config after second Apply() still old: %s", configAfterSecondApply)
+	}
+}
+
 func TestKubernetesDeployer_ConfigSaved(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
