@@ -4,9 +4,11 @@
 -- consumer as this plugin's config (no per-request control-plane call).
 -- Enforced from local config:
 --   * disabled        -> 403 key_disabled
---   * allowed_models  -> 403 model_not_permitted (only when a non-empty list is
---                        set and the request model is missing/not in it; empty or
---                        unset means unrestricted)
+--   * allowed_models  -> 403 model_not_permitted. Each entry is endpoint-scoped
+--                        ({ model, type?, endpoint_name? }); the request model AND
+--                        the IE/EE endpoint it hit must match some entry. Empty
+--                        type/endpoint_name = any endpoint of that model. An unset
+--                        list means unrestricted; an empty [] means deny-all.
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- The plugin is attached only when the key actually has access limits, so an
@@ -53,12 +55,33 @@ local function request_model()
     return nil
 end
 
-local function list_has(list, value)
+-- allow_match reports whether the request (model + the IE/EE endpoint it hit) is
+-- permitted by the endpoint-scoped allowlist. An entry permits the request when
+-- its `model` matches AND — for each of `type` / `endpoint_name` that the entry
+-- pins — the endpoint identity stashed by neutree-ai-gateway matches. An entry
+-- with empty type/endpoint_name is "any endpoint serving this model" (legacy
+-- name-only keys, migrated to this shape). An empty list permits nothing (deny-all).
+-- A pinned dimension matches when it is unset (= any) or equals the endpoint the
+-- request actually hit. "Unset" is anything that isn't a non-empty string: nil,
+-- or cjson.null (userdata) should a JSON null ever reach here — so a null
+-- type/endpoint_name reads as "any", never as a pin that can't match.
+--
+-- endpoint_name is matched bare (not workspace-qualified): an API key only
+-- reaches endpoints in its own workspace (the route ACL rejects anything else
+-- before this plugin), and names are unique within a workspace, so there is no
+-- cross-workspace collision to guard against.
+local function pin_ok(pin, actual)
+    return type(pin) ~= "string" or pin == "" or pin == actual
+end
+
+local function allow_match(list, model, ep_type, ep_name)
     if type(list) ~= "table" then
         return false
     end
-    for _, v in ipairs(list) do
-        if v == value then
+    for _, entry in ipairs(list) do
+        if type(entry) == "table" and entry.model == model
+            and pin_ok(entry.type, ep_type)
+            and pin_ok(entry.endpoint_name, ep_name) then
             return true
         end
     end
@@ -90,7 +113,9 @@ function AccessHandler:access(conf)
     --    stays unrestricted while [] enforces.
     if type(conf.allowed_models) == "table" then
         local model = request_model()
-        if not model or not list_has(conf.allowed_models, model) then
+        local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
+        local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name
+        if not model or not allow_match(conf.allowed_models, model, ep_type, ep_name) then
             return deny403("model_not_permitted", "Model not permitted for this API key")
         end
     end

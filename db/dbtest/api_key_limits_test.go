@@ -18,7 +18,7 @@ func TestApiKeyLimits(t *testing.T) {
 	user := CreateTestUser(t, "limitsuser", "limits@example.com", "testpassword")
 	other := CreateTestUser(t, "limitsother", "limitsother@example.com", "testpassword")
 
-	const limits = `{"token_quota":{"limit":300,"period":"monthly"},"rps":10,"rpm":600,"concurrency":8,"allowed_models":["gpt-4"],"disabled":false}`
+	const limits = `{"token_quota":{"limit":300,"period":"monthly"},"rps":10,"rpm":600,"concurrency":8,"allowed_models":[{"model":"gpt-4","type":"internal","endpoint_name":"ep-a"}],"disabled":false}`
 
 	// Create a key carrying limits in one call.
 	var apiKeyID string
@@ -44,7 +44,7 @@ func TestApiKeyLimits(t *testing.T) {
 		if err := db.QueryRowContext(ctx, `
 			SELECT (spec).limits #>> '{token_quota,limit}',
 			       (spec).limits #>> '{disabled}',
-			       (spec).limits #>> '{allowed_models,0}',
+			       (spec).limits #>> '{allowed_models,0,model}',
 			       (spec).quota::text
 			FROM api.api_keys WHERE id = $1`, apiKeyID).Scan(&lim, &disabled, &model, &quota); err != nil {
 			t.Fatalf("read spec.limits: %v", err)
@@ -229,6 +229,40 @@ func TestApiKeyLimits(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("expected empty allowed_models to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("set_api_key_limits accepts endpoint-scoped and unpinned allowed_models entries", func(t *testing.T) {
+		// A pinned entry (type + endpoint_name) and an unpinned one (model only,
+		// = any endpoint of that model) are both valid post-NEU-540.
+		const v = `{"allowed_models":[{"model":"gpt-4","type":"external","endpoint_name":"ee-a"},{"model":"llama"}]}`
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, $2::jsonb)`, apiKeyID, v)
+			return e
+		})
+		if err != nil {
+			t.Fatalf("expected endpoint-scoped allowed_models to be accepted, got %v", err)
+		}
+	})
+
+	t.Run("set_api_key_limits rejects malformed allowed_models entries", func(t *testing.T) {
+		// The legacy bare-string shape and objects missing a non-empty model must
+		// now fail validation (they can no longer reach the gateway as-is).
+		cases := []string{
+			`{"allowed_models":["gpt-4"]}`,                   // legacy bare string
+			`{"allowed_models":[{"type":"external"}]}`,       // no model
+			`{"allowed_models":[{"model":""}]}`,              // empty model
+			`{"allowed_models":[{"model":"x","type":5}]}`,    // non-string type
+			`{"allowed_models":[{"model":"x","type":null}]}`, // null type (must be a string or absent)
+		}
+		for _, c := range cases {
+			err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+				_, e := tx.ExecContext(ctx, `SELECT api.set_api_key_limits($1, $2::jsonb)`, apiKeyID, c)
+				return e
+			})
+			if err == nil {
+				t.Fatalf("expected malformed allowed_models %q to be rejected, got nil", c)
+			}
 		}
 	})
 }
