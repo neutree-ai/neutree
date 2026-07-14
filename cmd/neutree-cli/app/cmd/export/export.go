@@ -3,6 +3,7 @@ package export
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
+
+// traceLister fetches one page of traces. *client.TracesService satisfies it;
+// injecting it (rather than a concrete client) lets the export logic be unit
+// tested with an in-memory fake — no HTTP server, no filesystem.
+type traceLister interface {
+	ListPage(workspace string, filters client.TraceListFilters, before string, limit int, includeBody bool) ([]client.AITrace, string, error)
+}
 
 // NewExportCmd creates the `export` parent command.
 func NewExportCmd() *cobra.Command {
@@ -133,27 +141,40 @@ func normalizeTimeBound(v string, endOfDay bool) string {
 	return d.UTC().Format(time.RFC3339)
 }
 
+// resolveWorkspace maps the workspace flags to the value sent on the wire.
+// --all-workspaces is a boolean (never collides with a real workspace name);
+// it resolves to the server's cross-workspace sentinel.
+func resolveWorkspace(workspace string, allWorkspaces bool) string {
+	if allWorkspaces {
+		return client.AllWorkspaces
+	}
+
+	return workspace
+}
+
+// effectiveLimit applies the body-mode cap. Bodies are large, so a
+// body-carrying export that did not explicitly set --limit is capped to avoid
+// accidentally pulling an unbounded volume. Returns the limit to use and
+// whether the cap was applied.
+func effectiveLimit(withBody, limitSet bool, limit int) (int, bool) {
+	if withBody && !limitSet {
+		return withBodyDefaultLimit, true
+	}
+
+	return limit, false
+}
+
 func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	c, err := global.NewClient()
 	if err != nil {
 		return err
 	}
 
-	// --all-workspaces is exposed as a boolean so it never collides with a real
-	// workspace name; the server's cross-workspace aggregate is requested via
-	// the AllWorkspaces sentinel on the wire.
-	workspace := opts.workspace
-	if opts.allWorkspaces {
-		workspace = client.AllWorkspaces
-	}
-
-	// Bodies are large: a body-carrying export that did not set --limit is
-	// capped so a bare command cannot accidentally pull an unbounded volume.
-	if opts.withBody && !cmd.Flags().Changed("limit") {
-		opts.limit = withBodyDefaultLimit
+	if limit, capped := effectiveLimit(opts.withBody, cmd.Flags().Changed("limit"), opts.limit); capped {
+		opts.limit = limit
 		fmt.Fprintf(os.Stderr,
 			"note: limiting to %d records because --with-body is on; pass --limit N (or --limit 0) to change\n",
-			withBodyDefaultLimit)
+			limit)
 	}
 
 	// Resolve output. A file is buffered; stdout is written directly. Progress
@@ -173,24 +194,14 @@ func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	bw := bufio.NewWriter(out)
 	defer bw.Flush() //nolint:errcheck
 
-	writer, err := newTraceWriter(opts.format, bw)
+	total, err := runExport(exportRequest{
+		lister:    c.Traces,
+		dataOut:   bw,
+		progress:  os.Stderr,
+		workspace: resolveWorkspace(opts.workspace, opts.allWorkspaces),
+		opts:      opts,
+	})
 	if err != nil {
-		return err
-	}
-
-	filters := opts.filter
-	// A bare YYYY-MM-DD is normalized to an RFC3339 instant before being sent
-	// on to VictoriaLogs, which otherwise reads a date as that day's 00:00 —
-	// so an inclusive-looking `--until <date>` would drop the whole day.
-	filters.Start = normalizeTimeBound(opts.since, false)
-	filters.End = normalizeTimeBound(opts.until, true)
-
-	total, err := exportLoop(c, workspace, opts, filters, writer)
-	if err != nil {
-		return err
-	}
-
-	if err := writer.Close(); err != nil {
 		return err
 	}
 
@@ -203,10 +214,48 @@ func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	return nil
 }
 
+// exportRequest carries the fully-resolved inputs for a single export run. It
+// depends only on interfaces and io.Writers, so runExport is unit testable with
+// an in-memory lister and byte buffers.
+type exportRequest struct {
+	lister    traceLister
+	dataOut   io.Writer // record stream (stdout or a file)
+	progress  io.Writer // diagnostics (stderr)
+	workspace string
+	opts      *accessLogOptions
+}
+
+// runExport builds the output writer, streams every page through it, and
+// finalizes. It returns the number of records written.
+func runExport(req exportRequest) (int, error) {
+	writer, err := newTraceWriter(req.opts.format, req.dataOut)
+	if err != nil {
+		return 0, err
+	}
+
+	filters := req.opts.filter
+	// A bare YYYY-MM-DD is normalized to an RFC3339 instant before being sent
+	// on to VictoriaLogs, which otherwise reads a date as that day's 00:00 —
+	// so an inclusive-looking `--until <date>` would drop the whole day.
+	filters.Start = normalizeTimeBound(req.opts.since, false)
+	filters.End = normalizeTimeBound(req.opts.until, true)
+
+	total, err := exportLoop(req.lister, req.progress, req.workspace, req.opts, filters, writer)
+	if err != nil {
+		return total, err
+	}
+
+	if err := writer.Close(); err != nil {
+		return total, err
+	}
+
+	return total, nil
+}
+
 // exportLoop pages through the trace store, deduplicating by request id and
 // stopping on stall, limit, or exhaustion. It returns the number of records
 // written.
-func exportLoop(c *client.Client, workspace string, opts *accessLogOptions, filters client.TraceListFilters, writer traceWriter) (int, error) {
+func exportLoop(lister traceLister, progress io.Writer, workspace string, opts *accessLogOptions, filters client.TraceListFilters, writer traceWriter) (int, error) {
 	seen := make(map[string]struct{})
 
 	var (
@@ -222,7 +271,7 @@ func exportLoop(c *client.Client, workspace string, opts *accessLogOptions, filt
 
 		// Bodies come inline via include_body, so a full-content export is still
 		// a single request per page — no per-record detail lookup.
-		items, nextBefore, err := c.Traces.ListPage(workspace, filters, before, perPage, opts.withBody)
+		items, nextBefore, err := lister.ListPage(workspace, filters, before, perPage, opts.withBody)
 		if err != nil {
 			return total, err
 		}
@@ -254,7 +303,7 @@ func exportLoop(c *client.Client, workspace string, opts *accessLogOptions, filt
 			}
 		}
 
-		fmt.Fprintf(os.Stderr, "exported %d access log record(s)...\n", total)
+		fmt.Fprintf(progress, "exported %d access log record(s)...\n", total)
 
 		// Termination: the server reports no more pages, the cursor stops
 		// advancing, or the whole page was records we already wrote (a
@@ -264,12 +313,12 @@ func exportLoop(c *client.Client, workspace string, opts *accessLogOptions, filt
 		}
 
 		if nextBefore == before {
-			fmt.Fprintf(os.Stderr, "warning: pagination cursor stopped advancing at %s; stopping early\n", nextBefore)
+			fmt.Fprintf(progress, "warning: pagination cursor stopped advancing at %s; stopping early\n", nextBefore)
 			break
 		}
 
 		if newInPage == 0 {
-			fmt.Fprintf(os.Stderr, "warning: pagination stalled on duplicate records at %s; stopping early\n", nextBefore)
+			fmt.Fprintf(progress, "warning: pagination stalled on duplicate records at %s; stopping early\n", nextBefore)
 			break
 		}
 

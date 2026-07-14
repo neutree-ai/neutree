@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
+	"io"
 	"strings"
 	"testing"
 
@@ -15,23 +13,24 @@ import (
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
-// fakeTraceStore serves a fixed, time-desc-sorted set of traces with an
-// inclusive cursor and a small server-side page cap — reproducing the real
-// endpoint's boundary behavior (the cursor record repeats on the next page).
-type fakeTraceStore struct {
-	traces  []client.AITrace // sorted by Time desc
-	pageCap int
+// fakeLister is an in-memory traceLister. It reproduces the real endpoint's
+// inclusive cursor and server-side page cap (so a boundary record repeats on
+// the next page), letting the export logic be tested without an HTTP server.
+type fakeLister struct {
+	traces      []client.AITrace // sorted by Time desc
+	pageCap     int
+	calls       int
+	lastInclude bool
+	err         error
 }
 
-func (f *fakeTraceStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	before := r.URL.Query().Get("before")
-
-	limit := f.pageCap
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, _ := strconv.Atoi(v); n > 0 && n < limit {
-			limit = n
-		}
+func (f *fakeLister) ListPage(_ string, _ client.TraceListFilters, before string, limit int, includeBody bool) ([]client.AITrace, string, error) {
+	if f.err != nil {
+		return nil, "", f.err
 	}
+
+	f.calls++
+	f.lastInclude = includeBody
 
 	// Inclusive filter: Time <= before (mimics passing the cursor as `end`).
 	var filtered []client.AITrace
@@ -42,17 +41,20 @@ func (f *fakeTraceStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	pageLimit := f.pageCap
+	if limit > 0 && limit < pageLimit {
+		pageLimit = limit
+	}
+
 	page := filtered
 	next := ""
 
-	if len(filtered) > limit {
-		page = filtered[:limit]
+	if len(filtered) > pageLimit {
+		page = filtered[:pageLimit]
 		next = page[len(page)-1].Time // inclusive cursor -> boundary repeats
 	}
 
-	// When include_body is requested the store returns bodies inline, mirroring
-	// the real endpoint's ?include_body=true projection.
-	if r.URL.Query().Get("include_body") == "true" {
+	if includeBody {
 		withBodies := make([]client.AITrace, len(page))
 		for i, t := range page {
 			t.RequestBody = "body-" + t.RequestID
@@ -62,18 +64,7 @@ func (f *fakeTraceStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		page = withBodies
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"items":       page,
-		"next_before": next,
-	})
-}
-
-func newTestClient(t *testing.T, store *fakeTraceStore) (*client.Client, func()) {
-	t.Helper()
-
-	server := httptest.NewServer(store)
-
-	return client.NewClient(server.URL, client.WithAPIKey("k")), server.Close
+	return page, next, nil
 }
 
 func makeTraces(n int) []client.AITrace {
@@ -89,27 +80,36 @@ func makeTraces(n int) []client.AITrace {
 	return traces
 }
 
-func TestExportLoopPaginatesAndDeduplicates(t *testing.T) {
-	store := &fakeTraceStore{traces: makeTraces(12), pageCap: 5}
-	c, closeFn := newTestClient(t, store)
-	defer closeFn()
+// runLoop drives exportLoop with an in-memory lister and a jsonl writer,
+// returning the record count and the raw output.
+func runLoop(t *testing.T, lister traceLister, opts *accessLogOptions) (int, string) {
+	t.Helper()
 
 	var buf bytes.Buffer
 
 	writer, err := newTraceWriter("jsonl", &buf)
 	require.NoError(t, err)
 
-	total, err := exportLoop(c, "default", &accessLogOptions{}, client.TraceListFilters{}, writer)
+	total, err := exportLoop(lister, io.Discard, "default", opts, client.TraceListFilters{}, writer)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
+
+	return total, buf.String()
+}
+
+func TestExportLoopPaginatesAndDeduplicates(t *testing.T) {
+	lister := &fakeLister{traces: makeTraces(12), pageCap: 5}
+
+	total, out := runLoop(t, lister, &accessLogOptions{})
 
 	// All 12 unique records exported exactly once despite the inclusive-cursor
 	// boundary repeats across the 3 pages.
 	require.Equal(t, 12, total)
+	require.Greater(t, lister.calls, 1) // actually paged
 
 	seen := map[string]bool{}
 
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var rec client.AITrace
 		require.NoError(t, json.Unmarshal([]byte(line), &rec))
 		require.False(t, seen[rec.RequestID], "duplicate %s", rec.RequestID)
@@ -120,15 +120,9 @@ func TestExportLoopPaginatesAndDeduplicates(t *testing.T) {
 }
 
 func TestExportLoopRespectsLimit(t *testing.T) {
-	store := &fakeTraceStore{traces: makeTraces(100), pageCap: 500}
-	c, closeFn := newTestClient(t, store)
-	defer closeFn()
+	lister := &fakeLister{traces: makeTraces(100), pageCap: 500}
 
-	writer, err := newTraceWriter("jsonl", &bytes.Buffer{})
-	require.NoError(t, err)
-
-	total, err := exportLoop(c, "default", &accessLogOptions{limit: 7}, client.TraceListFilters{}, writer)
-	require.NoError(t, err)
+	total, _ := runLoop(t, lister, &accessLogOptions{limit: 7})
 	require.Equal(t, 7, total)
 }
 
@@ -141,17 +135,62 @@ func TestExportLoopTerminatesOnStall(t *testing.T) {
 		traces[i] = client.AITrace{RequestID: fmt.Sprintf("r%d", i), Time: "2026-07-14T00:00:00Z"}
 	}
 
-	store := &fakeTraceStore{traces: traces, pageCap: 5}
-	c, closeFn := newTestClient(t, store)
-	defer closeFn()
+	lister := &fakeLister{traces: traces, pageCap: 5}
 
-	writer, err := newTraceWriter("jsonl", &bytes.Buffer{})
-	require.NoError(t, err)
-
-	total, err := exportLoop(c, "default", &accessLogOptions{}, client.TraceListFilters{}, writer)
-	require.NoError(t, err)
+	total, _ := runLoop(t, lister, &accessLogOptions{})
 	// Only the first page's worth is recoverable; the loop terminates.
 	require.Equal(t, 5, total)
+}
+
+func TestExportLoopWithBodyIncludesBodiesInline(t *testing.T) {
+	// With --with-body the loop asks for include_body=true and the lister returns
+	// bodies inline in the same page — no per-record detail request.
+	lister := &fakeLister{traces: makeTraces(2), pageCap: 5}
+
+	total, out := runLoop(t, lister, &accessLogOptions{withBody: true})
+	require.Equal(t, 2, total)
+	require.True(t, lister.lastInclude)
+	require.Contains(t, out, "body-r000")
+}
+
+func TestExportLoopPropagatesListError(t *testing.T) {
+	lister := &fakeLister{err: fmt.Errorf("boom")}
+
+	writer, err := newTraceWriter("jsonl", io.Discard)
+	require.NoError(t, err)
+
+	_, err = exportLoop(lister, io.Discard, "default", &accessLogOptions{}, client.TraceListFilters{}, writer)
+	require.ErrorContains(t, err, "boom")
+}
+
+func TestResolveWorkspace(t *testing.T) {
+	require.Equal(t, "prod", resolveWorkspace("prod", false))
+	require.Equal(t, client.AllWorkspaces, resolveWorkspace("prod", true))
+	require.Equal(t, "default", resolveWorkspace("default", false))
+}
+
+func TestEffectiveLimit(t *testing.T) {
+	cases := []struct {
+		name       string
+		withBody   bool
+		limitSet   bool
+		limit      int
+		wantLimit  int
+		wantCapped bool
+	}{
+		{"body, no explicit limit -> capped", true, false, 0, withBodyDefaultLimit, true},
+		{"body, explicit limit -> respected", true, true, 50, 50, false},
+		{"body, explicit unlimited -> respected", true, true, 0, 0, false},
+		{"no body -> never capped", false, false, 0, 0, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, capped := effectiveLimit(tc.withBody, tc.limitSet, tc.limit)
+			require.Equal(t, tc.wantLimit, got)
+			require.Equal(t, tc.wantCapped, capped)
+		})
+	}
 }
 
 func TestNormalizeTimeBound(t *testing.T) {
@@ -175,21 +214,35 @@ func TestNormalizeTimeBound(t *testing.T) {
 	}
 }
 
-func TestExportLoopWithBodyIncludesBodiesInline(t *testing.T) {
-	// With --with-body the loop asks for include_body=true and the store returns
-	// bodies inline in the same page — no per-record detail request.
-	store := &fakeTraceStore{traces: makeTraces(2), pageCap: 5}
-	c, closeFn := newTestClient(t, store)
-	defer closeFn()
+func TestRunExportCSVToBufferNormalizesUntil(t *testing.T) {
+	// End-to-end through runExport with byte buffers only: writer selection,
+	// the loop, and finalization — no HTTP server, no filesystem.
+	lister := &fakeLister{traces: makeTraces(3), pageCap: 500}
 
-	var buf bytes.Buffer
+	var data, progress bytes.Buffer
 
-	writer, err := newTraceWriter("jsonl", &buf)
+	total, err := runExport(exportRequest{
+		lister:    lister,
+		dataOut:   &data,
+		progress:  &progress,
+		workspace: "default",
+		opts:      &accessLogOptions{format: "csv", until: "2026-07-14"},
+	})
 	require.NoError(t, err)
+	require.Equal(t, 3, total)
 
-	total, err := exportLoop(c, "default", &accessLogOptions{withBody: true}, client.TraceListFilters{}, writer)
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
-	require.Equal(t, 2, total)
-	require.Contains(t, buf.String(), "body-r000")
+	lines := strings.Split(strings.TrimSpace(data.String()), "\n")
+	require.Len(t, lines, 4) // header + 3 rows
+	require.Equal(t, strings.Join(csvHeader, ","), lines[0])
+}
+
+func TestRunExportUnsupportedFormat(t *testing.T) {
+	_, err := runExport(exportRequest{
+		lister:    &fakeLister{},
+		dataOut:   io.Discard,
+		progress:  io.Discard,
+		workspace: "default",
+		opts:      &accessLogOptions{format: "xml"},
+	})
+	require.Error(t, err)
 }
