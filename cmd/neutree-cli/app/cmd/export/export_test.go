@@ -50,6 +50,18 @@ func (f *fakeTraceStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		next = page[len(page)-1].Time // inclusive cursor -> boundary repeats
 	}
 
+	// When include_body is requested the store returns bodies inline, mirroring
+	// the real endpoint's ?include_body=true projection.
+	if r.URL.Query().Get("include_body") == "true" {
+		withBodies := make([]client.AITrace, len(page))
+		for i, t := range page {
+			t.RequestBody = "body-" + t.RequestID
+			withBodies[i] = t
+		}
+
+		page = withBodies
+	}
+
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"items":       page,
 		"next_before": next,
@@ -87,7 +99,7 @@ func TestExportLoopPaginatesAndDeduplicates(t *testing.T) {
 	writer, err := newTraceWriter("jsonl", &buf)
 	require.NoError(t, err)
 
-	total, err := exportLoop(c, &accessLogOptions{workspace: "default"}, client.TraceListFilters{}, writer)
+	total, err := exportLoop(c, "default", &accessLogOptions{}, client.TraceListFilters{}, writer)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -115,7 +127,7 @@ func TestExportLoopRespectsLimit(t *testing.T) {
 	writer, err := newTraceWriter("jsonl", &bytes.Buffer{})
 	require.NoError(t, err)
 
-	total, err := exportLoop(c, &accessLogOptions{workspace: "default", limit: 7}, client.TraceListFilters{}, writer)
+	total, err := exportLoop(c, "default", &accessLogOptions{limit: 7}, client.TraceListFilters{}, writer)
 	require.NoError(t, err)
 	require.Equal(t, 7, total)
 }
@@ -136,37 +148,25 @@ func TestExportLoopTerminatesOnStall(t *testing.T) {
 	writer, err := newTraceWriter("jsonl", &bytes.Buffer{})
 	require.NoError(t, err)
 
-	total, err := exportLoop(c, &accessLogOptions{workspace: "default"}, client.TraceListFilters{}, writer)
+	total, err := exportLoop(c, "default", &accessLogOptions{}, client.TraceListFilters{}, writer)
 	require.NoError(t, err)
 	// Only the first page's worth is recoverable; the loop terminates.
 	require.Equal(t, 5, total)
 }
 
-func TestExportLoopWithBodyFetchesDetail(t *testing.T) {
+func TestExportLoopWithBodyIncludesBodiesInline(t *testing.T) {
+	// With --with-body the loop asks for include_body=true and the store returns
+	// bodies inline in the same page — no per-record detail request.
 	store := &fakeTraceStore{traces: makeTraces(2), pageCap: 5}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Detail lookups hit /ai-traces/default/<id> (5 slashes); list hits
-		// /ai-traces/default (4 slashes).
-		if strings.Count(r.URL.Path, "/") == 5 {
-			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-			_ = json.NewEncoder(w).Encode(client.AITrace{RequestID: id, RequestBody: "body-" + id})
-
-			return
-		}
-
-		store.ServeHTTP(w, r)
-	}))
-	defer server.Close()
-
-	c := client.NewClient(server.URL, client.WithAPIKey("k"))
+	c, closeFn := newTestClient(t, store)
+	defer closeFn()
 
 	var buf bytes.Buffer
 
 	writer, err := newTraceWriter("jsonl", &buf)
 	require.NoError(t, err)
 
-	total, err := exportLoop(c, &accessLogOptions{workspace: "default", withBody: true}, client.TraceListFilters{}, writer)
+	total, err := exportLoop(c, "default", &accessLogOptions{withBody: true}, client.TraceListFilters{}, writer)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.Equal(t, 2, total)

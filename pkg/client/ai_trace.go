@@ -83,7 +83,10 @@ type aiTraceListResponse struct {
 // Callers exporting the full history must deduplicate by RequestID across
 // pages: the server's cursor is timestamp-based and inclusive, so the boundary
 // record can repeat on the next page.
-func (s *TracesService) ListPage(workspace string, filters TraceListFilters, before string, limit int) (items []AITrace, nextBefore string, err error) {
+//
+// When includeBody is true the page carries the full request/response bodies
+// inline (?include_body=true), so exports need no per-record detail lookup.
+func (s *TracesService) ListPage(workspace string, filters TraceListFilters, before string, limit int, includeBody bool) (items []AITrace, nextBefore string, err error) {
 	if workspace == "" {
 		return nil, "", fmt.Errorf("workspace is required")
 	}
@@ -94,6 +97,10 @@ func (s *TracesService) ListPage(workspace string, filters TraceListFilters, bef
 
 	params := url.Values{}
 	params.Set("limit", strconv.Itoa(limit))
+
+	if includeBody {
+		params.Set("include_body", "true")
+	}
 
 	setIfNotEmpty(params, "endpoint_name", filters.EndpointName)
 	setIfNotEmpty(params, "endpoint_type", filters.EndpointType)

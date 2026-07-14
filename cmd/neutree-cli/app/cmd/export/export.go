@@ -26,16 +26,23 @@ func NewExportCmd() *cobra.Command {
 
 // accessLogOptions holds the flags for `export access-log`.
 type accessLogOptions struct {
-	workspace string
-	format    string
-	file      string
-	limit     int
-	withBody  bool
+	workspace     string
+	allWorkspaces bool
+	format        string
+	file          string
+	limit         int
+	withBody      bool
 
 	since  string
 	until  string
 	filter client.TraceListFilters
 }
+
+// withBodyDefaultLimit caps a body-carrying export that did not set an explicit
+// --limit. Full request/response bodies are large, so an unbounded default
+// would produce enormous output; users who really want everything pass an
+// explicit --limit (0 for no cap).
+const withBodyDefaultLimit = 2000
 
 func newAccessLogCmd() *cobra.Command {
 	opts := &accessLogOptions{}
@@ -50,35 +57,41 @@ never buffers the full result set in memory. Data is written to stdout by
 default (redirect with --file); all progress and diagnostics go to stderr, so
 the data stream stays clean for pipes and redirection.
 
-Use --since/--until to bound the time window for large exports. Pass the
-special workspace _all_ to aggregate across every workspace you may read.
+Full request/response bodies are included by default. Because bodies are large,
+a body-carrying export without an explicit --limit is capped (pass --limit 0 to
+lift the cap); use --with-body=false to export metadata only.
+
+Use --since/--until to bound the time window for large exports. Pass
+--all-workspaces (-A) to aggregate across every workspace you may read.
 
 Examples:
-  # Stream the last records as JSON Lines to stdout
+  # Stream records (with bodies) as JSON Lines to stdout
   neutree-cli export access-log -w default
 
-  # Export a time window to a CSV file
-  neutree-cli export access-log -w default --since 2026-07-01 --until 2026-07-14 --format csv -f traces.csv
+  # Metadata only, a time window, to a CSV file
+  neutree-cli export access-log -w default --with-body=false \
+    --since 2026-07-01 --until 2026-07-14 --format csv -f traces.csv
 
   # Aggregate across all workspaces, filter by status, pipe to jq
-  neutree-cli export access-log -w _all_ --status 500 | jq -c .
+  neutree-cli export access-log -A --status 500 | jq -c .
 
-  # Include full request/response bodies (slow: one extra request per record)
-  neutree-cli export access-log -w default --limit 100 --with-body`,
+  # Export everything for one API key over the last week
+  neutree-cli export access-log -w default --api-key-id <uuid> --since 2026-07-07 --limit 0`,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAccessLogExport(opts)
+			return runAccessLogExport(cmd, opts)
 		},
 	}
 
 	f := cmd.Flags()
-	f.StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (use _all_ to aggregate across all readable workspaces)")
+	f.StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name")
+	f.BoolVarP(&opts.allWorkspaces, "all-workspaces", "A", false, "Aggregate across every workspace you may read (mutually exclusive with --workspace)")
 	f.StringVar(&opts.format, "format", "jsonl", "Output format: jsonl, json, csv")
 	f.StringVarP(&opts.file, "file", "f", "", "Output file path (default: stdout)")
 	f.IntVar(&opts.limit, "limit", 0, "Maximum number of records to export (0 = no limit)")
-	f.BoolVar(&opts.withBody, "with-body", false, "Fetch full request/response bodies (one extra request per record; slow)")
+	f.BoolVar(&opts.withBody, "with-body", true, "Include full request/response bodies")
 	f.StringVar(&opts.since, "since", "", "Only export records at or after this time (RFC3339 or YYYY-MM-DD)")
 	f.StringVar(&opts.until, "until", "", "Only export records before this time (RFC3339 or YYYY-MM-DD)")
 	f.StringVar(&opts.filter.EndpointName, "endpoint", "", "Filter by endpoint name")
@@ -88,16 +101,35 @@ Examples:
 	f.StringVar(&opts.filter.APIKeyID, "api-key-id", "", "Filter by API key ID")
 	f.StringVar(&opts.filter.FinishReason, "finish-reason", "", "Filter by finish reason")
 
+	cmd.MarkFlagsMutuallyExclusive("workspace", "all-workspaces")
+
 	return cmd
 }
 
 // perPageMax is the server's maximum page size.
 const perPageMax = client.MaxTracePageSize
 
-func runAccessLogExport(opts *accessLogOptions) error {
+func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	c, err := global.NewClient()
 	if err != nil {
 		return err
+	}
+
+	// --all-workspaces is exposed as a boolean so it never collides with a real
+	// workspace name; the server's cross-workspace aggregate is requested via
+	// the AllWorkspaces sentinel on the wire.
+	workspace := opts.workspace
+	if opts.allWorkspaces {
+		workspace = client.AllWorkspaces
+	}
+
+	// Bodies are large: a body-carrying export that did not set --limit is
+	// capped so a bare command cannot accidentally pull an unbounded volume.
+	if opts.withBody && !cmd.Flags().Changed("limit") {
+		opts.limit = withBodyDefaultLimit
+		fmt.Fprintf(os.Stderr,
+			"note: limiting to %d records because --with-body is on; pass --limit N (or --limit 0) to change\n",
+			withBodyDefaultLimit)
 	}
 
 	// Resolve output. A file is buffered; stdout is written directly. Progress
@@ -126,7 +158,7 @@ func runAccessLogExport(opts *accessLogOptions) error {
 	filters.Start = opts.since
 	filters.End = opts.until
 
-	total, err := exportLoop(c, opts, filters, writer)
+	total, err := exportLoop(c, workspace, opts, filters, writer)
 	if err != nil {
 		return err
 	}
@@ -147,7 +179,7 @@ func runAccessLogExport(opts *accessLogOptions) error {
 // exportLoop pages through the trace store, deduplicating by request id and
 // stopping on stall, limit, or exhaustion. It returns the number of records
 // written.
-func exportLoop(c *client.Client, opts *accessLogOptions, filters client.TraceListFilters, writer traceWriter) (int, error) {
+func exportLoop(c *client.Client, workspace string, opts *accessLogOptions, filters client.TraceListFilters, writer traceWriter) (int, error) {
 	seen := make(map[string]struct{})
 
 	var (
@@ -161,7 +193,9 @@ func exportLoop(c *client.Client, opts *accessLogOptions, filters client.TraceLi
 			perPage = opts.limit - total
 		}
 
-		items, nextBefore, err := c.Traces.ListPage(opts.workspace, filters, before, perPage)
+		// Bodies come inline via include_body, so a full-content export is still
+		// a single request per page — no per-record detail lookup.
+		items, nextBefore, err := c.Traces.ListPage(workspace, filters, before, perPage, opts.withBody)
 		if err != nil {
 			return total, err
 		}
@@ -181,15 +215,6 @@ func exportLoop(c *client.Client, opts *accessLogOptions, filters client.TraceLi
 
 			seen[t.RequestID] = struct{}{}
 			newInPage++
-
-			if opts.withBody {
-				detail, derr := c.Traces.GetDetail(opts.workspace, t.RequestID)
-				if derr != nil {
-					fmt.Fprintf(os.Stderr, "warning: failed to fetch body for %s: %v\n", t.RequestID, derr)
-				} else {
-					t = *detail
-				}
-			}
 
 			if err := writer.Write(t); err != nil {
 				return total, err

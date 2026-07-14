@@ -23,6 +23,7 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		// before takes precedence over the filter's End.
 		require.Equal(t, "2026-07-14T00:00:00Z", q.Get("before"))
 		require.Empty(t, q.Get("end"))
+		require.Equal(t, "true", q.Get("include_body"))
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(aiTraceListResponse{
@@ -39,7 +40,7 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		Model:        "qwen",
 		Start:        "2026-07-01T00:00:00Z",
 		End:          "2026-07-10T00:00:00Z", // must be ignored when before is set
-	}, "2026-07-14T00:00:00Z", 100)
+	}, "2026-07-14T00:00:00Z", 100, true)
 
 	require.NoError(t, err)
 	require.Equal(t, "2026-07-13T00:00:00Z", next)
@@ -53,6 +54,7 @@ func TestTracesListPageUsesEndWhenNoCursor(t *testing.T) {
 		require.Empty(t, q.Get("before"))
 		require.Equal(t, "2026-07-10T00:00:00Z", q.Get("end"))
 		require.Equal(t, "500", q.Get("limit")) // limit>max clamps to max
+		require.Empty(t, q.Get("include_body")) // omitted when false
 
 		_ = json.NewEncoder(w).Encode(aiTraceListResponse{})
 	}))
@@ -60,7 +62,7 @@ func TestTracesListPageUsesEndWhenNoCursor(t *testing.T) {
 
 	c := NewClient(server.URL, WithAPIKey("k"))
 
-	_, _, err := c.Traces.ListPage("default", TraceListFilters{End: "2026-07-10T00:00:00Z"}, "", 9999)
+	_, _, err := c.Traces.ListPage("default", TraceListFilters{End: "2026-07-10T00:00:00Z"}, "", 9999, false)
 	require.NoError(t, err)
 }
 
@@ -79,7 +81,7 @@ func TestTracesErrorStatusMapping(t *testing.T) {
 		}))
 
 		c := NewClient(server.URL, WithAPIKey("k"))
-		_, _, err := c.Traces.ListPage("default", TraceListFilters{}, "", 50)
+		_, _, err := c.Traces.ListPage("default", TraceListFilters{}, "", 50, false)
 		require.EqualError(t, err, tc.want)
 
 		server.Close()
@@ -103,6 +105,6 @@ func TestTracesGetDetail(t *testing.T) {
 
 func TestTracesListPageRequiresWorkspace(t *testing.T) {
 	c := NewClient("http://example.com", WithAPIKey("k"))
-	_, _, err := c.Traces.ListPage("", TraceListFilters{}, "", 50)
+	_, _, err := c.Traces.ListPage("", TraceListFilters{}, "", 50, false)
 	require.Error(t, err)
 }
