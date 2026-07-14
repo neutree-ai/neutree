@@ -78,6 +78,7 @@ local schema = {
             endpoint_type = {
               type = "string",
               required = false,
+              one_of = { "internal", "external" },
             },
           },
           {

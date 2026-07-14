@@ -61,13 +61,17 @@ end
 -- pins — the endpoint identity stashed by neutree-ai-gateway matches. An entry
 -- with empty type/endpoint_name is "any endpoint serving this model" (legacy
 -- name-only keys, migrated to this shape). An empty list permits nothing (deny-all).
--- A pinned dimension matches when it is unset (nil/"" = any) or equals the
--- endpoint the request actually hit. endpoint_name is matched bare (not
--- workspace-qualified): an API key only reaches endpoints in its own workspace
--- (the route ACL rejects anything else before this plugin), and names are unique
--- within a workspace, so there is no cross-workspace collision to guard against.
+-- A pinned dimension matches when it is unset (= any) or equals the endpoint the
+-- request actually hit. "Unset" is anything that isn't a non-empty string: nil,
+-- or cjson.null (userdata) should a JSON null ever reach here — so a null
+-- type/endpoint_name reads as "any", never as a pin that can't match.
+--
+-- endpoint_name is matched bare (not workspace-qualified): an API key only
+-- reaches endpoints in its own workspace (the route ACL rejects anything else
+-- before this plugin), and names are unique within a workspace, so there is no
+-- cross-workspace collision to guard against.
 local function pin_ok(pin, actual)
-    return pin == nil or pin == "" or pin == actual
+    return type(pin) ~= "string" or pin == "" or pin == actual
 end
 
 local function allow_match(list, model, ep_type, ep_name)

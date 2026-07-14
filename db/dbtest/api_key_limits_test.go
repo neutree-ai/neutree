@@ -249,10 +249,11 @@ func TestApiKeyLimits(t *testing.T) {
 		// The legacy bare-string shape and objects missing a non-empty model must
 		// now fail validation (they can no longer reach the gateway as-is).
 		cases := []string{
-			`{"allowed_models":["gpt-4"]}`,                // legacy bare string
-			`{"allowed_models":[{"type":"external"}]}`,    // no model
-			`{"allowed_models":[{"model":""}]}`,           // empty model
-			`{"allowed_models":[{"model":"x","type":5}]}`, // non-string type
+			`{"allowed_models":["gpt-4"]}`,                   // legacy bare string
+			`{"allowed_models":[{"type":"external"}]}`,       // no model
+			`{"allowed_models":[{"model":""}]}`,              // empty model
+			`{"allowed_models":[{"model":"x","type":5}]}`,    // non-string type
+			`{"allowed_models":[{"model":"x","type":null}]}`, // null type (must be a string or absent)
 		}
 		for _, c := range cases {
 			err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {

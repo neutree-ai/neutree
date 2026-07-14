@@ -96,7 +96,10 @@ BEGIN
 
     -- allowed_models: optional array of endpoint-scoped entries. Each element must
     -- be an object with a non-empty string `model`; `type` / `endpoint_name`, when
-    -- present, must be strings. An empty array (deny-all) is valid.
+    -- present, must be strings (JSON null is rejected — Go unmarshals it to "" and
+    -- the Kong schema/enforcement treat "unset" as absent, not null, so a stored
+    -- null would be an ambiguous shape rather than a meaningful value). An empty
+    -- array (deny-all) is valid.
     IF p_limits ? 'allowed_models' AND jsonb_typeof(p_limits -> 'allowed_models') <> 'null' THEN
         IF jsonb_typeof(p_limits -> 'allowed_models') <> 'array' THEN
             RAISE EXCEPTION 'Invalid allowed_models: must be an array'
@@ -113,11 +116,11 @@ BEGIN
                 RAISE EXCEPTION 'Invalid allowed_models entry: each item needs a non-empty string model'
                     USING ERRCODE = '22023';
             END IF;
-            IF v_node ? 'type' AND jsonb_typeof(v_node -> 'type') NOT IN ('string', 'null') THEN
+            IF v_node ? 'type' AND jsonb_typeof(v_node -> 'type') <> 'string' THEN
                 RAISE EXCEPTION 'Invalid allowed_models entry: type must be a string'
                     USING ERRCODE = '22023';
             END IF;
-            IF v_node ? 'endpoint_name' AND jsonb_typeof(v_node -> 'endpoint_name') NOT IN ('string', 'null') THEN
+            IF v_node ? 'endpoint_name' AND jsonb_typeof(v_node -> 'endpoint_name') <> 'string' THEN
                 RAISE EXCEPTION 'Invalid allowed_models entry: endpoint_name must be a string'
                     USING ERRCODE = '22023';
             END IF;

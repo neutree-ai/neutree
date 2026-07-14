@@ -1191,10 +1191,12 @@ function AIGatewayHandler:access(conf)
     -- Expose the IE/EE identity this route serves to later consumer plugins
     -- (neutree-ai-access endpoint-level allowlist). It is static per route/config,
     -- so stash it unconditionally regardless of request format or upstream match.
-    if conf.endpoint_type and conf.endpoint_type ~= "" then
+    -- Require an actual non-empty string: a nil/cjson.null config value must not
+    -- be stashed, since the access plugin expects a plain string endpoint identity.
+    if type(conf.endpoint_type) == "string" and conf.endpoint_type ~= "" then
         kong.ctx.shared.neutree_endpoint_type = conf.endpoint_type
     end
-    if conf.endpoint_name and conf.endpoint_name ~= "" then
+    if type(conf.endpoint_name) == "string" and conf.endpoint_name ~= "" then
         kong.ctx.shared.neutree_endpoint_name = conf.endpoint_name
     end
 

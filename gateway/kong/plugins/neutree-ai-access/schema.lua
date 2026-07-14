@@ -25,7 +25,13 @@ return {
                 type = "record",
                 fields = {
                   { model = { type = "string", required = true } },
-                  { type = { type = "string", required = false } },
+                  {
+                    type = {
+                      type = "string",
+                      required = false,
+                      one_of = { "internal", "external" },
+                    },
+                  },
                   { endpoint_name = { type = "string", required = false } },
                 },
               },
