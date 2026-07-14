@@ -155,3 +155,38 @@ func TestExtractMetadataField(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractID(t *testing.T) {
+	tests := []struct {
+		name string
+		data json.RawMessage
+		want string
+	}{
+		{
+			name: "uuid string id",
+			data: json.RawMessage(`{"id":"721d6adc-6b32-46d1-b4bf-67cb0c576848","metadata":{"name":"k"}}`),
+			want: "721d6adc-6b32-46d1-b4bf-67cb0c576848",
+		},
+		{
+			name: "integer id",
+			data: json.RawMessage(`{"id":42,"metadata":{"name":"e"}}`),
+			want: "42",
+		},
+		{
+			name: "missing id",
+			data: json.RawMessage(`{"metadata":{"name":"n"}}`),
+			want: "",
+		},
+		{
+			name: "invalid JSON",
+			data: json.RawMessage(`not json`),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ExtractID(tt.data))
+		})
+	}
+}
