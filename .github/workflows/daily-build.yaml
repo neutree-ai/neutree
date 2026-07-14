@@ -21,7 +21,7 @@ jobs:
         id: create_nightly_tag
         run: |
           DATE=$(date +'%Y%m%d')
-          NIGHTLY_TAG="v1.1.0-nightly-${DATE}"
+          NIGHTLY_TAG="v1.1.1-nightly-${DATE}"
           git tag "${NIGHTLY_TAG}" -m "${NIGHTLY_TAG}"
           git push origin "${NIGHTLY_TAG}"
           echo "tag=${NIGHTLY_TAG}" >> "${GITHUB_OUTPUT}"
