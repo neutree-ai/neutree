@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -92,8 +93,8 @@ Examples:
 	f.StringVarP(&opts.file, "file", "f", "", "Output file path (default: stdout)")
 	f.IntVar(&opts.limit, "limit", 0, "Maximum number of records to export (0 = no limit)")
 	f.BoolVar(&opts.withBody, "with-body", true, "Include full request/response bodies")
-	f.StringVar(&opts.since, "since", "", "Only export records at or after this time (RFC3339 or YYYY-MM-DD)")
-	f.StringVar(&opts.until, "until", "", "Only export records before this time (RFC3339 or YYYY-MM-DD)")
+	f.StringVar(&opts.since, "since", "", "Only export records at or after this time (RFC3339, or YYYY-MM-DD = start of that day)")
+	f.StringVar(&opts.until, "until", "", "Only export records before this time (RFC3339, or YYYY-MM-DD = through the end of that day)")
 	f.StringVar(&opts.filter.EndpointName, "endpoint", "", "Filter by endpoint name")
 	f.StringVar(&opts.filter.EndpointType, "endpoint-type", "", "Filter by endpoint type (endpoint or external-endpoint)")
 	f.StringVar(&opts.filter.Model, "model", "", "Filter by request or response model")
@@ -108,6 +109,29 @@ Examples:
 
 // perPageMax is the server's maximum page size.
 const perPageMax = client.MaxTracePageSize
+
+// normalizeTimeBound converts a bare YYYY-MM-DD date to an RFC3339 instant so
+// the server (and VictoriaLogs behind it) reads it unambiguously. A date-only
+// lower bound becomes the start of that UTC day; a date-only upper bound
+// (endOfDay=true) becomes the start of the *next* UTC day, so `--until <date>`
+// includes the whole day. Values already carrying a time, or any other form,
+// are passed through unchanged.
+func normalizeTimeBound(v string, endOfDay bool) string {
+	if v == "" {
+		return ""
+	}
+
+	d, err := time.Parse("2006-01-02", v)
+	if err != nil {
+		return v // not a bare date (RFC3339, unix, etc.) — leave as-is
+	}
+
+	if endOfDay {
+		d = d.AddDate(0, 0, 1)
+	}
+
+	return d.UTC().Format(time.RFC3339)
+}
 
 func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	c, err := global.NewClient()
@@ -155,8 +179,11 @@ func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
 	}
 
 	filters := opts.filter
-	filters.Start = opts.since
-	filters.End = opts.until
+	// A bare YYYY-MM-DD is normalized to an RFC3339 instant before being sent
+	// on to VictoriaLogs, which otherwise reads a date as that day's 00:00 —
+	// so an inclusive-looking `--until <date>` would drop the whole day.
+	filters.Start = normalizeTimeBound(opts.since, false)
+	filters.End = normalizeTimeBound(opts.until, true)
 
 	total, err := exportLoop(c, workspace, opts, filters, writer)
 	if err != nil {

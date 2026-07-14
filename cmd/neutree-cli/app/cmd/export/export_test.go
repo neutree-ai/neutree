@@ -154,6 +154,27 @@ func TestExportLoopTerminatesOnStall(t *testing.T) {
 	require.Equal(t, 5, total)
 }
 
+func TestNormalizeTimeBound(t *testing.T) {
+	cases := []struct {
+		name     string
+		in       string
+		endOfDay bool
+		want     string
+	}{
+		{"empty", "", false, ""},
+		{"date since -> start of day", "2026-07-07", false, "2026-07-07T00:00:00Z"},
+		{"date until -> next day start", "2026-07-14", true, "2026-07-15T00:00:00Z"},
+		{"rfc3339 passthrough", "2026-07-07T04:20:00Z", false, "2026-07-07T04:20:00Z"},
+		{"non-date passthrough", "5m", false, "5m"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, normalizeTimeBound(tc.in, tc.endOfDay))
+		})
+	}
+}
+
 func TestExportLoopWithBodyIncludesBodiesInline(t *testing.T) {
 	// With --with-body the loop asks for include_body=true and the store returns
 	// bodies inline in the same page — no per-record detail request.
