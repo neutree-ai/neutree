@@ -53,6 +53,16 @@ const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
 	"finish_reason, stream, user_agent, duration_ms"
 
+// stringTrue is the literal a boolean-valued string (a query flag, or a
+// stringified VictoriaLogs field) must equal to be considered on.
+const stringTrue = "true"
+
+// fullProjection extends listProjection with the large request/response body
+// columns. The list endpoint uses it only when the caller passes
+// ?include_body=true — chiefly the CLI export, which fetches bodies inline to
+// avoid an N+1 per-record detail lookup.
+const fullProjection = listProjection + ", request_body, response_body"
+
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
 // NextBefore is the cursor for the next page: passing it as ?before=<ts> on
@@ -383,10 +393,17 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// The list view never renders request/response bodies — project them
-		// out so VictoriaLogs returns only the small metadata columns.
+		// out so VictoriaLogs returns only the small metadata columns. Callers
+		// exporting the full record (?include_body=true) opt into the larger
+		// projection so bodies come back inline, avoiding a per-record lookup.
+		projection := listProjection
+		if c.Query("include_body") == stringTrue {
+			projection = fullProjection
+		}
+
 		query := strings.Join(queryParts, " ") +
 			" | sort by (_time) desc | limit " + strconv.Itoa(limit) +
-			" | fields " + listProjection
+			" | fields " + projection
 
 		params := url.Values{}
 
@@ -905,7 +922,7 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		RequestModel:  r.RequestModel,
 		ResponseModel: r.ResponseModel,
 		FinishReason:  r.FinishReason,
-		Stream:        r.IsStream == "true",
+		Stream:        r.IsStream == stringTrue,
 		UserAgent:     r.UserAgent,
 		RequestBody:   r.RequestBody,
 		ResponseBody:  r.ResponseBody,

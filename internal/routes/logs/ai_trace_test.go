@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -505,6 +506,44 @@ func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {
 		h(c)
 		assert.Equalf(t, http.StatusServiceUnavailable, w.Code, "handler %s", name)
 		assert.Containsf(t, w.Body.String(), "not configured", "handler %s", name)
+	}
+}
+
+func TestHandleListAITraces_IncludeBodyProjection(t *testing.T) {
+	// The list projection omits the large body columns by default and includes
+	// them only when the caller passes ?include_body=true.
+	cases := []struct {
+		name        string
+		rawQuery    string
+		wantInQuery bool
+	}{
+		{"default omits bodies", "", false},
+		{"include_body adds bodies", "include_body=true", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query().Get("query")
+				w.Header().Set("Content-Type", "application/x-ndjson")
+			}))
+			defer server.Close()
+
+			deps := &Dependencies{AITraceStoreURL: server.URL, HTTPClient: &util.DefaultHTTPClient{}}
+
+			c, w := traceCtx("user-1", "ws1")
+			c.Request = httptest.NewRequest("GET", "/?"+tc.rawQuery, nil)
+
+			handleListAITraces(deps)(c)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, gotQuery, "| fields ")
+
+			hasBodies := strings.Contains(gotQuery, "request_body, response_body")
+			assert.Equal(t, tc.wantInQuery, hasBodies, "query: %s", gotQuery)
+		})
 	}
 }
 

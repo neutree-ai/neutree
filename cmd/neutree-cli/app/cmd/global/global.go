@@ -33,8 +33,10 @@ func ResolveEnv() {
 	}
 }
 
-// NewClient validates global flags and creates a new API client.
-func NewClient() (*client.Client, error) {
+// NewClient validates global flags and creates a new API client. Extra options
+// (e.g. client.WithTimeout for long-running exports) are appended after the
+// defaults, so they take precedence.
+func NewClient(extra ...client.ClientOption) (*client.Client, error) {
 	if ServerURL == "" {
 		return nil, fmt.Errorf("server URL is required: use --server-url or set NEUTREE_SERVER_URL")
 	}
@@ -47,6 +49,8 @@ func NewClient() (*client.Client, error) {
 	if Insecure {
 		opts = append(opts, client.WithInsecureSkipVerify())
 	}
+
+	opts = append(opts, extra...)
 
 	return client.NewClient(ServerURL, opts...), nil
 }
