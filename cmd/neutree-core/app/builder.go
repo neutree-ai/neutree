@@ -7,12 +7,15 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/accelerator"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 // Builder is the application builder
 type Builder struct {
-	controllerInits map[string]ControllerFactory
-	config          *config.CoreConfig
+	controllerInits    map[string]ControllerFactory
+	config             *config.CoreConfig
+	acceleratorPlugins []publicaccelerator.Plugin
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -56,6 +59,11 @@ func NewBuilder() *Builder {
 
 func (b *Builder) WithConfig(c *config.CoreConfig) *Builder {
 	b.config = c
+	return b
+}
+
+func (b *Builder) WithAcceleratorPlugins(plugins ...publicaccelerator.Plugin) *Builder {
+	b.acceleratorPlugins = append(b.acceleratorPlugins, append([]publicaccelerator.Plugin(nil), plugins...)...)
 	return b
 }
 
@@ -105,6 +113,12 @@ func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
 		return nil, fmt.Errorf("configuration is required to build the application")
 	}
+
+	acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
+	if err != nil {
+		return nil, fmt.Errorf("create accelerator manager: %w", err)
+	}
+	b.config.AcceleratorManager = acceleratorManager
 
 	registerControllers := make(map[string]controllers.Controller)
 	// Initialize controllers

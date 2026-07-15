@@ -1,10 +1,9 @@
 package resourceparser
 
 import (
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
@@ -14,10 +13,7 @@ const (
 
 // ResourceParser handles standard accelerator resource semantics. Kubernetes
 // Neutree node/pod annotation aggregation lives in internal/resource.
-type ResourceParser interface {
-	ParseFromRay(resource map[string]float64) (*v1.ResourceInfo, error)
-	ParseFromKubernetes(resource map[corev1.ResourceName]k8sresource.Quantity, labels map[string]string) (*v1.ResourceInfo, error)
-}
+type ResourceParser = accelerator.ResourceParser
 
 type KubernetesNodeResourceContext struct {
 	NodeName             string

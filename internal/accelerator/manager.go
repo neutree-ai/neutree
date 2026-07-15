@@ -2,7 +2,9 @@ package accelerator
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type Manager interface {
@@ -60,6 +63,15 @@ type manager struct {
 }
 
 func NewManager(e *gin.Engine) *manager {
+	manager, err := NewManagerWithPlugins(e)
+	if err != nil {
+		panic(err)
+	}
+
+	return manager
+}
+
+func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.Plugin) (*manager, error) {
 	manager := &manager{
 		acceleratorsMap: sync.Map{},
 	}
@@ -74,11 +86,37 @@ func NewManager(e *gin.Engine) *manager {
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
+	for _, p := range injectedPlugins {
+		if err := manager.addInternalPlugin(p); err != nil {
+			return nil, err
+		}
+	}
+
 	// register plugin register handler
 	pluginGroup := e.Group(v1.PluginAPIGroupPath)
 	pluginGroup.POST("/register", manager.registerHandler)
 
-	return manager
+	return manager, nil
+}
+
+func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
+	if p == nil || (reflect.ValueOf(p).Kind() == reflect.Ptr && reflect.ValueOf(p).IsNil()) {
+		return fmt.Errorf("accelerator plugin is nil")
+	}
+	if p.Resource() == "" {
+		return fmt.Errorf("accelerator plugin resource is required")
+	}
+	if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
+		return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+	}
+
+	a.acceleratorsMap.Store(p.Resource(), registerPlugin{
+		resource:         p.Resource(),
+		plugin:           p,
+		lastRegisterTime: time.Now(),
+	})
+
+	return nil
 }
 
 func (a *manager) registerHandler(c *gin.Context) {
