@@ -250,7 +250,10 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        local models = {}
+        -- `data` must serialise as a JSON array even when no models are mapped;
+        -- a plain empty table would encode to `{}`. Tag with array_mt so an
+        -- empty list still becomes `[]`. See NEU-551.
+        local models = setmetatable({}, cjson.array_mt)
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -270,7 +273,8 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_anthropic_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        local models = {}
+        -- See the /v1/models path above: array_mt keeps an empty list as `[]`.
+        local models = setmetatable({}, cjson.array_mt)
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -705,7 +709,13 @@ local function make_message_start(request_model, input_tokens)
             type = "message",
             role = "assistant",
             model = request_model or "unknown",
-            content = {},
+            -- Anthropic's message_start always carries content as an empty JSON
+            -- array `[]`; a bare `{}` here (what an empty Lua table encodes to)
+            -- can break strict clients that treat content as a list. Use the
+            -- cjson sentinel that always serialises as `[]`. This is a
+            -- constructed table, so the module-level decode_array_with_array_mt
+            -- setting does not apply. See NEU-551.
+            content = cjson.empty_array,
             stop_reason = cjson.null,
             stop_sequence = cjson.null,
             usage = {
