@@ -1,21 +1,32 @@
 local cjson = require("cjson.safe")
 local buffer = require("string.buffer")
-
--- Preserve the array/object distinction across a decode -> encode round-trip.
--- Plain lua-cjson decodes both JSON `[]` and `{}` into the same empty Lua table,
--- and re-encodes every empty table as `{}`. That silently rewrites a client's
--- `"required": []` (and any other empty array inside a tool schema) into
--- `"required": {}`, which upstreams reject with 400 ({} is not of type "array")
--- when we forward a model-mapped request (see access(): cjson.decode at the
--- anthropic and OpenAI passthrough paths, re-encoded before set_raw_body).
--- Enabling array_mt on decode tags decoded arrays so encode preserves `[]`,
--- while genuine empty objects (`{}`) still encode as `{}`. This is a per-worker
--- setting; the OpenResty cjson fork shares it between `cjson` and `cjson.safe`.
--- See NEU-551.
-cjson.decode_array_with_array_mt(true)
 local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
+
+-- JSON array/object policy (NEU-551).
+--
+-- An empty Lua table is ambiguous: plain lua-cjson decodes both JSON `[]` and
+-- `{}` into one empty table, and encodes every empty table back as `{}`. That
+-- silently turns a client's `"required": []` (or any empty array in a tool
+-- schema) into `"required": {}`, which upstreams reject with 400
+-- ({} is not of type "array"). Two rules resolve it, one per direction:
+--
+--   1. Tables decoded FROM the client body: enable array_mt on decode so
+--      decoded JSON arrays stay arrays across a re-encode (see access(), which
+--      decodes/re-encodes the body on the model-mapping paths). Genuine empty
+--      objects still encode as `{}`. This one setting covers every decode path.
+--      It is per-worker; the OpenResty cjson fork shares it with `cjson.safe`.
+--
+--   2. Lists we build OURSELVES and then encode: rule 1 cannot help these, so
+--      construct them with json_array() below. It tags the table with array_mt
+--      so it serialises as `[]` even when empty. Use it for ANY list this
+--      plugin emits that could be empty (stream events, model lists, ...).
+cjson.decode_array_with_array_mt(true)
+
+local function json_array(t)
+    return setmetatable(t or {}, cjson.array_mt)
+end
 
 local AIGatewayHandler = {
     PRIORITY = 900,
@@ -250,10 +261,7 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        -- `data` must serialise as a JSON array even when no models are mapped;
-        -- a plain empty table would encode to `{}`. Tag with array_mt so an
-        -- empty list still becomes `[]`. See NEU-551.
-        local models = setmetatable({}, cjson.array_mt)
+        local models = json_array()
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -273,8 +281,7 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_anthropic_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        -- See the /v1/models path above: array_mt keeps an empty list as `[]`.
-        local models = setmetatable({}, cjson.array_mt)
+        local models = json_array()
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -710,12 +717,8 @@ local function make_message_start(request_model, input_tokens)
             role = "assistant",
             model = request_model or "unknown",
             -- Anthropic's message_start always carries content as an empty JSON
-            -- array `[]`; a bare `{}` here (what an empty Lua table encodes to)
-            -- can break strict clients that treat content as a list. Use the
-            -- cjson sentinel that always serialises as `[]`. This is a
-            -- constructed table, so the module-level decode_array_with_array_mt
-            -- setting does not apply. See NEU-551.
-            content = cjson.empty_array,
+            -- array `[]`, never `{}`. json_array() keeps it an array.
+            content = json_array(),
             stop_reason = cjson.null,
             stop_sequence = cjson.null,
             usage = {
