@@ -74,10 +74,6 @@ func (e metricsAcceleratorExporter) HasCustomMetricsPath() bool {
 }
 
 func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metricsAcceleratorExporter, error) {
-	if m.acceleratorExporterMode() != v1.ClusterAcceleratorExporterModeManaged {
-		return nil, nil
-	}
-
 	supported, err := m.supportsManagedMetricsExporters()
 	if err != nil {
 		return nil, err

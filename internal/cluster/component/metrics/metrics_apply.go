@@ -40,7 +40,9 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
 	}
 
-	variables.AcceleratorExporters = acceleratorExporters
+	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
+		variables.AcceleratorExporters = acceleratorExporters
+	}
 	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 
 	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
