@@ -1,5 +1,18 @@
 local cjson = require("cjson.safe")
 local buffer = require("string.buffer")
+
+-- Preserve the array/object distinction across a decode -> encode round-trip.
+-- Plain lua-cjson decodes both JSON `[]` and `{}` into the same empty Lua table,
+-- and re-encodes every empty table as `{}`. That silently rewrites a client's
+-- `"required": []` (and any other empty array inside a tool schema) into
+-- `"required": {}`, which upstreams reject with 400 ({} is not of type "array")
+-- when we forward a model-mapped request (see access(): cjson.decode at the
+-- anthropic and OpenAI passthrough paths, re-encoded before set_raw_body).
+-- Enabling array_mt on decode tags decoded arrays so encode preserves `[]`,
+-- while genuine empty objects (`{}`) still encode as `{}`. This is a per-worker
+-- setting; the OpenResty cjson fork shares it between `cjson` and `cjson.safe`.
+-- See NEU-551.
+cjson.decode_array_with_array_mt(true)
 local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
