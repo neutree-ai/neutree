@@ -463,6 +463,61 @@ func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T
 		v1.AcceleratorProduct("NVIDIA-L20"))
 }
 
+func TestStaticNodeResourceClientSupportsProductSpecificAscendAcceleratorType(t *testing.T) {
+	const (
+		acceleratorType = "npu-ascend910b"
+		product         = "HUAWEI_Ascend910B"
+	)
+
+	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
+		{
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec:     &v1.StaticNodeSpec{IP: "192.168.19.218"},
+			Status: &v1.StaticNodeStatus{
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: acceleratorType,
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "NPU-0", ProductModel: product, MemoryMiB: 32768, Healthy: true},
+					},
+				},
+			},
+		},
+	}, staticNodeBaseClient{nodes: []ResourceNode{
+		{
+			ID: "192.168.19.218",
+			Status: &v1.NodeResourceStatus{ResourceStatus: v1.ResourceStatus{
+				Allocatable: &v1.ResourceInfo{AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorType(acceleratorType): {
+						Quantity: 1,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							product: 1,
+						},
+					},
+				}},
+				Available: &v1.ResourceInfo{AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+					v1.AcceleratorType(acceleratorType): {
+						Quantity: 1,
+						ProductGroups: map[v1.AcceleratorProduct]float64{
+							product: 1,
+						},
+					},
+				}},
+			}},
+		},
+	}})
+
+	nodes, err := client.ListNodes(context.Background(), staticNodeClusterForTest())
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	group := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorType(acceleratorType)]
+	require.NotNil(t, group)
+	assert.Equal(t, float64(1), group.Quantity)
+	assert.Equal(t, float64(1), group.ProductGroups[v1.AcceleratorProduct(product)])
+	require.Len(t, nodes[0].Status.Devices, 1)
+	assert.Equal(t, product, nodes[0].Status.Devices[0].Product)
+}
+
 func TestStaticNodeResourceClientListEndpointInstancesUsesEndpointProductKey(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
