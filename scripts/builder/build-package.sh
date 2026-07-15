@@ -37,7 +37,7 @@ Options:
     --version <VERSION>        Version tag (default: latest)
     --arch <ARCH>              Architecture: amd64, arm64 (default: amd64)
     --cluster-type <TYPE>      Cluster type: k8s or ssh (required if type=cluster)
-    --accelerator <ACCEL>      Accelerator type: nvidia_gpu, amd_gpu (for ssh cluster)
+    --accelerator <ACCEL>      SSH accelerator image list key: nvidia_gpu, amd_gpu, npu-ascend310p, npu-ascend910b
     --mirror-registry <URL>    Mirror registry URL to pull images from (e.g., registry.example.com)
     --output-dir <DIR>         Output directory (default: ./dist)
     -h, --help                 Show this help message
