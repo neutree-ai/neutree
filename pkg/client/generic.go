@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -274,6 +275,31 @@ func ExtractPhase(data json.RawMessage) string {
 	}
 
 	return holder.Status.Phase
+}
+
+// ExtractID extracts the top-level resource id from raw JSON resource data.
+// The id may be a JSON string (e.g. an api key's UUID) or a number (an integer
+// primary key); both are returned as their string form. Missing/unparseable
+// ids yield "".
+func ExtractID(data json.RawMessage) string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+
+	idRaw, ok := raw["id"]
+	if !ok {
+		return ""
+	}
+
+	// A UUID id arrives quoted; unmarshal into a string to strip the quotes.
+	var s string
+	if err := json.Unmarshal(idRaw, &s); err == nil {
+		return s
+	}
+
+	// A numeric id has no quotes to strip — use its literal form.
+	return strings.TrimSpace(string(idRaw))
 }
 
 // ExtractMetadataField extracts a field from metadata in raw JSON resource data.

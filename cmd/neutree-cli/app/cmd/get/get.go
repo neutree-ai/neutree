@@ -3,6 +3,7 @@ package get
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -180,6 +181,18 @@ type resourcePrinter struct {
 	kind          string
 	format        string
 	headerPrinted bool
+	// out is the destination for rendered output; defaults to os.Stdout when nil
+	// (overridden in tests to capture output).
+	out io.Writer
+}
+
+// writer returns the printer's output destination, defaulting to os.Stdout.
+func (p *resourcePrinter) writer() io.Writer {
+	if p.out != nil {
+		return p.out
+	}
+
+	return os.Stdout
 }
 
 func (p *resourcePrinter) print(items []json.RawMessage) error {
@@ -196,13 +209,13 @@ func (p *resourcePrinter) print(items []json.RawMessage) error {
 }
 
 func (p *resourcePrinter) printTable(items []json.RawMessage) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	w := tabwriter.NewWriter(p.writer(), 0, 4, 2, ' ', 0)
 
 	if !p.headerPrinted {
 		if p.kind == "Workspace" {
-			fmt.Fprintln(w, "NAME\tPHASE\tAGE")
+			fmt.Fprintln(w, "NAME\tID\tPHASE\tAGE")
 		} else {
-			fmt.Fprintln(w, "NAME\tWORKSPACE\tPHASE\tAGE")
+			fmt.Fprintln(w, "NAME\tID\tWORKSPACE\tPHASE\tAGE")
 		}
 
 		p.headerPrinted = true
@@ -210,14 +223,15 @@ func (p *resourcePrinter) printTable(items []json.RawMessage) error {
 
 	for _, item := range items {
 		name := client.ExtractMetadataField(item, "name")
+		id := client.ExtractID(item)
 		workspace := client.ExtractMetadataField(item, "workspace")
 		phase := client.ExtractPhase(item)
 		age := formatAge(client.ExtractMetadataField(item, "creation_timestamp"))
 
 		if p.kind == "Workspace" {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", name, phase, age)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, id, phase, age)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, workspace, phase, age)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, id, workspace, phase, age)
 		}
 	}
 
