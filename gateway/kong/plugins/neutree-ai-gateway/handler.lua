@@ -1542,4 +1542,18 @@ function AIGatewayHandler:log(conf)
     kong.log.set_serialize_value("ai.statistics.usage", usage)
 end
 
+-- Internal helpers exposed for unit tests only (spec/handler_spec.lua). Not part
+-- of the plugin's runtime contract; do not use from other modules.
+AIGatewayHandler._TEST = {
+    json_array = json_array,
+    is_empty_table = is_empty_table,
+    convert_tool_choice = convert_tool_choice,
+    convert_tools = convert_tools,
+    convert_messages = convert_messages,
+    convert_request = convert_request,
+    convert_response = convert_response,
+    make_message_start = make_message_start,
+    anthropic_usage_from_openai = anthropic_usage_from_openai,
+}
+
 return AIGatewayHandler

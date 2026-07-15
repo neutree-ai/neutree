@@ -212,6 +212,21 @@ e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
 	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout 6h ./tests/e2e/... \
 		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips --ginkgo.timeout=$(E2E_TIMEOUT) $(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
 
+##@ Gateway Lua Testing
+
+GATEWAY_PLUGIN_DIR ?= gateway/kong/plugins/neutree-ai-gateway
+
+.PHONY: gateway-lua-test
+gateway-lua-test: ## Run neutree-ai-gateway Lua unit tests (LuaJIT + busted, in Docker)
+	docker run --rm -v $(CURDIR)/$(GATEWAY_PLUGIN_DIR):/plugin -w /plugin debian:bookworm-slim sh -c '\
+		set -e; \
+		export DEBIAN_FRONTEND=noninteractive; \
+		apt-get update >/dev/null; \
+		apt-get install -y --no-install-recommends luajit luarocks lua5.1 liblua5.1-0-dev build-essential unzip ca-certificates >/dev/null; \
+		luarocks install lua-cjson >/dev/null; \
+		luarocks install busted >/dev/null; \
+		sh spec/run.sh'
+
 ##@ Database Testing
 
 .PHONY: db-test
