@@ -37,6 +37,13 @@ type RuntimeProfileProvider interface {
 	GetRuntimeConfigForProfile(context.Context, string) (v1.RuntimeConfig, error)
 }
 
+// RuntimeProfileResolver derives a single runtime profile from an accelerator
+// resource view. It is optional because most accelerator families have no
+// profile-specific runtime image.
+type RuntimeProfileResolver interface {
+	ResolveRuntimeProfile(context.Context, *v1.ClusterResources) (string, error)
+}
+
 type ResourceConverter interface {
 	ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error)
 	ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)

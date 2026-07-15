@@ -506,6 +506,18 @@ func (a *manager) GetImageSuffixForProfile(ctx context.Context, acceleratorType,
 	return config.ImageSuffix, nil
 }
 
+func (a *manager) ResolveRuntimeProfile(ctx context.Context, acceleratorType string, resources *v1.ClusterResources) (string, error) {
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return "", errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+	resolver, ok := p.Handle().(publicaccelerator.RuntimeProfileResolver)
+	if !ok {
+		return "", errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
+	}
+	return resolver.ResolveRuntimeProfile(ctx, resources)
+}
+
 func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
 	if acceleratorType == "" {
 		return nil, nil
