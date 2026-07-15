@@ -43,6 +43,8 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		acceleratorType := c.Query("accelerator_type")
+		runtimeProfile := c.Query("runtime_profile")
+		acceleratorProduct := c.Query("accelerator_product")
 
 		// Get image registry
 		imageRegistries, err := deps.Storage.ListImageRegistry(storage.ListOption{
@@ -150,6 +152,12 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 					if labels[v1.ImageLabelAcceleratorType] != acceleratorType {
 						return
 					}
+				}
+				if runtimeProfile != "" && labels[v1.ImageLabelRuntimeProfile] != runtimeProfile {
+					return
+				}
+				if acceleratorProduct != "" && labels[v1.ImageLabelAcceleratorProduct] != acceleratorProduct {
+					return
 				}
 
 				v, parseErr := semver.NewVersion(versionStr)
