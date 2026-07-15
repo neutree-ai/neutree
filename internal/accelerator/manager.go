@@ -485,6 +485,27 @@ func (a *manager) GetImageSuffix(acceleratorType string) string {
 	return rc.ImageSuffix
 }
 
+// GetImageSuffixForProfile returns the suffix from an optional profile-aware
+// plugin. Empty profiles preserve the legacy type-only lookup behavior.
+func (a *manager) GetImageSuffixForProfile(ctx context.Context, acceleratorType, runtimeProfile string) (string, error) {
+	if runtimeProfile == "" {
+		return a.GetImageSuffix(acceleratorType), nil
+	}
+	p, ok := a.GetPlugin(acceleratorType)
+	if !ok {
+		return "", errors.Errorf("accelerator plugin %s not found", acceleratorType)
+	}
+	provider, ok := p.Handle().(publicaccelerator.RuntimeProfileProvider)
+	if !ok {
+		return "", errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
+	}
+	config, err := provider.GetRuntimeConfigForProfile(ctx, runtimeProfile)
+	if err != nil {
+		return "", errors.Wrapf(err, "get runtime profile %s from accelerator plugin %s", runtimeProfile, acceleratorType)
+	}
+	return config.ImageSuffix, nil
+}
+
 func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
 	if acceleratorType == "" {
 		return nil, nil
