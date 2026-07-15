@@ -20,11 +20,11 @@
   - `cmd/neutree-cli/app/cmd/packageimport/engine.go`
   - `internal/cli/packageimport`
 - 企业版 Neutree：
-  - `/Users/huangwei/go/src/neutree-ai/neutree-enterprise/cmd/neutree-core/neutree-core.go`
+  - `neutree-enterprise/cmd/neutree-core/neutree-core.go`
 - 已有 Ascend Plugin：
-  - `/Users/huangwei/go/src/neutree-ai/neutree-ascend/.worktrees/feat-vllm-ascend-0-18-0rc1/internal/plugin`
-  - `/Users/huangwei/go/src/neutree-ai/neutree-ascend/.worktrees/feat-vllm-ascend-0-18-0rc1/internal/engine`
-  - `/Users/huangwei/go/src/neutree-ai/neutree-ascend/.worktrees/feat-vllm-ascend-0-18-0rc1/dist/*manifest.yaml`
+  - `neutree-ascend/internal/plugin`
+  - `neutree-ascend/internal/engine`
+  - `neutree-ascend/dist/*manifest.yaml`
 
 ## 总体原则
 
