@@ -152,16 +152,10 @@ func assertK8sExternalAcceleratorExporterResources(
 			ContainSubstring("--accelerator-exporter-url="),
 		))
 
-		visibleDevices := ""
-
-		for _, env := range nodeAgentContainer.Env {
-			if env.Name == "NVIDIA_VISIBLE_DEVICES" {
-				visibleDevices = env.Value
-				break
-			}
-		}
-
-		ExpectWithOffset(1, visibleDevices).To(Equal("all"))
+		ExpectWithOffset(1, nodeAgentContainer.Env).To(ContainElement(And(
+			HaveField("Name", "NVIDIA_VISIBLE_DEVICES"),
+			HaveField("Value", "all"),
+		)))
 	} else {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
 		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")
