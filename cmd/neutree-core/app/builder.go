@@ -118,6 +118,7 @@ func (b *Builder) Build() (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create accelerator manager: %w", err)
 	}
+
 	b.config.AcceleratorManager = acceleratorManager
 
 	registerControllers := make(map[string]controllers.Controller)

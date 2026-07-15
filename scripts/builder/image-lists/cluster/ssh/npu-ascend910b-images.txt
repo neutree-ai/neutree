@@ -1,1 +1,0 @@
-neutree/neutree-serve:latest-npu-ascend910b

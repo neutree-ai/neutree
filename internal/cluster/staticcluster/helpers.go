@@ -66,24 +66,18 @@ func (r *Planner) runtimeProfile(
 		return nil, errors.New("accelerator profile provider is required")
 	}
 
-	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
-	if err != nil {
-		return nil, err
+	if validator, ok := r.AcceleratorProfileProvider.(staticClusterVersionValidator); ok {
+		version := ""
+		if cluster != nil && cluster.Spec != nil {
+			version = cluster.Spec.Version
+		}
+
+		if err := validator.ValidateStaticClusterVersion(ctx, accelerator.Type, version); err != nil {
+			return nil, err
+		}
 	}
-	if cluster == nil || cluster.Spec == nil || cluster.Spec.RuntimeProfile == "" {
-		return profile, nil
-	}
-	provider, ok := r.AcceleratorProfileProvider.(RuntimeProfileConfigProvider)
-	if !ok {
-		return nil, errors.New("accelerator runtime profile provider is required")
-	}
-	runtime, err := provider.GetRuntimeConfigForProfile(ctx, accelerator.Type, cluster.Spec.RuntimeProfile)
-	if err != nil {
-		return nil, err
-	}
-	copy := *profile
-	copy.ClusterRuntime = &runtime
-	return &copy, nil
+
+	return r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {

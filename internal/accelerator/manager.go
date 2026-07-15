@@ -103,9 +103,11 @@ func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
 	if p == nil || (reflect.ValueOf(p).Kind() == reflect.Ptr && reflect.ValueOf(p).IsNil()) {
 		return fmt.Errorf("accelerator plugin is nil")
 	}
+
 	if p.Resource() == "" {
 		return fmt.Errorf("accelerator plugin resource is required")
 	}
+
 	if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
 		return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
 	}
@@ -241,6 +243,27 @@ func (a *manager) DetectAccelerator(
 			return true
 		}
 
+		staticResponse, staticErr := p.plugin.Handle().DetectStaticNodeAccelerator(ctx, &v1.DetectStaticNodeAcceleratorRequest{
+			NodeIp:  nodeIP,
+			SSHAuth: sshAuth,
+		})
+
+		if staticErr == nil && staticResponse != nil && staticResponse.Matched && staticResponse.Accelerator != nil {
+			detected = staticResponse.Accelerator
+
+			return false
+		}
+
+		if staticErr != nil && p.plugin.Type() == publicaccelerator.InternalPluginType {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, staticErr.Error())
+
+			if detectErr == nil {
+				detectErr = errors.Wrapf(staticErr, "detect static node accelerator from plugin %s failed", p.resource)
+			}
+
+			return true
+		}
+
 		response, err := p.plugin.Handle().GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
 			NodeIp:  nodeIP,
 			SSHAuth: sshAuth,
@@ -358,16 +381,82 @@ func (a *manager) GetAcceleratorProfile(
 	}
 
 	p, ok := a.GetPlugin(acceleratorType)
-	if !ok {
+	if ok {
+		profile, err := p.Handle().GetAcceleratorProfile(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+		}
+
+		return profile, nil
+	}
+
+	var resolved *v1.AcceleratorProfile
+	var resolveErr error
+
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if !registeredOK {
+			return true
+		}
+
+		resolver, resolverOK := registered.plugin.Handle().(publicaccelerator.AcceleratorProfileResolver)
+		if !resolverOK {
+			return true
+		}
+
+		profile, matched, err := resolver.GetAcceleratorProfileForType(ctx, acceleratorType)
+		if err != nil {
+			resolveErr = errors.Wrapf(err, "get accelerator profile for type %s from plugin %s", acceleratorType, registered.resource)
+			return false
+		}
+
+		if !matched {
+			return true
+		}
+
+		resolved = profile
+
+		return false
+	})
+
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	if resolved == nil {
 		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 
-	profile, err := p.Handle().GetAcceleratorProfile(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
-	}
+	return resolved, nil
+}
 
-	return profile, nil
+func (a *manager) ValidateStaticClusterVersion(ctx context.Context, acceleratorType, version string) error {
+	var validationErr error
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if !registeredOK {
+			return true
+		}
+
+		validator, validatorOK := registered.plugin.Handle().(publicaccelerator.StaticClusterVersionValidator)
+		if !validatorOK {
+			return true
+		}
+
+		matched, err := validator.ValidateStaticClusterVersion(ctx, acceleratorType, version)
+		if err != nil {
+			validationErr = errors.Wrapf(err, "validate static cluster version for accelerator type %s", acceleratorType)
+			return false
+		}
+
+		if matched {
+			return false
+		}
+
+		return true
+	})
+
+	return validationErr
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
@@ -447,6 +536,7 @@ func (a *manager) GetPlugin(acceleratorType string) (plugin.AcceleratorPlugin, b
 
 func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
+
 	if !ok {
 		return nil, false
 	}
@@ -458,6 +548,7 @@ func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter
 
 func (a *manager) GetParser(acceleratorType string) (resourceparser.ResourceParser, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
+
 	if !ok {
 		return nil, false
 	}
@@ -483,73 +574,6 @@ func (a *manager) GetImageSuffix(acceleratorType string) string {
 	}
 
 	return rc.ImageSuffix
-}
-
-// GetImageSuffixForProfile returns the suffix from an optional profile-aware
-// plugin. Empty profiles preserve the legacy type-only lookup behavior.
-func (a *manager) GetImageSuffixForProfile(ctx context.Context, acceleratorType, runtimeProfile string) (string, error) {
-	config, err := a.GetRuntimeConfigForProfile(ctx, acceleratorType, runtimeProfile)
-	if err != nil {
-		return "", err
-	}
-	return config.ImageSuffix, nil
-}
-
-func (a *manager) GetRuntimeConfigForProfile(ctx context.Context, acceleratorType, runtimeProfile string) (v1.RuntimeConfig, error) {
-	if runtimeProfile == "" {
-		p, ok := a.GetPlugin(acceleratorType)
-		if !ok {
-			return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s not found", acceleratorType)
-		}
-		return p.Handle().GetContainerRuntimeConfig()
-	}
-	p, ok := a.GetPlugin(acceleratorType)
-	if !ok {
-		return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s not found", acceleratorType)
-	}
-	provider, ok := p.Handle().(publicaccelerator.RuntimeProfileProvider)
-	if !ok {
-		return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
-	}
-	config, err := provider.GetRuntimeConfigForProfile(ctx, runtimeProfile)
-	if err != nil {
-		return v1.RuntimeConfig{}, errors.Wrapf(err, "get runtime profile %s from accelerator plugin %s", runtimeProfile, acceleratorType)
-	}
-	return config, nil
-}
-
-func (a *manager) ResolveRuntimeProfile(ctx context.Context, acceleratorType string, resources *v1.ClusterResources) (string, error) {
-	p, ok := a.GetPlugin(acceleratorType)
-	if !ok {
-		return "", errors.Errorf("accelerator plugin %s not found", acceleratorType)
-	}
-	resolver, ok := p.Handle().(publicaccelerator.RuntimeProfileResolver)
-	if !ok {
-		return "", errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
-	}
-	return resolver.ResolveRuntimeProfile(ctx, resources)
-}
-
-func (a *manager) ResolveRuntimeProfiles(ctx context.Context, resources *v1.ClusterResources) (map[string]string, error) {
-	profiles := map[string]string{}
-	if resources == nil || resources.Allocatable == nil {
-		return profiles, nil
-	}
-	for acceleratorType := range resources.Allocatable.AcceleratorGroups {
-		p, ok := a.GetPlugin(string(acceleratorType))
-		if !ok {
-			continue
-		}
-		if _, ok := p.Handle().(publicaccelerator.RuntimeProfileResolver); !ok {
-			continue
-		}
-		profile, err := a.ResolveRuntimeProfile(ctx, string(acceleratorType), resources)
-		if err != nil {
-			return nil, err
-		}
-		profiles[string(acceleratorType)] = profile
-	}
-	return profiles, nil
 }
 
 func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
