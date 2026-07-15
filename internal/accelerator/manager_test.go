@@ -65,6 +65,24 @@ func TestNewManagerRegistersInjectedInternalPlugin(t *testing.T) {
 	assert.Contains(t, m.SupportPlugins(), injected.Resource())
 }
 
+func TestNewManagerCreatesDefaultPlugins(t *testing.T) {
+	m := NewManager(gin.New())
+
+	require.NotNil(t, m)
+	assert.NotEmpty(t, m.SupportPlugins())
+}
+
+func TestNewManagerWithPluginsRejectsInvalidInternalPlugins(t *testing.T) {
+	_, err := NewManagerWithPlugins(gin.New(), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accelerator plugin is nil")
+
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+	_, err = NewManagerWithPlugins(gin.New(), injected, injected)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already registered")
+}
+
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
@@ -129,6 +147,46 @@ func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, profile)
 	assert.Contains(t, err.Error(), "accelerator plugin missing not found")
+}
+
+func TestManagerGetAcceleratorProfileReturnsTypeResolverError(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin:   &fakeStaticNodeAcceleratorPlugin{profileResolverErr: errors.New("profile lookup failed")},
+	})
+
+	profile, err := m.GetAcceleratorProfile(context.Background(), "npu-ascend910b")
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.Contains(t, err.Error(), "profile lookup failed")
+}
+
+func TestManagerValidateStaticClusterVersion(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin: &fakeStaticNodeAcceleratorPlugin{
+			validationMatched: true,
+			validationErr:     errors.New("v1.1.0 required"),
+		},
+	})
+
+	err := m.ValidateStaticClusterVersion(context.Background(), "npu-ascend910b", "v1.0.2")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "v1.1.0 required")
+}
+
+func TestManagerValidateStaticClusterVersionIgnoresUnmatchedType(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin:   &fakeStaticNodeAcceleratorPlugin{},
+	})
+
+	require.NoError(t, m.ValidateStaticClusterVersion(context.Background(), "other", "v1.0.2"))
 }
 
 func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
@@ -252,6 +310,9 @@ type fakeStaticNodeAcceleratorPlugin struct {
 	accelerators        []v1.Accelerator
 	acceleratorProfiles map[string]*v1.AcceleratorProfile
 	staticResponse      *v1.DetectStaticNodeAcceleratorResponse
+	profileResolverErr  error
+	validationErr       error
+	validationMatched   bool
 	getErr              error
 	getCalls            int
 	getRequest          *v1.GetNodeAcceleratorRequest
@@ -323,6 +384,14 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Cont
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfileForType(_ context.Context, acceleratorType string) (*v1.AcceleratorProfile, bool, error) {
+	if p.profileResolverErr != nil {
+		return nil, false, p.profileResolverErr
+	}
+
 	profile, ok := p.acceleratorProfiles[acceleratorType]
 	return profile, ok, nil
+}
+
+func (p *fakeStaticNodeAcceleratorPlugin) ValidateStaticClusterVersion(context.Context, string, string) (bool, error) {
+	return p.validationMatched, p.validationErr
 }
