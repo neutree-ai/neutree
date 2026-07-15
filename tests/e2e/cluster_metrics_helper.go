@@ -153,12 +153,14 @@ func assertK8sExternalAcceleratorExporterResources(
 		))
 
 		visibleDevices := ""
+
 		for _, env := range nodeAgentContainer.Env {
 			if env.Name == "NVIDIA_VISIBLE_DEVICES" {
 				visibleDevices = env.Value
 				break
 			}
 		}
+
 		ExpectWithOffset(1, visibleDevices).To(Equal("all"))
 	} else {
 		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
