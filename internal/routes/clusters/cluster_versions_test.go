@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	registryMocks "github.com/neutree-ai/neutree/internal/registry/mocks"
@@ -212,4 +213,30 @@ func TestGetAvailableClusterVersions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetAvailableClusterVersionsFiltersRuntimeProfileAndProduct(t *testing.T) {
+	storage := storageMocks.NewMockStorage(t)
+	images := registryMocks.NewMockImageService(t)
+	storage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{{Spec: &v1.ImageRegistrySpec{URL: "registry.example.com"}}}, nil)
+	images.On("ListImageTags", "registry.example.com/"+v1.NeutreeServeImageName, mock.Anything).Return([]string{"v1.1.0-310p", "v1.1.0-910b"}, nil)
+	images.On("GetImageLabels", "registry.example.com/neutree/neutree-serve:v1.1.0-310p", mock.Anything).Return(map[string]string{
+		v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "npu",
+		v1.ImageLabelRuntimeProfile: "npu-ascend310p", v1.ImageLabelAcceleratorProduct: "HUAWEI_Ascend310P",
+	}, nil)
+	images.On("GetImageLabels", "registry.example.com/neutree/neutree-serve:v1.1.0-910b", mock.Anything).Return(map[string]string{
+		v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "npu",
+		v1.ImageLabelRuntimeProfile: "npu-ascend910b", v1.ImageLabelAcceleratorProduct: "HUAWEI_Ascend910B",
+	}, nil)
+
+	c, recorder := createTestContextWithQuery(map[string]string{
+		"workspace": "default", "image_registry": "registry", "cluster_type": "ssh", "accelerator_type": "npu",
+		"runtime_profile": "npu-ascend910b", "accelerator_product": "HUAWEI_Ascend910B",
+	})
+	getAvailableClusterVersions(&Dependencies{Storage: storage, ImageService: images})(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	response := availableClusterVersionsResponse{}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, []string{"v1.1.0"}, response.AvailableVersions)
 }
