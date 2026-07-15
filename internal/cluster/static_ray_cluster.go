@@ -317,19 +317,11 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
-			RuntimeProfile:  staticRuntimeProfile(c),
 			Metrics:         copyStaticClusterMetricsConfig(c.Spec.Config),
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
-}
-
-func staticRuntimeProfile(c *v1.Cluster) string {
-	if c == nil || c.Status == nil || c.Status.AcceleratorRuntimeProfile == nil {
-		return ""
-	}
-	return *c.Status.AcceleratorRuntimeProfile
 }
 
 func copyStaticClusterMetricsConfig(config *v1.ClusterConfig) *v1.ClusterMetricsConfig {
@@ -403,10 +395,6 @@ func (r *staticRayReconciler) copyStatus(
 	}
 }
 
-type runtimeProfilesResolver interface {
-	ResolveRuntimeProfiles(context.Context, *v1.ClusterResources) (map[string]string, error)
-}
-
 func (r *staticRayReconciler) updateResourceInfo(
 	c *v1.Cluster,
 	staticCluster *v1.StaticNodeCluster,
@@ -416,6 +404,7 @@ func (r *staticRayReconciler) updateResourceInfo(
 		klog.Warningf("failed to calculate static node cluster %s resources: %v", staticCluster.Metadata.WorkspaceName(), err)
 		return nil
 	}
+
 	if resources == nil {
 		return nil
 	}
@@ -425,35 +414,7 @@ func (r *staticRayReconciler) updateResourceInfo(
 	}
 
 	c.Status.ResourceInfo = resources
-	resolver, ok := r.acceleratorManager.(runtimeProfilesResolver)
-	if !ok {
-		return nil
-	}
-	profiles, err := resolver.ResolveRuntimeProfiles(context.Background(), resources)
-	if err != nil {
-		return errors.Wrap(err, "resolve accelerator runtime profile")
-	}
-	return applyRuntimeProfiles(c.Status, profiles)
-}
 
-func applyRuntimeProfiles(status *v1.ClusterStatus, profiles map[string]string) error {
-	if status == nil {
-		return errors.New("cluster status is required")
-	}
-	if len(profiles) == 0 {
-		status.AcceleratorRuntimeProfile = nil
-		return nil
-	}
-	if len(profiles) != 1 {
-		return errors.New("static cluster must resolve to one accelerator runtime profile")
-	}
-	for acceleratorType, profile := range profiles {
-		if profile == "" {
-			return errors.New("accelerator runtime profile is required")
-		}
-		status.AcceleratorType = &acceleratorType
-		status.AcceleratorRuntimeProfile = &profile
-	}
 	return nil
 }
 

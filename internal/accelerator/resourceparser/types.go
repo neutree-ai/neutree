@@ -1,9 +1,10 @@
 package resourceparser
 
 import (
-	"github.com/neutree-ai/neutree/pkg/accelerator"
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 const (

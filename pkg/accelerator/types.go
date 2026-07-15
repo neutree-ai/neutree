@@ -4,9 +4,10 @@ package accelerator
 import (
 	"context"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
@@ -31,17 +32,16 @@ type PluginHandle interface {
 	Ping(context.Context) error
 }
 
-// RuntimeProfileProvider is an optional plugin capability for accelerator
-// families that require a runtime configuration selected by an opaque profile.
-type RuntimeProfileProvider interface {
-	GetRuntimeConfigForProfile(context.Context, string) (v1.RuntimeConfig, error)
+// AcceleratorProfileResolver is an optional plugin capability for node-level
+// accelerator types that are aliases of the plugin's registered resource.
+type AcceleratorProfileResolver interface {
+	GetAcceleratorProfileForType(context.Context, string) (*v1.AcceleratorProfile, bool, error)
 }
 
-// RuntimeProfileResolver derives a single runtime profile from an accelerator
-// resource view. It is optional because most accelerator families have no
-// profile-specific runtime image.
-type RuntimeProfileResolver interface {
-	ResolveRuntimeProfile(context.Context, *v1.ClusterResources) (string, error)
+// StaticClusterVersionValidator optionally restricts a node-level accelerator
+// type to compatible static cluster versions.
+type StaticClusterVersionValidator interface {
+	ValidateStaticClusterVersion(context.Context, string, string) (bool, error)
 }
 
 type ResourceConverter interface {

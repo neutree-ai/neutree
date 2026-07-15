@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	stderrors "errors"
 	"fmt"
 	"path"
@@ -18,10 +17,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-type runtimeProfileImageSuffixProvider interface {
-	GetImageSuffixForProfile(context.Context, string, string) (string, error)
-}
 
 // errHeadNodeUnhealthy marks a known-unhealthy head-node state (dashboard
 // unreachable or head raylet not alive) as opposed to an unexpected internal
@@ -609,18 +604,7 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 	// Resolve accelerator image suffix for the cluster image (e.g. "rocm" for AMD GPU).
 	imageSuffix := ""
 	if reconcileCtx.Cluster.Status != nil && reconcileCtx.Cluster.Status.AcceleratorType != nil {
-		if reconcileCtx.Cluster.Status.AcceleratorRuntimeProfile != nil {
-			provider, ok := c.acceleratorManager.(runtimeProfileImageSuffixProvider)
-			if !ok {
-				return errors.New("accelerator manager does not support runtime profiles")
-			}
-			imageSuffix, err = provider.GetImageSuffixForProfile(reconcileCtx.Ctx, *reconcileCtx.Cluster.Status.AcceleratorType, *reconcileCtx.Cluster.Status.AcceleratorRuntimeProfile)
-			if err != nil {
-				return errors.Wrap(err, "resolve accelerator runtime profile for pre-pull")
-			}
-		} else {
-			imageSuffix = c.acceleratorManager.GetImageSuffix(*reconcileCtx.Cluster.Status.AcceleratorType)
-		}
+		imageSuffix = c.acceleratorManager.GetImageSuffix(*reconcileCtx.Cluster.Status.AcceleratorType)
 	}
 
 	clusterImage := util.BuildClusterImageRef(imagePrefix, reconcileCtx.Cluster.Spec.Version, imageSuffix)

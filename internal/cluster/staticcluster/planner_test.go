@@ -1276,6 +1276,37 @@ type fakeAcceleratorProfileProvider struct {
 	profiles map[string]*v1.AcceleratorProfile
 }
 
+type versionedAcceleratorProfileProvider struct {
+	fakeAcceleratorProfileProvider
+}
+
+func (f versionedAcceleratorProfileProvider) ValidateStaticClusterVersion(
+	_ context.Context,
+	acceleratorType string,
+	version string,
+) error {
+	if acceleratorType == "npu-ascend910b" && version != "v1.1.0" {
+		return fmt.Errorf("unsupported Ascend static cluster version %s", version)
+	}
+
+	return nil
+}
+
+func TestPlannerRuntimeProfileValidatesStaticClusterVersion(t *testing.T) {
+	planner := &Planner{AcceleratorProfileProvider: versionedAcceleratorProfileProvider{
+		fakeAcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{
+			"npu-ascend910b": {AcceleratorType: "npu-ascend910b"},
+		}},
+	}}
+
+	_, err := planner.runtimeProfile(context.Background(), &v1.StaticNodeCluster{
+		Spec: &v1.StaticNodeClusterSpec{Version: "v1.0.2"},
+	}, v1.StaticNodeAcceleratorStatus{Type: "npu-ascend910b"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported Ascend static cluster version")
+}
+
 func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
 	_ context.Context,
 	acceleratorType string,

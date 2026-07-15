@@ -19,8 +19,8 @@ type AcceleratorProfileProvider interface {
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 }
 
-type RuntimeProfileConfigProvider interface {
-	GetRuntimeConfigForProfile(context.Context, string, string) (v1.RuntimeConfig, error)
+type staticClusterVersionValidator interface {
+	ValidateStaticClusterVersion(context.Context, string, string) error
 }
 
 type DesiredNodePlan struct {
