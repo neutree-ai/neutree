@@ -26,7 +26,6 @@ const (
 	HAMiImageRepository          = "projecthami/hami"
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
-	DefaultNvidiaDriverRoot      = ""
 )
 
 var KubeSchedulerVersionsByMinor = map[string]string{
