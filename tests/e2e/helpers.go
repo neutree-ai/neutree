@@ -896,27 +896,10 @@ func renderTemplateToTempFile(templatePath string, data map[string]any) (string,
 	return tmpFile.Name(), nil
 }
 
-// requireImageRegistryProfile skips the test if image registry is not configured.
-// Docker Hub does not require a Repository value.
+// requireImageRegistryProfile skips the test if the ImageRegistry URL is not configured.
 func requireImageRegistryProfile() {
 	if profile.ImageRegistry.URL == "" {
 		Skip("ImageRegistry.URL not configured in profile")
-	}
-
-	if profile.ImageRegistry.Repository == "" && !isDockerHubRegistryURL(profile.ImageRegistry.URL) {
-		Skip("ImageRegistry.Repository not configured in profile")
-	}
-}
-
-func isDockerHubRegistryURL(rawURL string) bool {
-	host := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(rawURL), "https://"), "http://")
-	host = strings.SplitN(host, "/", 2)[0]
-
-	switch strings.ToLower(host) {
-	case "docker.io", "index.docker.io", "registry-1.docker.io":
-		return true
-	default:
-		return false
 	}
 }
 
