@@ -49,7 +49,8 @@ func BuildEngineImageRef(imagePrefix string, engineImage *v1.EngineImage) string
 }
 
 // RewriteImageRef rewrites image into imagePrefix while preserving the image
-// repository path and removing any source registry host.
+// repository path and removing any source registry host. Docker Hub prefixes
+// preserve explicit upstream registry hosts so those images keep their source.
 func RewriteImageRef(imagePrefix, image string) string {
 	if image == "" {
 		return ""
@@ -59,8 +60,23 @@ func RewriteImageRef(imagePrefix, image string) string {
 	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
 		return image
 	}
+	if IsDockerHubImagePrefix(imagePrefix) && hasSourceImageRegistry(image) {
+		return image
+	}
 
 	return imagePrefix + "/" + stripSourceImageRegistry(image)
+}
+
+// IsDockerHubImagePrefix reports whether imagePrefix targets Docker Hub.
+func IsDockerHubImagePrefix(imagePrefix string) bool {
+	host := strings.SplitN(strings.Trim(strings.TrimSpace(imagePrefix), "/"), "/", 2)[0]
+
+	switch strings.ToLower(host) {
+	case "docker.io", "index.docker.io", "registry-1.docker.io":
+		return true
+	default:
+		return false
+	}
 }
 
 func stripSourceImageRegistry(image string) string {
@@ -74,6 +90,12 @@ func stripSourceImageRegistry(image string) string {
 	}
 
 	return image
+}
+
+func hasSourceImageRegistry(image string) bool {
+	parts := strings.SplitN(image, "/", 2)
+
+	return len(parts) == 2 && isSourceImageRegistry(parts[0])
 }
 
 func isSourceImageRegistry(segment string) bool {

@@ -152,17 +152,17 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
-				"image": chartImageValues(KubeSchedulerImage, h.resolveKubeSchedulerVersion()),
+				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(HAMiImage, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
 			"enabled": shouldDeployDevicePlugin(scopePlan),
-			"image":   chartImageValues(HAMiImage, Version),
+			"image":   chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(HAMiImage, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			},
 		},
 	})
@@ -191,8 +191,9 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 	return values
 }
 
-func chartImageValues(repository, tag string) map[string]interface{} {
+func chartImageValues(registry, repository, tag string) map[string]interface{} {
 	values := map[string]interface{}{
+		"registry":   registry,
 		"repository": repository,
 		"pullPolicy": "IfNotPresent",
 	}
@@ -204,7 +205,12 @@ func chartImageValues(repository, tag string) map[string]interface{} {
 }
 
 func (h *HAMiComponent) normalizedImagePrefix() string {
-	return strings.TrimRight(strings.TrimSpace(h.imagePrefix), "/")
+	imagePrefix := strings.TrimRight(strings.TrimSpace(h.imagePrefix), "/")
+	if util.IsDockerHubImagePrefix(imagePrefix) {
+		return ""
+	}
+
+	return imagePrefix
 }
 
 // DefaultKubeSchedulerVersion is used when the target cluster version cannot be

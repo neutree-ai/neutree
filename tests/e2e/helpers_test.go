@@ -20,3 +20,22 @@ func TestResolveCLIBinaryUsesEnvironmentOverride(t *testing.T) {
 	require.False(t, cleanup)
 	require.Equal(t, cliPath, resolved)
 }
+
+func TestIsDockerHubRegistryURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "docker io", url: "docker.io", want: true},
+		{name: "docker io with scheme", url: "https://docker.io", want: true},
+		{name: "docker hub alias", url: "index.docker.io", want: true},
+		{name: "private registry", url: "registry.example.com", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, isDockerHubRegistryURL(tt.url))
+		})
+	}
+}

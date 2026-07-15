@@ -19,12 +19,14 @@ const (
 	ManagedComponentLabelKey   = "neutree.ai/component"
 	ManagedComponentLabelValue = "hami"
 
-	CACertificateYears          = 10
-	ServingCertificateYears     = 1
-	ServingCertificateRenewDays = 30
-	HAMiImage                   = "projecthami/hami"
-	KubeSchedulerImage          = "kube-scheduler"
-	DefaultNvidiaDriverRoot     = ""
+	CACertificateYears           = 10
+	ServingCertificateYears      = 1
+	ServingCertificateRenewDays  = 30
+	HAMiImageRegistry            = "docker.io"
+	HAMiImageRepository          = "projecthami/hami"
+	KubeSchedulerImageRegistry   = "registry.k8s.io"
+	KubeSchedulerImageRepository = "kube-scheduler"
+	DefaultNvidiaDriverRoot      = ""
 )
 
 var KubeSchedulerVersionsByMinor = map[string]string{

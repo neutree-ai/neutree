@@ -376,6 +376,46 @@ func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
 	assert.Assert(t, foundRoleBinding, "kube-state-metrics role binding not found")
 }
 
+func TestBuildMetricsResourcesWithDockerHubPreservesUpstreamImageRegistries(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "docker.io/neutree-ai",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  accelerator.NewManager(gin.New()),
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to build metrics resources: %v", err)
+	}
+
+	kubeStateMetrics := findMetricsDeployment(t, objs, "neutree-kube-state-metrics")
+	assert.Equal(t, "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+		kubeStateMetrics.Spec.Template.Spec.Containers[0].Image)
+
+	nodeExporter := findMetricsDaemonSet(t, objs, "neutree-node-exporter")
+	assert.Equal(t, "quay.io/prometheus/node-exporter:v1.8.2",
+		nodeExporter.Spec.Template.Spec.Containers[0].Image)
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	assert.Equal(t, "docker.io/neutree-ai/neutree/neutree-node-agent:v1.1.0-rc.1",
+		nodeAgent.Spec.Template.Spec.Containers[0].Image)
+
+	dcgm := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	assert.Equal(t, "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+		dcgm.Spec.Template.Spec.Containers[0].Image)
+}
+
 func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -1187,6 +1227,26 @@ func findMetricsDaemonSet(t *testing.T, objs *unstructured.UnstructuredList, nam
 	}
 
 	t.Fatalf("DaemonSet %s not found", name)
+
+	return nil
+}
+
+func findMetricsDeployment(t *testing.T, objs *unstructured.UnstructuredList, name string) *appsv1.Deployment {
+	t.Helper()
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "Deployment" && obj.GetName() == name {
+			objContent, _ := json.Marshal(obj.Object)
+			deployment := &appsv1.Deployment{}
+			if err := json.Unmarshal(objContent, deployment); err != nil {
+				t.Fatalf("Failed to unmarshal Deployment %s: %v", name, err)
+			}
+
+			return deployment
+		}
+	}
+
+	t.Fatalf("Deployment %s not found", name)
 
 	return nil
 }

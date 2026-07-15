@@ -121,6 +121,24 @@ func TestRewriteImageRef(t *testing.T) {
 			expected:    "docker.io/neutree/neutree-node-agent:v1.2.0",
 		},
 		{
+			name:        "docker hub preserves explicit upstream registry",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+			expected:    "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+		},
+		{
+			name:        "docker hub preserves quay image",
+			imagePrefix: "docker.io",
+			image:       "quay.io/prometheus/node-exporter:v1.8.2",
+			expected:    "quay.io/prometheus/node-exporter:v1.8.2",
+		},
+		{
+			name:        "docker hub still prefixes unqualified image",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "neutree/neutree-node-agent:v1.2.0",
+			expected:    "docker.io/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
 			name:        "empty image stays empty",
 			imagePrefix: "registry.example.com/neutree-ai",
 			image:       "",

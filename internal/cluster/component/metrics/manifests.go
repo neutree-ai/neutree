@@ -186,7 +186,7 @@ spec:
       serviceAccountName: neutree-kube-state-metrics
       containers:
       - name: kube-state-metrics
-        image: {{ .ImagePrefix }}/kube-state-metrics/kube-state-metrics:{{ .KubeStateMetricsVersion }}
+        image: {{ .KubeStateMetricsImage }}
         args:
         - --port=8080
         - --telemetry-port=8081
@@ -546,7 +546,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
 	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
-	KubeStateMetricsVersion          string
+	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
 	MetricsMode                      string
@@ -595,7 +595,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
 		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,
+		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),

@@ -75,6 +75,20 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	assert.Contains(t, stringSlice(monitor["command"]), "vGPUmonitor")
 }
 
+func TestHAMiComponentWithDockerHubPreservesUpstreamImageRegistries(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "docker.io/neutree-ai",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(defaultNodeScopePlan())
+	require.NoError(t, err)
+
+	kubeScheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "kube-scheduler")
+	assert.Equal(t, "registry.k8s.io/kube-scheduler:"+DefaultKubeSchedulerVersion(), kubeScheduler["image"])
+
+	extender := findContainer(t, objs.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
+	assert.Equal(t, "docker.io/projecthami/hami:"+Version, extender["image"])
+}
+
 func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	neutreeSemver "github.com/neutree-ai/neutree/internal/semver"
 )
 
@@ -711,6 +713,94 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 
 			ClusterH.EventuallyInPhase(clusterName, v1.ClusterPhaseInitializing, "failed to create REST config", TerminalPhaseTimeout)
 		})
+	})
+})
+
+var _ = Describe("K8s Cluster Docker Hub Image Registry", Ordered, Label("cluster", "k8s", "docker-hub-registry"), func() {
+	var (
+		clusterH         *ClusterHelper
+		clusterName      string
+		imageRegistry    string
+		imageRegistryYML string
+		kubeconfig       string
+		k8sH             *K8sHelper
+		namespace        string
+	)
+
+	BeforeAll(func() {
+		kubeconfig = requireK8sProfile()
+		clusterH = NewClusterHelper()
+		imageRegistry = "e2e-docker-hub-registry-" + Cfg.RunID
+		imageRegistryYML = renderDockerHubImageRegistryYAML(imageRegistry)
+
+		r := RunCLI("apply", "-f", imageRegistryYML)
+		ExpectSuccess(r)
+		DeferCleanup(func() {
+			if imageRegistryYML == "" {
+				return
+			}
+
+			r := RunCLI("delete", "-f", imageRegistryYML, "--force", "--ignore-not-found")
+			ExpectSuccess(r)
+			Expect(os.Remove(imageRegistryYML)).To(Succeed())
+		})
+		r = RunCLI("wait", "imageregistry", imageRegistry,
+			"-w", profileWorkspace(),
+			"--for", "jsonpath=.status.phase=Connected",
+			"--timeout", "2m",
+		)
+		ExpectSuccess(r)
+
+		clusterName = "e2e-k8s-docker-hub-" + Cfg.RunID
+		yaml := renderK8sClusterYAML(map[string]any{
+			"name":           clusterName,
+			"kubeconfig":     kubeconfig,
+			"image_registry": imageRegistry,
+			"version":        "v1.1.1",
+		})
+		r = clusterH.Apply(yaml)
+		ExpectSuccess(r)
+		DeferCleanup(func() {
+			if clusterName != "" {
+				clusterH.EnsureDeleted(clusterName)
+			}
+		})
+		r = clusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
+		ExpectSuccess(r)
+
+		k8sH = NewK8sHelper(kubeconfig)
+		r = clusterH.Get(clusterName)
+		ExpectSuccess(r)
+		cluster := parseClusterJSON(r.Stdout)
+		namespace = ClusterNamespace(cluster.Metadata.Workspace, cluster.Metadata.Name, cluster.ID)
+	})
+
+	It("keeps explicit upstream metrics image registries", Label("C2732263"), func() {
+		ctx := context.Background()
+
+		var kubeStateMetrics *appsv1.Deployment
+		Eventually(func(g Gomega) {
+			deployment, err := k8sH.GetDeployment(ctx, namespace, "neutree-kube-state-metrics")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(deployment.Status.ReadyReplicas).To(Equal(int32(1)))
+			kubeStateMetrics = deployment
+		}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+		Expect(kubeStateMetrics.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+		Expect(kubeStateMetrics.Spec.Template.Spec.Containers[0].Image).To(Equal(
+			"registry.k8s.io/kube-state-metrics/kube-state-metrics:" + componentversion.KubeStateMetrics,
+		))
+
+		nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
+		Expect(nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+		Expect(nodeExporter.Spec.Template.Spec.Containers[0].Image).To(Equal(
+			"quay.io/prometheus/node-exporter:" + componentversion.NodeExporter,
+		))
+
+		nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
+		Expect(nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+		Expect(nodeAgent.Spec.Template.Spec.Containers[0].Image).To(Equal(
+			"docker.io/neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent,
+		))
 	})
 })
 
