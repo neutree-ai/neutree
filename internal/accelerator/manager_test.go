@@ -56,6 +56,23 @@ func TestManagerGetAcceleratorProfileUsesTypeAwareResolver(t *testing.T) {
 	assert.Equal(t, "npu-ascend910b", profile.ClusterRuntime.ImageSuffix)
 }
 
+func TestManagerGetStaticNodeRuntimeConfigUsesTypeAwareResolver(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin: &fakeStaticNodeAcceleratorPlugin{staticRuntimeConfigs: map[string]*v1.RuntimeConfig{
+			"npu-ascend910b": {Env: map[string]string{"VISIBLE_DEVICES": "0,1"}},
+		}},
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "npu-ascend910b"})
+
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	assert.Equal(t, "0,1", config.Env["VISIBLE_DEVICES"])
+}
+
 func TestNewManagerRegistersInjectedInternalPlugin(t *testing.T) {
 	injected := &fakeStaticNodeAcceleratorPlugin{}
 
@@ -336,17 +353,18 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 }
 
 type fakeStaticNodeAcceleratorPlugin struct {
-	resource            string
-	resourceSet         bool
-	accelerators        []v1.Accelerator
-	acceleratorProfiles map[string]*v1.AcceleratorProfile
-	staticResponse      *v1.DetectStaticNodeAcceleratorResponse
-	profileResolverErr  error
-	validationErr       error
-	validationMatched   bool
-	getErr              error
-	getCalls            int
-	getRequest          *v1.GetNodeAcceleratorRequest
+	resource             string
+	resourceSet          bool
+	accelerators         []v1.Accelerator
+	acceleratorProfiles  map[string]*v1.AcceleratorProfile
+	staticRuntimeConfigs map[string]*v1.RuntimeConfig
+	staticResponse       *v1.DetectStaticNodeAcceleratorResponse
+	profileResolverErr   error
+	validationErr        error
+	validationMatched    bool
+	getErr               error
+	getCalls             int
+	getRequest           *v1.GetNodeAcceleratorRequest
 
 	acceleratorProfile   *v1.AcceleratorProfile
 	runtimeProfileConfig v1.RuntimeConfig
@@ -425,6 +443,15 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfileForType(_ context
 
 	profile, ok := p.acceleratorProfiles[acceleratorType]
 	return profile, ok, nil
+}
+
+func (p *fakeStaticNodeAcceleratorPlugin) GetStaticNodeRuntimeConfig(_ context.Context, status *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error) {
+	if status == nil {
+		return nil, false, nil
+	}
+
+	config, ok := p.staticRuntimeConfigs[status.Type]
+	return config, ok, nil
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) ValidateStaticClusterVersion(context.Context, string, string) (bool, error) {

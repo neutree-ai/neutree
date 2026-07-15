@@ -38,6 +38,14 @@ type AcceleratorProfileResolver interface {
 	GetAcceleratorProfileForType(context.Context, string) (*v1.AcceleratorProfile, bool, error)
 }
 
+// StaticNodeRuntimeConfigResolver optionally resolves the cluster runtime
+// configuration from a previously detected static-node accelerator status.
+// This stays in-process so vendor-specific runtime details are not exposed by
+// the public plugin REST API.
+type StaticNodeRuntimeConfigResolver interface {
+	GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error)
+}
+
 // StaticClusterVersionValidator optionally restricts a node-level accelerator
 // type to compatible static cluster versions.
 type StaticClusterVersionValidator interface {

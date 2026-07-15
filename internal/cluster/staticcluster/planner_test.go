@@ -1307,6 +1307,78 @@ func TestPlannerRuntimeProfileValidatesStaticClusterVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported Ascend static cluster version")
 }
 
+func TestPlannerRuntimeProfileResolvesStaticNodeRuntimeConfig(t *testing.T) {
+	planner := &Planner{AcceleratorProfileProvider: staticNodeRuntimeConfigProfileProvider{
+		fakeAcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{
+			"custom_accelerator": {
+				AcceleratorType: "custom_accelerator",
+				ClusterRuntime:  &v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": "true"}},
+			},
+		}},
+		runtimeConfig: &v1.RuntimeConfig{Env: map[string]string{"VISIBLE_DEVICES": "0,1"}},
+	}}
+
+	profile, err := planner.runtimeProfile(context.Background(), testStaticNodeCluster(), v1.StaticNodeAcceleratorStatus{
+		Type:    "custom_accelerator",
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0"}, {ID: "1"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "0,1", profile.ClusterRuntime.Env["VISIBLE_DEVICES"])
+	assert.NotSame(t, planner.AcceleratorProfileProvider.(staticNodeRuntimeConfigProfileProvider).runtimeConfig, profile.ClusterRuntime)
+}
+
+func TestPlannerPassesStaticNodeRuntimeConfigToRayComponent(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			v1.StaticNodeAcceleratorStatus{
+				Type:    "custom_accelerator",
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0"}, {ID: "1"}},
+			},
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{AcceleratorProfileProvider: staticNodeRuntimeConfigProfileProvider{
+		fakeAcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{
+			"custom_accelerator": {AcceleratorType: "custom_accelerator"},
+		}},
+		runtimeConfig: &v1.RuntimeConfig{Env: map[string]string{
+			"VISIBLE_DEVICES": "0,1",
+		}},
+	}}
+
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	rayHead := findComponent(head.Spec.Components, rayHeadComponentName)
+	require.NotNil(t, rayHead)
+	assert.Equal(t, "0,1", rayHead.Env["VISIBLE_DEVICES"])
+}
+
+type staticNodeRuntimeConfigProfileProvider struct {
+	fakeAcceleratorProfileProvider
+	runtimeConfig *v1.RuntimeConfig
+}
+
+func (p staticNodeRuntimeConfigProfileProvider) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error) {
+	return p.runtimeConfig, nil
+}
+
 func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
 	_ context.Context,
 	acceleratorType string,
