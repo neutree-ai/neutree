@@ -404,6 +404,15 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 			nodeAgentImage:        "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.1.0-rc.1",
 			dcgmImage:             "registry.example.com/neutree-ai/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		},
+		{
+			name:                  "docker hub without project leaves images unchanged",
+			imagePrefix:           "docker.io",
+			kubeStateMetricsImage: "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+			vmagentImage:          "victoriametrics/vmagent:v1.115.0",
+			nodeExporterImage:     "quay.io/prometheus/node-exporter:v1.8.2",
+			nodeAgentImage:        "neutree/neutree-node-agent:v1.1.0-rc.1",
+			dcgmImage:             "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+		},
 	}
 
 	for _, tt := range tests {

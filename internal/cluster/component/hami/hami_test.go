@@ -94,6 +94,12 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + DefaultKubeSchedulerVersion(),
 			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + Version,
 		},
+		{
+			name:               "docker hub without project preserves source registries",
+			imagePrefix:        "docker.io",
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + DefaultKubeSchedulerVersion(),
+			hamiImage:          "docker.io/projecthami/hami:" + Version,
+		},
 	}
 
 	for _, tt := range tests {
