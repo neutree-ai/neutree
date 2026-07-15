@@ -27,6 +27,7 @@ const (
 
 	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultKubeStateMetricsImage = "registry.k8s.io/kube-state-metrics/kube-state-metrics:" + componentversion.KubeStateMetrics
+	defaultVMAgentImage          = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 	defaultMetricsPath           = "/metrics"
 	acceleratorExporterJobPrefix = "accelerator-exporter"
 )

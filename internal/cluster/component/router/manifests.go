@@ -1,6 +1,9 @@
 package router
 
-import v1 "github.com/neutree-ai/neutree/api/v1"
+import (
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/util"
+)
 
 var routerMainifestTemplate = `
 apiVersion: v1
@@ -84,7 +87,7 @@ spec:
       serviceAccountName: router-service-account
       containers:
       - name: router
-        image: {{ .ImagePrefix }}/neutree/router:{{ .RouterVersion }}
+        image: {{ .RouterImage }}
         args:
         - --host
         - "0.0.0.0"
@@ -147,10 +150,10 @@ type RouteManifestVariables struct {
 	ClusterName     string
 	Workspace       string
 	Namespace       string
-	ImagePrefix     string
 	ImagePullSecret string
 	Version         string // Cluster version (spec.version), used for version labels
 	RouterVersion   string // Router image version (config.Router.Version or spec.version), used for image tag
+	RouterImage     string
 	Replicas        int
 	Resources       map[string]string
 	AccessMode      string
@@ -194,10 +197,10 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 		ClusterName:     r.cluster.GetName(),
 		Workspace:       r.cluster.GetWorkspace(),
 		Namespace:       r.namespace,
-		ImagePrefix:     r.imagePrefix,
 		ImagePullSecret: r.imagePullSecret,
 		Version:         version,
 		RouterVersion:   routerVersion,
+		RouterImage:     util.RewriteImageRef(r.imagePrefix, "neutree/router:"+routerVersion),
 		Replicas:        replicas,
 		Resources:       resources,
 		AccessMode:      string(accessMode),

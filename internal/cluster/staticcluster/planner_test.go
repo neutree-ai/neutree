@@ -566,10 +566,10 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 			want:          "nvcr.io/nvidia/ray-runtime:test",
 		},
 		{
-			name:          "docker hub prefixes unqualified repository path",
+			name:          "docker hub leaves unqualified repository path unchanged",
 			imageRegistry: "docker.io/neutree",
 			image:         "library/ray-runtime:v1.2.0",
-			want:          "docker.io/neutree/library/ray-runtime:v1.2.0",
+			want:          "library/ray-runtime:v1.2.0",
 		},
 	}
 

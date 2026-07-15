@@ -381,6 +381,7 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 		name                  string
 		imagePrefix           string
 		kubeStateMetricsImage string
+		vmagentImage          string
 		nodeExporterImage     string
 		nodeAgentImage        string
 		dcgmImage             string
@@ -389,14 +390,16 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 			name:                  "docker hub preserves explicit upstream registries",
 			imagePrefix:           "docker.io/neutree-ai",
 			kubeStateMetricsImage: "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+			vmagentImage:          "victoriametrics/vmagent:v1.115.0",
 			nodeExporterImage:     "quay.io/prometheus/node-exporter:v1.8.2",
-			nodeAgentImage:        "docker.io/neutree-ai/neutree/neutree-node-agent:v1.1.0-rc.1",
+			nodeAgentImage:        "neutree/neutree-node-agent:v1.1.0-rc.1",
 			dcgmImage:             "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		},
 		{
 			name:                  "private registry rewrites all images",
 			imagePrefix:           "registry.example.com/neutree-ai",
 			kubeStateMetricsImage: "registry.example.com/neutree-ai/kube-state-metrics/kube-state-metrics:v2.15.0",
+			vmagentImage:          "registry.example.com/neutree-ai/victoriametrics/vmagent:v1.115.0",
 			nodeExporterImage:     "registry.example.com/neutree-ai/prometheus/node-exporter:v1.8.2",
 			nodeAgentImage:        "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.1.0-rc.1",
 			dcgmImage:             "registry.example.com/neutree-ai/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
@@ -429,6 +432,9 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 
 			kubeStateMetrics := findMetricsDeployment(t, objs, "neutree-kube-state-metrics")
 			assert.Equal(t, tt.kubeStateMetricsImage, kubeStateMetrics.Spec.Template.Spec.Containers[0].Image)
+
+			vmagent := findMetricsDeployment(t, objs, "vmagent")
+			assert.Equal(t, tt.vmagentImage, vmagent.Spec.Template.Spec.Containers[0].Image)
 
 			nodeExporter := findMetricsDaemonSet(t, objs, "neutree-node-exporter")
 			assert.Equal(t, tt.nodeExporterImage, nodeExporter.Spec.Template.Spec.Containers[0].Image)

@@ -21,7 +21,7 @@ func BuildClusterImageRef(imagePrefix, version, imageSuffix string) string {
 		tag = version + "-" + imageSuffix
 	}
 
-	return imagePrefix + "/" + v1.NeutreeServeImageName + ":" + tag
+	return RewriteImageRef(imagePrefix, v1.NeutreeServeImageName+":"+tag)
 }
 
 // BuildEngineImageRef constructs the full engine image reference from an EngineImage.
@@ -41,27 +41,19 @@ func BuildEngineImageRef(imagePrefix string, engineImage *v1.EngineImage) string
 		return ""
 	}
 
-	if imagePrefix != "" {
-		return imagePrefix + "/" + imageName + ":" + tag
-	}
-
-	return imageName + ":" + tag
+	return RewriteImageRef(imagePrefix, imageName+":"+tag)
 }
 
 // RewriteImageRef rewrites image into imagePrefix while preserving the image
 // repository path and removing any source registry host. Docker Hub prefixes
-// preserve explicit upstream registry hosts so those images keep their source.
+// leave image references unchanged.
 func RewriteImageRef(imagePrefix, image string) string {
 	if image == "" {
 		return ""
 	}
 
 	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
-	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
-		return image
-	}
-
-	if IsDockerHubImagePrefix(imagePrefix) && hasSourceImageRegistry(image) {
+	if imagePrefix == "" || IsDockerHubImagePrefix(imagePrefix) || strings.HasPrefix(image, imagePrefix+"/") {
 		return image
 	}
 
@@ -91,12 +83,6 @@ func stripSourceImageRegistry(image string) string {
 	}
 
 	return image
-}
-
-func hasSourceImageRegistry(image string) bool {
-	parts := strings.SplitN(image, "/", 2)
-
-	return len(parts) == 2 && isSourceImageRegistry(parts[0])
 }
 
 func isSourceImageRegistry(segment string) bool {
