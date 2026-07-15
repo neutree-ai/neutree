@@ -60,6 +60,7 @@ func RewriteImageRef(imagePrefix, image string) string {
 	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
 		return image
 	}
+
 	if IsDockerHubImagePrefix(imagePrefix) && hasSourceImageRegistry(image) {
 		return image
 	}
