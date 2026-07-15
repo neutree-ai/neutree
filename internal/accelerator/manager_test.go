@@ -43,6 +43,17 @@ func TestNewManagerRegistersInjectedInternalPlugin(t *testing.T) {
 	assert.Contains(t, m.SupportPlugins(), injected.Resource())
 }
 
+func TestManagerGetImageSuffixForProfile(t *testing.T) {
+	plugin := &fakeStaticNodeAcceleratorPlugin{runtimeProfileConfig: v1.RuntimeConfig{ImageSuffix: "npu-ascend910b"}}
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{resource: "npu", plugin: plugin, lastRegisterTime: time.Now()})
+
+	suffix, err := m.GetImageSuffixForProfile(context.Background(), "npu", "npu-ascend910b")
+
+	require.NoError(t, err)
+	assert.Equal(t, "npu-ascend910b", suffix)
+}
+
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
@@ -207,7 +218,8 @@ type fakeStaticNodeAcceleratorPlugin struct {
 	getCalls     int
 	getRequest   *v1.GetNodeAcceleratorRequest
 
-	acceleratorProfile *v1.AcceleratorProfile
+	acceleratorProfile   *v1.AcceleratorProfile
+	runtimeProfileConfig v1.RuntimeConfig
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
@@ -266,4 +278,8 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetContainerRuntimeConfig() (v1.Runtim
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
 	return p.acceleratorProfile, nil
+}
+
+func (p *fakeStaticNodeAcceleratorPlugin) GetRuntimeConfigForProfile(context.Context, string) (v1.RuntimeConfig, error) {
+	return p.runtimeProfileConfig, nil
 }

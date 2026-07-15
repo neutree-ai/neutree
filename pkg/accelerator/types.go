@@ -31,6 +31,12 @@ type PluginHandle interface {
 	Ping(context.Context) error
 }
 
+// RuntimeProfileProvider is an optional plugin capability for accelerator
+// families that require a runtime configuration selected by an opaque profile.
+type RuntimeProfileProvider interface {
+	GetRuntimeConfigForProfile(context.Context, string) (v1.RuntimeConfig, error)
+}
+
 type ResourceConverter interface {
 	ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error)
 	ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
