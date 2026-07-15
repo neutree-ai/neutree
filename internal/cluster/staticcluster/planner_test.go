@@ -571,6 +571,18 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 			image:         "library/ray-runtime:v1.2.0",
 			want:          "library/ray-runtime:v1.2.0",
 		},
+		{
+			name:          "docker hub without project preserves explicit upstream registry",
+			imageRegistry: "docker.io",
+			image:         "quay.io/neutree/ray-runtime:v1.2.0",
+			want:          "quay.io/neutree/ray-runtime:v1.2.0",
+		},
+		{
+			name:          "docker hub without project leaves unqualified repository path unchanged",
+			imageRegistry: "docker.io",
+			image:         "library/ray-runtime:v1.2.0",
+			want:          "library/ray-runtime:v1.2.0",
+		},
 	}
 
 	for _, tt := range tests {
