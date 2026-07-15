@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
@@ -31,6 +32,15 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
+}
+
+func TestNewManagerRegistersInjectedInternalPlugin(t *testing.T) {
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+
+	m, err := NewManagerWithPlugins(gin.New(), injected)
+
+	require.NoError(t, err)
+	assert.Contains(t, m.SupportPlugins(), injected.Resource())
 }
 
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
