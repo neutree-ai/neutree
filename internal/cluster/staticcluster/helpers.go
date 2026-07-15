@@ -77,7 +77,41 @@ func (r *Planner) runtimeProfile(
 		}
 	}
 
-	return r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
+	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
+	if err != nil || profile == nil {
+		return profile, err
+	}
+
+	provider, ok := r.AcceleratorProfileProvider.(staticNodeRuntimeConfigProvider)
+	if !ok {
+		return profile, nil
+	}
+
+	runtimeConfig, err := provider.GetStaticNodeRuntimeConfig(ctx, &accelerator)
+	if err != nil || runtimeConfig == nil {
+		return profile, err
+	}
+
+	resolvedProfile := *profile
+	resolvedRuntimeConfig := *runtimeConfig
+	resolvedRuntimeConfig.Env = copyStringMap(runtimeConfig.Env)
+	resolvedRuntimeConfig.Options = append([]string(nil), runtimeConfig.Options...)
+	resolvedProfile.ClusterRuntime = &resolvedRuntimeConfig
+
+	return &resolvedProfile, nil
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+
+	return result
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {

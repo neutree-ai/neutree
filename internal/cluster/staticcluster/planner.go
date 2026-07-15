@@ -23,6 +23,10 @@ type staticClusterVersionValidator interface {
 	ValidateStaticClusterVersion(context.Context, string, string) error
 }
 
+type staticNodeRuntimeConfigProvider interface {
+	GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
+}
+
 type DesiredNodePlan struct {
 	Node             *v1.StaticNode
 	Accelerator      *v1.StaticNodeAcceleratorStatus
