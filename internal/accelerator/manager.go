@@ -518,6 +518,28 @@ func (a *manager) ResolveRuntimeProfile(ctx context.Context, acceleratorType str
 	return resolver.ResolveRuntimeProfile(ctx, resources)
 }
 
+func (a *manager) ResolveRuntimeProfiles(ctx context.Context, resources *v1.ClusterResources) (map[string]string, error) {
+	profiles := map[string]string{}
+	if resources == nil || resources.Allocatable == nil {
+		return profiles, nil
+	}
+	for acceleratorType := range resources.Allocatable.AcceleratorGroups {
+		p, ok := a.GetPlugin(string(acceleratorType))
+		if !ok {
+			continue
+		}
+		if _, ok := p.Handle().(publicaccelerator.RuntimeProfileResolver); !ok {
+			continue
+		}
+		profile, err := a.ResolveRuntimeProfile(ctx, string(acceleratorType), resources)
+		if err != nil {
+			return nil, err
+		}
+		profiles[string(acceleratorType)] = profile
+	}
+	return profiles, nil
+}
+
 func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string, error) {
 	if acceleratorType == "" {
 		return nil, nil
