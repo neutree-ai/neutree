@@ -529,37 +529,55 @@ func TestPlannerSkipsNodeExporterTargetsForUndiscoveredNodes(t *testing.T) {
 }
 
 func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
-	cluster := testStaticNodeCluster()
-
 	tests := []struct {
-		name  string
-		image string
-		want  string
+		name          string
+		imageRegistry string
+		image         string
+		want          string
 	}{
 		{
-			name:  "strips source registry",
-			image: "nvcr.io/nvidia/ray-runtime:test",
-			want:  "registry.example.com/neutree/nvidia/ray-runtime:test",
+			name:          "private registry strips source registry",
+			imageRegistry: "registry.example.com/neutree",
+			image:         "nvcr.io/nvidia/ray-runtime:test",
+			want:          "registry.example.com/neutree/nvidia/ray-runtime:test",
 		},
 		{
-			name:  "keeps docker hub repository path",
-			image: "library/ray-runtime:v1.2.0",
-			want:  "registry.example.com/neutree/library/ray-runtime:v1.2.0",
+			name:          "private registry keeps unqualified repository path",
+			imageRegistry: "registry.example.com/neutree",
+			image:         "library/ray-runtime:v1.2.0",
+			want:          "registry.example.com/neutree/library/ray-runtime:v1.2.0",
 		},
 		{
-			name:  "strips localhost registry",
-			image: "localhost:5000/custom/ray-runtime:v1",
-			want:  "registry.example.com/neutree/custom/ray-runtime:v1",
+			name:          "private registry strips localhost registry",
+			imageRegistry: "registry.example.com/neutree",
+			image:         "localhost:5000/custom/ray-runtime:v1",
+			want:          "registry.example.com/neutree/custom/ray-runtime:v1",
 		},
 		{
-			name:  "keeps digest",
-			image: "quay.io/neutree/ray-runtime@sha256:abc",
-			want:  "registry.example.com/neutree/neutree/ray-runtime@sha256:abc",
+			name:          "private registry keeps digest",
+			imageRegistry: "registry.example.com/neutree",
+			image:         "quay.io/neutree/ray-runtime@sha256:abc",
+			want:          "registry.example.com/neutree/neutree/ray-runtime@sha256:abc",
+		},
+		{
+			name:          "docker hub preserves explicit upstream registry",
+			imageRegistry: "docker.io/neutree",
+			image:         "nvcr.io/nvidia/ray-runtime:test",
+			want:          "nvcr.io/nvidia/ray-runtime:test",
+		},
+		{
+			name:          "docker hub prefixes unqualified repository path",
+			imageRegistry: "docker.io/neutree",
+			image:         "library/ray-runtime:v1.2.0",
+			want:          "docker.io/neutree/library/ray-runtime:v1.2.0",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			cluster := testStaticNodeCluster()
+			cluster.Spec.ImageRegistry = tt.imageRegistry
+
 			assert.Equal(t, tt.want, staticComponentImage(cluster, tt.image))
 		})
 	}

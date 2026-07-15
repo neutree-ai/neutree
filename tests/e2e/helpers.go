@@ -896,25 +896,15 @@ func renderTemplateToTempFile(templatePath string, data map[string]any) (string,
 	return tmpFile.Name(), nil
 }
 
-// requireImageRegistryProfile skips the test if the ImageRegistry URL is not configured.
+// requireImageRegistryProfile skips the test if image registry is not fully configured in profile.
 func requireImageRegistryProfile() {
 	if profile.ImageRegistry.URL == "" {
 		Skip("ImageRegistry.URL not configured in profile")
 	}
-}
 
-func renderDockerHubImageRegistryYAML(name string) string {
-	path, err := renderTemplateToTempFile("testdata/image-registry.yaml", map[string]any{
-		"E2E_IMAGE_REGISTRY":          name,
-		"E2E_WORKSPACE":               profileWorkspace(),
-		"E2E_IMAGE_REGISTRY_URL":      "docker.io",
-		"E2E_IMAGE_REGISTRY_REPO":     "",
-		"E2E_IMAGE_REGISTRY_USERNAME": "",
-		"E2E_IMAGE_REGISTRY_PASSWORD": "",
-	})
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-
-	return path
+	if profile.ImageRegistry.Repository == "" {
+		Skip("ImageRegistry.Repository not configured in profile")
+	}
 }
 
 // renderImageRegistryYAML renders an ImageRegistry YAML and returns the temp file path.
