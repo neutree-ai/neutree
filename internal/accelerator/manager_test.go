@@ -77,6 +77,11 @@ func TestNewManagerWithPluginsRejectsInvalidInternalPlugins(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "accelerator plugin is nil")
 
+	emptyResource := &fakeStaticNodeAcceleratorPlugin{resourceSet: true}
+	_, err = NewManagerWithPlugins(gin.New(), emptyResource)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resource is required")
+
 	injected := &fakeStaticNodeAcceleratorPlugin{}
 	_, err = NewManagerWithPlugins(gin.New(), injected, injected)
 	require.Error(t, err)
@@ -163,6 +168,20 @@ func TestManagerGetAcceleratorProfileReturnsTypeResolverError(t *testing.T) {
 	assert.Contains(t, err.Error(), "profile lookup failed")
 }
 
+func TestManagerGetAcceleratorProfileReturnsNotFoundWhenTypeResolverDoesNotMatch(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin:   &fakeStaticNodeAcceleratorPlugin{},
+	})
+
+	profile, err := m.GetAcceleratorProfile(context.Background(), "npu-ascend910b")
+
+	require.Error(t, err)
+	assert.Nil(t, profile)
+	assert.Contains(t, err.Error(), "accelerator plugin npu-ascend910b not found")
+}
+
 func TestManagerValidateStaticClusterVersion(t *testing.T) {
 	m := &manager{}
 	m.acceleratorsMap.Store("npu", registerPlugin{
@@ -187,6 +206,16 @@ func TestManagerValidateStaticClusterVersionIgnoresUnmatchedType(t *testing.T) {
 	})
 
 	require.NoError(t, m.ValidateStaticClusterVersion(context.Background(), "other", "v1.0.2"))
+}
+
+func TestManagerValidateStaticClusterVersionAcceptsMatchedVersion(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource: "npu",
+		plugin:   &fakeStaticNodeAcceleratorPlugin{validationMatched: true},
+	})
+
+	require.NoError(t, m.ValidateStaticClusterVersion(context.Background(), "npu-ascend910b", "v1.1.0"))
 }
 
 func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
@@ -307,6 +336,8 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 }
 
 type fakeStaticNodeAcceleratorPlugin struct {
+	resource            string
+	resourceSet         bool
 	accelerators        []v1.Accelerator
 	acceleratorProfiles map[string]*v1.AcceleratorProfile
 	staticResponse      *v1.DetectStaticNodeAcceleratorResponse
@@ -322,6 +353,10 @@ type fakeStaticNodeAcceleratorPlugin struct {
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
+	if p.resourceSet {
+		return p.resource
+	}
+
 	return "custom_gpu"
 }
 
