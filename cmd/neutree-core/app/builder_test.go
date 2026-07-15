@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 )
 
@@ -30,6 +31,21 @@ func TestBuilderWithConfig(t *testing.T) {
 
 	if builder.config != config {
 		t.Errorf("Expected config to be set in builder, got %v", builder.config)
+	}
+}
+
+func TestBuilderBuildCreatesAcceleratorManagerBeforeControllers(t *testing.T) {
+	c := &config.CoreConfig{GinEngine: gin.New()}
+	b := NewBuilder().WithConfig(c)
+	b.controllerInits = map[string]ControllerFactory{}
+
+	_, err := b.Build()
+
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if c.AcceleratorManager == nil {
+		t.Fatal("Build() did not initialize AcceleratorManager")
 	}
 }
 
