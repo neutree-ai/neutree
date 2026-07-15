@@ -488,22 +488,34 @@ func (a *manager) GetImageSuffix(acceleratorType string) string {
 // GetImageSuffixForProfile returns the suffix from an optional profile-aware
 // plugin. Empty profiles preserve the legacy type-only lookup behavior.
 func (a *manager) GetImageSuffixForProfile(ctx context.Context, acceleratorType, runtimeProfile string) (string, error) {
+	config, err := a.GetRuntimeConfigForProfile(ctx, acceleratorType, runtimeProfile)
+	if err != nil {
+		return "", err
+	}
+	return config.ImageSuffix, nil
+}
+
+func (a *manager) GetRuntimeConfigForProfile(ctx context.Context, acceleratorType, runtimeProfile string) (v1.RuntimeConfig, error) {
 	if runtimeProfile == "" {
-		return a.GetImageSuffix(acceleratorType), nil
+		p, ok := a.GetPlugin(acceleratorType)
+		if !ok {
+			return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s not found", acceleratorType)
+		}
+		return p.Handle().GetContainerRuntimeConfig()
 	}
 	p, ok := a.GetPlugin(acceleratorType)
 	if !ok {
-		return "", errors.Errorf("accelerator plugin %s not found", acceleratorType)
+		return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 	provider, ok := p.Handle().(publicaccelerator.RuntimeProfileProvider)
 	if !ok {
-		return "", errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
+		return v1.RuntimeConfig{}, errors.Errorf("accelerator plugin %s does not support runtime profiles", acceleratorType)
 	}
 	config, err := provider.GetRuntimeConfigForProfile(ctx, runtimeProfile)
 	if err != nil {
-		return "", errors.Wrapf(err, "get runtime profile %s from accelerator plugin %s", runtimeProfile, acceleratorType)
+		return v1.RuntimeConfig{}, errors.Wrapf(err, "get runtime profile %s from accelerator plugin %s", runtimeProfile, acceleratorType)
 	}
-	return config.ImageSuffix, nil
+	return config, nil
 }
 
 func (a *manager) ResolveRuntimeProfile(ctx context.Context, acceleratorType string, resources *v1.ClusterResources) (string, error) {

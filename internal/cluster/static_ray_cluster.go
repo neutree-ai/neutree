@@ -317,11 +317,19 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
+			RuntimeProfile:  staticRuntimeProfile(c),
 			Metrics:         copyStaticClusterMetricsConfig(c.Spec.Config),
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
+}
+
+func staticRuntimeProfile(c *v1.Cluster) string {
+	if c == nil || c.Status == nil || c.Status.AcceleratorRuntimeProfile == nil {
+		return ""
+	}
+	return *c.Status.AcceleratorRuntimeProfile
 }
 
 func copyStaticClusterMetricsConfig(config *v1.ClusterConfig) *v1.ClusterMetricsConfig {

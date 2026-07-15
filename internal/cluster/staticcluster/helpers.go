@@ -55,6 +55,7 @@ func currentStaticNodeAcceleratorStatus(node *v1.StaticNode) *v1.StaticNodeAccel
 
 func (r *Planner) runtimeProfile(
 	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
 	accelerator v1.StaticNodeAcceleratorStatus,
 ) (*v1.AcceleratorProfile, error) {
 	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
@@ -69,8 +70,20 @@ func (r *Planner) runtimeProfile(
 	if err != nil {
 		return nil, err
 	}
-
-	return profile, nil
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.RuntimeProfile == "" {
+		return profile, nil
+	}
+	provider, ok := r.AcceleratorProfileProvider.(RuntimeProfileConfigProvider)
+	if !ok {
+		return nil, errors.New("accelerator runtime profile provider is required")
+	}
+	runtime, err := provider.GetRuntimeConfigForProfile(ctx, accelerator.Type, cluster.Spec.RuntimeProfile)
+	if err != nil {
+		return nil, err
+	}
+	copy := *profile
+	copy.ClusterRuntime = &runtime
+	return &copy, nil
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
