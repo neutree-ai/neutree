@@ -169,6 +169,12 @@ func TestResolveWorkspace(t *testing.T) {
 	require.Equal(t, "default", resolveWorkspace("default", false))
 }
 
+func TestValidateLimit(t *testing.T) {
+	require.NoError(t, validateLimit(0))  // 0 = unlimited
+	require.NoError(t, validateLimit(10)) // positive is fine
+	require.Error(t, validateLimit(-1))   // negative must be rejected
+}
+
 func TestEffectiveLimit(t *testing.T) {
 	cases := []struct {
 		name       string

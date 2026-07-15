@@ -42,9 +42,10 @@ type accessLogOptions struct {
 	limit         int
 	withBody      bool
 
-	since  string
-	until  string
-	filter client.TraceListFilters
+	since   string
+	until   string
+	timeout time.Duration
+	filter  client.TraceListFilters
 }
 
 // withBodyDefaultLimit caps a body-carrying export that did not set an explicit
@@ -101,6 +102,7 @@ Examples:
 	f.StringVarP(&opts.file, "file", "f", "", "Output file path (default: stdout)")
 	f.IntVar(&opts.limit, "limit", 0, "Maximum number of records to export (0 = no limit)")
 	f.BoolVar(&opts.withBody, "with-body", true, "Include full request/response bodies")
+	f.DurationVar(&opts.timeout, "timeout", 0, "Per-request HTTP timeout (0 = no timeout); a body-carrying page can exceed a short timeout")
 	f.StringVar(&opts.since, "since", "", "Only export records at or after this time (RFC3339, or YYYY-MM-DD = start of that day)")
 	f.StringVar(&opts.until, "until", "", "Only export records before this time (RFC3339, or YYYY-MM-DD = through the end of that day)")
 	f.StringVar(&opts.filter.EndpointName, "endpoint", "", "Filter by endpoint name")
@@ -164,8 +166,26 @@ func effectiveLimit(withBody, limitSet bool, limit int) (int, bool) {
 	return limit, false
 }
 
+// validateLimit rejects a negative --limit. 0 means unlimited; a negative value
+// is meaningless and would otherwise slip past the with-body cap (which only
+// applies when --limit is unset) and be treated as unlimited.
+func validateLimit(limit int) error {
+	if limit < 0 {
+		return fmt.Errorf("--limit must be >= 0 (0 = no limit)")
+	}
+
+	return nil
+}
+
 func runAccessLogExport(cmd *cobra.Command, opts *accessLogOptions) error {
-	c, err := global.NewClient()
+	if err := validateLimit(opts.limit); err != nil {
+		return err
+	}
+
+	// Exports are long-running: a full page of inline bodies can exceed the
+	// client's default 30s timeout and abort a partial export. Default to no
+	// timeout; --timeout lets the user reinstate one.
+	c, err := global.NewClient(client.WithTimeout(opts.timeout))
 	if err != nil {
 		return err
 	}
