@@ -38,6 +38,12 @@ func TestBuildClusterImageRef(t *testing.T) {
 			imageSuffix: "rocm",
 			expected:    "registry.io/neutree/neutree/neutree-serve:v1.0.1-rc.1-rocm",
 		},
+		{
+			name:        "docker hub leaves image unchanged",
+			imagePrefix: "docker.io/neutree",
+			version:     "v1.0.0",
+			expected:    "neutree/neutree-serve:v1.0.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -76,6 +82,12 @@ func TestBuildEngineImageRef(t *testing.T) {
 		{
 			name:        "no prefix",
 			imagePrefix: "",
+			engineImage: &v1.EngineImage{ImageName: "neutree/vllm", Tag: "v0.11.2"},
+			expected:    "neutree/vllm:v0.11.2",
+		},
+		{
+			name:        "docker hub leaves image unchanged",
+			imagePrefix: "docker.io/neutree",
 			engineImage: &v1.EngineImage{ImageName: "neutree/vllm", Tag: "v0.11.2"},
 			expected:    "neutree/vllm:v0.11.2",
 		},
@@ -119,6 +131,24 @@ func TestRewriteImageRef(t *testing.T) {
 			imagePrefix: "",
 			image:       "docker.io/neutree/neutree-node-agent:v1.2.0",
 			expected:    "docker.io/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "docker hub preserves explicit upstream registry",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+			expected:    "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+		},
+		{
+			name:        "docker hub preserves quay image",
+			imagePrefix: "docker.io",
+			image:       "quay.io/prometheus/node-exporter:v1.8.2",
+			expected:    "quay.io/prometheus/node-exporter:v1.8.2",
+		},
+		{
+			name:        "docker hub leaves unqualified image unchanged",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "neutree/neutree-node-agent:v1.2.0",
+			expected:    "neutree/neutree-node-agent:v1.2.0",
 		},
 		{
 			name:        "empty image stays empty",

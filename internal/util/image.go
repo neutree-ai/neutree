@@ -21,7 +21,7 @@ func BuildClusterImageRef(imagePrefix, version, imageSuffix string) string {
 		tag = version + "-" + imageSuffix
 	}
 
-	return imagePrefix + "/" + v1.NeutreeServeImageName + ":" + tag
+	return RewriteImageRef(imagePrefix, v1.NeutreeServeImageName+":"+tag)
 }
 
 // BuildEngineImageRef constructs the full engine image reference from an EngineImage.
@@ -41,26 +41,35 @@ func BuildEngineImageRef(imagePrefix string, engineImage *v1.EngineImage) string
 		return ""
 	}
 
-	if imagePrefix != "" {
-		return imagePrefix + "/" + imageName + ":" + tag
-	}
-
-	return imageName + ":" + tag
+	return RewriteImageRef(imagePrefix, imageName+":"+tag)
 }
 
 // RewriteImageRef rewrites image into imagePrefix while preserving the image
-// repository path and removing any source registry host.
+// repository path and removing any source registry host. Docker Hub prefixes
+// leave image references unchanged.
 func RewriteImageRef(imagePrefix, image string) string {
 	if image == "" {
 		return ""
 	}
 
 	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
-	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
+	if imagePrefix == "" || IsDockerHubImagePrefix(imagePrefix) || strings.HasPrefix(image, imagePrefix+"/") {
 		return image
 	}
 
 	return imagePrefix + "/" + stripSourceImageRegistry(image)
+}
+
+// IsDockerHubImagePrefix reports whether imagePrefix targets Docker Hub.
+func IsDockerHubImagePrefix(imagePrefix string) bool {
+	host := strings.SplitN(strings.Trim(strings.TrimSpace(imagePrefix), "/"), "/", 2)[0]
+
+	switch strings.ToLower(host) {
+	case "docker.io", "index.docker.io", "registry-1.docker.io":
+		return true
+	default:
+		return false
+	}
 }
 
 func stripSourceImageRegistry(image string) string {

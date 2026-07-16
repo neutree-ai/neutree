@@ -186,7 +186,7 @@ spec:
       serviceAccountName: neutree-kube-state-metrics
       containers:
       - name: kube-state-metrics
-        image: {{ .ImagePrefix }}/kube-state-metrics/kube-state-metrics:{{ .KubeStateMetricsVersion }}
+        image: {{ .KubeStateMetricsImage }}
         args:
         - --port=8080
         - --telemetry-port=8081
@@ -508,7 +508,7 @@ spec:
       serviceAccountName: vmagent-service-account
       containers:
       - name: vmagent
-        image: {{ .ImagePrefix }}/victoriametrics/vmagent:{{ .Version }}
+        image: {{ .VMAgentImage }}
         args:
         - --promscrape.config=/etc/prometheus/prometheus.yml
         - --promscrape.configCheckInterval=10s
@@ -536,9 +536,9 @@ type MetricsManifestVariables struct {
 	ClusterName                      string
 	Workspace                        string
 	Namespace                        string
-	ImagePrefix                      string
 	ImagePullSecret                  string
 	Version                          string
+	VMAgentImage                     string
 	NodeExporterName                 string
 	NodeExporterImage                string
 	NodeExporterPort                 int
@@ -546,7 +546,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
 	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
-	KubeStateMetricsVersion          string
+	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
 	MetricsMode                      string
@@ -586,16 +586,16 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		ClusterName:                      m.cluster.Metadata.Name,
 		Workspace:                        m.cluster.Metadata.Workspace,
 		Namespace:                        m.namespace,
-		ImagePrefix:                      m.imagePrefix,
 		ImagePullSecret:                  m.imagePullSecret,
 		Version:                          version,
+		VMAgentImage:                     util.RewriteImageRef(m.imagePrefix, defaultVMAgentImage),
 		NodeExporterName:                 nodeExporterDaemonSetName,
 		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
 		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsVersion:          componentversion.KubeStateMetrics,
+		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),

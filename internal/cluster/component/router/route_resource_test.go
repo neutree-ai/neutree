@@ -66,6 +66,41 @@ func Test_BuildRouterDeployment(t *testing.T) {
 	t.Fatalf("router deployment not found in resources")
 }
 
+func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
+	routerComponent := &RouterComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "1.0.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "docker.io/neutree-ai",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := routerComponent.GetRouteResources()
+	if err != nil {
+		t.Fatalf("Failed to build router deployment: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetObjectKind().GroupVersionKind().Kind != "Deployment" || obj.GetName() != "router" {
+			continue
+		}
+
+		objContent, _ := json.Marshal(obj.Object)
+		deployment := &appsv1.Deployment{}
+		if err := json.Unmarshal(objContent, deployment); err != nil {
+			t.Fatalf("Failed to unmarshal deployment: %v", err)
+		}
+
+		assert.Equal(t, "neutree/router:1.0.0", deployment.Spec.Template.Spec.Containers[0].Image)
+
+		return
+	}
+
+	t.Fatalf("router deployment not found in resources")
+}
+
 func Test_BuildRouterService(t *testing.T) {
 	// Test implementation goes here
 	routerComponent := &RouterComponent{

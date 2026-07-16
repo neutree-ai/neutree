@@ -75,6 +75,56 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	assert.Contains(t, stringSlice(monitor["command"]), "vGPUmonitor")
 }
 
+func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
+	tests := []struct {
+		name               string
+		imagePrefix        string
+		kubeSchedulerImage string
+		hamiImage          string
+	}{
+		{
+			name:               "docker hub preserves explicit upstream registries",
+			imagePrefix:        "docker.io/neutree-ai",
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + DefaultKubeSchedulerVersion(),
+			hamiImage:          "docker.io/projecthami/hami:" + Version,
+		},
+		{
+			name:               "private registry rewrites all images",
+			imagePrefix:        "registry.example.com/neutree-ai",
+			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + DefaultKubeSchedulerVersion(),
+			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + Version,
+		},
+		{
+			name:               "docker hub without project preserves source registries",
+			imagePrefix:        "docker.io",
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + DefaultKubeSchedulerVersion(),
+			hamiImage:          "docker.io/projecthami/hami:" + Version,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			component := NewHAMiComponent(newTestCluster(), "neutree-system", tt.imagePrefix,
+				"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+			objs, err := component.renderResources(defaultNodeScopePlan())
+			require.NoError(t, err)
+
+			kubeScheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "kube-scheduler")
+			assert.Equal(t, tt.kubeSchedulerImage, kubeScheduler["image"])
+
+			extender := findContainer(t, objs.Items, "Deployment", SchedulerName, "vgpu-scheduler-extender")
+			assert.Equal(t, tt.hamiImage, extender["image"])
+
+			devicePlugin := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
+			assert.Equal(t, tt.hamiImage, devicePlugin["image"])
+
+			monitor := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "vgpu-monitor")
+			assert.Equal(t, tt.hamiImage, monitor["image"])
+		})
+	}
+}
+
 func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
