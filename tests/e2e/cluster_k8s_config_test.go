@@ -242,7 +242,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EnsureDeleted(clusterName)
 		})
 
-		It("should scrape external accelerator exporter without installing managed DCGM", Label("C2623077"), func() {
+		It("should scrape external accelerator exporter without installing managed DCGM", Label("C2732256"), func() {
 			assertK8sExternalAcceleratorExporterResources(
 				context.Background(),
 				k8sH,

@@ -275,6 +275,51 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
+func TestCheckResourcesStatusDoesNotRequireManagedAcceleratorExporterInExternalMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fakeClient := fake.NewClientBuilder().
+		WithObjects(
+			readyMetricsDeployment("vmagent"),
+			readyMetricsDeployment("neutree-kube-state-metrics"),
+			readyMetricsDaemonSet("neutree-node-exporter", 1),
+			readyMetricsDaemonSet("neutree-node-agent", 1),
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					},
+				},
+			},
+		).
+		Build()
+
+	metricsCmpt := &MetricsComponent{
+		ctrlClient:     fakeClient,
+		namespace:      "default",
+		acceleratorMgr: accelerator.NewManager(gin.New()),
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+	}
+
+	status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+	assert.NoError(t, err)
+	assert.True(t, status.Ready())
+	assert.False(t, status.AcceleratorExporterRequired)
+	assert.False(t, status.AcceleratorExporterDaemonSetsReady)
+	assert.Empty(t, status.Errors)
+}
+
 func TestSupportsClusterVersionAtLeast(t *testing.T) {
 	tests := []struct {
 		name    string

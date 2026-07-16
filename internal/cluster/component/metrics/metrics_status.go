@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -120,29 +121,31 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		}
 	}
 
-	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
-	} else if len(acceleratorExporters) > 0 {
-		status.AcceleratorExporterRequired = true
-		status.AcceleratorExporterDaemonSetsReady = true
+	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
+		acceleratorExporters, err := m.planAcceleratorExporters(ctx)
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
+		} else if len(acceleratorExporters) > 0 {
+			status.AcceleratorExporterRequired = true
+			status.AcceleratorExporterDaemonSetsReady = true
 
-		for _, exporter := range acceleratorExporters {
-			exporterReady, exporterPodsReady, exporterTotalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
-			if checkErr != nil {
-				status.AcceleratorExporterDaemonSetsReady = false
-				status.Errors = append(status.Errors,
-					fmt.Sprintf("accelerator-exporter daemonset %s check failed: %v", exporter.Name, checkErr))
+			for _, exporter := range acceleratorExporters {
+				exporterReady, exporterPodsReady, exporterTotalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
+				if checkErr != nil {
+					status.AcceleratorExporterDaemonSetsReady = false
+					status.Errors = append(status.Errors,
+						fmt.Sprintf("accelerator-exporter daemonset %s check failed: %v", exporter.Name, checkErr))
 
-				continue
+					continue
+				}
+
+				if !exporterReady {
+					status.AcceleratorExporterDaemonSetsReady = false
+				}
+
+				status.AcceleratorExporterPodsReady += exporterPodsReady
+				status.AcceleratorExporterTotalPods += exporterTotalPods
 			}
-
-			if !exporterReady {
-				status.AcceleratorExporterDaemonSetsReady = false
-			}
-
-			status.AcceleratorExporterPodsReady += exporterPodsReady
-			status.AcceleratorExporterTotalPods += exporterTotalPods
 		}
 	}
 

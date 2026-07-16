@@ -155,8 +155,9 @@ func assertK8sExternalAcceleratorExporterResources(
 
 		nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
 		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--metrics-mode=external"))
-		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers[0].Args).NotTo(ContainElement(
+		nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
+		ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--metrics-mode=external"))
+		ExpectWithOffset(1, nodeAgentContainer.Args).NotTo(ContainElement(
 			ContainSubstring("--accelerator-exporter-url="),
 		))
 	} else {

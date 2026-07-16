@@ -652,6 +652,115 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
+func TestBuildMetricsResourcesProjectsMatchedExporterEnvToNodeAgent(t *testing.T) {
+	testCases := []struct {
+		name                string
+		mode                v1.ClusterAcceleratorExporterMode
+		nodeLabels          map[string]string
+		wantNodeAgentEnv    map[string]string
+		wantManagedExporter bool
+	}{
+		{
+			name: "managed mode",
+			mode: v1.ClusterAcceleratorExporterModeManaged,
+			nodeLabels: map[string]string{
+				"accelerator.example.com/nvidia": "true",
+			},
+			wantNodeAgentEnv: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES":     "all",
+				"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
+			},
+			wantManagedExporter: true,
+		},
+		{
+			name: "external mode",
+			mode: v1.ClusterAcceleratorExporterModeExternal,
+			nodeLabels: map[string]string{
+				"accelerator.example.com/nvidia": "true",
+			},
+			wantNodeAgentEnv: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES":     "all",
+				"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
+			},
+		},
+		{
+			name: "external mode without matching node",
+			mode: v1.ClusterAcceleratorExporterModeExternal,
+			nodeLabels: map[string]string{
+				"kubernetes.io/os": "linux",
+			},
+			wantNodeAgentEnv: map[string]string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			acceleratorMgr := &acceleratormocks.MockManager{}
+			acceleratorMgr.On("SupportPlugins").Return([]string{v1.AcceleratorTypeNVIDIAGPU.String()}).Maybe()
+			acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).
+				Return(&v1.AcceleratorProfile{
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Name:  "dcgm-exporter",
+						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:  19400,
+						Env: map[string]string{
+							"NVIDIA_VISIBLE_DEVICES":     "all",
+							"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
+							"UNRELATED_EXPORTER_ENV":     "must-not-project",
+						},
+						Runtime: &v1.AcceleratorExporterRuntimeProfile{
+							NodeSelector: map[string]string{
+								"accelerator.example.com/nvidia": "true",
+							},
+						},
+					},
+				}, nil).Maybe()
+
+			metricsCmpt := &MetricsComponent{
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+					Spec: &v1.ClusterSpec{
+						Version: "v1.1.0",
+						Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+							AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: tc.mode},
+						}},
+					},
+				},
+				namespace:      "test-namespace",
+				acceleratorMgr: acceleratorMgr,
+				ctrlClient: fake.NewClientBuilder().WithObjects(
+					metricsTestNode("test-node", tc.nodeLabels),
+				).Build(),
+			}
+
+			objs, err := metricsCmpt.GetMetricsResources(context.Background())
+			assert.NilError(t, err)
+
+			nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+			for name, want := range tc.wantNodeAgentEnv {
+				assert.Equal(t, want, envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
+			}
+			for _, name := range []string{
+				"NVIDIA_VISIBLE_DEVICES",
+				"NVIDIA_DRIVER_CAPABILITIES",
+				"UNRELATED_EXPORTER_ENV",
+			} {
+				if _, ok := tc.wantNodeAgentEnv[name]; !ok {
+					assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
+				}
+			}
+
+			managedExporterFound := false
+			for _, obj := range objs.Items {
+				isManagedExporter := obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"
+				managedExporterFound = managedExporterFound || isManagedExporter
+			}
+			assert.Equal(t, tc.wantManagedExporter, managedExporterFound)
+		})
+	}
+}
+
 func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -1251,6 +1360,16 @@ func envValue(env []corev1.EnvVar, name string) string {
 	}
 
 	return ""
+}
+
+func hasEnv(env []corev1.EnvVar, name string) bool {
+	for _, item := range env {
+		if item.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func findMetricsDaemonSet(t *testing.T, objs *unstructured.UnstructuredList, name string) *appsv1.DaemonSet {
