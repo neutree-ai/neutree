@@ -7,8 +7,8 @@
 # invoke busted's Lua entry point directly under `luajit`.
 #
 # Requires on PATH: luajit, luarocks, and the rocks `lua-cjson` + `busted`
-# installed. `make gateway-lua-test` provisions these in a container; CI installs
-# them on the runner. See ci.yaml (gateway-lua-test job).
+# installed. `make gateway-lua-test` builds spec/Dockerfile (which bakes those
+# into cached layers) and runs this script inside it; CI runs the same target.
 set -e
 
 plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

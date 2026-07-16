@@ -63,12 +63,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Install LuaJIT + busted
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            luajit luarocks lua5.1 liblua5.1-0-dev build-essential
-          sudo luarocks install lua-cjson
-          sudo luarocks install busted
       - name: Run neutree-ai-gateway Lua unit tests
-        run: sh gateway/kong/plugins/neutree-ai-gateway/spec/run.sh
+        run: make gateway-lua-test

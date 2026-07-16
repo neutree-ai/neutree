@@ -215,17 +215,12 @@ e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
 ##@ Gateway Lua Testing
 
 GATEWAY_PLUGIN_DIR ?= gateway/kong/plugins/neutree-ai-gateway
+GATEWAY_LUA_TEST_IMAGE ?= neutree-gateway-lua-test:latest
 
 .PHONY: gateway-lua-test
 gateway-lua-test: ## Run neutree-ai-gateway Lua unit tests (LuaJIT + busted, in Docker)
-	docker run --rm -v $(CURDIR)/$(GATEWAY_PLUGIN_DIR):/plugin -w /plugin debian:bookworm-slim sh -c '\
-		set -e; \
-		export DEBIAN_FRONTEND=noninteractive; \
-		apt-get update >/dev/null; \
-		apt-get install -y --no-install-recommends luajit luarocks lua5.1 liblua5.1-0-dev build-essential unzip ca-certificates >/dev/null; \
-		luarocks install lua-cjson >/dev/null; \
-		luarocks install busted >/dev/null; \
-		sh spec/run.sh'
+	docker build -q -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec >/dev/null
+	docker run --rm -v $(CURDIR)/$(GATEWAY_PLUGIN_DIR):/plugin -w /plugin $(GATEWAY_LUA_TEST_IMAGE) sh spec/run.sh
 
 ##@ Database Testing
 

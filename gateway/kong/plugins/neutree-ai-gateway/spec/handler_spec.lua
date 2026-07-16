@@ -36,15 +36,13 @@ package.loaded["kong.tools.string"] = {
 _G.ngx = { now = function() return 0 end }
 _G.kong = { log = { warn = function() end, err = function() end } }
 
--- Make `require("kong.plugins.neutree-ai-gateway.handler")` resolve to the
--- handler next to this spec, regardless of the working directory busted is run
--- from. The gateway root is four levels up from spec/.
+-- Load the handler by file path (relative to this spec) rather than by module
+-- name, so the tests do not depend on the kong.plugins.* directory nesting
+-- being present — the plugin dir is often bind-mounted on its own.
 local spec_dir = (debug.getinfo(1, "S").source:sub(2)):match("(.*/)") or "./"
-local gateway_root = spec_dir .. "../../../../"
-package.path = gateway_root .. "?.lua;" .. gateway_root .. "?/init.lua;" .. package.path
 
 local cjson = require("cjson.safe")
-local handler = require("kong.plugins.neutree-ai-gateway.handler")
+local handler = assert(loadfile(spec_dir .. "../handler.lua"))()
 local T = handler._TEST
 
 -- plain-substring find helpers (cjson emits no spaces, and a key and its value
