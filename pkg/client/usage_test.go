@@ -89,6 +89,7 @@ func TestGetUsageByDimensionErrorStatusMapping(t *testing.T) {
 
 	_, err := c.Usage.GetUsageByDimension(UsageFilters{StartDate: "2026-07-01", EndDate: "2026-07-15"})
 	require.ErrorContains(t, err, "workspace:usage-read")
+	require.ErrorContains(t, err, "nope") // server body preserved for diagnosis
 }
 
 func ptrInt64(n int64) *int64 { return &n }

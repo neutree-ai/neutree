@@ -3,9 +3,11 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // UsageService handles model-usage statistics via the get_usage_by_dimension
@@ -106,7 +108,12 @@ func (s *UsageService) GetUsageByDimension(filters UsageFilters) ([]UsageRow, er
 
 		switch resp.StatusCode {
 		case http.StatusForbidden:
-			return nil, fmt.Errorf("permission denied: viewing another user's usage needs workspace:usage-read")
+			base := "permission denied: viewing another user's usage needs workspace:usage-read"
+			if body := strings.TrimSpace(string(bodyBytes)); body != "" {
+				return nil, fmt.Errorf("%s (server: %s)", base, body)
+			}
+
+			return nil, errors.New(base)
 		default:
 			return nil, fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(bodyBytes))
 		}

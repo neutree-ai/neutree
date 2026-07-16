@@ -185,6 +185,17 @@ func TestResolveWindow(t *testing.T) {
 	require.Equal(t, "2026-01-01", start)
 	require.Equal(t, "2026-01-31", end)
 
+	// An explicit past --until still yields a full trailing window: --since
+	// defaults relative to the resolved end, not to "now".
+	start, end, err = resolveWindow("", "2026-01-31", fixedNow)
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-01", start)
+	require.Equal(t, "2026-01-31", end)
+
+	// A start after the end is rejected rather than sent to the server.
+	_, _, err = resolveWindow("2026-07-10", "2026-07-01", fixedNow)
+	require.ErrorContains(t, err, "after")
+
 	// Malformed bounds are rejected.
 	_, _, err = resolveWindow("nope", "", fixedNow)
 	require.ErrorContains(t, err, "invalid --since")

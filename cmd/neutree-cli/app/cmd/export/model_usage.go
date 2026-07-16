@@ -163,11 +163,6 @@ func runUsageExport(req usageExportRequest) (int, error) {
 		return 0, err
 	}
 
-	writer, err := newUsageWriter(req.opts.format, req.dataOut)
-	if err != nil {
-		return 0, err
-	}
-
 	rows, err := req.lister.GetUsageByDimension(client.UsageFilters{
 		StartDate:    start,
 		EndDate:      end,
@@ -175,6 +170,15 @@ func runUsageExport(req usageExportRequest) (int, error) {
 		EndpointName: req.opts.endpoint,
 		Workspace:    resolveUsageWorkspace(req.opts.workspace, req.opts.allWorkspaces),
 	})
+	if err != nil {
+		return 0, err
+	}
+
+	// Build the writer only after the RPC succeeds. This RPC is non-paginated —
+	// the fetch above already holds every row — so opening the writer first buys
+	// no streaming benefit and would emit a CSV header (buffered on construction)
+	// even when the RPC then fails, leaving misleading partial output.
+	writer, err := newUsageWriter(req.opts.format, req.dataOut)
 	if err != nil {
 		return 0, err
 	}
@@ -202,35 +206,44 @@ func runUsageExport(req usageExportRequest) (int, error) {
 	return total, nil
 }
 
-// resolveWindow fills in the default window (last defaultWindowDays through
-// today, UTC) for any unset bound and validates explicit ones. Both bounds are
-// inclusive dates, matching the RPC's BETWEEN semantics.
+// resolveWindow resolves the inclusive [start, end] date window. An unset
+// --until defaults to today (UTC); an unset --since defaults to
+// defaultWindowDays before the *resolved end* (not before "now"), so an
+// explicit past --until still yields a full trailing window rather than a
+// start that runs ahead of the end. Explicit bounds are validated, and a window
+// with start after end is rejected. Both bounds are inclusive, matching the
+// RPC's BETWEEN semantics.
 func resolveWindow(since, until string, now time.Time) (string, string, error) {
-	end := until
-	if end == "" {
-		end = now.UTC().Format(dateLayout)
-	} else if err := validateDate(end); err != nil {
-		return "", "", fmt.Errorf("invalid --until: %w", err)
+	end := now.UTC()
+
+	if until != "" {
+		t, err := time.Parse(dateLayout, until)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid --until: %q is not a valid date (want YYYY-MM-DD)", until)
+		}
+
+		end = t
 	}
 
-	start := since
-	if start == "" {
-		start = now.UTC().AddDate(0, 0, -defaultWindowDays).Format(dateLayout)
-	} else if err := validateDate(start); err != nil {
-		return "", "", fmt.Errorf("invalid --since: %w", err)
+	start := end.AddDate(0, 0, -defaultWindowDays)
+
+	if since != "" {
+		t, err := time.Parse(dateLayout, since)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid --since: %q is not a valid date (want YYYY-MM-DD)", since)
+		}
+
+		start = t
 	}
 
-	return start, end, nil
-}
-
-// validateDate rejects anything that is not a bare YYYY-MM-DD date, so a
-// malformed flag fails locally with a clear message instead of as a server error.
-func validateDate(v string) error {
-	if _, err := time.Parse(dateLayout, v); err != nil {
-		return fmt.Errorf("%q is not a valid date (want YYYY-MM-DD)", v)
+	// Compare on the date, not the clock: a defaulted end carries now's
+	// time-of-day, which must not make an equal-date start look "after" it.
+	if start.Format(dateLayout) > end.Format(dateLayout) {
+		return "", "", fmt.Errorf("invalid window: --since %s is after --until %s",
+			start.Format(dateLayout), end.Format(dateLayout))
 	}
 
-	return nil
+	return start.Format(dateLayout), end.Format(dateLayout), nil
 }
 
 // resolveUsageWorkspace maps the workspace flags to the p_workspace value.
