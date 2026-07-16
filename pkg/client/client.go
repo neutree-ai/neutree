@@ -20,6 +20,7 @@ type Client struct {
 	ModelRegistries *ModelRegistriesService
 	Generic         *GenericService
 	Traces          *TracesService
+	Usage           *UsageService
 }
 
 // ClientOption is a function that configures a Client
@@ -103,6 +104,7 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 	client.ImageRegistries = NewImageRegistriesService(client)
 	client.ModelRegistries = NewModelRegistriesService(client)
 	client.Traces = NewTracesService(client)
+	client.Usage = NewUsageService(client)
 
 	s, err := BuildScheme()
 	if err == nil {
