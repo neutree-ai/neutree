@@ -29,6 +29,7 @@ func NewExportCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newAccessLogCmd())
+	cmd.AddCommand(newModelUsageCmd())
 
 	return cmd
 }
