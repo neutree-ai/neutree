@@ -58,3 +58,10 @@ jobs:
         with:
           token: ${{secrets.CODECOV_UPLOAD_TOKEN}}
           file: ./coverage.out
+
+  gateway-lua-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run neutree-ai-gateway Lua unit tests
+        run: make gateway-lua-test

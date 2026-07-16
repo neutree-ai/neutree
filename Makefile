@@ -212,6 +212,16 @@ e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
 	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout 6h ./tests/e2e/... \
 		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips --ginkgo.timeout=$(E2E_TIMEOUT) $(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
 
+##@ Gateway Lua Testing
+
+GATEWAY_PLUGIN_DIR ?= gateway/kong/plugins/neutree-ai-gateway
+GATEWAY_LUA_TEST_IMAGE ?= neutree-gateway-lua-test:latest
+
+.PHONY: gateway-lua-test
+gateway-lua-test: ## Run neutree-ai-gateway Lua unit tests (LuaJIT + busted, in Docker)
+	docker build -q -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec >/dev/null
+	docker run --rm -v $(CURDIR)/$(GATEWAY_PLUGIN_DIR):/plugin -w /plugin $(GATEWAY_LUA_TEST_IMAGE) sh spec/run.sh
+
 ##@ Database Testing
 
 .PHONY: db-test

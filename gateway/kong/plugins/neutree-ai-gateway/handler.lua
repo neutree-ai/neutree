@@ -4,6 +4,30 @@ local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 
+-- JSON array/object policy (NEU-551).
+--
+-- An empty Lua table is ambiguous: plain lua-cjson decodes both JSON `[]` and
+-- `{}` into one empty table, and encodes every empty table back as `{}`. That
+-- silently turns a client's `"required": []` (or any empty array in a tool
+-- schema) into `"required": {}`, which upstreams reject with 400
+-- ({} is not of type "array"). Two rules resolve it, one per direction:
+--
+--   1. Tables decoded FROM the client body: enable array_mt on decode so
+--      decoded JSON arrays stay arrays across a re-encode (see access(), which
+--      decodes/re-encodes the body on the model-mapping paths). Genuine empty
+--      objects still encode as `{}`. This one setting covers every decode path.
+--      It is per-worker; the OpenResty cjson fork shares it with `cjson.safe`.
+--
+--   2. Lists we build OURSELVES and then encode: rule 1 cannot help these, so
+--      construct them with json_array() below. It tags the table with array_mt
+--      so it serialises as `[]` even when empty. Use it for ANY list this
+--      plugin emits that could be empty (stream events, model lists, ...).
+cjson.decode_array_with_array_mt(true)
+
+local function json_array(t)
+    return setmetatable(t or {}, cjson.array_mt)
+end
+
 local AIGatewayHandler = {
     PRIORITY = 900,
     VERSION = "0.0.1",
@@ -237,7 +261,7 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        local models = {}
+        local models = json_array()
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -257,7 +281,7 @@ local function maybe_return_model_list(conf, suffix)
 
     if is_anthropic_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
-        local models = {}
+        local models = json_array()
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
                 models[#models + 1] = {
@@ -692,7 +716,9 @@ local function make_message_start(request_model, input_tokens)
             type = "message",
             role = "assistant",
             model = request_model or "unknown",
-            content = {},
+            -- Anthropic's message_start always carries content as an empty JSON
+            -- array `[]`, never `{}`. json_array() keeps it an array.
+            content = json_array(),
             stop_reason = cjson.null,
             stop_sequence = cjson.null,
             usage = {
@@ -1515,5 +1541,19 @@ function AIGatewayHandler:log(conf)
     usage.cost = kong.ctx.plugin.cost_usd
     kong.log.set_serialize_value("ai.statistics.usage", usage)
 end
+
+-- Internal helpers exposed for unit tests only (spec/handler_spec.lua). Not part
+-- of the plugin's runtime contract; do not use from other modules.
+AIGatewayHandler._TEST = {
+    json_array = json_array,
+    is_empty_table = is_empty_table,
+    convert_tool_choice = convert_tool_choice,
+    convert_tools = convert_tools,
+    convert_messages = convert_messages,
+    convert_request = convert_request,
+    convert_response = convert_response,
+    make_message_start = make_message_start,
+    anthropic_usage_from_openai = anthropic_usage_from_openai,
+}
 
 return AIGatewayHandler
