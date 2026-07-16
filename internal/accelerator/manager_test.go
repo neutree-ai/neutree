@@ -1,6 +1,7 @@
 package accelerator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/klog/v2"
 )
 
 func TestManagerGetAcceleratorProfile(t *testing.T) {
@@ -75,11 +77,17 @@ func TestManagerGetStaticNodeRuntimeConfigUsesTypeAwareResolver(t *testing.T) {
 
 func TestNewManagerRegistersInjectedInternalPlugin(t *testing.T) {
 	injected := &fakeStaticNodeAcceleratorPlugin{}
+	var logs bytes.Buffer
+	klogState := klog.CaptureState()
+	klog.LogToStderr(false)
+	klog.SetOutput(&logs)
+	t.Cleanup(klogState.Restore)
 
 	m, err := NewManagerWithPlugins(gin.New(), injected)
 
 	require.NoError(t, err)
 	assert.Contains(t, m.SupportPlugins(), injected.Resource())
+	assert.Contains(t, logs.String(), "Register internal accelerator plugin: "+injected.Resource())
 }
 
 func TestNewManagerCreatesDefaultPlugins(t *testing.T) {

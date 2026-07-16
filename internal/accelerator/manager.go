@@ -119,6 +119,8 @@ func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
 		lastRegisterTime: time.Now(),
 	})
 
+	klog.Infof("Register internal accelerator plugin: %s", p.Resource())
+
 	return nil
 }
 
