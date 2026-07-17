@@ -212,8 +212,10 @@ func TestList_IncludeBodyReassemblesInOneBatch(t *testing.T) {
 
 func TestList_WithoutBodySkipsChunkFetch(t *testing.T) {
 	// Metadata-only pages never trigger chunk fetches, even when the page
-	// contains chunked records (their metadata is not even projected).
-	page := `{"request_id":"req-a","workspace":"ws1","response_status":"200"}` + "\n"
+	// contains chunked records (their chunk metadata is not even projected) —
+	// but the body_truncated flag IS projected, so truncated traces stay
+	// recognizable in the list view.
+	page := `{"request_id":"req-a","workspace":"ws1","response_status":"200","body_truncated":"true"}` + "\n"
 
 	fake := &fakeVL{responses: []string{page}}
 	server := fake.server(t)
@@ -225,8 +227,10 @@ func TestList_WithoutBodySkipsChunkFetch(t *testing.T) {
 	items, err := store.List(`workspace:="ws1"`, traceFilters{}, 50, false, timeWindow{})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
+	assert.True(t, items[0].BodyTruncated)
 	require.Len(t, fake.queries, 1)
 	assert.NotContains(t, fake.queries[0], "body_chunked")
+	assert.Contains(t, fake.queries[0], "body_truncated")
 }
 
 func TestAssembleBody(t *testing.T) {

@@ -43,12 +43,14 @@ func newTraceStore(deps *Dependencies) *traceStore {
 }
 
 // listProjection is the LogsQL `fields` projection for the list query: every
-// metadata column the list view renders, deliberately excluding the large
-// request_body / response_body fields so list responses stay small.
+// metadata column the list view renders — including the body_truncated flag,
+// so truncated traces are recognizable without fetching bodies — while
+// deliberately excluding the large request_body / response_body fields so
+// list responses stay small.
 const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
 	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
-	"finish_reason, stream, user_agent, duration_ms"
+	"finish_reason, stream, user_agent, duration_ms, body_truncated"
 
 // fullProjection extends listProjection with the large request/response body
 // columns plus the chunked-body metadata needed to reassemble oversized
@@ -56,7 +58,7 @@ const listProjection = "_time, request_id, workspace, endpoint_type, " +
 // the CLI export, which fetches bodies inline to avoid an N+1 per-record
 // detail lookup.
 const fullProjection = listProjection + ", request_body, response_body, " +
-	"body_chunked, body_truncated, request_chunks, response_chunks"
+	"body_chunked, request_chunks, response_chunks"
 
 // Chunked-body storage schema. Oversized request/response bodies would exceed
 // VictoriaLogs' hard-coded 2MiB per-record cap, so Vector splits them into

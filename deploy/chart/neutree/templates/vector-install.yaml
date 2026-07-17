@@ -147,6 +147,10 @@ data:
           # into companion chunk records (~1MiB each) that neutree-api's trace
           # store reassembles on read. Chunks share the parent's timestamp and
           # stream fields so they live in the same stream and expire together.
+          # Chunking additionally requires a non-empty string request id: it is the
+          # grouping key that ties chunks back to their parent, so a missing or
+          # non-string id falls back to the single-record path (as before this
+          # change) rather than risk cross-trace chunk mixing.
           #
           # chunk_data is base64: chunks() splits on raw byte offsets, which can
           # cut a multi-byte UTF-8 character in half — the halves would be
@@ -154,7 +158,7 @@ data:
           # never be reassembled byte-exact. Base64 text is ASCII, so any byte
           # split survives; 1MiB is a multiple of 4, so every chunk (and any
           # truncated prefix of chunks) stays independently valid base64.
-          if length(req_body) + length(resp_body) <= 1572864 {
+          if length(req_body) + length(resp_body) <= 1572864 || !is_string(.request.id) || .request.id == "" {
               . = rec
           } else {
               chunk_size = 1048576 # 1MiB of base64 text (~768KiB of body) per chunk record
