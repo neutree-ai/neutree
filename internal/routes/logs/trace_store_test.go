@@ -203,6 +203,9 @@ func TestList_IncludeBodyReassemblesInOneBatch(t *testing.T) {
 
 	require.Len(t, fake.queries, 2, "all chunked records share one chunk fetch")
 	assert.Contains(t, fake.queries[1], `request_id:in("req-a","req-c")`)
+	// The fetch limit is inferred from the parents' chunk counts (1+1 and
+	// 1+0), not from any constant mirroring Vector's max_chunks.
+	assert.Contains(t, fake.queries[1], "| limit 3")
 	// Body-mode list queries must project the chunk metadata columns.
 	assert.Contains(t, fake.queries[0], "body_chunked")
 }

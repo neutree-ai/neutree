@@ -61,9 +61,11 @@ const fullProjection = listProjection + ", request_body, response_body, " +
 // Chunked-body storage schema. Oversized request/response bodies would exceed
 // VictoriaLogs' hard-coded 2MiB per-record cap, so Vector splits them into
 // companion "chunk" records that this store reassembles on read. The field
-// names and limits below form a contract with Vector's prepare_trace_payload
-// transform (deploy/docker/neutree-core/vector/vector.yml and the chart copy
-// in vector-install.yaml). Keep both sides in sync.
+// names below form a contract with Vector's prepare_trace_payload transform
+// (deploy/docker/neutree-core/vector/vector.yml and the chart copy in
+// vector-install.yaml) — keep both sides in sync. Sizing (chunk_size,
+// max_chunks) is Vector's alone: the store learns per-trace chunk counts from
+// the parent record itself.
 const (
 	// chunkRecordType is the record_type value marking a chunk record. Trace
 	// records (including all pre-chunking data) carry no record_type at all,
@@ -72,9 +74,6 @@ const (
 	// chunkKindRequest / chunkKindResponse say which body a chunk belongs to.
 	chunkKindRequest  = "request"
 	chunkKindResponse = "response"
-	// maxChunksPerBody mirrors Vector's max_chunks: the most chunk records a
-	// single body can produce (longer bodies are truncated at ingestion).
-	maxChunksPerBody = 16
 )
 
 // traceFilters are the caller-facing list filters. The store translates them
@@ -244,14 +243,29 @@ func (s *traceStore) reassembleBodies(scope string, traces []*AITrace) error {
 		return nil
 	}
 
+	// The parents' own chunk counts say exactly how many chunk rows to expect
+	// — they live in the same record as the body_chunked flag, so they are
+	// exactly as trustworthy, and the store needs no mirror of Vector's
+	// max_chunks limit.
 	ids := make([]string, 0, len(chunked))
+	expected := 0
+
 	for _, t := range chunked {
 		ids = append(ids, t.RequestID)
+		expected += t.requestChunks + t.responseChunks
 	}
 
-	byID, err := s.fetchChunks(scope, ids)
-	if err != nil {
-		return err
+	// expected == 0 means every parent recorded zero chunks; there is nothing
+	// to fetch (and LogsQL would read `limit 0` as unlimited).
+	var byID map[string][]traceChunk
+
+	if expected > 0 {
+		var err error
+
+		byID, err = s.fetchChunks(scope, ids, expected)
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, t := range chunked {
@@ -279,10 +293,13 @@ func (s *traceStore) reassembleBodies(scope string, traces []*AITrace) error {
 }
 
 // fetchChunks returns the chunk records for the given request ids, grouped by
-// request id. The query is scoped like any trace query — a caller who may not
-// read a trace can never read its chunks — but deliberately bypasses
+// request id. `expected` is the exact row count the parents recorded; stray
+// extra rows (e.g. a re-ingested duplicate) push a real chunk past the limit,
+// which assembleBody then reports as body_incomplete — the designed
+// degradation. The query is scoped like any trace query — a caller who may
+// not read a trace can never read its chunks — but deliberately bypasses
 // baseQuery, which exists to exclude exactly these records.
-func (s *traceStore) fetchChunks(scope string, requestIDs []string) (map[string][]traceChunk, error) {
+func (s *traceStore) fetchChunks(scope string, requestIDs []string, expected int) (map[string][]traceChunk, error) {
 	quoted := make([]string, 0, len(requestIDs))
 	for _, id := range requestIDs {
 		quoted = append(quoted, logsQLQuoteValue(id))
@@ -291,7 +308,7 @@ func (s *traceStore) fetchChunks(scope string, requestIDs []string) (map[string]
 	query := fmt.Sprintf(
 		"%s record_type:=%s request_id:in(%s) | fields request_id, chunk_kind, chunk_seq, chunk_data | limit %d",
 		scope, logsQLQuoteValue(chunkRecordType), strings.Join(quoted, ","),
-		len(requestIDs)*2*maxChunksPerBody,
+		expected,
 	)
 
 	resp, err := s.selectQuery(query, url.Values{})
