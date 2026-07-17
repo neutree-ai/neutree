@@ -366,6 +366,13 @@ func (s *traceStore) fetchChunks(scope string, requestIDs []string, expected int
 // ranges together. ok is false when any chunk of the recorded count is
 // missing, duplicated, or undecodable.
 func assembleBody(parts []traceChunk, want int) (string, bool) {
+	// A parent that recorded zero chunks has an empty body by definition;
+	// stray rows (e.g. re-ingested duplicates sharing the request id) must
+	// not resurrect content the parent says does not exist.
+	if want == 0 {
+		return "", len(parts) == 0
+	}
+
 	sort.Slice(parts, func(i, j int) bool { return parts[i].seq < parts[j].seq })
 
 	var b strings.Builder
@@ -384,7 +391,10 @@ func assembleBody(parts []traceChunk, want int) (string, bool) {
 
 	decoded, err := base64.StdEncoding.DecodeString(b.String())
 	if err != nil {
-		return "", false
+		// DecodeString hands back the bytes it decoded before the error, so a
+		// corrupt chunk degrades to the longest decodable prefix instead of
+		// wiping out the valid chunks before it.
+		return string(decoded), false
 	}
 
 	return string(decoded), got == want && len(parts) == want

@@ -250,6 +250,11 @@ func TestAssembleBody(t *testing.T) {
 		{"missing middle keeps prefix", []traceChunk{{seq: 0, data: b64("abc")}, {seq: 2, data: b64("ghi")}}, 3, "abc", false},
 		{"duplicate seq", []traceChunk{{seq: 0, data: b64("abc")}, {seq: 0, data: b64("abc")}}, 2, "abc", false},
 		{"undecodable", []traceChunk{{seq: 0, data: "!!!not-base64!!!"}}, 1, "", false},
+		// A corrupt later chunk degrades to the longest decodable prefix
+		// rather than wiping out the valid chunks before it.
+		{"corrupt tail keeps prefix", []traceChunk{{seq: 0, data: b64("abc")}, {seq: 1, data: "###"}}, 2, "abc", false},
+		// Stray rows must not resurrect a body the parent recorded as empty.
+		{"stray parts with want zero", []traceChunk{{seq: 0, data: b64("ghost")}}, 0, "", false},
 	}
 
 	for _, tc := range cases {
