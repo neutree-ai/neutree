@@ -53,6 +53,13 @@ type AITrace struct {
 	DurationMs       *int   `json:"duration_ms,omitempty"`
 	RequestBody      string `json:"request_body,omitempty"`
 	ResponseBody     string `json:"response_body,omitempty"`
+
+	// BodyTruncated marks a record whose bodies exceeded the server's storage
+	// cap and were cut off at ingestion; BodyIncomplete marks one for which
+	// part of the stored body could not be read back. In both cases the bodies
+	// hold a prefix of the originals.
+	BodyTruncated  bool `json:"body_truncated,omitempty"`
+	BodyIncomplete bool `json:"body_incomplete,omitempty"`
 }
 
 // TraceListFilters are the optional server-side filters for a list query. Empty

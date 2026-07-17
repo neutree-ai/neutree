@@ -100,11 +100,19 @@ data:
         inputs:
           - filter_trace_logs
         source: |
-          . = {
+          # Field names and limits below form a contract with the query side:
+          # internal/routes/logs/trace_store.go reassembles chunked bodies and
+          # filters record_type="chunk" out of every trace query. Keep in sync.
+          rid = .request.id || "ai-trace"
+          rid = to_string(rid) ?? "ai-trace"
+          req_body = to_string(.ai."trace".request_body) ?? ""
+          resp_body = to_string(.ai."trace".response_body) ?? ""
+
+          rec = {
               # VictoriaLogs rejects records without a non-empty `_msg`. Failed
               # requests often carry no response body, so `_msg` must be a field
               # that is always populated — never the (optional) response body.
-              "_msg":           .request.id || "ai-trace",
+              "_msg":           rid,
               "request_id":     .request.id,
               "timestamp":      .started_at,
               "workspace":      .extracted_data.workspace || "",
@@ -128,8 +136,84 @@ data:
               "stream":         .ai."trace".stream || false,
               "user_agent":     .request.headers."user-agent" || "",
               "duration_ms":    .latencies.request,
-              "request_body":   .ai."trace".request_body || "",
-              "response_body":  .ai."trace".response_body || "",
+              "request_body":   req_body,
+              "response_body":  resp_body,
+          }
+
+          # VictoriaLogs hard-drops any record whose estimated JSON size exceeds
+          # 2MiB (maxUncompressedBlockSize — hardcoded upstream, cannot be raised;
+          # https://docs.victoriametrics.com/victorialogs/faq/). Bodies that fit
+          # comfortably below that ship as a single record; larger bodies are split
+          # into companion chunk records (~1MiB each) that neutree-api's trace
+          # store reassembles on read. Chunks share the parent's timestamp and
+          # stream fields so they live in the same stream and expire together.
+          # Chunking additionally requires a non-empty string request id: it is the
+          # grouping key that ties chunks back to their parent, so a missing or
+          # non-string id falls back to the single-record path (as before this
+          # change) rather than risk cross-trace chunk mixing.
+          #
+          # chunk_data is base64: chunks() splits on raw byte offsets, which can
+          # cut a multi-byte UTF-8 character in half — the halves would be
+          # lossily replaced (U+FFFD) during JSON encoding and the body could
+          # never be reassembled byte-exact. Base64 text is ASCII, so any byte
+          # split survives; 1MiB is a multiple of 4, so every chunk (and any
+          # truncated prefix of chunks) stays independently valid base64.
+          if length(req_body) + length(resp_body) <= 1572864 || !is_string(.request.id) || .request.id == "" {
+              . = rec
+          } else {
+              chunk_size = 1048576 # 1MiB of base64 text (~768KiB of body) per chunk record
+              max_chunks = 16      # per body (~12MiB of body); anything longer is truncated
+
+              req_chunks = chunks(encode_base64(req_body), chunk_size)
+              resp_chunks = chunks(encode_base64(resp_body), chunk_size)
+
+              truncated = false
+              if length(req_chunks) > max_chunks {
+                  req_chunks = slice(req_chunks, 0, max_chunks) ?? req_chunks
+                  truncated = true
+              }
+              if length(resp_chunks) > max_chunks {
+                  resp_chunks = slice(resp_chunks, 0, max_chunks) ?? resp_chunks
+                  truncated = true
+              }
+
+              rec.request_body = ""
+              rec.response_body = ""
+              rec.body_chunked = true
+              rec.body_truncated = truncated
+              rec.request_chunks = length(req_chunks)
+              rec.response_chunks = length(resp_chunks)
+
+              events = [rec]
+              for_each(array!(req_chunks)) -> |i, chunk| {
+                  events = push(events, {
+                      "_msg":          rid + "#request." + to_string(i),
+                      "record_type":   "chunk",
+                      "request_id":    rec.request_id,
+                      "timestamp":     rec.timestamp,
+                      "workspace":     rec.workspace,
+                      "endpoint_type": rec.endpoint_type,
+                      "endpoint_name": rec.endpoint_name,
+                      "chunk_kind":    "request",
+                      "chunk_seq":     i,
+                      "chunk_data":    chunk,
+                  })
+              }
+              for_each(array!(resp_chunks)) -> |i, chunk| {
+                  events = push(events, {
+                      "_msg":          rid + "#response." + to_string(i),
+                      "record_type":   "chunk",
+                      "request_id":    rec.request_id,
+                      "timestamp":     rec.timestamp,
+                      "workspace":     rec.workspace,
+                      "endpoint_type": rec.endpoint_type,
+                      "endpoint_name": rec.endpoint_name,
+                      "chunk_kind":    "response",
+                      "chunk_seq":     i,
+                      "chunk_data":    chunk,
+                  })
+              }
+              . = events
           }
       {{- end }}
     sinks:

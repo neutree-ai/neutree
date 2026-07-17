@@ -122,7 +122,7 @@ var csvHeader = []string{
 	"api_key_id", "request_uri", "request_model", "response_model",
 	"response_status", "prompt_tokens", "completion_tokens", "total_tokens",
 	"finish_reason", "stream", "user_agent", "duration_ms",
-	"request_body", "response_body",
+	"request_body", "response_body", "body_truncated", "body_incomplete",
 }
 
 // traceCSVRow renders a trace as a CSV row. Body columns are empty unless the
@@ -135,6 +135,7 @@ func traceCSVRow(t client.AITrace) []string {
 		intPtrStr(t.PromptTokens), intPtrStr(t.CompletionTokens), intPtrStr(t.TotalTokens),
 		t.FinishReason, strconv.FormatBool(t.Stream), t.UserAgent, intPtrStr(t.DurationMs),
 		t.RequestBody, t.ResponseBody,
+		strconv.FormatBool(t.BodyTruncated), strconv.FormatBool(t.BodyIncomplete),
 	}
 }
 
