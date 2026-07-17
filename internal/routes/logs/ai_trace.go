@@ -40,11 +40,30 @@ type AITrace struct {
 	DurationMs       *int   `json:"duration_ms,omitempty"`
 	RequestBody      string `json:"request_body,omitempty"`
 	ResponseBody     string `json:"response_body,omitempty"`
+
+	// BodyTruncated marks a record whose bodies exceeded the ingestion cap and
+	// were cut off by Vector; the stored bodies are a prefix of the originals.
+	BodyTruncated bool `json:"body_truncated,omitempty"`
+	// BodyIncomplete marks a chunked record for which some body chunks could
+	// not be read back (partial ingestion loss); the returned bodies hold the
+	// longest decodable prefix.
+	BodyIncomplete bool `json:"body_incomplete,omitempty"`
+
+	// Chunked-body storage metadata, private to the trace store: whether this
+	// record's bodies live in companion chunk records, and how many each body
+	// was split into. Never serialized; the API always returns whole bodies.
+	bodyChunked    bool
+	requestChunks  int
+	responseChunks int
 }
 
 // stringTrue is the literal a boolean-valued string (a query flag, or a
 // stringified VictoriaLogs field) must equal to be considered on.
 const stringTrue = "true"
+
+// includeBodyMaxLimit caps the page size of body-carrying list queries
+// (?include_body=true); metadata-only pages may go up to 500.
+const includeBodyMaxLimit = 50
 
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
@@ -386,6 +405,15 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		// ?include_body=true so bodies come back inline, avoiding a per-record
 		// detail lookup.
 		includeBody := c.Query("include_body") == stringTrue
+
+		// Body-carrying pages are bounded tighter: with bodies of up to tens
+		// of MiB per record, a 500-record page could produce a GiB-scale
+		// response. Clamping here is transparent to pagers — nextBefore is
+		// derived from the effective limit, so cursoring still walks the full
+		// result set in smaller pages.
+		if includeBody && limit > includeBodyMaxLimit {
+			limit = includeBodyMaxLimit
+		}
 
 		window := timeWindow{Start: strings.TrimSpace(c.Query("start"))}
 		// `before` is the inclusive upper bound from the previous page's last

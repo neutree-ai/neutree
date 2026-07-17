@@ -577,3 +577,39 @@ func TestHandleAITraceKeyStats_DecodesNDJSON(t *testing.T) {
 	assert.Equal(t, "k2", resp.Keys[1].APIKeyID)
 	assert.Equal(t, int64(52), resp.Keys[1].Requests)
 }
+
+func TestHandleListAITraces_IncludeBodyClampsLimit(t *testing.T) {
+	// Body-carrying pages are clamped to includeBodyMaxLimit; metadata-only
+	// pages keep the requested size.
+	cases := []struct {
+		name      string
+		rawQuery  string
+		wantLimit string
+	}{
+		{"metadata keeps 500", "limit=500", "| limit 500"},
+		{"body clamps to 50", "limit=500&include_body=true", "| limit 50"},
+		{"body below cap untouched", "limit=10&include_body=true", "| limit 10"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query().Get("query")
+				w.Header().Set("Content-Type", "application/x-ndjson")
+			}))
+			defer server.Close()
+
+			deps := &Dependencies{AITraceStoreURL: server.URL, HTTPClient: &util.DefaultHTTPClient{}}
+
+			c, w := traceCtx("user-1", "ws1")
+			c.Request = httptest.NewRequest("GET", "/?"+tc.rawQuery, nil)
+
+			handleListAITraces(deps)(c)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, gotQuery, tc.wantLimit, "query: %s", gotQuery)
+		})
+	}
+}

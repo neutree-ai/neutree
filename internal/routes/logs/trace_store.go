@@ -2,10 +2,12 @@ package logs
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,10 +51,31 @@ const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"finish_reason, stream, user_agent, duration_ms"
 
 // fullProjection extends listProjection with the large request/response body
-// columns. Used only when the caller opts in via ?include_body=true — chiefly
+// columns plus the chunked-body metadata needed to reassemble oversized
+// bodies. Used only when the caller opts in via ?include_body=true — chiefly
 // the CLI export, which fetches bodies inline to avoid an N+1 per-record
 // detail lookup.
-const fullProjection = listProjection + ", request_body, response_body"
+const fullProjection = listProjection + ", request_body, response_body, " +
+	"body_chunked, body_truncated, request_chunks, response_chunks"
+
+// Chunked-body storage schema. Oversized request/response bodies would exceed
+// VictoriaLogs' hard-coded 2MiB per-record cap, so Vector splits them into
+// companion "chunk" records that this store reassembles on read. The field
+// names and limits below form a contract with Vector's prepare_trace_payload
+// transform (deploy/docker/neutree-core/vector/vector.yml and the chart copy
+// in vector-install.yaml). Keep both sides in sync.
+const (
+	// chunkRecordType is the record_type value marking a chunk record. Trace
+	// records (including all pre-chunking data) carry no record_type at all,
+	// which is why every trace query filters with a negative match.
+	chunkRecordType = "chunk"
+	// chunkKindRequest / chunkKindResponse say which body a chunk belongs to.
+	chunkKindRequest  = "request"
+	chunkKindResponse = "response"
+	// maxChunksPerBody mirrors Vector's max_chunks: the most chunk records a
+	// single body can produce (longer bodies are truncated at ingestion).
+	maxChunksPerBody = 16
+)
 
 // traceFilters are the caller-facing list filters. The store translates them
 // to LogsQL; handlers never build query fragments themselves.
@@ -121,11 +144,13 @@ func (w timeWindow) params() url.Values {
 	return params
 }
 
-// baseQuery prepends the permission scope to every query the store issues.
-// Storage-level record filtering (e.g. excluding non-trace record types)
-// belongs here so no query path can forget it.
+// baseQuery prepends the permission scope to every query the store issues and
+// excludes chunk records — an internal storage detail that must never surface
+// as a trace (it would inflate list pages, stats counts, and per-key
+// aggregates). The negative match keeps pre-chunking records visible: they
+// carry no record_type field, so `NOT record_type:="chunk"` passes them.
 func (s *traceStore) baseQuery(scope string) string {
-	return scope
+	return scope + " NOT record_type:=" + logsQLQuoteValue(chunkRecordType)
 }
 
 // List returns up to limit traces, newest first. Bodies are included only
@@ -143,7 +168,29 @@ func (s *traceStore) List(scope string, f traceFilters, limit int, includeBody b
 		" | sort by (_time) desc | limit " + strconv.Itoa(limit) +
 		" | fields " + projection
 
-	return s.queryTraces(query, w.params())
+	items, err := s.queryTraces(query, w.params())
+	if err != nil {
+		return nil, err
+	}
+
+	// A body-carrying page must hand back whole bodies: reassemble any
+	// chunked records in one batched chunk fetch. Without includeBody the
+	// projection omits the chunk metadata, so nothing is flagged here.
+	if includeBody {
+		chunked := make([]*AITrace, 0)
+
+		for i := range items {
+			if items[i].bodyChunked {
+				chunked = append(chunked, &items[i])
+			}
+		}
+
+		if err := s.reassembleBodies(scope, chunked); err != nil {
+			return nil, err
+		}
+	}
+
+	return items, nil
 }
 
 // Get returns the single trace with the given request id — including the full
@@ -164,7 +211,164 @@ func (s *traceStore) Get(scope, requestID string) (*AITrace, error) {
 		return nil, nil
 	}
 
+	if err := s.reassembleBodies(scope, []*AITrace{&items[0]}); err != nil {
+		return nil, err
+	}
+
 	return &items[0], nil
+}
+
+// traceChunk is one decoded chunk record.
+type traceChunk struct {
+	kind string
+	seq  int
+	data string // base64 slice of the body
+}
+
+// reassembleBodies fetches the chunk records for every chunked trace in the
+// slice (one batched query) and reconstructs their request/response bodies in
+// place. Traces not flagged as chunked are left untouched. Chunk records have
+// no transactional tie to their parent, so a partially ingested trace is
+// degraded — bodies hold the longest decodable prefix and BodyIncomplete is
+// set — rather than failing the whole read.
+func (s *traceStore) reassembleBodies(scope string, traces []*AITrace) error {
+	chunked := make([]*AITrace, 0, len(traces))
+
+	for _, t := range traces {
+		if t.bodyChunked {
+			chunked = append(chunked, t)
+		}
+	}
+
+	if len(chunked) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(chunked))
+	for _, t := range chunked {
+		ids = append(ids, t.RequestID)
+	}
+
+	byID, err := s.fetchChunks(scope, ids)
+	if err != nil {
+		return err
+	}
+
+	for _, t := range chunked {
+		chunks := byID[t.RequestID]
+
+		reqParts := make([]traceChunk, 0, t.requestChunks)
+		respParts := make([]traceChunk, 0, t.responseChunks)
+
+		for _, ch := range chunks {
+			switch ch.kind {
+			case chunkKindRequest:
+				reqParts = append(reqParts, ch)
+			case chunkKindResponse:
+				respParts = append(respParts, ch)
+			}
+		}
+
+		var reqOK, respOK bool
+		t.RequestBody, reqOK = assembleBody(reqParts, t.requestChunks)
+		t.ResponseBody, respOK = assembleBody(respParts, t.responseChunks)
+		t.BodyIncomplete = !reqOK || !respOK
+	}
+
+	return nil
+}
+
+// fetchChunks returns the chunk records for the given request ids, grouped by
+// request id. The query is scoped like any trace query — a caller who may not
+// read a trace can never read its chunks — but deliberately bypasses
+// baseQuery, which exists to exclude exactly these records.
+func (s *traceStore) fetchChunks(scope string, requestIDs []string) (map[string][]traceChunk, error) {
+	quoted := make([]string, 0, len(requestIDs))
+	for _, id := range requestIDs {
+		quoted = append(quoted, logsQLQuoteValue(id))
+	}
+
+	query := fmt.Sprintf(
+		"%s record_type:=%s request_id:in(%s) | fields request_id, chunk_kind, chunk_seq, chunk_data | limit %d",
+		scope, logsQLQuoteValue(chunkRecordType), strings.Join(quoted, ","),
+		len(requestIDs)*2*maxChunksPerBody,
+	)
+
+	resp, err := s.selectQuery(query, url.Values{})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	out := make(map[string][]traceChunk, len(requestIDs))
+	scanner := bufio.NewScanner(resp.Body)
+	// Each line carries up to ~1MiB of base64 body data plus JSON escaping.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var r struct {
+			RequestID string `json:"request_id"`
+			ChunkKind string `json:"chunk_kind"`
+			ChunkSeq  string `json:"chunk_seq"`
+			ChunkData string `json:"chunk_data"`
+		}
+
+		if err := json.Unmarshal(line, &r); err != nil {
+			continue
+		}
+
+		seq, err := strconv.Atoi(r.ChunkSeq)
+		if err != nil {
+			continue
+		}
+
+		out[r.RequestID] = append(out[r.RequestID], traceChunk{
+			kind: r.ChunkKind,
+			seq:  seq,
+			data: r.ChunkData,
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan victorialogs response: %w", err)
+	}
+
+	return out, nil
+}
+
+// assembleBody reconstructs one body from its chunks. Only the contiguous
+// prefix (seq 0, 1, 2, ...) is used so the concatenated base64 always decodes
+// to an exact prefix of the original body — a gap must not splice unrelated
+// ranges together. ok is false when any chunk of the recorded count is
+// missing, duplicated, or undecodable.
+func assembleBody(parts []traceChunk, want int) (string, bool) {
+	sort.Slice(parts, func(i, j int) bool { return parts[i].seq < parts[j].seq })
+
+	var b strings.Builder
+
+	got := 0
+
+	for _, p := range parts {
+		if p.seq != got {
+			break
+		}
+
+		b.WriteString(p.data)
+
+		got++
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(b.String())
+	if err != nil {
+		return "", false
+	}
+
+	return string(decoded), got == want && len(parts) == want
 }
 
 // DayCounts returns per-UTC-day trace counts for [start, end), keyed by
@@ -405,6 +609,10 @@ type vlRecord struct {
 	DurationMs       string `json:"duration_ms"`
 	RequestBody      string `json:"request_body"`
 	ResponseBody     string `json:"response_body"`
+	BodyChunked      string `json:"body_chunked"`
+	BodyTruncated    string `json:"body_truncated"`
+	RequestChunks    string `json:"request_chunks"`
+	ResponseChunks   string `json:"response_chunks"`
 }
 
 func decodeVLRecord(line []byte) (AITrace, bool) {
@@ -428,7 +636,18 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		UserAgent:     r.UserAgent,
 		RequestBody:   r.RequestBody,
 		ResponseBody:  r.ResponseBody,
+		BodyTruncated: r.BodyTruncated == stringTrue,
+		bodyChunked:   r.BodyChunked == stringTrue,
 	}
+
+	if n, err := strconv.Atoi(r.RequestChunks); err == nil {
+		t.requestChunks = n
+	}
+
+	if n, err := strconv.Atoi(r.ResponseChunks); err == nil {
+		t.responseChunks = n
+	}
+
 	if r.Time == "" {
 		t.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	}

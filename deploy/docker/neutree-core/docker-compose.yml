@@ -322,8 +322,12 @@ services:
       # Log retention period. Defaults to 30d; override at deploy time with
       # `neutree-cli launch neutree-core --victorialogs-retention-period <period>`.
       - -retentionPeriod={{ .VictoriaLogsRetentionPeriod }}
-      # AI-trace request/response bodies can be large; raise the per-line
-      # ingest limit to 16MiB so VictoriaLogs does not drop them.
+      # Raise the HTTP line-reader limit so large AI-trace lines are not
+      # rejected at ingestion. Note this does NOT lift VictoriaLogs' separate
+      # hard-coded 2MiB per-record storage cap — records between 2MiB and this
+      # limit would still be silently dropped by the storage layer. Oversized
+      # request/response bodies are therefore split into ~1MiB chunk records
+      # by Vector (see vector/vector.yml, prepare_trace_payload).
       - -insert.maxLineSizeBytes=16777216
     volumes:
       - vl_data:/victoria-logs-data
