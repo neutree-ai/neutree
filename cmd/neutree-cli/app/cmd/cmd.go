@@ -68,7 +68,7 @@ Examples:
 func Execute() {
 	err := NewNeutreeCliCommand().Execute()
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 }
