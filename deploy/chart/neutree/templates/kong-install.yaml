@@ -344,6 +344,11 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong
+      annotations:
+        checksum/neutree-ai-gateway-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | sha256sum | quote }}
+        checksum/neutree-ai-statistics-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-statistics/*").AsConfig | sha256sum | quote }}
+        checksum/neutree-ai-access-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-access/*").AsConfig | sha256sum | quote }}
+        checksum/neutree-ai-quota-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-quota/*").AsConfig | sha256sum | quote }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
