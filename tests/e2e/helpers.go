@@ -1191,6 +1191,15 @@ func setupK8sCluster(prefix string) (clusterName string) {
 	By("Setting up image registry")
 	SetupImageRegistry()
 
+	// Reuse an existing Running cluster when configured (shared GPU envs where
+	// a second cluster on the same nodes would conflict on host ports / GPU).
+	if existing := profile.Kubernetes.ExistingCluster; existing != "" {
+		By("Reusing existing K8s cluster: " + existing)
+		ch := NewClusterHelper()
+		ch.EventuallyInPhase(existing, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
+		return existing
+	}
+
 	kubeconfig := requireK8sProfile()
 	clusterName = prefix + Cfg.RunID
 
@@ -1216,7 +1225,10 @@ func setupK8sCluster(prefix string) (clusterName string) {
 func teardownCluster(clusterName string) {
 	ch := NewClusterHelper()
 
-	ch.EnsureDeleted(clusterName)
+	// Never delete a reused pre-existing cluster — it is shared infrastructure.
+	if clusterName != profile.Kubernetes.ExistingCluster {
+		ch.EnsureDeleted(clusterName)
+	}
 
 	TeardownImageRegistry()
 }

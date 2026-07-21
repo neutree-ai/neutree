@@ -51,6 +51,11 @@ type Profile struct {
 	Kubernetes struct {
 		Kubeconfig       string `yaml:"kubeconfig"`
 		RouterAccessMode string `yaml:"router_access_mode"`
+		// ExistingCluster, when set, makes K8s-cluster-scoped tests reuse an
+		// already-Running Neutree cluster of that name instead of enrolling a
+		// fresh one. Needed for shared GPU environments where creating a second
+		// cluster on the same k8s nodes conflicts on host ports / GPU DCGM.
+		ExistingCluster string `yaml:"existing_cluster"`
 	} `yaml:"kubernetes"`
 
 	ImageRegistry struct {
