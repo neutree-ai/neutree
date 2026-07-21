@@ -2,9 +2,13 @@ package util
 
 import (
 	"bytes"
-	"html/template"
 	"os"
 	"strings"
+	// These helpers render deployment artifacts (compose YAML, Vector
+	// VRL, prometheus config) — never HTML. html/template would entity-escape
+	// content and parameter values (`<=` becomes `&lt;=`), corrupting VRL
+	// programs and any credential containing <, >, &, ' or ".
+	"text/template"
 
 	"github.com/pkg/errors"
 )
