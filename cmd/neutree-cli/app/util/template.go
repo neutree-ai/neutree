@@ -2,14 +2,20 @@ package util
 
 import (
 	"bytes"
-	"html/template"
 	"os"
 	"strings"
+	"text/template"
 
 	"github.com/pkg/errors"
 )
 
-// ParseTemplate validates and parses passed as argument template
+// ParseTemplate validates and parses passed as argument template.
+//
+// It renders deployment artifacts (compose YAML, Vector VRL, prometheus
+// config) — never HTML — so it must stay on text/template: html/template
+// entity-escapes content and parameter values (`<=` becomes `&lt;=`),
+// corrupting VRL programs and any credential containing <, >, &, ' or "
+// (NEU-583).
 func ParseTemplate(strtmpl string, obj interface{}) ([]byte, error) {
 	var buf bytes.Buffer
 

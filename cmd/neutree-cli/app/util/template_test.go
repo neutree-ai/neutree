@@ -192,3 +192,19 @@ func TestBatchParseTemplateFilesErrorCases(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// NEU-583 regression: the helpers render YAML/VRL deployment files, so they
+// must use text/template — html/template entity-escapes VRL operators
+// (`<=` → `&lt;=`) and special characters in parameter values, producing
+// configs Vector rejects (exit 78 restart loop).
+func TestParseTemplate_NoHTMLEscaping(t *testing.T) {
+	out, err := ParseTemplate(
+		`if length(req_body) + length(resp_body) <= 1572864 { pw = "{{.AdminPassword}}" }`,
+		map[string]string{"AdminPassword": `p<&'">w`},
+	)
+	assert.NoError(t, err)
+	assert.Contains(t, string(out), "<= 1572864")
+	assert.Contains(t, string(out), `p<&'">w`)
+	assert.NotContains(t, string(out), "&lt;")
+	assert.NotContains(t, string(out), "&amp;")
+}

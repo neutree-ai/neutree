@@ -154,6 +154,43 @@ func TestPrepareNeutreeCoreDeployConfig(t *testing.T) {
 	}
 }
 
+// NEU-583 regression: rendering the embedded manifests must not HTML-escape
+// the Vector VRL program — html/template turned `<=` into `&lt;=`, which
+// Vector rejects (exit 78 restart loop), silently disabling the NEU-539
+// chunking topology on Docker CP deployments.
+func TestPrepareNeutreeCoreDeployConfig_PreservesVRLOperators(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	for _, f := range []string{
+		filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"),
+		filepath.Join(tempDir, "neutree-core", "docker-compose.yml"),
+	} {
+		content, err := os.ReadFile(f)
+		require.NoError(t, err)
+		assert.NotContainsf(t, string(content), "&lt;", "HTML-escaped operator in %s", f)
+		assert.NotContainsf(t, string(content), "&amp;", "HTML-escaped ampersand in %s", f)
+		assert.NotContainsf(t, string(content), "&#", "HTML entity in %s", f)
+	}
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+	// The NEU-539 chunking threshold must survive rendering verbatim.
+	assert.Contains(t, string(vector), "<= 1572864")
+}
+
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 	tests := []struct {
 		name          string
