@@ -55,6 +55,7 @@ func currentStaticNodeAcceleratorStatus(node *v1.StaticNode) *v1.StaticNodeAccel
 
 func (r *Planner) runtimeProfile(
 	ctx context.Context,
+	cluster *v1.StaticNodeCluster,
 	accelerator v1.StaticNodeAcceleratorStatus,
 ) (*v1.AcceleratorProfile, error) {
 	if accelerator.Type == "" || accelerator.Type == v1.StaticNodeAcceleratorTypeCPU {
@@ -65,12 +66,52 @@ func (r *Planner) runtimeProfile(
 		return nil, errors.New("accelerator profile provider is required")
 	}
 
-	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
-	if err != nil {
-		return nil, err
+	if validator, ok := r.AcceleratorProfileProvider.(staticClusterVersionValidator); ok {
+		version := ""
+		if cluster != nil && cluster.Spec != nil {
+			version = cluster.Spec.Version
+		}
+
+		if err := validator.ValidateStaticClusterVersion(ctx, accelerator.Type, version); err != nil {
+			return nil, err
+		}
 	}
 
-	return profile, nil
+	profile, err := r.AcceleratorProfileProvider.GetAcceleratorProfile(ctx, accelerator.Type)
+	if err != nil || profile == nil {
+		return profile, err
+	}
+
+	provider, ok := r.AcceleratorProfileProvider.(staticNodeRuntimeConfigProvider)
+	if !ok {
+		return profile, nil
+	}
+
+	runtimeConfig, err := provider.GetStaticNodeRuntimeConfig(ctx, &accelerator)
+	if err != nil || runtimeConfig == nil {
+		return profile, err
+	}
+
+	resolvedProfile := *profile
+	resolvedRuntimeConfig := *runtimeConfig
+	resolvedRuntimeConfig.Env = copyStringMap(runtimeConfig.Env)
+	resolvedRuntimeConfig.Options = append([]string(nil), runtimeConfig.Options...)
+	resolvedProfile.ClusterRuntime = &resolvedRuntimeConfig
+
+	return &resolvedProfile, nil
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+
+	return result
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {

@@ -8,7 +8,6 @@ import (
 	"k8s.io/klog"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
@@ -87,9 +86,6 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	}
 
 	klog.Infof("Transformed metrics remote write url: %s", o.Observability.MetricsRemoteWriteURL)
-
-	acceleratorManager := accelerator.NewManager(e)
-	c.AcceleratorManager = acceleratorManager
 
 	engineRegistry, err := engine.NewRegistry(e)
 	if err != nil {

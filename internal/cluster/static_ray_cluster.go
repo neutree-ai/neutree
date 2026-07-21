@@ -86,7 +86,9 @@ func (r *staticRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error 
 		return errors.Errorf("static node cluster %s status is applying desired spec", c.Metadata.Name)
 	}
 
-	r.updateResourceInfo(c, desired)
+	if err := r.updateResourceInfo(c, desired); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -396,12 +398,15 @@ func (r *staticRayReconciler) copyStatus(
 func (r *staticRayReconciler) updateResourceInfo(
 	c *v1.Cluster,
 	staticCluster *v1.StaticNodeCluster,
-) {
+) error {
 	resources, err := r.calculateResources(staticCluster)
 	if err != nil {
 		klog.Warningf("failed to calculate static node cluster %s resources: %v", staticCluster.Metadata.WorkspaceName(), err)
+		return nil
+	}
 
-		return
+	if resources == nil {
+		return nil
 	}
 
 	if c.Status == nil {
@@ -409,6 +414,8 @@ func (r *staticRayReconciler) updateResourceInfo(
 	}
 
 	c.Status.ResourceInfo = resources
+
+	return nil
 }
 
 func staticClusterSpecObserved(current, desired *v1.StaticNodeCluster) bool {

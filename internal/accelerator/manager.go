@@ -2,7 +2,9 @@ package accelerator
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type Manager interface {
@@ -23,6 +26,7 @@ type Manager interface {
 	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
+	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 
@@ -60,6 +64,15 @@ type manager struct {
 }
 
 func NewManager(e *gin.Engine) *manager {
+	manager, err := NewManagerWithPlugins(e)
+	if err != nil {
+		panic(err)
+	}
+
+	return manager
+}
+
+func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.Plugin) (*manager, error) {
 	manager := &manager{
 		acceleratorsMap: sync.Map{},
 	}
@@ -74,11 +87,41 @@ func NewManager(e *gin.Engine) *manager {
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
+	for _, p := range injectedPlugins {
+		if err := manager.addInternalPlugin(p); err != nil {
+			return nil, err
+		}
+	}
+
 	// register plugin register handler
 	pluginGroup := e.Group(v1.PluginAPIGroupPath)
 	pluginGroup.POST("/register", manager.registerHandler)
 
-	return manager
+	return manager, nil
+}
+
+func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
+	if p == nil || (reflect.ValueOf(p).Kind() == reflect.Ptr && reflect.ValueOf(p).IsNil()) {
+		return fmt.Errorf("accelerator plugin is nil")
+	}
+
+	if p.Resource() == "" {
+		return fmt.Errorf("accelerator plugin resource is required")
+	}
+
+	if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
+		return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+	}
+
+	a.acceleratorsMap.Store(p.Resource(), registerPlugin{
+		resource:         p.Resource(),
+		plugin:           p,
+		lastRegisterTime: time.Now(),
+	})
+
+	klog.Infof("Register internal accelerator plugin: %s", p.Resource())
+
+	return nil
 }
 
 func (a *manager) registerHandler(c *gin.Context) {
@@ -203,6 +246,27 @@ func (a *manager) DetectAccelerator(
 			return true
 		}
 
+		staticResponse, staticErr := p.plugin.Handle().DetectStaticNodeAccelerator(ctx, &v1.DetectStaticNodeAcceleratorRequest{
+			NodeIp:  nodeIP,
+			SSHAuth: sshAuth,
+		})
+
+		if staticErr == nil && staticResponse != nil && staticResponse.Matched && staticResponse.Accelerator != nil {
+			detected = staticResponse.Accelerator
+
+			return false
+		}
+
+		if staticErr != nil && p.plugin.Type() == publicaccelerator.InternalPluginType {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, staticErr.Error())
+
+			if detectErr == nil {
+				detectErr = errors.Wrapf(staticErr, "detect static node accelerator from plugin %s failed", p.resource)
+			}
+
+			return true
+		}
+
 		response, err := p.plugin.Handle().GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
 			NodeIp:  nodeIP,
 			SSHAuth: sshAuth,
@@ -320,16 +384,126 @@ func (a *manager) GetAcceleratorProfile(
 	}
 
 	p, ok := a.GetPlugin(acceleratorType)
-	if !ok {
+	if ok {
+		profile, err := p.Handle().GetAcceleratorProfile(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+		}
+
+		return profile, nil
+	}
+
+	var resolved *v1.AcceleratorProfile
+	var resolveErr error
+
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if !registeredOK {
+			return true
+		}
+
+		resolver, resolverOK := registered.plugin.Handle().(publicaccelerator.AcceleratorProfileResolver)
+		if !resolverOK {
+			return true
+		}
+
+		profile, matched, err := resolver.GetAcceleratorProfileForType(ctx, acceleratorType)
+		if err != nil {
+			resolveErr = errors.Wrapf(err, "get accelerator profile for type %s from plugin %s", acceleratorType, registered.resource)
+			return false
+		}
+
+		if !matched {
+			return true
+		}
+
+		resolved = profile
+
+		return false
+	})
+
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	if resolved == nil {
 		return nil, errors.Errorf("accelerator plugin %s not found", acceleratorType)
 	}
 
-	profile, err := p.Handle().GetAcceleratorProfile(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "get accelerator profile from plugin %s failed", p.Resource())
+	return resolved, nil
+}
+
+func (a *manager) GetStaticNodeRuntimeConfig(
+	ctx context.Context,
+	acceleratorStatus *v1.StaticNodeAcceleratorStatus,
+) (*v1.RuntimeConfig, error) {
+	if acceleratorStatus == nil || acceleratorStatus.Type == "" {
+		return nil, nil
 	}
 
-	return profile, nil
+	var resolved *v1.RuntimeConfig
+	var resolveErr error
+
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if !registeredOK {
+			return true
+		}
+
+		resolver, resolverOK := registered.plugin.Handle().(publicaccelerator.StaticNodeRuntimeConfigResolver)
+		if !resolverOK {
+			return true
+		}
+
+		config, matched, err := resolver.GetStaticNodeRuntimeConfig(ctx, acceleratorStatus)
+		if err != nil {
+			resolveErr = errors.Wrapf(err, "get static node runtime config for accelerator type %s from plugin %s", acceleratorStatus.Type, registered.resource)
+			return false
+		}
+
+		if !matched {
+			return true
+		}
+
+		resolved = config
+
+		return false
+	})
+
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	return resolved, nil
+}
+
+func (a *manager) ValidateStaticClusterVersion(ctx context.Context, acceleratorType, version string) error {
+	var validationErr error
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if !registeredOK {
+			return true
+		}
+
+		validator, validatorOK := registered.plugin.Handle().(publicaccelerator.StaticClusterVersionValidator)
+		if !validatorOK {
+			return true
+		}
+
+		matched, err := validator.ValidateStaticClusterVersion(ctx, acceleratorType, version)
+		if err != nil {
+			validationErr = errors.Wrapf(err, "validate static cluster version for accelerator type %s", acceleratorType)
+			return false
+		}
+
+		if matched {
+			return false
+		}
+
+		return true
+	})
+
+	return validationErr
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {
@@ -409,6 +583,7 @@ func (a *manager) GetPlugin(acceleratorType string) (plugin.AcceleratorPlugin, b
 
 func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
+
 	if !ok {
 		return nil, false
 	}
@@ -420,6 +595,7 @@ func (a *manager) GetConverter(acceleratorType string) (plugin.ResourceConverter
 
 func (a *manager) GetParser(acceleratorType string) (resourceparser.ResourceParser, bool) {
 	p, ok := a.GetPlugin(acceleratorType)
+
 	if !ok {
 		return nil, false
 	}

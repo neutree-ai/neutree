@@ -19,6 +19,14 @@ type AcceleratorProfileProvider interface {
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 }
 
+type staticClusterVersionValidator interface {
+	ValidateStaticClusterVersion(context.Context, string, string) error
+}
+
+type staticNodeRuntimeConfigProvider interface {
+	GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
+}
+
 type DesiredNodePlan struct {
 	Node             *v1.StaticNode
 	Accelerator      *v1.StaticNodeAcceleratorStatus
@@ -112,7 +120,7 @@ func (r *Planner) buildDesiredNodePlans(
 			continue
 		}
 
-		profile, err := r.runtimeProfile(ctx, *acceleratorStatus)
+		profile, err := r.runtimeProfile(ctx, cluster, *acceleratorStatus)
 		if err != nil {
 			return nil, err
 		}
