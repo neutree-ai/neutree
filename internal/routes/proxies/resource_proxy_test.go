@@ -289,7 +289,7 @@ func Test_filterResponseBody(t *testing.T) {
 	})
 }
 
-func Test_extractExcludeFieldsFromTag(t *testing.T) {
+func Test_extractStructTagConfig_excludeFields(t *testing.T) {
 	t.Run("extract single field with api tag", func(t *testing.T) {
 		type TestStatus struct {
 			Phase   string `json:"phase"`
@@ -302,12 +302,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract multiple fields with api tag", func(t *testing.T) {
@@ -327,13 +327,13 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status   TestStatus   `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"metadata.secret": {},
 			"status.sk_value": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("handle pointer types", func(t *testing.T) {
@@ -347,12 +347,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status *TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("no api tag returns empty map", func(t *testing.T) {
@@ -361,9 +361,9 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
-		assert.Empty(t, result)
+		assert.Empty(t, result.excludeFields)
 	})
 
 	t.Run("ignore fields with json:-", func(t *testing.T) {
@@ -373,12 +373,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Secret   string `json:"secret" api:"-"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("ignore unexported fields", func(t *testing.T) {
@@ -388,10 +388,10 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		}
 		obj := TestObject{secret: "hidden"}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		assert.Equal(t, "hidden", obj.secret)
-		assert.Empty(t, result)
+		assert.Empty(t, result.excludeFields)
 	})
 
 	t.Run("handle json tag with omitempty", func(t *testing.T) {
@@ -405,12 +405,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract fields from slice element type", func(t *testing.T) {
@@ -426,32 +426,33 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 
 		type TestObject struct {
 			ID        string          `json:"id"`
-			Upstreams []UpstreamEntry `json:"upstreams"`
+			Upstreams []UpstreamEntry `json:"upstreams" mergekey:"url"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"upstreams.auth.credential": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract fields from pointer slice element type", func(t *testing.T) {
 		type Inner struct {
+			Name   string `json:"name"`
 			Secret string `json:"secret" api:"-"`
 		}
 
 		type TestObject struct {
-			Items []*Inner `json:"items"`
+			Items []*Inner `json:"items" mergekey:"name"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"items.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("deeply nested structs", func(t *testing.T) {
@@ -472,12 +473,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			L1 Level1 `json:"l1"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"l1.l2.l3.deep_secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 }
 
@@ -1069,23 +1070,61 @@ func Test_mergeExcludedFields(t *testing.T) {
 	})
 }
 
-func Test_extractArrayMergeKeysFromTag(t *testing.T) {
+func Test_extractStructTagConfig_arrayMergeKeys(t *testing.T) {
 	t.Run("external endpoint upstreams declare identity keys", func(t *testing.T) {
-		mergeKeys := extractArrayMergeKeysFromTag(reflect.TypeOf(v1.ExternalEndpoint{}))
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.ExternalEndpoint{})).arrayMergeKeys
 
 		assert.Equal(t, []string{"upstream.url", "endpoint_ref"}, mergeKeys["spec.upstreams"])
 	})
 
 	t.Run("static node cluster nodes declare identity keys", func(t *testing.T) {
-		mergeKeys := extractArrayMergeKeysFromTag(reflect.TypeOf(v1.StaticNodeCluster{}))
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.StaticNodeCluster{})).arrayMergeKeys
 
 		assert.Equal(t, []string{"ip"}, mergeKeys["spec.nodes"])
 	})
 
 	t.Run("struct without mergekey tags yields no entries", func(t *testing.T) {
-		mergeKeys := extractArrayMergeKeysFromTag(reflect.TypeOf(v1.ApiKey{}))
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.ApiKey{})).arrayMergeKeys
 
 		assert.Empty(t, mergeKeys)
+	})
+
+	t.Run("panics when an array holds a masked field without a mergekey tag", func(t *testing.T) {
+		type entry struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type spec struct {
+			Entries []entry `json:"entries"`
+		}
+
+		type object struct {
+			Spec spec `json:"spec"`
+		}
+
+		assert.Panics(t, func() {
+			extractStructTagConfig(reflect.TypeOf(object{}))
+		})
+	})
+
+	t.Run("does not panic when the whole array is masked", func(t *testing.T) {
+		type entry struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type spec struct {
+			Entries []entry `json:"entries" api:"-"`
+		}
+
+		type object struct {
+			Spec spec `json:"spec"`
+		}
+
+		assert.NotPanics(t, func() {
+			extractStructTagConfig(reflect.TypeOf(object{}))
+		})
 	})
 }
 

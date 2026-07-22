@@ -154,13 +154,54 @@ func (w *responseCapture) WriteString(s string) (int, error) {
 	return w.body.WriteString(s)
 }
 
-// extractExcludeFieldsFromTag extracts fields marked with api:"-" tag from a struct type
-// Returns a map of JSON paths to exclude
-func extractExcludeFieldsFromTag(t reflect.Type) map[string]struct{} {
-	excludeFields := make(map[string]struct{})
-	extractFieldsRecursive(t, "", excludeFields)
+// structTagConfig holds everything the resource proxy derives from a resource
+// struct's tags in a single reflection pass.
+type structTagConfig struct {
+	// excludeFields are JSON paths of fields tagged api:"-" (masked in responses).
+	excludeFields map[string]struct{}
+	// arrayMergeKeys maps an array field's JSON path (e.g. "spec.upstreams") to
+	// the candidate identity paths of its elements, from the mergekey tag.
+	arrayMergeKeys map[string][]string
+	// arrayPaths records every slice-of-struct field path, for validation.
+	arrayPaths map[string]struct{}
+}
 
-	return excludeFields
+// extractStructTagConfig walks a resource struct type once and collects the
+// masked-field paths and array identity keys. It panics if an array contains a
+// masked field but declares no mergekey tag: backfilling such an array by
+// index leaks one element's masked value into another after a delete/reorder
+// (NEU-592), so that configuration must fail at startup, not in production.
+func extractStructTagConfig(t reflect.Type) structTagConfig {
+	cfg := structTagConfig{
+		excludeFields:  make(map[string]struct{}),
+		arrayMergeKeys: make(map[string][]string),
+		arrayPaths:     make(map[string]struct{}),
+	}
+
+	extractStructTagsRecursive(t, "", &cfg)
+
+	for excludedPath := range cfg.excludeFields {
+		for arrayPath := range cfg.arrayPaths {
+			if !strings.HasPrefix(excludedPath, arrayPath+".") {
+				continue
+			}
+
+			// An array that is itself masked gets merged wholesale, so its
+			// elements never go through per-element pairing.
+			if _, wholeArrayMasked := cfg.excludeFields[arrayPath]; wholeArrayMasked {
+				continue
+			}
+
+			if _, ok := cfg.arrayMergeKeys[arrayPath]; !ok {
+				panic(fmt.Sprintf(
+					"resource type %s: array %q contains masked field %q but has no mergekey tag declaring its element identity",
+					t, arrayPath, excludedPath,
+				))
+			}
+		}
+	}
+
+	return cfg
 }
 
 func extractTopLevelJSONFields(t reflect.Type) []string {
@@ -196,8 +237,9 @@ func extractTopLevelJSONFields(t reflect.Type) []string {
 	return fields
 }
 
-// extractFieldsRecursive recursively extracts fields with api:"-" tag
-func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[string]struct{}) {
+// extractStructTagsRecursive walks struct fields and records api:"-" masked
+// paths, slice-of-struct paths, and mergekey identity declarations.
+func extractStructTagsRecursive(t reflect.Type, prefix string, cfg *structTagConfig) {
 	// Handle pointer types
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -236,7 +278,7 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 		// Check if this field has api:"-" tag
 		apiTag := field.Tag.Get("api")
 		if apiTag == "-" {
-			excludeFields[fieldPath] = struct{}{}
+			cfg.excludeFields[fieldPath] = struct{}{}
 		}
 
 		// Recursively process nested structs and slices
@@ -246,74 +288,22 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 		}
 
 		if fieldType.Kind() == reflect.Slice {
-			fieldType = fieldType.Elem()
-			if fieldType.Kind() == reflect.Ptr {
-				fieldType = fieldType.Elem()
-			}
-		}
-
-		if fieldType.Kind() == reflect.Struct {
-			extractFieldsRecursive(fieldType, fieldPath, excludeFields)
-		}
-	}
-}
-
-// extractArrayMergeKeysFromTag extracts mergekey tags from slice-of-struct
-// fields. Returns a map from the array's JSON path (e.g. "spec.upstreams") to
-// the candidate identity paths of its elements (e.g. ["upstream.url", "endpoint_ref"]).
-func extractArrayMergeKeysFromTag(t reflect.Type) map[string][]string {
-	mergeKeys := make(map[string][]string)
-	extractArrayMergeKeysRecursive(t, "", mergeKeys)
-
-	return mergeKeys
-}
-
-func extractArrayMergeKeysRecursive(t reflect.Type, prefix string, mergeKeys map[string][]string) {
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-
-	if t.Kind() != reflect.Struct {
-		return
-	}
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-
-		if !field.IsExported() {
-			continue
-		}
-
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "" || jsonTag == "-" {
-			continue
-		}
-
-		jsonName := strings.Split(jsonTag, ",")[0]
-
-		fieldPath := jsonName
-		if prefix != "" {
-			fieldPath = prefix + "." + jsonName
-		}
-
-		fieldType := field.Type
-		if fieldType.Kind() == reflect.Ptr {
-			fieldType = fieldType.Elem()
-		}
-
-		if fieldType.Kind() == reflect.Slice {
 			if mergeKeyTag := field.Tag.Get("mergekey"); mergeKeyTag != "" {
-				mergeKeys[fieldPath] = strings.Split(mergeKeyTag, ",")
+				cfg.arrayMergeKeys[fieldPath] = strings.Split(mergeKeyTag, ",")
 			}
 
 			fieldType = fieldType.Elem()
 			if fieldType.Kind() == reflect.Ptr {
 				fieldType = fieldType.Elem()
 			}
+
+			if fieldType.Kind() == reflect.Struct {
+				cfg.arrayPaths[fieldPath] = struct{}{}
+			}
 		}
 
 		if fieldType.Kind() == reflect.Struct {
-			extractArrayMergeKeysRecursive(fieldType, fieldPath, mergeKeys)
+			extractStructTagsRecursive(fieldType, fieldPath, cfg)
 		}
 	}
 }
@@ -632,8 +622,9 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 	// Extract exclude fields from struct type at initialization time (compile-time type safety)
 	var zero T
 	structType := reflect.TypeOf(zero)
-	excludeFields := extractExcludeFieldsFromTag(structType)
-	arrayMergeKeys := extractArrayMergeKeysFromTag(structType)
+	tagConfig := extractStructTagConfig(structType)
+	excludeFields := tagConfig.excludeFields
+	arrayMergeKeys := tagConfig.arrayMergeKeys
 	topLevelFields := extractTopLevelJSONFields(structType)
 
 	return func(c *gin.Context) {
