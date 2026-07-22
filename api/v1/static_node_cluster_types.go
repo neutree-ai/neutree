@@ -28,7 +28,9 @@ type StaticNodeClusterSpec struct {
 	// Metrics configures static-node observability collectors.
 	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	// Nodes declares the desired static machines that make up the cluster.
-	Nodes []StaticNodeClusterNodeSpec `json:"nodes,omitempty"`
+	// mergekey makes the API proxy backfill each node's masked ssh_auth from the
+	// stored node with the same ip, not the same array index (see NEU-592).
+	Nodes []StaticNodeClusterNodeSpec `json:"nodes,omitempty" mergekey:"ip"`
 	// UpgradeStrategy controls how the static cluster rolls from the observed version to Version.
 	UpgradeStrategy *ClusterUpgradeStrategy `json:"upgrade_strategy,omitempty"`
 }

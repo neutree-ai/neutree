@@ -60,8 +60,12 @@ const (
 )
 
 type ExternalEndpointSpec struct {
-	// Upstreams is the list of upstream entries
-	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams"`
+	// Upstreams is the list of upstream entries.
+	// The mergekey tag lets the API proxy backfill each entry's masked
+	// auth.credential from the stored entry with the same identity (upstream.url
+	// or endpoint_ref) instead of by array index, so deleting or reordering
+	// entries cannot leak one upstream's credential into another.
+	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams" mergekey:"upstream.url,endpoint_ref"`
 
 	// Timeout is the request timeout in milliseconds, default 60000
 	Timeout *int `json:"timeout,omitempty"`

@@ -258,14 +258,79 @@ func extractFieldsRecursive(t reflect.Type, prefix string, excludeFields map[str
 	}
 }
 
-// mergeExcludedFields merges excluded fields from source into target
-// Only merges fields that are in excludeFields and missing in target
-func mergeExcludedFields(target, source map[string]interface{}, excludeFields map[string]struct{}) {
-	mergeExcludedFieldsRecursive(target, source, excludeFields, "")
+// extractArrayMergeKeysFromTag extracts mergekey tags from slice-of-struct
+// fields. Returns a map from the array's JSON path (e.g. "spec.upstreams") to
+// the candidate identity paths of its elements (e.g. ["upstream.url", "endpoint_ref"]).
+func extractArrayMergeKeysFromTag(t reflect.Type) map[string][]string {
+	mergeKeys := make(map[string][]string)
+	extractArrayMergeKeysRecursive(t, "", mergeKeys)
+
+	return mergeKeys
+}
+
+func extractArrayMergeKeysRecursive(t reflect.Type, prefix string, mergeKeys map[string][]string) {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
+		return
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		if !field.IsExported() {
+			continue
+		}
+
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+
+		jsonName := strings.Split(jsonTag, ",")[0]
+
+		fieldPath := jsonName
+		if prefix != "" {
+			fieldPath = prefix + "." + jsonName
+		}
+
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType = fieldType.Elem()
+		}
+
+		if fieldType.Kind() == reflect.Slice {
+			if mergeKeyTag := field.Tag.Get("mergekey"); mergeKeyTag != "" {
+				mergeKeys[fieldPath] = strings.Split(mergeKeyTag, ",")
+			}
+
+			fieldType = fieldType.Elem()
+			if fieldType.Kind() == reflect.Ptr {
+				fieldType = fieldType.Elem()
+			}
+		}
+
+		if fieldType.Kind() == reflect.Struct {
+			extractArrayMergeKeysRecursive(fieldType, fieldPath, mergeKeys)
+		}
+	}
+}
+
+// mergeExcludedFields merges excluded fields from source into target.
+// Only merges fields that are in excludeFields and missing in target.
+// arrayMergeKeys maps an array field path (e.g. "spec.upstreams") to the
+// candidate identity paths of its elements (from the mergekey struct tag);
+// arrays listed there are merged by element identity instead of by index.
+func mergeExcludedFields(target, source map[string]interface{}, excludeFields map[string]struct{}, arrayMergeKeys map[string][]string) {
+	mergeExcludedFieldsRecursive(target, source, excludeFields, arrayMergeKeys, "")
 }
 
 // mergeExcludedFieldsRecursive recursively merges excluded fields
-func mergeExcludedFieldsRecursive(target, source map[string]interface{}, excludeFields map[string]struct{}, currentPath string) {
+func mergeExcludedFieldsRecursive(
+	target, source map[string]interface{}, excludeFields map[string]struct{}, arrayMergeKeys map[string][]string, currentPath string,
+) {
 	for key, sourceValue := range source {
 		fieldPath := key
 		if currentPath != "" {
@@ -285,12 +350,12 @@ func mergeExcludedFieldsRecursive(target, source map[string]interface{}, exclude
 		// Recursively merge nested objects
 		if sourceMap, ok := sourceValue.(map[string]interface{}); ok {
 			if targetMap, ok := target[key].(map[string]interface{}); ok {
-				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, fieldPath)
+				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
 			} else if !ok && target[key] == nil {
 				// Target has this key but it's nil, create a new map and merge
 				target[key] = make(map[string]interface{})
 				if targetMap, ok := target[key].(map[string]interface{}); ok {
-					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, fieldPath)
+					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
 				}
 			}
 		}
@@ -298,17 +363,93 @@ func mergeExcludedFieldsRecursive(target, source map[string]interface{}, exclude
 		// Recursively merge array elements
 		if sourceArr, ok := sourceValue.([]interface{}); ok {
 			if targetArr, ok := target[key].([]interface{}); ok {
-				for i := 0; i < len(sourceArr) && i < len(targetArr); i++ {
-					sourceElem, sourceOk := sourceArr[i].(map[string]interface{})
-					targetElem, targetOk := targetArr[i].(map[string]interface{})
+				if identityPaths, hasIdentity := arrayMergeKeys[fieldPath]; hasIdentity {
+					// Merge by element identity: pairing by index would leak one
+					// element's masked fields into another after a delete/reorder
+					// (NEU-592). Elements whose identity is missing from source are
+					// left untouched.
+					mergeArrayByIdentity(targetArr, sourceArr, identityPaths, excludeFields, arrayMergeKeys, fieldPath)
+				} else {
+					for i := 0; i < len(sourceArr) && i < len(targetArr); i++ {
+						sourceElem, sourceOk := sourceArr[i].(map[string]interface{})
+						targetElem, targetOk := targetArr[i].(map[string]interface{})
 
-					if sourceOk && targetOk {
-						mergeExcludedFieldsRecursive(targetElem, sourceElem, excludeFields, fieldPath)
+						if sourceOk && targetOk {
+							mergeExcludedFieldsRecursive(targetElem, sourceElem, excludeFields, arrayMergeKeys, fieldPath)
+						}
 					}
 				}
 			}
 		}
 	}
+}
+
+// mergeArrayByIdentity merges excluded fields between array elements paired by
+// identity value rather than position. Duplicate identities are paired in
+// order of occurrence; target elements without an identity or without a
+// matching source element are skipped.
+func mergeArrayByIdentity(
+	targetArr, sourceArr []interface{}, identityPaths []string,
+	excludeFields map[string]struct{}, arrayMergeKeys map[string][]string, fieldPath string,
+) {
+	sourceByIdentity := make(map[string][]map[string]interface{})
+
+	for _, item := range sourceArr {
+		sourceElem, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if identity := elementIdentity(sourceElem, identityPaths); identity != "" {
+			sourceByIdentity[identity] = append(sourceByIdentity[identity], sourceElem)
+		}
+	}
+
+	for _, item := range targetArr {
+		targetElem, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		identity := elementIdentity(targetElem, identityPaths)
+		if identity == "" {
+			continue
+		}
+
+		candidates := sourceByIdentity[identity]
+		if len(candidates) == 0 {
+			continue
+		}
+
+		sourceByIdentity[identity] = candidates[1:]
+		mergeExcludedFieldsRecursive(targetElem, candidates[0], excludeFields, arrayMergeKeys, fieldPath)
+	}
+}
+
+// elementIdentity resolves the first non-empty identity value of an array
+// element. Each candidate path is a dot-separated route into nested objects
+// (e.g. "upstream.url"). The matched path is included in the returned key so
+// that different identity fields never collide with each other.
+func elementIdentity(elem map[string]interface{}, identityPaths []string) string {
+	for _, path := range identityPaths {
+		var current interface{} = elem
+
+		for _, part := range strings.Split(path, ".") {
+			currentMap, ok := current.(map[string]interface{})
+			if !ok {
+				current = nil
+				break
+			}
+
+			current = currentMap[part]
+		}
+
+		if s, ok := current.(string); ok && s != "" {
+			return path + "=" + s
+		}
+	}
+
+	return ""
 }
 
 // isEmptyValue checks if a value is considered empty
@@ -492,6 +633,7 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 	var zero T
 	structType := reflect.TypeOf(zero)
 	excludeFields := extractExcludeFieldsFromTag(structType)
+	arrayMergeKeys := extractArrayMergeKeysFromTag(structType)
 	topLevelFields := extractTopLevelJSONFields(structType)
 
 	return func(c *gin.Context) {
@@ -507,7 +649,7 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 
 		// Handle PATCH requests with excluded fields backfilling
 		if c.Request.Method == "PATCH" && len(excludeFields) > 0 {
-			handlePatchWithBackfill(c, deps, tableName, excludeFields)
+			handlePatchWithBackfill(c, deps, tableName, excludeFields, arrayMergeKeys)
 			return
 		}
 
@@ -557,7 +699,9 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 }
 
 // handlePatchWithBackfill handles PATCH requests with excluded fields backfilling
-func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, tableName string, excludeFields map[string]struct{}) {
+func handlePatchWithBackfill(
+	c *gin.Context, deps *Dependencies, tableName string, excludeFields map[string]struct{}, arrayMergeKeys map[string][]string,
+) {
 	// Read request body
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -605,7 +749,7 @@ func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, tableName strin
 		// Continue without backfill if fetch fails (resource might not exist yet)
 	} else if currentResource != nil {
 		// Merge excluded fields from current resource into request body
-		mergeExcludedFields(requestBody, currentResource, excludeFields)
+		mergeExcludedFields(requestBody, currentResource, excludeFields, arrayMergeKeys)
 		klog.V(4).Infof("Backfilled excluded fields for PATCH request")
 	}
 
