@@ -289,7 +289,7 @@ func Test_filterResponseBody(t *testing.T) {
 	})
 }
 
-func Test_extractExcludeFieldsFromTag(t *testing.T) {
+func Test_extractStructTagConfig_excludeFields(t *testing.T) {
 	t.Run("extract single field with api tag", func(t *testing.T) {
 		type TestStatus struct {
 			Phase   string `json:"phase"`
@@ -302,12 +302,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract multiple fields with api tag", func(t *testing.T) {
@@ -327,13 +327,13 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status   TestStatus   `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"metadata.secret": {},
 			"status.sk_value": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("handle pointer types", func(t *testing.T) {
@@ -347,12 +347,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status *TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("no api tag returns empty map", func(t *testing.T) {
@@ -361,9 +361,9 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
-		assert.Empty(t, result)
+		assert.Empty(t, result.excludeFields)
 	})
 
 	t.Run("ignore fields with json:-", func(t *testing.T) {
@@ -373,12 +373,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Secret   string `json:"secret" api:"-"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("ignore unexported fields", func(t *testing.T) {
@@ -388,10 +388,10 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 		}
 		obj := TestObject{secret: "hidden"}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		assert.Equal(t, "hidden", obj.secret)
-		assert.Empty(t, result)
+		assert.Empty(t, result.excludeFields)
 	})
 
 	t.Run("handle json tag with omitempty", func(t *testing.T) {
@@ -405,12 +405,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			Status TestStatus `json:"status"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"status.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract fields from slice element type", func(t *testing.T) {
@@ -426,32 +426,33 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 
 		type TestObject struct {
 			ID        string          `json:"id"`
-			Upstreams []UpstreamEntry `json:"upstreams"`
+			Upstreams []UpstreamEntry `json:"upstreams" mergekey:"url"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"upstreams.auth.credential": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("extract fields from pointer slice element type", func(t *testing.T) {
 		type Inner struct {
+			Name   string `json:"name"`
 			Secret string `json:"secret" api:"-"`
 		}
 
 		type TestObject struct {
-			Items []*Inner `json:"items"`
+			Items []*Inner `json:"items" mergekey:"name"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"items.secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 
 	t.Run("deeply nested structs", func(t *testing.T) {
@@ -472,12 +473,12 @@ func Test_extractExcludeFieldsFromTag(t *testing.T) {
 			L1 Level1 `json:"l1"`
 		}
 
-		result := extractExcludeFieldsFromTag(reflect.TypeOf(TestObject{}))
+		result := extractStructTagConfig(reflect.TypeOf(TestObject{}))
 
 		expected := map[string]struct{}{
 			"l1.l2.l3.deep_secret": {},
 		}
-		assert.Equal(t, expected, result)
+		assert.Equal(t, expected, result.excludeFields)
 	})
 }
 
@@ -714,7 +715,7 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.credentials": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		expected := map[string]interface{}{
 			"id": "123",
@@ -748,7 +749,7 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.credentials": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		// Should keep the new_token, not override with old_token
 		assert.Equal(t, "new_token", target["spec"].(map[string]interface{})["credentials"])
@@ -780,7 +781,7 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"status.sk_value":  {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		assert.Equal(t, "hf_token", target["spec"].(map[string]interface{})["credentials"])
 		assert.Equal(t, "secret_key", target["status"].(map[string]interface{})["sk_value"])
@@ -802,7 +803,7 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.credentials": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
 	})
@@ -838,7 +839,7 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.upstreams.auth.credential": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		upstreams := target["spec"].(map[string]interface{})["upstreams"].([]interface{})
 		auth := upstreams[0].(map[string]interface{})["auth"].(map[string]interface{})
@@ -890,13 +891,158 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.upstreams.auth.credential": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		upstreams := target["spec"].(map[string]interface{})["upstreams"].([]interface{})
 		auth0 := upstreams[0].(map[string]interface{})["auth"].(map[string]interface{})
 		auth1 := upstreams[1].(map[string]interface{})["auth"].(map[string]interface{})
 		assert.Equal(t, "token-1", auth0["credential"])
 		assert.Equal(t, "token-2", auth1["credential"])
+	})
+
+	// NEU-592: credential backfill must pair upstreams by identity, not index.
+	upstreamMergeKeys := map[string][]string{
+		"spec.upstreams": {"upstream.url", "endpoint_ref"},
+	}
+	upstreamExcludeFields := map[string]struct{}{
+		"spec.upstreams.auth.credential": {},
+	}
+	externalUpstream := func(url, credential string) map[string]interface{} {
+		return map[string]interface{}{
+			"upstream": map[string]interface{}{"url": url},
+			"auth": map[string]interface{}{
+				"type":       "bearer",
+				"credential": credential,
+			},
+		}
+	}
+	upstreamCredential := func(t *testing.T, target map[string]interface{}, index int) string {
+		t.Helper()
+
+		upstreams := target["spec"].(map[string]interface{})["upstreams"].([]interface{})
+		auth := upstreams[index].(map[string]interface{})["auth"].(map[string]interface{})
+
+		return auth["credential"].(string)
+	}
+
+	t.Run("identity merge survives deleting a leading upstream", func(t *testing.T) {
+		// Stored EE: [openrouter (no key), dogfood (key)]; the PATCH deletes the
+		// openrouter entry. Index pairing would hand dogfood the deleted entry's
+		// empty credential; identity pairing must keep dogfood's own key.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://dogfood.example.com/v1", ""),
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://openrouter.ai/api/v1", ""),
+					externalUpstream("https://dogfood.example.com/v1", "sk_dogfood"),
+				},
+			},
+		}
+
+		mergeExcludedFields(target, source, upstreamExcludeFields, upstreamMergeKeys)
+
+		assert.Equal(t, "sk_dogfood", upstreamCredential(t, target, 0))
+	})
+
+	t.Run("identity merge survives reordering upstreams", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://b.example.com/v1", ""),
+					externalUpstream("https://a.example.com/v1", ""),
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://a.example.com/v1", "key-a"),
+					externalUpstream("https://b.example.com/v1", "key-b"),
+				},
+			},
+		}
+
+		mergeExcludedFields(target, source, upstreamExcludeFields, upstreamMergeKeys)
+
+		assert.Equal(t, "key-b", upstreamCredential(t, target, 0))
+		assert.Equal(t, "key-a", upstreamCredential(t, target, 1))
+	})
+
+	t.Run("identity merge does not backfill a new upstream", func(t *testing.T) {
+		// A brand-new URL has no stored credential; it must stay empty instead of
+		// inheriting another entry's key.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://new.example.com/v1", ""),
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://old.example.com/v1", "old-key"),
+				},
+			},
+		}
+
+		mergeExcludedFields(target, source, upstreamExcludeFields, upstreamMergeKeys)
+
+		assert.Equal(t, "", upstreamCredential(t, target, 0))
+	})
+
+	t.Run("identity merge matches endpoint_ref entries and keeps explicit credentials", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					map[string]interface{}{"endpoint_ref": "qwen3-local"},
+					externalUpstream("https://a.example.com/v1", "user-typed-new-key"),
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://a.example.com/v1", "stored-key"),
+					map[string]interface{}{"endpoint_ref": "qwen3-local"},
+				},
+			},
+		}
+
+		mergeExcludedFields(target, source, upstreamExcludeFields, upstreamMergeKeys)
+
+		// The user-provided replacement key must win over the stored one.
+		assert.Equal(t, "user-typed-new-key", upstreamCredential(t, target, 1))
+	})
+
+	t.Run("identity merge pairs duplicate identities in order", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://dup.example.com/v1", ""),
+					externalUpstream("https://dup.example.com/v1", ""),
+				},
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"upstreams": []interface{}{
+					externalUpstream("https://dup.example.com/v1", "first"),
+					externalUpstream("https://dup.example.com/v1", "second"),
+				},
+			},
+		}
+
+		mergeExcludedFields(target, source, upstreamExcludeFields, upstreamMergeKeys)
+
+		assert.Equal(t, "first", upstreamCredential(t, target, 0))
+		assert.Equal(t, "second", upstreamCredential(t, target, 1))
 	})
 
 	t.Run("do not merge non-excluded fields", func(t *testing.T) {
@@ -915,12 +1061,70 @@ func Test_mergeExcludedFields(t *testing.T) {
 			"spec.credentials": {},
 		}
 
-		mergeExcludedFields(target, source, excludeFields)
+		mergeExcludedFields(target, source, excludeFields, nil)
 
 		// type should not be overridden
 		assert.Equal(t, "new-type", target["spec"].(map[string]interface{})["type"])
 		// credentials should be merged
 		assert.Equal(t, "token", target["spec"].(map[string]interface{})["credentials"])
+	})
+}
+
+func Test_extractStructTagConfig_arrayMergeKeys(t *testing.T) {
+	t.Run("external endpoint upstreams declare identity keys", func(t *testing.T) {
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.ExternalEndpoint{})).arrayMergeKeys
+
+		assert.Equal(t, []string{"upstream.url", "endpoint_ref"}, mergeKeys["spec.upstreams"])
+	})
+
+	t.Run("static node cluster nodes declare identity keys", func(t *testing.T) {
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.StaticNodeCluster{})).arrayMergeKeys
+
+		assert.Equal(t, []string{"ip"}, mergeKeys["spec.nodes"])
+	})
+
+	t.Run("struct without mergekey tags yields no entries", func(t *testing.T) {
+		mergeKeys := extractStructTagConfig(reflect.TypeOf(v1.ApiKey{})).arrayMergeKeys
+
+		assert.Empty(t, mergeKeys)
+	})
+
+	t.Run("panics when an array holds a masked field without a mergekey tag", func(t *testing.T) {
+		type entry struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type spec struct {
+			Entries []entry `json:"entries"`
+		}
+
+		type object struct {
+			Spec spec `json:"spec"`
+		}
+
+		assert.Panics(t, func() {
+			extractStructTagConfig(reflect.TypeOf(object{}))
+		})
+	})
+
+	t.Run("does not panic when the whole array is masked", func(t *testing.T) {
+		type entry struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret" api:"-"`
+		}
+
+		type spec struct {
+			Entries []entry `json:"entries" api:"-"`
+		}
+
+		type object struct {
+			Spec spec `json:"spec"`
+		}
+
+		assert.NotPanics(t, func() {
+			extractStructTagConfig(reflect.TypeOf(object{}))
+		})
 	})
 }
 
