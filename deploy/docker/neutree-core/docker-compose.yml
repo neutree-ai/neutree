@@ -366,6 +366,11 @@ services:
   kong:
     image: kong/kong:{{ .KongVersion }}
     container_name: kong
+    labels:
+      neutree.ai/kong-plugin-neutree-ai-gateway-checksum: "{{ .KongPluginGatewayChecksum }}"
+      neutree.ai/kong-plugin-neutree-ai-statistics-checksum: "{{ .KongPluginStatisticsChecksum }}"
+      neutree.ai/kong-plugin-neutree-ai-access-checksum: "{{ .KongPluginAccessChecksum }}"
+      neutree.ai/kong-plugin-neutree-ai-quota-checksum: "{{ .KongPluginQuotaChecksum }}"
     environment:
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
       KONG_PLUGINS: bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota

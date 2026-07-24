@@ -160,6 +160,8 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 }
 
 func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, outputWorkDir string) error {
+	renderedCoreWorkDir := filepath.Join(outputWorkDir, "neutree-core")
+
 	// extract neutree core deploy manifests
 	neutreeCoreDeployManifestsTarFile, err := manifests.NeutreeDeployManifestsTar.Open("neutree-core.tar")
 	if err != nil {
@@ -172,8 +174,12 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		return errors.Wrap(err, "extract neutree core db init scripts failed")
 	}
 
-	renderedCoreWorkDir := filepath.Join(outputWorkDir, "neutree-core")
 	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
+
+	pluginChecksums, err := kongPluginChecksums(filepath.Join(renderedCoreWorkDir, "gateway", "kong", "plugins"))
+	if err != nil {
+		return errors.Wrap(err, "calculate Kong plugin checksums failed")
+	}
 
 	// parseTemplate
 	tempplateFiles := []string{
@@ -194,19 +200,23 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 
 	templateParams := map[string]string{
-		"NeutreeCoreWorkDir":          coreWorkDir,
-		"JwtSecret":                   options.jwtSecret,
-		"DbPassword":                  options.dbPassword,
-		"MetricsRemoteWriteURL":       options.metricsRemoteWriteURL,
-		"GrafanaURL":                  options.grafanaURL,
-		"VictoriaMetricsVersion":      componentversion.VictoriaMetrics,
-		"VictoriaLogsRetentionPeriod": options.victorialogsRetentionPeriod,
-		"NeutreeVersion":              options.version,
-		"JwtToken":                    *jwtToken,
-		"VectorVersion":               componentversion.Vector,
-		"KongVersion":                 componentversion.Kong,
-		"NodeIP":                      options.nodeIP,
-		"AdminPassword":               options.adminPassword,
+		"NeutreeCoreWorkDir":           coreWorkDir,
+		"JwtSecret":                    options.jwtSecret,
+		"DbPassword":                   options.dbPassword,
+		"MetricsRemoteWriteURL":        options.metricsRemoteWriteURL,
+		"GrafanaURL":                   options.grafanaURL,
+		"VictoriaMetricsVersion":       componentversion.VictoriaMetrics,
+		"VictoriaLogsRetentionPeriod":  options.victorialogsRetentionPeriod,
+		"NeutreeVersion":               options.version,
+		"JwtToken":                     *jwtToken,
+		"VectorVersion":                componentversion.Vector,
+		"KongVersion":                  componentversion.Kong,
+		"KongPluginGatewayChecksum":    pluginChecksums["neutree-ai-gateway"],
+		"KongPluginStatisticsChecksum": pluginChecksums["neutree-ai-statistics"],
+		"KongPluginAccessChecksum":     pluginChecksums["neutree-ai-access"],
+		"KongPluginQuotaChecksum":      pluginChecksums["neutree-ai-quota"],
+		"NodeIP":                       options.nodeIP,
+		"AdminPassword":                options.adminPassword,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)
