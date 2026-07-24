@@ -153,6 +153,8 @@ func (r *Planner) buildDesiredNodePlans(
 
 	// Upgrade staging may adopt observed components; normalize the final Spec
 	// that will be written to the StaticNode.
+	// TODO: Standardize plan traversal style when this path is refactored. Keep
+	// this range form for now because it only updates the StaticNode behind Node.
 	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
 	}
