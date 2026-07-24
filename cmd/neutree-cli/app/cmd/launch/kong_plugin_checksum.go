@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -38,44 +37,40 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return "", fmt.Errorf("expected directory %s", pluginDir)
 	}
 
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return "", err
+	}
+
 	hasher := sha256.New()
 
-	err = filepath.WalkDir(pluginDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
+	for _, entry := range entries {
 		if entry.IsDir() {
-			return nil
+			continue
 		}
+
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("non-regular file %s", path)
+			return "", fmt.Errorf("non-regular file %s", entry.Name())
 		}
 
 		info, err := entry.Info()
 		if err != nil {
-			return err
+			return "", err
 		}
+
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("non-regular file %s", path)
+			return "", fmt.Errorf("non-regular file %s", entry.Name())
 		}
 
-		relativePath, err := filepath.Rel(pluginDir, path)
-		if err != nil {
-			return err
+		path := filepath.Join(pluginDir, entry.Name())
+		if err := writeKongPluginChecksumRecord(hasher, entry.Name(), path); err != nil {
+			return "", err
 		}
-
-		if err := writeKongPluginChecksumRecord(hasher, filepath.ToSlash(relativePath), path); err != nil {
-			return err
-		}
-
-		return nil
-	})
-	if err != nil {
-		return "", err
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil

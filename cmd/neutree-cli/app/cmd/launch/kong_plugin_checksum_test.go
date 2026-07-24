@@ -39,6 +39,22 @@ func TestKongPluginChecksumsOnlyChangesModifiedPlugin(t *testing.T) {
 	assert.Equal(t, before["neutree-ai-quota"], after["neutree-ai-quota"])
 }
 
+func TestKongPluginChecksumsIgnoreNestedPluginFiles(t *testing.T) {
+	pluginsRoot := writeKongPluginTree(t)
+	nestedFile := filepath.Join(pluginsRoot, "neutree-ai-gateway", "spec", "handler_spec.lua")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nestedFile), 0o755))
+	require.NoError(t, os.WriteFile(nestedFile, []byte("return { VERSION = 'first' }\n"), 0o600))
+
+	before, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(nestedFile, []byte("return { VERSION = 'second' }\n"), 0o600))
+
+	after, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+
+	assert.Equal(t, before, after)
+}
+
 func TestKongPluginChecksumsRejectsMissingPluginDirectory(t *testing.T) {
 	pluginsRoot := writeKongPluginTree(t)
 	require.NoError(t, os.RemoveAll(filepath.Join(pluginsRoot, "neutree-ai-quota")))

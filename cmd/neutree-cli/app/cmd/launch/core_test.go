@@ -207,17 +207,6 @@ func TestPrepareNeutreeCoreDeployConfigRendersKongPluginChecksumLabels(t *testin
 	}
 }
 
-func TestCleanKongPluginDirectoryRemovesStalePluginFiles(t *testing.T) {
-	renderedCoreWorkDir := filepath.Join(t.TempDir(), "neutree-core")
-	staleFilePath := filepath.Join(renderedCoreWorkDir, "gateway", "kong", "plugins", "neutree-ai-gateway", "removed.lua")
-	require.NoError(t, os.MkdirAll(filepath.Dir(staleFilePath), 0o755))
-	require.NoError(t, os.WriteFile(staleFilePath, []byte("stale\n"), 0o600))
-
-	require.NoError(t, cleanKongPluginDirectory(renderedCoreWorkDir))
-
-	assert.NoFileExists(t, staleFilePath)
-}
-
 // NEU-583 regression: rendering the embedded manifests must not HTML-escape
 // the Vector VRL program — html/template turned `<=` into `&lt;=`, which
 // Vector rejects (exit 78 restart loop), silently disabling the NEU-539

@@ -169,10 +169,6 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 	defer neutreeCoreDeployManifestsTarFile.Close()
 
-	if err := cleanKongPluginDirectory(renderedCoreWorkDir); err != nil {
-		return errors.Wrap(err, "clean Kong plugin directory failed")
-	}
-
 	err = util.ExtractTar(neutreeCoreDeployManifestsTarFile, outputWorkDir)
 	if err != nil {
 		return errors.Wrap(err, "extract neutree core db init scripts failed")
@@ -236,8 +232,4 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 
 	return nil
-}
-
-func cleanKongPluginDirectory(renderedCoreWorkDir string) error {
-	return os.RemoveAll(filepath.Join(renderedCoreWorkDir, "gateway", "kong", "plugins"))
 }
