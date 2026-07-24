@@ -179,6 +179,7 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 
 	coreWorkDir := filepath.Join(options.workDir, "neutree-core")
+
 	pluginChecksums, err := kongPluginChecksums(filepath.Join(renderedCoreWorkDir, "gateway", "kong", "plugins"))
 	if err != nil {
 		return errors.Wrap(err, "calculate Kong plugin checksums failed")

@@ -20,6 +20,7 @@ var kongPluginNames = []string{
 
 func kongPluginChecksums(pluginsRoot string) (map[string]string, error) {
 	checksums := make(map[string]string, len(kongPluginNames))
+
 	for _, pluginName := range kongPluginNames {
 		checksum, err := kongPluginChecksum(filepath.Join(pluginsRoot, pluginName))
 		if err != nil {
@@ -66,6 +67,7 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 		if err != nil {
 			return err
 		}
+
 		if err := writeKongPluginChecksumRecord(hasher, filepath.ToSlash(relativePath), path); err != nil {
 			return err
 		}
@@ -83,6 +85,7 @@ func writeKongPluginChecksumRecord(hasher hash.Hash, relativePath, path string) 
 	if _, err := io.WriteString(hasher, relativePath); err != nil {
 		return err
 	}
+
 	if _, err := hasher.Write([]byte{0}); err != nil {
 		return err
 	}
@@ -96,6 +99,7 @@ func writeKongPluginChecksumRecord(hasher hash.Hash, relativePath, path string) 
 	if _, err := io.Copy(hasher, file); err != nil {
 		return err
 	}
+
 	if _, err := hasher.Write([]byte{0}); err != nil {
 		return err
 	}
