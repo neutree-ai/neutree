@@ -137,8 +137,8 @@ func (r *Planner) buildDesiredNodePlans(
 	attachMetricsConfigFiles(cluster, plans)
 
 	// Snapshot the normalized target before upgrade staging can replace plan
-	// components with the observed StaticNode Spec. Use indexed plans so updates
-	// to DesiredNodePlan fields are applied to the slice, not a value copy.
+	// components with the observed StaticNode Spec. Use the indexed plan because
+	// TargetComponents is a DesiredNodePlan field, not an object behind Node.
 	for i := range plans {
 		plan := &plans[i]
 		if plan.Node == nil || plan.Node.Spec == nil {
@@ -153,8 +153,7 @@ func (r *Planner) buildDesiredNodePlans(
 
 	// Upgrade staging may adopt observed components; normalize the final Spec
 	// that will be written to the StaticNode.
-	for i := range plans {
-		plan := &plans[i]
+	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
 	}
 
