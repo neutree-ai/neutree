@@ -1,6 +1,10 @@
 package staticcluster
 
-import v1 "github.com/neutree-ai/neutree/api/v1"
+import (
+	"reflect"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+)
 
 type staticNodeClusterUpgradeStep string
 
@@ -89,6 +93,8 @@ func staticNodeClusterUpgradeStepFromObservedState(
 	switch {
 	case staticNodeClusterRayRuntimeRunningTarget(cluster, currentNodes, plans):
 		return staticNodeClusterUpgradeStepVerifying
+	case staticNodeClusterWorkerTargetSpecIssued(cluster, currentNodes, plans):
+		return staticNodeClusterUpgradeStepStartingWorkers
 	case staticNodeClusterWorkersStopped(cluster, currentNodes) &&
 		staticNodeClusterHeadRayRunningTarget(cluster, currentNodes, plans):
 		return staticNodeClusterUpgradeStepStartingWorkers
@@ -187,6 +193,39 @@ func staticNodeClusterWorkersStopped(cluster *v1.StaticNodeCluster, nodes []*v1.
 	return true
 }
 
+func staticNodeClusterWorkerTargetSpecIssued(
+	cluster *v1.StaticNodeCluster,
+	nodes []*v1.StaticNode,
+	plans []DesiredNodePlan,
+) bool {
+	workerNames := staticNodeClusterWorkerNames(cluster)
+	nodesByName := staticNodeByName(nodes)
+
+	for name := range workerNames {
+		node := nodesByName[name]
+		if staticNodeRayWorkerSpecTarget(node, desiredRayComponent(plans, name, rayWorkerComponentName)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func staticNodeRayWorkerSpecTarget(node *v1.StaticNode, target *v1.NodeComponentSpec) bool {
+	if node == nil || node.Spec == nil || target == nil {
+		return false
+	}
+
+	for i := range node.Spec.Components {
+		component := &node.Spec.Components[i]
+		if component.Name == rayWorkerComponentName {
+			return reflect.DeepEqual(*component, *target)
+		}
+	}
+
+	return false
+}
+
 func staticNodeClusterRayRuntimeRunningTarget(
 	cluster *v1.StaticNodeCluster,
 	nodes []*v1.StaticNode,
@@ -252,6 +291,19 @@ func desiredRayComponentImage(
 	nodeName string,
 	componentName string,
 ) string {
+	component := desiredRayComponent(plans, nodeName, componentName)
+	if component == nil {
+		return ""
+	}
+
+	return component.Image
+}
+
+func desiredRayComponent(
+	plans []DesiredNodePlan,
+	nodeName string,
+	componentName string,
+) *v1.NodeComponentSpec {
 	for _, plan := range plans {
 		if plan.Node == nil || plan.Node.Spec == nil {
 			continue
@@ -266,14 +318,14 @@ func desiredRayComponentImage(
 			components = plan.Node.Spec.Components
 		}
 
-		for _, component := range components {
-			if component.Name == componentName {
-				return component.Image
+		for i := range components {
+			if components[i].Name == componentName {
+				return &components[i]
 			}
 		}
 	}
 
-	return ""
+	return nil
 }
 
 func staticNodeClusterWorkerNames(cluster *v1.StaticNodeCluster) map[string]struct{} {

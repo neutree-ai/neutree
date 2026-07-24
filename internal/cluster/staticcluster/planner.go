@@ -121,9 +121,8 @@ func (r *Planner) buildDesiredNodePlans(
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
-			Accelerator:      acceleratorStatus,
-			Node:             desiredNode,
-			TargetComponents: copyNodeComponents(components),
+			Accelerator: acceleratorStatus,
+			Node:        desiredNode,
 		})
 	}
 
@@ -136,6 +135,17 @@ func (r *Planner) buildDesiredNodePlans(
 	})
 
 	attachMetricsConfigFiles(cluster, plans)
+
+	for i := range plans {
+		plan := &plans[i]
+		if plan.Node == nil || plan.Node.Spec == nil {
+			continue
+		}
+
+		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
+		plan.TargetComponents = copyNodeComponents(plan.Node.Spec.Components)
+	}
+
 	applyRayRecreateUpgradePlan(cluster, currentByName, plans)
 
 	for _, plan := range plans {

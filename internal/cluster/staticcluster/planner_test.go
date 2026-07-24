@@ -869,6 +869,218 @@ func TestPlannerPlansRayRecreateUpgradeOrder(t *testing.T) {
 	}
 }
 
+func TestPlannerKeepsTargetWorkerSpecDuringRayRecreateUpgrade(t *testing.T) {
+	tests := []struct {
+		name      string
+		phase     v1.NodeComponentPhase
+		nodePhase v1.StaticNodePhase
+	}{
+		{
+			name:      "worker starting",
+			phase:     v1.NodeComponentPhaseStarting,
+			nodePhase: v1.StaticNodePhaseReconciling,
+		},
+		{
+			name:      "worker pending",
+			phase:     v1.NodeComponentPhasePending,
+			nodePhase: v1.StaticNodePhaseReconciling,
+		},
+		{
+			name:      "worker failed",
+			phase:     v1.NodeComponentPhaseFailed,
+			nodePhase: v1.StaticNodePhaseFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster := testStaticNodeCluster()
+			cluster.Spec.Version = "v1.2.1"
+			cluster.Status = &v1.StaticNodeClusterStatus{
+				Phase:   v1.StaticNodeClusterPhaseUpgrading,
+				Version: "v1.2.0",
+			}
+			currentNodes := staticNodeUpgradeCurrentNodes()
+			markUpgradeHeadTargetRunning(currentNodes)
+
+			targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+			require.NoError(t, err)
+			targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
+			require.NotNil(t, targetWorker)
+
+			worker := findStaticNode(currentNodes, "worker-0")
+			require.NotNil(t, worker)
+			worker.Spec = targetWorker.Spec
+			worker.Status.Phase = tt.nodePhase
+			worker.Status.Components = []v1.NodeComponentStatus{{
+				Name:   rayWorkerComponentName,
+				Phase:  tt.phase,
+				Reason: "transitional state",
+			}}
+
+			desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+
+			require.NoError(t, err)
+			status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
+			assert.Contains(t, status.ErrorMessage, staticNodeClusterUpgradeStepStartingWorkers)
+
+			desiredWorker := findStaticNode(staticNodesFromPlans(desiredNodePlans), "worker-0")
+			require.NotNil(t, desiredWorker)
+			assert.Equal(t, findComponent(targetWorker.Spec.Components, rayWorkerComponentName),
+				findComponent(desiredWorker.Spec.Components, rayWorkerComponentName))
+		})
+	}
+}
+
+func TestPlannerKeepsTargetWorkerSpecWhenHeadTemporarilyLeavesTarget(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase:   v1.StaticNodeClusterPhaseUpgrading,
+		Version: "v1.2.0",
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	markUpgradeHeadTargetRunning(currentNodes)
+
+	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+	targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
+	require.NotNil(t, targetWorker)
+
+	worker := findStaticNode(currentNodes, "worker-0")
+	require.NotNil(t, worker)
+	worker.Spec = &v1.StaticNodeSpec{
+		Role:       targetWorker.Spec.Role,
+		Components: copyNodeComponents(targetWorker.Spec.Components),
+	}
+	worker.Status.Phase = v1.StaticNodePhaseReconciling
+	worker.Status.Components = []v1.NodeComponentStatus{{
+		Name:  rayWorkerComponentName,
+		Phase: v1.NodeComponentPhaseStarting,
+	}}
+
+	head := findStaticNode(currentNodes, "head-0")
+	require.NotNil(t, head)
+	head.Status.Components = []v1.NodeComponentStatus{{
+		Name:          rayHeadComponentName,
+		Ready:         true,
+		Phase:         v1.NodeComponentPhaseRunning,
+		ObservedImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+	}}
+
+	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
+	assert.Contains(t, status.ErrorMessage, staticNodeClusterUpgradeStepStartingWorkers)
+	desiredWorker := findStaticNode(staticNodesFromPlans(desiredNodePlans), "worker-0")
+	require.NotNil(t, desiredWorker)
+	assert.Equal(t, findComponent(targetWorker.Spec.Components, rayWorkerComponentName),
+		findComponent(desiredWorker.Spec.Components, rayWorkerComponentName))
+}
+
+func TestPlannerContinuesStartingWorkersForPartiallyIssuedWorkerSpecs(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Spec.Nodes = append(cluster.Spec.Nodes, v1.StaticNodeClusterNodeSpec{
+		Name: "worker-1",
+		IP:   "10.0.0.12",
+		Role: v1.StaticNodeRoleWorker,
+	})
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase:   v1.StaticNodeClusterPhaseUpgrading,
+		Version: "v1.2.0",
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	workerZero := findStaticNode(currentNodes, "worker-0")
+	require.NotNil(t, workerZero)
+	currentNodes = append(currentNodes, &v1.StaticNode{
+		Metadata: &v1.Metadata{Name: "worker-1"},
+		Spec: &v1.StaticNodeSpec{
+			Role:       v1.StaticNodeRoleWorker,
+			Components: copyNodeComponents(workerZero.Spec.Components),
+		},
+		Status: &v1.StaticNodeStatus{
+			Phase:       v1.StaticNodePhaseReady,
+			Accelerator: workerZero.Status.Accelerator,
+			Warm:        &v1.WarmStatus{Ready: true},
+			Components:  append([]v1.NodeComponentStatus{}, workerZero.Status.Components...),
+		},
+	})
+	markUpgradeHeadTargetRunning(currentNodes)
+	workerOne := findStaticNode(currentNodes, "worker-1")
+	require.NotNil(t, workerOne)
+	workerOne.Status.Components = []v1.NodeComponentStatus{{
+		Name:  rayWorkerComponentName,
+		Phase: v1.NodeComponentPhaseStopped,
+	}}
+
+	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+	targetWorkerZero := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
+	require.NotNil(t, targetWorkerZero)
+	workerZero.Spec = targetWorkerZero.Spec
+	workerZero.Status.Phase = v1.StaticNodePhaseReconciling
+	workerZero.Status.Components = []v1.NodeComponentStatus{{
+		Name:  rayWorkerComponentName,
+		Phase: v1.NodeComponentPhaseStarting,
+	}}
+
+	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
+	assert.Contains(t, status.ErrorMessage, staticNodeClusterUpgradeStepStartingWorkers)
+	for _, name := range []string{"worker-0", "worker-1"} {
+		targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), name)
+		desiredWorker := findStaticNode(staticNodesFromPlans(desiredNodePlans), name)
+		require.NotNil(t, targetWorker)
+		require.NotNil(t, desiredWorker)
+		assert.Equal(t, findComponent(targetWorker.Spec.Components, rayWorkerComponentName),
+			findComponent(desiredWorker.Spec.Components, rayWorkerComponentName))
+	}
+}
+
+func TestPlannerDoesNotTreatDifferentWorkerSpecAsTarget(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.1"
+	cluster.Status = &v1.StaticNodeClusterStatus{
+		Phase:   v1.StaticNodeClusterPhaseUpgrading,
+		Version: "v1.2.0",
+	}
+	currentNodes := staticNodeUpgradeCurrentNodes()
+	markUpgradeHeadTargetRunning(currentNodes)
+
+	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+	targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
+	require.NotNil(t, targetWorker)
+
+	worker := findStaticNode(currentNodes, "worker-0")
+	require.NotNil(t, worker)
+	worker.Spec = &v1.StaticNodeSpec{
+		Role:       targetWorker.Spec.Role,
+		Components: copyNodeComponents(targetWorker.Spec.Components),
+	}
+	workerRay := findComponent(worker.Spec.Components, rayWorkerComponentName)
+	require.NotNil(t, workerRay)
+	workerRay.ConfigHash = "different-config-hash"
+	worker.Status.Phase = v1.StaticNodePhaseReconciling
+	worker.Status.Components = []v1.NodeComponentStatus{{
+		Name:  rayWorkerComponentName,
+		Phase: v1.NodeComponentPhaseStarting,
+	}}
+
+	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
+	assert.Contains(t, status.ErrorMessage, staticNodeClusterUpgradeStepStoppingWorkers)
+	desiredWorker := findStaticNode(staticNodesFromPlans(desiredNodePlans), "worker-0")
+	require.NotNil(t, desiredWorker)
+	assert.Nil(t, findComponent(desiredWorker.Spec.Components, rayWorkerComponentName))
+}
+
 func TestPlannerAdvancesRayRecreateUpgradeStep(t *testing.T) {
 	tests := []struct {
 		name     string
