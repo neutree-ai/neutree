@@ -121,9 +121,8 @@ func (r *Planner) buildDesiredNodePlans(
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
-			Accelerator:      acceleratorStatus,
-			Node:             desiredNode,
-			TargetComponents: copyNodeComponents(components),
+			Accelerator: acceleratorStatus,
+			Node:        desiredNode,
 		})
 	}
 
@@ -136,8 +135,26 @@ func (r *Planner) buildDesiredNodePlans(
 	})
 
 	attachMetricsConfigFiles(cluster, plans)
+
+	// Snapshot the normalized target before upgrade staging can replace plan
+	// components with the observed StaticNode Spec. Use the indexed plan because
+	// TargetComponents is a DesiredNodePlan field, not an object behind Node.
+	for i := range plans {
+		plan := &plans[i]
+		if plan.Node == nil || plan.Node.Spec == nil {
+			continue
+		}
+
+		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
+		plan.TargetComponents = copyNodeComponents(plan.Node.Spec.Components)
+	}
+
 	applyRayRecreateUpgradePlan(cluster, currentByName, plans)
 
+	// Upgrade staging may adopt observed components; normalize the final Spec
+	// that will be written to the StaticNode.
+	// TODO: Standardize plan traversal style when this path is refactored. Keep
+	// this range form for now because it only updates the StaticNode behind Node.
 	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
 	}
