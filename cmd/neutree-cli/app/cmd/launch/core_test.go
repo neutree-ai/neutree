@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/compose-spec/compose-go/cli"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/pkg/errors"
@@ -152,6 +153,69 @@ func TestPrepareNeutreeCoreDeployConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrepareNeutreeCoreDeployConfigRendersKongPluginChecksumLabels(t *testing.T) {
+	tempDir := t.TempDir()
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	composeFilePath := filepath.Join(tempDir, "neutree-core", "docker-compose.yml")
+	project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
+		ConfigPaths: []string{composeFilePath},
+	})
+	require.NoError(t, err)
+
+	expectedChecksums, err := kongPluginChecksums(filepath.Join(tempDir, "neutree-core", "gateway", "kong", "plugins"))
+	require.NoError(t, err)
+	expectedLabels := map[string]string{
+		"neutree.ai/kong-plugin-neutree-ai-gateway-checksum":    expectedChecksums["neutree-ai-gateway"],
+		"neutree.ai/kong-plugin-neutree-ai-statistics-checksum": expectedChecksums["neutree-ai-statistics"],
+		"neutree.ai/kong-plugin-neutree-ai-access-checksum":     expectedChecksums["neutree-ai-access"],
+		"neutree.ai/kong-plugin-neutree-ai-quota-checksum":      expectedChecksums["neutree-ai-quota"],
+	}
+
+	var kongLabels map[string]string
+	for _, service := range project.Services {
+		if service.Name == "kong" {
+			kongLabels = service.Labels
+			break
+		}
+	}
+	require.NotNil(t, kongLabels)
+	for label, checksum := range expectedLabels {
+		assert.Equal(t, checksum, kongLabels[label])
+	}
+
+	for _, service := range project.Services {
+		if service.Name == "kong" {
+			continue
+		}
+		for label := range expectedLabels {
+			assert.NotContains(t, service.Labels, label, "unexpected Kong plugin checksum label on %s", service.Name)
+		}
+	}
+}
+
+func TestCleanKongPluginDirectoryRemovesStalePluginFiles(t *testing.T) {
+	renderedCoreWorkDir := filepath.Join(t.TempDir(), "neutree-core")
+	staleFilePath := filepath.Join(renderedCoreWorkDir, "gateway", "kong", "plugins", "neutree-ai-gateway", "removed.lua")
+	require.NoError(t, os.MkdirAll(filepath.Dir(staleFilePath), 0o755))
+	require.NoError(t, os.WriteFile(staleFilePath, []byte("stale\n"), 0o600))
+
+	require.NoError(t, cleanKongPluginDirectory(renderedCoreWorkDir))
+
+	assert.NoFileExists(t, staleFilePath)
 }
 
 // NEU-583 regression: rendering the embedded manifests must not HTML-escape
