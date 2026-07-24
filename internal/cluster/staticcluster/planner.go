@@ -136,6 +136,8 @@ func (r *Planner) buildDesiredNodePlans(
 
 	attachMetricsConfigFiles(cluster, plans)
 
+	// Snapshot the normalized target before upgrade staging can replace plan
+	// components with the observed StaticNode Spec.
 	for i := range plans {
 		plan := &plans[i]
 		if plan.Node == nil || plan.Node.Spec == nil {
@@ -148,6 +150,8 @@ func (r *Planner) buildDesiredNodePlans(
 
 	applyRayRecreateUpgradePlan(cluster, currentByName, plans)
 
+	// Upgrade staging may adopt observed components; normalize the final Spec
+	// that will be written to the StaticNode.
 	for _, plan := range plans {
 		plan.Node.Spec.Components = withComponentConfigHashes(plan.Node.Spec.Components)
 	}
