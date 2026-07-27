@@ -77,9 +77,9 @@ func (_c *MockImageService_CheckImageExists_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
-// CheckPullPermission provides a mock function with given fields: image, auth
-func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authenticator) (bool, error) {
-	ret := _m.Called(image, auth)
+// CheckPullPermission provides a mock function with given fields: image, auth, useHTTP
+func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
+	ret := _m.Called(image, auth, useHTTP)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckPullPermission")
@@ -87,17 +87,17 @@ func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authent
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (bool, error)); ok {
-		return rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) (bool, error)); ok {
+		return rf(image, auth, useHTTP)
 	}
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) bool); ok {
-		r0 = rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) bool); ok {
+		r0 = rf(image, auth, useHTTP)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
-		r1 = rf(image, auth)
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator, bool) error); ok {
+		r1 = rf(image, auth, useHTTP)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -113,13 +113,14 @@ type MockImageService_CheckPullPermission_Call struct {
 // CheckPullPermission is a helper method to define mock.On call
 //   - image string
 //   - auth authn.Authenticator
-func (_e *MockImageService_Expecter) CheckPullPermission(image interface{}, auth interface{}) *MockImageService_CheckPullPermission_Call {
-	return &MockImageService_CheckPullPermission_Call{Call: _e.mock.On("CheckPullPermission", image, auth)}
+//   - useHTTP bool
+func (_e *MockImageService_Expecter) CheckPullPermission(image interface{}, auth interface{}, useHTTP interface{}) *MockImageService_CheckPullPermission_Call {
+	return &MockImageService_CheckPullPermission_Call{Call: _e.mock.On("CheckPullPermission", image, auth, useHTTP)}
 }
 
-func (_c *MockImageService_CheckPullPermission_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_CheckPullPermission_Call {
+func (_c *MockImageService_CheckPullPermission_Call) Run(run func(image string, auth authn.Authenticator, useHTTP bool)) *MockImageService_CheckPullPermission_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(authn.Authenticator))
+		run(args[0].(string), args[1].(authn.Authenticator), args[2].(bool))
 	})
 	return _c
 }
@@ -129,14 +130,14 @@ func (_c *MockImageService_CheckPullPermission_Call) Return(_a0 bool, _a1 error)
 	return _c
 }
 
-func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(string, authn.Authenticator) (bool, error)) *MockImageService_CheckPullPermission_Call {
+func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(string, authn.Authenticator, bool) (bool, error)) *MockImageService_CheckPullPermission_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetImageLabels provides a mock function with given fields: image, auth
-func (_m *MockImageService) GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error) {
-	ret := _m.Called(image, auth)
+// GetImageLabels provides a mock function with given fields: image, auth, useHTTP
+func (_m *MockImageService) GetImageLabels(image string, auth authn.Authenticator, useHTTP bool) (map[string]string, error) {
+	ret := _m.Called(image, auth, useHTTP)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetImageLabels")
@@ -144,19 +145,19 @@ func (_m *MockImageService) GetImageLabels(image string, auth authn.Authenticato
 
 	var r0 map[string]string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (map[string]string, error)); ok {
-		return rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) (map[string]string, error)); ok {
+		return rf(image, auth, useHTTP)
 	}
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) map[string]string); ok {
-		r0 = rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) map[string]string); ok {
+		r0 = rf(image, auth, useHTTP)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
-		r1 = rf(image, auth)
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator, bool) error); ok {
+		r1 = rf(image, auth, useHTTP)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -172,13 +173,14 @@ type MockImageService_GetImageLabels_Call struct {
 // GetImageLabels is a helper method to define mock.On call
 //   - image string
 //   - auth authn.Authenticator
-func (_e *MockImageService_Expecter) GetImageLabels(image interface{}, auth interface{}) *MockImageService_GetImageLabels_Call {
-	return &MockImageService_GetImageLabels_Call{Call: _e.mock.On("GetImageLabels", image, auth)}
+//   - useHTTP bool
+func (_e *MockImageService_Expecter) GetImageLabels(image interface{}, auth interface{}, useHTTP interface{}) *MockImageService_GetImageLabels_Call {
+	return &MockImageService_GetImageLabels_Call{Call: _e.mock.On("GetImageLabels", image, auth, useHTTP)}
 }
 
-func (_c *MockImageService_GetImageLabels_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_GetImageLabels_Call {
+func (_c *MockImageService_GetImageLabels_Call) Run(run func(image string, auth authn.Authenticator, useHTTP bool)) *MockImageService_GetImageLabels_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(authn.Authenticator))
+		run(args[0].(string), args[1].(authn.Authenticator), args[2].(bool))
 	})
 	return _c
 }
@@ -188,14 +190,14 @@ func (_c *MockImageService_GetImageLabels_Call) Return(_a0 map[string]string, _a
 	return _c
 }
 
-func (_c *MockImageService_GetImageLabels_Call) RunAndReturn(run func(string, authn.Authenticator) (map[string]string, error)) *MockImageService_GetImageLabels_Call {
+func (_c *MockImageService_GetImageLabels_Call) RunAndReturn(run func(string, authn.Authenticator, bool) (map[string]string, error)) *MockImageService_GetImageLabels_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ListImageTags provides a mock function with given fields: imageRepo, auth
-func (_m *MockImageService) ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error) {
-	ret := _m.Called(imageRepo, auth)
+// ListImageTags provides a mock function with given fields: imageRepo, auth, useHTTP
+func (_m *MockImageService) ListImageTags(imageRepo string, auth authn.Authenticator, useHTTP bool) ([]string, error) {
+	ret := _m.Called(imageRepo, auth, useHTTP)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListImageTags")
@@ -203,19 +205,19 @@ func (_m *MockImageService) ListImageTags(imageRepo string, auth authn.Authentic
 
 	var r0 []string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) ([]string, error)); ok {
-		return rf(imageRepo, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) ([]string, error)); ok {
+		return rf(imageRepo, auth, useHTTP)
 	}
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) []string); ok {
-		r0 = rf(imageRepo, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) []string); ok {
+		r0 = rf(imageRepo, auth, useHTTP)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
-		r1 = rf(imageRepo, auth)
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator, bool) error); ok {
+		r1 = rf(imageRepo, auth, useHTTP)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -231,13 +233,14 @@ type MockImageService_ListImageTags_Call struct {
 // ListImageTags is a helper method to define mock.On call
 //   - imageRepo string
 //   - auth authn.Authenticator
-func (_e *MockImageService_Expecter) ListImageTags(imageRepo interface{}, auth interface{}) *MockImageService_ListImageTags_Call {
-	return &MockImageService_ListImageTags_Call{Call: _e.mock.On("ListImageTags", imageRepo, auth)}
+//   - useHTTP bool
+func (_e *MockImageService_Expecter) ListImageTags(imageRepo interface{}, auth interface{}, useHTTP interface{}) *MockImageService_ListImageTags_Call {
+	return &MockImageService_ListImageTags_Call{Call: _e.mock.On("ListImageTags", imageRepo, auth, useHTTP)}
 }
 
-func (_c *MockImageService_ListImageTags_Call) Run(run func(imageRepo string, auth authn.Authenticator)) *MockImageService_ListImageTags_Call {
+func (_c *MockImageService_ListImageTags_Call) Run(run func(imageRepo string, auth authn.Authenticator, useHTTP bool)) *MockImageService_ListImageTags_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(authn.Authenticator))
+		run(args[0].(string), args[1].(authn.Authenticator), args[2].(bool))
 	})
 	return _c
 }
@@ -247,7 +250,7 @@ func (_c *MockImageService_ListImageTags_Call) Return(_a0 []string, _a1 error) *
 	return _c
 }
 
-func (_c *MockImageService_ListImageTags_Call) RunAndReturn(run func(string, authn.Authenticator) ([]string, error)) *MockImageService_ListImageTags_Call {
+func (_c *MockImageService_ListImageTags_Call) RunAndReturn(run func(string, authn.Authenticator, bool) ([]string, error)) *MockImageService_ListImageTags_Call {
 	_c.Call.Return(run)
 	return _c
 }

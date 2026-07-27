@@ -62,6 +62,7 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		imageRegistry := &imageRegistries[0]
+		useHTTP := util.IsHTTPRegistryURL(imageRegistry.Spec.URL)
 
 		imagePrefix, err := util.GetImagePrefix(imageRegistry)
 		if err != nil {
@@ -106,7 +107,7 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 		// Labeled images are deduplicated by version and filtered by accelerator type.
 		imageSvc := deps.ImageService
 
-		tags, err := imageSvc.ListImageTags(imageRepo, auth)
+		tags, err := imageSvc.ListImageTags(imageRepo, auth, useHTTP)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list image tags: %v", err)})
 			return
@@ -135,7 +136,7 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 
 				imageRef := imageRepo + ":" + t
 
-				labels, labelErr := imageSvc.GetImageLabels(imageRef, auth)
+				labels, labelErr := imageSvc.GetImageLabels(imageRef, auth, useHTTP)
 				if labelErr != nil {
 					klog.V(4).Infof("skipping tag %s: failed to get labels: %v", t, labelErr)
 					return
