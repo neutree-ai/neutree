@@ -28,6 +28,20 @@ func intPtr(i int) *int { return &i }
 
 func stringPtr(v string) *string { return &v }
 
+// customRayResourceConverter models accelerators that schedule through Ray
+// custom resources instead of Ray's built-in num_gpus field.
+type customRayResourceConverter struct{}
+
+func (customRayResourceConverter) ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+	return &v1.RayResourceSpec{
+		Resources: map[string]float64{"NPU": 2},
+	}, nil
+}
+
+func (customRayResourceConverter) ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+	return &v1.KubernetesResourceSpec{}, nil
+}
+
 func endpointModelHashForTest(t *testing.T, endpoint *v1.Endpoint) string {
 	t.Helper()
 
@@ -2231,6 +2245,69 @@ func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 					assert.False(t, hasTensorParallel, "%s should not be set", tt.tpKey)
 				}
 			}
+		})
+	}
+}
+
+func TestEndpointToApplication_TensorParallelSizeUsesRequestedGPUCount(t *testing.T) {
+	const customAcceleratorType = "custom_accelerator"
+
+	modelRegistry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
+	}
+	deployedCluster := &v1.Cluster{}
+
+	tests := []struct {
+		name       string
+		engineName string
+		engineVer  string
+		tpKey      string
+	}{
+		{
+			name:       "vllm",
+			engineName: v1.EngineNameVLLM,
+			engineVer:  "v0.11.2",
+			tpKey:      "tensor_parallel_size",
+		},
+		{
+			name:       "sglang",
+			engineName: v1.EngineNameSGLang,
+			engineVer:  "v0.5.10",
+			tpKey:      "tp_size",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gpu := "2"
+			endpoint := &v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "test", Name: "test-endpoint"},
+				Spec: &v1.EndpointSpec{
+					Engine:    &v1.EndpointEngineSpec{Engine: tt.engineName, Version: tt.engineVer},
+					Resources: &v1.ResourceSpec{GPU: &gpu},
+					Replicas:  v1.ReplicaSpec{Num: pointy.Int(1)},
+					Model:     &v1.ModelSpec{Name: "test-model"},
+				},
+			}
+			endpoint.Spec.Resources.SetAcceleratorType(customAcceleratorType)
+
+			mgr := acceleratormocks.NewMockManager(t)
+			mgr.EXPECT().GetConverter(customAcceleratorType).
+				Return(customRayResourceConverter{}, true)
+
+			app, err := EndpointToApplication(endpoint, deployedCluster, modelRegistry, nil, nil, mgr)
+			require.NoError(t, err)
+
+			engineArgs, ok := app.Args["engine_args"].(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, 2, engineArgs[tt.tpKey])
+
+			deploymentOptions, ok := app.Args["deployment_options"].(map[string]interface{})
+			require.True(t, ok)
+			backend, ok := deploymentOptions["backend"].(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, float64(0), backend["num_gpus"])
+			assert.Equal(t, map[string]float64{"NPU": 2}, backend["resources"])
 		})
 	}
 }
