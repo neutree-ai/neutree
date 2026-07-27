@@ -28,6 +28,7 @@ Subcommands live under `cmd/neutree-cli/app/cmd/`. Each top-level directory is a
 | `cleanup` | Tear down a compose stack deployed by `launch` (`cleanup neutree-core` or `cleanup obs-stack`); `--remove-data` also drops volumes. |
 | `launch` | Two subcommands: `launch neutree-core` (operational stack — neutree-api + neutree-core + Postgres/GoTrue/PostgREST + Kong + vmagent + vector) and `launch obs-stack` (VictoriaMetrics + Grafana). Both via Docker Compose. |
 | `engine` | Engine-specific operations (import a package, list versions, ...). |
+| `image` | Push an arbitrary container image into a Neutree-managed image registry (`image push`). |
 | `model` | Model registry / catalog operations. |
 | `packageimport` | Import engine packages and similar bundles. |
 | `resource` | Generic resource operations not tied to a single verb. |
@@ -56,6 +57,24 @@ The CLI sends the API key on `Authorization`; `neutree-api`'s `auth` middleware 
 There is currently no Kubernetes-native install path in `neutree-cli`; the Helm chart at `deploy/chart/` is applied with `helm install` directly by operators outside this tool.
 
 Note: this is independent from the runtime cluster mode (K8s vs SSH) — the runtime mode controls how user `Endpoint` resources are scheduled (`Cluster.spec.config`), not how the CP itself is installed.
+
+## Arbitrary Image Push
+
+`neutree-cli image push <image>` tags a local Docker image into the `ImageRegistry` resource
+named by `--image-registry` / `--workspace` and pushes it. The printed reference is what the
+platform will pull, which makes it usable verbatim as an engine `image` override (the flex
+engine's `engine_args.image`). Credentials come from the registry's stored auth via the
+`credentials/image_registries` endpoint (`image_registry:read-credentials`), with
+`--registry-username` / `--registry-password` as the fallback for keys that lack the permission.
+
+The target reference uses `util.RelocateImageRef`, **not** the `util.RewriteImageRef` the
+orchestrators render pull specs with. The two agree except on Docker Hub prefixes: `RewriteImageRef`
+deliberately leaves a reference alone when the registry is Docker Hub (already pullable, no prefix
+needed), which on the push side would send the image to whatever registry the *source* reference
+names — a different host than the one whose credentials are in play. `RelocateImageRef` always
+applies the prefix; `RewriteImageRef` is now the Docker-Hub short-circuit in front of it.
+
+Implementation: `internal/cli/image/` (`push.go` workflow, `pusher.go` Docker primitives).
 
 ## Engine Package Import
 

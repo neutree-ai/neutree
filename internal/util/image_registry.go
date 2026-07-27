@@ -2,10 +2,12 @@ package util
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/docker/docker/api/types/registry"
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -47,6 +49,26 @@ func GetImageRegistryAuthInfo(r *v1.ImageRegistry) (string, string, error) {
 	}
 
 	return "", "", nil
+}
+
+// EncodeRegistryAuth builds the base64-encoded Docker auth blob expected by the
+// Docker client's RegistryAuth push option. An empty username yields an empty
+// blob, i.e. an anonymous push.
+func EncodeRegistryAuth(username, password, serverAddress string) (string, error) {
+	if username == "" {
+		return "", nil
+	}
+
+	authConfigBytes, err := json.Marshal(registry.AuthConfig{
+		Username:      username,
+		Password:      password,
+		ServerAddress: serverAddress,
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "failed to marshal registry auth config")
+	}
+
+	return base64.URLEncoding.EncodeToString(authConfigBytes), nil
 }
 
 // parseRegistryHost normalizes a registry URL by stripping any scheme and

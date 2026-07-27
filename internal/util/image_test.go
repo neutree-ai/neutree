@@ -166,6 +166,66 @@ func TestRewriteImageRef(t *testing.T) {
 	}
 }
 
+func TestRelocateImageRef(t *testing.T) {
+	tests := []struct {
+		name        string
+		imagePrefix string
+		image       string
+		expected    string
+	}{
+		{
+			name:        "source registry is replaced by the target prefix",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "docker.io/neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "image without source registry keeps repository path",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "already relocated image is unchanged",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+			expected:    "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			// The pull-side RewriteImageRef leaves these alone; a push must not,
+			// or the image lands on the source registry instead of the target.
+			name:        "docker hub prefix still relocates an unqualified image",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "my-workload:v1",
+			expected:    "docker.io/neutree-ai/my-workload:v1",
+		},
+		{
+			name:        "docker hub prefix still replaces a foreign source registry",
+			imagePrefix: "docker.io/neutree-ai",
+			image:       "ghcr.io/acme/my-workload:v1",
+			expected:    "docker.io/neutree-ai/acme/my-workload:v1",
+		},
+		{
+			name:        "empty prefix leaves image unchanged",
+			imagePrefix: "",
+			image:       "docker.io/neutree/neutree-node-agent:v1.2.0",
+			expected:    "docker.io/neutree/neutree-node-agent:v1.2.0",
+		},
+		{
+			name:        "empty image stays empty",
+			imagePrefix: "registry.example.com/neutree-ai",
+			image:       "",
+			expected:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, RelocateImageRef(tt.imagePrefix, tt.image))
+		})
+	}
+}
+
 func TestResolveEngineImage(t *testing.T) {
 	ev := &v1.EngineVersion{
 		Version: "v0.11.2",

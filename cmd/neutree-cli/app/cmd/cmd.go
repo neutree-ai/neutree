@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/export"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/get"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/image"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/model"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/packageimport"
@@ -28,6 +29,7 @@ func NewNeutreeCliCommand() *cobra.Command {
 Available Commands:
   • launch: Deploy Neutree components and services
   • model: Manage Neutree models
+  • image: Push container images to a Neutree-managed image registry
   • engine: Manage Neutree engines
 
 Examples:
@@ -56,6 +58,7 @@ Examples:
 	neutreeCliCmd.AddCommand(engine.NewEngineCmd())
 	neutreeCliCmd.AddCommand(export.NewExportCmd())
 	neutreeCliCmd.AddCommand(get.NewGetCmd())
+	neutreeCliCmd.AddCommand(image.NewImageCmd())
 	neutreeCliCmd.AddCommand(launch.NewLaunchCmd())
 	neutreeCliCmd.AddCommand(model.NewModelCmd())
 	neutreeCliCmd.AddCommand(packageimport.NewImportCmd())

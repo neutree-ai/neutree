@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 )
@@ -49,9 +48,8 @@ func (s *resourceService) list(params url.Values, result interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return err
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -88,9 +86,8 @@ func (s *resourceService) get(workspace, name string, result interface{}) error 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return err
 	}
 
 	// Decode into a slice first to check if resource exists
@@ -131,9 +128,8 @@ func (s *resourceService) create(data interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/201 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	if err := expectStatus(resp, http.StatusOK, http.StatusCreated); err != nil {
+		return err
 	}
 
 	return nil
@@ -168,9 +164,8 @@ func (s *resourceService) update(id string, data interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/204 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	if err := expectStatus(resp, http.StatusOK, http.StatusNoContent); err != nil {
+		return err
 	}
 
 	return nil
@@ -198,9 +193,8 @@ func (s *resourceService) delete(id string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/204 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	if err := expectStatus(resp, http.StatusOK, http.StatusNoContent); err != nil {
+		return err
 	}
 
 	return nil
