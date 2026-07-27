@@ -14,7 +14,7 @@ import (
 type ImageService interface {
 	CheckImageExists(image string, auth authn.Authenticator) (bool, error)
 	// CheckPullPermission checks if the provided auth has pull permission for the image
-	CheckPullPermission(image string, auth authn.Authenticator) (bool, error)
+	CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error)
 	ListImageTags(imageRepo string, auth authn.Authenticator) ([]string, error)
 	// GetImageLabels returns the labels from an image's config.
 	GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error)
@@ -52,13 +52,26 @@ func (svc *imageService) CheckImageExists(image string, auth authn.Authenticator
 	return true, nil
 }
 
-func (svc *imageService) CheckPullPermission(image string, auth authn.Authenticator) (bool, error) {
-	ref, err := name.ParseReference(image)
+func (svc *imageService) CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
+	options := []name.Option{}
+	if useHTTP {
+		options = append(options, name.Insecure)
+	}
+
+	ref, err := name.ParseReference(image, options...)
 	if err != nil {
 		return false, errors.Wrap(err, "failed to parse image "+image)
 	}
 
-	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(svc.transport))
+	requestTransport := svc.transport
+	if !useHTTP {
+		requestTransport = &forceHTTPSRegistryTransport{
+			inner:    requestTransport,
+			registry: ref.Context().Registry.RegistryStr(),
+		}
+	}
+
+	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(requestTransport))
 	if err != nil {
 		if transportErr, ok := err.(*transport.Error); ok {
 			if transportErr.StatusCode == http.StatusUnauthorized || transportErr.StatusCode == http.StatusForbidden {
@@ -75,6 +88,22 @@ func (svc *imageService) CheckPullPermission(image string, auth authn.Authentica
 	}
 
 	return true, nil
+}
+
+type forceHTTPSRegistryTransport struct {
+	inner    http.RoundTripper
+	registry string
+}
+
+func (t *forceHTTPSRegistryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL.Scheme != "http" || request.URL.Host != t.registry {
+		return t.inner.RoundTrip(request)
+	}
+
+	request = request.Clone(request.Context())
+	request.URL.Scheme = "https"
+
+	return t.inner.RoundTrip(request)
 }
 
 func (svc *imageService) GetImageLabels(image string, auth authn.Authenticator) (map[string]string, error) {

@@ -77,9 +77,9 @@ func (_c *MockImageService_CheckImageExists_Call) RunAndReturn(run func(string, 
 	return _c
 }
 
-// CheckPullPermission provides a mock function with given fields: image, auth
-func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authenticator) (bool, error) {
-	ret := _m.Called(image, auth)
+// CheckPullPermission provides a mock function with given fields: image, auth, useHTTP
+func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
+	ret := _m.Called(image, auth, useHTTP)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckPullPermission")
@@ -87,17 +87,17 @@ func (_m *MockImageService) CheckPullPermission(image string, auth authn.Authent
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (bool, error)); ok {
-		return rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) (bool, error)); ok {
+		return rf(image, auth, useHTTP)
 	}
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) bool); ok {
-		r0 = rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) bool); ok {
+		r0 = rf(image, auth, useHTTP)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
-		r1 = rf(image, auth)
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator, bool) error); ok {
+		r1 = rf(image, auth, useHTTP)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -113,13 +113,14 @@ type MockImageService_CheckPullPermission_Call struct {
 // CheckPullPermission is a helper method to define mock.On call
 //   - image string
 //   - auth authn.Authenticator
-func (_e *MockImageService_Expecter) CheckPullPermission(image interface{}, auth interface{}) *MockImageService_CheckPullPermission_Call {
-	return &MockImageService_CheckPullPermission_Call{Call: _e.mock.On("CheckPullPermission", image, auth)}
+//   - useHTTP bool
+func (_e *MockImageService_Expecter) CheckPullPermission(image interface{}, auth interface{}, useHTTP interface{}) *MockImageService_CheckPullPermission_Call {
+	return &MockImageService_CheckPullPermission_Call{Call: _e.mock.On("CheckPullPermission", image, auth, useHTTP)}
 }
 
-func (_c *MockImageService_CheckPullPermission_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_CheckPullPermission_Call {
+func (_c *MockImageService_CheckPullPermission_Call) Run(run func(image string, auth authn.Authenticator, useHTTP bool)) *MockImageService_CheckPullPermission_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(authn.Authenticator))
+		run(args[0].(string), args[1].(authn.Authenticator), args[2].(bool))
 	})
 	return _c
 }
@@ -129,7 +130,7 @@ func (_c *MockImageService_CheckPullPermission_Call) Return(_a0 bool, _a1 error)
 	return _c
 }
 
-func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(string, authn.Authenticator) (bool, error)) *MockImageService_CheckPullPermission_Call {
+func (_c *MockImageService_CheckPullPermission_Call) RunAndReturn(run func(string, authn.Authenticator, bool) (bool, error)) *MockImageService_CheckPullPermission_Call {
 	_c.Call.Return(run)
 	return _c
 }

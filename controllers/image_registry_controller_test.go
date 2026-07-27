@@ -20,6 +20,46 @@ func newTestImageRegistryController(storage *storagemocks.MockStorage, svc *regi
 	}
 }
 
+func TestImageRegistryController_ConnectImageRegistry_PassesHTTPRegistryScheme(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		useHTTP bool
+	}{
+		{
+			name:    "explicit HTTP URL",
+			url:     "http://registry.example.com:5000",
+			useHTTP: true,
+		},
+		{
+			name: "explicit HTTPS URL",
+			url:  "https://registry.example.com:5000",
+		},
+		{
+			name: "URL without scheme",
+			url:  "registry.example.com:5000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imageService := &registrymocks.MockImageService{}
+			imageService.
+				On("CheckPullPermission", "registry.example.com:5000/neutree/neutree-serve", mock.Anything, tt.useHTTP).
+				Return(true, nil)
+
+			controller := newTestImageRegistryController(&storagemocks.MockStorage{}, imageService)
+			err := controller.connectImageRegistry(&v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "test"},
+				Spec:     &v1.ImageRegistrySpec{URL: tt.url},
+			})
+
+			assert.NoError(t, err)
+			imageService.AssertExpectations(t)
+		})
+	}
+}
+
 func TestImageRegistryController_Sync_Delete(t *testing.T) {
 	now := time.Now().Format(time.RFC3339Nano)
 
@@ -125,7 +165,7 @@ func TestImageRegistryController_Sync_PendingOrNoStatus(t *testing.T) {
 			name:  "Pending/NoStatus -> Connected (check pull permission success)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)
@@ -144,7 +184,7 @@ func TestImageRegistryController_Sync_PendingOrNoStatus(t *testing.T) {
 			name:  "Pending/NoStatus -> Failed (check pull permission failed)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)
@@ -239,7 +279,7 @@ func TestImageRegistryController_Sync_Conneted(t *testing.T) {
 			name:  "Connected -> Connected (check pull permission success)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)
@@ -254,7 +294,7 @@ func TestImageRegistryController_Sync_Conneted(t *testing.T) {
 			name:  "Connected -> Failed (check pull permission failed)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)
@@ -351,7 +391,7 @@ func TestImageRegistryController_Sync_Failed(t *testing.T) {
 			name:  "Failed -> Connected (check pull permission success)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)
@@ -370,7 +410,7 @@ func TestImageRegistryController_Sync_Failed(t *testing.T) {
 			name:  "Failed -> Failed (check pull permission failed)",
 			input: testImageRegistry(),
 			mockSetup: func(input *v1.ImageRegistry, s *storagemocks.MockStorage, imageSvc *registrymocks.MockImageService) {
-				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				imageSvc.On("CheckPullPermission", mock.Anything, mock.Anything, true).Run(func(args mock.Arguments) {
 					image := args.Get(0).(string)
 					assert.Equal(t, "test/neutree/neutree-serve", image)
 					arg := args.Get(1).(authn.Authenticator)

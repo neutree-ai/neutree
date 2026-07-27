@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
@@ -136,7 +137,8 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 		authenticator = authn.FromConfig(authConfig)
 	}
 
-	hasPermission, err := c.imageService.CheckPullPermission(testImage, authenticator)
+	useHTTP := strings.HasPrefix(imageRegistry.Spec.URL, "http://")
+	hasPermission, err := c.imageService.CheckPullPermission(testImage, authenticator, useHTTP)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect %s at URL %s",
 			imageRegistry.Metadata.WorkspaceName(), imageRegistry.Spec.URL)
