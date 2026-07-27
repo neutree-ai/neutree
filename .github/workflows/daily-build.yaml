@@ -25,3 +25,17 @@ jobs:
           git tag "${NIGHTLY_TAG}" -m "${NIGHTLY_TAG}"
           git push origin "${NIGHTLY_TAG}"
           echo "tag=${NIGHTLY_TAG}" >> "${GITHUB_OUTPUT}"
+      - name: Trigger Release Workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const nightlyTag = '${{ steps.create_nightly_tag.outputs.tag }}';
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release.yaml',
+              ref: 'main',
+              inputs: {
+                tag: nightlyTag
+              },
+            })
