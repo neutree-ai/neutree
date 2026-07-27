@@ -710,12 +710,22 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	proxyReady := allProxiesHealthy(currentAppsResp.Proxies)
 
-	currentModelHash, hashErr := util.ComputeEndpointModelHash(endpoint)
-	if hashErr != nil {
-		klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
+	isBuiltInModelDownloaderEngine := endpoint.Spec != nil &&
+		endpoint.Spec.Engine != nil &&
+		v1.IsBuiltInModelDownloaderEngine(endpoint.Spec.Engine.Engine)
+
+	currentModelHash := ""
+	modelDownloadCompleted := false
+	if isBuiltInModelDownloaderEngine {
+		var hashErr error
+		currentModelHash, hashErr = util.ComputeEndpointModelHash(endpoint)
+		if hashErr != nil {
+			klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
+		}
+
+		modelDownloadCompleted = currentModelDownloadHashMatches(endpoint, currentModelHash)
 	}
 
-	modelDownloadCompleted := currentModelDownloadHashMatches(endpoint, currentModelHash)
 	modelDownloadIncomplete := false
 
 	// Basic status mapping
@@ -748,17 +758,19 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 			ErrorMessage: "",
 			Resources:    resources,
 		}
-		if currentModelHash != "" {
+		if isBuiltInModelDownloaderEngine && currentModelHash != "" {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		}
 
 		return endpointStatus, nil
 	}
 
-	var modelDownloadMessages []string
-	phase, modelDownloadCompleted, modelDownloadIncomplete, modelDownloadMessages =
-		resolveRayStartupModelDownloadStatus(dashboardService, status, phase, modelDownloadCompleted)
-	errorMessages = append(errorMessages, modelDownloadMessages...)
+	if isBuiltInModelDownloaderEngine {
+		var modelDownloadMessages []string
+		phase, modelDownloadCompleted, modelDownloadIncomplete, modelDownloadMessages =
+			resolveRayStartupModelDownloadStatus(dashboardService, status, phase, modelDownloadCompleted)
+		errorMessages = append(errorMessages, modelDownloadMessages...)
+	}
 
 	// Merge Ray Serve error messages
 	if status.Message != "" {
@@ -796,7 +808,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		Resources:    resources,
 	}
 
-	if currentModelHash != "" {
+	if isBuiltInModelDownloaderEngine && currentModelHash != "" {
 		if modelDownloadCompleted {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		} else if modelDownloadIncomplete {

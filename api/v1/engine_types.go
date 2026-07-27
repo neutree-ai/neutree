@@ -21,6 +21,17 @@ const (
 	EngineNameSGLang   = "sglang"
 )
 
+// IsBuiltInModelDownloaderEngine reports whether engine uses Neutree's
+// built-in model downloader.
+func IsBuiltInModelDownloaderEngine(name string) bool {
+	switch name {
+	case EngineNameVLLM, EngineNameLlamaCpp, EngineNameSGLang:
+		return true
+	default:
+		return false
+	}
+}
+
 // knownModelTasks is the canonical set of task identifiers consumed by Neutree
 // engine deploy templates (vLLM / llama-cpp). Values outside this set are
 // silently ignored by the templates and must be rejected at ingestion time

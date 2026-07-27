@@ -2428,6 +2428,9 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				Name:      "chat-model",
 			},
 			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{
+					Engine: v1.EngineNameVLLM,
+				},
 				Model: &v1.ModelSpec{
 					Registry: "test-registry",
 					Name:     "test-model",
@@ -2450,6 +2453,8 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 		expectCurrentModelHash       bool
 		expectedModelDownloadHash    *string
 		expectModelDownloadHashEmpty bool
+		expectModelDownloadHashNil   bool
+		expectEmptyErrorMsg          bool
 		expectErrorMsg               string
 		expectError                  bool
 	}{
@@ -2560,6 +2565,77 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 			expectedPhase:  v1.EndpointPhaseDEPLOYING,
 			expectErrorMsg: "Endpoint deploying in progress",
 			expectError:    false,
+		},
+		{
+			name: "return Deploying without downloader status for custom engine",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Engine.Engine = "custom-engine"
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            dashboard.ApplicationStatusDeploying,
+							DeployedAppConfig: existingApp,
+							Deployments: map[string]dashboard.Deployment{
+								"BACKEND": {
+									Name:   "BACKEND",
+									Status: "UPDATING",
+									Replicas: []dashboard.Replica{{
+										ActorID:   "actor-1",
+										ReplicaID: "backend-replica-1",
+									}},
+								},
+							},
+						},
+					},
+				}, nil)
+				// No GetActorLog expectation: any log inspection is an unexpected mock call.
+			},
+			expectedPhase:              v1.EndpointPhaseDEPLOYING,
+			expectModelDownloadHashNil: true,
+			expectEmptyErrorMsg:        true,
+			expectError:                false,
+		},
+		{
+			name: "return Running without downloader status for custom engine",
+			inputEndpoint: func() *v1.Endpoint {
+				ep := newEndpoint()
+				ep.Spec.Engine.Engine = "custom-engine"
+				return ep
+			},
+			setupMock: func(mockDashboard *dashboardmocks.MockDashboardService) {
+				existingApp := &dashboard.RayServeApplication{
+					Name:        applicationName,
+					RoutePrefix: "/production/chat-model",
+					ImportPath:  "old.import.path",
+					Args:        map[string]interface{}{"old": "config"},
+				}
+
+				mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+					Applications: map[string]dashboard.RayServeApplicationStatus{
+						applicationName: {
+							Status:            dashboard.ApplicationStatusRunning,
+							DeployedAppConfig: existingApp,
+						},
+					},
+					Proxies: map[string]dashboard.ProxyStatus{
+						"proxy-actor": {Status: dashboard.ProxyStatusHealthy},
+					},
+				}, nil)
+			},
+			expectedPhase:              v1.EndpointPhaseRUNNING,
+			expectModelDownloadHashNil: true,
+			expectError:                false,
 		},
 		{
 			name: "return ModelDownloading for application in DEPLOYING status before current model download completion",
@@ -3855,6 +3931,12 @@ func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 				if tt.expectModelDownloadHashEmpty {
 					require.NotNil(t, status.ModelDownloadCompletedHash)
 					assert.Empty(t, *status.ModelDownloadCompletedHash)
+				}
+				if tt.expectModelDownloadHashNil {
+					assert.Nil(t, status.ModelDownloadCompletedHash)
+				}
+				if tt.expectEmptyErrorMsg {
+					assert.Empty(t, status.ErrorMessage)
 				}
 				if tt.expectErrorMsg != "" {
 					assert.Contains(t, status.ErrorMessage, tt.expectErrorMsg)
