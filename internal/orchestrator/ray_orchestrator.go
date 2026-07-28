@@ -946,7 +946,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	setDefaultSGLangEnableMetricsForApplication(endpoint, &app)
 
-	setDefaultTensorParallelSize(endpoint, &app, rayResource.NumGPUs)
+	setDefaultTensorParallelSize(endpoint, &app, endpoint.Spec.Resources.GetGPUCount())
 
 	setEngineSpecialEnv(endpoint, deployedCluster, applicationEnv)
 
