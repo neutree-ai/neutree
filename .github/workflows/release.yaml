@@ -20,7 +20,6 @@ jobs:
       baseline_version: ${{ steps.versions.outputs.baseline_version }}
       ui_version: ${{ steps.versions.outputs.ui_version }}
       cluster_version: ${{ steps.versions.outputs.cluster_version }}
-      community_version: ${{ steps.versions.outputs.community_version }}
     steps:
       - name: Resolve release versions
         id: versions
@@ -45,29 +44,21 @@ jobs:
             exit 1
           fi
 
-          baseline_version="${release_version%-enterprise}"
-          baseline_version="${baseline_version%%-nightly-*}"
+          baseline_version="${release_version%%-nightly-*}"
+          ui_version="$release_version"
           cluster_version="$baseline_version"
-          community_version="$baseline_version"
-          if [[ "$release_version" == *-enterprise ]]; then
-            ui_version="$baseline_version"
-          else
-            ui_version="$release_version"
-          fi
 
           {
             echo "release_version=${release_version}"
             echo "baseline_version=${baseline_version}"
             echo "ui_version=${ui_version}"
             echo "cluster_version=${cluster_version}"
-            echo "community_version=${community_version}"
           } >> "$GITHUB_OUTPUT"
 
           echo "Release version: ${release_version}"
           echo "Baseline version: ${baseline_version}"
           echo "UI version: ${ui_version}"
           echo "Cluster version: ${cluster_version}"
-          echo "Community version: ${community_version}"
       - name: Validate release tag
         env:
           RELEASE_VERSION: ${{ steps.versions.outputs.release_version }}
@@ -90,7 +81,6 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.release_version }}
       UI_VERSION: ${{ needs.prepare.outputs.ui_version }}
       CLUSTER_VERSION: ${{ needs.prepare.outputs.cluster_version }}
-      COMMUNITY_VERSION: ${{ needs.prepare.outputs.community_version }}
     runs-on: ubuntu-22.04
     name: build amd64 image
     steps:
@@ -118,7 +108,6 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.release_version }}
       UI_VERSION: ${{ needs.prepare.outputs.ui_version }}
       CLUSTER_VERSION: ${{ needs.prepare.outputs.cluster_version }}
-      COMMUNITY_VERSION: ${{ needs.prepare.outputs.community_version }}
     runs-on: ubuntu-22.04-arm
     name: build arm64 image
     steps:
