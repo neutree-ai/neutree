@@ -34,7 +34,7 @@ type customRayResourceConverter struct{}
 
 func (customRayResourceConverter) ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error) {
 	return &v1.RayResourceSpec{
-		Resources: map[string]float64{"NPU": 2},
+		Resources: map[string]float64{"custom_accelerator": 2},
 	}, nil
 }
 
@@ -2307,7 +2307,7 @@ func TestEndpointToApplication_TensorParallelSizeUsesRequestedGPUCount(t *testin
 			backend, ok := deploymentOptions["backend"].(map[string]interface{})
 			require.True(t, ok)
 			assert.Equal(t, float64(0), backend["num_gpus"])
-			assert.Equal(t, map[string]float64{"NPU": 2}, backend["resources"])
+			assert.Equal(t, map[string]float64{"custom_accelerator": 2}, backend["resources"])
 		})
 	}
 }
