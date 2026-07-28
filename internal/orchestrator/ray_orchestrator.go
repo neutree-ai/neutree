@@ -649,6 +649,42 @@ func resolveRayStartupModelDownloadStatus(
 	return phase, modelDownloadCompleted, false, nil
 }
 
+func buildRayApplicationErrorMessage(
+	phase v1.EndpointPhase,
+	status dashboard.RayServeApplicationStatus,
+	errorMessages []string,
+) string {
+	if status.Message != "" {
+		errorMessages = append(errorMessages, status.Message)
+	}
+
+	if len(status.Deployments) == 0 {
+		errorMessages = append(errorMessages, "No deployments found for the application")
+	}
+
+	for _, deployment := range status.Deployments {
+		if deployment.Status != dashboard.DeploymentStatusHealthy && deployment.Message != "" {
+			errorMessages = append(errorMessages, fmt.Sprintf("Deployment %s: %s", deployment.Name, deployment.Message))
+		}
+	}
+
+	errorMessage := strings.Join(errorMessages, "; ")
+	if errorMessage == "" {
+		return ""
+	}
+
+	switch phase {
+	case v1.EndpointPhaseDEPLOYING:
+		return "Endpoint deploying in progress: " + errorMessage
+	case v1.EndpointPhaseMODELDOWNLOADING:
+		return "Endpoint model download in progress: " + errorMessage
+	case v1.EndpointPhaseFAILED:
+		return "Endpoint failed: " + errorMessage
+	default:
+		return errorMessage
+	}
+}
+
 // GetEndpointStatus retrieves the status of a specific endpoint from Ray Serve.
 func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.EndpointStatus, error) {
 	// Placeholder implementation: Get all apps and check if ours exists.
@@ -710,12 +746,24 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 
 	proxyReady := allProxiesHealthy(currentAppsResp.Proxies)
 
-	currentModelHash, hashErr := util.ComputeEndpointModelHash(endpoint)
-	if hashErr != nil {
-		klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
+	isBuiltInModelDownloaderEngine := endpoint.Spec != nil &&
+		endpoint.Spec.Engine != nil &&
+		v1.IsBuiltInModelDownloaderEngine(endpoint.Spec.Engine.Engine)
+
+	currentModelHash := ""
+	modelDownloadCompleted := false
+
+	if isBuiltInModelDownloaderEngine {
+		var hashErr error
+
+		currentModelHash, hashErr = util.ComputeEndpointModelHash(endpoint)
+		if hashErr != nil {
+			klog.Warningf("failed to compute endpoint %s model hash: %v", endpoint.Metadata.WorkspaceName(), hashErr)
+		}
+
+		modelDownloadCompleted = currentModelDownloadHashMatches(endpoint, currentModelHash)
 	}
 
-	modelDownloadCompleted := currentModelDownloadHashMatches(endpoint, currentModelHash)
 	modelDownloadIncomplete := false
 
 	// Basic status mapping
@@ -748,47 +796,21 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 			ErrorMessage: "",
 			Resources:    resources,
 		}
-		if currentModelHash != "" {
+		if isBuiltInModelDownloaderEngine && currentModelHash != "" {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		}
 
 		return endpointStatus, nil
 	}
 
-	var modelDownloadMessages []string
-	phase, modelDownloadCompleted, modelDownloadIncomplete, modelDownloadMessages =
-		resolveRayStartupModelDownloadStatus(dashboardService, status, phase, modelDownloadCompleted)
-	errorMessages = append(errorMessages, modelDownloadMessages...)
-
-	// Merge Ray Serve error messages
-	if status.Message != "" {
-		errorMessages = append(errorMessages, status.Message)
+	if isBuiltInModelDownloaderEngine {
+		var modelDownloadMessages []string
+		phase, modelDownloadCompleted, modelDownloadIncomplete, modelDownloadMessages =
+			resolveRayStartupModelDownloadStatus(dashboardService, status, phase, modelDownloadCompleted)
+		errorMessages = append(errorMessages, modelDownloadMessages...)
 	}
 
-	if len(status.Deployments) == 0 {
-		errorMessages = append(errorMessages, "No deployments found for the application")
-	}
-
-	// merge Ray Serve error messages
-	for _, deployment := range status.Deployments {
-		if deployment.Status != dashboard.DeploymentStatusHealthy && deployment.Message != "" {
-			errorMessages = append(errorMessages, fmt.Sprintf("Deployment %s: %s", deployment.Name, deployment.Message))
-		}
-	}
-
-	errorMsg := strings.Join(errorMessages, "; ")
-	// Add prefix to error message based on phase
-	if errorMsg != "" {
-		switch phase {
-		// no prefix
-		case v1.EndpointPhaseDEPLOYING:
-			errorMsg = "Endpoint deploying in progress: " + errorMsg
-		case v1.EndpointPhaseMODELDOWNLOADING:
-			errorMsg = "Endpoint model download in progress: " + errorMsg
-		case v1.EndpointPhaseFAILED:
-			errorMsg = "Endpoint failed: " + errorMsg
-		}
-	}
+	errorMsg := buildRayApplicationErrorMessage(phase, status, errorMessages)
 
 	endpointStatus := &v1.EndpointStatus{
 		Phase:        phase,
@@ -796,7 +818,7 @@ func (o *RayOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.Endpoint
 		Resources:    resources,
 	}
 
-	if currentModelHash != "" {
+	if isBuiltInModelDownloaderEngine && currentModelHash != "" {
 		if modelDownloadCompleted {
 			setModelDownloadStatus(endpointStatus, true, currentModelHash)
 		} else if modelDownloadIncomplete {

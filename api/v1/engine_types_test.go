@@ -412,6 +412,27 @@ func TestIsKnownModelTask(t *testing.T) {
 	}
 }
 
+func TestIsBuiltInModelDownloaderEngine(t *testing.T) {
+	tests := []struct {
+		name   string
+		engine string
+		want   bool
+	}{
+		{name: "vllm", engine: EngineNameVLLM, want: true},
+		{name: "llama-cpp", engine: EngineNameLlamaCpp, want: true},
+		{name: "sglang", engine: EngineNameSGLang, want: true},
+		{name: "custom engine", engine: "custom-engine", want: false},
+		{name: "empty engine", engine: "", want: false},
+		{name: "case variant", engine: "VLLM", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsBuiltInModelDownloaderEngine(tt.engine))
+		})
+	}
+}
+
 func TestKnownModelTasks(t *testing.T) {
 	got := KnownModelTasks()
 
