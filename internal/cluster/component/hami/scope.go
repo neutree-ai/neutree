@@ -240,7 +240,7 @@ func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin
 		blockingReasons := make([]string, 0)
 
 		for _, config := range configs {
-			if config != nil && config.Supported {
+			if config != nil {
 				blockingReasons = append(blockingReasons, config.BlockingReasons...)
 			}
 		}

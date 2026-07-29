@@ -49,13 +49,13 @@ func TestMergeVirtualizationConfigsRejectsZeroOrMultipleCandidateOwners(t *testi
 	}
 
 	tests := []struct {
-		name           string
-		configs        []*plugin.VirtualizationConfig
-		expectedReason string
+		name            string
+		configs         []*plugin.VirtualizationConfig
+		expectedReasons []string
 	}{
 		{
 			name:           "zero owners",
-			expectedReason: "no nodes",
+			expectedReasons: []string{"no nodes", "unsupported"},
 			configs: []*plugin.VirtualizationConfig{
 				{Supported: true, BlockingReasons: []string{"no nodes"}},
 				{Supported: false, BlockingReasons: []string{"unsupported"}},
@@ -73,8 +73,8 @@ func TestMergeVirtualizationConfigsRejectsZeroOrMultipleCandidateOwners(t *testi
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "exactly one")
-			if tt.expectedReason != "" {
-				assert.Contains(t, err.Error(), tt.expectedReason)
+			for _, expectedReason := range tt.expectedReasons {
+				assert.Contains(t, err.Error(), expectedReason)
 			}
 		})
 	}
