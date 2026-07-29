@@ -27,10 +27,10 @@ var (
 	}
 
 	neutreeCoreCompatibilityPolicyForCurrentRelease = neutreeCoreCompatibilityPolicy{
-		cliMin:    "v1.1.0-0",
-		cliMax:    "v1.2.0-0",
-		targetMin: "v1.1.0-0",
-		targetMax: "v1.2.0-0",
+		cliMin:    "v1.2.0-0",
+		cliMax:    "v1.3.0-0",
+		targetMin: "v1.2.0-0",
+		targetMax: "v1.3.0-0",
 	}
 )
 
