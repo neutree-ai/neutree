@@ -136,7 +136,11 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 		authenticator = authn.FromConfig(authConfig)
 	}
 
-	hasPermission, err := c.imageService.CheckPullPermission(testImage, authenticator)
+	hasPermission, err := c.imageService.CheckPullPermission(
+		testImage,
+		authenticator,
+		util.IsHTTPRegistryURL(imageRegistry.Spec.URL),
+	)
 	if err != nil {
 		return errors.Wrapf(err, "failed to connect %s at URL %s",
 			imageRegistry.Metadata.WorkspaceName(), imageRegistry.Spec.URL)

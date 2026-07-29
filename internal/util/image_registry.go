@@ -101,6 +101,11 @@ func StripRegistryScheme(rawURL string) string {
 	return stripped
 }
 
+// IsHTTPRegistryURL reports whether a registry URL explicitly opts into HTTP.
+func IsHTTPRegistryURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "http://")
+}
+
 func GetImageRegistryHost(r *v1.ImageRegistry) (string, error) {
 	return parseRegistryHost(r.Spec.URL)
 }

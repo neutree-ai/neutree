@@ -6,6 +6,27 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+func TestIsHTTPRegistryURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "explicit HTTP", url: "http://registry.example.com:5000", want: true},
+		{name: "explicit HTTPS", url: "https://registry.example.com:5000"},
+		{name: "URL without scheme", url: "registry.example.com:5000"},
+		{name: "uppercase HTTP is not an explicit opt in", url: "HTTP://registry.example.com:5000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsHTTPRegistryURL(tt.url); got != tt.want {
+				t.Errorf("IsHTTPRegistryURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGetImagePrefix(t *testing.T) {
 	tests := []struct {
 		name          string
