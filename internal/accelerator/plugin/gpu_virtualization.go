@@ -43,7 +43,15 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	_ context.Context,
 	input VirtualizationConfigInput,
 ) (*VirtualizationConfig, error) {
-	configPatch := map[string]interface{}{}
+	configPatch := map[string]interface{}{
+		"devicePlugin": map[string]interface{}{
+			"enabled": true,
+			"nvidiaNodeSelector": map[string]interface{}{
+				"gpu":                           nil,
+				NvidiaGPUVirtualizationLabelKey: "true",
+			},
+		},
+	}
 	blockingReasons := make([]string, 0)
 
 	for _, policy := range input.GPUOperatorClusterPolicies {

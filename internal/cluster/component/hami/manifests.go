@@ -48,7 +48,7 @@ scheduler:
       pullPolicy: IfNotPresent
       tag: v2.9.0
 devicePlugin:
-  enabled: true
+  enabled: false
   image:
     repository: projecthami/hami
     pullPolicy: IfNotPresent
@@ -99,10 +99,30 @@ func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]int
 	if h.cluster.Spec != nil &&
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
-		values = mergeChartValues(values, h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)
+		if _, found := h.cluster.Spec.AcceleratorVirtualization.ConfigPatch["devicePlugin"]; found {
+			h.logger.Info("Ignoring legacy user HAMi devicePlugin config patch; accelerator plugins own device-plugin lifecycle")
+		}
+
+		values = mergeChartValues(values, userVirtualizationConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch))
 	}
 
-	return mergeChartValues(values, h.protectedChartValues(scopePlan))
+	return mergeChartValues(values, h.protectedChartValues())
+}
+
+func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
+	if len(configPatch) == 0 {
+		return nil
+	}
+
+	sanitized := make(map[string]interface{}, len(configPatch))
+
+	for key, value := range configPatch {
+		if key != "devicePlugin" {
+			sanitized[key] = value
+		}
+	}
+
+	return sanitized
 }
 
 func defaultChartValues(imageRegistry string) map[string]interface{} {
@@ -148,7 +168,7 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 	return values
 }
 
-func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string]interface{} {
+func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
@@ -159,8 +179,7 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"enabled": shouldDeployDevicePlugin(scopePlan),
-			"image":   chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			"monitor": map[string]interface{}{
 				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			},
@@ -174,19 +193,6 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 			},
 		})
 	}
-
-	values = mergeChartValues(values, map[string]interface{}{
-		"devicePlugin": map[string]interface{}{
-			"nvidiaNodeSelector": map[string]interface{}{
-				// The upstream HAMi chart defaults this selector to gpu=on.
-				// Neutree uses the accelerator plugin scope label as the only
-				// virtualization node selector, so clear the chart default
-				// during Helm value coalescing.
-				"gpu":                        nil,
-				scopePlan.NodeScopeLabel.Key: scopePlan.NodeScopeLabel.EnabledValue,
-			},
-		},
-	})
 
 	return values
 }
@@ -348,12 +354,33 @@ func kubeVersionNumericPrefix(value string) string {
 	return value
 }
 
-func shouldDeployDevicePlugin(plan NodeScopePlan) bool {
-	// When every candidate node is explicitly disabled, HAMi should still keep
-	// scheduler/webhook resources but skip the device-plugin DaemonSet.
-	return len(plan.DisabledNodes) == 0 || len(plan.EnabledNodes) > 0 || len(plan.PatchedNodes) > 0
-}
-
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
-	return renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+	resources, err := renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+	if err != nil || scopePlan.DevicePluginTemplate == nil || scopePlan.DevicePluginTemplate.Manifest == "" {
+		return resources, err
+	}
+
+	imagePullSecrets := make([]string, 0, 1)
+	if h.imagePullSecret != "" {
+		imagePullSecrets = append(imagePullSecrets, h.imagePullSecret)
+	}
+
+	templateResources, err := util.RenderKubernetesManifest(scopePlan.DevicePluginTemplate.Manifest, struct {
+		Namespace        string
+		NodeScopeLabel   NodeScopeLabel
+		ImagePrefix      string
+		ImagePullSecrets []string
+	}{
+		Namespace:        h.namespace,
+		NodeScopeLabel:   scopePlan.NodeScopeLabel,
+		ImagePrefix:      h.normalizedImagePrefix(),
+		ImagePullSecrets: imagePullSecrets,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resources.Items = append(resources.Items, templateResources.Items...)
+
+	return resources, nil
 }

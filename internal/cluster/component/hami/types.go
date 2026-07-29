@@ -7,14 +7,12 @@ import (
 )
 
 const (
-	ComponentName             = "hami"
-	ChartReleaseName          = "hami"
-	Version                   = "v2.9.0"
-	SchedulerName             = "hami-scheduler"
-	DevicePluginDaemonSetName = "hami-device-plugin"
-	MonitorServiceName        = "hami-device-plugin-monitor"
-	WebhookName               = "hami-webhook"
-	TLSSecretName             = "hami-scheduler-tls" //nolint:gosec
+	ComponentName    = "hami"
+	ChartReleaseName = "hami"
+	Version          = "v2.9.0"
+	SchedulerName    = "hami-scheduler"
+	WebhookName      = "hami-webhook"
+	TLSSecretName    = "hami-scheduler-tls" //nolint:gosec
 
 	ManagedComponentLabelKey   = "neutree.ai/component"
 	ManagedComponentLabelValue = "hami"
@@ -43,8 +41,7 @@ type HAMiStatus struct {
 	Reason                 string
 	Message                string
 	SchedulerReady         bool
-	DevicePluginReady      bool
-	MonitorReady           bool
+	DeviceConfigReady      bool
 	WebhookReady           bool
 	TLSReady               bool
 	ReadyNodes             int
@@ -55,10 +52,6 @@ type HAMiStatus struct {
 	PatchedNodes           []string
 	SchedulerReadyReplicas int
 	SchedulerReplicas      int
-	DevicePluginReadyPods  int
-	DevicePluginPods       int
-	MonitorReadyPods       int
-	MonitorPods            int
 }
 
 func (s HAMiStatus) ComponentStatus() *v1.ComponentStatus {

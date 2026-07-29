@@ -291,66 +291,11 @@ func mergeEndpointPatch(existing *v1.Endpoint, patch *v1.Endpoint) v1.Endpoint {
 }
 
 func mergeEndpointResourceSpec(existing *v1.ResourceSpec, patch *v1.ResourceSpec) *v1.ResourceSpec {
-	if existing == nil {
+	if patch != nil {
 		return copyEndpointResourceSpec(patch)
 	}
 
-	merged := copyEndpointResourceSpec(existing)
-
-	if patch.CPU != nil {
-		merged.CPU = patch.CPU
-	}
-
-	if patch.GPU != nil {
-		merged.GPU = patch.GPU
-	}
-
-	if patch.Memory != nil {
-		merged.Memory = patch.Memory
-	}
-
-	if patch.Accelerator != nil {
-		if merged.Accelerator == nil {
-			merged.Accelerator = make(map[string]string, len(patch.Accelerator))
-		}
-
-		for key, value := range patch.Accelerator {
-			merged.Accelerator[key] = value
-		}
-
-		if acceleratorPatchClearsVirtualization(patch.Accelerator) {
-			clearAcceleratorVirtualization(merged.Accelerator)
-		}
-	}
-
-	return merged
-}
-
-func acceleratorPatchClearsVirtualization(accelerator map[string]string) bool {
-	if accelerator == nil {
-		return false
-	}
-
-	_, hasType := accelerator[v1.AcceleratorTypeKey]
-	_, hasProduct := accelerator[v1.AcceleratorProductKey]
-
-	return hasType && hasProduct && !acceleratorHasVirtualization(accelerator)
-}
-
-func clearAcceleratorVirtualization(accelerator map[string]string) {
-	delete(accelerator, v1.AcceleratorVirtualizationMemoryMiBKey)
-	delete(accelerator, v1.AcceleratorVirtualizationMemoryPercentKey)
-	delete(accelerator, v1.AcceleratorVirtualizationCorePercentKey)
-}
-
-func acceleratorHasVirtualization(accelerator map[string]string) bool {
-	for key := range accelerator {
-		if v1.IsAcceleratorVirtualizationKey(key) {
-			return true
-		}
-	}
-
-	return false
+	return copyEndpointResourceSpec(existing)
 }
 
 func copyEndpointResourceSpec(resources *v1.ResourceSpec) *v1.ResourceSpec {
@@ -421,14 +366,6 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return nil
 	}
 
-	if resources.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) {
-		return &validationError{
-			Code:    "10217",
-			Message: "accelerator virtualization is only supported for NVIDIA GPU endpoints",
-			Hint:    "Set spec.resources.accelerator.type to nvidia_gpu",
-		}
-	}
-
 	if resources.GetAcceleratorProduct() == "" {
 		return &validationError{
 			Code:    "10218",
@@ -477,10 +414,7 @@ func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Clus
 	maxMemoryMiB, ok := clusterProductMaxMemoryMiB(cluster, product)
 
 	if !ok {
-		return endpointResourceValueError(fmt.Errorf(
-			"unable to determine physical GPU memory_mib for accelerator product %s",
-			product,
-		))
+		return nil
 	}
 
 	if requestedMemoryMiB > maxMemoryMiB {
@@ -530,17 +464,18 @@ func clusterProductMetadataMemoryMiB(resourceInfo *v1.ClusterResources, product 
 		return 0, false
 	}
 
-	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
-	if metadata == nil || metadata.Products == nil {
-		return 0, false
+	for _, metadata := range resourceInfo.AcceleratorMetadata {
+		if metadata == nil || metadata.Products == nil {
+			continue
+		}
+
+		productMetadata := metadata.Products[v1.AcceleratorProduct(product)]
+		if productMetadata != nil && productMetadata.MemoryTotalMiB > 0 {
+			return int64(productMetadata.MemoryTotalMiB), true
+		}
 	}
 
-	productMetadata := metadata.Products[v1.AcceleratorProduct(product)]
-	if productMetadata == nil || productMetadata.MemoryTotalMiB <= 0 {
-		return 0, false
-	}
-
-	return int64(productMetadata.MemoryTotalMiB), true
+	return 0, false
 }
 
 func endpointReplicaCount(spec *v1.EndpointSpec) int64 {

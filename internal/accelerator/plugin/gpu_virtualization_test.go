@@ -63,7 +63,12 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	}, config.NodeScopeLabel)
 	assert.Equal(t, map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
+			"enabled":          true,
 			"nvidiaDriverRoot": NvidiaGPUOperatorDriverRoot,
+			"nvidiaNodeSelector": map[string]interface{}{
+				"gpu":                           nil,
+				NvidiaGPUVirtualizationLabelKey: "true",
+			},
 		},
 	}, config.ConfigPatch)
 	assert.Contains(t, config.BlockingReasons[0], "NVIDIA GPU Operator devicePlugin is enabled")

@@ -102,7 +102,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 				"version": "v1.1.0",
 				"accelerator_virtualization": {
 					"enabled": true,
-					"config_patch": {"devicePlugin": {"nvidiaDriverRoot": "/run/nvidia/driver"}}
+					"config_patch": {"scheduler": {"defaultSchedulerPolicy": {}}}
 				}
 			}
 		}`))
@@ -250,7 +250,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10210", err.Code)
-		assert.Contains(t, err.Message, "MIG")
+		assert.Contains(t, err.Message, "devicePlugin")
 	})
 
 	t.Run("rejects partial patch missing cluster type and version", func(t *testing.T) {

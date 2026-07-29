@@ -120,12 +120,16 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 		reason      AcceleratorVirtualizationErrorReason
 	}{
 		{
-			name: "allows supported config patch",
+			name: "allows scheduler and global config patches",
 			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{"nvidiaDriverRoot": "/run/nvidia/driver"},
-				"scheduler":    map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
-				"global":       map[string]interface{}{"imageRegistry": "registry.example.com"},
+				"scheduler": map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
+				"global":    map[string]interface{}{"imageRegistry": "registry.example.com"},
 			},
+		},
+		{
+			name:        "rejects user device plugin patch",
+			configPatch: map[string]interface{}{"devicePlugin": map[string]interface{}{"enabled": true}},
+			reason:      AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 		{
 			name:        "rejects unsupported top-level key",
@@ -147,11 +151,11 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedCertManagerReason,
 		},
 		{
-			name: "rejects MIG mode",
+			name: "rejects device plugin MIG patch as user-owned config",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},
 			},
-			reason: AcceleratorVirtualizationUnsupportedMIGReason,
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 	}
 

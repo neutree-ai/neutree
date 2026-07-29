@@ -95,12 +95,12 @@ func ValidateAcceleratorVirtualizationClusterSupport(clusterType, version string
 func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interface{}) error {
 	for key := range configPatch {
 		switch key {
-		case "devicePlugin", "scheduler", "global":
+		case "scheduler", "global":
 		default:
 			return &AcceleratorVirtualizationError{
 				Reason:  AcceleratorVirtualizationUnsupportedConfigReason,
 				Message: fmt.Sprintf("unsupported accelerator_virtualization.config_patch key %q", key),
-				Hint:    "Only devicePlugin, scheduler, and global config_patch keys are supported",
+				Hint:    "Only scheduler and global config_patch keys are supported",
 			}
 		}
 	}
@@ -118,17 +118,6 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 			Reason:  AcceleratorVirtualizationManagedCertManagerReason,
 			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
 			Hint:    "Remove scheduler.certManager.enabled from accelerator_virtualization.config_patch",
-		}
-	}
-
-	// Neutree vGPU support is based on HAMi core mode. MIG mode requires
-	// different node/device semantics and is intentionally rejected here.
-	if migStrategy, ok, err := unstructured.NestedString(configPatch, "devicePlugin", "migStrategy"); err == nil && ok &&
-		strings.ToLower(strings.TrimSpace(migStrategy)) != "none" {
-		return &AcceleratorVirtualizationError{
-			Reason:  AcceleratorVirtualizationUnsupportedMIGReason,
-			Message: "HAMi MIG virtualization mode is not supported",
-			Hint:    "Set devicePlugin.migStrategy to none or remove it from accelerator_virtualization.config_patch",
 		}
 	}
 

@@ -152,6 +152,23 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("allows a non NVIDIA accelerator type", func(t *testing.T) {
+		gpu := "1"
+		resources := &v1.ResourceSpec{
+			GPU: &gpu,
+			Accelerator: map[string]string{
+				v1.AcceleratorTypeKey:                      "ascend_npu",
+				v1.AcceleratorProductKey:                   "Ascend-910B",
+				v1.AcceleratorVirtualizationMemoryMiBKey:   "32768",
+				v1.AcceleratorVirtualizationCorePercentKey: "50",
+			},
+		}
+
+		err := validateEndpointVGPUResourceShape(resources)
+
+		assert.Nil(t, err)
+	})
+
 	t.Run("skips patch that does not touch resources", func(t *testing.T) {
 		endpoint, err := parseEndpointBody([]byte(`{
 			"spec": {
@@ -165,8 +182,36 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 	})
 }
 
+func TestValidateEndpointVGPUMemorySpecRejectsKnownNonNVIDIAMaximum(t *testing.T) {
+	acceleratorType := v1.AcceleratorType("ascend_npu")
+	product := "Ascend-910B"
+	cluster := clusterWithNVIDIAGPUProduct(product, 32768, nil)
+	cluster.Status.ResourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+		acceleratorType: {
+			Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+				v1.AcceleratorProduct(product): {MemoryTotalMiB: 32768},
+			},
+		},
+	}
+	requestedGPU := "1"
+	resources := &v1.ResourceSpec{
+		GPU: &requestedGPU,
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                    string(acceleratorType),
+			v1.AcceleratorProductKey:                 product,
+			v1.AcceleratorVirtualizationMemoryMiBKey: "32769",
+		},
+	}
+
+	err := validateEndpointVGPUMemorySpec(resources, cluster)
+
+	assert.NotNil(t, err)
+	assert.Equal(t, "10216", err.Code)
+	assert.Contains(t, err.Hint, "32768")
+}
+
 func TestMergeEndpointResourceSpec(t *testing.T) {
-	t.Run("clears virtualization keys and preserves custom keys when switching to whole GPU", func(t *testing.T) {
+	t.Run("replaces the full resource specification", func(t *testing.T) {
 		existing := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 			v1.AcceleratorVirtualizationCorePercentKey: "50",
@@ -181,7 +226,7 @@ func TestMergeEndpointResourceSpec(t *testing.T) {
 
 		merged := mergeEndpointResourceSpec(existing, patch)
 
-		assert.Equal(t, "50", merged.Accelerator["nvidia.com/gpucores"])
+		assert.Empty(t, merged.Accelerator["nvidia.com/gpucores"])
 		assert.Empty(t, merged.Accelerator[v1.AcceleratorVirtualizationMemoryMiBKey])
 		assert.Empty(t, merged.Accelerator[v1.AcceleratorVirtualizationCorePercentKey])
 	})
@@ -217,7 +262,7 @@ func TestEndpointVGPUValidationAllowsPostWithoutCapacityPrecheck(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsPostWhenProductMemorySpecIsMissing(t *testing.T) {
+func TestEndpointVGPUValidationAllowsPostWhenProductMemorySpecIsMissing(t *testing.T) {
 	cluster := clusterWithoutNVIDIAGPUProducts()
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
@@ -241,12 +286,8 @@ func TestEndpointVGPUValidationRejectsPostWhenProductMemorySpecIsMissing(t *test
 
 	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
-	var response validationError
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Hint, "physical GPU memory_mib")
-	assert.False(t, handlerCalled)
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationRejectsPostWhenMemoryMIBExceedsPhysicalCardSpec(t *testing.T) {
@@ -709,7 +750,7 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChangesToMissingMemorySpec(t *testing.T) {
+func TestEndpointVGPUValidationAllowsPatchWhenProductMemorySpecIsMissing(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
 	})
@@ -737,13 +778,9 @@ func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChangesToMissing
 		clusterStorage,
 	)
 
-	var response validationError
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Hint, "physical GPU memory_mib")
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.False(t, handlerCalled)
+	assert.True(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationAllowsPatchWhenCurrentAvailableCapacityIsZero(t *testing.T) {

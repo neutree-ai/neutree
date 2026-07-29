@@ -13,13 +13,14 @@ type NodeScopeLabel struct {
 }
 
 type NodeScopePlan struct {
-	EnabledNodes      []string
-	DisabledNodes     []string
-	StaleEnabledNodes []string
-	PatchedNodes      []string
-	Patches           map[string]map[string]string
-	NodeScopeLabel    NodeScopeLabel
-	ConfigPatch       map[string]interface{}
+	EnabledNodes         []string
+	DisabledNodes        []string
+	StaleEnabledNodes    []string
+	PatchedNodes         []string
+	Patches              map[string]map[string]string
+	NodeScopeLabel       NodeScopeLabel
+	ConfigPatch          map[string]interface{}
+	DevicePluginTemplate *plugin.DevicePluginTemplate
 }
 
 // PlanNodeScope decides which candidate nodes need the virtualization label.

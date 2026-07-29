@@ -13,6 +13,12 @@ type VirtualizationNodeScopeLabel struct {
 	DisabledValue string
 }
 
+// DevicePluginTemplate is an optional accelerator-owned Kubernetes manifest.
+// Core renders and applies it as part of the shared HAMi component lifecycle.
+type DevicePluginTemplate struct {
+	Manifest string
+}
+
 type GPUOperatorClusterPolicy struct {
 	Name string
 	Spec map[string]interface{}
@@ -24,10 +30,11 @@ type VirtualizationConfigInput struct {
 }
 
 type VirtualizationConfig struct {
-	Supported       bool
-	BlockingReasons []string
-	CandidateNodes  []string
-	NodeScopeLabel  VirtualizationNodeScopeLabel
+	Supported            bool
+	BlockingReasons      []string
+	CandidateNodes       []string
+	NodeScopeLabel       VirtualizationNodeScopeLabel
+	DevicePluginTemplate *DevicePluginTemplate
 	// ConfigPatch contains accelerator-specific Helm values for the shared
 	// virtualization solution. The component still applies protected values last.
 	ConfigPatch map[string]interface{}
