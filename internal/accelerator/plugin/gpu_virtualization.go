@@ -17,7 +17,7 @@ import (
 func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 	ctx context.Context,
 	cluster *v1.Cluster,
-) (*VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	ctrlClient, err := kubernetesClientForVirtualizationConfig(cluster)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	_ context.Context,
 	input VirtualizationConfigInput,
-) (*VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	configPatch := map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
 			"enabled": true,
@@ -86,11 +86,11 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 			"No NVIDIA GPU nodes available for vGPU virtualization")
 	}
 
-	return &VirtualizationConfig{
+	return &v1.VirtualizationConfig{
 		Supported:       true,
 		BlockingReasons: blockingReasons,
 		CandidateNodes:  candidateNodes,
-		NodeScopeLabel: VirtualizationNodeScopeLabel{
+		NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 			Key:           NvidiaGPUVirtualizationLabelKey,
 			EnabledValue:  "true",
 			DisabledValue: "false",

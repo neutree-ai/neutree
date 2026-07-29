@@ -33,6 +33,6 @@ func (p *acceleratorRestPlugin) Type() string {
 func (p *acceleratorRestPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	return NewUnsupportedVirtualizationConfig(p.resource), nil
 }

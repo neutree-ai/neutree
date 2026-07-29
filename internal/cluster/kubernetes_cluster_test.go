@@ -817,10 +817,10 @@ func (testVirtualizationPlugin) Type() string {
 func (testVirtualizationPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*plugin.VirtualizationConfig, error) {
-	return &plugin.VirtualizationConfig{
+) (*v1.VirtualizationConfig, error) {
+	return &v1.VirtualizationConfig{
 		Supported: true,
-		NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+		NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 			Key:           plugin.NvidiaGPUVirtualizationLabelKey,
 			EnabledValue:  "true",
 			DisabledValue: "false",

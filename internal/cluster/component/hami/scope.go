@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
@@ -178,7 +179,7 @@ func (h *HAMiComponent) planNodeScope(ctx context.Context, nodes []corev1.Node, 
 
 func (h *HAMiComponent) resolveVirtualizationConfig(
 	ctx context.Context,
-) (*plugin.VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	configs, err := h.resolveVirtualizationConfigs(ctx)
 	if err != nil {
 		return nil, err
@@ -189,12 +190,12 @@ func (h *HAMiComponent) resolveVirtualizationConfig(
 
 func (h *HAMiComponent) resolveVirtualizationConfigs(
 	ctx context.Context,
-) ([]*plugin.VirtualizationConfig, error) {
+) ([]*v1.VirtualizationConfig, error) {
 	if h.pluginProvider == nil {
 		return nil, errors.New("accelerator plugin provider is not configured")
 	}
 
-	configs := make([]*plugin.VirtualizationConfig, 0)
+	configs := make([]*v1.VirtualizationConfig, 0)
 
 	for _, acceleratorType := range h.pluginProvider.SupportPlugins() {
 		acceleratorPlugin, ok := h.pluginProvider.GetPlugin(acceleratorType)
@@ -202,7 +203,7 @@ func (h *HAMiComponent) resolveVirtualizationConfigs(
 			continue
 		}
 
-		configProvider, ok := acceleratorPlugin.(plugin.ClusterVirtualizationConfigProvider)
+		configProvider, ok := acceleratorPlugin.(v1.ClusterVirtualizationConfigProvider)
 		if !ok {
 			configs = append(configs, plugin.NewUnsupportedVirtualizationConfig(acceleratorType))
 			continue
@@ -227,8 +228,8 @@ func (h *HAMiComponent) resolveVirtualizationConfigs(
 	return configs, nil
 }
 
-func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin.VirtualizationConfig, error) {
-	owners := make([]*plugin.VirtualizationConfig, 0, len(configs))
+func mergeVirtualizationConfigs(configs []*v1.VirtualizationConfig) (*v1.VirtualizationConfig, error) {
+	owners := make([]*v1.VirtualizationConfig, 0, len(configs))
 
 	for _, config := range configs {
 		if config != nil && config.Supported && len(config.CandidateNodes) > 0 {
@@ -258,7 +259,7 @@ func mergeVirtualizationConfigs(configs []*plugin.VirtualizationConfig) (*plugin
 	return owners[0], nil
 }
 
-func supportedNodeScopeLabels(configs []*plugin.VirtualizationConfig) []NodeScopeLabel {
+func supportedNodeScopeLabels(configs []*v1.VirtualizationConfig) []NodeScopeLabel {
 	labels := make([]NodeScopeLabel, 0, len(configs))
 	seen := make(map[string]struct{}, len(configs))
 
@@ -279,7 +280,7 @@ func supportedNodeScopeLabels(configs []*plugin.VirtualizationConfig) []NodeScop
 	return labels
 }
 
-func virtualizationConfigBlocked(config *plugin.VirtualizationConfig) error {
+func virtualizationConfigBlocked(config *v1.VirtualizationConfig) error {
 	if !config.Supported {
 		return errors.New("no accelerator plugin supports HAMi virtualization on this cluster")
 	}
@@ -292,7 +293,7 @@ func virtualizationConfigBlocked(config *plugin.VirtualizationConfig) error {
 	return nil
 }
 
-func nodeScopeLabelFromPlugin(label plugin.VirtualizationNodeScopeLabel) NodeScopeLabel {
+func nodeScopeLabelFromPlugin(label v1.VirtualizationNodeScopeLabel) NodeScopeLabel {
 	defaultLabel := defaultNodeScopeLabel()
 
 	if label.Key == "" {

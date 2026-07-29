@@ -87,7 +87,7 @@ func TestHAMiComponentResourcesAppendOwnerDevicePluginTemplate(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 	objs, err := component.renderResources(NodeScopePlan{
-		DevicePluginTemplate: &plugin.DevicePluginTemplate{Manifest: `
+		DevicePluginTemplate: &v1.DevicePluginTemplate{Manifest: `
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -421,10 +421,10 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	)
 	nvidiaPlugin := fakeAcceleratorPlugin{
 		acceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
-		config: &plugin.VirtualizationConfig{
+		config: &v1.VirtualizationConfig{
 			Supported:      true,
 			CandidateNodes: []string{"plugin-candidate"},
-			NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+			NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 				Key:           plugin.NvidiaGPUVirtualizationLabelKey,
 				EnabledValue:  "true",
 				DisabledValue: "false",
@@ -466,7 +466,7 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 }
 
 func TestHAMiComponentNodeScopeRetainsOwnerDevicePluginTemplate(t *testing.T) {
-	template := &plugin.DevicePluginTemplate{Manifest: "apiVersion: v1\nkind: ConfigMap\n"}
+	template := &v1.DevicePluginTemplate{Manifest: "apiVersion: v1\nkind: ConfigMap\n"}
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree/",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t,
 			newHAMiNode("plugin-candidate", map[string]string{}),
@@ -474,7 +474,7 @@ func TestHAMiComponentNodeScopeRetainsOwnerDevicePluginTemplate(t *testing.T) {
 			plugins: map[string]plugin.AcceleratorPlugin{
 				string(v1.AcceleratorTypeNVIDIAGPU): fakeAcceleratorPlugin{
 					acceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
-					config: &plugin.VirtualizationConfig{
+					config: &v1.VirtualizationConfig{
 						Supported:            true,
 						CandidateNodes:       []string{"plugin-candidate"},
 						DevicePluginTemplate: template,
@@ -802,7 +802,7 @@ func TestHAMiDeleteRemovesNodeScopeWhenSpecStillEnablesVirtualization(t *testing
 
 func TestHAMiDeleteUsesPluginNodeScopeLabel(t *testing.T) {
 	const customLabelKey = "example.com/custom-vgpu-enabled"
-	customLabel := plugin.VirtualizationNodeScopeLabel{
+	customLabel := v1.VirtualizationNodeScopeLabel{
 		Key:           customLabelKey,
 		EnabledValue:  "enabled",
 		DisabledValue: "disabled",
@@ -855,9 +855,9 @@ func TestHAMiDeleteCleansEnabledLabelsForAllSupportedVirtualizationPlugins(t *te
 			plugins: map[string]plugin.AcceleratorPlugin{
 				"nvidia_gpu": fakeAcceleratorPlugin{
 					acceleratorType: "nvidia_gpu",
-					config: &plugin.VirtualizationConfig{
+					config: &v1.VirtualizationConfig{
 						Supported: true,
-						NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+						NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 							Key:           plugin.NvidiaGPUVirtualizationLabelKey,
 							EnabledValue:  "true",
 							DisabledValue: "false",
@@ -866,9 +866,9 @@ func TestHAMiDeleteCleansEnabledLabelsForAllSupportedVirtualizationPlugins(t *te
 				},
 				"npu": fakeAcceleratorPlugin{
 					acceleratorType: "npu",
-					config: &plugin.VirtualizationConfig{
+					config: &v1.VirtualizationConfig{
 						Supported: true,
-						NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+						NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 							Key:           ascendLabelKey,
 							EnabledValue:  "true",
 							DisabledValue: "false",
@@ -995,7 +995,7 @@ type fakePluginProvider struct {
 }
 
 func newTestPluginProvider(candidateNodes ...string) fakePluginProvider {
-	return newTestPluginProviderWithNodeScopeLabel(plugin.VirtualizationNodeScopeLabel{
+	return newTestPluginProviderWithNodeScopeLabel(v1.VirtualizationNodeScopeLabel{
 		Key:           plugin.NvidiaGPUVirtualizationLabelKey,
 		EnabledValue:  "true",
 		DisabledValue: "false",
@@ -1003,12 +1003,12 @@ func newTestPluginProvider(candidateNodes ...string) fakePluginProvider {
 }
 
 func newTestPluginProviderWithNodeScopeLabel(
-	label plugin.VirtualizationNodeScopeLabel,
+	label v1.VirtualizationNodeScopeLabel,
 	candidateNodes ...string,
 ) fakePluginProvider {
 	nvidiaPlugin := fakeAcceleratorPlugin{
 		acceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
-		config: &plugin.VirtualizationConfig{
+		config: &v1.VirtualizationConfig{
 			Supported:      true,
 			CandidateNodes: candidateNodes,
 			NodeScopeLabel: label,
@@ -1034,7 +1034,7 @@ func (f fakePluginProvider) GetPlugin(acceleratorType string) (plugin.Accelerato
 
 type fakeAcceleratorPlugin struct {
 	acceleratorType string
-	config          *plugin.VirtualizationConfig
+	config          *v1.VirtualizationConfig
 	err             error
 }
 
@@ -1053,7 +1053,7 @@ func (p fakeAcceleratorPlugin) Type() string {
 func (p fakeAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*plugin.VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	return p.config, p.err
 }
 

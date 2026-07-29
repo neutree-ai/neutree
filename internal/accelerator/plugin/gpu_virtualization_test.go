@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
@@ -56,7 +58,7 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, config.Supported)
 	assert.Equal(t, []string{"gpu-label", "mig-node"}, config.CandidateNodes)
-	assert.Equal(t, VirtualizationNodeScopeLabel{
+	assert.Equal(t, v1.VirtualizationNodeScopeLabel{
 		Key:           NvidiaGPUVirtualizationLabelKey,
 		EnabledValue:  "true",
 		DisabledValue: "false",

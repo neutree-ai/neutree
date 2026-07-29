@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -49,6 +51,37 @@ const (
 )
 
 type AcceleratorProduct string
+
+// VirtualizationNodeScopeLabel selects the nodes managed by an accelerator
+// virtualization provider.
+type VirtualizationNodeScopeLabel struct {
+	Key           string
+	EnabledValue  string
+	DisabledValue string
+}
+
+// DevicePluginTemplate is an optional accelerator-owned Kubernetes manifest.
+// The Core renders and applies it as part of the shared HAMi lifecycle.
+type DevicePluginTemplate struct {
+	Manifest string
+}
+
+// VirtualizationConfig is the public output of an accelerator virtualization
+// provider. Discovery and reconciliation remain Core implementation details.
+type VirtualizationConfig struct {
+	Supported            bool
+	BlockingReasons      []string
+	CandidateNodes       []string
+	NodeScopeLabel       VirtualizationNodeScopeLabel
+	DevicePluginTemplate *DevicePluginTemplate
+	ConfigPatch          map[string]interface{}
+}
+
+// ClusterVirtualizationConfigProvider is implemented by accelerator plugins
+// that supply virtualization configuration for a Kubernetes cluster.
+type ClusterVirtualizationConfigProvider interface {
+	ResolveClusterVirtualizationConfig(ctx context.Context, cluster *Cluster) (*VirtualizationConfig, error)
+}
 
 type Accelerator struct {
 	ID   string `json:"id,omitempty"`

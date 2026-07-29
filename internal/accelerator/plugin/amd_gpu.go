@@ -219,6 +219,6 @@ func (p *AMDGPUAcceleratorPlugin) GetResourceParser() resourceparser.ResourcePar
 func (p *AMDGPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*VirtualizationConfig, error) {
+) (*v1.VirtualizationConfig, error) {
 	return NewUnsupportedVirtualizationConfig(string(v1.AcceleratorTypeAMDGPU)), nil
 }

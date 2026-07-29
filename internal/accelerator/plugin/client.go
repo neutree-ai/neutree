@@ -116,8 +116,8 @@ func (u *acceleratorPluginClient) GetResourceParser() resourceparser.ResourcePar
 func (u *acceleratorPluginClient) ResolveVirtualizationConfig(
 	ctx context.Context,
 	input VirtualizationConfigInput,
-) (*VirtualizationConfig, error) {
-	resp := &VirtualizationConfig{}
+) (*v1.VirtualizationConfig, error) {
+	resp := &v1.VirtualizationConfig{}
 	if err := u.doPost(ctx, v1.ResolveVirtualizationConfigPath, input, resp); err != nil {
 		return nil, err
 	}

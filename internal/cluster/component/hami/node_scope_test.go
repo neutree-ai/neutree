@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
@@ -20,50 +21,50 @@ func TestNodeScopePlanExposesSelectedDevicePluginTemplate(t *testing.T) {
 }
 
 func TestMergeVirtualizationConfigsSelectsOnlyCandidateOwner(t *testing.T) {
-	owner := &plugin.VirtualizationConfig{
+	owner := &v1.VirtualizationConfig{
 		Supported:       true,
 		CandidateNodes:  []string{"nvidia-node"},
 		BlockingReasons: []string{"owner-specific reason"},
-		NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+		NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 			Key: "neutree.ai/nvidia-vgpu-enabled",
 		},
 		ConfigPatch: map[string]interface{}{"devicePlugin": map[string]interface{}{"enabled": true}},
 	}
-	nonOwner := &plugin.VirtualizationConfig{
+	nonOwner := &v1.VirtualizationConfig{
 		Supported:       true,
 		BlockingReasons: []string{"non-owner reason"},
-		NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+		NodeScopeLabel: v1.VirtualizationNodeScopeLabel{
 			Key: "neutree.ai/ascend-vnpu-enabled",
 		},
 	}
 
-	config, err := mergeVirtualizationConfigs([]*plugin.VirtualizationConfig{nonOwner, owner})
+	config, err := mergeVirtualizationConfigs([]*v1.VirtualizationConfig{nonOwner, owner})
 
 	require.NoError(t, err)
 	assert.Same(t, owner, config)
 }
 
 func TestMergeVirtualizationConfigsRejectsZeroOrMultipleCandidateOwners(t *testing.T) {
-	candidateOwner := func(node string) *plugin.VirtualizationConfig {
-		return &plugin.VirtualizationConfig{Supported: true, CandidateNodes: []string{node}}
+	candidateOwner := func(node string) *v1.VirtualizationConfig {
+		return &v1.VirtualizationConfig{Supported: true, CandidateNodes: []string{node}}
 	}
 
 	tests := []struct {
 		name            string
-		configs         []*plugin.VirtualizationConfig
+		configs         []*v1.VirtualizationConfig
 		expectedReasons []string
 	}{
 		{
-			name:           "zero owners",
+			name:            "zero owners",
 			expectedReasons: []string{"no nodes", "unsupported"},
-			configs: []*plugin.VirtualizationConfig{
+			configs: []*v1.VirtualizationConfig{
 				{Supported: true, BlockingReasons: []string{"no nodes"}},
 				{Supported: false, BlockingReasons: []string{"unsupported"}},
 			},
 		},
 		{
 			name:    "multiple owners",
-			configs: []*plugin.VirtualizationConfig{candidateOwner("nvidia-node"), candidateOwner("ascend-node")},
+			configs: []*v1.VirtualizationConfig{candidateOwner("nvidia-node"), candidateOwner("ascend-node")},
 		},
 	}
 

@@ -1,10 +1,8 @@
 package plugin
 
 import (
-	"context"
 	"sync"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -22,10 +20,6 @@ type AcceleratorPlugin = accelerator.Plugin
 type AcceleratorPluginProvider interface {
 	SupportPlugins() []string
 	GetPlugin(acceleratorType string) (AcceleratorPlugin, bool)
-}
-
-type ClusterVirtualizationConfigProvider interface {
-	ResolveClusterVirtualizationConfig(ctx context.Context, cluster *v1.Cluster) (*VirtualizationConfig, error)
 }
 
 type AcceleratorPluginHandle = accelerator.PluginHandle

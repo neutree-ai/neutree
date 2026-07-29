@@ -6,10 +6,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestVirtualizationConfigExposesOptionalDevicePluginTemplate(t *testing.T) {
-	field, found := reflect.TypeOf(VirtualizationConfig{}).FieldByName("DevicePluginTemplate")
+	field, found := reflect.TypeOf(v1.VirtualizationConfig{}).FieldByName("DevicePluginTemplate")
 
 	require.True(t, found)
 	assert.Equal(t, reflect.Pointer, field.Type.Kind())

@@ -3,6 +3,7 @@ package hami
 import (
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
@@ -20,7 +21,7 @@ type NodeScopePlan struct {
 	Patches              map[string]map[string]string
 	NodeScopeLabel       NodeScopeLabel
 	ConfigPatch          map[string]interface{}
-	DevicePluginTemplate *plugin.DevicePluginTemplate
+	DevicePluginTemplate *v1.DevicePluginTemplate
 }
 
 // PlanNodeScope decides which candidate nodes need the virtualization label.
