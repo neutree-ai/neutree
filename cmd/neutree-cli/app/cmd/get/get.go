@@ -88,7 +88,7 @@ func runGet(opts *getOptions, args []string) error {
 		name = args[1]
 	}
 
-	printer := &resourcePrinter{kind: kind, format: opts.output}
+	printer := &resourcePrinter{kind: kind, format: opts.output, single: name != ""}
 
 	if opts.watch {
 		return runWatch(c, kind, name, opts, printer)
@@ -103,11 +103,8 @@ func runOnce(c *client.Client, kind, name string, opts *getOptions, printer *res
 		return err
 	}
 
-	if len(items) == 0 {
-		fmt.Printf("No %s resources found\n", strings.ToLower(kind))
-		return nil
-	}
-
+	// Empty results are handed to the printer like any other result so that
+	// machine formats emit a parseable empty document instead of prose.
 	return printer.print(items)
 }
 
@@ -178,12 +175,20 @@ func fetchResources(c *client.Client, kind, name, workspace string) ([]json.RawM
 
 // resourcePrinter handles output formatting with state (e.g., table header printed once).
 type resourcePrinter struct {
-	kind          string
-	format        string
+	kind   string
+	format string
+	// single reports whether a NAME was requested. It picks the output envelope,
+	// which follows the request form rather than the result count: a list request
+	// always renders a collection (even for one item), a named request always
+	// renders a bare object.
+	single        bool
 	headerPrinted bool
 	// out is the destination for rendered output; defaults to os.Stdout when nil
 	// (overridden in tests to capture output).
 	out io.Writer
+	// errOut receives human-readable notices that must stay off stdout;
+	// defaults to os.Stderr when nil.
+	errOut io.Writer
 }
 
 // writer returns the printer's output destination, defaulting to os.Stdout.
@@ -195,12 +200,27 @@ func (p *resourcePrinter) writer() io.Writer {
 	return os.Stdout
 }
 
+// errWriter returns the destination for human-readable notices, defaulting to os.Stderr.
+func (p *resourcePrinter) errWriter() io.Writer {
+	if p.errOut != nil {
+		return p.errOut
+	}
+
+	return os.Stderr
+}
+
 func (p *resourcePrinter) print(items []json.RawMessage) error {
+	// Formatters below never see a nil slice: an absent result and an empty one
+	// render identically, and a nil slice would otherwise encode as JSON `null`.
+	if items == nil {
+		items = []json.RawMessage{}
+	}
+
 	switch p.format {
 	case "json":
-		return printJSON(items)
+		return p.printJSON(items)
 	case "yaml":
-		return printYAML(items)
+		return p.printYAML(items)
 	case "table":
 		return p.printTable(items)
 	default:
@@ -221,6 +241,12 @@ func (p *resourcePrinter) printTable(items []json.RawMessage) error {
 		p.headerPrinted = true
 	}
 
+	// The "nothing here" notice is a human-readable aside, so it goes to stderr:
+	// stdout stays a clean, uniformly shaped stream across every output format.
+	if len(items) == 0 {
+		fmt.Fprintf(p.errWriter(), "No %s resources found\n", strings.ToLower(p.kind))
+	}
+
 	for _, item := range items {
 		name := client.ExtractMetadataField(item, "name")
 		id := client.ExtractID(item)
@@ -238,40 +264,75 @@ func (p *resourcePrinter) printTable(items []json.RawMessage) error {
 	return w.Flush()
 }
 
-func printJSON(items []json.RawMessage) error {
+func (p *resourcePrinter) printJSON(items []json.RawMessage) error {
 	var output any
-	if len(items) == 1 {
+
+	if p.single {
+		if len(items) == 0 {
+			return nil
+		}
+
 		output = items[0]
 	} else {
 		output = items
 	}
 
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(p.writer())
 	enc.SetIndent("", "  ")
 
 	return enc.Encode(output)
 }
 
-func printYAML(items []json.RawMessage) error {
-	for i, item := range items {
-		if i > 0 {
-			fmt.Println("---")
-		}
-
+// printYAML renders one YAML document, mirroring the JSON envelope: a list
+// request yields a sequence, a named request yields a mapping. A document
+// stream would be neither — an empty one parses as null rather than as a
+// collection, and a one-item one is indistinguishable from a named result.
+func (p *resourcePrinter) printYAML(items []json.RawMessage) error {
+	decode := func(item json.RawMessage) (any, error) {
 		var obj any
 		if err := json.Unmarshal(item, &obj); err != nil {
-			return fmt.Errorf("failed to parse JSON: %w", err)
+			return nil, fmt.Errorf("failed to parse JSON: %w", err)
 		}
 
-		out, err := yaml.Marshal(obj)
-		if err != nil {
-			return fmt.Errorf("failed to marshal YAML: %w", err)
-		}
-
-		fmt.Print(string(out))
+		return obj, nil
 	}
 
-	return nil
+	var output any
+
+	if p.single {
+		if len(items) == 0 {
+			return nil
+		}
+
+		obj, err := decode(items[0])
+		if err != nil {
+			return err
+		}
+
+		output = obj
+	} else {
+		list := make([]any, 0, len(items))
+
+		for _, item := range items {
+			obj, err := decode(item)
+			if err != nil {
+				return err
+			}
+
+			list = append(list, obj)
+		}
+
+		output = list
+	}
+
+	out, err := yaml.Marshal(output)
+	if err != nil {
+		return fmt.Errorf("failed to marshal YAML: %w", err)
+	}
+
+	_, err = fmt.Fprint(p.writer(), string(out))
+
+	return err
 }
 
 // --- utilities ---
