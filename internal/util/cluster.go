@@ -7,27 +7,13 @@ import (
 	"strconv"
 
 	"github.com/pkg/errors"
-	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-)
-
-var (
-	scheme = runtime.NewScheme()
-	_      = rayv1.AddToScheme(scheme)
-	_      = admissionregistrationv1.AddToScheme(scheme)
-	_      = appsv1.AddToScheme(scheme)
-	_      = corev1.AddToScheme(scheme)
-	_      = rbacv1.AddToScheme(scheme)
+	pkgutil "github.com/neutree-ai/neutree/pkg/util"
 )
 
 func GetClusterModelCache(c v1.Cluster) ([]v1.ModelCache, error) {
@@ -97,31 +83,7 @@ func GetClientSetFromCluster(cluster *v1.Cluster) (*kubernetes.Clientset, error)
 }
 
 func GetClientFromCluster(cluster *v1.Cluster) (client.Client, error) {
-	kubeconfig, err := GetKubeConfigFromCluster(cluster)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get kubeconfig from cluster")
-	}
-
-	restConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create REST config")
-	}
-
-	// Increase QPS and Burst to handle more requests
-	// This is important for clusters with many nodes/pods
-	// to avoid throttling issues
-	restConfig.QPS = 10
-	restConfig.Burst = 20
-
-	ctrClient, err := client.New(restConfig, client.Options{
-		Scheme: scheme,
-	})
-
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create controller client")
-	}
-
-	return ctrClient, nil
+	return pkgutil.GetClientFromCluster(cluster)
 }
 
 func ClusterNamespace(cluster *v1.Cluster) string {

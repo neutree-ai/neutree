@@ -5,8 +5,19 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	rbacv1 "k8s.io/api/rbac/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
+
+func TestGetClientFromClusterPreservesMissingConfigError(t *testing.T) {
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{}}}
+
+	ctrlClient, err := GetClientFromCluster(cluster)
+
+	require.Nil(t, ctrlClient)
+	require.EqualError(t, err,
+		"failed to get kubeconfig from cluster: failed to parse kubernetes cluster config: kubernetes cluster config is empty")
+}
 
 func makeKubeConfig(clusterConfig, userConfig string) string {
 	return fmt.Sprintf(`
@@ -122,12 +133,4 @@ func TestGetTransportFromDecodedKubeConfig(t *testing.T) {
 			require.NotNil(t, transport)
 		})
 	}
-}
-
-func TestKubernetesClientSchemeRegistersRBAC(t *testing.T) {
-	kinds, _, err := scheme.ObjectKinds(&rbacv1.Role{})
-
-	require.NoError(t, err)
-	require.NotEmpty(t, kinds)
-	require.Equal(t, "Role", kinds[0].Kind)
 }
