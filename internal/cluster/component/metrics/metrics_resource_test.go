@@ -127,6 +127,33 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 	t.Fatalf("vmagent deployment not found in resources")
 }
 
+func TestBuildMetricsResourcesWithNumericClusterMetadata(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "123", Workspace: "456"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+
+	clusterRole := findMetricsClusterRoleByApp(t, objs, "vmagent")
+	assert.Equal(t, clusterRole.Labels["cluster"], "123")
+	assert.Equal(t, clusterRole.Labels["workspace"], "456")
+
+	vmagent := findMetricsDeployment(t, objs, "vmagent")
+	assert.Equal(t, vmagent.Spec.Template.Labels["cluster"], "123")
+	assert.Equal(t, vmagent.Spec.Template.Labels["workspace"], "456")
+
+	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config")
+	assert.Assert(t, strings.Contains(vmagentConfig.Data["prometheus.yml"], "regex: \"123\""))
+	assert.Assert(t, strings.Contains(vmagentConfig.Data["prometheus.yml"], "replacement: \"456\""))
+}
+
 func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{

@@ -60,14 +60,14 @@ spec:
   selector:
     matchLabels:
       app: router
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
         app: router
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .Version }}
     spec:
       affinity:
@@ -136,8 +136,8 @@ metadata:
 spec:
   selector:
     app: router
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
+    cluster: {{ .ClusterName | quote }}
+    workspace: {{ .Workspace | quote }}
   ports:
   - name: http
     port: 8000
