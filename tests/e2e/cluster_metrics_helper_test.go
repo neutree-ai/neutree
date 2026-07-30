@@ -143,11 +143,13 @@ func assertK8sNodeAgentControlPlaneScheduling(
 
 	controlPlaneNodes := make(map[string]struct{})
 	untaintedWorkerNodes := make(map[string]struct{})
+
 	for _, node := range nodes {
 		if hasControlPlaneNoScheduleTaint(node) {
 			controlPlaneNodes[node.Name] = struct{}{}
 			continue
 		}
+
 		if isUntaintedWorkerNode(node) {
 			untaintedWorkerNodes[node.Name] = struct{}{}
 		}
@@ -156,6 +158,7 @@ func assertK8sNodeAgentControlPlaneScheduling(
 	if len(controlPlaneNodes) == 0 {
 		Skip("requires a control-plane node with node-role.kubernetes.io/control-plane:NoSchedule taint")
 	}
+
 	if len(untaintedWorkerNodes) == 0 {
 		Skip("requires an untainted worker node")
 	}
@@ -167,10 +170,12 @@ func assertK8sNodeAgentControlPlaneScheduling(
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list node-agent pods")
 
 	var readyWorkerPod *corev1.Pod
+
 	for i := range pods {
 		pod := &pods[i]
 		ExpectWithOffset(1, controlPlaneNodes).NotTo(HaveKey(pod.Spec.NodeName),
 			"node-agent pod %s must not run on a control-plane node", pod.Name)
+
 		if _, ok := untaintedWorkerNodes[pod.Spec.NodeName]; ok && isPodReady(pod) {
 			readyWorkerPod = pod
 			break
@@ -201,6 +206,7 @@ func isUntaintedWorkerNode(node corev1.Node) bool {
 	if _, isControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]; isControlPlane {
 		return false
 	}
+
 	if _, isMaster := node.Labels["node-role.kubernetes.io/master"]; isMaster {
 		return false
 	}
