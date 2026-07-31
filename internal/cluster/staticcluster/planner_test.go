@@ -462,7 +462,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 					v1.StaticNodeRoleHead,
 					v1.StaticNodePhaseReady,
 					true,
-					cpuAcceleratorStatus(),
+					nvidiaAcceleratorStatus(),
 					nil,
 				),
 				staticNodeStatusWithAccelerator(
@@ -476,21 +476,49 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			}
 
 			nodes := plannedStaticNodes(t, &Planner{
+				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+					profiles: map[string]*v1.AcceleratorProfile{
+						v1.AcceleratorTypeNVIDIAGPU.String(): {
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+							MetricsExporter: &v1.AcceleratorExporterProfile{
+								Name:  "dcgm-exporter",
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
+							},
+						},
+					},
+				},
 				MetricsRemoteWriteURL: tt.metricsRemoteWriteURL,
 			}, cluster, currentNodes)
 
 			head := findStaticNode(nodes, "head-0")
 			require.NotNil(t, head)
-			assertNodeComponentNames(t, head.Spec.Components, []string{"ray-head"})
+			assertNodeComponentNames(t, head.Spec.Components, []string{
+				"ray-head",
+				nodeExporterComponentName,
+				acceleratorExporterComponentName,
+				nodeAgentComponentName,
+			})
+			assert.Nil(t, findComponent(head.Spec.Components, vmagentComponentName))
 			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 			})
 
 			worker := findStaticNode(nodes, "worker-0")
 			require.NotNil(t, worker)
-			assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker"})
+			assertNodeComponentNames(t, worker.Spec.Components, []string{
+				"ray-worker",
+				nodeExporterComponentName,
+				nodeAgentComponentName,
+			})
+			assert.Nil(t, findComponent(worker.Spec.Components, vmagentComponentName))
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
 			})
 		})
 	}
