@@ -104,6 +104,32 @@ func TestExternalEndpointUpstreamEntryIdentity(t *testing.T) {
 			wantModels: nil,
 		},
 		{
+			// userinfo in the URL is a credential; it must not reach the status
+			name: "external upstream entry with embedded credentials",
+			entry: ExternalEndpointUpstreamEntry{
+				Upstream: &ExternalEndpointUpstreamSpec{URL: "https://user:sk-secret@api.example.com/v1"},
+			},
+			wantKind: ExternalEndpointUpstreamKindExternal,
+			wantRef:  "https://api.example.com/v1",
+		},
+		{
+			// providers commonly pass the key as a query parameter
+			name: "external upstream entry with credential in query",
+			entry: ExternalEndpointUpstreamEntry{
+				Upstream: &ExternalEndpointUpstreamSpec{URL: "https://api.example.com/v1?api-key=sk-secret"},
+			},
+			wantKind: ExternalEndpointUpstreamKindExternal,
+			wantRef:  "https://api.example.com/v1",
+		},
+		{
+			name: "unparsable upstream url is not echoed back",
+			entry: ExternalEndpointUpstreamEntry{
+				Upstream: &ExternalEndpointUpstreamSpec{URL: "://sk-secret@nope"},
+			},
+			wantKind: ExternalEndpointUpstreamKindExternal,
+			wantRef:  unparsableUpstreamURL,
+		},
+		{
 			name:     "entry with neither ref nor upstream",
 			entry:    ExternalEndpointUpstreamEntry{},
 			wantKind: ExternalEndpointUpstreamKindExternal,

@@ -265,6 +265,17 @@ func TestSyncExternalEndpointAllUpstreamsFailed(t *testing.T) {
 	assert.Equal(t, v1.ExternalEndpointUpstreamPhaseFailed, statuses[0].Phase)
 }
 
+// An endpoint with no upstreams at all is a spec problem, and must keep saying
+// so rather than reporting "nothing resolved" with an empty list of reasons.
+func TestSyncExternalEndpointNoUpstreamsConfigured(t *testing.T) {
+	k := &Kong{}
+
+	statuses, err := k.SyncExternalEndpoint(testExternalEndpoint())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "has no upstreams configured")
+	assert.Empty(t, statuses)
+}
+
 func TestJoinUpstreamErrors(t *testing.T) {
 	statuses := []v1.ExternalEndpointUpstreamStatus{
 		{Phase: v1.ExternalEndpointUpstreamPhaseFailed, ErrorMessage: "first failed"},

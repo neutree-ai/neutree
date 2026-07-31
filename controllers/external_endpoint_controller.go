@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -136,10 +137,19 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 func summarizeDegradedUpstreams(statuses []v1.ExternalEndpointUpstreamStatus) (int, error) {
 	refs := make([]string, 0, len(statuses))
 
-	for _, s := range statuses {
-		if s.Phase == v1.ExternalEndpointUpstreamPhaseFailed {
-			refs = append(refs, s.Ref)
+	for i, s := range statuses {
+		if s.Phase != v1.ExternalEndpointUpstreamPhaseFailed {
+			continue
 		}
+
+		// A spec entry with neither endpoint_ref nor upstream has no reference to
+		// name, so fall back to its position rather than rendering an empty item.
+		ref := s.Ref
+		if ref == "" {
+			ref = fmt.Sprintf("upstream #%d", i+1)
+		}
+
+		refs = append(refs, ref)
 	}
 
 	if len(refs) == 0 {

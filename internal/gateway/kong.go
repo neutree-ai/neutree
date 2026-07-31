@@ -779,6 +779,13 @@ func getEndpointRoutePath(ep *v1.Endpoint) string {
 // entry resolves does the whole sync fail, since Kong needs at least one
 // reachable target to build the service.
 func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
+	// An endpoint with no upstreams at all is a spec problem, not a resolution
+	// failure — keep saying so explicitly rather than reporting "nothing
+	// resolved" with an empty list of reasons.
+	if len(ee.Spec.Upstreams) == 0 {
+		return nil, errors.Errorf("external endpoint %s has no upstreams configured", ee.Key())
+	}
+
 	resolved := k.resolveExternalEndpointUpstreams(ee)
 	statuses := externalEndpointUpstreamStatuses(resolved)
 

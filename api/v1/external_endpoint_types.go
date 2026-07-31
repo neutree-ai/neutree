@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"net/url"
 	"sort"
 	"strconv"
 
@@ -70,19 +71,41 @@ func (e *ExternalEndpointUpstreamEntry) Kind() string {
 }
 
 // Ref returns the stable identity of the entry: the referenced internal endpoint
-// name, or the external upstream URL. It matches the identities listed in the
-// spec's mergekey tag, so a status entry can be correlated with a spec entry
-// across reordering. Never contains the auth credential.
+// name, or the external upstream URL with anything credential-bearing removed.
+// It is safe to publish in status, logs and error messages.
 func (e *ExternalEndpointUpstreamEntry) Ref() string {
 	if e.EndpointRef != nil {
 		return *e.EndpointRef
 	}
 
 	if e.Upstream != nil {
-		return e.Upstream.URL
+		return SanitizeUpstreamURL(e.Upstream.URL)
 	}
 
 	return ""
+}
+
+// unparsableUpstreamURL stands in for a URL we could not parse. Echoing the raw
+// value would risk leaking whatever it embeds.
+const unparsableUpstreamURL = "(unparsable upstream url)"
+
+// SanitizeUpstreamURL strips the credential-bearing parts of an upstream URL:
+// the userinfo component (https://user:pass@host) and the query string, which
+// providers commonly use to carry an API key (?api-key=...). The result is a
+// deterministic function of the URL, so it still identifies the entry it came
+// from — two upstreams differing only in their query string collapse to the
+// same reference, which is the intended trade for not publishing secrets.
+func SanitizeUpstreamURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return unparsableUpstreamURL
+	}
+
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	return u.String()
 }
 
 // ExposedModels returns the client-facing model names this entry serves, sorted

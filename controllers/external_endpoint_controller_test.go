@@ -364,6 +364,26 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// A spec entry with neither endpoint_ref nor upstream has an empty Ref;
+			// the summary must not render an empty identifier.
+			name: "degraded summary falls back to position for an unidentifiable upstream",
+			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{
+					{Ref: "ok-upstream", Phase: v1.ExternalEndpointUpstreamPhaseReady},
+					{Ref: "", Kind: v1.ExternalEndpointUpstreamKindExternal, Phase: v1.ExternalEndpointUpstreamPhaseFailed},
+				}, nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseDEGRADED &&
+						strings.Contains(ee.Status.ErrorMessage, "upstream #2") &&
+						!strings.HasSuffix(ee.Status.ErrorMessage, ": ")
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
 			// Nothing resolved: the gateway hard-fails, and the per-upstream detail
 			// still rides along so the status explains why.
 			name: "total upstream failure stays Failed and keeps upstream detail",
