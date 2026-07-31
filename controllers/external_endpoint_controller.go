@@ -1,11 +1,14 @@
 package controllers
 
 import (
+	"strings"
+
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/gateway"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -65,7 +68,7 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 
 		deleteErr := c.gw.DeleteExternalEndpoint(obj)
 
-		updateErr := c.updateStatus(obj, v1.ExternalEndpointPhaseDELETED, deleteErr)
+		updateErr := c.updateStatus(obj, v1.ExternalEndpointPhaseDELETED, deleteErr, nil)
 		if updateErr != nil {
 			klog.Errorf("failed to update external_endpoint %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -84,9 +87,9 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 	}
 
 	// sync external endpoint when not deleting
-	err = c.gw.SyncExternalEndpoint(obj)
+	upstreamStatuses, err := c.gw.SyncExternalEndpoint(obj)
 	if err != nil {
-		syncErr := c.updateStatus(obj, v1.ExternalEndpointPhaseFAILED, err)
+		syncErr := c.updateStatus(obj, v1.ExternalEndpointPhaseFAILED, err, upstreamStatuses)
 		if syncErr != nil {
 			klog.Errorf("failed to update external_endpoint %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, syncErr)
@@ -96,27 +99,68 @@ func (c *ExternalEndpointController) sync(obj *v1.ExternalEndpoint) error {
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
-	// Recompute Running status on every successful reconcile so that the
-	// service URL stays in sync with the current gateway proxy address
-	// (e.g. after neutree-core restarts with a different --gateway-proxy-url).
-	// updateStatus drift-detects and only writes when phase, service URL,
-	// or error message has changed.
-	err = c.updateStatus(obj, v1.ExternalEndpointPhaseRUNNING, nil)
+	// The gateway config was pushed, but individual upstreams may have been left
+	// out because they no longer resolve (referenced endpoint or its cluster was
+	// deleted). Report that as Degraded rather than Running: the endpoint serves,
+	// yet some of its models do not. Requeueing is pointless here — recovery
+	// depends on the user restoring the endpoint or fixing the reference — so the
+	// reconcile succeeds and the detail lives in the status.
+	phase := v1.ExternalEndpointPhaseRUNNING
+
+	degradedCount, degradedErr := summarizeDegradedUpstreams(upstreamStatuses)
+	if degradedCount > 0 {
+		phase = v1.ExternalEndpointPhaseDEGRADED
+
+		klog.Warningf("external_endpoint %s/%s is degraded: %d of %d upstreams unavailable",
+			obj.Metadata.Workspace, obj.Metadata.Name, degradedCount, len(upstreamStatuses))
+	}
+
+	// Recompute status on every successful reconcile so that the service URL
+	// stays in sync with the current gateway proxy address (e.g. after
+	// neutree-core restarts with a different --gateway-proxy-url) and a
+	// recovered upstream flips the phase back to Running. updateStatus
+	// drift-detects and only writes when something user-visible has changed.
+	err = c.updateStatus(obj, phase, degradedErr, upstreamStatuses)
 	if err != nil {
-		return errors.Wrapf(err, "failed to update external_endpoint %s/%s status to RUNNING",
-			obj.Metadata.Workspace, obj.Metadata.Name)
+		return errors.Wrapf(err, "failed to update external_endpoint %s/%s status to %s",
+			obj.Metadata.Workspace, obj.Metadata.Name, phase)
 	}
 
 	return nil
 }
 
-func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phase v1.ExternalEndpointPhase, err error) error {
+// summarizeDegradedUpstreams reports how many upstreams failed to resolve and
+// renders the endpoint-level error message for them. Per-upstream detail stays
+// in the status list; this is the one-line version for list views. The error is
+// nil when nothing is degraded.
+func summarizeDegradedUpstreams(statuses []v1.ExternalEndpointUpstreamStatus) (int, error) {
+	refs := make([]string, 0, len(statuses))
+
+	for _, s := range statuses {
+		if s.Phase == v1.ExternalEndpointUpstreamPhaseFailed {
+			refs = append(refs, s.Ref)
+		}
+	}
+
+	if len(refs) == 0 {
+		return 0, nil
+	}
+
+	return len(refs), errors.Errorf(
+		"%d upstream(s) unavailable and excluded from the gateway configuration: %s",
+		len(refs), strings.Join(refs, ", "))
+}
+
+func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phase v1.ExternalEndpointPhase,
+	err error, upstreamStatuses []v1.ExternalEndpointUpstreamStatus) error {
 	serviceURL := ""
 	if obj.Status != nil {
 		serviceURL = obj.Status.ServiceURL
 	}
 
-	if phase == v1.ExternalEndpointPhaseRUNNING {
+	// A degraded endpoint is still served on its route, so its service URL must
+	// stay fresh too.
+	if phase == v1.ExternalEndpointPhaseRUNNING || phase == v1.ExternalEndpointPhaseDEGRADED {
 		url, urlErr := c.gw.GetExternalEndpointServeUrl(obj)
 		if urlErr != nil {
 			klog.Warningf("failed to get external_endpoint %s/%s service url: %v",
@@ -131,6 +175,7 @@ func (c *ExternalEndpointController) updateStatus(obj *v1.ExternalEndpoint, phas
 		Phase:              phase,
 		ServiceURL:         serviceURL,
 		ErrorMessage:       FormatErrorForStatus(err),
+		UpstreamStatuses:   upstreamStatuses,
 	}
 
 	if !externalEndpointStatusChanged(obj.Status, newStatus) {
@@ -152,7 +197,37 @@ func externalEndpointStatusChanged(old, newSt *v1.ExternalEndpointStatus) bool {
 		return true
 	}
 
-	return old.Phase != newSt.Phase ||
+	if old.Phase != newSt.Phase ||
 		old.ServiceURL != newSt.ServiceURL ||
-		old.ErrorMessage != newSt.ErrorMessage
+		old.ErrorMessage != newSt.ErrorMessage {
+		return true
+	}
+
+	return upstreamStatusesChanged(old.UpstreamStatuses, newSt.UpstreamStatuses)
+}
+
+// upstreamStatusesChanged compares the per-upstream detail. The lists are built
+// in spec order by the gateway, and the model names within an entry are sorted,
+// so comparing them as a whole is stable across reconciles — and unlike a
+// field-by-field compare it cannot go stale when the status type gains a field.
+func upstreamStatusesChanged(old, newSt []v1.ExternalEndpointUpstreamStatus) bool {
+	// An absent list and an empty list mean the same thing here, but marshal
+	// differently (null vs []), so short-circuit before comparing.
+	if len(old) == 0 && len(newSt) == 0 {
+		return false
+	}
+
+	equal, diff, err := util.JsonEqual(old, newSt)
+	if err != nil {
+		// Comparison is only an optimization; on failure fall back to writing.
+		klog.Warningf("failed to compare external_endpoint upstream statuses: %v", err)
+
+		return true
+	}
+
+	if !equal {
+		klog.V(4).Infof("external_endpoint upstream statuses changed, diff: %s", diff)
+	}
+
+	return !equal
 }

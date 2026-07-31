@@ -44,7 +44,9 @@ type Gateway interface {
 	// GetServeUrl returns the endpoint serving url of the gateway
 	GetEndpointServeUrl(ep *v1.Endpoint) (string, error)
 	// SyncExternalEndpoint synchronizes an external endpoint configuration to the gateway
-	SyncExternalEndpoint(ee *v1.ExternalEndpoint) error
+	// It returns the per-upstream resolution result, so the caller can surface
+	// which upstreams are unavailable even when the sync as a whole succeeded.
+	SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error)
 	// DeleteExternalEndpoint removes an external endpoint configuration from the gateway
 	DeleteExternalEndpoint(ee *v1.ExternalEndpoint) error
 	// GetExternalEndpointServeUrl returns the external endpoint serving url of the gateway
