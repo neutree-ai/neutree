@@ -3,6 +3,7 @@ package client
 import (
 	"crypto/tls"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -87,7 +88,7 @@ func WithTimeout(timeout time.Duration) ClientOption {
 // NewClient creates a new neutree API client
 func NewClient(baseURL string, options ...ClientOption) *Client {
 	client := &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
