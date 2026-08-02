@@ -58,7 +58,13 @@ make db-test
 # Quick iteration: rebuild and restart local containers
 make docker-test-api
 make docker-test-core
+
+# Same, against a container on a remote host (backs up + verifies the swap)
+make deploy-remote HOST=root@10.0.0.5 COMP=neutree-api
 ```
+
+See [`contributing/testing.md`](contributing/testing.md#iterating-against-a-running-control-plane)
+for the remote deployment options and rollback.
 
 ## Roadmap
 
