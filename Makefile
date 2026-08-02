@@ -80,7 +80,11 @@ install-hooks: ## Enable .githooks as local git hooks (run once per worktree)
 	chmod +x scripts/check-boundaries.sh scripts/check-migration-pairs.sh scripts/builder/sync-controlplane-images.sh
 	@echo "Git hooks installed for this worktree. Pre-commit will run on every 'git commit'."
 
-build: test build-neutree-core build-neutree-cli build-neutree-api
+build: test build-neutree-core build-neutree-cli build-neutree-api build-all-packages
+
+.PHONY: build-all-packages
+build-all-packages: prepare-build-cli ## Check that every package compiles outside the test build
+	$(GO) build ./...
 
 build-neutree-core:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-core ./cmd/neutree-core/neutree-core.go
