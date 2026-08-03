@@ -350,6 +350,42 @@ docker-test-core: ## Redeploy local neutree-core for testing
 docker-test-node-agent: ## Build local neutree-node-agent binary for testing
 	$(MAKE) build-neutree-node-agent
 
+# Remote counterpart of docker-test-api / docker-test-core: same idea, but the
+# container lives on another host and the swap is checked instead of assumed.
+# Required: HOST, COMP. Optional: CONTAINER, REMOTE_BIN, BACKUP_DIR, HEALTH_URL,
+# SETTLE, SSH_OPTS. Leave REMOTE_BIN empty for a stock container (docker cp);
+# set it to the bind-mounted directory on the remote host when the binary is
+# mounted in. See contributing/testing.md.
+#
+# The binary is built on the machine running make, and build-$(COMP) does not
+# pin GOOS/GOARCH. When HOST's OS or CPU architecture differs from this
+# machine's, cross-compile by exporting them for the whole invocation:
+#
+#     GOOS=linux GOARCH=amd64 make deploy-remote HOST=root@10.0.0.5 COMP=neutree-api
+#
+# deploy-remote.sh refuses to ship a binary that does not match HOST, so a
+# forgotten GOARCH fails before anything on the host is touched.
+CONTAINER ?= $(COMP)
+REMOTE_BIN ?=
+BACKUP_DIR ?= /var/tmp/neutree-deploy-remote
+HEALTH_URL ?=
+SETTLE ?= 10
+SSH_OPTS ?=
+
+DEPLOY_REMOTE_ENV = \
+	HOST="$(HOST)" COMP="$(COMP)" CONTAINER="$(CONTAINER)" REMOTE_BIN="$(REMOTE_BIN)" \
+	BACKUP_DIR="$(BACKUP_DIR)" HEALTH_URL="$(HEALTH_URL)" SETTLE="$(SETTLE)" \
+	SSH_OPTS="$(SSH_OPTS)" LOCAL_BIN="bin/$(COMP)" EXPECT_COMMIT="$(GIT_COMMIT)"
+
+.PHONY: deploy-remote
+deploy-remote: ## Build COMP and hot-replace it in a container on HOST, with backup and verification
+	$(MAKE) build-$(COMP)
+	@$(DEPLOY_REMOTE_ENV) bash scripts/deploy-remote.sh deploy
+
+.PHONY: deploy-remote-rollback
+deploy-remote-rollback: ## Restore the binary deploy-remote backed up on HOST and restart the container
+	@$(DEPLOY_REMOTE_ENV) bash scripts/deploy-remote.sh rollback
+
 .PHONY: docker-test-db-scripts
 docker-test-db-scripts: ## Overwrite db scripts for testing, and restart related services
 	docker cp db copy-db-scripts:/

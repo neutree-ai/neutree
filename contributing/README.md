@@ -64,7 +64,7 @@ If the component differs between Compose and Helm, document the reason in the PR
 | [`architecture-neutree-api.md`](architecture-neutree-api.md) | neutree-api process role, route topology, authentication |
 | [`architecture-neutree-core.md`](architecture-neutree-core.md) | neutree-core process role, controller pattern (idempotent / spec-status / soft-delete), reconcile cadence, cluster modes, vendor plugin pairs |
 | [`architecture-neutree-cli.md`](architecture-neutree-cli.md) | neutree-cli process role, subcommand groups, authentication, deploy mode, engine package import |
-| [`testing.md`](testing.md) | Unit (testify + mockery), Python co-location, DB integration, E2E (Ginkgo), impl/test file pairs |
+| [`testing.md`](testing.md) | Unit (testify + mockery), Python co-location, DB integration, E2E (Ginkgo), impl/test file pairs, deploying a build to a running control plane |
 | [`coding-standards.md`](coding-standards.md) | golangci-lint rules, import organization, commit convention, lint fix cheatsheet |
 | [`database.md`](database.md) | PostgREST + RLS model, migration rules (incl. pairing), auth token layers, common errors |
 | [`playbooks.md`](playbooks.md) | Step-by-step checklists — new engine version, new resource type |
