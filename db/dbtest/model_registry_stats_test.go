@@ -15,15 +15,21 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// createTestModelRegistry inserts a model registry through PostgREST and
-// registers its removal. It returns the row id.
+// createTestModelRegistry inserts a model registry in the default workspace
+// through PostgREST and registers its removal. It returns the row id.
 func createTestModelRegistry(t *testing.T, db *sql.DB, s storage.Storage, name string) int {
+	t.Helper()
+
+	return createTestModelRegistryInWorkspace(t, db, s, name, "default")
+}
+
+func createTestModelRegistryInWorkspace(t *testing.T, db *sql.DB, s storage.Storage, name, workspace string) int {
 	t.Helper()
 
 	require.NoError(t, s.CreateModelRegistry(&v1.ModelRegistry{
 		APIVersion: "v1",
 		Kind:       "ModelRegistry",
-		Metadata:   &v1.Metadata{Name: name, Workspace: "default"},
+		Metadata:   &v1.Metadata{Name: name, Workspace: workspace},
 		Spec: &v1.ModelRegistrySpec{
 			Type: v1.BentoMLModelRegistryType,
 			Url:  "file://localhost/tmp/" + name,
@@ -33,8 +39,8 @@ func createTestModelRegistry(t *testing.T, db *sql.DB, s storage.Storage, name s
 
 	var id int
 	require.NoError(t, db.QueryRow(
-		"SELECT id FROM api.model_registries WHERE (metadata).name = $1 AND (metadata).workspace = 'default'",
-		name,
+		"SELECT id FROM api.model_registries WHERE (metadata).name = $1 AND (metadata).workspace = $2",
+		name, workspace,
 	).Scan(&id))
 
 	t.Cleanup(func() {
