@@ -87,9 +87,9 @@ func TestValidateModelAlias(t *testing.T) {
 func TestModelAliasLengthBoundIsTheSameOnEitherForm(t *testing.T) {
 	inputs := []string{
 		"Qwen3",
-		"\u0130stanbul", // U+0130 capital I with dot above
-		"\u01c5",        // U+01C5 titlecase digraph
-		"\u1e68",        // U+1E68 S with dot above and below
+		"\u0130stanbul",     // U+0130 capital I with dot above
+		"\u01c5",            // U+01C5 titlecase digraph
+		"\u1e68",            // U+1E68 S with dot above and below
 		"\u1e9estra\u00dfe", // U+1E9E capital sharp s
 		strings.Repeat("\u0130", maxModelAliasLength),
 		strings.Repeat("\u0130", maxModelAliasLength+1),
