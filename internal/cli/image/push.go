@@ -72,9 +72,13 @@ func Push(ctx context.Context, lister RegistryLister, pusher ImagePusher, opts P
 		return "", errors.Wrapf(err, "failed to resolve image prefix for image registry %s", opts.Registry)
 	}
 
-	registryAuth, err := buildRegistryAuth(imageRegistry, host, opts)
+	registryAuth, credSource, err := buildRegistryAuth(imageRegistry, host, opts)
 	if err != nil {
 		return "", err
+	}
+
+	if credentialsDenied {
+		credSource = credentialsUnreadable
 	}
 
 	source := normalizeReference(opts.SourceImage)
@@ -98,14 +102,7 @@ func Push(ctx context.Context, lister RegistryLister, pusher ImagePusher, opts P
 	}
 
 	if err := pusher.TagAndPush(ctx, source, target, registryAuth); err != nil {
-		if credentialsDenied {
-			return "", errors.Wrapf(err,
-				"pushed anonymously because the credentials of image registry %s could not be read: the API key "+
-					"may lack the image_registry:read-credentials permission, pass --registry-username/--registry-password",
-				opts.Registry)
-		}
-
-		return "", err
+		return "", explainPushFailure(err, credSource, opts.Registry)
 	}
 
 	return target, nil
@@ -183,22 +180,104 @@ func getRegistry(lister RegistryLister, opts PushOptions, withCreds bool) (*v1.I
 	return &registries[0], nil
 }
 
+// credentialSource records where the push credentials came from, so that an
+// authentication failure can name the thing the user has to change.
+type credentialSource int
+
+const (
+	// credentialsFromRegistry: the registry resource's stored credentials.
+	credentialsFromRegistry credentialSource = iota
+	// credentialsFromFlags: --registry-username / --registry-password.
+	credentialsFromFlags
+	// credentialsAnonymous: the registry stores no credentials.
+	credentialsAnonymous
+	// credentialsUnreadable: the registry may store credentials, but this API
+	// key may not read them, so the push went out anonymously.
+	credentialsUnreadable
+)
+
 // buildRegistryAuth prefers explicit credentials over the stored ones. A
 // registry with neither is pushed to anonymously — the platform itself skips
 // docker login for those (see controllers/static_node_controller.go).
-func buildRegistryAuth(imageRegistry *v1.ImageRegistry, host string, opts PushOptions) (string, error) {
+func buildRegistryAuth(imageRegistry *v1.ImageRegistry, host string, opts PushOptions) (string, credentialSource, error) {
 	username, password := opts.Username, opts.Password
+	source := credentialsFromFlags
 
 	if username == "" {
 		var err error
 
 		username, password, err = util.GetImageRegistryAuthInfo(imageRegistry)
 		if err != nil {
-			return "", errors.Wrap(err, "failed to read image registry credentials")
+			return "", source, errors.Wrap(err, "failed to read image registry credentials")
+		}
+
+		source = credentialsFromRegistry
+		if username == "" {
+			source = credentialsAnonymous
 		}
 	}
 
-	return util.EncodeRegistryAuth(username, password, host)
+	auth, err := util.EncodeRegistryAuth(username, password, host)
+
+	return auth, source, err
+}
+
+// explainPushFailure attaches a hint to an authentication failure, naming what
+// the user has to change. Registry credentials in Neutree are only required to
+// grant pull, so a valid credential that cannot push is the expected failure,
+// not a corner case. Non-authentication failures (a missing local image, a
+// broken daemon) are returned untouched — a credential hint would misdirect.
+func explainPushFailure(err error, source credentialSource, registry string) error {
+	if !isAuthFailure(err) {
+		return err
+	}
+
+	switch source {
+	case credentialsUnreadable:
+		return errors.Wrapf(err,
+			"pushed anonymously because the credentials of image registry %s could not be read: the API key "+
+				"may lack the image_registry:read-credentials permission, pass --registry-username/--registry-password",
+			registry)
+	case credentialsFromRegistry:
+		return errors.Wrapf(err,
+			"the stored credentials of image registry %s were rejected: Neutree only requires them to grant pull, "+
+				"so update the registry with an account that may push, or pass --registry-username/--registry-password",
+			registry)
+	case credentialsAnonymous:
+		return errors.Wrapf(err,
+			"pushed anonymously because image registry %s stores no credentials: add credentials that may push to "+
+				"the registry, or pass --registry-username/--registry-password",
+			registry)
+	case credentialsFromFlags:
+		return errors.Wrapf(err,
+			"the credentials passed with --registry-username/--registry-password were rejected by image registry %s",
+			registry)
+	}
+
+	return err
+}
+
+// isAuthFailure reports whether err looks like a registry rejecting the
+// credentials. The Docker daemon surfaces these as opaque strings from the
+// registry's own response, so matching on text is the only option; the phrases
+// below are what Docker Registry v2 implementations (including Harbor) return.
+func isAuthFailure(err error) bool {
+	message := strings.ToLower(err.Error())
+
+	for _, phrase := range []string{
+		"denied",
+		"unauthorized",
+		"authentication required",
+		"no basic auth credentials",
+		"insufficient_scope",
+		"forbidden",
+	} {
+		if strings.Contains(message, phrase) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // normalizeReference appends the implicit :latest tag so the reported target is

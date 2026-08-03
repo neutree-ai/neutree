@@ -67,6 +67,13 @@ engine's `engine_args.image`). Credentials come from the registry's stored auth 
 `credentials/image_registries` endpoint (`image_registry:read-credentials`), with
 `--registry-username` / `--registry-password` as the fallback for keys that lack the permission.
 
+Neutree only requires a registry's stored credentials to grant **pull** — the account behind them
+may well be unable to push. That failure comes back from the registry as an opaque string, so
+`explainPushFailure` classifies it by which credentials were actually used (stored / flags /
+anonymous / unreadable) and names the thing to change: update the `ImageRegistry` resource, or pass
+`--registry-username` / `--registry-password`. Failures that are not authentication failures are
+returned untouched, so a missing local image is never misreported as a permission problem.
+
 The target reference uses `util.RelocateImageRef`, **not** the `util.RewriteImageRef` the
 orchestrators render pull specs with. The two agree except on Docker Hub prefixes: `RewriteImageRef`
 deliberately leaves a reference alone when the registry is Docker Hub (already pullable, no prefix

@@ -325,6 +325,68 @@ func TestPushAnonymousFailureHintsAtCredentialsOnlyAfterFallback(t *testing.T) {
 	assert.Contains(t, err.Error(), "unauthorized")
 }
 
+// The credentials Neutree stores are only required to grant pull, so a
+// pull-only account failing to push is the expected failure and has to name the
+// registry resource the user must update.
+func TestPushHintsAtPullOnlyStoredCredentials(t *testing.T) {
+	for _, denial := range []string{
+		"denied: requested access to the resource is denied",
+		"unauthorized: authentication required",
+		"insufficient_scope: authorization failed",
+	} {
+		t.Run(denial, func(t *testing.T) {
+			lister := &fakeLister{withCreds: []v1.ImageRegistry{credentialedRegistry()}}
+			pusher := &fakePusher{pushErr: errors.New(denial)}
+
+			_, err := Push(context.Background(), lister, pusher, baseOptions())
+			require.Error(t, err)
+
+			require.Len(t, pusher.pushed, 1)
+			assert.Equal(t, expectedAuth(t), pusher.pushed[0].auth, "the stored credentials were used")
+			assert.Contains(t, err.Error(), "stored credentials of image registry default were rejected")
+			assert.Contains(t, err.Error(), "--registry-username/--registry-password")
+			assert.Contains(t, err.Error(), denial, "the registry's own message stays visible")
+			assert.NotContains(t, err.Error(), "image_registry:read-credentials",
+				"credentials that were read fine must not be blamed on API key permissions")
+		})
+	}
+}
+
+// A hint pointing at credentials would misdirect when the failure has nothing
+// to do with them.
+func TestPushDoesNotHintAtCredentialsForOtherFailures(t *testing.T) {
+	lister := &fakeLister{withCreds: []v1.ImageRegistry{credentialedRegistry()}}
+	pusher := &fakePusher{pushErr: errors.New("failed to tag my-workload:v1 (is the image present in the local Docker daemon?)")}
+
+	_, err := Push(context.Background(), lister, pusher, baseOptions())
+	require.Error(t, err)
+	assert.Equal(t, pusher.pushErr.Error(), err.Error(), "the error is returned untouched")
+}
+
+func TestPushHintsAtMissingCredentialsWhenAnonymous(t *testing.T) {
+	lister := &fakeLister{withCreds: []v1.ImageRegistry{maskedRegistry()}}
+	pusher := &fakePusher{pushErr: errors.New("no basic auth credentials")}
+
+	_, err := Push(context.Background(), lister, pusher, baseOptions())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image registry default stores no credentials")
+}
+
+func TestPushHintsAtRejectedFlagCredentials(t *testing.T) {
+	lister := &fakeLister{masked: []v1.ImageRegistry{maskedRegistry()}}
+	pusher := &fakePusher{pushErr: errors.New("denied: requested access to the resource is denied")}
+
+	opts := baseOptions()
+	opts.Username = "user"
+	opts.Password = "pass"
+
+	_, err := Push(context.Background(), lister, pusher, opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--registry-username/--registry-password were rejected")
+	assert.NotContains(t, err.Error(), "stored credentials",
+		"explicit flags win over the stored credentials, so the stored ones cannot be at fault")
+}
+
 func TestPushLoadsArchiveBeforePushing(t *testing.T) {
 	lister := &fakeLister{withCreds: []v1.ImageRegistry{credentialedRegistry()}}
 	pusher := &fakePusher{}
