@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
@@ -31,6 +32,49 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
+}
+
+func TestNewManagerWithPluginsRegistersInjectedPlugin(t *testing.T) {
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+
+	manager, err := NewManagerWithPlugins(gin.New(), injected)
+
+	require.NoError(t, err)
+	assert.Contains(t, manager.SupportPlugins(), injected.Resource())
+	assert.Contains(t, manager.SupportPlugins(), v1.AcceleratorTypeNVIDIAGPU.String())
+}
+
+func TestNewManagerWithPluginsRequiresGinEngine(t *testing.T) {
+	_, err := NewManagerWithPlugins(nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gin engine is required")
+}
+
+func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
+	var typedNil *fakeStaticNodeAcceleratorPlugin
+	emptyResource := &fakeStaticNodeAcceleratorPlugin{resourceSet: true}
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+
+	tests := []struct {
+		name    string
+		plugins []plugin.AcceleratorPlugin
+		message string
+	}{
+		{name: "nil plugin", plugins: []plugin.AcceleratorPlugin{nil}, message: "accelerator plugin is nil"},
+		{name: "typed nil plugin", plugins: []plugin.AcceleratorPlugin{typedNil}, message: "accelerator plugin is nil"},
+		{name: "empty resource", plugins: []plugin.AcceleratorPlugin{emptyResource}, message: "resource is required"},
+		{name: "duplicate resource", plugins: []plugin.AcceleratorPlugin{injected, injected}, message: "already registered"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewManagerWithPlugins(gin.New(), tt.plugins...)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.message)
+		})
+	}
 }
 
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
@@ -192,6 +236,9 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 }
 
 type fakeStaticNodeAcceleratorPlugin struct {
+	resourceSet bool
+	resource    string
+
 	accelerators []v1.Accelerator
 	getErr       error
 	getCalls     int
@@ -201,6 +248,10 @@ type fakeStaticNodeAcceleratorPlugin struct {
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
+	if p.resourceSet {
+		return p.resource
+	}
+
 	return "custom_gpu"
 }
 

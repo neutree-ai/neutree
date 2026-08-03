@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 const (
@@ -13,19 +13,11 @@ const (
 )
 
 const (
-	ExternalPluginType = "external"
-	InternalPluginType = "internal"
+	ExternalPluginType = accelerator.ExternalPluginType
+	InternalPluginType = accelerator.InternalPluginType
 )
 
-type AcceleratorPlugin interface {
-	Handle() AcceleratorPluginHandle
-	// Resource returns the accelerator resource type identifier (e.g., "nvidia_gpu", "amd_gpu")
-	// This identifier is used for:
-	// - Plugin registration and lookup
-	// - Resource converter registration (maps to accelerator.type in user configuration)
-	Resource() string
-	Type() string
-}
+type AcceleratorPlugin = accelerator.Plugin
 
 type AcceleratorPluginProvider interface {
 	SupportPlugins() []string
@@ -36,36 +28,11 @@ type ClusterVirtualizationConfigProvider interface {
 	ResolveClusterVirtualizationConfig(ctx context.Context, cluster *v1.Cluster) (*VirtualizationConfig, error)
 }
 
-type AcceleratorPluginHandle interface {
-	GetNodeAccelerator(ctx context.Context, request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
-	GetNodeRuntimeConfig(ctx context.Context, request *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)
-	DetectStaticNodeAccelerator(
-		ctx context.Context,
-		request *v1.DetectStaticNodeAcceleratorRequest,
-	) (*v1.DetectStaticNodeAcceleratorResponse, error)
-	Ping(ctx context.Context) error
-	GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error)
-	// GetResourceConverter returns the resource converter
-	GetResourceConverter() ResourceConverter
-
-	// GetResourceParser returns the resource parser
-	GetResourceParser() resourceparser.ResourceParser
-
-	// GetContainerRuntimeConfig returns the static RuntimeConfig for engine containers.
-	// Unlike GetNodeRuntimeConfig, this does NOT require SSH access to a node.
-	// Used to generate Docker run_options for engine containers (runtime_env.container).
-	GetContainerRuntimeConfig() (v1.RuntimeConfig, error)
-}
+type AcceleratorPluginHandle = accelerator.PluginHandle
 
 // ResourceConverter is the interface for resource converters
 // Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
-type ResourceConverter interface {
-	// ConvertToRay converts to Ray resource configuration
-	ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error)
-
-	// ConvertToKubernetes converts to Kubernetes resource configuration
-	ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
-}
+type ResourceConverter = accelerator.ResourceConverter
 
 type RegisterHandle func(plugin AcceleratorPlugin)
 
