@@ -203,12 +203,28 @@ func (s *postgrestStorage) ListModelAlias(option ListOption) ([]v1.ModelAlias, e
 	return response, err
 }
 
+// withoutDerivedFields returns a copy with the server-derived fields cleared, so
+// a caller round-tripping an object read from the database does not send them
+// back. Workspace is derived by a trigger from the referenced registry and is
+// what the RLS policies are protecting, so it must never look client-writable.
+func withoutDerivedFields(data *v1.ModelAlias) *v1.ModelAlias {
+	if data == nil {
+		return nil
+	}
+
+	sent := *data
+	sent.Workspace = ""
+
+	return &sent
+}
+
 func (s *postgrestStorage) CreateModelAlias(data *v1.ModelAlias) error {
 	var (
 		err error
 	)
 
-	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Insert(data, false, "", "", "").Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).
+		Insert(withoutDerivedFields(data), false, "", "", "").Execute(); err != nil {
 		return err
 	}
 
@@ -232,7 +248,8 @@ func (s *postgrestStorage) UpdateModelAlias(id string, data *v1.ModelAlias) erro
 		err error
 	)
 
-	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).
+		Update(withoutDerivedFields(data), "", "").Filter("id", "eq", id).Execute(); err != nil {
 		return err
 	}
 

@@ -50,6 +50,28 @@ func aliasTestServer(t *testing.T, payload string) (*httptest.Server, *[]recorde
 	return server, &seen
 }
 
+// decodeInsertBody decodes an insert body, which PostgREST accepts either as a
+// bare object or as an array of them. It asserts the shape rather than guessing,
+// so a change in what the client sends surfaces here instead of silently
+// skipping the assertions that follow.
+func decodeInsertBody(t *testing.T, body string) map[string]any {
+	t.Helper()
+
+	trimmed := strings.TrimSpace(body)
+	if strings.HasPrefix(trimmed, "[") {
+		var rows []map[string]any
+		require.NoError(t, json.Unmarshal([]byte(trimmed), &rows))
+		require.Len(t, rows, 1, "one alias per insert")
+
+		return rows[0]
+	}
+
+	var row map[string]any
+	require.NoError(t, json.Unmarshal([]byte(trimmed), &row))
+
+	return row
+}
+
 // CreateModelAlias must issue a plain insert. If it ever asked PostgREST to
 // resolve duplicates (Prefer: resolution=merge-duplicates) the unique index on
 // (model_registry_id, alias_normalized) would stop rejecting a taken alias and
@@ -75,8 +97,7 @@ func TestCreateModelAlias_IsAPlainInsert(t *testing.T) {
 	assert.NotContains(t, got.prefer, "resolution=merge-duplicates",
 		"a duplicate alias must come back as an error, not silently replace the existing row")
 
-	var sent map[string]any
-	require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(got.body, "[")), &sent))
+	sent := decodeInsertBody(t, got.body)
 	assert.Equal(t, "Qwen3", sent["alias"])
 	assert.Equal(t, "qwen3", sent["alias_normalized"])
 	assert.NotContains(t, sent, "workspace",

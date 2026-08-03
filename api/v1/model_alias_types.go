@@ -9,8 +9,11 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// maxModelAliasLength bounds the normalized alias. It is deliberately far above
-// maxModelNameLength: an alias is a display name, not a BentoML tag.
+// maxModelAliasLength bounds the alias in its NFKC-normalized, whitespace-
+// trimmed form -- equivalently its lowercased form, since strings.ToLower maps
+// rune to rune (simple case mapping, no special casing) and so cannot change the
+// count. It is deliberately far above maxModelNameLength: an alias is a display
+// name, not a BentoML tag.
 const maxModelAliasLength = 128
 
 // ModelAlias is a user-facing display name for one model version inside a

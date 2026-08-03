@@ -80,8 +80,8 @@ func TestModelAliasNormalizationVariantsCollide(t *testing.T) {
 		{"lowercase", "qwen3"},
 		{"uppercase", "QWEN3"},
 		{"surrounding whitespace", " Qwen3 "},
-		{"no-break space (NFKC folds it to a trimmable space)", " Qwen3 "},
-		{"fullwidth (NFKC)", "Ｑｗｅｎ３"},
+		{"no-break space (NFKC folds it to a trimmable space)", "\u00a0Qwen3\u00a0"},
+		{"fullwidth (NFKC)", "\uff31\uff57\uff45\uff4e\uff13"},
 	}
 
 	for _, tt := range variants {
@@ -131,17 +131,20 @@ func TestModelAliasWorkspaceIsDerivedFromRegistry(t *testing.T) {
 
 	registryID := createTestModelRegistry(t, db, s, "alias-workspace-derived")
 
-	forged := newAlias(registryID, "qwen3", "v1", "Qwen3")
-	forged.Workspace = "someone-elses-workspace"
-	require.NoError(t, s.CreateModelAlias(forged))
+	// Straight SQL rather than the Go client: pkg/storage strips Workspace
+	// before sending, but the guarantee has to hold for anyone talking to
+	// PostgREST directly, which is the case that actually matters.
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO api.model_aliases (model_registry_id, workspace, model_name, model_version, alias, alias_normalized)
+		VALUES ($1, 'someone-elses-workspace', 'qwen3', 'v1', 'Qwen3', 'qwen3')`, registryID)
+	require.NoError(t, err)
 
 	stored := aliasesOfRegistry(t, s, registryID)
 	require.Len(t, stored, 1)
 	assert.Equal(t, "default", stored[0].Workspace, "the registry's workspace wins over the one supplied by the client")
 
-	// The same on update, and straight through SQL so the check is on the
-	// database rather than on anything the Go client does or does not send.
-	_, err := db.ExecContext(ctx,
+	// The same on update.
+	_, err = db.ExecContext(ctx,
 		`UPDATE api.model_aliases SET workspace = 'someone-elses-workspace' WHERE id = $1`, stored[0].ID)
 	require.NoError(t, err)
 
@@ -149,6 +152,18 @@ func TestModelAliasWorkspaceIsDerivedFromRegistry(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx,
 		`SELECT workspace FROM api.model_aliases WHERE id = $1`, stored[0].ID).Scan(&workspace))
 	assert.Equal(t, "default", workspace, "an update cannot move a row into another workspace either")
+
+	// And the storage layer does not present the field as writable in the first place.
+	viaClient := newAlias(registryID, "llama", "v1", "Llama")
+	viaClient.Workspace = "someone-elses-workspace"
+	require.NoError(t, s.CreateModelAlias(viaClient))
+
+	after := aliasesOfRegistry(t, s, registryID)
+	require.Len(t, after, 2)
+
+	for _, a := range after {
+		assert.Equal(t, "default", a.Workspace)
+	}
 }
 
 // TestModelAliasCascadeOnRegistryDelete: the foreign key removes a whole class

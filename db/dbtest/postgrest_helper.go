@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -56,7 +57,10 @@ func waitForPostgREST(t *testing.T) {
 				return
 			}
 
-			lastErr = nil
+			// Reached but not serving. Keep the status: it is the difference
+			// between "nothing is listening" and "PostgREST cannot reach the
+			// database", and only one of those is worth investigating here.
+			lastErr = fmt.Errorf("last response was HTTP %d", resp.StatusCode)
 		} else {
 			lastErr = err
 		}
