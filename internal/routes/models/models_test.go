@@ -215,7 +215,7 @@ func TestListModels_Success(t *testing.T) {
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("ListModels", mock.MatchedBy(func(option model_registry.ListOption) bool {
 		return option.Search == "test"
-	})).Return(&model_registry.ModelPage{Models: mockModels, Total: len(mockModels)}, nil)
+	})).Return(&model_registry.ModelPage{Models: mockModels, Total: model_registry.KnownTotal(len(mockModels))}, nil)
 	mockStorage.On("ListModelAlias", mock.Anything).Return([]v1.ModelAlias{}, nil)
 
 	// Call the handler function directly

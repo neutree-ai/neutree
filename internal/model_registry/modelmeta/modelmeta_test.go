@@ -64,6 +64,19 @@ func TestParse_ConfigFields(t *testing.T) {
 			missing: []string{v1.ModelInfoFieldParameterCount},
 		},
 		{
+			// Truncating 3000/32 to 93 and stamping it "derived" would be worse
+			// than saying nothing: the value would look like it came from the
+			// checkpoint, and nothing downstream could tell it was wrong.
+			name:    "head_dim that does not divide evenly is missing, not truncated",
+			fixture: "uneven-head-dim",
+			assert: func(t *testing.T, info *v1.ModelInfo) {
+				assert.Equal(t, 32, deref(t, info.NumAttentionHeads))
+				assert.Nil(t, info.HeadDim)
+				assert.NotContains(t, info.FieldSources, v1.ModelInfoFieldHeadDim)
+			},
+			missing: []string{v1.ModelInfoFieldHeadDim, v1.ModelInfoFieldParameterCount},
+		},
+		{
 			name:    "mixture-of-experts checkpoint reports its expert counts",
 			fixture: "moe",
 			assert: func(t *testing.T, info *v1.ModelInfo) {

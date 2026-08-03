@@ -74,7 +74,7 @@ func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options 
 // an error — a client paging a registry that shrank under it should see the end
 // of the list, not a failure.
 func pageOf(models []v1.GeneralModel, options ListOption) *ModelPage {
-	page := &ModelPage{Total: len(models)}
+	page := &ModelPage{Total: KnownTotal(len(models))}
 
 	start := options.Offset
 	if start < 0 {

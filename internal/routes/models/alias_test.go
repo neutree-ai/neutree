@@ -161,7 +161,7 @@ func aliasTestRegistry(t *testing.T, models ...v1.GeneralModel) (
 	mockRegistry.On("Connect").Return(nil)
 	mockRegistry.On("Disconnect").Return(nil)
 	mockRegistry.On("ListModels", mock.Anything).
-		Return(&model_registry.ModelPage{Models: models, Total: len(models)}, nil).Maybe()
+		Return(&model_registry.ModelPage{Models: models, Total: model_registry.KnownTotal(len(models))}, nil).Maybe()
 
 	return &Dependencies{Storage: mockStorage}, mockStorage, mockRegistry, table
 }

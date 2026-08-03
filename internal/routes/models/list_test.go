@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -44,7 +45,7 @@ func TestListModels_ReportsTotalInContentRange(t *testing.T) {
 		name       string
 		query      string
 		returned   []v1.GeneralModel
-		total      int
+		total      *int
 		wantOffset int
 		wantLimit  int
 		wantHeader string
@@ -52,14 +53,14 @@ func TestListModels_ReportsTotalInContentRange(t *testing.T) {
 		{
 			name:       "whole listing",
 			returned:   []v1.GeneralModel{storedModel("a", "v1"), storedModel("b", "v1")},
-			total:      2,
+			total:      model_registry.KnownTotal(2),
 			wantHeader: "0-1/2",
 		},
 		{
 			name:       "second page",
 			query:      "offset=2&limit=2",
 			returned:   []v1.GeneralModel{storedModel("c", "v1")},
-			total:      5,
+			total:      model_registry.KnownTotal(5),
 			wantOffset: 2,
 			wantLimit:  2,
 			wantHeader: "2-2/5",
@@ -68,15 +69,23 @@ func TestListModels_ReportsTotalInContentRange(t *testing.T) {
 			name:       "offset past the end",
 			query:      "offset=50",
 			returned:   []v1.GeneralModel{},
-			total:      5,
+			total:      model_registry.KnownTotal(5),
 			wantOffset: 50,
 			wantHeader: "*/5",
 		},
 		{
 			name:       "empty registry",
 			returned:   []v1.GeneralModel{},
-			total:      0,
+			total:      model_registry.KnownTotal(0),
 			wantHeader: "*/0",
+		},
+		{
+			// A registry that cannot count what matched says so, rather than
+			// passing off the page size as the total.
+			name:       "registry cannot count its contents",
+			returned:   []v1.GeneralModel{storedModel("a", "v1"), storedModel("b", "v1")},
+			total:      nil,
+			wantHeader: "0-1/*",
 		},
 	}
 
@@ -141,7 +150,7 @@ func TestListModels_AttachesAliases(t *testing.T) {
 	mockRegistry.On("Disconnect").Return(nil)
 	mockRegistry.On("ListModels", mock.Anything).Return(&model_registry.ModelPage{
 		Models: []v1.GeneralModel{storedModel("qwen3", "v1", "v2")},
-		Total:  1,
+		Total:  model_registry.KnownTotal(1),
 	}, nil)
 
 	c, w := newListContext(t, "")
@@ -159,8 +168,33 @@ func TestListModels_AttachesAliases(t *testing.T) {
 }
 
 func TestContentRange(t *testing.T) {
-	assert.Equal(t, "0-9/100", contentRange(0, 10, 100))
-	assert.Equal(t, "10-19/100", contentRange(10, 10, 100))
-	assert.Equal(t, "*/100", contentRange(200, 0, 100))
-	assert.Equal(t, "*/0", contentRange(0, 0, 0))
+	assert.Equal(t, "0-9/100", contentRange(0, 10, model_registry.KnownTotal(100)))
+	assert.Equal(t, "10-19/100", contentRange(10, 10, model_registry.KnownTotal(100)))
+	assert.Equal(t, "*/100", contentRange(200, 0, model_registry.KnownTotal(100)))
+	assert.Equal(t, "*/0", contentRange(0, 0, model_registry.KnownTotal(0)))
+	// An unknown total is reported as unknown, not as zero.
+	assert.Equal(t, "0-9/*", contentRange(0, 10, nil))
+	assert.Equal(t, "*/*", contentRange(0, 0, nil))
+}
+
+// A registry that refuses to page from an offset gets a plain refusal, not a
+// server error and not a silent first page.
+func TestListModels_OffsetRefusedByRegistry(t *testing.T) {
+	mockStorage, mockRegistry := setupMocks(t)
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
+		ID:       8,
+		Metadata: &v1.Metadata{Name: "test-registry", Workspace: "default"},
+		Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
+	}}, nil)
+	mockRegistry.On("Connect").Return(nil)
+	mockRegistry.On("Disconnect").Return(nil)
+	mockRegistry.On("ListModels", mock.Anything).
+		Return(nil, errors.Wrap(model_registry.ErrNotSupported, "cannot list from an offset"))
+
+	c, w := newListContext(t, "offset=10&limit=5")
+	listModels(&Dependencies{Storage: mockStorage})(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "cannot list models this way")
+	assert.Empty(t, w.Header().Get("Content-Range"))
 }

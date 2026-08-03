@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -322,6 +323,14 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 			Limit:  limit,
 		})
 		if err != nil {
+			if errors.Is(err, model_registry.ErrNotSupported) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"message": fmt.Sprintf("This model registry cannot list models this way: %v", err),
+				})
+
+				return
+			}
+
 			klog.Errorf("Failed to list models: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to list models: %v", err),
@@ -370,14 +379,20 @@ func intQuery(c *gin.Context, name string) (int, bool) {
 	return value, true
 }
 
-// contentRange formats the PostgREST-style range header: "first-last/total", or
-// "*/total" for an empty page.
-func contentRange(offset, returned, total int) string {
-	if returned == 0 {
-		return fmt.Sprintf("*/%d", total)
+// contentRange formats the PostgREST-style range header: "first-last/total",
+// with "*" in place of the range for an empty page and in place of the total
+// when the registry cannot count what matched.
+func contentRange(offset, returned int, total *int) string {
+	size := "*"
+	if total != nil {
+		size = strconv.Itoa(*total)
 	}
 
-	return fmt.Sprintf("%d-%d/%d", offset, offset+returned-1, total)
+	if returned == 0 {
+		return "*/" + size
+	}
+
+	return fmt.Sprintf("%d-%d/%s", offset, offset+returned-1, size)
 }
 
 // getModel handles retrieving a specific model

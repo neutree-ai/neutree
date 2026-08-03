@@ -93,16 +93,25 @@ type HuggingFaceModel struct {
 	ModelID       string    `json:"modelId,omitempty"`
 }
 
-// ListModels retrieves all models from the Hugging Face Hub API by page.
+// ListModels retrieves the first page of models from the Hugging Face Hub API.
 //
-// The Hub does not report how many models match a search, so Total is the size
-// of the page that came back. A client cannot use it to compute a page count for
-// a public registry.
+// Offset is refused rather than ignored. The Hub's supported pagination is an
+// opaque, server-generated cursor carried in a Link header, which cannot express
+// "start at row N"; its `skip` parameter, which could, is documented by the Hub
+// itself as deprecated and rejects values past a few thousand. Silently serving
+// the first page for every offset would make a paging client believe it was
+// walking the catalogue while it re-read the same rows.
+//
+// The Hub also does not report how many models matched, so Total is unknown.
 func (hf *huggingFace) ListModels(option ListOption) (*ModelPage, error) {
 	var (
 		allHFModels []HuggingFaceModel
 		result      = []v1.GeneralModel{}
 	)
+
+	if option.Offset > 0 {
+		return nil, errors.Wrap(ErrNotSupported, "the Hugging Face Hub API cannot list models from an offset")
+	}
 
 	allHFModels, err := hf.getModelsList(option)
 	if err != nil {
@@ -121,7 +130,7 @@ func (hf *huggingFace) ListModels(option ListOption) (*ModelPage, error) {
 		})
 	}
 
-	return &ModelPage{Models: result, Total: len(result)}, nil
+	return &ModelPage{Models: result}, nil
 }
 
 // HealthyCheck checks the health of the Hugging Face Hub API.

@@ -65,7 +65,7 @@ func TestListModels_OrderIsStable(t *testing.T) {
 
 	assert.Equal(t, []string{"alpha", "beta", "delta", "gamma", "kappa", "mu", "omega", "zeta"},
 		modelNames(first.Models))
-	assert.Equal(t, 8, first.Total)
+	assert.Equal(t, 8, *first.Total)
 }
 
 // With a stable order, paging is coherent: consecutive pages neither overlap nor
@@ -122,7 +122,7 @@ func TestListModels_Paging(t *testing.T) {
 
 			assert.Equal(t, tt.wantNames, modelNames(page.Models))
 			// Total always counts everything that matched, never the page.
-			assert.Equal(t, 5, page.Total)
+			assert.Equal(t, 5, *page.Total)
 		})
 	}
 }
@@ -155,7 +155,7 @@ func TestListModels_SearchFiltersBeforePaging(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"qwen3-32b", "qwen3-8b"}, modelNames(page.Models))
-	assert.Equal(t, 2, page.Total)
+	assert.Equal(t, 2, *page.Total)
 }
 
 // Labels written into model.yaml used to be decoded into a struct that did not

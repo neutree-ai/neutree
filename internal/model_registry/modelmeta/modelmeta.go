@@ -158,18 +158,30 @@ func applyConfig(info *v1.ModelInfo, cfg *hfConfig) {
 // applyHeadDim resolves the one arithmetic derivation this package allows:
 // hidden_size / num_attention_heads when head_dim is absent. That is the
 // established Hugging Face convention for the fallback, not a guess.
+//
+// The division has to come out exact. Integer division would otherwise truncate
+// a config where the two do not divide evenly and hand back a wrong head_dim
+// carrying derived provenance — worse than reporting nothing, because a value
+// that claims to come from the checkpoint gives a reader no way to notice it is
+// wrong.
 func applyHeadDim(info *v1.ModelInfo, cfg *hfConfig) {
-	switch {
-	case cfg.HeadDim != nil:
+	if cfg.HeadDim != nil {
 		info.HeadDim = cfg.HeadDim
 		info.SetFieldSource(v1.ModelInfoFieldHeadDim, v1.ModelInfoSourceAuto)
-	case cfg.HiddenSize != nil && cfg.NumAttentionHeads != nil && *cfg.NumAttentionHeads > 0:
-		derived := *cfg.HiddenSize / *cfg.NumAttentionHeads
-		info.HeadDim = &derived
-		info.SetFieldSource(v1.ModelInfoFieldHeadDim, v1.ModelInfoSourceDerived)
-	default:
-		info.MarkFieldMissing(v1.ModelInfoFieldHeadDim)
+
+		return
 	}
+
+	if cfg.HiddenSize == nil || cfg.NumAttentionHeads == nil || *cfg.NumAttentionHeads <= 0 ||
+		*cfg.HiddenSize%*cfg.NumAttentionHeads != 0 {
+		info.MarkFieldMissing(v1.ModelInfoFieldHeadDim)
+
+		return
+	}
+
+	derived := *cfg.HiddenSize / *cfg.NumAttentionHeads
+	info.HeadDim = &derived
+	info.SetFieldSource(v1.ModelInfoFieldHeadDim, v1.ModelInfoSourceDerived)
 }
 
 // applyExperts decides dense vs. MoE. Reading the config at all settles is_moe,

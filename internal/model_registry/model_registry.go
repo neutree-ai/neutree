@@ -31,9 +31,18 @@ type ListOption struct {
 // ModelPage is one page of a listing plus the number of models that matched the
 // search before Offset and Limit were applied, so a caller can render paging
 // without fetching everything.
+//
+// Total is nil when the registry cannot state how many matched. That is a real
+// answer, not a placeholder: reporting the page size instead would tell a client
+// it had reached the end of a listing it had barely started.
 type ModelPage struct {
 	Models []v1.GeneralModel
-	Total  int
+	Total  *int
+}
+
+// KnownTotal builds a Total for a registry that can count its own contents.
+func KnownTotal(total int) *int {
+	return &total
 }
 
 // RegistryUsage is a raw observation of what a registry's backing storage holds.
