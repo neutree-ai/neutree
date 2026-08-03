@@ -39,7 +39,6 @@ func aliasesOfRegistry(t *testing.T, s storage.Storage, registryID int) []v1.Mod
 	return got
 }
 
-
 // TestModelAliasUniqueWithinRegistry covers the constraint the table exists for:
 // an alias is unique inside one registry, compared on the normalized form, and
 // two registries are free to use the same alias.
