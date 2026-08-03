@@ -196,6 +196,71 @@ func (s *postgrestStorage) GetModelRegistry(id string) (*v1.ModelRegistry, error
 	return &response[0], nil
 }
 
+func (s *postgrestStorage) ListModelAlias(option ListOption) ([]v1.ModelAlias, error) {
+	var response []v1.ModelAlias
+	err := s.genericList(MODEL_ALIAS_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateModelAlias(data *v1.ModelAlias) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Insert(data, false, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteModelAlias(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateModelAlias(id string, data *v1.ModelAlias) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetModelAlias(id string) (*v1.ModelAlias, error) {
+	var (
+		response []v1.ModelAlias
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(MODEL_ALIAS_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
 func (s *postgrestStorage) ListCluster(option ListOption) ([]v1.Cluster, error) {
 	var response []v1.Cluster
 	err := s.genericList(CLUSTERS_TABLE, &response, option)

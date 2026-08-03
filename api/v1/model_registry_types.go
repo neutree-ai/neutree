@@ -44,10 +44,25 @@ type ModelRegistrySpec struct {
 	Credentials string            `json:"credentials" api:"-"`
 }
 
+// ModelRegistryStats is a cached summary of what a registry currently holds. It
+// is a projection refreshed out of band, not authoritative data.
+type ModelRegistryStats struct {
+	// ModelCount is the number of models visible in the registry.
+	ModelCount int `json:"model_count"`
+	// StorageBytes is the total on-disk size of those models.
+	StorageBytes int64 `json:"storage_bytes"`
+	// StatsUpdatedAt is when the counters above were last refreshed (RFC3339).
+	StatsUpdatedAt string `json:"stats_updated_at,omitempty"`
+}
+
 type ModelRegistryStatus struct {
 	ErrorMessage       string             `json:"error_message,omitempty"`
 	LastTransitionTime string             `json:"last_transition_time,omitempty"`
 	Phase              ModelRegistryPhase `json:"phase,omitempty"`
+	// Stats is written by the statistics path, not by the connectivity
+	// reconcile. PostgREST replaces a composite-type column as a whole, so every
+	// writer of this status has to carry Stats forward or it is nulled out.
+	Stats *ModelRegistryStats `json:"stats,omitempty"`
 }
 
 type ModelRegistry struct {

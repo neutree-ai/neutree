@@ -72,3 +72,28 @@ services:
     volumes:
       - ./seed:/seed
     restart: "no"
+
+  # PostgREST is what the control plane actually writes through, and part of its
+  # behaviour -- notably that a PATCH replaces a composite-type column as a whole
+  # instead of merging attribute by attribute -- cannot be reproduced with plain
+  # SQL. Brought up after seed so its schema cache reflects the migrated schema.
+  # Settings mirror deploy/docker/neutree-core/docker-compose.yml.
+  postgrest:
+    image: postgrest/postgrest:v14.0
+    container_name: neutree-postgrest-test
+    ports:
+      - "6432:6432"
+    environment:
+      PGRST_DB_URI: postgres://postgres:pgpassword@postgres:5432/neutree_test
+      PGRST_DB_SCHEMA: api
+      PGRST_SERVER_HOST: 0.0.0.0
+      PGRST_SERVER_PORT: 6432
+      PGRST_JWT_SECRET: test-jwt-secret-32-characters-min
+      PGRST_APP_SETTINGS_JWT_SECRET: test-jwt-secret-32-characters-min
+      PGRST_DB_EXTRA_SEARCH_PATH: auth
+      PGRST_DB_AGGREGATES_ENABLED: 1
+      PGRST_DB_ANON_ROLE: anonymous
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
