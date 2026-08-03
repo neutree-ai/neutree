@@ -14,7 +14,7 @@ import (
 const maxModelAliasLength = 128
 
 // ModelAlias is a user-facing display name for one model version inside a
-// private model registry.
+// private model registry. A model version carries at most one alias.
 //
 // The registry filesystem, not this table, decides which models exist. A row
 // whose (ModelName, ModelVersion) no longer resolves is an orphan: it is hidden
@@ -26,8 +26,10 @@ type ModelAlias struct {
 	// rather than the registry name means deleting and recreating a registry
 	// under the same name does not inherit the old registry's aliases.
 	ModelRegistryID int `json:"model_registry_id,omitempty"`
-	// Workspace duplicates the owning registry's workspace so RLS can check it
-	// without a join.
+	// Workspace is the owning registry's workspace. It is read-only: a database
+	// trigger derives it from ModelRegistryID on every write, so anything set
+	// here is discarded. Authorization keys off the registry's workspace, never
+	// off this column.
 	Workspace string `json:"workspace,omitempty"`
 	// ModelName and ModelVersion are the physical coordinates of the model.
 	ModelName    string `json:"model_name,omitempty"`

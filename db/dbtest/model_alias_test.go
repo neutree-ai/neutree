@@ -16,11 +16,11 @@ import (
 
 // newAlias builds a ModelAlias with alias_normalized derived the way the
 // application derives it, so these tests exercise the Go rule and the database
-// index together rather than one in isolation.
-func newAlias(registryID int, workspace, model, version, alias string) *v1.ModelAlias {
+// index together rather than one in isolation. Workspace is left unset on
+// purpose: the database derives it from the registry.
+func newAlias(registryID int, model, version, alias string) *v1.ModelAlias {
 	return &v1.ModelAlias{
 		ModelRegistryID: registryID,
-		Workspace:       workspace,
 		ModelName:       model,
 		ModelVersion:    version,
 		Alias:           alias,
@@ -49,13 +49,13 @@ func TestModelAliasUniqueWithinRegistry(t *testing.T) {
 	registryA := createTestModelRegistry(t, db, s, "alias-unique-a")
 	registryB := createTestModelRegistry(t, db, s, "alias-unique-b")
 
-	require.NoError(t, s.CreateModelAlias(newAlias(registryA, "default", "qwen3", "v1", "Qwen3")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryA, "qwen3", "v1", "Qwen3")))
 
-	err := s.CreateModelAlias(newAlias(registryA, "default", "llama", "v1", "qwen3"))
+	err := s.CreateModelAlias(newAlias(registryA, "llama", "v1", "qwen3"))
 	require.Error(t, err, "a second alias normalizing to qwen3 must be rejected by the unique index")
 
 	// The same alias in a different registry is fine: uniqueness is per registry.
-	require.NoError(t, s.CreateModelAlias(newAlias(registryB, "default", "qwen3", "v1", "Qwen3")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryB, "qwen3", "v1", "Qwen3")))
 
 	assert.Len(t, aliasesOfRegistry(t, s, registryA), 1)
 	assert.Len(t, aliasesOfRegistry(t, s, registryB), 1)
@@ -70,7 +70,7 @@ func TestModelAliasNormalizationVariantsCollide(t *testing.T) {
 
 	registryID := createTestModelRegistry(t, db, s, "alias-normalization")
 
-	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "default", "qwen3", "v1", "Qwen3")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v1", "Qwen3")))
 
 	variants := []struct {
 		name  string
@@ -86,14 +86,69 @@ func TestModelAliasNormalizationVariantsCollide(t *testing.T) {
 
 	for _, tt := range variants {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Error(t, s.CreateModelAlias(newAlias(registryID, "default", "llama", "v1", tt.alias)),
+			assert.Error(t, s.CreateModelAlias(newAlias(registryID, "llama", "v1", tt.alias)),
 				"alias %q normalizes to %q and must collide", tt.alias, v1.NormalizeModelAlias(tt.alias))
 		})
 	}
 
-	// Inner spacing is part of the display name, so this one is a different alias.
-	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "default", "qwen3", "v1", "Qwen 3")))
+	// Inner spacing is part of the display name, so this one is a different
+	// alias. It goes on a different model version because a model version
+	// carries at most one alias.
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v2", "Qwen 3")))
 	assert.Len(t, aliasesOfRegistry(t, s, registryID), 2)
+}
+
+// TestModelAliasOnePerModelVersion: the requirement is a single display name per
+// model, so a second alias for the same model version is rejected. Without this
+// the read path -- which joins aliases onto the live model list -- would have no
+// defined winner.
+func TestModelAliasOnePerModelVersion(t *testing.T) {
+	db := GetTestDB(t)
+	s := NewTestStorage(t)
+
+	registryID := createTestModelRegistry(t, db, s, "alias-one-per-model")
+
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v1", "Qwen3")))
+
+	assert.Error(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v1", "Qwen3 Chat")),
+		"a model version must not accumulate a second alias")
+
+	// A different version of the same model is a different model, so it may
+	// carry its own alias.
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v2", "Qwen3 Chat")))
+	assert.Len(t, aliasesOfRegistry(t, s, registryID), 2)
+}
+
+// TestModelAliasWorkspaceIsDerivedFromRegistry: the workspace column must not be
+// something a client can choose. It is denormalized for reads, but a write that
+// names a different workspace has that value discarded and replaced with the
+// owning registry's -- so it cannot be used to plant a row that authorizes
+// against one workspace while occupying a unique-index slot in another.
+func TestModelAliasWorkspaceIsDerivedFromRegistry(t *testing.T) {
+	db := GetTestDB(t)
+	s := NewTestStorage(t)
+	ctx := context.Background()
+
+	registryID := createTestModelRegistry(t, db, s, "alias-workspace-derived")
+
+	forged := newAlias(registryID, "qwen3", "v1", "Qwen3")
+	forged.Workspace = "someone-elses-workspace"
+	require.NoError(t, s.CreateModelAlias(forged))
+
+	stored := aliasesOfRegistry(t, s, registryID)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "default", stored[0].Workspace, "the registry's workspace wins over the one supplied by the client")
+
+	// The same on update, and straight through SQL so the check is on the
+	// database rather than on anything the Go client does or does not send.
+	_, err := db.ExecContext(ctx,
+		`UPDATE api.model_aliases SET workspace = 'someone-elses-workspace' WHERE id = $1`, stored[0].ID)
+	require.NoError(t, err)
+
+	var workspace string
+	require.NoError(t, db.QueryRowContext(ctx,
+		`SELECT workspace FROM api.model_aliases WHERE id = $1`, stored[0].ID).Scan(&workspace))
+	assert.Equal(t, "default", workspace, "an update cannot move a row into another workspace either")
 }
 
 // TestModelAliasCascadeOnRegistryDelete: the foreign key removes a whole class
@@ -104,8 +159,8 @@ func TestModelAliasCascadeOnRegistryDelete(t *testing.T) {
 
 	registryID := createTestModelRegistry(t, db, s, "alias-cascade")
 
-	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "default", "qwen3", "v1", "Qwen3")))
-	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "default", "llama", "v1", "Llama")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "qwen3", "v1", "Qwen3")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "llama", "v1", "Llama")))
 	require.Len(t, aliasesOfRegistry(t, s, registryID), 2)
 
 	_, err := db.Exec("DELETE FROM api.model_registries WHERE id = $1", registryID)
@@ -125,12 +180,12 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 
 	// "removed-model" is gone from the registry as far as this test is
 	// concerned; the alias row is the leftover.
-	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "default", "removed-model", "v1", "Qwen3")))
+	require.NoError(t, s.CreateModelAlias(newAlias(registryID, "removed-model", "v1", "Qwen3")))
 
 	existing := aliasesOfRegistry(t, s, registryID)
 	require.Len(t, existing, 1)
 
-	takeover := newAlias(registryID, "default", "qwen3", "v2", "Qwen3")
+	takeover := newAlias(registryID, "qwen3", "v2", "Qwen3")
 	require.NoError(t, s.UpdateModelAlias(strconv.Itoa(existing[0].ID), takeover),
 		"an orphaned row must not block a new alias with the same normalized form")
 
@@ -145,17 +200,18 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 // model:read and writes need model:push. Both actions already exist (042); the
 // table adds no new permission action.
 //
-// Role assignments are global in this schema -- api.has_permission only looks at
-// assignments with global = TRUE, and a trigger rejects workspace-scoped ones
-// (error 10041) -- so what is asserted here is the action half of the policies.
-// The workspace column is carried for the same reason the other workspaced
-// tables carry it: it is the argument the policies pass to api.has_permission.
+// The workspace the policies pass to api.has_permission is the owning
+// registry's, looked up through public.model_registry_workspace, never the row's
+// own column -- see TestModelAliasWorkspaceIsDerivedFromRegistry for why the
+// column cannot be trusted. Whether a workspace mismatch is refused is not
+// observable here: api.has_permission ignores its workspace argument and only
+// consults role assignments with global = TRUE (a trigger rejects
+// workspace-scoped ones, error 10041), which is true of every workspaced table
+// in this schema. What is asserted here is therefore the action half.
 func TestModelAliasRLS(t *testing.T) {
 	db := GetTestDB(t)
 	s := NewTestStorage(t)
 	ctx := context.Background()
-
-	const workspace = "default"
 
 	registryID := createTestModelRegistry(t, db, s, "alias-rls")
 
@@ -176,20 +232,23 @@ func TestModelAliasRLS(t *testing.T) {
 	// executeAsUser never commits, so a write here is only ever an
 	// allowed/denied probe. The row the read probes look for is seeded on the
 	// admin connection below, which is superuser and bypasses RLS.
-	insert := func(userID, alias string) error {
+	// workspace is omitted: the trigger derives it. Each probe uses its own model
+	// version because a model version carries at most one alias, and a
+	// unique-index violation would otherwise be mistaken for an RLS refusal.
+	insert := func(userID, model, alias string) error {
 		return executeAsUser(t, db, userID, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `
-				INSERT INTO api.model_aliases (model_registry_id, workspace, model_name, model_version, alias, alias_normalized)
-				VALUES ($1, $2, 'qwen3', 'v1', $3, $4)`,
-				registryID, workspace, alias, v1.NormalizeModelAlias(alias))
+				INSERT INTO api.model_aliases (model_registry_id, model_name, model_version, alias, alias_normalized)
+				VALUES ($1, $2, 'v1', $3, $4)`,
+				registryID, model, alias, v1.NormalizeModelAlias(alias))
 
 			return err
 		})
 	}
 
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO api.model_aliases (model_registry_id, workspace, model_name, model_version, alias, alias_normalized)
-		VALUES ($1, $2, 'qwen3', 'v1', 'Qwen3', 'qwen3')`, registryID, workspace)
+		INSERT INTO api.model_aliases (model_registry_id, model_name, model_version, alias, alias_normalized)
+		VALUES ($1, 'qwen3', 'v1', 'Qwen3', 'qwen3')`, registryID)
 	require.NoError(t, err)
 
 	countVisible := func(userID string) int {
@@ -204,15 +263,15 @@ func TestModelAliasRLS(t *testing.T) {
 	}
 
 	t.Run("model:push may write", func(t *testing.T) {
-		require.NoError(t, insert(pusher, "PusherAlias"))
+		require.NoError(t, insert(pusher, "pusher-model", "PusherAlias"))
 	})
 
 	t.Run("model:read alone may not write", func(t *testing.T) {
-		assert.Error(t, insert(reader, "ReadOnlyAttempt"))
+		assert.Error(t, insert(reader, "reader-model", "ReadOnlyAttempt"))
 	})
 
 	t.Run("no model permission may not write", func(t *testing.T) {
-		assert.Error(t, insert(stranger, "StrangerAttempt"))
+		assert.Error(t, insert(stranger, "stranger-model", "StrangerAttempt"))
 	})
 
 	t.Run("model:read may read", func(t *testing.T) {
