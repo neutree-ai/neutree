@@ -20,16 +20,10 @@ import (
 func createTestModelRegistry(t *testing.T, db *sql.DB, s storage.Storage, name string) int {
 	t.Helper()
 
-	return createTestModelRegistryInWorkspace(t, db, s, name, "default")
-}
-
-func createTestModelRegistryInWorkspace(t *testing.T, db *sql.DB, s storage.Storage, name, workspace string) int {
-	t.Helper()
-
 	require.NoError(t, s.CreateModelRegistry(&v1.ModelRegistry{
 		APIVersion: "v1",
 		Kind:       "ModelRegistry",
-		Metadata:   &v1.Metadata{Name: name, Workspace: workspace},
+		Metadata:   &v1.Metadata{Name: name, Workspace: "default"},
 		Spec: &v1.ModelRegistrySpec{
 			Type: v1.BentoMLModelRegistryType,
 			Url:  "file://localhost/tmp/" + name,
@@ -39,8 +33,8 @@ func createTestModelRegistryInWorkspace(t *testing.T, db *sql.DB, s storage.Stor
 
 	var id int
 	require.NoError(t, db.QueryRow(
-		"SELECT id FROM api.model_registries WHERE (metadata).name = $1 AND (metadata).workspace = $2",
-		name, workspace,
+		"SELECT id FROM api.model_registries WHERE (metadata).name = $1 AND (metadata).workspace = 'default'",
+		name,
 	).Scan(&id))
 
 	t.Cleanup(func() {

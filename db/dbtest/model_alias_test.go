@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
-	"strings"
+
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,45 +39,6 @@ func aliasesOfRegistry(t *testing.T, s storage.Storage, registryID int) []v1.Mod
 	return got
 }
 
-// createUserInWorkspace creates a user holding permissions in one workspace
-// only, so the tests can tell a permission check from a workspace check.
-func createUserInWorkspace(t *testing.T, tx *sql.Tx, username, email, workspace string, permissions []string) string {
-	t.Helper()
-	ctx := context.Background()
-
-	user := CreateTestUser(t, username, email, "password123")
-
-	roleName := username + "-role"
-	permissionsArray := "ARRAY['" + strings.Join(permissions, "','") + "']::api.permission_action[]"
-
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO api.roles (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'Role',
-			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW(NULL, `+permissionsArray+`)::api.role_spec
-		)
-	`, roleName)
-	if err != nil {
-		t.Fatalf("failed to create role %s: %v", roleName, err)
-	}
-
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'RoleAssignment',
-			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, $3, FALSE, $4)::api.role_assignment_spec
-		)
-	`, username+"-role-assignment", user.ID, workspace, roleName)
-	if err != nil {
-		t.Fatalf("failed to assign role %s in workspace %s: %v", roleName, workspace, err)
-	}
-
-	return user.ID
-}
 
 // TestModelAliasUniqueWithinRegistry covers the constraint the table exists for:
 // an alias is unique inside one registry, compared on the normalized form, and
@@ -181,39 +142,36 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 	assert.Equal(t, "Qwen3", after[0].Alias)
 }
 
-// TestModelAliasRLS checks the policies added with the table: reads need
-// model:read and writes need model:push, both scoped by the row's workspace.
-// The permission actions themselves already exist (042); no new action is added.
+// TestModelAliasRLS checks the policies shipped with the table: reads need
+// model:read and writes need model:push. Both actions already exist (042); the
+// table adds no new permission action.
+//
+// Role assignments are global in this schema -- api.has_permission only looks at
+// assignments with global = TRUE, and a trigger rejects workspace-scoped ones
+// (error 10041) -- so what is asserted here is the action half of the policies.
+// The workspace column is carried for the same reason the other workspaced
+// tables carry it: it is the argument the policies pass to api.has_permission.
 func TestModelAliasRLS(t *testing.T) {
 	db := GetTestDB(t)
 	s := NewTestStorage(t)
 	ctx := context.Background()
 
-	const (
-		workspace      = "alias-rls-ws"
-		otherWorkspace = "alias-rls-other-ws"
-	)
+	const workspace = "default"
 
-	registryID := createTestModelRegistryInWorkspace(t, db, s, "alias-rls", workspace)
-
-	var (
-		reader   string // model:read in workspace
-		pusher   string // model:read + model:push in workspace
-		outsider string // model:read + model:push, but in another workspace
-	)
+	registryID := createTestModelRegistry(t, db, s, "alias-rls")
 
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 
-	reader = createUserInWorkspace(t, tx, "alias-reader", "alias-reader@example.com", workspace, []string{"model:read"})
-	pusher = createUserInWorkspace(t, tx, "alias-pusher", "alias-pusher@example.com", workspace, []string{"model:read", "model:push"})
-	outsider = createUserInWorkspace(t, tx, "alias-outsider", "alias-outsider@example.com", otherWorkspace, []string{"model:read", "model:push"})
+	reader := createUserWithPermissions(t, tx, "alias-reader", "alias-reader@example.com", []string{"model:read"})
+	pusher := createUserWithPermissions(t, tx, "alias-pusher", "alias-pusher@example.com", []string{"model:read", "model:push"})
+	stranger := createUserWithPermissions(t, tx, "alias-stranger", "alias-stranger@example.com", []string{"cluster:read"})
 
 	require.NoError(t, tx.Commit())
 
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(ctx, `DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid, $3::uuid)`, reader, pusher, outsider)
-		_, _ = db.ExecContext(ctx, `DELETE FROM api.roles WHERE (metadata).name LIKE 'alias-%-role'`)
+		_, _ = db.ExecContext(ctx, `DELETE FROM api.role_assignments WHERE (spec).user_id IN ($1::uuid, $2::uuid, $3::uuid)`, reader, pusher, stranger)
+		_, _ = db.ExecContext(ctx, `DELETE FROM api.roles WHERE (metadata).name IN ('alias-reader-role', 'alias-pusher-role', 'alias-stranger-role')`)
 	})
 
 	insert := func(userID, alias string) error {
@@ -246,15 +204,15 @@ func TestModelAliasRLS(t *testing.T) {
 		assert.Error(t, insert(reader, "ReadOnlyAttempt"))
 	})
 
-	t.Run("another workspace may not write here", func(t *testing.T) {
-		assert.Error(t, insert(outsider, "OutsiderAttempt"))
+	t.Run("no model permission may not write", func(t *testing.T) {
+		assert.Error(t, insert(stranger, "StrangerAttempt"))
 	})
 
 	t.Run("model:read may read", func(t *testing.T) {
 		assert.Equal(t, 1, countVisible(reader))
 	})
 
-	t.Run("another workspace sees nothing", func(t *testing.T) {
-		assert.Equal(t, 0, countVisible(outsider))
+	t.Run("no model permission sees nothing", func(t *testing.T) {
+		assert.Equal(t, 0, countVisible(stranger))
 	})
 }
