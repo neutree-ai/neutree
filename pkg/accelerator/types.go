@@ -32,6 +32,14 @@ type PluginHandle interface {
 	Ping(context.Context) error
 }
 
+// StaticNodeRuntimeConfigResolver optionally resolves a cluster runtime
+// configuration from a previously detected static-node accelerator status.
+// This stays in-process so vendor-specific runtime details are not exposed by
+// the public plugin REST API.
+type StaticNodeRuntimeConfigResolver interface {
+	GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error)
+}
+
 type ResourceConverter interface {
 	ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error)
 	ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)

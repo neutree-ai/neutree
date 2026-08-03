@@ -15,6 +15,7 @@ func TestPluginImplementsPublicContract(t *testing.T) {
 	var _ PluginHandle = contractPlugin{}
 	var _ ResourceConverter = contractPlugin{}
 	var _ ResourceParser = contractPlugin{}
+	var _ StaticNodeRuntimeConfigResolver = contractPlugin{}
 }
 
 type contractPlugin struct{}
@@ -38,6 +39,9 @@ func (contractPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
 }
 func (contractPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
 	return nil, nil
+}
+func (contractPlugin) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error) {
+	return nil, false, nil
 }
 func (p contractPlugin) GetResourceConverter() ResourceConverter { return p }
 func (p contractPlugin) GetResourceParser() ResourceParser       { return p }

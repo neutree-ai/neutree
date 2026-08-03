@@ -632,6 +632,65 @@ func (_c *MockManager_GetPlugin_Call) RunAndReturn(run func(string) (pkgaccelera
 	return _c
 }
 
+// GetStaticNodeRuntimeConfig provides a mock function with given fields: ctx, _a1
+func (_m *MockManager) GetStaticNodeRuntimeConfig(ctx context.Context, _a1 *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error) {
+	ret := _m.Called(ctx, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStaticNodeRuntimeConfig")
+	}
+
+	var r0 *v1.RuntimeConfig
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)); ok {
+		return rf(ctx, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.StaticNodeAcceleratorStatus) *v1.RuntimeConfig); ok {
+		r0 = rf(ctx, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.RuntimeConfig)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.StaticNodeAcceleratorStatus) error); ok {
+		r1 = rf(ctx, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManager_GetStaticNodeRuntimeConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStaticNodeRuntimeConfig'
+type MockManager_GetStaticNodeRuntimeConfig_Call struct {
+	*mock.Call
+}
+
+// GetStaticNodeRuntimeConfig is a helper method to define mock.On call
+//   - ctx context.Context
+//   - _a1 *v1.StaticNodeAcceleratorStatus
+func (_e *MockManager_Expecter) GetStaticNodeRuntimeConfig(ctx interface{}, _a1 interface{}) *MockManager_GetStaticNodeRuntimeConfig_Call {
+	return &MockManager_GetStaticNodeRuntimeConfig_Call{Call: _e.mock.On("GetStaticNodeRuntimeConfig", ctx, _a1)}
+}
+
+func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) Run(run func(ctx context.Context, _a1 *v1.StaticNodeAcceleratorStatus)) *MockManager_GetStaticNodeRuntimeConfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*v1.StaticNodeAcceleratorStatus))
+	})
+	return _c
+}
+
+func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) Return(_a0 *v1.RuntimeConfig, _a1 error) *MockManager_GetStaticNodeRuntimeConfig_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) RunAndReturn(run func(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)) *MockManager_GetStaticNodeRuntimeConfig_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function with given fields: ctx
 func (_m *MockManager) Start(ctx context.Context) {
 	_m.Called(ctx)

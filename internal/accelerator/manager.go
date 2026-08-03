@@ -26,6 +26,7 @@ type Manager interface {
 	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
+	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
 	GetNodeAcceleratorType(ctx context.Context, nodeIp string, sshAuth v1.Auth) (string, error)
 	GetNodeRuntimeConfig(ctx context.Context, acceleratorType string, nodeIp string, sshAuth v1.Auth) (v1.RuntimeConfig, error)
 
@@ -388,6 +389,98 @@ func (a *manager) GetAcceleratorProfile(
 	}
 
 	return profile, nil
+}
+
+func (a *manager) GetStaticNodeRuntimeConfig(
+	ctx context.Context,
+	acceleratorStatus *v1.StaticNodeAcceleratorStatus,
+) (*v1.RuntimeConfig, error) {
+	if acceleratorStatus == nil || acceleratorStatus.Type == "" {
+		return nil, nil
+	}
+
+	fallbackAllowed := false
+
+	if value, ok := a.acceleratorsMap.Load(acceleratorStatus.Type); ok {
+		if registered, registeredOK := value.(registerPlugin); registeredOK {
+			if _, resolverOK := registered.plugin.Handle().(publicaccelerator.StaticNodeRuntimeConfigResolver); resolverOK {
+				config, matched, err := resolveStaticNodeRuntimeConfig(ctx, acceleratorStatus, registered)
+				if err != nil {
+					return nil, err
+				}
+
+				if !matched {
+					return nil, errors.Errorf(
+						"static runtime resolver for accelerator type %s from owner plugin %s did not match",
+						acceleratorStatus.Type,
+						registered.resource,
+					)
+				}
+
+				return config, nil
+			}
+
+			fallbackAllowed = true
+		}
+	}
+
+	if !fallbackAllowed {
+		return nil, nil
+	}
+
+	registeredPlugins := []registerPlugin{}
+
+	a.acceleratorsMap.Range(func(_, value any) bool {
+		registered, registeredOK := value.(registerPlugin)
+		if registeredOK && registered.resource != acceleratorStatus.Type {
+			registeredPlugins = append(registeredPlugins, registered)
+		}
+
+		return true
+	})
+	sort.Slice(registeredPlugins, func(i, j int) bool {
+		return registeredPlugins[i].resource < registeredPlugins[j].resource
+	})
+
+	for _, registered := range registeredPlugins {
+		config, matched, err := resolveStaticNodeRuntimeConfig(ctx, acceleratorStatus, registered)
+		if err != nil || matched {
+			return config, err
+		}
+	}
+
+	return nil, nil
+}
+
+func resolveStaticNodeRuntimeConfig(
+	ctx context.Context,
+	acceleratorStatus *v1.StaticNodeAcceleratorStatus,
+	registered registerPlugin,
+) (*v1.RuntimeConfig, bool, error) {
+	resolver, resolverOK := registered.plugin.Handle().(publicaccelerator.StaticNodeRuntimeConfigResolver)
+	if !resolverOK {
+		return nil, false, nil
+	}
+
+	config, matched, err := resolver.GetStaticNodeRuntimeConfig(ctx, acceleratorStatus)
+	if err != nil {
+		return nil, false, errors.Wrapf(
+			err,
+			"get static node runtime config for accelerator type %s from plugin %s",
+			acceleratorStatus.Type,
+			registered.resource,
+		)
+	}
+
+	if matched && config == nil {
+		return nil, false, errors.Errorf(
+			"static runtime resolver for accelerator type %s from plugin %s returned nil config for a matched status",
+			acceleratorStatus.Type,
+			registered.resource,
+		)
+	}
+
+	return config, matched, nil
 }
 
 func (a *manager) GetAllConverters() map[string]plugin.ResourceConverter {

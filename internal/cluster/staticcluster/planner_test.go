@@ -1518,6 +1518,62 @@ type fakeAcceleratorProfileProvider struct {
 	profiles map[string]*v1.AcceleratorProfile
 }
 
+func TestPlannerRuntimeProfileOverridesStaticNodeRuntimeConfigOnCopy(t *testing.T) {
+	profileConfig := &v1.RuntimeConfig{
+		ImageSuffix: "base-image",
+		Runtime:     "base-runtime",
+		Env:         map[string]string{"PROFILE_ONLY": "true", "CONFLICT": "profile"},
+		Options:     []string{"--profile"},
+	}
+	resolvedConfig := &v1.RuntimeConfig{
+		Env: map[string]string{"VISIBLE_DEVICES": "0,1", "CONFLICT": "resolver"},
+	}
+	planner := &Planner{AcceleratorProfileProvider: staticNodeRuntimeConfigProfileProvider{
+		fakeAcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{
+			"custom_accelerator": {AcceleratorType: "custom_accelerator", ClusterRuntime: profileConfig},
+		}},
+		runtimeConfig: resolvedConfig,
+	}}
+
+	profile, err := planner.runtimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
+		Type:    "custom_accelerator",
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0"}, {ID: "1"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "0,1", profile.ClusterRuntime.Env["VISIBLE_DEVICES"])
+	assert.Equal(t, "resolver", profile.ClusterRuntime.Env["CONFLICT"])
+	assert.Equal(t, "base-image", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, "base-runtime", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, []string{"--profile"}, profile.ClusterRuntime.Options)
+	assert.NotSame(t, resolvedConfig, profile.ClusterRuntime)
+	assert.Equal(t, "true", profileConfig.Env["PROFILE_ONLY"])
+	assert.Equal(t, "profile", profileConfig.Env["CONFLICT"])
+	profile.ClusterRuntime.Env["VISIBLE_DEVICES"] = "changed"
+	assert.Equal(t, "0,1", resolvedConfig.Env["VISIBLE_DEVICES"])
+}
+
+func TestMergeRuntimeConfigDoesNotClearBaseOptions(t *testing.T) {
+	merged := mergeRuntimeConfig(
+		&v1.RuntimeConfig{Options: []string{"--profile"}},
+		&v1.RuntimeConfig{Options: []string{}},
+	)
+
+	require.NotNil(t, merged)
+	assert.Equal(t, []string{"--profile"}, merged.Options)
+}
+
+type staticNodeRuntimeConfigProfileProvider struct {
+	fakeAcceleratorProfileProvider
+	runtimeConfig *v1.RuntimeConfig
+}
+
+func (p staticNodeRuntimeConfigProfileProvider) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error) {
+	return p.runtimeConfig, nil
+}
+
 func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
 	_ context.Context,
 	acceleratorType string,
