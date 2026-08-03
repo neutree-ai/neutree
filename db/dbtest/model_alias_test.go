@@ -174,6 +174,9 @@ func TestModelAliasRLS(t *testing.T) {
 		_, _ = db.ExecContext(ctx, `DELETE FROM api.roles WHERE (metadata).name IN ('alias-reader-role', 'alias-pusher-role', 'alias-stranger-role')`)
 	})
 
+	// executeAsUser never commits, so a write here is only ever an
+	// allowed/denied probe. The row the read probes look for is seeded on the
+	// admin connection below, which is superuser and bypasses RLS.
 	insert := func(userID, alias string) error {
 		return executeAsUser(t, db, userID, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `
@@ -184,6 +187,11 @@ func TestModelAliasRLS(t *testing.T) {
 			return err
 		})
 	}
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO api.model_aliases (model_registry_id, workspace, model_name, model_version, alias, alias_normalized)
+		VALUES ($1, $2, 'qwen3', 'v1', 'Qwen3', 'qwen3')`, registryID, workspace)
+	require.NoError(t, err)
 
 	countVisible := func(userID string) int {
 		var n int
@@ -197,7 +205,7 @@ func TestModelAliasRLS(t *testing.T) {
 	}
 
 	t.Run("model:push may write", func(t *testing.T) {
-		require.NoError(t, insert(pusher, "Qwen3"))
+		require.NoError(t, insert(pusher, "PusherAlias"))
 	})
 
 	t.Run("model:read alone may not write", func(t *testing.T) {
