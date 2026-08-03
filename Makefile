@@ -352,6 +352,15 @@ docker-test-node-agent: ## Build local neutree-node-agent binary for testing
 # SETTLE, SSH_OPTS. Leave REMOTE_BIN empty for a stock container (docker cp);
 # set it to the bind-mounted directory on the remote host when the binary is
 # mounted in. See contributing/testing.md.
+#
+# The binary is built on the machine running make, and build-$(COMP) does not
+# pin GOOS/GOARCH. When HOST's OS or CPU architecture differs from this
+# machine's, cross-compile by exporting them for the whole invocation:
+#
+#     GOOS=linux GOARCH=amd64 make deploy-remote HOST=root@10.0.0.5 COMP=neutree-api
+#
+# deploy-remote.sh refuses to ship a binary that does not match HOST, so a
+# forgotten GOARCH fails before anything on the host is touched.
 CONTAINER ?= $(COMP)
 REMOTE_BIN ?=
 BACKUP_DIR ?= /var/tmp/neutree-deploy-remote

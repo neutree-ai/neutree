@@ -96,8 +96,21 @@ host directory over the binary. `docker inspect -f '{{json .HostConfig.Binds}}'
 <container>` tells you which one you are looking at; if the binary path is not
 in there, leave `REMOTE_BIN` empty.
 
+**Deploying to a different architecture.** The binary is built on the machine
+running `make`, and `build-$(COMP)` does not pin `GOOS`/`GOARCH`. Deploying from
+an arm64 laptop to an amd64 host therefore ships something the target cannot
+exec. Export them for the whole invocation:
+
+```bash
+GOOS=linux GOARCH=amd64 make deploy-remote HOST=root@10.0.0.5 COMP=neutree-api
+```
+
 Why each step is there — every one of these has bitten someone:
 
+- **Architecture checked before anything is touched.** The ELF header of the
+  binary is compared against `uname -m` on `HOST`. Without it a forgotten
+  `GOARCH` only surfaces once the container restarts into a crash loop — you
+  find out by causing an outage.
 - **Backup before touching anything.** `deploy-remote-rollback` restores it and
   restarts. Nothing else in the flow can un-break a bad binary.
 - **`chmod 755` after transfer.** `scp` propagates the *local* file's mode, so a

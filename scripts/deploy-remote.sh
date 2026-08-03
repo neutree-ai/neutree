@@ -81,6 +81,40 @@ preflight() {
 	fi
 }
 
+# `make deploy-remote` builds the binary on whatever machine make runs on, and
+# build-$COMP does not pin GOOS/GOARCH — so an arm64 laptop deploying to an
+# amd64 host produces something the target cannot exec. Left unchecked that only
+# surfaces after the restart, as a crash loop: you find out by causing an outage.
+#
+# Read the ELF header of the file about to be shipped — magic at bytes 0-3,
+# e_machine at 18-19, little-endian — and compare it with the host's `uname -m`.
+# Inspecting the artifact rather than `go env` also covers a binary that was
+# built somewhere else entirely.
+check_arch() {
+	local header machine remote_arch
+	header=$(od -An -tx1 -N20 "$LOCAL_BIN" | tr -d ' \n')
+	[ "${header:0:8}" = "7f454c46" ] ||
+		fail "$LOCAL_BIN is not an ELF binary — built for a non-Linux GOOS?
+       Cross-compile for the target: GOOS=linux GOARCH=<arch> make build-$COMP"
+
+	machine="${header:36:4}"
+	remote_arch=$(remote "uname -m")
+	case "$remote_arch:$machine" in
+	x86_64:3e00 | aarch64:b700 | arm64:b700)
+		echo "    arch:          $remote_arch (matches)"
+		;;
+	x86_64:* | aarch64:* | arm64:*)
+		fail "$LOCAL_BIN was not built for the architecture of $HOST ($remote_arch).
+       Cross-compile for the target: GOOS=linux GOARCH=<arch> make build-$COMP"
+		;;
+	*)
+		# Some other architecture: nothing to assert against, and guessing would
+		# be worse than the crash loop this check exists to avoid.
+		echo "    arch:          $remote_arch (unrecognised, not checked)"
+		;;
+	esac
+}
+
 # Install $STAGE (already staged and chmod'ed on the remote host) as the live
 # binary, then restart the container.
 install_and_restart() {
@@ -163,6 +197,7 @@ do_deploy() {
 	before_restarts=$(remote "docker inspect -f '{{.RestartCount}}' '$CONTAINER'")
 
 	log "Deploying $LOCAL_BIN to $HOST via $MODE"
+	check_arch
 
 	# Back up first, so there is always something to roll back to. The backup
 	# lives outside REMOTE_BIN so it is not exposed inside the container.
