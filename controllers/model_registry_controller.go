@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -13,17 +14,22 @@ import (
 
 type ModelRegistryController struct {
 	storage storage.Storage
+	stats   model_registry.StatsAggregator
 
 	syncHandler func(modelRegistry *v1.ModelRegistry) error
 }
 
 type ModelRegistryControllerOption struct {
 	Storage storage.Storage
+	// StatsStaleAfter overrides how long collected registry counters stay usable
+	// before the tree is walked again. Zero uses the package default.
+	StatsStaleAfter time.Duration
 }
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
 		storage: option.Storage,
+		stats:   model_registry.StatsAggregator{StaleAfter: option.StatsStaleAfter},
 	}
 
 	c.syncHandler = c.sync
@@ -45,63 +51,16 @@ func (c *ModelRegistryController) Reconcile(obj interface{}) error {
 func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	var (
 		modelRegistry model_registry.ModelRegistry
+		// stats is what this reconcile will persist. It starts as whatever was
+		// observed, so a reconcile that does not measure the registry still writes
+		// the counters back — PostgREST replaces the whole status column.
+		stats          = currentStats(obj)
+		statsRefreshed bool
 	)
 
 	// Handle deletion early - bypass defer block for already-deleted resources
 	if obj.Metadata != nil && obj.Metadata.DeletionTimestamp != "" {
-		isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
-
-		if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
-			klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
-
-			err = c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID))
-			if err != nil {
-				return errors.Wrapf(err, "failed to delete model registry %s/%s from DB",
-					obj.Metadata.Workspace, obj.Metadata.Name)
-			}
-
-			return nil
-		}
-
-		klog.Infof("Deleting model registry %s (force=%v)", obj.Metadata.Name, isForceDelete)
-
-		// For deletion, we need to track if it succeeds to set correct phase
-		deleteErr := func() error {
-			modelRegistry, err = model_registry.NewModelRegistry(obj)
-			if err == nil {
-				// only disconnect model registry when it config is correct.
-				if err = modelRegistry.Disconnect(); err != nil {
-					return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
-						obj.Metadata.Workspace, obj.Metadata.Name)
-				}
-			}
-
-			return nil
-		}()
-
-		// Update status to DELETED if successful, or FAILED if not
-		// For force delete, always mark as DELETED even if there were errors
-		phase := v1.ModelRegistryPhaseDELETED
-		if deleteErr != nil && !isForceDelete {
-			phase = v1.ModelRegistryPhaseFAILED
-		}
-
-		updateErr := c.updateStatus(obj, phase, deleteErr)
-		if updateErr != nil {
-			klog.Errorf("failed to update model registry %s/%s status: %v",
-				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
-		}
-
-		LogForceDeletionWarning(isForceDelete, "model registry", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
-
-		klog.Info("Model registry " + obj.Metadata.Name + " deletion processed")
-
-		// Return the original delete error if any, unless it's a force delete
-		if deleteErr != nil && !isForceDelete {
-			return deleteErr
-		}
-
-		return nil
+		return c.syncDeletion(obj)
 	}
 
 	// Defer block to handle status updates for non-deletion paths
@@ -112,13 +71,16 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			phase = v1.ModelRegistryPhaseFAILED
 		}
 
-		// Skip update if already in correct phase and no error change
-		if obj.Status != nil && obj.Status.Phase == phase &&
+		// Skip update if already in correct phase, no error change, and the
+		// counters were not recomputed. The recomputation has to be written even
+		// when the counters came out identical: its timestamp is what stops the
+		// next reconcile, ten seconds later, from walking the model tree again.
+		if !statsRefreshed && obj.Status != nil && obj.Status.Phase == phase &&
 			(err != nil) == (obj.Status.ErrorMessage != "") {
 			return
 		}
 
-		updateErr := c.updateStatus(obj, phase, err)
+		updateErr := c.updateStatus(obj, phase, err, stats)
 		if updateErr != nil {
 			klog.Errorf("failed to update model registry %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -160,24 +122,97 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			return errors.Wrapf(err, "health check failed for model registry %s/%s",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
+
+		// Measured only here, on a registry known to be reachable right now, and
+		// only when the previous counters have gone stale. This is also why an
+		// unreachable registry keeps its last known counters: the code that would
+		// overwrite them never runs.
+		stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
 	}
 
 	return nil
 }
 
-func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.ModelRegistryPhase, err error) error {
+// syncDeletion drives a registry marked for deletion to its final state. It
+// bypasses the status defer of the normal path: the phase here is decided by
+// whether the disconnect worked, not by the reconcile's error.
+func (c *ModelRegistryController) syncDeletion(obj *v1.ModelRegistry) error {
+	isForceDelete := v1.IsForceDelete(obj.Metadata.Annotations)
+
+	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseDELETED {
+		klog.Info("Model registry " + obj.Metadata.Name + " is already deleted, delete resource from storage")
+
+		if err := c.storage.DeleteModelRegistry(strconv.Itoa(obj.ID)); err != nil {
+			return errors.Wrapf(err, "failed to delete model registry %s/%s from DB",
+				obj.Metadata.Workspace, obj.Metadata.Name)
+		}
+
+		return nil
+	}
+
+	klog.Infof("Deleting model registry %s (force=%v)", obj.Metadata.Name, isForceDelete)
+
+	// For deletion, we need to track if it succeeds to set correct phase
+	deleteErr := func() error {
+		modelRegistry, err := model_registry.NewModelRegistry(obj)
+		if err != nil {
+			// only disconnect model registry when it config is correct.
+			return nil
+		}
+
+		if err = modelRegistry.Disconnect(); err != nil {
+			return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
+				obj.Metadata.Workspace, obj.Metadata.Name)
+		}
+
+		return nil
+	}()
+
+	// Update status to DELETED if successful, or FAILED if not
+	// For force delete, always mark as DELETED even if there were errors
+	phase := v1.ModelRegistryPhaseDELETED
+	if deleteErr != nil && !isForceDelete {
+		phase = v1.ModelRegistryPhaseFAILED
+	}
+
+	updateErr := c.updateStatus(obj, phase, deleteErr, currentStats(obj))
+	if updateErr != nil {
+		klog.Errorf("failed to update model registry %s/%s status: %v",
+			obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
+	}
+
+	LogForceDeletionWarning(isForceDelete, "model registry", obj.Metadata.Workspace, obj.Metadata.Name, deleteErr)
+
+	klog.Info("Model registry " + obj.Metadata.Name + " deletion processed")
+
+	// Return the original delete error if any, unless it's a force delete
+	if deleteErr != nil && !isForceDelete {
+		return deleteErr
+	}
+
+	return nil
+}
+
+func currentStats(obj *v1.ModelRegistry) *v1.ModelRegistryStats {
+	if obj.Status == nil {
+		return nil
+	}
+
+	return obj.Status.Stats
+}
+
+func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.ModelRegistryPhase,
+	err error, stats *v1.ModelRegistryStats) error {
 	newStatus := &v1.ModelRegistryStatus{
 		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
 		ErrorMessage:       FormatErrorForStatus(err),
-	}
-
-	// PostgREST replaces a composite-type column as a whole, so any attribute
-	// missing from the PATCH body is nulled rather than left alone. Carry
-	// forward the attributes this reconcile does not own; otherwise every phase
-	// or error transition wipes them. Same reason as ClusterController.updateStatus.
-	if obj.Status != nil {
-		newStatus.Stats = obj.Status.Stats
+		// PostgREST replaces a composite-type column as a whole, so any attribute
+		// missing from the PATCH body is nulled rather than left alone. Stats is
+		// therefore always passed in — carried forward from the observed object
+		// when this reconcile did not recompute it — or every phase or error
+		// transition wipes it. Same reason as ClusterController.updateStatus.
+		Stats: stats,
 	}
 
 	return c.storage.UpdateModelRegistry(strconv.Itoa(obj.ID), &v1.ModelRegistry{Status: newStatus})

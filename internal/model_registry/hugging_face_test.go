@@ -257,3 +257,48 @@ func TestHuggingFace_HealthyCheck(t *testing.T) {
 		})
 	}
 }
+
+// A public registry refuses the operations it does not implement with a typed
+// error, so a caller can answer "this registry kind cannot do that" instead of
+// reporting a server failure.
+func TestHuggingFace_UnsupportedOperationsAreTyped(t *testing.T) {
+	hf := &huggingFace{url: "https://huggingface.co"}
+
+	t.Run("GetModelDetail", func(t *testing.T) {
+		_, err := hf.GetModelDetail("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("GetReadme", func(t *testing.T) {
+		_, err := hf.GetReadme("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("SetManualModelInfo", func(t *testing.T) {
+		assert.ErrorIs(t, hf.SetManualModelInfo("qwen3", "latest", &v1.ModelInfo{}), ErrNotSupported)
+	})
+
+	t.Run("CollectUsage", func(t *testing.T) {
+		_, err := hf.CollectUsage()
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("GetModelVersion", func(t *testing.T) {
+		_, err := hf.GetModelVersion("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("DeleteModel", func(t *testing.T) {
+		assert.ErrorIs(t, hf.DeleteModel("qwen3", "latest"), ErrNotSupported)
+	})
+
+	t.Run("GetModelPath", func(t *testing.T) {
+		_, err := hf.GetModelPath("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	// The wording predates the typed error and is kept so existing messages do
+	// not change.
+	_, err := hf.GetModelDetail("qwen3", "latest")
+	assert.Contains(t, err.Error(), "operation not supported for Hugging Face registry")
+}

@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -104,28 +105,40 @@ func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockMod
 
 func endpointModelReferenceFilterMatcher(workspace, registryName, modelName string) interface{} {
 	return mock.MatchedBy(func(option storage.ListOption) bool {
-		expected := map[string]string{
-			"metadata->workspace":    strconvQuote(workspace),
-			"spec->model->>registry": registryName,
-			"spec->model->>name":     modelName,
+		expected := []storage.Filter{
+			{Column: "metadata->workspace", Operator: "eq", Value: strconvQuote(workspace)},
+			{Column: "spec->model->>registry", Operator: "eq", Value: registryName},
+			{Column: "spec->model->>name", Operator: "eq", Value: modelName},
+			// Endpoints on their way out must not hold the model hostage.
+			{Column: "metadata->>deletion_timestamp", Operator: "is", Value: "null"},
 		}
 
 		if len(option.Filters) != len(expected) {
 			return false
 		}
 
-		for _, filter := range option.Filters {
-			if filter.Operator != "eq" {
-				return false
-			}
-
-			value, ok := expected[filter.Column]
-			if !ok || filter.Value != value {
+		for _, want := range expected {
+			if !slices.Contains(option.Filters, want) {
 				return false
 			}
 		}
 
 		return true
+	})
+}
+
+// catalogReferenceFilterMatcher matches the workspace-scoped, not-yet-deleted
+// model catalog listing the deletion check sweeps in Go.
+func catalogReferenceFilterMatcher(workspace string) interface{} {
+	return mock.MatchedBy(func(option storage.ListOption) bool {
+		expected := []storage.Filter{
+			{Column: "metadata->workspace", Operator: "eq", Value: strconvQuote(workspace)},
+			{Column: "metadata->>deletion_timestamp", Operator: "is", Value: "null"},
+		}
+
+		return len(option.Filters) == len(expected) &&
+			slices.Contains(option.Filters, expected[0]) &&
+			slices.Contains(option.Filters, expected[1])
 	})
 }
 
@@ -202,7 +215,8 @@ func TestListModels_Success(t *testing.T) {
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("ListModels", mock.MatchedBy(func(option model_registry.ListOption) bool {
 		return option.Search == "test"
-	})).Return(mockModels, nil)
+	})).Return(&model_registry.ModelPage{Models: mockModels, Total: len(mockModels)}, nil)
+	mockStorage.On("ListModelAlias", mock.Anything).Return([]v1.ModelAlias{}, nil)
 
 	// Call the handler function directly
 	handlerFunc := listModels(deps)
@@ -247,7 +261,7 @@ func TestListModels_RegistryNotFound(t *testing.T) {
 	// Verify the results
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "model registry not found")
@@ -281,7 +295,7 @@ func TestListModels_StorageError(t *testing.T) {
 	// Verify the results
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "failed to find model registry")
@@ -327,7 +341,7 @@ func TestListModels_ListModelsError(t *testing.T) {
 	// Verify the results
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "Failed to list models")
@@ -369,7 +383,8 @@ func TestGetModel_Success(t *testing.T) {
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
-	mockModelRegistry.On("GetModelVersion", "test-model", v1.LatestVersion).Return(mockModelVersion, nil)
+	mockModelRegistry.On("GetModelDetail", "test-model", v1.LatestVersion).Return(mockModelVersion, nil)
+	mockStorage.On("ListModelAlias", mock.Anything).Return([]v1.ModelAlias{}, nil)
 
 	// Call the handler function directly
 	handlerFunc := getModel(deps)
@@ -410,7 +425,7 @@ func TestGetModel_NotFound(t *testing.T) {
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockError := errors.New("model not found")
-	mockModelRegistry.On("GetModelVersion", "non-existent-model", v1.LatestVersion).Return(nil, mockError)
+	mockModelRegistry.On("GetModelDetail", "non-existent-model", v1.LatestVersion).Return(nil, mockError)
 
 	// Call the handler function directly
 	handlerFunc := getModel(deps)
@@ -419,7 +434,7 @@ func TestGetModel_NotFound(t *testing.T) {
 	// Verify the results
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "Failed to get model")
@@ -455,9 +470,14 @@ func TestDeleteModel_Success(t *testing.T) {
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
 		Return([]v1.Endpoint{}, nil)
+	mockStorage.On("ListModelCatalog", catalogReferenceFilterMatcher("default")).
+		Return([]v1.ModelCatalog{}, nil).Maybe()
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", v1.LatestVersion).
+		Return(&v1.ModelVersion{Name: "v1.0.0"}, nil).Maybe()
+	mockStorage.On("ListModelAlias", mock.Anything).Return([]v1.ModelAlias{}, nil).Maybe()
 
 	// Call the handler function directly
 	handlerFunc := deleteModel(deps)
@@ -486,6 +506,8 @@ func TestDeleteModel_BlockedWhenEndpointReferencesExactVersion(t *testing.T) {
 
 	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
 		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v1.0.0")}, nil)
+	mockStorage.On("ListModelCatalog", catalogReferenceFilterMatcher("default")).
+		Return([]v1.ModelCatalog{}, nil).Maybe()
 	mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil).Maybe()
 
 	handlerFunc := deleteModel(deps)
@@ -493,7 +515,7 @@ func TestDeleteModel_BlockedWhenEndpointReferencesExactVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "10131", response["code"])
@@ -536,6 +558,8 @@ func TestDeleteModel_BlockedWhenEndpointReferencesLatestVersion(t *testing.T) {
 
 			mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
 				Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", tc.endpointVersion)}, nil)
+			mockStorage.On("ListModelCatalog", catalogReferenceFilterMatcher("default")).
+				Return([]v1.ModelCatalog{}, nil).Maybe()
 			mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil).Maybe()
 
 			handlerFunc := deleteModel(deps)
@@ -543,7 +567,7 @@ func TestDeleteModel_BlockedWhenEndpointReferencesLatestVersion(t *testing.T) {
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 
-			var response map[string]string
+			var response map[string]any
 			err := json.Unmarshal(w.Body.Bytes(), &response)
 			assert.NoError(t, err)
 			assert.Equal(t, "10131", response["code"])
@@ -570,6 +594,8 @@ func TestDeleteModel_BlockedWhenDeletingLatestAndEndpointReferencesConcreteVersi
 
 	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
 		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v1.0.0")}, nil)
+	mockStorage.On("ListModelCatalog", catalogReferenceFilterMatcher("default")).
+		Return([]v1.ModelCatalog{}, nil).Maybe()
 	mockModelRegistry.On("DeleteModel", "test-model", v1.LatestVersion).Return(nil).Maybe()
 
 	handlerFunc := deleteModel(deps)
@@ -577,7 +603,7 @@ func TestDeleteModel_BlockedWhenDeletingLatestAndEndpointReferencesConcreteVersi
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "10131", response["code"])
@@ -611,9 +637,14 @@ func TestDeleteModel_AllowsUnrelatedEndpointVersion(t *testing.T) {
 	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
 	mockStorage.On("ListEndpoint", endpointModelReferenceFilterMatcher("default", "test-registry", "test-model")).
 		Return([]v1.Endpoint{endpointWithModel("test-registry", "test-model", "v2.0.0")}, nil)
+	mockStorage.On("ListModelCatalog", catalogReferenceFilterMatcher("default")).
+		Return([]v1.ModelCatalog{}, nil).Maybe()
 	mockModelRegistry.On("Connect").Return(nil)
 	mockModelRegistry.On("Disconnect").Return(nil)
 	mockModelRegistry.On("DeleteModel", "test-model", "v1.0.0").Return(nil)
+	mockModelRegistry.On("GetModelVersion", "test-model", "v1.0.0").
+		Return(&v1.ModelVersion{Name: "v1.0.0"}, nil).Maybe()
+	mockStorage.On("ListModelAlias", mock.Anything).Return([]v1.ModelAlias{}, nil).Maybe()
 
 	handlerFunc := deleteModel(deps)
 	handlerFunc(c)
@@ -645,7 +676,7 @@ func TestDeleteModel_ValidationErrorSkipsRegistryDelete(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "Failed to validate model deletion")
@@ -712,7 +743,7 @@ func TestUploadModel_InvalidName(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	var response map[string]string
+	var response map[string]any
 	err = json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Contains(t, response["message"], "Invalid model name")

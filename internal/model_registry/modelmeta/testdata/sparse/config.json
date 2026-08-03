@@ -1,0 +1,4 @@
+{
+  "model_type": "custom",
+  "torch_dtype": "float32"
+}

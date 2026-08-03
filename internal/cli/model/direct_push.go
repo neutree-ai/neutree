@@ -109,6 +109,7 @@ func ReadImportedModelVersion(localNFSPath, name, version string) (*v1.ModelVers
 		CreationTime: meta.CreationTime,
 		Size:         meta.Size,
 		Module:       meta.Module,
+		Labels:       meta.Labels,
 	}, nil
 }
 

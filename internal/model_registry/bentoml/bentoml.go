@@ -29,26 +29,27 @@ import (
 )
 
 type Model struct {
-	Tag          string `json:"tag"`
-	Module       string `json:"module"`
-	Size         string `json:"size"`
-	CreationTime string `json:"creation_time"`
-}
-
-type ModelMeta struct {
-	Name         string `yaml:"name" json:"name"`
-	Version      string `yaml:"version" json:"version"`
-	Module       string `yaml:"module" json:"module"`
-	Size         string `yaml:"size" json:"size"`
-	CreationTime string `yaml:"creation_time" json:"creation_time"`
+	Tag          string            `json:"tag"`
+	Module       string            `json:"module"`
+	Size         string            `json:"size"`
+	CreationTime string            `json:"creation_time"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 const (
 	ModelYAMLFileName = "model.yaml"
+	// ModelJSONFileName is the JSON spelling of the same descriptor; a store may
+	// hold either.
+	ModelJSONFileName = "model.json"
 )
 
-// GetModelDetail gets detailed information about a specific model
-func GetModelDetail(homePath, modelName, version string) (*ModelMeta, error) {
+// GetModelDetail gets detailed information about a specific model.
+//
+// It decodes the whole model.yaml. An earlier narrower struct dropped everything
+// but name/version/module/size/creation_time, which meant the labels and
+// metadata a user writes into model.yaml — and which the export/import round
+// trip faithfully preserves — could not be read back anywhere.
+func GetModelDetail(homePath, modelName, version string) (*ModelYAML, error) {
 	actualVersion := version
 
 	if version == v1.LatestVersion || version == "" {
@@ -78,12 +79,18 @@ func GetModelDetail(homePath, modelName, version string) (*ModelMeta, error) {
 		return nil, errors.Wrap(err, "failed to read model.yaml")
 	}
 
-	var meta ModelMeta
+	var meta ModelYAML
 	if err := yaml.Unmarshal(data, &meta); err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal model.yaml")
 	}
 
 	return &meta, nil
+}
+
+// ModelDir returns the directory a model version's files live in. Both segments
+// are lowercased, matching the layout ImportModel writes.
+func ModelDir(homePath, modelName, version string) string {
+	return filepath.Join(homePath, "models", strings.ToLower(modelName), strings.ToLower(version))
 }
 
 // DeleteModel deletes a model from BentoML store
@@ -216,7 +223,7 @@ func GetModelPath(homePath, modelName, version string) (string, error) {
 	}
 
 	// Construct the path to the model directory
-	modelDir := filepath.Join(homePath, "models", strings.ToLower(meta.Name), strings.ToLower(meta.Version))
+	modelDir := ModelDir(homePath, meta.Name, meta.Version)
 	if _, err := os.Stat(modelDir); os.IsNotExist(err) {
 		return "", errors.New("model directory not found")
 	}
@@ -256,7 +263,7 @@ func ListModels(homePath string) ([]Model, error) {
 		}
 
 		name := d.Name()
-		if name != "model.yaml" && name != "model.json" {
+		if name != ModelYAMLFileName && name != ModelJSONFileName {
 			return nil
 		}
 
@@ -265,8 +272,7 @@ func ListModels(homePath string) ([]Model, error) {
 			return err
 		}
 
-		// Minimal superset of fields we care about
-		var meta ModelMeta
+		var meta ModelYAML
 
 		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 			if err := yaml.Unmarshal(raw, &meta); err != nil {
@@ -283,6 +289,7 @@ func ListModels(homePath string) ([]Model, error) {
 			Module:       meta.Module,
 			Size:         meta.Size,
 			CreationTime: meta.CreationTime,
+			Labels:       meta.Labels,
 		})
 
 		return nil
@@ -336,7 +343,11 @@ func GenerateVersion() (*string, error) {
 	return &lower, nil
 }
 
-func calculateDirectorySize(dir string) (int64, error) {
+// CalculateDirectorySize sums the size of every regular file under dir. It is
+// the only honest way to state what a model occupies: the size recorded in
+// model.yaml is a human-readable string baked in at push time, never recomputed,
+// and measured over a different set of files than the archive contains.
+func CalculateDirectorySize(dir string) (int64, error) {
 	var totalSize int64
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -355,7 +366,7 @@ func calculateDirectorySize(dir string) (int64, error) {
 }
 
 func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter io.Writer) (string, error) {
-	dirSize, err := calculateDirectorySize(srcDir)
+	dirSize, err := CalculateDirectorySize(srcDir)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to calculate directory size")
 	}
@@ -523,23 +534,26 @@ func CreateArchiveWithProgress(srcDir, modelName, version string, progressWriter
 	return tmpFile.Name(), nil
 }
 
+// ModelYAML is a model.yaml. The JSON tags matter as much as the YAML ones:
+// ListModels also reads model.json, and without them a snake_case key such as
+// creation_time would not bind.
 type ModelYAML struct {
-	Name       string                 `yaml:"name"`
-	Version    string                 `yaml:"version"`
-	Module     string                 `yaml:"module"`
-	Size       string                 `yaml:"size,omitempty"`
-	APIVersion string                 `yaml:"api_version"`
-	Signatures map[string]interface{} `yaml:"signatures"`
-	Labels     map[string]string      `yaml:"labels"`
-	Options    map[string]interface{} `yaml:"options"`
-	Metadata   map[string]interface{} `yaml:"metadata"`
+	Name       string                 `yaml:"name" json:"name"`
+	Version    string                 `yaml:"version" json:"version"`
+	Module     string                 `yaml:"module" json:"module"`
+	Size       string                 `yaml:"size,omitempty" json:"size,omitempty"`
+	APIVersion string                 `yaml:"api_version" json:"api_version"`
+	Signatures map[string]interface{} `yaml:"signatures" json:"signatures"`
+	Labels     map[string]string      `yaml:"labels" json:"labels"`
+	Options    map[string]interface{} `yaml:"options" json:"options"`
+	Metadata   map[string]interface{} `yaml:"metadata" json:"metadata"`
 	Context    struct {               // nested
-		FrameworkName    string            `yaml:"framework_name"`
-		FrameworkVersion map[string]string `yaml:"framework_versions"`
-		BentoVersion     string            `yaml:"bentoml_version"`
-		PythonVersion    string            `yaml:"python_version"`
-	} `yaml:"context"`
-	CreationTime string `yaml:"creation_time"`
+		FrameworkName    string            `yaml:"framework_name" json:"framework_name"`
+		FrameworkVersion map[string]string `yaml:"framework_versions" json:"framework_versions"`
+		BentoVersion     string            `yaml:"bentoml_version" json:"bentoml_version"`
+		PythonVersion    string            `yaml:"python_version" json:"python_version"`
+	} `yaml:"context" json:"context"`
+	CreationTime string `yaml:"creation_time" json:"creation_time"`
 }
 
 func FillMinimalModelYAML(y *ModelYAML, name, version, hfRepo string, size int64) error {

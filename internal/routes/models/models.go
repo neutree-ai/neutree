@@ -114,6 +114,14 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 					middleware.RequireWorkspacePermission("model:read", permissionDeps),
 					getModel(deps))
 
+				// Update a model's display metadata: its alias and the model info
+				// fields a user fills in by hand. Both are annotations on an
+				// existing model, so they reuse model:push rather than introducing
+				// a permission action of their own.
+				models.PATCH("/:model",
+					middleware.RequireWorkspacePermission("model:push", permissionDeps),
+					patchModel(deps))
+
 				// Upload a new model
 				models.POST("",
 					middleware.RequirePermission("model:push", permissionDeps),
@@ -176,7 +184,7 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -185,9 +193,9 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
 
-		modelVersion, err := (*modelRegistry).GetModelVersion(modelName, version)
+		modelVersion, err := handle.client.GetModelVersion(modelName, version)
 		if err != nil {
 			klog.Errorf("Failed to finalize model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -230,8 +238,16 @@ func validateFinalizedModelVersion(req finalizeModelRequest, modelVersion *v1.Mo
 	return nil
 }
 
+// registryHandle is a connected registry client together with the stored object
+// it was built from. Handlers need both: the client to reach the backing store,
+// and the object for its row id, which is what the alias table keys on.
+type registryHandle struct {
+	registry *v1.ModelRegistry
+	client   model_registry.ModelRegistry
+}
+
 // getModelRegistry retrieves and connects to a model registry
-func getModelRegistry(c *gin.Context, deps *Dependencies) (*model_registry.ModelRegistry, error) {
+func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, error) {
 	workspace := c.Param("workspace")
 	registryName := c.Param("registry")
 
@@ -269,30 +285,26 @@ func getModelRegistry(c *gin.Context, deps *Dependencies) (*model_registry.Model
 		return nil, fmt.Errorf("failed to connect to model registry: %w", err)
 	}
 
-	return &modelRegistry, nil
+	return &registryHandle{registry: &modelRegistries[0], client: modelRegistry}, nil
 }
 
 // listModels handles listing all models in a registry
 func listModels(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		search := c.Query("search")
-		limit := 0
 
-		if limitStr := c.Query("limit"); limitStr != "" {
-			var err error
+		limit, ok := intQuery(c, "limit")
+		if !ok {
+			return
+		}
 
-			limit, err = strconv.Atoi(limitStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"message": "Invalid limit parameter",
-				})
-
-				return
-			}
+		offset, ok := intQuery(c, "offset")
+		if !ok {
+			return
 		}
 
 		// Get and connect to the model registry
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -301,11 +313,12 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
 
 		// List models
-		models, err := (*modelRegistry).ListModels(model_registry.ListOption{
+		page, err := handle.client.ListModels(model_registry.ListOption{
 			Search: search,
+			Offset: offset,
 			Limit:  limit,
 		})
 		if err != nil {
@@ -317,8 +330,54 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, models)
+		aliases, err := listRegistryAliases(deps, handle.registry.ID)
+		if err != nil {
+			klog.Errorf("Failed to list model aliases: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": err.Error(),
+			})
+
+			return
+		}
+
+		attachAliases(page.Models, aliases)
+
+		// The total goes in a header, PostgREST style, and the body stays a bare
+		// array. Wrapping the body in an envelope would break every existing
+		// caller for the sake of one number.
+		c.Header("Content-Range", contentRange(offset, len(page.Models), page.Total))
+		c.JSON(http.StatusOK, page.Models)
 	}
+}
+
+// intQuery reads a non-negative integer query parameter, answering 400 and
+// reporting false when it is present but not a number.
+func intQuery(c *gin.Context, name string) (int, bool) {
+	raw := c.Query(name)
+	if raw == "" {
+		return 0, true
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": fmt.Sprintf("Invalid %s parameter", name),
+		})
+
+		return 0, false
+	}
+
+	return value, true
+}
+
+// contentRange formats the PostgREST-style range header: "first-last/total", or
+// "*/total" for an empty page.
+func contentRange(offset, returned, total int) string {
+	if returned == 0 {
+		return fmt.Sprintf("*/%d", total)
+	}
+
+	return fmt.Sprintf("%d-%d/%d", offset, offset+returned-1, total)
 }
 
 // getModel handles retrieving a specific model
@@ -332,7 +391,7 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Get and connect to the model registry
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -341,10 +400,11 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
 
-		// Get model version details
-		modelVersion, err := (*modelRegistry).GetModelVersion(modelName, version)
+		// Get model version details, including whatever the checkpoint states
+		// about itself.
+		modelVersion, err := handle.client.GetModelDetail(modelName, version)
 		if err != nil {
 			klog.Errorf("Failed to get model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -354,8 +414,34 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		if err := attachModelAlias(deps, handle, modelName, modelVersion); err != nil {
+			klog.Errorf("Failed to read alias of model %s:%s: %v", modelName, version, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": err.Error(),
+			})
+
+			return
+		}
+
 		c.JSON(http.StatusOK, modelVersion)
 	}
+}
+
+// attachModelAlias fills in the alias of a single resolved version. The lookup
+// keys off the version the registry resolved, not the one the caller asked for,
+// so "latest" lands on the alias of the version it currently points at.
+func attachModelAlias(deps *Dependencies, handle *registryHandle,
+	modelName string, modelVersion *v1.ModelVersion) error {
+	aliases, err := listRegistryAliases(deps, handle.registry.ID)
+	if err != nil {
+		return err
+	}
+
+	if row, ok := aliases[aliasKey(modelName, modelVersion.Name)]; ok {
+		modelVersion.Alias = row.Alias
+	}
+
+	return nil
 }
 
 // uploadModel handles uploading a new model
@@ -459,7 +545,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		defer modelPart.Close()
 
 		// Get and connect to the model registry
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -468,7 +554,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
 
 		// Use chunked encoding for progress reporting
 		c.Header("Transfer-Encoding", "chunked")
@@ -485,7 +571,7 @@ func uploadModel(deps *Dependencies) gin.HandlerFunc {
 		// Import directly from uploaded file reader with progress
 		klog.V(4).Infof("Importing model %s:%s", name, version)
 
-		if err := (*modelRegistry).ImportModel(modelPart, name, version, progressWriter); err != nil {
+		if err := handle.client.ImportModel(modelPart, name, version, progressWriter); err != nil {
 			klog.Errorf("Failed to import model: %v", err)
 			fmt.Fprintf(c.Writer, "Error: Failed to import model: %v\n", err)
 
@@ -521,7 +607,7 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		// Get and connect to the model registry
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -530,14 +616,14 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
 
 		// Create temporary file for export
 		tempFile := filepath.Join(tempDir, fmt.Sprintf("%s-%s.bentomodel", modelName, version))
 		defer os.Remove(tempFile) // Clean up when done
 
 		// Export model to temporary file
-		if err := (*modelRegistry).ExportModel(modelName, version, tempFile); err != nil {
+		if err := handle.client.ExportModel(modelName, version, tempFile); err != nil {
 			klog.Errorf("Failed to export model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to export model: %v", err),
@@ -555,50 +641,6 @@ func downloadModel(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
-func validateModelDeletion(deps *Dependencies, workspace, registryName, modelName, version string) (int, error) {
-	endpoints, err := deps.Storage.ListEndpoint(storage.ListOption{
-		Filters: []storage.Filter{
-			{
-				Column:   "metadata->workspace",
-				Operator: "eq",
-				Value:    strconv.Quote(workspace),
-			},
-			{
-				Column:   "spec->model->>registry",
-				Operator: "eq",
-				Value:    registryName,
-			},
-			{
-				Column:   "spec->model->>name",
-				Operator: "eq",
-				Value:    modelName,
-			},
-		},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to list endpoints: %w", err)
-	}
-
-	references := 0
-
-	for _, endpoint := range endpoints {
-		if endpoint.Spec == nil || endpoint.Spec.Model == nil {
-			continue
-		}
-
-		endpointVersion := endpoint.Spec.Model.Version
-		if endpointVersion == "" {
-			endpointVersion = v1.LatestVersion
-		}
-
-		if version == v1.LatestVersion || endpointVersion == v1.LatestVersion || endpointVersion == version {
-			references++
-		}
-	}
-
-	return references, nil
-}
-
 // deleteModel handles deleting a model
 func deleteModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -611,7 +653,7 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 			version = v1.LatestVersion
 		}
 
-		references, err := validateModelDeletion(deps, workspace, registryName, modelName, version)
+		references, err := collectModelReferences(deps, workspace, registryName, modelName, version)
 		if err != nil {
 			klog.Errorf("Failed to validate model deletion %s/%s/%s:%s: %v", workspace, registryName, modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -621,18 +663,19 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if references > 0 {
+		if len(references) > 0 {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    modelReferencedByEndpointCode,
-				"message": fmt.Sprintf("cannot delete model '%s/%s/%s:%s'", workspace, registryName, modelName, version),
-				"hint":    fmt.Sprintf("%d endpoint(s) still reference this model", references),
+				"code":       modelReferencedByEndpointCode,
+				"message":    fmt.Sprintf("cannot delete model '%s/%s/%s:%s'", workspace, registryName, modelName, version),
+				"hint":       referenceHint(references),
+				"references": references,
 			})
 
 			return
 		}
 
 		// Get and connect to the model registry
-		modelRegistry, err := getModelRegistry(c, deps)
+		handle, err := getModelRegistry(c, deps)
 		if err != nil {
 			klog.Errorf("Failed to get model registry: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -641,10 +684,15 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-		defer (*modelRegistry).Disconnect() //nolint:errcheck
+		defer handle.client.Disconnect() //nolint:errcheck
+
+		// Resolve the version before deleting: afterwards there is nothing left to
+		// resolve "latest" against, and the alias rows are keyed on the concrete
+		// version.
+		deletedVersion := resolveConcreteVersion(handle, modelName, version)
 
 		// Delete the model
-		if err := (*modelRegistry).DeleteModel(modelName, version); err != nil {
+		if err := handle.client.DeleteModel(modelName, version); err != nil {
 			klog.Errorf("Failed to delete model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to delete model: %v", err),
@@ -653,6 +701,25 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		if deletedVersion != "" {
+			deleteModelAliases(deps, handle.registry.ID, modelName, deletedVersion)
+		}
+
 		c.Status(http.StatusNoContent)
 	}
+}
+
+// resolveConcreteVersion turns "latest" into the version it points at, or
+// returns an empty string when it cannot. Failing to resolve only costs an alias
+// row that is left behind, and an alias whose model no longer exists is already
+// invisible to every read path.
+func resolveConcreteVersion(handle *registryHandle, modelName, version string) string {
+	modelVersion, err := handle.client.GetModelVersion(modelName, version)
+	if err != nil {
+		klog.Warningf("Failed to resolve version of model %s:%s before deletion: %v", modelName, version, err)
+
+		return ""
+	}
+
+	return modelVersion.Name
 }

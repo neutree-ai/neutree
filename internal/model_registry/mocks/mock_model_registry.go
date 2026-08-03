@@ -24,6 +24,63 @@ func (_m *MockModelRegistry) EXPECT() *MockModelRegistry_Expecter {
 	return &MockModelRegistry_Expecter{mock: &_m.Mock}
 }
 
+// CollectUsage provides a mock function with no fields
+func (_m *MockModelRegistry) CollectUsage() (*model_registry.RegistryUsage, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for CollectUsage")
+	}
+
+	var r0 *model_registry.RegistryUsage
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (*model_registry.RegistryUsage, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() *model_registry.RegistryUsage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model_registry.RegistryUsage)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockModelRegistry_CollectUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CollectUsage'
+type MockModelRegistry_CollectUsage_Call struct {
+	*mock.Call
+}
+
+// CollectUsage is a helper method to define mock.On call
+func (_e *MockModelRegistry_Expecter) CollectUsage() *MockModelRegistry_CollectUsage_Call {
+	return &MockModelRegistry_CollectUsage_Call{Call: _e.mock.On("CollectUsage")}
+}
+
+func (_c *MockModelRegistry_CollectUsage_Call) Run(run func()) *MockModelRegistry_CollectUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockModelRegistry_CollectUsage_Call) Return(_a0 *model_registry.RegistryUsage, _a1 error) *MockModelRegistry_CollectUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockModelRegistry_CollectUsage_Call) RunAndReturn(run func() (*model_registry.RegistryUsage, error)) *MockModelRegistry_CollectUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Connect provides a mock function with no fields
 func (_m *MockModelRegistry) Connect() error {
 	ret := _m.Called()
@@ -209,6 +266,65 @@ func (_c *MockModelRegistry_ExportModel_Call) RunAndReturn(run func(string, stri
 	return _c
 }
 
+// GetModelDetail provides a mock function with given fields: name, version
+func (_m *MockModelRegistry) GetModelDetail(name string, version string) (*v1.ModelVersion, error) {
+	ret := _m.Called(name, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetModelDetail")
+	}
+
+	var r0 *v1.ModelVersion
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (*v1.ModelVersion, error)); ok {
+		return rf(name, version)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) *v1.ModelVersion); ok {
+		r0 = rf(name, version)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.ModelVersion)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(name, version)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockModelRegistry_GetModelDetail_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetModelDetail'
+type MockModelRegistry_GetModelDetail_Call struct {
+	*mock.Call
+}
+
+// GetModelDetail is a helper method to define mock.On call
+//   - name string
+//   - version string
+func (_e *MockModelRegistry_Expecter) GetModelDetail(name interface{}, version interface{}) *MockModelRegistry_GetModelDetail_Call {
+	return &MockModelRegistry_GetModelDetail_Call{Call: _e.mock.On("GetModelDetail", name, version)}
+}
+
+func (_c *MockModelRegistry_GetModelDetail_Call) Run(run func(name string, version string)) *MockModelRegistry_GetModelDetail_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockModelRegistry_GetModelDetail_Call) Return(_a0 *v1.ModelVersion, _a1 error) *MockModelRegistry_GetModelDetail_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockModelRegistry_GetModelDetail_Call) RunAndReturn(run func(string, string) (*v1.ModelVersion, error)) *MockModelRegistry_GetModelDetail_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetModelPath provides a mock function with given fields: name, version
 func (_m *MockModelRegistry) GetModelPath(name string, version string) (string, error) {
 	ret := _m.Called(name, version)
@@ -380,6 +496,63 @@ func (_c *MockModelRegistry_GetNFSVersion_Call) RunAndReturn(run func() (string,
 	return _c
 }
 
+// GetReadme provides a mock function with given fields: name, version
+func (_m *MockModelRegistry) GetReadme(name string, version string) (string, error) {
+	ret := _m.Called(name, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReadme")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
+		return rf(name, version)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) string); ok {
+		r0 = rf(name, version)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(name, version)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockModelRegistry_GetReadme_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReadme'
+type MockModelRegistry_GetReadme_Call struct {
+	*mock.Call
+}
+
+// GetReadme is a helper method to define mock.On call
+//   - name string
+//   - version string
+func (_e *MockModelRegistry_Expecter) GetReadme(name interface{}, version interface{}) *MockModelRegistry_GetReadme_Call {
+	return &MockModelRegistry_GetReadme_Call{Call: _e.mock.On("GetReadme", name, version)}
+}
+
+func (_c *MockModelRegistry_GetReadme_Call) Run(run func(name string, version string)) *MockModelRegistry_GetReadme_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockModelRegistry_GetReadme_Call) Return(_a0 string, _a1 error) *MockModelRegistry_GetReadme_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockModelRegistry_GetReadme_Call) RunAndReturn(run func(string, string) (string, error)) *MockModelRegistry_GetReadme_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HealthyCheck provides a mock function with no fields
 func (_m *MockModelRegistry) HealthyCheck() error {
 	ret := _m.Called()
@@ -475,23 +648,23 @@ func (_c *MockModelRegistry_ImportModel_Call) RunAndReturn(run func(io.Reader, s
 }
 
 // ListModels provides a mock function with given fields: option
-func (_m *MockModelRegistry) ListModels(option model_registry.ListOption) ([]v1.GeneralModel, error) {
+func (_m *MockModelRegistry) ListModels(option model_registry.ListOption) (*model_registry.ModelPage, error) {
 	ret := _m.Called(option)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListModels")
 	}
 
-	var r0 []v1.GeneralModel
+	var r0 *model_registry.ModelPage
 	var r1 error
-	if rf, ok := ret.Get(0).(func(model_registry.ListOption) ([]v1.GeneralModel, error)); ok {
+	if rf, ok := ret.Get(0).(func(model_registry.ListOption) (*model_registry.ModelPage, error)); ok {
 		return rf(option)
 	}
-	if rf, ok := ret.Get(0).(func(model_registry.ListOption) []v1.GeneralModel); ok {
+	if rf, ok := ret.Get(0).(func(model_registry.ListOption) *model_registry.ModelPage); ok {
 		r0 = rf(option)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]v1.GeneralModel)
+			r0 = ret.Get(0).(*model_registry.ModelPage)
 		}
 	}
 
@@ -522,12 +695,60 @@ func (_c *MockModelRegistry_ListModels_Call) Run(run func(option model_registry.
 	return _c
 }
 
-func (_c *MockModelRegistry_ListModels_Call) Return(_a0 []v1.GeneralModel, _a1 error) *MockModelRegistry_ListModels_Call {
+func (_c *MockModelRegistry_ListModels_Call) Return(_a0 *model_registry.ModelPage, _a1 error) *MockModelRegistry_ListModels_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockModelRegistry_ListModels_Call) RunAndReturn(run func(model_registry.ListOption) ([]v1.GeneralModel, error)) *MockModelRegistry_ListModels_Call {
+func (_c *MockModelRegistry_ListModels_Call) RunAndReturn(run func(model_registry.ListOption) (*model_registry.ModelPage, error)) *MockModelRegistry_ListModels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetManualModelInfo provides a mock function with given fields: name, version, info
+func (_m *MockModelRegistry) SetManualModelInfo(name string, version string, info *v1.ModelInfo) error {
+	ret := _m.Called(name, version, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetManualModelInfo")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, *v1.ModelInfo) error); ok {
+		r0 = rf(name, version, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockModelRegistry_SetManualModelInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetManualModelInfo'
+type MockModelRegistry_SetManualModelInfo_Call struct {
+	*mock.Call
+}
+
+// SetManualModelInfo is a helper method to define mock.On call
+//   - name string
+//   - version string
+//   - info *v1.ModelInfo
+func (_e *MockModelRegistry_Expecter) SetManualModelInfo(name interface{}, version interface{}, info interface{}) *MockModelRegistry_SetManualModelInfo_Call {
+	return &MockModelRegistry_SetManualModelInfo_Call{Call: _e.mock.On("SetManualModelInfo", name, version, info)}
+}
+
+func (_c *MockModelRegistry_SetManualModelInfo_Call) Run(run func(name string, version string, info *v1.ModelInfo)) *MockModelRegistry_SetManualModelInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string), args[2].(*v1.ModelInfo))
+	})
+	return _c
+}
+
+func (_c *MockModelRegistry_SetManualModelInfo_Call) Return(_a0 error) *MockModelRegistry_SetManualModelInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockModelRegistry_SetManualModelInfo_Call) RunAndReturn(run func(string, string, *v1.ModelInfo) error) *MockModelRegistry_SetManualModelInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }
