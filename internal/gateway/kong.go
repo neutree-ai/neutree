@@ -770,26 +770,52 @@ func getEndpointRoutePath(ep *v1.Endpoint) string {
 	return "/workspace/" + ep.Metadata.Workspace + "/endpoint/" + ep.Metadata.Name
 }
 
-// SyncExternalEndpoint synchronizes an external endpoint configuration to Kong
-func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
-	gwService, err := k.syncExternalEndpointService(ee)
+// SyncExternalEndpoint synchronizes an external endpoint configuration to Kong.
+//
+// Upstream entries are resolved independently: an entry that fails to resolve
+// (its internal endpoint was deleted, its cluster was deleted, its URL is
+// malformed) is reported as Failed in the returned statuses and left out of the
+// gateway configuration, while every other entry is still pushed. Only when no
+// entry resolves does the whole sync fail, since Kong needs at least one
+// reachable target to build the service.
+func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
+	// An endpoint with no upstreams at all is a spec problem, not a resolution
+	// failure — keep saying so explicitly rather than reporting "nothing
+	// resolved" with an empty list of reasons.
+	if len(ee.Spec.Upstreams) == 0 {
+		return nil, errors.Errorf("external endpoint %s has no upstreams configured", ee.Key())
+	}
+
+	resolved := k.resolveExternalEndpointUpstreams(ee)
+	statuses := externalEndpointUpstreamStatuses(resolved)
+
+	ready := make([]resolvedUpstream, 0, len(resolved))
+
+	for _, r := range resolved {
+		if r.err == nil {
+			ready = append(ready, r)
+		}
+	}
+
+	if len(ready) == 0 {
+		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
+			ee.Key(), joinUpstreamErrors(statuses))
+	}
+
+	gwService, err := k.syncExternalEndpointService(ee, ready[0])
 	if err != nil {
-		return errors.Wrapf(err, "failed to sync external endpoint service %s", ee.Metadata.Name)
+		return statuses, errors.Wrapf(err, "failed to sync external endpoint service %s", ee.Metadata.Name)
 	}
 
 	route, err := k.syncExternalEndpointRoute(ee, gwService)
 	if err != nil {
-		return errors.Wrapf(err, "failed to sync external endpoint route %s", ee.Metadata.Name)
+		return statuses, errors.Wrapf(err, "failed to sync external endpoint route %s", ee.Metadata.Name)
 	}
 
 	// sync route plugins
 	needPluginMap := make(map[string]*kong.Plugin)
 
-	aiGatewayPlugin, err := k.generateExternalEndpointAIGatewayPlugin(ee, route)
-	if err != nil {
-		return errors.Wrapf(err, "failed to generate ai gateway plugin for %s", ee.Metadata.Name)
-	}
-
+	aiGatewayPlugin := k.generateExternalEndpointAIGatewayPlugin(ee, route, ready)
 	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
 
 	aclPlugin := k.generateExternalEndpointACLPlugin(ee, route)
@@ -798,13 +824,13 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	for _, plugin := range needPluginMap {
 		err = k.syncPlugin(plugin)
 		if err != nil {
-			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
+			return statuses, errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
 		}
 	}
 
 	curPlugins, err := k.kongClient.Plugins.ListAllForRoute(context.Background(), route.ID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to list plugins for route %s", *route.Name)
+		return statuses, errors.Wrapf(err, "failed to list plugins for route %s", *route.Name)
 	}
 
 	var needDeletePlugins []*kong.Plugin
@@ -822,11 +848,11 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
 	for _, needDeletePlugin := range needDeletePlugins {
 		err = k.kongClient.Plugins.Delete(context.Background(), needDeletePlugin.ID)
 		if err != nil {
-			return errors.Wrapf(err, "failed to delete plugin %s", *needDeletePlugin.Name)
+			return statuses, errors.Wrapf(err, "failed to delete plugin %s", *needDeletePlugin.Name)
 		}
 	}
 
-	return nil
+	return statuses, nil
 }
 
 // DeleteExternalEndpoint removes an external endpoint configuration from Kong
@@ -912,44 +938,110 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 	return scheme, host, port, path, nil
 }
 
-func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint) (*kong.Service, error) {
-	var serviceHost string
-	var servicePort int
-	var serviceScheme string
-	var servicePath string
+// resolvedUpstream is the outcome of resolving one spec upstream entry into a
+// concrete gateway target. err is non-nil when the entry could not be resolved,
+// in which case the address fields are meaningless and the entry must be left
+// out of the Kong configuration.
+type resolvedUpstream struct {
+	entry v1.ExternalEndpointUpstreamEntry
 
-	if len(ee.Spec.Upstreams) == 0 {
-		return nil, errors.Errorf("external endpoint %s has no upstreams configured", ee.Key())
-	}
+	scheme string
+	host   string
+	port   int
+	path   string
+	// internal marks a target inside a neutree cluster, which the ai-gateway
+	// plugin treats differently from a third-party API.
+	internal bool
 
-	firstEntry := ee.Spec.Upstreams[0]
+	err error
+}
 
-	switch {
-	case firstEntry.EndpointRef != nil:
-		// Resolve internal endpoint ref
-		scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *firstEntry.EndpointRef)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to resolve endpoint ref: %s", *firstEntry.EndpointRef)
+// resolveExternalEndpointUpstreams resolves every upstream entry independently.
+// It never returns an error: a failure is recorded on the individual entry so
+// the caller can push the entries that did resolve.
+func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resolvedUpstream {
+	resolved := make([]resolvedUpstream, 0, len(ee.Spec.Upstreams))
+
+	for _, entry := range ee.Spec.Upstreams {
+		r := resolvedUpstream{entry: entry}
+
+		switch {
+		case entry.EndpointRef != nil:
+			scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *entry.EndpointRef)
+			if err != nil {
+				r.err = errors.Wrapf(err, "failed to resolve endpoint ref %s", *entry.EndpointRef)
+				break
+			}
+
+			r.scheme, r.host, r.port, r.path = scheme, host, port, path
+			r.internal = true
+		case entry.Upstream != nil:
+			uc, err := util.ParseURLComponents(entry.Upstream.URL)
+			if err != nil {
+				r.err = errors.Wrapf(err, "failed to parse upstream URL %s", entry.Upstream.URL)
+				break
+			}
+
+			r.scheme, r.host, r.port, r.path = uc.Scheme, uc.Host, uc.Port, uc.Path
+		default:
+			r.err = errors.Errorf("upstream entry for model_mapping %v has neither endpoint_ref nor upstream configured", entry.ModelMapping)
 		}
 
-		serviceScheme = scheme
-		serviceHost = host
-		servicePort = port
-		servicePath = path
-	case firstEntry.Upstream != nil:
-		// Parse external upstream URL
-		uc, err := util.ParseURLComponents(firstEntry.Upstream.URL)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse upstream URL: %s", firstEntry.Upstream.URL)
+		resolved = append(resolved, r)
+	}
+
+	return resolved
+}
+
+// externalEndpointUpstreamStatuses projects resolution outcomes into the
+// user-visible per-upstream status list, in spec order.
+func externalEndpointUpstreamStatuses(resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
+	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
+
+	for i := range resolved {
+		entry := resolved[i].entry
+		status := v1.ExternalEndpointUpstreamStatus{
+			Kind:   entry.Kind(),
+			Ref:    entry.Ref(),
+			Models: entry.ExposedModels(),
+			Phase:  v1.ExternalEndpointUpstreamPhaseReady,
 		}
 
-		serviceScheme = uc.Scheme
-		serviceHost = uc.Host
-		servicePort = uc.Port
-		servicePath = uc.Path
-	default:
-		return nil, errors.Errorf("first upstream entry of external endpoint %s has neither endpoint_ref nor upstream configured", ee.Key())
+		if resolved[i].err != nil {
+			status.Phase = v1.ExternalEndpointUpstreamPhaseFailed
+			status.ErrorMessage = resolved[i].err.Error()
+		}
+
+		statuses = append(statuses, status)
 	}
+
+	return statuses
+}
+
+// joinUpstreamErrors renders every failed entry into a single message, used when
+// no upstream resolved at all. It reads the already-projected statuses so that
+// "failed" has exactly one definition.
+func joinUpstreamErrors(statuses []v1.ExternalEndpointUpstreamStatus) string {
+	msgs := make([]string, 0, len(statuses))
+
+	for _, s := range statuses {
+		if s.Phase == v1.ExternalEndpointUpstreamPhaseFailed {
+			msgs = append(msgs, s.ErrorMessage)
+		}
+	}
+
+	return strings.Join(msgs, "; ")
+}
+
+func (k *Kong) syncExternalEndpointService(ee *v1.ExternalEndpoint, target resolvedUpstream) (*kong.Service, error) {
+	// The Kong service only needs one reachable target: the ai-gateway plugin
+	// rewrites the upstream per request from its own upstream list. Using the
+	// first *resolvable* entry (rather than Upstreams[0]) is what keeps a broken
+	// leading entry from blocking the whole config push.
+	serviceScheme := target.scheme
+	serviceHost := target.host
+	servicePort := target.port
+	servicePath := target.path
 
 	timeout := 60000
 	if ee.Spec.Timeout != nil && *ee.Spec.Timeout > 0 {
@@ -1069,54 +1161,30 @@ func (k *Kong) deleteExternalEndpointRoute(ee *v1.ExternalEndpoint) error {
 	return nil
 }
 
-func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route) (*kong.Plugin, error) {
+// generateExternalEndpointAIGatewayPlugin builds the plugin config from the
+// already-resolved upstreams. Callers pass only the entries that resolved, so a
+// broken entry simply stops being routable while the rest keep serving.
+func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route,
+	ready []resolvedUpstream) *kong.Plugin {
 	instanceName := "neutree-ai-gateway-external-endpoint-" + util.HashString(ee.Key())
 
-	var upstreams []map[string]interface{}
+	upstreams := make([]map[string]interface{}, 0, len(ready))
 
-	for _, entry := range ee.Spec.Upstreams {
-		var upstreamEntry map[string]interface{}
+	for _, r := range ready {
+		upstreamEntry := map[string]interface{}{
+			"model_mapping": r.entry.ModelMapping,
+			"scheme":        r.scheme,
+			"host":          r.host,
+			"port":          r.port,
+			"path":          r.path,
+			"auth_header":   nil,
+			// Must explicitly set "internal" to match Kong schema default (false),
+			// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
+			"internal": r.internal,
+		}
 
-		switch {
-		case entry.EndpointRef != nil:
-			// Resolve internal endpoint ref
-			scheme, host, port, path, err := k.resolveEndpointRef(ee.Metadata.Workspace, *entry.EndpointRef)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to resolve endpoint ref %s for model_mapping %v", *entry.EndpointRef, entry.ModelMapping)
-			}
-
-			upstreamEntry = map[string]interface{}{
-				"model_mapping": entry.ModelMapping,
-				"scheme":        scheme,
-				"host":          host,
-				"port":          port,
-				"path":          path,
-				"auth_header":   nil,
-				"internal":      true,
-			}
-		case entry.Upstream != nil:
-			uc, err := util.ParseURLComponents(entry.Upstream.URL)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to parse upstream URL for model_mapping %v", entry.ModelMapping)
-			}
-
-			upstreamEntry = map[string]interface{}{
-				"model_mapping": entry.ModelMapping,
-				"scheme":        uc.Scheme,
-				"host":          uc.Host,
-				"port":          uc.Port,
-				"path":          uc.Path,
-				"auth_header":   nil,
-				// Must explicitly set "internal" to match Kong schema default (false),
-				// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
-				"internal": false,
-			}
-
-			if entry.Auth != nil {
-				upstreamEntry["auth_header"] = entry.Auth.AuthHeaderValue()
-			}
-		default:
-			return nil, errors.Errorf("upstream entry for model_mapping %v has neither endpoint_ref nor upstream configured", entry.ModelMapping)
+		if !r.internal && r.entry.Auth != nil {
+			upstreamEntry["auth_header"] = r.entry.Auth.AuthHeaderValue()
 		}
 
 		upstreams = append(upstreams, upstreamEntry)
@@ -1138,7 +1206,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			"endpoint_type": endpointTypeExternal,
 			"endpoint_name": ee.Metadata.Name,
 		},
-	}, nil
+	}
 }
 
 func getExternalEndpointRoutePath(ee *v1.ExternalEndpoint) string {

@@ -500,21 +500,33 @@ func (_c *MockGateway_SyncEndpoint_Call) RunAndReturn(run func(*v1.Endpoint) err
 }
 
 // SyncExternalEndpoint provides a mock function with given fields: ee
-func (_m *MockGateway) SyncExternalEndpoint(ee *v1.ExternalEndpoint) error {
+func (_m *MockGateway) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
 	ret := _m.Called(ee)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SyncExternalEndpoint")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1.ExternalEndpoint) error); ok {
+	var r0 []v1.ExternalEndpointUpstreamStatus
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error)); ok {
+		return rf(ee)
+	}
+	if rf, ok := ret.Get(0).(func(*v1.ExternalEndpoint) []v1.ExternalEndpointUpstreamStatus); ok {
 		r0 = rf(ee)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.ExternalEndpointUpstreamStatus)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(*v1.ExternalEndpoint) error); ok {
+		r1 = rf(ee)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockGateway_SyncExternalEndpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncExternalEndpoint'
@@ -535,12 +547,12 @@ func (_c *MockGateway_SyncExternalEndpoint_Call) Run(run func(ee *v1.ExternalEnd
 	return _c
 }
 
-func (_c *MockGateway_SyncExternalEndpoint_Call) Return(_a0 error) *MockGateway_SyncExternalEndpoint_Call {
-	_c.Call.Return(_a0)
+func (_c *MockGateway_SyncExternalEndpoint_Call) Return(_a0 []v1.ExternalEndpointUpstreamStatus, _a1 error) *MockGateway_SyncExternalEndpoint_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockGateway_SyncExternalEndpoint_Call) RunAndReturn(run func(*v1.ExternalEndpoint) error) *MockGateway_SyncExternalEndpoint_Call {
+func (_c *MockGateway_SyncExternalEndpoint_Call) RunAndReturn(run func(*v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error)) *MockGateway_SyncExternalEndpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,7 +151,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			name: "sync success transitions Pending to Running",
 			in:   ee(id, v1.ExternalEndpointPhasePENDING),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil &&
@@ -164,7 +165,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			name: "sync success with no prior status transitions to Running",
 			in:   ee(id, ""),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("", nil)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil && ee.Status.Phase == v1.ExternalEndpointPhaseRUNNING
@@ -176,7 +177,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 			name: "sync failure transitions to Failed",
 			in:   ee(id, v1.ExternalEndpointPhasePENDING),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(assert.AnError)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, assert.AnError)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil && ee.Status.Phase == v1.ExternalEndpointPhaseFAILED
 				})).Return(nil)
@@ -194,7 +195,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 				return e
 			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://stable-gateway/path", nil)
 				// No UpdateExternalEndpoint expectation: drift detect should suppress write.
 			},
@@ -214,7 +215,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 				return e
 			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://new-gateway/path", nil)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil &&
@@ -235,7 +236,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 				return e
 			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(assert.AnError)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, assert.AnError)
 				// No UpdateExternalEndpoint: phase and error message unchanged.
 			},
 			wantErr: true,
@@ -251,11 +252,151 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 				return e
 			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(assert.AnError)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, assert.AnError)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil &&
 						ee.Status.Phase == v1.ExternalEndpointPhaseFAILED &&
 						ee.Status.ErrorMessage == assert.AnError.Error()
+				})).Return(nil)
+			},
+			wantErr: true,
+		},
+		{
+			// NEU-580: the gateway pushed the healthy upstreams and reported the
+			// broken one. The endpoint serves, so it must not be marked Failed.
+			name: "partial upstream failure transitions to Degraded and records detail",
+			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{
+					{
+						Kind:         v1.ExternalEndpointUpstreamKindEndpointRef,
+						Ref:          "ep-deleted",
+						Models:       []string{"gone"},
+						Phase:        v1.ExternalEndpointUpstreamPhaseFailed,
+						ErrorMessage: "internal endpoint ep-deleted not found in workspace ws",
+					},
+					{
+						Kind:   v1.ExternalEndpointUpstreamKindExternal,
+						Ref:    "https://api.openai.com/v1",
+						Models: []string{"fast"},
+						Phase:  v1.ExternalEndpointUpstreamPhaseReady,
+					},
+				}, nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseDEGRADED &&
+						// a degraded endpoint is still served, so the URL is kept fresh
+						ee.Status.ServiceURL == "http://serve-url" &&
+						strings.Contains(ee.Status.ErrorMessage, "ep-deleted") &&
+						len(ee.Status.UpstreamStatuses) == 2 &&
+						ee.Status.UpstreamStatuses[0].Phase == v1.ExternalEndpointUpstreamPhaseFailed &&
+						ee.Status.UpstreamStatuses[1].Phase == v1.ExternalEndpointUpstreamPhaseReady
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			// A degraded endpoint reconciles repeatedly; identical detail must not
+			// rewrite the row on every pass.
+			name: "unchanged degraded detail skips storage write",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseDEGRADED)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:      v1.ExternalEndpointPhaseDEGRADED,
+					ServiceURL: "http://serve-url",
+					ErrorMessage: "1 upstream(s) unavailable and excluded from the gateway " +
+						"configuration: ep-deleted",
+					UpstreamStatuses: []v1.ExternalEndpointUpstreamStatus{{
+						Kind:         v1.ExternalEndpointUpstreamKindEndpointRef,
+						Ref:          "ep-deleted",
+						Models:       []string{"gone"},
+						Phase:        v1.ExternalEndpointUpstreamPhaseFailed,
+						ErrorMessage: "internal endpoint ep-deleted not found",
+					}},
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{{
+					Kind:         v1.ExternalEndpointUpstreamKindEndpointRef,
+					Ref:          "ep-deleted",
+					Models:       []string{"gone"},
+					Phase:        v1.ExternalEndpointUpstreamPhaseFailed,
+					ErrorMessage: "internal endpoint ep-deleted not found",
+				}}, nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
+				// No UpdateExternalEndpoint: nothing user-visible moved.
+			},
+			wantErr: false,
+		},
+		{
+			// The user restored the deleted endpoint: the phase must fall back to
+			// Running and the stale error detail must be cleared.
+			name: "recovered upstream transitions Degraded back to Running",
+			in: func() *v1.ExternalEndpoint {
+				e := ee(id, v1.ExternalEndpointPhaseDEGRADED)
+				e.Status = &v1.ExternalEndpointStatus{
+					Phase:        v1.ExternalEndpointPhaseDEGRADED,
+					ServiceURL:   "http://serve-url",
+					ErrorMessage: "1 upstream(s) unavailable",
+					UpstreamStatuses: []v1.ExternalEndpointUpstreamStatus{{
+						Ref:   "ep-restored",
+						Phase: v1.ExternalEndpointUpstreamPhaseFailed,
+					}},
+				}
+				return e
+			}(),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{{
+					Ref:   "ep-restored",
+					Phase: v1.ExternalEndpointUpstreamPhaseReady,
+				}}, nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseRUNNING &&
+						ee.Status.ErrorMessage == "" &&
+						len(ee.Status.UpstreamStatuses) == 1 &&
+						ee.Status.UpstreamStatuses[0].Phase == v1.ExternalEndpointUpstreamPhaseReady
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			// A spec entry with neither endpoint_ref nor upstream has an empty Ref;
+			// the summary must not render an empty identifier.
+			name: "degraded summary falls back to position for an unidentifiable upstream",
+			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{
+					{Ref: "ok-upstream", Phase: v1.ExternalEndpointUpstreamPhaseReady},
+					{Ref: "", Kind: v1.ExternalEndpointUpstreamKindExternal, Phase: v1.ExternalEndpointUpstreamPhaseFailed},
+				}, nil)
+				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("http://serve-url", nil)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseDEGRADED &&
+						strings.Contains(ee.Status.ErrorMessage, "upstream #2") &&
+						!strings.HasSuffix(ee.Status.ErrorMessage, ": ")
+				})).Return(nil)
+			},
+			wantErr: false,
+		},
+		{
+			// Nothing resolved: the gateway hard-fails, and the per-upstream detail
+			// still rides along so the status explains why.
+			name: "total upstream failure stays Failed and keeps upstream detail",
+			in:   ee(id, v1.ExternalEndpointPhaseRUNNING),
+			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
+				g.On("SyncExternalEndpoint", mock.Anything).Return([]v1.ExternalEndpointUpstreamStatus{{
+					Ref:   "ep-deleted",
+					Phase: v1.ExternalEndpointUpstreamPhaseFailed,
+				}}, assert.AnError)
+				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
+					return ee.Status != nil &&
+						ee.Status.Phase == v1.ExternalEndpointPhaseFAILED &&
+						len(ee.Status.UpstreamStatuses) == 1
 				})).Return(nil)
 			},
 			wantErr: true,
@@ -271,7 +412,7 @@ func TestExternalEndpointController_Sync_CreateUpdate(t *testing.T) {
 				return e
 			}(),
 			setup: func(s *storagemocks.MockStorage, g *gatewaymocks.MockGateway) {
-				g.On("SyncExternalEndpoint", mock.Anything).Return(nil)
+				g.On("SyncExternalEndpoint", mock.Anything).Return(nil, nil)
 				g.On("GetExternalEndpointServeUrl", mock.Anything).Return("", nil)
 				s.On("UpdateExternalEndpoint", strconv.Itoa(id), mock.MatchedBy(func(ee *v1.ExternalEndpoint) bool {
 					return ee.Status != nil &&

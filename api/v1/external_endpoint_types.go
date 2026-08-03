@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"net/url"
+	"sort"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -52,6 +54,77 @@ type ExternalEndpointUpstreamEntry struct {
 	ModelMapping map[string]string `json:"model_mapping"`
 }
 
+// Upstream entry kinds, used to describe an entry in the status without
+// leaking its credential.
+const (
+	ExternalEndpointUpstreamKindEndpointRef = "endpoint_ref"
+	ExternalEndpointUpstreamKindExternal    = "external"
+)
+
+// Kind reports whether the entry points at an internal endpoint or an external URL.
+func (e *ExternalEndpointUpstreamEntry) Kind() string {
+	if e.EndpointRef != nil {
+		return ExternalEndpointUpstreamKindEndpointRef
+	}
+
+	return ExternalEndpointUpstreamKindExternal
+}
+
+// Ref returns the stable identity of the entry: the referenced internal endpoint
+// name, or the external upstream URL with anything credential-bearing removed.
+// It is safe to publish in status, logs and error messages.
+func (e *ExternalEndpointUpstreamEntry) Ref() string {
+	if e.EndpointRef != nil {
+		return *e.EndpointRef
+	}
+
+	if e.Upstream != nil {
+		return SanitizeUpstreamURL(e.Upstream.URL)
+	}
+
+	return ""
+}
+
+// unparsableUpstreamURL stands in for a URL we could not parse. Echoing the raw
+// value would risk leaking whatever it embeds.
+const unparsableUpstreamURL = "(unparsable upstream url)"
+
+// SanitizeUpstreamURL strips the credential-bearing parts of an upstream URL:
+// the userinfo component (https://user:pass@host) and the query string, which
+// providers commonly use to carry an API key (?api-key=...). The result is a
+// deterministic function of the URL, so it still identifies the entry it came
+// from — two upstreams differing only in their query string collapse to the
+// same reference, which is the intended trade for not publishing secrets.
+func SanitizeUpstreamURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return unparsableUpstreamURL
+	}
+
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	return u.String()
+}
+
+// ExposedModels returns the client-facing model names this entry serves, sorted
+// so the status stays stable across reconciles (Go map iteration is random).
+func (e *ExternalEndpointUpstreamEntry) ExposedModels() []string {
+	if len(e.ModelMapping) == 0 {
+		return nil
+	}
+
+	models := make([]string, 0, len(e.ModelMapping))
+	for exposed := range e.ModelMapping {
+		models = append(models, exposed)
+	}
+
+	sort.Strings(models)
+
+	return models
+}
+
 // Route type constants for AI statistics
 const (
 	RouteTypeChatCompletions = "/v1/chat/completions"
@@ -76,15 +149,49 @@ type ExternalEndpointPhase string
 const (
 	ExternalEndpointPhasePENDING ExternalEndpointPhase = "Pending"
 	ExternalEndpointPhaseRUNNING ExternalEndpointPhase = "Running"
-	ExternalEndpointPhaseFAILED  ExternalEndpointPhase = "Failed"
-	ExternalEndpointPhaseDELETED ExternalEndpointPhase = "Deleted"
+	// ExternalEndpointPhaseDEGRADED means the endpoint is serving, but at least
+	// one upstream could not be resolved and was left out of the gateway
+	// configuration. Models served only by that upstream are unavailable; every
+	// other model keeps working. Per-upstream detail is in UpstreamStatuses.
+	ExternalEndpointPhaseDEGRADED ExternalEndpointPhase = "Degraded"
+	ExternalEndpointPhaseFAILED   ExternalEndpointPhase = "Failed"
+	ExternalEndpointPhaseDELETED  ExternalEndpointPhase = "Deleted"
 )
+
+type ExternalEndpointUpstreamPhase string
+
+const (
+	ExternalEndpointUpstreamPhaseReady  ExternalEndpointUpstreamPhase = "Ready"
+	ExternalEndpointUpstreamPhaseFailed ExternalEndpointUpstreamPhase = "Failed"
+)
+
+// ExternalEndpointUpstreamStatus reports the outcome of resolving a single
+// upstream entry. One entry is emitted per spec upstream, in spec order.
+type ExternalEndpointUpstreamStatus struct {
+	// Kind is "endpoint_ref" or "external".
+	Kind string `json:"kind,omitempty"`
+
+	// Ref is the referenced internal endpoint name or the external upstream URL.
+	// It never carries the auth credential.
+	Ref string `json:"ref,omitempty"`
+
+	// Models are the client-facing model names this upstream serves. When the
+	// upstream is Failed, these are exactly the models that stopped resolving.
+	Models []string `json:"models,omitempty"`
+
+	Phase        ExternalEndpointUpstreamPhase `json:"phase,omitempty"`
+	ErrorMessage string                        `json:"error_message,omitempty"`
+}
 
 type ExternalEndpointStatus struct {
 	Phase              ExternalEndpointPhase `json:"phase,omitempty"`
 	ServiceURL         string                `json:"service_url,omitempty"`
 	LastTransitionTime string                `json:"last_transition_time,omitempty"`
 	ErrorMessage       string                `json:"error_message,omitempty"`
+
+	// UpstreamStatuses carries per-upstream detail so a single broken upstream is
+	// distinguishable from a wholly broken endpoint.
+	UpstreamStatuses []ExternalEndpointUpstreamStatus `json:"upstream_status,omitempty"`
 }
 
 type ExternalEndpoint struct {
