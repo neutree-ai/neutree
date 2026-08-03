@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEnginesListNormalizesBaseURLTrailingSlash(t *testing.T) {
+func TestNormalizesBaseURLTrailingSlash(t *testing.T) {
 	tests := []struct {
 		name          string
 		baseURLSuffix string
