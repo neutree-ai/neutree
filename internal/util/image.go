@@ -47,13 +47,31 @@ func BuildEngineImageRef(imagePrefix string, engineImage *v1.EngineImage) string
 // RewriteImageRef rewrites image into imagePrefix while preserving the image
 // repository path and removing any source registry host. Docker Hub prefixes
 // leave image references unchanged.
+//
+// This is the pull-side rule: a reference that is already pullable from Docker
+// Hub needs no prefix. Use RelocateImageRef when choosing a push destination.
 func RewriteImageRef(imagePrefix, image string) string {
+	if IsDockerHubImagePrefix(imagePrefix) {
+		return image
+	}
+
+	return RelocateImageRef(imagePrefix, image)
+}
+
+// RelocateImageRef rewrites image into imagePrefix for a push, preserving the
+// repository path and removing any source registry host.
+//
+// Unlike RewriteImageRef it applies the prefix even when the prefix is Docker
+// Hub: a push must land in the registry the caller named. Skipping the prefix
+// there would push the image back to whatever registry the source reference
+// points at — a different host than the one whose credentials are in play.
+func RelocateImageRef(imagePrefix, image string) string {
 	if image == "" {
 		return ""
 	}
 
 	imagePrefix = strings.TrimRight(strings.TrimSpace(imagePrefix), "/")
-	if imagePrefix == "" || IsDockerHubImagePrefix(imagePrefix) || strings.HasPrefix(image, imagePrefix+"/") {
+	if imagePrefix == "" || strings.HasPrefix(image, imagePrefix+"/") {
 		return image
 	}
 

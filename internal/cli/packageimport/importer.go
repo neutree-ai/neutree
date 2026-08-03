@@ -2,15 +2,12 @@ package packageimport
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/api/types/registry"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
@@ -231,20 +228,11 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return []string{}, nil
 	}
 
-	user, token := opts.RegistryUser, opts.RegistryPassword
-
-	authConfig := registry.AuthConfig{
-		Username:      user,
-		Password:      token,
-		ServerAddress: util.StripRegistryScheme(opts.MirrorRegistry),
-	}
-
-	authConfigBytes, err := json.Marshal(authConfig)
+	registryAuth, err := util.EncodeRegistryAuth(opts.RegistryUser, opts.RegistryPassword,
+		util.StripRegistryScheme(opts.MirrorRegistry))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal auth config")
+		return nil, err
 	}
-
-	registryAuth := base64.URLEncoding.EncodeToString(authConfigBytes)
 
 	imagePrefix, err := util.BuildImagePrefix(opts.MirrorRegistry, opts.RegistryProject)
 	if err != nil {
