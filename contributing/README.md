@@ -4,13 +4,32 @@ Engineering guide for human contributors and AI agents. Start here, then open th
 
 ## First-time Setup
 
-After cloning the repo, install the local git hooks:
+After cloning the repo, install the local git hooks and generate the embedded CLI manifests:
 
 ```bash
 make install-hooks
+make prepare-build-cli
 ```
 
-This enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / full lint / short tests on affected packages).
+`make install-hooks` enables the pre-commit gate (`gofmt` / `go vet` / architecture boundaries / migration-pair check / full lint / short tests on affected packages).
+
+`make prepare-build-cli` packs `deploy/docker/` into `cmd/neutree-cli/app/cmd/launch/manifests/neutree-core.tar` and `obs-stack.tar`. Those archives are `//go:embed`-ed by the launch manifests but are git-ignored build artifacts, so a fresh clone does not have them. Until you generate them, **any** build of the module fails:
+
+```
+cmd/neutree-cli/app/cmd/launch/manifests/core.go:7:12: pattern neutree-core.tar: no matching files found
+```
+
+That breaks `go build ./...`, `go test ./...`, and gopls / IDE indexing — not just the CLI target.
+
+The target is not a bare `tar`; it pulls in the deploy manifests first:
+
+```
+prepare-build-cli
+├── sync-deploy-manifests → bin/vendir sync   # fans deploy manifests out into deploy/docker/ and deploy/chart/
+└── tar deploy/docker/{neutree-core,obs-stack} → manifests/*.tar
+```
+
+Two consequences. First, `vendir` is a tool dependency: the `vendir` target curl-downloads the binary into `bin/` from GitHub releases when it is missing, so **the first run needs network access** (later runs do not — `vendir.yml` only declares local `directory:` sources, so `sync` itself copies from paths already in the repo). Second, because the tar step packs whatever `sync` just wrote, re-run `make prepare-build-cli` after changing anything under `deploy/` — a stale `.tar` embeds silently.
 
 ## Playbooks
 
