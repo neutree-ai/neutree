@@ -18,8 +18,8 @@ spec:
       maxSurge: 0
   selector:
     matchLabels:
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
       endpoint: "{{ .EndpointName }}"
       app: inference
   template:
@@ -33,8 +33,8 @@ spec:
       labels:
         engine: {{ .EngineName }}
         engine_version: {{ .EngineVersion }}
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         endpoint: "{{ .EndpointName }}"
         routing_logic: {{ .RoutingLogic }}
         app: inference
