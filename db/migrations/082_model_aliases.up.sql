@@ -68,9 +68,22 @@ ALTER TABLE api.model_aliases ENABLE ROW LEVEL SECURITY;
 -- The policies authorize against the workspace of the referenced registry, not
 -- against the row's own workspace column. Two reasons the stored column must
 -- not be the authority: a client supplies it on write, and nothing propagates a
--- later change of the registry's workspace to rows already stored. Aliases are
--- part of a registry's model data, so they reuse the model actions from 042
--- rather than introducing new ones.
+-- later change of the registry's workspace to rows already stored.
+--
+-- api.has_permission is the single authorization primitive in this schema, and
+-- its signature is a stable contract: a policy is responsible for handing it the
+-- real workspace of the resource being guarded. This schema caps a deployment at
+-- one workspace (021), so the argument is not consumed today -- passing the
+-- correct value is the policy's job either way, not the primitive's.
+--
+-- Were these policies to authorize against the stored column instead, a caller
+-- holding model:push in one workspace could insert a row naming that workspace
+-- while pointing model_registry_id at a registry in another, taking a slot in
+-- the second registry's unique index in a row that registry's own users could
+-- neither see nor clear.
+--
+-- Aliases are part of a registry's model data, so they reuse the model actions
+-- from 042 rather than introducing new ones.
 CREATE POLICY "model alias read policy" ON api.model_aliases
     FOR SELECT
     USING (

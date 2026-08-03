@@ -218,11 +218,14 @@ func TestModelAliasOrphanRowCanBeTakenOver(t *testing.T) {
 // The workspace the policies pass to api.has_permission is the owning
 // registry's, looked up through public.model_registry_workspace, never the row's
 // own column -- see TestModelAliasWorkspaceIsDerivedFromRegistry for why the
-// column cannot be trusted. Whether a workspace mismatch is refused is not
-// observable here: api.has_permission ignores its workspace argument and only
-// consults role assignments with global = TRUE (a trigger rejects
-// workspace-scoped ones, error 10041), which is true of every workspaced table
-// in this schema. What is asserted here is therefore the action half.
+// column cannot be trusted.
+//
+// Only the action half of the policies is asserted here. This schema caps a
+// deployment at one workspace (021), so api.has_permission does not consume the
+// workspace argument and a trigger rejects workspace-scoped role assignments
+// outright (error 10041) -- there is no second workspace for a caller to be
+// refused from. That the policies nevertheless hand it the registry's real
+// workspace is what TestModelAliasWorkspaceIsDerivedFromRegistry pins down.
 func TestModelAliasRLS(t *testing.T) {
 	db := GetTestDB(t)
 	s := NewTestStorage(t)
