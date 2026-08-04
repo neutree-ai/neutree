@@ -167,6 +167,51 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 	}
 }
 
+func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) {
+	templates := []struct {
+		name     string
+		template string
+	}{
+		{
+			name:     "vllm v0.11.2",
+			template: vllmV0_11_2DeployTemplate,
+		},
+		{
+			name:     "vllm v0.17.1",
+			template: vllmV0_17_1DeployTemplate,
+		},
+		{
+			name:     "vllm v0.24.0",
+			template: vllmV0_24_0DeployTemplate,
+		},
+		{
+			name:     "sglang v0.5.10",
+			template: sglangV0_5_10DeployTemplate,
+		},
+		{
+			name:     "llama.cpp v0.3.7",
+			template: llamaCppDefaultDeployTemplate,
+		},
+	}
+
+	for _, tc := range templates {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := newTestVLLMVars("v0.17.1", "text-generation")
+			vars["ClusterName"] = "123"
+			vars["Workspace"] = "456"
+
+			objs, err := util.RenderKubernetesManifest(tc.template, vars)
+			require.NoError(t, err)
+
+			deployment := mustFindRenderedObjectByKind(t, objs.Items, "Deployment")
+			assertNestedString(t, deployment.Object, "123", "spec", "selector", "matchLabels", "cluster")
+			assertNestedString(t, deployment.Object, "456", "spec", "selector", "matchLabels", "workspace")
+			assertNestedString(t, deployment.Object, "123", "spec", "template", "metadata", "labels", "cluster")
+			assertNestedString(t, deployment.Object, "456", "spec", "template", "metadata", "labels", "workspace")
+		})
+	}
+}
+
 func TestVLLMTemplatePreservesListEngineArgs(t *testing.T) {
 	vars := newTestVLLMVars("v0.24.0", "text-generation")
 	vars["EngineArgs"] = map[string]any{

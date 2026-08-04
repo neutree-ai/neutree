@@ -3,6 +3,8 @@ package metrics
 import (
 	"bytes"
 	"text/template"
+
+	"github.com/Masterminds/sprig/v3"
 )
 
 const kubernetesVMAgentConfigTemplateText = `global:
@@ -24,10 +26,10 @@ scrape_configs:
   # Only scrape pods with cluster and workspace labels matching
   - source_labels: [__meta_kubernetes_pod_label_cluster]
     action: keep
-    regex: {{ .ClusterName }}
+    regex: {{ .ClusterName | quote }}
   - source_labels: [__meta_kubernetes_pod_label_workspace]
     action: keep
-    regex: {{ .Workspace }}
+    regex: {{ .Workspace | quote }}
   # Set the __address__ to pod IP and port 8000
   - source_labels: [__meta_kubernetes_pod_ip]
     action: replace
@@ -66,10 +68,10 @@ scrape_configs:
   # Only scrape pods with cluster and workspace labels matching
   - source_labels: [__meta_kubernetes_pod_label_cluster]
     action: keep
-    regex: {{ .ClusterName }}
+    regex: {{ .ClusterName | quote }}
   - source_labels: [__meta_kubernetes_pod_label_workspace]
     action: keep
-    regex: {{ .Workspace }}
+    regex: {{ .Workspace | quote }}
   # Set the __address__ to pod IP and port 8000
   - source_labels: [__meta_kubernetes_pod_ip]
     action: replace
@@ -130,9 +132,9 @@ scrape_configs:
     target_label: node
   # Add cluster and workspace labels
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName }}
+    replacement: {{ .ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace }}
+    replacement: {{ .Workspace | quote }}
 {{ end }}
 {{ if .EnableNeutreeNodeAgentMetrics }}
 # Scrape Neutree normalized node and accelerator metrics.
@@ -164,9 +166,9 @@ scrape_configs:
     action: replace
     target_label: pod
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName }}
+    replacement: {{ .ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace }}
+    replacement: {{ .Workspace | quote }}
 {{ end }}
 {{ range .AcceleratorExporters }}
 # Scrape accelerator exporter metrics from detected accelerator nodes.
@@ -198,9 +200,9 @@ scrape_configs:
     action: replace
     target_label: pod
   - target_label: neutree_cluster
-    replacement: {{ $.ClusterName }}
+    replacement: {{ $.ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ $.Workspace }}
+    replacement: {{ $.Workspace | quote }}
   - target_label: accelerator_type
     replacement: {{ .AcceleratorType }}
 {{ end }}
@@ -228,9 +230,9 @@ scrape_configs:
     action: replace
     target_label: pod
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName }}
+    replacement: {{ .ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace }}
+    replacement: {{ .Workspace | quote }}
 {{ end }}
 {{ if .EnableHAMiMonitorScrape }}
 # Scrape HAMi vGPU monitor metrics from the managed HAMi device-plugin pods
@@ -263,9 +265,9 @@ scrape_configs:
     target_label: monitor_pod
   # Add cluster and workspace labels
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName }}
+    replacement: {{ .ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace }}
+    replacement: {{ .Workspace | quote }}
 {{ end }}
 {{ if .EnableKubeStateMetrics }}
 # Scrape kube-state-metrics for Neutree pod ownership labels.
@@ -294,13 +296,13 @@ scrape_configs:
     action: replace
     target_label: monitor_pod
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName }}
+    replacement: {{ .ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace }}
+    replacement: {{ .Workspace | quote }}
 {{ end }}`
 
 var kubernetesVMAgentConfigTemplate = template.Must(
-	template.New("kubernetes-vmagent-config").Parse(kubernetesVMAgentConfigTemplateText),
+	template.New("kubernetes-vmagent-config").Funcs(sprig.TxtFuncMap()).Parse(kubernetesVMAgentConfigTemplateText),
 )
 
 func renderKubernetesVMAgentConfig(variables MetricsManifestVariables) (string, error) {
