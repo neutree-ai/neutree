@@ -27,9 +27,10 @@ var (
 )
 
 var (
-	mountInterface = kmount.New("")
-	readDir        = os.ReadDir
-	readDirChecks  sync.Map
+	mountInterface  = kmount.New("")
+	readDir         = os.ReadDir
+	readDirChecksMu sync.Mutex
+	readDirChecks   = make(map[string]*readDirCheck)
 )
 
 const nfsReadTimeout = 10 * time.Second
@@ -51,6 +52,7 @@ func findMount(device string, mountPoint string) (bool, string, error) {
 	}
 
 	var unexpectedDevice string
+
 	for _, mp := range mountPoints {
 		if mountPoint == mp.Path && device == mp.Device {
 			return true, "", nil
@@ -107,6 +109,7 @@ func MountNFS(device string, mountPoint string) error {
 	if existed {
 		return readDirWithTimeout(mountPoint, nfsReadTimeout)
 	}
+
 	if unexpectedDevice != "" {
 		return errors.Errorf("mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
 	}
@@ -131,16 +134,22 @@ type readDirCheck struct {
 }
 
 func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
-	newCheck := &readDirCheck{done: make(chan struct{})}
-	value, loaded := readDirChecks.LoadOrStore(mountPoint, newCheck)
-	check := newCheck
-	if loaded {
-		check = value.(*readDirCheck)
-	} else {
+	readDirChecksMu.Lock()
+	check, loaded := readDirChecks[mountPoint]
+	if !loaded {
+		check = &readDirCheck{done: make(chan struct{})}
+		readDirChecks[mountPoint] = check
+	}
+	readDirChecksMu.Unlock()
+
+	if !loaded {
 		go func() {
 			_, check.err = readDir(mountPoint)
 			close(check.done)
-			readDirChecks.Delete(mountPoint)
+
+			readDirChecksMu.Lock()
+			delete(readDirChecks, mountPoint)
+			readDirChecksMu.Unlock()
 		}()
 	}
 
@@ -152,6 +161,7 @@ func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 		if check.err != nil {
 			return errors.Wrapf(check.err, "failed to read NFS mount path %s", mountPoint)
 		}
+
 		return nil
 	case <-timer.C:
 		return errors.Errorf("timed out reading NFS mount path %s", mountPoint)
