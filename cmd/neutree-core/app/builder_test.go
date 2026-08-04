@@ -68,7 +68,7 @@ func TestBuilderBuildRequiresGinEngine(t *testing.T) {
 
 func TestBuilderBuildPreservesConfiguredAcceleratorManagerWithoutInjectedPlugins(t *testing.T) {
 	manager := &acceleratormocks.MockManager{}
-	config := &config.CoreConfig{AcceleratorManager: manager}
+	config := &config.CoreConfig{GinEngine: gin.New(), AcceleratorManager: manager}
 	builder := NewBuilder().WithConfig(config)
 	builder.controllerInits = map[string]ControllerFactory{}
 
@@ -79,6 +79,17 @@ func TestBuilderBuildPreservesConfiguredAcceleratorManagerWithoutInjectedPlugins
 	}
 	if config.AcceleratorManager != manager {
 		t.Fatal("Build() replaced the configured AcceleratorManager without injected plugins")
+	}
+}
+
+func TestBuilderBuildRequiresGinEngineWithConfiguredAcceleratorManager(t *testing.T) {
+	builder := NewBuilder().WithConfig(&config.CoreConfig{AcceleratorManager: &acceleratormocks.MockManager{}})
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err == nil {
+		t.Fatal("Build() error = nil, want GinEngine validation error")
 	}
 }
 

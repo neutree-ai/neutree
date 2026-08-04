@@ -113,6 +113,9 @@ func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
 		return nil, fmt.Errorf("configuration is required to build the application")
 	}
+	if b.config.GinEngine == nil {
+		return nil, fmt.Errorf("gin engine is required")
+	}
 
 	if b.config.AcceleratorManager == nil || len(b.acceleratorPlugins) > 0 {
 		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
