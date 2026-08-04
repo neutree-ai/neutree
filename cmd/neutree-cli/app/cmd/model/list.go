@@ -100,6 +100,7 @@ func runList(opts *listOptions) error {
 
 	// Create client
 	c := client.NewClient(global.ServerURL, clientOptions...)
+
 	_, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
 	if err != nil {
 		return fmt.Errorf("failed to get model registry %s: %w", registry, err)
