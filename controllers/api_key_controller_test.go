@@ -45,10 +45,34 @@ func testApiKey(id string, phase v1.ApiKeyPhase) *v1.ApiKey {
 	return apiKey
 }
 
+// newTestApiKeyControllerWithFailingGateway builds a controller whose gateway
+// rejects the delete, standing in for an unreachable gateway.
+func newTestApiKeyControllerWithFailingGateway(storage *storagemocks.MockStorage) *ApiKeyController {
+	gw := &gatewaymocks.MockGateway{}
+	gw.On("SyncAPIKey", mock.Anything).Return(nil)
+	gw.On("DeleteAPIKey", mock.Anything).Return(assert.AnError)
+
+	c, _ := NewApiKeyController(&ApiKeyControllerOption{
+		Storage: storage,
+		Gw:      gw,
+	})
+
+	return c
+}
+
 // testApiKeyWithDeletionTimestamp is a helper to create a ApiKey object marked for deletion.
 func testApiKeyWithDeletionTimestamp(id string, phase v1.ApiKeyPhase) *v1.ApiKey {
 	apiKey := testApiKey(id, phase)
 	apiKey.Metadata.DeletionTimestamp = time.Now().Format(time.RFC3339Nano)
+	return apiKey
+}
+
+// testApiKeyForceDeleted marks the key for deletion and adds the force-delete
+// annotation, which api_key deliberately does not honour.
+func testApiKeyForceDeleted(id string, phase v1.ApiKeyPhase) *v1.ApiKey {
+	apiKey := testApiKeyWithDeletionTimestamp(id, phase)
+	apiKey.Metadata.Annotations = v1.WithForceDeleteAnnotation(apiKey.Metadata.Annotations)
+
 	return apiKey
 }
 
@@ -114,6 +138,46 @@ func TestApiKeyController_Sync_Deletion(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
+// TestApiKeyController_Sync_Deletion_GatewayUnreachable pins NEU-650: a key whose
+// gateway credential could not be revoked must not advance to DELETED, with or
+// without the force-delete annotation. Advancing would let the next reconcile drop
+// the DB row and leave an orphaned consumer keeping the key alive on the data plane.
+func TestApiKeyController_Sync_Deletion_GatewayUnreachable(t *testing.T) {
+	apiKeyID := "test-id"
+
+	tests := []struct {
+		name  string
+		input *v1.ApiKey
+	}{
+		{
+			name:  "gateway delete failed -> phase not advanced",
+			input: testApiKeyWithDeletionTimestamp(apiKeyID, v1.ApiKeyPhaseCREATED),
+		},
+		{
+			name:  "gateway delete failed with force-delete annotation -> phase still not advanced",
+			input: testApiKeyForceDeleted(apiKeyID, v1.ApiKeyPhaseCREATED),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			mockStorage.On("UpdateApiKey", apiKeyID, mock.MatchedBy(func(r *v1.ApiKey) bool {
+				return r.Status != nil && r.Status.Phase != v1.ApiKeyPhaseDELETED && r.Status.ErrorMessage != ""
+			})).Return(nil).Once()
+
+			c := newTestApiKeyControllerWithFailingGateway(mockStorage)
+
+			err := c.sync(tt.input)
+
+			assert.Error(t, err)
+			// The DB row must survive so a later reconcile can retry the revocation.
+			mockStorage.AssertNotCalled(t, "DeleteApiKey", mock.Anything)
 			mockStorage.AssertExpectations(t)
 		})
 	}
