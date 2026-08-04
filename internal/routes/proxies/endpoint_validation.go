@@ -69,7 +69,53 @@ func validateEndpointVGPURequest(
 		return validationErr
 	}
 
-	return validateEndpointVGPUPreflight(store, method, queryParams, endpoint)
+	var resolvedPatch *v1.Endpoint
+
+	if method == http.MethodPatch {
+		clusterPresent, validationErr := endpointPatchIncludesCluster(body)
+		if validationErr != nil {
+			return validationErr
+		}
+
+		if clusterPresent {
+			resolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
+			if validationErr != nil {
+				return validationErr
+			}
+
+			if endpointClusterChanged(resolvedPatch, endpoint) {
+				return endpointClusterImmutableError()
+			}
+		}
+	}
+
+	return validateEndpointVGPUPreflightWithResolvedPatch(store, method, queryParams, endpoint, resolvedPatch)
+}
+
+func endpointPatchIncludesCluster(body []byte) (bool, *validationError) {
+	var payload struct {
+		Spec map[string]json.RawMessage `json:"spec"`
+	}
+
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, invalidEndpointPayloadError(err)
+	}
+
+	_, ok := payload.Spec["cluster"]
+
+	return ok, nil
+}
+
+func endpointClusterChanged(existing *v1.Endpoint, patch *v1.Endpoint) bool {
+	if existing == nil || existing.Spec == nil {
+		return false
+	}
+
+	if patch == nil || patch.Spec == nil {
+		return existing.Spec.Cluster != ""
+	}
+
+	return existing.Spec.Cluster != patch.Spec.Cluster
 }
 
 func parseEndpointBody(body []byte) (*v1.Endpoint, *validationError) {
@@ -87,6 +133,16 @@ func validateEndpointVGPUPreflight(
 	queryParams url.Values,
 	endpoint *v1.Endpoint,
 ) *validationError {
+	return validateEndpointVGPUPreflightWithResolvedPatch(store, method, queryParams, endpoint, nil)
+}
+
+func validateEndpointVGPUPreflightWithResolvedPatch(
+	store storage.Storage,
+	method string,
+	queryParams url.Values,
+	endpoint *v1.Endpoint,
+	resolvedPatch *v1.Endpoint,
+) *validationError {
 	if endpoint == nil || endpoint.GetDeletionTimestamp() != "" {
 		return nil
 	}
@@ -101,7 +157,7 @@ func validateEndpointVGPUPreflight(
 		}
 	}
 
-	targetEndpoint, validationErr := endpointVGPUValidationTarget(store, method, queryParams, endpoint)
+	targetEndpoint, validationErr := endpointVGPUValidationTarget(store, method, queryParams, endpoint, resolvedPatch)
 	if validationErr != nil {
 		return validationErr
 	}
@@ -149,17 +205,22 @@ func endpointVGPUValidationTarget(
 	method string,
 	queryParams url.Values,
 	endpoint *v1.Endpoint,
+	resolvedPatch *v1.Endpoint,
 ) (*v1.Endpoint, *validationError) {
 	if method != http.MethodPatch {
 		return endpoint, nil
 	}
 
-	resolved, validationErr := resolveEndpointPatch(store, queryParams)
-	if validationErr != nil {
-		return nil, validationErr
+	if resolvedPatch == nil {
+		var validationErr *validationError
+		resolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
+
+		if validationErr != nil {
+			return nil, validationErr
+		}
 	}
 
-	merged := mergeEndpointPatch(resolved, endpoint)
+	merged := mergeEndpointPatch(resolvedPatch, endpoint)
 
 	return &merged, nil
 }
@@ -649,5 +710,13 @@ func endpointVGPUNotReadyError(cluster *v1.Cluster, hint string) *validationErro
 		Code:    "10222",
 		Message: "cluster accelerator virtualization is not ready",
 		Hint:    hint,
+	}
+}
+
+func endpointClusterImmutableError() *validationError {
+	return &validationError{
+		Code:    "10225",
+		Message: "endpoint cluster is immutable",
+		Hint:    "spec.cluster cannot be changed after endpoint creation",
 	}
 }

@@ -568,7 +568,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWhenVirtualizationNotReady(t *tes
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsPausePatchWithMissingCluster(t *testing.T) {
+func TestEndpointVGPUValidationRejectsPausePatchThatChangesCluster(t *testing.T) {
 	clusterStorage := &fakeClusterStorage{
 		endpoints: []v1.Endpoint{
 			*endpointWithVGPU("cluster-a", "team-a"),
@@ -588,8 +588,11 @@ func TestEndpointVGPUValidationAllowsPausePatchWithMissingCluster(t *testing.T) 
 		clusterStorage,
 	)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, handlerCalled)
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10225", response.Code)
+	assert.False(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationAllowsPausePatchWithInvalidVGPUResourceShape(t *testing.T) {
@@ -910,8 +913,106 @@ func TestEndpointVGPUValidationAllowsPatchWhenTargetDeviceCannotPhysicallyFitVGP
 		clusterStorage,
 	)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, handlerCalled)
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10225", response.Code)
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsPatchThatChangesCluster(t *testing.T) {
+	existing := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "different cluster",
+			body: `{"spec":{"cluster":"cluster-b"}}`,
+		},
+		{
+			name: "empty cluster",
+			body: `{"spec":{"cluster":""}}`,
+		},
+		{
+			name: "null cluster",
+			body: `{"spec":{"cluster":null}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{*existing}}
+
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				http.MethodPatch,
+				"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+				tt.body,
+				clusterStorage,
+			)
+
+			var response validationError
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, "10225", response.Code)
+			assert.False(t, handlerCalled)
+			assert.Equal(t, 1, clusterStorage.endpointListCalls)
+		})
+	}
+}
+
+func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
+	existing := v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+
+	tests := []struct {
+		name              string
+		method            string
+		body              string
+		expectedListCalls int
+	}{
+		{
+			name:              "same cluster patch",
+			method:            http.MethodPatch,
+			body:              `{"spec":{"cluster":"cluster-a"}}`,
+			expectedListCalls: 1,
+		},
+		{
+			name:              "patch without cluster",
+			method:            http.MethodPatch,
+			body:              `{"spec":{"variables":{"foo":"bar"}}}`,
+			expectedListCalls: 0,
+		},
+		{
+			name:              "post remains allowed",
+			method:            http.MethodPost,
+			body:              `{"metadata":{"name":"new","workspace":"team-a"},"spec":{"cluster":"cluster-b"}}`,
+			expectedListCalls: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				tt.method,
+				"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+				tt.body,
+				clusterStorage,
+			)
+
+			assert.Equal(t, http.StatusNoContent, recorder.Code)
+			assert.True(t, handlerCalled)
+			assert.Equal(t, tt.expectedListCalls, clusterStorage.endpointListCalls)
+		})
+	}
 }
 
 func endpointWithVGPU(cluster string, workspace string) *v1.Endpoint {
