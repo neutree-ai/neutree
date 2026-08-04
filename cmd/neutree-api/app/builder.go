@@ -27,6 +27,7 @@ type Builder struct {
 	config                 *config.APIConfig
 	globalMiddlewaresInits []MiddlewareFactory
 	admissionConfigurers   []admissionConfigurer
+	buildAttempted         bool
 }
 
 type admissionConfigurer struct {
@@ -196,8 +197,16 @@ func (b *Builder) WithAdmissionConfigurer(name string, configure func(*Admission
 
 // Build creates and initializes all components
 func (b *Builder) Build() (*App, error) {
+	if b.buildAttempted {
+		return nil, fmt.Errorf("build has already been attempted")
+	}
+	b.buildAttempted = true
+
 	if b.config == nil {
 		return nil, fmt.Errorf("config is required")
+	}
+	if err := b.validateAdmissionConfigurers(); err != nil {
+		return nil, err
 	}
 	admissionRegistry := admission.NewRegistry()
 
@@ -255,13 +264,8 @@ func (b *Builder) Build() (*App, error) {
 		}
 	}
 
-	configuredNames := make(map[string]struct{}, len(b.admissionConfigurers))
 	admissionOptions := &AdmissionOptions{Registry: admissionRegistry}
 	for _, configurer := range b.admissionConfigurers {
-		if _, exists := configuredNames[configurer.name]; exists {
-			return nil, fmt.Errorf("duplicate admission configurer %q", configurer.name)
-		}
-		configuredNames[configurer.name] = struct{}{}
 		if err := configurer.configure(admissionOptions); err != nil {
 			return nil, fmt.Errorf("failed to configure admission %q: %w", configurer.name, err)
 		}
@@ -271,4 +275,21 @@ func (b *Builder) Build() (*App, error) {
 	}
 
 	return NewApp(b.config), nil
+}
+
+func (b *Builder) validateAdmissionConfigurers() error {
+	names := make(map[string]struct{}, len(b.admissionConfigurers))
+	for _, configurer := range b.admissionConfigurers {
+		if configurer.name == "" {
+			return fmt.Errorf("admission configurer name is required")
+		}
+		if configurer.configure == nil {
+			return fmt.Errorf("admission configurer %q is nil", configurer.name)
+		}
+		if _, exists := names[configurer.name]; exists {
+			return fmt.Errorf("duplicate admission configurer %q", configurer.name)
+		}
+		names[configurer.name] = struct{}{}
+	}
+	return nil
 }

@@ -69,6 +69,29 @@ func TestBuilderAdmissionConfigurerErrorAbortsBuild(t *testing.T) {
 	}
 }
 
+func TestBuilderAdmissionNilConfigurerFailsWithoutPanic(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	builder.WithAdmissionConfigurer("nil", nil)
+
+	err := buildAdmissionWithoutPanic(t, builder)
+	if err == nil || !strings.Contains(err.Error(), "nil") {
+		t.Errorf("Build() error = %v, want nil configurer error", err)
+	}
+}
+
+func TestBuilderAdmissionConfigurerFailurePreventsBuildReuse(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	want := errors.New("configure admission")
+	builder.WithAdmissionConfigurer("failing", func(*AdmissionOptions) error { return want })
+
+	if err := buildAdmissionWithoutPanic(t, builder); !errors.Is(err, want) {
+		t.Errorf("first Build() error = %v, want %v", err, want)
+	}
+	if err := buildAdmissionWithoutPanic(t, builder); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Errorf("second Build() error = %v, want already attempted error", err)
+	}
+}
+
 func TestBuilderPassesAdmissionRegistryToProxyRoutes(t *testing.T) {
 	builder := newAdmissionTestBuilder()
 	var proxyRegistry, configuredRegistry *admission.Registry
@@ -98,4 +121,15 @@ func newAdmissionTestBuilder() *Builder {
 		StaticConfig: &config.StaticConfig{},
 	})
 	return builder
+}
+
+func buildAdmissionWithoutPanic(t *testing.T, builder *Builder) (err error) {
+	t.Helper()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Build() panicked: %v", recovered)
+		}
+	}()
+	_, err = builder.Build()
+	return err
 }
