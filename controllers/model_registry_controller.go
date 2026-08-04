@@ -172,5 +172,13 @@ func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.M
 		ErrorMessage:       FormatErrorForStatus(err),
 	}
 
+	// PostgREST replaces a composite-type column as a whole, so any attribute
+	// missing from the PATCH body is nulled rather than left alone. Carry
+	// forward the attributes this reconcile does not own; otherwise every phase
+	// or error transition wipes them. Same reason as ClusterController.updateStatus.
+	if obj.Status != nil {
+		newStatus.Stats = obj.Status.Stats
+	}
+
 	return c.storage.UpdateModelRegistry(strconv.Itoa(obj.ID), &v1.ModelRegistry{Status: newStatus})
 }

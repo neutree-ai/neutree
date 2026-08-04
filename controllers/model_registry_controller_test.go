@@ -376,6 +376,83 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 	}
 }
 
+// Regression test for the status write-back defect bundled with NEU-619.
+//
+// updateStatus rebuilds the status struct from scratch, and PostgREST replaces a
+// composite-type column as a whole rather than merging attribute by attribute.
+// Every attribute the reconcile leaves out of the PATCH body is therefore nulled
+// in the database. Before the carry-forward, each of the transitions below wiped
+// the statistics that the (separate) statistics path had written.
+func TestModelRegistryController_UpdateStatus_CarriesStatsForward(t *testing.T) {
+	stats := func() *v1.ModelRegistryStats {
+		return &v1.ModelRegistryStats{
+			ModelCount:     3,
+			StorageBytes:   4096,
+			StatsUpdatedAt: "2026-01-01T00:00:00Z",
+		}
+	}
+
+	testModelRegistry := func(phase v1.ModelRegistryPhase) *v1.ModelRegistry {
+		return &v1.ModelRegistry{
+			ID:       1,
+			Metadata: &v1.Metadata{Name: "test"},
+			Status:   &v1.ModelRegistryStatus{Phase: phase, Stats: stats()},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		input     *v1.ModelRegistry
+		wantPhase v1.ModelRegistryPhase
+		mockSetup func(*modelregistrymocks.MockModelRegistry)
+		wantErr   bool
+	}{
+		{
+			name:      "Connected -> Failed (health check failed)",
+			input:     testModelRegistry(v1.ModelRegistryPhaseCONNECTED),
+			wantPhase: v1.ModelRegistryPhaseFAILED,
+			mockSetup: func(m *modelregistrymocks.MockModelRegistry) {
+				m.On("HealthyCheck").Return(assert.AnError)
+			},
+			wantErr: true,
+		},
+		{
+			name:      "Failed -> Connected (reconnect succeeded)",
+			input:     testModelRegistry(v1.ModelRegistryPhaseFAILED),
+			wantPhase: v1.ModelRegistryPhaseCONNECTED,
+			mockSetup: func(m *modelregistrymocks.MockModelRegistry) {
+				m.On("Disconnect").Return(nil)
+				m.On("Connect").Return(nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &storagemocks.MockStorage{}
+			mockModel := &modelregistrymocks.MockModelRegistry{}
+			tt.mockSetup(mockModel)
+
+			mockStorage.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+				obj := args.Get(1).(*v1.ModelRegistry)
+				assert.Equal(t, tt.wantPhase, obj.Status.Phase)
+				assert.Equal(t, stats(), obj.Status.Stats, "status write-back must not drop stats")
+			}).Return(nil)
+
+			c := newTestModelRegistryController(mockStorage, mockModel)
+			err := c.sync(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockStorage.AssertExpectations(t)
+			mockModel.AssertExpectations(t)
+		})
+	}
+}
+
 func TestModelRegistryController_Reconcile(t *testing.T) {
 	tests := []struct {
 		name      string
