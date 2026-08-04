@@ -1,12 +1,16 @@
 package storage
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // NEU-447 regression tests.
@@ -110,4 +114,91 @@ func TestCallDatabaseFunction_FailureDoesNotPoisonListQueries(t *testing.T) {
 	require.Empty(t, endpoints)
 	require.Equal(t, int32(1), atomic.LoadInt32(&listCalls),
 		"the List must reach the server, not short-circuit on a stale error")
+}
+
+func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
+	requests := make(chan *http.Request, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ReleaseInfo","metadata":{"name":"v1.2.0"},"spec":{"channel":"Stable","build_identity":"v1.2.0"},"status":{"revision":"r1"}}]`))
+		case http.MethodPost:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`[]`))
+		case http.MethodPatch:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := newTestStorage(t, server.URL)
+	infos, err := s.ListReleaseInfo()
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, "v1.2.0", infos[0].GetName())
+
+	info := &v1.ReleaseInfo{Metadata: &v1.Metadata{Name: "v1.2.0"}}
+	require.NoError(t, s.CreateReleaseInfo(info))
+	require.NoError(t, s.UpdateReleaseInfo("7", info))
+
+	first := <-requests
+	assert.Equal(t, http.MethodGet, first.Method)
+	assert.Equal(t, "/release_infos", first.URL.Path)
+
+	second := <-requests
+	assert.Equal(t, http.MethodPost, second.Method)
+	assert.Equal(t, "/release_infos", second.URL.Path)
+
+	third := <-requests
+	assert.Equal(t, http.MethodPatch, third.Method)
+	assert.Equal(t, "/release_infos", third.URL.Path)
+	assert.Equal(t, "eq.7", third.URL.Query().Get("id"))
+}
+
+func TestClusterUpgradeSnapshotStorageUsesInternalTable(t *testing.T) {
+	requests := make(chan *http.Request, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"cluster_id":7,"source_cluster_version":"v1.1.0","target_cluster_version":"v1.2.0","target_release_info":{"baseline":"v1.2.0","revision":"r2"},"allowed_edge":{"from":"v1.1.0","to":"v1.2.0"},"components":{"ray_runtime":"neutree/neutree-serve:v1.1.1"}}]`))
+		case http.MethodPost:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`[]`))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := newTestStorage(t, server.URL)
+	snapshot, err := s.GetClusterUpgradeSnapshot("7")
+	require.NoError(t, err)
+	assert.Equal(t, "v1.2.0", snapshot.TargetClusterVersion)
+	require.NoError(t, s.CreateClusterUpgradeSnapshot(&v1.ClusterUpgradeSnapshot{ClusterID: 7}))
+	require.NoError(t, s.DeleteClusterUpgradeSnapshot("7"))
+
+	first := <-requests
+	assert.Equal(t, http.MethodGet, first.Method)
+	assert.Equal(t, "/cluster_upgrade_snapshots", first.URL.Path)
+	assert.Equal(t, "eq.7", first.URL.Query().Get("cluster_id"))
+
+	second := <-requests
+	assert.Equal(t, http.MethodPost, second.Method)
+	assert.Equal(t, "/cluster_upgrade_snapshots", second.URL.Path)
+
+	third := <-requests
+	assert.Equal(t, http.MethodDelete, third.Method)
+	assert.Equal(t, "/cluster_upgrade_snapshots", third.URL.Path)
+	assert.Equal(t, "eq.7", third.URL.Query().Get("cluster_id"))
 }

@@ -453,6 +453,62 @@ func (s *postgrestStorage) UpdateStaticNode(id string, data *v1.StaticNode) erro
 	return err
 }
 
+func (s *postgrestStorage) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
+	var response []v1.ReleaseInfo
+	err := s.genericList(RELEASE_INFO_TABLE, &response, ListOption{})
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateReleaseInfo(data *v1.ReleaseInfo) error {
+	_, _, err := s.postgrestClient.From(RELEASE_INFO_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateReleaseInfo(id string, data *v1.ReleaseInfo) error {
+	_, _, err := s.postgrestClient.From(RELEASE_INFO_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) GetClusterUpgradeSnapshot(clusterID string) (*v1.ClusterUpgradeSnapshot, error) {
+	var response []v1.ClusterUpgradeSnapshot
+
+	responseContent, _, err := s.postgrestClient.From(CLUSTER_UPGRADE_SNAPSHOT_TABLE).
+		Select("*", "", false).
+		Filter("cluster_id", "eq", clusterID).
+		Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) CreateClusterUpgradeSnapshot(data *v1.ClusterUpgradeSnapshot) error {
+	_, _, err := s.postgrestClient.From(CLUSTER_UPGRADE_SNAPSHOT_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteClusterUpgradeSnapshot(clusterID string) error {
+	_, _, err := s.postgrestClient.From(CLUSTER_UPGRADE_SNAPSHOT_TABLE).
+		Delete("", "").
+		Filter("cluster_id", "eq", clusterID).
+		Execute()
+
+	return err
+}
+
 func (s *postgrestStorage) DeleteStaticNode(id string) error {
 	_, _, err := s.postgrestClient.From(STATIC_NODE_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
 

@@ -24,7 +24,6 @@ const (
 	NvidiaGPUCoreResource              corev1.ResourceName = "nvidia.com/gpucores"
 	NvidiaGPUCountResource             string              = "nvidia.com/gpu.count"
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
-	nvidiaDCGMExporterImage            string              = "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"
 	nvidiaDCGMExporterPort             int                 = 19400
 	nvidiaDCGMExporterCollectorsPath   string              = "/etc/neutree/dcgm-exporter/default-counters.csv"
 	nvidiaDCGMExporterCollectors       string              = `# Format
@@ -231,8 +230,7 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		ClusterRuntime:  &clusterRuntime,
 		EngineRuntime:   &engineRuntime,
 		MetricsExporter: &v1.AcceleratorExporterProfile{
-			Name:  "dcgm-exporter",
-			Image: nvidiaDCGMExporterImage,
+			Name: "dcgm-exporter",
 			Args: []string{
 				"--collectors",
 				nvidiaDCGMExporterCollectorsPath,

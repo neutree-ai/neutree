@@ -17,7 +17,7 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'v1',
 			'StaticNodeCluster',
 				ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL, NULL)::api.static_node_cluster_spec,
 			ROW('Ready', 0, 0, FALSE, FALSE, 'v1.0.2', NULL, NULL)::api.static_node_cluster_status
 		)
 	`, clusterName, workspace)
@@ -37,6 +37,49 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 	`, "10.0.0.10", workspace, clusterName)
 	if err != nil {
 		t.Fatalf("failed to create static node: %v", err)
+	}
+}
+
+func TestStaticNodeClusterSpecPersistsReleaseComponents(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var runtimeImage string
+	err = tx.QueryRowContext(ctx, `
+		WITH inserted AS (
+			INSERT INTO api.static_node_clusters (api_version, kind, metadata, spec, status)
+			VALUES (
+				'v1',
+				'StaticNodeCluster',
+				ROW('release-components', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+				ROW(
+					'v1.1.0',
+					'registry.example.com/neutree',
+					NULL,
+					jsonb_build_array(),
+					NULL,
+					jsonb_build_object('ray_runtime', 'neutree/neutree-serve:v1.1.0')
+				)::api.static_node_cluster_spec,
+				ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
+			)
+			RETURNING spec
+		)
+		SELECT (spec).components->>'ray_runtime' FROM inserted
+	`).Scan(&runtimeImage)
+	if err != nil {
+		t.Fatalf("failed to persist static node release components: %v", err)
+	}
+
+	if runtimeImage != "neutree/neutree-serve:v1.1.0" {
+		t.Fatalf("expected persisted ray runtime image, got %q", runtimeImage)
 	}
 }
 
@@ -192,7 +235,7 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 					'v1',
 					'StaticNodeCluster',
 						ROW('blocked-static', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-						ROW('v1.0.2', NULL, NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+						ROW('v1.0.2', NULL, NULL, jsonb_build_array(), NULL, NULL)::api.static_node_cluster_spec,
 					ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 				)
 			`,
@@ -338,7 +381,7 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 			'v1',
 			'StaticNodeCluster',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+			ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL, NULL)::api.static_node_cluster_spec,
 			ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 		)
 	`, insertedCluster, workspace); err != nil {

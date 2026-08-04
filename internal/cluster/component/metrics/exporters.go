@@ -89,8 +89,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 		return nil, nil
 	}
 
-	acceleratorTypes := append([]string{}, m.acceleratorMgr.SupportPlugins()...)
-	sort.Strings(acceleratorTypes)
+	acceleratorTypes := m.acceleratorTypes()
 
 	candidates := make([]metricsAcceleratorExporter, 0, len(acceleratorTypes))
 
@@ -102,6 +101,27 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	}
 
 	return m.selectClusterAcceleratorExporter(ctx, candidates)
+}
+
+func (m *MetricsComponent) acceleratorTypes() []string {
+	if m.releaseComponents != nil {
+		if m.cluster == nil || m.cluster.Spec == nil || m.cluster.Spec.Config == nil ||
+			m.cluster.Spec.Config.AcceleratorType == nil {
+			return nil
+		}
+
+		acceleratorType := strings.TrimSpace(*m.cluster.Spec.Config.AcceleratorType)
+		if acceleratorType == "" {
+			return nil
+		}
+
+		return []string{acceleratorType}
+	}
+
+	acceleratorTypes := append([]string{}, m.acceleratorMgr.SupportPlugins()...)
+	sort.Strings(acceleratorTypes)
+
+	return acceleratorTypes
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
@@ -127,7 +147,15 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
-	if strings.TrimSpace(exporterProfile.Image) == "" ||
+
+	exporterImage := ""
+	if m.releaseComponents != nil {
+		exporterImage = m.releaseComponents["dcgm_exporter"]
+	} else if acceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() {
+		exporterImage = componentversion.NVIDIADCGMExporterImage
+	}
+
+	if strings.TrimSpace(exporterImage) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {
 		return metricsAcceleratorExporter{}, false
@@ -143,7 +171,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Name:            name,
 		AcceleratorType: acceleratorType,
 		ExporterName:    exporterProfile.Name,
-		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Image:           util.RewriteImageRef(m.imagePrefix, exporterImage),
 		Args:            append([]string{}, exporterProfile.Args...),
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,

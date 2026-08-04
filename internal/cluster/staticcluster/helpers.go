@@ -143,6 +143,27 @@ func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
 	return util.RewriteImageRef(imageRegistry, image)
 }
 
+func releaseComponentImage(cluster *v1.StaticNodeCluster, component string) string {
+	if cluster == nil || cluster.Spec == nil {
+		return ""
+	}
+
+	image := cluster.Spec.Components[component]
+	if image == "" {
+		return ""
+	}
+
+	return staticComponentImage(cluster, image)
+}
+
+func componentImage(cluster *v1.StaticNodeCluster, component, legacyImage string) string {
+	if image := releaseComponentImage(cluster, component); image != "" {
+		return image
+	}
+
+	return staticComponentImage(cluster, legacyImage)
+}
+
 func copyAuth(auth *v1.Auth) *v1.Auth {
 	if auth == nil {
 		return nil

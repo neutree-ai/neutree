@@ -20,6 +20,59 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+type ReleaseInfoProvider interface {
+	Current() (*v1.ReleaseInfo, error)
+}
+
+func validateClusterVersionCreate(provider ReleaseInfoProvider) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Request.Body.Close()
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+		c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		var cluster v1.Cluster
+		if err := json.Unmarshal(body, &cluster); err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if provider == nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(errors.New("release info provider is required")))
+			c.Abort()
+
+			return
+		}
+
+		info, err := provider.Current()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(err))
+			c.Abort()
+
+			return
+		}
+
+		if err := validateReleaseInfoClusterVersionCreate(info, cluster.GetVersion()); err != nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
 		count, err := s.Count(storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters(workspace, name))
@@ -107,7 +160,12 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 	}
 }
 
-func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
+func validateClusterVersionUpdate(s storage.Storage, providers ...ReleaseInfoProvider) gin.HandlerFunc {
+	var provider ReleaseInfoProvider
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
+
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -166,6 +224,44 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
+		if provider != nil {
+			info, err := provider.Current()
+			if err != nil {
+				c.JSON(http.StatusBadRequest, releaseInfoValidationError(err))
+				c.Abort()
+
+				return
+			}
+
+			sourceVersion := effectiveClusterVersionForUpdate(current)
+			if releaseVersion := releaseInfoClusterVersion(info, sourceVersion); releaseVersion != nil {
+				if err := validateReleaseInfoClusterVersionUpdate(info, sourceVersion, desiredVersion); err != nil {
+					c.JSON(http.StatusBadRequest, releaseInfoValidationError(err))
+					c.Abort()
+
+					return
+				}
+
+				if err := validateClusterUpgradeSnapshot(s, current, sourceVersion, desiredVersion); err != nil {
+					c.JSON(http.StatusBadRequest, releaseInfoValidationError(err))
+					c.Abort()
+
+					return
+				}
+
+				c.Next()
+
+				return
+			}
+
+			if err := validateReleaseInfoClusterVersionCreate(info, desiredVersion); err != nil {
+				c.JSON(http.StatusBadRequest, releaseInfoValidationError(err))
+				c.Abort()
+
+				return
+			}
+		}
+
 		if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
 			c.JSON(http.StatusBadRequest, &validationError{
 				Code:    "10212",
@@ -179,6 +275,114 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func effectiveClusterVersionForUpdate(cluster *v1.Cluster) string {
+	if cluster != nil && cluster.Status != nil && cluster.Status.Version != "" {
+		return cluster.Status.Version
+	}
+
+	return cluster.GetVersion()
+}
+
+func validateClusterUpgradeSnapshot(s storage.Storage, current *v1.Cluster, sourceVersion, desiredVersion string) error {
+	if s == nil || current == nil {
+		return nil
+	}
+
+	snapshot, err := s.GetClusterUpgradeSnapshot(strconv.Itoa(current.ID))
+	if errors.Is(err, storage.ErrResourceNotFound) {
+		return nil
+	}
+
+	if err != nil {
+		return fmt.Errorf("get cluster upgrade snapshot: %w", err)
+	}
+
+	if snapshot.TargetClusterVersion == sourceVersion {
+		return nil
+	}
+
+	if snapshot.SourceClusterVersion == sourceVersion && snapshot.TargetClusterVersion == desiredVersion {
+		return nil
+	}
+
+	return fmt.Errorf("in-flight upgrade snapshot %s -> %s does not match requested upgrade %s -> %s",
+		snapshot.SourceClusterVersion, snapshot.TargetClusterVersion, sourceVersion, desiredVersion)
+}
+
+func releaseInfoValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version update",
+		Hint:    err.Error(),
+	}
+}
+
+func releaseInfoCreateValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version create",
+		Hint:    err.Error(),
+	}
+}
+
+func validateReleaseInfoClusterVersionCreate(info *v1.ReleaseInfo, version string) error {
+	if version == "" {
+		return errors.New("spec.version is required")
+	}
+
+	releaseVersion := releaseInfoClusterVersion(info, version)
+	if releaseVersion == nil {
+		return fmt.Errorf("cluster version %s is not supported by the current release info", version)
+	}
+
+	if releaseVersion.State != v1.ReleaseInfoClusterVersionStateActive {
+		return fmt.Errorf("cluster version %s is not active", version)
+	}
+
+	return nil
+}
+
+func validateReleaseInfoClusterVersionUpdate(info *v1.ReleaseInfo, currentVersion, desiredVersion string) error {
+	if err := validateReleaseInfoClusterVersionCreate(info, desiredVersion); err != nil {
+		return err
+	}
+
+	current := releaseInfoClusterVersion(info, currentVersion)
+	if current == nil {
+		return fmt.Errorf("current cluster version %s is not supported by the current release info", currentVersion)
+	}
+
+	if current.State != v1.ReleaseInfoClusterVersionStateActive {
+		return fmt.Errorf("current cluster version %s is not active", currentVersion)
+	}
+
+	if currentVersion == desiredVersion {
+		return nil
+	}
+
+	for _, target := range current.UpgradeTo {
+		if target == desiredVersion {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cluster version update from %s to %s is not allowed by the current release info", currentVersion, desiredVersion)
+}
+
+func releaseInfoClusterVersion(info *v1.ReleaseInfo, version string) *v1.ReleaseInfoClusterVersion {
+	if info == nil || info.Spec == nil {
+		return nil
+	}
+
+	for index := range info.Spec.ClusterVersions {
+		if info.Spec.ClusterVersions[index].Version == version {
+			return &info.Spec.ClusterVersions[index]
+		}
+	}
+
+	return nil
 }
 
 func clusterPatchDesiredVersion(body []byte) (string, bool, error) {
@@ -558,9 +762,10 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
 	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
-	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage)
+	versionCreateValidation := validateClusterVersionCreate(deps.ReleaseInfoProvider)
+	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage, deps.ReleaseInfoProvider)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
+	proxyGroup.POST("", versionCreateValidation, acceleratorVirtualizationValidation, handler)
 	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, acceleratorVirtualizationValidation, handler)
 }

@@ -89,7 +89,9 @@ func buildMetricsComponents(
 
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
 		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
+			if image := acceleratorExporterImage(cluster, exporter); image != "" {
+				components = append(components, buildAcceleratorExporterComponent(exporter, image))
+			}
 		}
 	}
 
@@ -105,7 +107,7 @@ func buildMetricsComponents(
 func buildNodeExporterComponent(cluster *v1.StaticNodeCluster) v1.NodeComponentSpec {
 	return v1.NodeComponentSpec{
 		Name:  nodeExporterComponentName,
-		Image: staticComponentImage(cluster, defaultNodeExporterImage),
+		Image: componentImage(cluster, "node_exporter", defaultNodeExporterImage),
 		Args: []string{
 			"--path.rootfs=/host",
 			fmt.Sprintf("--web.listen-address=:%d", defaultNodeExporterPort),
@@ -143,17 +145,31 @@ func acceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorE
 func validAcceleratorExporterProfile(exporter *v1.AcceleratorExporterProfile) bool {
 	return exporter != nil &&
 		strings.TrimSpace(exporter.Name) != "" &&
-		strings.TrimSpace(exporter.Image) != "" &&
 		exporter.Port > 0
 }
 
-func buildAcceleratorExporterComponent(
+func acceleratorExporterImage(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
+) string {
+	if image := releaseComponentImage(cluster, "dcgm_exporter"); image != "" {
+		return image
+	}
+
+	if exporter == nil || exporter.Name != "dcgm-exporter" {
+		return ""
+	}
+
+	return staticComponentImage(cluster, componentversion.NVIDIADCGMExporterImage)
+}
+
+func buildAcceleratorExporterComponent(
+	exporter *v1.AcceleratorExporterProfile,
+	image string,
 ) v1.NodeComponentSpec {
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
-		Image:            staticComponentImage(cluster, exporter.Image),
+		Image:            image,
 		Args:             append([]string{}, exporter.Args...),
 		Env:              copyMetricsStringMap(exporter.Env),
 		Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),
@@ -193,7 +209,7 @@ func buildNodeAgentComponent(
 
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
-		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
+		Image:            componentImage(cluster, "node_agent", defaultNodeAgentImage(cluster)),
 		Args:             args,
 		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
@@ -308,7 +324,7 @@ func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL 
 
 	return v1.NodeComponentSpec{
 		Name:             vmagentComponentName,
-		Image:            staticComponentImage(cluster, defaultVMAgentImage),
+		Image:            componentImage(cluster, "vmagent", defaultVMAgentImage),
 		Args:             vmagentArgs,
 		DockerRunOptions: []string{"--net=host"},
 		Volumes: []v1.NodeComponentVolume{

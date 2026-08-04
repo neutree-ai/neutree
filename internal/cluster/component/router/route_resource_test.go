@@ -29,7 +29,6 @@ func Test_BuildRouterDeployment(t *testing.T) {
 		config: v1.KubernetesClusterConfig{
 			Router: v1.RouterSpec{
 				AccessMode: v1.KubernetesAccessModeLoadBalancer,
-				Version:    "1.0.0",
 				Replicas:   2,
 				Resources:  map[string]string{"cpu": "100m", "memory": "128Mi"},
 			},
@@ -102,6 +101,42 @@ func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
 	t.Fatalf("router deployment not found in resources")
 }
 
+func TestBuildRouterDeploymentUsesReleaseInfoImage(t *testing.T) {
+	routerComponent := NewRouterComponentWithImage(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"neutree/router:v1.1.1",
+		v1.KubernetesClusterConfig{},
+		nil,
+	)
+
+	objs, err := routerComponent.GetRouteResources()
+	if err != nil {
+		t.Fatalf("failed to build router deployment: %v", err)
+	}
+
+	for _, obj := range objs.Items {
+		if obj.GetObjectKind().GroupVersionKind().Kind != "Deployment" || obj.GetName() != "router" {
+			continue
+		}
+
+		objContent, err := json.Marshal(obj.Object)
+		assert.NoError(t, err)
+		deployment := &appsv1.Deployment{}
+		assert.NoError(t, json.Unmarshal(objContent, deployment))
+		assert.Equal(t, "test-image-prefix/neutree/router:v1.1.1", deployment.Spec.Template.Spec.Containers[0].Image)
+
+		return
+	}
+
+	t.Fatalf("router deployment not found in resources")
+}
+
 func Test_BuildRouterService(t *testing.T) {
 	// Test implementation goes here
 	routerComponent := &RouterComponent{
@@ -120,7 +155,6 @@ func Test_BuildRouterService(t *testing.T) {
 		config: v1.KubernetesClusterConfig{
 			Router: v1.RouterSpec{
 				AccessMode: v1.KubernetesAccessModeLoadBalancer,
-				Version:    "1.0.0",
 				Replicas:   2,
 				Resources:  map[string]string{"cpu": "100m", "memory": "128Mi"},
 			},

@@ -27,8 +27,6 @@ jobs:
           echo "tag=${NIGHTLY_TAG}" >> "${GITHUB_OUTPUT}"
       - name: Trigger Workflow
         uses: actions/github-script@v7
-        env:
-          NIGHTLY_CLUSTER_VERSION: ${{ secrets.NIGHTLY_CLUSTER_VERSION }}
         with:
           script: |
             const nightlyTag = '${{ steps.create_nightly_tag.outputs.tag }}';
@@ -39,7 +37,6 @@ jobs:
               ref: 'main',
               inputs: {
                 tag: nightlyTag,
-                ui_version: nightlyTag,
-                cluster_version: process.env.NIGHTLY_CLUSTER_VERSION
+                ui_version: nightlyTag
               },
             })

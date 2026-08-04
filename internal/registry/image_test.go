@@ -39,6 +39,36 @@ func TestImageService_CheckPullPermissionUsesConfiguredScheme(t *testing.T) {
 	}
 }
 
+func TestImageService_CheckImageExistsUsesConfiguredSchemeAndPreservesNotFound(t *testing.T) {
+	tests := []struct {
+		name      string
+		newServer func(http.Handler) *httptest.Server
+		useHTTP   bool
+		scheme    string
+	}{
+		{name: "explicit HTTP", newServer: httptest.NewServer, useHTTP: true, scheme: "http"},
+		{name: "HTTPS by default", newServer: httptest.NewTLSServer, scheme: "https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := tt.newServer(testRegistryHandler())
+			t.Cleanup(server.Close)
+
+			registryHost := strings.TrimPrefix(server.URL, tt.scheme+"://")
+			service := NewImageService()
+
+			exists, err := service.CheckImageExists(registryHost+"/neutree/router:v1.2.0", authn.Anonymous, tt.useHTTP)
+			require.NoError(t, err)
+			require.True(t, exists)
+
+			exists, err = service.CheckImageExists(registryHost+"/neutree/router:missing", authn.Anonymous, tt.useHTTP)
+			require.NoError(t, err)
+			require.False(t, exists)
+		})
+	}
+}
+
 func TestImageService_ListImageTagsUsesConfiguredScheme(t *testing.T) {
 	tests := []struct {
 		name      string

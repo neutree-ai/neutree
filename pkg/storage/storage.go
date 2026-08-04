@@ -15,21 +15,23 @@ var (
 )
 
 const (
-	ENDPOINT_TABLE            = "endpoints"
-	ENGINE_TABLE              = "engines"
-	IMAGE_REGISTRY_TABLE      = "image_registries"
-	CLUSTERS_TABLE            = "clusters"
-	MODEL_REGISTRY_TABLE      = "model_registries"
-	MODEL_ALIAS_TABLE         = "model_aliases"
-	MODEL_CATALOG_TABLE       = "model_catalogs"
-	ROLE_TABLE                = "roles"
-	ROLE_ASSIGNMENT_TABLE     = "role_assignments"
-	WORKSPACE_TABLE           = "workspaces"
-	API_KEY_TABLE             = "api_keys"
-	USER_PROFILE_TABLE        = "user_profiles"
-	EXTERNAL_ENDPOINT_TABLE   = "external_endpoints"
-	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
-	STATIC_NODE_TABLE         = "static_nodes"
+	ENDPOINT_TABLE                 = "endpoints"
+	ENGINE_TABLE                   = "engines"
+	IMAGE_REGISTRY_TABLE           = "image_registries"
+	CLUSTERS_TABLE                 = "clusters"
+	MODEL_REGISTRY_TABLE           = "model_registries"
+	MODEL_ALIAS_TABLE              = "model_aliases"
+	MODEL_CATALOG_TABLE            = "model_catalogs"
+	ROLE_TABLE                     = "roles"
+	ROLE_ASSIGNMENT_TABLE          = "role_assignments"
+	WORKSPACE_TABLE                = "workspaces"
+	API_KEY_TABLE                  = "api_keys"
+	USER_PROFILE_TABLE             = "user_profiles"
+	EXTERNAL_ENDPOINT_TABLE        = "external_endpoints"
+	RELEASE_INFO_TABLE             = "release_infos"
+	CLUSTER_UPGRADE_SNAPSHOT_TABLE = "cluster_upgrade_snapshots"
+	STATIC_NODE_CLUSTER_TABLE      = "static_node_clusters"
+	STATIC_NODE_TABLE              = "static_nodes"
 )
 
 type ImageRegistryStorage interface {
@@ -223,6 +225,20 @@ type StaticNodeStorage interface {
 	UpdateStaticNode(id string, data *v1.StaticNode) error
 }
 
+type ReleaseInfoStorage interface {
+	ListReleaseInfo() ([]v1.ReleaseInfo, error)
+	CreateReleaseInfo(data *v1.ReleaseInfo) error
+	UpdateReleaseInfo(id string, data *v1.ReleaseInfo) error
+}
+
+// ClusterUpgradeSnapshotStorage persists private controller upgrade inputs.
+// Snapshots are neither user-facing resources nor general-purpose history.
+type ClusterUpgradeSnapshotStorage interface {
+	GetClusterUpgradeSnapshot(clusterID string) (*v1.ClusterUpgradeSnapshot, error)
+	CreateClusterUpgradeSnapshot(data *v1.ClusterUpgradeSnapshot) error
+	DeleteClusterUpgradeSnapshot(clusterID string) error
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -239,6 +255,8 @@ type Storage interface {
 	ExternalEndpointStorage
 	StaticNodeClusterStorage
 	StaticNodeStorage
+	ReleaseInfoStorage
+	ClusterUpgradeSnapshotStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

@@ -32,7 +32,6 @@ func newTestClusterController(s *storagemocks.MockStorage,
 
 	return &ClusterController{
 		storage:                 s,
-		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
 		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
@@ -97,6 +96,25 @@ func TestClusterController_Sync_Delete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClusterControllerDoesNotAssignDefaultVersionToLegacyCluster(t *testing.T) {
+	store := storagemocks.NewMockStorage(t)
+	store.On("DeleteCluster", "1").Return(nil)
+	controller := newTestClusterController(store, nil)
+	cluster := &v1.Cluster{
+		ID: 1,
+		Metadata: &v1.Metadata{
+			Name:              "legacy",
+			DeletionTimestamp: time.Now().Format(time.RFC3339Nano),
+		},
+		Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
+		Status: &v1.ClusterStatus{Phase: v1.ClusterPhaseDeleted},
+	}
+
+	require.NoError(t, controller.sync(cluster))
+	assert.Empty(t, cluster.Spec.Version)
+	store.AssertExpectations(t)
 }
 
 func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {
@@ -659,4 +677,105 @@ func TestComputeClusterSpecHash(t *testing.T) {
 		}
 		assert.Equal(t, cluster.ComputeClusterSpecHash(spec1), cluster.ComputeClusterSpecHash(spec2))
 	})
+}
+
+func TestClusterControllerRecordsReleaseInfoAfterSuccessfulReleaseAwareReconcile(t *testing.T) {
+	store := new(storagemocks.MockStorage)
+	reconciler := new(clustermocks.MockClusterReconcile)
+	controller := newTestClusterController(store, reconciler)
+	controller.releaseInfoProvider = &releaseInfoStatusProvider{info: &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{{
+			Version: "v1.2.0",
+			State:   v1.ReleaseInfoClusterVersionStateActive,
+		}}},
+		Status: &v1.ReleaseInfoStatus{Revision: "revision-2"},
+	}}
+	clusterObj := &v1.Cluster{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "release-aware"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+		Status: &v1.ClusterStatus{
+			Initialized:      true,
+			Version:          "v1.1.1",
+			ObservedSpecHash: cluster.ComputeClusterSpecHash(&v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"}),
+		},
+	}
+
+	reconciler.On("Reconcile", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		obj := args.Get(1).(*v1.Cluster)
+		obj.Status.Version = obj.Spec.Version
+	}).Return(nil).Once()
+	store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		return updated.Status.Phase == v1.ClusterPhaseRunning &&
+			updated.Status.ReleaseInfo.Baseline == "v1.2.0" &&
+			updated.Status.ReleaseInfo.Revision == "revision-2" &&
+			updated.Status.ObservedSpecHash == cluster.ComputeClusterSpecHash(clusterObj.Spec)
+	})).Return(nil).Once()
+	store.On("DeleteClusterUpgradeSnapshot", "1").Return(nil).Once()
+
+	require.NoError(t, controller.sync(clusterObj))
+	store.AssertExpectations(t)
+	reconciler.AssertExpectations(t)
+}
+
+func TestClusterControllerStopsUnsupportedOrRetiredReleaseInfoCluster(t *testing.T) {
+	tests := []struct {
+		name              string
+		versions          []v1.ReleaseInfoClusterVersion
+		wantPhase         v1.ClusterPhase
+		wantCompatibility v1.ClusterReleaseCompatibilityState
+	}{
+		{
+			name:              "version omitted from matrix is unsupported",
+			versions:          []v1.ReleaseInfoClusterVersion{{Version: "v1.1.1", State: v1.ReleaseInfoClusterVersionStateActive}},
+			wantPhase:         v1.ClusterPhaseUnsupported,
+			wantCompatibility: v1.ClusterReleaseCompatibilityStateUnsupported,
+		},
+		{
+			name:              "retired matrix version is retired",
+			versions:          []v1.ReleaseInfoClusterVersion{{Version: "v1.2.0", State: v1.ReleaseInfoClusterVersionStateRetired}},
+			wantPhase:         v1.ClusterPhaseRetired,
+			wantCompatibility: v1.ClusterReleaseCompatibilityStateRetired,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := new(storagemocks.MockStorage)
+			controller := newTestClusterController(store, nil)
+			controller.releaseInfoProvider = &releaseInfoStatusProvider{info: &v1.ReleaseInfo{
+				Metadata: &v1.Metadata{Name: "v1.2.0"},
+				Spec:     &v1.ReleaseInfoSpec{ClusterVersions: tt.versions},
+				Status:   &v1.ReleaseInfoStatus{Revision: "revision-2"},
+			}}
+			clusterObj := &v1.Cluster{
+				ID:       1,
+				Metadata: &v1.Metadata{Name: "release-aware"},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+				Status:   &v1.ClusterStatus{Initialized: true, Version: "v1.2.0"},
+			}
+
+			store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {
+				return updated.Status.Phase == tt.wantPhase &&
+					updated.Status.ReleaseInfo.Baseline == "v1.2.0" &&
+					updated.Status.ReleaseInfo.Revision == "revision-2" &&
+					updated.Status.ReleaseCompatibility.State == tt.wantCompatibility &&
+					updated.Status.ReleaseCompatibility.EffectiveVersion == "v1.2.0" &&
+					updated.Status.ReleaseCompatibility.ResolvedVersion == "v1.2.0"
+			})).Return(nil).Once()
+
+			err := controller.sync(clusterObj)
+			require.Error(t, err)
+			store.AssertExpectations(t)
+		})
+	}
+}
+
+type releaseInfoStatusProvider struct {
+	info *v1.ReleaseInfo
+}
+
+func (provider *releaseInfoStatusProvider) Current() (*v1.ReleaseInfo, error) {
+	return provider.info, nil
 }

@@ -17,8 +17,7 @@ import (
 )
 
 type ClusterController struct {
-	storage               storage.Storage
-	defaultClusterVersion string
+	storage storage.Storage
 
 	syncHandler func(cluster *v1.Cluster) error
 
@@ -29,13 +28,21 @@ type ClusterController struct {
 	gw gateway.Gateway
 
 	acceleratorManager  accelerator.Manager
+	releaseInfoProvider ReleaseInfoProvider
 	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
 }
 
+// ReleaseInfoProvider supplies only the ReleaseInfo identity needed for
+// status reporting. Component resolution remains owned by cluster reconciliation.
+type ReleaseInfoProvider interface {
+	Current() (*v1.ReleaseInfo, error)
+}
+
 type ClusterControllerOption struct {
-	Storage               storage.Storage
-	DefaultClusterVersion string
-	MetricsRemoteWriteURL string
+	Storage                  storage.Storage
+	MetricsRemoteWriteURL    string
+	ReleaseComponentResolver cluster.ReleaseComponentResolver
+	ReleaseInfoProvider      ReleaseInfoProvider
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	Gw                      gateway.Gateway
@@ -44,15 +51,22 @@ type ClusterControllerOption struct {
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
-		storage:               opt.Storage,
-		defaultClusterVersion: opt.DefaultClusterVersion,
+		storage: opt.Storage,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
 		gw:                  opt.Gw,
 		acceleratorManager:  opt.AcceleratorManager,
-		newClusterReconcile: cluster.NewReconcile,
+		releaseInfoProvider: opt.ReleaseInfoProvider,
+		newClusterReconcile: func(
+			clusterObj *v1.Cluster,
+			acceleratorManager accelerator.Manager,
+			store storage.Storage,
+			metricsRemoteWriteURL string,
+		) (cluster.ClusterReconcile, error) {
+			return cluster.NewReconcileWithReleaseInfo(clusterObj, acceleratorManager, store, metricsRemoteWriteURL, opt.ReleaseComponentResolver)
+		},
 	}
 
 	c.syncHandler = c.sync
@@ -72,11 +86,6 @@ func (c *ClusterController) Reconcile(obj interface{}) error {
 }
 
 func (controller *ClusterController) sync(obj *v1.Cluster) error {
-	// set default cluster version
-	if obj.Spec.Version == "" {
-		obj.Spec.Version = controller.defaultClusterVersion
-	}
-
 	// Backfill status.version for legacy clusters that were created before
 	// version tracking was introduced. Without this, changing spec.version
 	// on a legacy cluster would show as Updating instead of Upgrading.
@@ -95,9 +104,18 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 
 func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	var reconcileErr error
+	upgradeStarted := cluster.NeedsVersionUpgrade(c)
+
+	if phase, compatibilityErr := controller.ensureClusterReleaseCompatibility(c); compatibilityErr != nil {
+		if updateErr := controller.updateStatus(c, phase, compatibilityErr); updateErr != nil {
+			klog.Errorf("failed to update incompatible cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+		}
+
+		return compatibilityErr
+	}
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr)
+		controller.updateClusterStatus(c, reconcileErr, upgradeStarted)
 	}()
 
 	r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
@@ -109,6 +127,11 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	reconcileErr = r.Reconcile(context.Background(), c)
 	if reconcileErr != nil {
 		reconcileErr = errors.Wrapf(reconcileErr, "failed to reconcile cluster %s", c.Metadata.WorkspaceName())
+		return reconcileErr
+	}
+
+	if err = controller.recordReleaseInfoStatus(c); err != nil {
+		reconcileErr = errors.Wrapf(err, "failed to record release info for cluster %s", c.Metadata.WorkspaceName())
 		return reconcileErr
 	}
 
@@ -168,7 +191,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 	var reconcileErr error
 
 	defer func() {
-		controller.updateClusterStatus(c, reconcileErr)
+		controller.updateClusterStatus(c, reconcileErr, false)
 	}()
 
 	reconcileErr = func() error {
@@ -206,6 +229,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 func (controller *ClusterController) updateClusterStatus(
 	c *v1.Cluster,
 	reconcileErr error,
+	upgradeStarted bool,
 ) {
 	if c.Metadata.DeletionTimestamp != "" {
 		phase := cluster.DetermineClusterDeletePhase(reconcileErr == nil, c)
@@ -230,7 +254,45 @@ func (controller *ClusterController) updateClusterStatus(
 
 	if updateErr := controller.updateStatus(c, phase, reconcileErr); updateErr != nil {
 		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+		return
 	}
+
+	if phase == v1.ClusterPhaseRunning && upgradeStarted {
+		if deleteErr := controller.storage.DeleteClusterUpgradeSnapshot(strconv.Itoa(c.ID)); deleteErr != nil {
+			klog.Errorf("failed to delete completed upgrade snapshot for cluster %s, err: %v", c.Metadata.WorkspaceName(), deleteErr)
+		}
+	}
+}
+
+func (controller *ClusterController) recordReleaseInfoStatus(c *v1.Cluster) error {
+	releaseAware, err := cluster.IsReleaseInfoAwareClusterVersion(c.GetVersion())
+	if err != nil {
+		return err
+	}
+
+	if !releaseAware || controller.releaseInfoProvider == nil {
+		return nil
+	}
+
+	info, err := controller.releaseInfoProvider.Current()
+	if err != nil {
+		return err
+	}
+
+	if info == nil || info.Metadata == nil || info.Status == nil {
+		return errors.New("release info metadata and status are required")
+	}
+
+	if c.Status == nil {
+		c.Status = &v1.ClusterStatus{}
+	}
+
+	c.Status.ReleaseInfo = &v1.ReleaseInfoReference{
+		Baseline: info.Metadata.Name,
+		Revision: info.Status.Revision,
+	}
+
+	return nil
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {
@@ -250,6 +312,8 @@ func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.Clus
 		newStatus.ResourceInfo = obj.Status.ResourceInfo
 		newStatus.AcceleratorType = obj.Status.AcceleratorType
 		newStatus.ObservedSpecHash = obj.Status.ObservedSpecHash
+		newStatus.ReleaseInfo = obj.Status.ReleaseInfo
+		newStatus.ReleaseCompatibility = obj.Status.ReleaseCompatibility
 		newStatus.ComponentStatus = obj.Status.ComponentStatus
 	}
 

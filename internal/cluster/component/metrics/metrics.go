@@ -19,6 +19,7 @@ type MetricsComponent struct {
 	metricsRemoteWriteURL string
 	imagePullSecret       string
 	acceleratorMgr        accelerator.Manager
+	releaseComponents     map[string]string
 
 	config     v1.KubernetesClusterConfig
 	ctrlClient client.Client
@@ -28,6 +29,27 @@ type MetricsComponent struct {
 func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client,
 	acceleratorMgr accelerator.Manager) *MetricsComponent {
+	return NewMetricsComponentWithReleaseComponents(
+		cluster,
+		namespace,
+		imagePrefix,
+		imagePullSecret,
+		metricsRemoteWriteURL,
+		config,
+		ctrlClient,
+		acceleratorMgr,
+		nil,
+	)
+}
+
+func NewMetricsComponentWithReleaseComponents(
+	cluster *v1.Cluster,
+	namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
+	config v1.KubernetesClusterConfig,
+	ctrlClient client.Client,
+	acceleratorMgr accelerator.Manager,
+	releaseComponents map[string]string,
+) *MetricsComponent {
 	logger := klog.LoggerWithValues(klog.Background(),
 		"cluster", cluster.Metadata.WorkspaceName(),
 		"component", "metrics",
@@ -40,10 +62,24 @@ func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullS
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		imagePullSecret:       imagePullSecret,
 		acceleratorMgr:        acceleratorMgr,
+		releaseComponents:     copyReleaseComponents(releaseComponents),
 		config:                config,
 		ctrlClient:            ctrlClient,
 		logger:                logger,
 	}
+}
+
+func copyReleaseComponents(components map[string]string) map[string]string {
+	if len(components) == 0 {
+		return nil
+	}
+
+	copied := make(map[string]string, len(components))
+	for component, image := range components {
+		copied[component] = image
+	}
+
+	return copied
 }
 
 // Reconcile ensures the metrics component is set up in the cluster

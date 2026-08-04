@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	registryMocks "github.com/neutree-ai/neutree/internal/registry/mocks"
@@ -22,232 +23,307 @@ func createTestContextWithQuery(queryParams map[string]string) (*gin.Context, *h
 	c, _ := gin.CreateTestContext(w)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	q := req.URL.Query()
-	for k, v := range queryParams {
-		q.Set(k, v)
+	query := req.URL.Query()
+	for key, value := range queryParams {
+		query.Set(key, value)
 	}
-	req.URL.RawQuery = q.Encode()
+	req.URL.RawQuery = query.Encode()
 	c.Request = req
 
 	return c, w
 }
 
+func TestGetAvailableClusterVersionsUsesReleaseInfoComponents(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	imageService := registryMocks.NewMockImageService(t)
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testImageRegistry("https://registry.example.com", "project")}, nil)
+
+	for _, image := range []string{
+		"registry.example.com/project/neutree/neutree-serve:v1.1.1",
+		"registry.example.com/project/neutree/neutree-node-agent:v1.1.0-rc.1",
+		"registry.example.com/project/prometheus/node-exporter:v1.8.2",
+		"registry.example.com/project/victoriametrics/vmagent:v1.115.0",
+		"registry.example.com/project/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+	} {
+		imageService.On("CheckImageExists", image, mock.Anything, false).Return(true, nil)
+	}
+
+	context, recorder := createTestContextWithQuery(map[string]string{
+		"workspace":        "default",
+		"image_registry":   "registry",
+		"cluster_type":     "ssh",
+		"accelerator_type": "nvidia_gpu",
+	})
+	getAvailableClusterVersions(&Dependencies{
+		Storage:             store,
+		ImageService:        imageService,
+		ReleaseInfoProvider: &testReleaseInfoProvider{info: testReleaseInfo()},
+	})(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response availableClusterVersionsResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, []string{"v1.2.0"}, response.AvailableVersions)
+	imageService.AssertExpectations(t)
+}
+
+func TestGetAvailableClusterVersionsOmitsVersionWithMissingSelectedAcceleratorImage(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	imageService := registryMocks.NewMockImageService(t)
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testImageRegistry("registry.example.com", "")}, nil)
+	imageService.On("CheckImageExists", "registry.example.com/neutree/neutree-serve:v1.1.1-rocm", mock.Anything, false).Return(false, nil)
+	imageService.On("CheckImageExists", mock.Anything, mock.Anything, false).Return(true, nil)
+
+	context, recorder := createTestContextWithQuery(map[string]string{
+		"workspace":        "default",
+		"image_registry":   "registry",
+		"cluster_type":     "kubernetes",
+		"accelerator_type": "amd_gpu",
+	})
+	getAvailableClusterVersions(&Dependencies{
+		Storage:             store,
+		ImageService:        imageService,
+		ReleaseInfoProvider: &testReleaseInfoProvider{info: testReleaseInfo()},
+	})(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response availableClusterVersionsResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Empty(t, response.AvailableVersions)
+}
+
 func TestGetAvailableClusterVersionsPassesHTTPRegistryScheme(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	imageService := registryMocks.NewMockImageService(t)
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{testImageRegistry("http://registry.example.com:5000", "")}, nil)
+	imageService.On("CheckImageExists", mock.Anything, mock.Anything, true).Return(true, nil)
+
+	context, recorder := createTestContextWithQuery(map[string]string{
+		"workspace":      "default",
+		"image_registry": "registry",
+		"cluster_type":   "ssh",
+	})
+	getAvailableClusterVersions(&Dependencies{
+		Storage:             store,
+		ImageService:        imageService,
+		ReleaseInfoProvider: &testReleaseInfoProvider{info: testReleaseInfo()},
+	})(context)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	imageService.AssertExpectations(t)
+}
+
+func TestRequiredReleaseImagesScopesComponentsByClusterType(t *testing.T) {
+	version := v1.ReleaseInfoClusterVersion{
+		Components: map[string]string{
+			"ray_runtime":        "neutree/neutree-serve:v1.1.1",
+			"router":             "neutree/router:v1.1.1",
+			"node_agent":         "neutree/neutree-node-agent:v1.1.0-rc.1",
+			"node_exporter":      "quay.io/prometheus/node-exporter:v1.8.2",
+			"vmagent":            "victoriametrics/vmagent:v1.115.0",
+			"kube_state_metrics": "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+		},
+		AcceleratorComponents: map[string]map[string]string{
+			"nvidia_gpu": {"dcgm_exporter": "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"},
+		},
+	}
+
+	assert.ElementsMatch(t, []string{
+		"neutree/neutree-serve:v1.1.1",
+		"neutree/neutree-node-agent:v1.1.0-rc.1",
+		"quay.io/prometheus/node-exporter:v1.8.2",
+		"victoriametrics/vmagent:v1.115.0",
+		"nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+	}, requiredReleaseImages(version, string(v1.SSHClusterType), "nvidia_gpu"))
+
+	assert.ElementsMatch(t, []string{
+		"neutree/neutree-serve:v1.1.1",
+		"neutree/router:v1.1.1",
+		"neutree/neutree-node-agent:v1.1.0-rc.1",
+		"quay.io/prometheus/node-exporter:v1.8.2",
+		"victoriametrics/vmagent:v1.115.0",
+		"registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+		"nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+	}, requiredReleaseImages(version, string(v1.KubernetesClusterType), "nvidia_gpu"))
+}
+
+func TestGetAvailableClusterVersionsRejectsUnavailableDependencies(t *testing.T) {
 	tests := []struct {
-		name    string
-		url     string
-		useHTTP bool
+		name        string
+		query       map[string]string
+		providerErr error
+		registries  []v1.ImageRegistry
+		wantStatus  int
+		wantError   string
 	}{
-		{name: "explicit HTTP", url: "http://registry.example.com:5000", useHTTP: true},
-		{name: "explicit HTTPS", url: "https://registry.example.com:5000"},
-		{name: "URL without scheme", url: "registry.example.com:5000"},
+		{
+			name:       "missing workspace",
+			query:      map[string]string{"image_registry": "registry", "cluster_type": "ssh"},
+			wantStatus: http.StatusBadRequest,
+			wantError:  "workspace is required",
+		},
+		{
+			name:       "unsupported cluster type",
+			query:      map[string]string{"workspace": "default", "image_registry": "registry", "cluster_type": "unsupported"},
+			wantStatus: http.StatusBadRequest,
+			wantError:  "unsupported cluster_type",
+		},
+		{
+			name:        "release info is unavailable",
+			query:       map[string]string{"workspace": "default", "image_registry": "registry", "cluster_type": "ssh"},
+			providerErr: errors.New("release info v1.2.0 not found"),
+			wantStatus:  http.StatusInternalServerError,
+			wantError:   "failed to get release info",
+		},
+		{
+			name:       "image registry is unavailable",
+			query:      map[string]string{"workspace": "default", "image_registry": "registry", "cluster_type": "ssh"},
+			registries: []v1.ImageRegistry{},
+			wantStatus: http.StatusNotFound,
+			wantError:  "image registry default/registry not found",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			storage := storageMocks.NewMockStorage(t)
+			store := storageMocks.NewMockStorage(t)
 			imageService := registryMocks.NewMockImageService(t)
-			storage.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{{
-				Spec: &v1.ImageRegistrySpec{URL: tt.url},
-			}}, nil)
-			imageService.
-				On("ListImageTags", "registry.example.com:5000/"+v1.NeutreeRouterImageName, mock.Anything, tt.useHTTP).
-				Return([]string{"v1.2.0"}, nil)
-			imageService.
-				On("GetImageLabels", "registry.example.com:5000/neutree/router:v1.2.0", mock.Anything, tt.useHTTP).
-				Return(map[string]string{v1.ImageLabelVersion: "v1.2.0"}, nil)
+			if tt.registries != nil {
+				store.On("ListImageRegistry", mock.Anything).Return(tt.registries, nil)
+			}
 
-			context, recorder := createTestContextWithQuery(map[string]string{
-				"workspace":      "default",
-				"image_registry": "registry",
-				"cluster_type":   "kubernetes",
-			})
-			getAvailableClusterVersions(&Dependencies{Storage: storage, ImageService: imageService})(context)
+			context, recorder := createTestContextWithQuery(tt.query)
+			getAvailableClusterVersions(&Dependencies{
+				Storage:             store,
+				ImageService:        imageService,
+				ReleaseInfoProvider: &testReleaseInfoProvider{info: testReleaseInfo(), err: tt.providerErr},
+			})(context)
 
-			assert.Equal(t, http.StatusOK, recorder.Code)
-			imageService.AssertExpectations(t)
+			assert.Equal(t, tt.wantStatus, recorder.Code)
+			var response map[string]string
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Contains(t, response["error"], tt.wantError)
 		})
 	}
 }
 
-func TestGetAvailableClusterVersions(t *testing.T) {
-	tests := []struct {
-		name               string
-		queryParams        map[string]string
-		setupMock          func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService)
-		expectedStatusCode int
-		expectedResponse   *availableClusterVersionsResponse
-		expectedError      string
-	}{
-		{
-			name: "success - filters by nvidia accelerator type",
-			queryParams: map[string]string{
-				"workspace":        "default",
-				"image_registry":   "my-registry",
-				"cluster_type":     "ssh",
-				"accelerator_type": "nvidia_gpu",
-			},
-			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
-					{Spec: &v1.ImageRegistrySpec{URL: "registry.example.com"}},
-				}, nil)
-				imgSvc.On("ListImageTags", mock.Anything, mock.Anything, false).Return([]string{
-					"v1.0.0", "v1.0.0-rocm", "v1.0.1", "v1.0.1-rc.1", "v1.0.2", "v1.1.0",
-					"v1.0.1-nightly-20260313", "latest",
-				}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0-rocm" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.1" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.1", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.1-rc.1" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.1-rc.1", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.2" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.2", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.1.0" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				// Unlabeled tags — skipped
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.1-nightly-20260313" }), mock.Anything, false).
-					Return(map[string]string{}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:latest" }), mock.Anything, false).
-					Return(map[string]string{}, nil)
-			},
-			expectedStatusCode: http.StatusOK,
-			expectedResponse: &availableClusterVersionsResponse{
-				AvailableVersions: []string{"v1.0.2", "v1.1.0"},
-			},
-		},
-		{
-			name: "success - no accelerator_type deduplicates shared versions after minimum filter",
-			queryParams: map[string]string{
-				"workspace":      "default",
-				"image_registry": "my-registry",
-				"cluster_type":   "ssh",
-			},
-			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
-					{Spec: &v1.ImageRegistrySpec{URL: "registry.example.com"}},
-				}, nil)
-				imgSvc.On("ListImageTags", mock.Anything, mock.Anything, false).Return([]string{
-					"v1.0.0", "v1.0.0-rocm", "v1.0.2", "v1.0.2-rocm",
-				}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.0-rocm" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.2" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.2", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/neutree-serve:v1.0.2-rocm" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.2", v1.ImageLabelAcceleratorType: "amd_gpu"}, nil)
-			},
-			expectedStatusCode: http.StatusOK,
-			expectedResponse: &availableClusterVersionsResponse{
-				AvailableVersions: []string{"v1.0.2"},
-			},
-		},
-		{
-			name: "success - k8s cluster type uses router image",
-			queryParams: map[string]string{
-				"workspace":        "default",
-				"image_registry":   "my-registry",
-				"cluster_type":     "kubernetes",
-				"accelerator_type": "nvidia_gpu",
-			},
-			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
-					{Spec: &v1.ImageRegistrySpec{URL: "registry.example.com"}},
-				}, nil)
-				imgSvc.On("ListImageTags", "registry.example.com/"+v1.NeutreeRouterImageName, mock.Anything, false).Return([]string{
-					"v1.0.0", "v1.0.1", "v1.1.0",
-				}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/router:v1.0.0" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/router:v1.0.1" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.0.1", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-				imgSvc.On("GetImageLabels", mock.MatchedBy(func(s string) bool { return s == "registry.example.com/neutree/router:v1.1.0" }), mock.Anything, false).
-					Return(map[string]string{v1.ImageLabelVersion: "v1.1.0", v1.ImageLabelAcceleratorType: "nvidia_gpu"}, nil)
-			},
-			expectedStatusCode: http.StatusOK,
-			expectedResponse: &availableClusterVersionsResponse{
-				AvailableVersions: []string{"v1.1.0"},
-			},
-		},
-		{
-			name:               "missing workspace",
-			queryParams:        map[string]string{"image_registry": "r", "cluster_type": "ssh"},
-			setupMock:          func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {},
-			expectedStatusCode: http.StatusBadRequest,
-			expectedError:      "workspace is required",
-		},
-		{
-			name:               "missing image_registry",
-			queryParams:        map[string]string{"workspace": "default", "cluster_type": "ssh"},
-			setupMock:          func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {},
-			expectedStatusCode: http.StatusBadRequest,
-			expectedError:      "image_registry is required",
-		},
-		{
-			name:               "missing cluster_type",
-			queryParams:        map[string]string{"workspace": "default", "image_registry": "r"},
-			setupMock:          func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {},
-			expectedStatusCode: http.StatusBadRequest,
-			expectedError:      "cluster_type is required",
-		},
-		{
-			name: "image registry not found",
-			queryParams: map[string]string{
-				"workspace": "default", "image_registry": "missing", "cluster_type": "ssh",
-			},
-			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{}, nil)
-			},
-			expectedStatusCode: http.StatusNotFound,
-			expectedError:      "image registry default/missing not found",
-		},
-		{
-			name: "list tags error",
-			queryParams: map[string]string{
-				"workspace": "default", "image_registry": "my-registry", "cluster_type": "ssh",
-			},
-			setupMock: func(s *storageMocks.MockStorage, imgSvc *registryMocks.MockImageService) {
-				s.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
-					{Spec: &v1.ImageRegistrySpec{URL: "registry.example.com"}},
-				}, nil)
-				imgSvc.On("ListImageTags", mock.Anything, mock.Anything, false).Return(nil, errors.New("registry unreachable"))
-			},
-			expectedStatusCode: http.StatusInternalServerError,
-			expectedError:      "failed to list image tags",
+func TestGetVersionMatrixDoesNotExposeComponentReferences(t *testing.T) {
+	context, recorder := createTestContextWithQuery(map[string]string{"workspace": "default"})
+	getVersionMatrix(&Dependencies{ReleaseInfoProvider: &testReleaseInfoProvider{info: testReleaseInfo()}})(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"versions":[{"version":"v1.2.0","state":"Active","upgrade_to":[]}]}`, recorder.Body.String())
+	assert.NotContains(t, recorder.Body.String(), "neutree-serve")
+	assert.NotContains(t, recorder.Body.String(), "build_identity")
+}
+
+func TestGetClusterUpgradePreflightUsesCurrentReleaseInfoEdge(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		Status:   &v1.ClusterStatus{Version: "v1.1.0"},
+	}}, nil).Once()
+	context, recorder := createTestContextWithQuery(map[string]string{
+		"workspace":      "default",
+		"name":           "cluster-a",
+		"target_version": "v1.2.0",
+	})
+
+	getClusterUpgradePreflight(&Dependencies{
+		Storage:             store,
+		ReleaseInfoProvider: &testReleaseInfoProvider{info: testUpgradeReleaseInfo()},
+	})(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response clusterUpgradePreflightResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Allowed)
+	assert.Equal(t, "v1.1.0", response.SourceVersion)
+	assert.Equal(t, "v1.2.0", response.TargetVersion)
+	assert.Equal(t, []string{"v1.1.1", "v1.2.0"}, response.UpgradeTo)
+	assert.Equal(t, "v1.2.0", response.ReleaseInfo.Baseline)
+	assert.Equal(t, "revision-2", response.ReleaseInfo.Revision)
+	store.AssertExpectations(t)
+}
+
+func TestGetClusterUpgradePreflightRejectsUndeclaredEdge(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{Version: "v1.1.1"},
+		Status:   &v1.ClusterStatus{Version: "v1.1.1"},
+	}}, nil).Once()
+	context, recorder := createTestContextWithQuery(map[string]string{
+		"workspace":      "default",
+		"name":           "cluster-a",
+		"target_version": "v1.1.0",
+	})
+
+	getClusterUpgradePreflight(&Dependencies{
+		Storage:             store,
+		ReleaseInfoProvider: &testReleaseInfoProvider{info: testUpgradeReleaseInfo()},
+	})(context)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "not allowed")
+	store.AssertExpectations(t)
+}
+
+type testReleaseInfoProvider struct {
+	info *v1.ReleaseInfo
+	err  error
+}
+
+func (provider *testReleaseInfoProvider) Current() (*v1.ReleaseInfo, error) {
+	return provider.info, provider.err
+}
+
+func testReleaseInfo() *v1.ReleaseInfo {
+	return &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec: &v1.ReleaseInfoSpec{
+			BuildIdentity: "v1.2.0",
+			ClusterVersions: []v1.ReleaseInfoClusterVersion{{
+				Version: "v1.2.0",
+				State:   v1.ReleaseInfoClusterVersionStateActive,
+				Components: map[string]string{
+					"ray_runtime":        "neutree/neutree-serve:v1.1.1",
+					"router":             "neutree/router:v1.1.1",
+					"node_agent":         "neutree/neutree-node-agent:v1.1.0-rc.1",
+					"node_exporter":      "quay.io/prometheus/node-exporter:v1.8.2",
+					"vmagent":            "victoriametrics/vmagent:v1.115.0",
+					"kube_state_metrics": "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
+				},
+				AcceleratorComponents: map[string]map[string]string{
+					"nvidia_gpu": {"dcgm_exporter": "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"},
+					"amd_gpu":    {"ray_runtime": "neutree/neutree-serve:v1.1.1-rocm"},
+				},
+			}},
 		},
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := storageMocks.NewMockStorage(t)
-			mockImgSvc := registryMocks.NewMockImageService(t)
-			tt.setupMock(mockStorage, mockImgSvc)
-
-			deps := &Dependencies{Storage: mockStorage, ImageService: mockImgSvc}
-			c, w := createTestContextWithQuery(tt.queryParams)
-
-			handler := getAvailableClusterVersions(deps)
-			handler(c)
-
-			assert.Equal(t, tt.expectedStatusCode, w.Code)
-
-			if tt.expectedResponse != nil {
-				var resp availableClusterVersionsResponse
-				err := json.Unmarshal(w.Body.Bytes(), &resp)
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedResponse.AvailableVersions, resp.AvailableVersions)
-			}
-
-			if tt.expectedError != "" {
-				var errResp map[string]string
-				err := json.Unmarshal(w.Body.Bytes(), &errResp)
-				assert.NoError(t, err)
-				assert.Contains(t, errResp["error"], tt.expectedError)
-			}
-		})
+func testUpgradeReleaseInfo() *v1.ReleaseInfo {
+	return &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{
+			{
+				Version:   "v1.1.0",
+				State:     v1.ReleaseInfoClusterVersionStateActive,
+				UpgradeTo: []string{"v1.1.1", "v1.2.0"},
+			},
+			{
+				Version:   "v1.1.1",
+				State:     v1.ReleaseInfoClusterVersionStateActive,
+				UpgradeTo: []string{"v1.2.0"},
+			},
+			{Version: "v1.2.0", State: v1.ReleaseInfoClusterVersionStateActive},
+		}},
+		Status: &v1.ReleaseInfoStatus{Revision: "revision-2"},
 	}
+}
+
+func testImageRegistry(url, repository string) v1.ImageRegistry {
+	return v1.ImageRegistry{Spec: &v1.ImageRegistrySpec{URL: url, Repository: repository}}
 }

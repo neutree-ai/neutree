@@ -241,6 +241,10 @@ func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
 }
 
 func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string) string {
+	if image := releaseComponentImage(cluster, "ray_runtime"); image != "" {
+		return image
+	}
+
 	if cluster == nil || cluster.Spec == nil || cluster.Spec.Version == "" || cluster.Spec.ImageRegistry == "" {
 		return ""
 	}

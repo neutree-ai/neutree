@@ -586,14 +586,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		Namespace:                        m.namespace,
 		ImagePullSecret:                  m.imagePullSecret,
 		Version:                          version,
-		VMAgentImage:                     util.RewriteImageRef(m.imagePrefix, defaultVMAgentImage),
+		VMAgentImage:                     m.componentImage("vmagent", defaultVMAgentImage),
 		NodeExporterName:                 nodeExporterDaemonSetName,
-		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
+		NodeExporterImage:                m.componentImage("node_exporter", defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
+		NeutreeNodeAgentMetricsImage:     m.componentImage("node_agent", neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
+		KubeStateMetricsImage:            m.componentImage("kube_state_metrics", defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),
@@ -603,6 +603,15 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		KubeStateMetricsResources:        kubeStateMetricsResources,
 		HashSuffix:                       util.HashString(m.cluster.Key()),
 	}
+}
+
+func (m *MetricsComponent) componentImage(component, legacyImage string) string {
+	image := legacyImage
+	if m != nil && m.releaseComponents != nil && m.releaseComponents[component] != "" {
+		image = m.releaseComponents[component]
+	}
+
+	return util.RewriteImageRef(m.imagePrefix, image)
 }
 
 func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {

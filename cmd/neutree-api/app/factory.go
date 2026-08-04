@@ -5,6 +5,7 @@ import (
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
@@ -46,11 +47,12 @@ type ProxyRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFun
 func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
-			Storage:          deps.Config.Storage,
-			StorageAccessURL: deps.Config.StorageAccessURL,
-			AuthEndpoint:     deps.Config.AuthEndpoint,
-			AuthConfig:       deps.Config.AuthConfig,
-			ImageService:     registry.NewImageService(),
+			Storage:             deps.Config.Storage,
+			StorageAccessURL:    deps.Config.StorageAccessURL,
+			AuthEndpoint:        deps.Config.AuthEndpoint,
+			AuthConfig:          deps.Config.AuthConfig,
+			ImageService:        registry.NewImageService(),
+			ReleaseInfoProvider: releaseinfo.NewProvider(deps.Config.Storage, deps.Config.Version),
 		})
 
 		return nil
@@ -111,8 +113,9 @@ type ClustersRegisterFunc func(group *gin.RouterGroup, middlewares []gin.Handler
 func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
-			Storage:      deps.Config.Storage,
-			ImageService: registry.NewImageService(),
+			Storage:             deps.Config.Storage,
+			ImageService:        registry.NewImageService(),
+			ReleaseInfoProvider: releaseinfo.NewProvider(deps.Config.Storage, deps.Config.Version),
 		})
 
 		return nil

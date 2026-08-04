@@ -55,3 +55,26 @@ func TestClusterAcceleratorVirtualizationDisabledWhenMissing(t *testing.T) {
 	spec.AcceleratorVirtualization = &AcceleratorVirtualizationSpec{}
 	assert.False(t, spec.AcceleratorVirtualizationEnabled())
 }
+
+func TestClusterReleaseCompatibilitySerialization(t *testing.T) {
+	cluster := &Cluster{Status: &ClusterStatus{
+		ReleaseInfo: &ReleaseInfoReference{Baseline: "v1.2.0", Revision: "revision-2"},
+		ReleaseCompatibility: &ClusterReleaseCompatibility{
+			EffectiveVersion: "v1.2.0",
+			ResolvedVersion:  "v1.2.0",
+			State:            ClusterReleaseCompatibilityStateRetired,
+			Reason:           "cluster version v1.2.0 is retired",
+		},
+	}}
+
+	data, err := json.Marshal(cluster)
+	require.NoError(t, err)
+
+	var got Cluster
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.NotNil(t, got.Status.ReleaseInfo)
+	assert.Equal(t, "revision-2", got.Status.ReleaseInfo.Revision)
+	require.NotNil(t, got.Status.ReleaseCompatibility)
+	assert.Equal(t, ClusterReleaseCompatibilityStateRetired, got.Status.ReleaseCompatibility.State)
+	assert.Equal(t, "cluster version v1.2.0 is retired", got.Status.ReleaseCompatibility.Reason)
+}

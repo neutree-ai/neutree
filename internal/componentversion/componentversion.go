@@ -21,6 +21,9 @@ const NodeExporter = "v1.8.2"
 // NeutreeNodeAgent image version.
 const NeutreeNodeAgent = "v1.1.0-rc.1"
 
+// NVIDIADCGMExporterImage is retained only for pre-ReleaseInfo Cluster versions.
+const NVIDIADCGMExporterImage = "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"
+
 // Grafana image version.
 const Grafana = "11.5.3"
 

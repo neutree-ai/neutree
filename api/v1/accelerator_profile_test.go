@@ -26,7 +26,6 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		},
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
-			Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 			Args:        []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 			Port:        19400,
 			MetricsPath: "/metrics",
@@ -93,4 +92,19 @@ func TestGetAcceleratorProfileResponse(t *testing.T) {
 	data, err := json.Marshal(response)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"profile":{"accelerator_type":"amd_gpu"}}`, string(data))
+}
+
+func TestAcceleratorProfileIgnoresMetricsExporterImage(t *testing.T) {
+	profile := AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"metrics_exporter": {
+			"name": "dcgm-exporter",
+			"image": "example.com/untrusted/dcgm-exporter:latest",
+			"port": 19400
+		}
+	}`), &profile))
+
+	reencoded, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.NotContains(t, string(reencoded), `"image"`)
 }
