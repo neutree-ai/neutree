@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
@@ -125,6 +126,107 @@ func assertK8sMetricsResources(
 	}
 
 	assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
+}
+
+func assertK8sNodeAgentControlPlaneScheduling(
+	ctx context.Context,
+	k8sH *K8sHelper,
+	namespace string,
+	clusterVersion string,
+) {
+	if !clusterVersionSupportsManagedMetricsExporters(clusterVersion) {
+		Skip("node-agent control-plane scheduling check requires managed metrics exporters")
+	}
+
+	nodes, err := k8sH.ListNodes(ctx, "")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list Kubernetes nodes")
+
+	controlPlaneNodes := make(map[string]struct{})
+	untaintedWorkerNodes := make(map[string]struct{})
+
+	for _, node := range nodes {
+		if hasControlPlaneNoScheduleTaint(node) {
+			controlPlaneNodes[node.Name] = struct{}{}
+			continue
+		}
+
+		if isUntaintedWorkerNode(node) {
+			untaintedWorkerNodes[node.Name] = struct{}{}
+		}
+	}
+
+	if len(controlPlaneNodes) == 0 {
+		Skip("requires a control-plane node with a control-plane NoSchedule taint")
+	}
+
+	if len(untaintedWorkerNodes) == 0 {
+		Skip("requires an untainted worker node")
+	}
+
+	nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
+	ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Tolerations).To(BeEmpty())
+
+	pods, err := k8sH.ListPods(ctx, namespace, "app=neutree-node-agent")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "should list node-agent pods")
+
+	var readyWorkerPod *corev1.Pod
+
+	for i := range pods {
+		pod := &pods[i]
+		ExpectWithOffset(1, controlPlaneNodes).NotTo(HaveKey(pod.Spec.NodeName),
+			"node-agent pod %s must not run on a control-plane node", pod.Name)
+
+		if _, ok := untaintedWorkerNodes[pod.Spec.NodeName]; ok && isPodReady(pod) {
+			readyWorkerPod = pod
+			break
+		}
+	}
+
+	ExpectWithOffset(1, readyWorkerPod).NotTo(BeNil(), "an untainted worker must have a ready node-agent pod")
+	health, err := k8sH.PodProxyGetRaw(ctx, namespace, readyWorkerPod.Name, "19101", "/health")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "node-agent /health should be reachable on an untainted worker")
+	ExpectWithOffset(1, string(health)).To(ContainSubstring(`"status":"ok"`))
+}
+
+func hasControlPlaneNoScheduleTaint(node corev1.Node) bool {
+	for _, taint := range node.Spec.Taints {
+		if (taint.Key == "node-role.kubernetes.io/control-plane" || taint.Key == "node-role.kubernetes.io/master") &&
+			taint.Effect == corev1.TaintEffectNoSchedule {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isUntaintedWorkerNode(node corev1.Node) bool {
+	if len(node.Spec.Taints) != 0 {
+		return false
+	}
+
+	if _, isControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]; isControlPlane {
+		return false
+	}
+
+	if _, isMaster := node.Labels["node-role.kubernetes.io/master"]; isMaster {
+		return false
+	}
+
+	return true
+}
+
+func isPodReady(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
 
 func assertK8sExternalAcceleratorExporterResources(

@@ -327,8 +327,6 @@ spec:
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
-      tolerations:
-      - operator: Exists
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
       containers:
