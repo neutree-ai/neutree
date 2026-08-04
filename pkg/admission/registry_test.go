@@ -49,12 +49,16 @@ func TestRegistryRejectsDuplicateHookMetadata(t *testing.T) {
 	require.Error(t, registry.RegisterHook(widgetResource, hook))
 }
 
-func TestRegistryRequiresResourceRegistrationBeforeHookRegistration(t *testing.T) {
+func TestRegistryRegistersResourceWhenHookIsRegistered(t *testing.T) {
 	registry := admission.NewRegistry()
 	unregistered := admission.NewResource[widget]("unregistered")
-	require.Error(t, registry.RegisterHook(unregistered, admission.ValidateCreate(
+	require.NoError(t, registry.RegisterHook(unregistered, admission.ValidateCreate(
 		admission.HookMeta{Name: "community.unregistered", Order: 1}, 10001, validateWidget,
 	)))
+	require.NoError(t, registry.Seal())
+	chain, err := registry.Chain(unregistered, admission.Create)
+	require.NoError(t, err)
+	require.Len(t, chain.Hooks(), 1)
 }
 
 func TestRegistryRejectsDuplicateMutatorOrder(t *testing.T) {

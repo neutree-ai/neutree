@@ -52,7 +52,7 @@ func NewRegistry() *Registry {
 }
 
 // RegisterResource registers a REST write resource, including resources with
-// no hooks. A resource must be registered before hooks can be added to it.
+// no hooks. Hooks also create a resource descriptor when first registered.
 func (r *Registry) RegisterResource(resource any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -70,10 +70,7 @@ func (r *Registry) RegisterResource(resource any) error {
 	if _, exists := r.resources[name]; exists {
 		return fmt.Errorf("admission resource %q is already registered", name)
 	}
-	r.resources[name] = &resourceHooks{
-		hooks:  make(map[Operation][]Hook),
-		byName: make(map[hookKey]struct{}),
-	}
+	r.resources[name] = newResourceHooks()
 	return nil
 }
 
@@ -89,12 +86,16 @@ func (r *Registry) RegisterHook(resource any, hook Hook) error {
 	if err != nil {
 		return err
 	}
-	resourceHooks, exists := r.resources[name]
-	if !exists {
-		return fmt.Errorf("admission resource %q is not registered", name)
+	if name == "" {
+		return fmt.Errorf("admission resource name is empty")
 	}
 	if err := validateHook(hook); err != nil {
 		return err
+	}
+	resourceHooks, exists := r.resources[name]
+	if !exists {
+		resourceHooks = newResourceHooks()
+		r.resources[name] = resourceHooks
 	}
 	key := hookKey{operation: hook.meta.Operation, phase: hook.meta.Phase, name: hook.meta.Name}
 	if _, exists := resourceHooks.byName[key]; exists {
@@ -294,4 +295,11 @@ func contextError(ctx RequestContext) error {
 		return nil
 	}
 	return ctx.Context.Err()
+}
+
+func newResourceHooks() *resourceHooks {
+	return &resourceHooks{
+		hooks:  make(map[Operation][]Hook),
+		byName: make(map[hookKey]struct{}),
+	}
 }
