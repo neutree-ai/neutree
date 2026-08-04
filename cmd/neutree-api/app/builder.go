@@ -197,17 +197,17 @@ func (b *Builder) WithAdmissionConfigurer(name string, configure func(*Admission
 
 // Build creates and initializes all components
 func (b *Builder) Build() (*App, error) {
-	if b.buildAttempted {
-		return nil, fmt.Errorf("build has already been attempted")
-	}
-	b.buildAttempted = true
-
 	if b.config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
 	if err := b.validateAdmissionConfigurers(); err != nil {
 		return nil, err
 	}
+	if b.buildAttempted {
+		return nil, fmt.Errorf("build has already been attempted")
+	}
+	b.buildAttempted = true
+
 	admissionRegistry := admission.NewRegistry()
 
 	middlewareOptions := &MiddlewareOptions{

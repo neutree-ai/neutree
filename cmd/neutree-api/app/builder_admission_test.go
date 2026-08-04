@@ -92,6 +92,22 @@ func TestBuilderAdmissionConfigurerFailurePreventsBuildReuse(t *testing.T) {
 	}
 }
 
+func TestBuilderAdmissionMissingConfigAllowsLaterBuild(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	builder.config = nil
+
+	if err := buildAdmissionWithoutPanic(t, builder); err == nil || !strings.Contains(err.Error(), "config") {
+		t.Errorf("first Build() error = %v, want missing config error", err)
+	}
+	builder.WithConfig(&config.APIConfig{
+		GinEngine:    gin.New(),
+		StaticConfig: &config.StaticConfig{},
+	})
+	if err := buildAdmissionWithoutPanic(t, builder); err != nil {
+		t.Errorf("second Build() error = %v, want success", err)
+	}
+}
+
 func TestBuilderPassesAdmissionRegistryToProxyRoutes(t *testing.T) {
 	builder := newAdmissionTestBuilder()
 	var proxyRegistry, configuredRegistry *admission.Registry
