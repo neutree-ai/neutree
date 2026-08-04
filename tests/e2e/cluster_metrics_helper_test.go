@@ -156,7 +156,7 @@ func assertK8sNodeAgentControlPlaneScheduling(
 	}
 
 	if len(controlPlaneNodes) == 0 {
-		Skip("requires a control-plane node with node-role.kubernetes.io/control-plane:NoSchedule taint")
+		Skip("requires a control-plane node with a control-plane NoSchedule taint")
 	}
 
 	if len(untaintedWorkerNodes) == 0 {
@@ -190,7 +190,8 @@ func assertK8sNodeAgentControlPlaneScheduling(
 
 func hasControlPlaneNoScheduleTaint(node corev1.Node) bool {
 	for _, taint := range node.Spec.Taints {
-		if taint.Key == "node-role.kubernetes.io/control-plane" && taint.Effect == corev1.TaintEffectNoSchedule {
+		if (taint.Key == "node-role.kubernetes.io/control-plane" || taint.Key == "node-role.kubernetes.io/master") &&
+			taint.Effect == corev1.TaintEffectNoSchedule {
 			return true
 		}
 	}
