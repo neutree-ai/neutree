@@ -102,15 +102,22 @@ func (r *Registry) RegisterHook(resource any, hook Hook) error {
 	if err := validateHook(hook); err != nil {
 		return err
 	}
-	resourceHooks, exists := r.resources[descriptor.Name]
-	if !exists {
-		resourceHooks = newResourceHooks(descriptor.ObjectType)
-		r.resources[descriptor.Name] = resourceHooks
-	} else if err := validateDescriptorType(descriptor.Name, resourceHooks.objectType, descriptor.ObjectType); err != nil {
+	if err := validateHookDescriptorType(descriptor.Name, descriptor.ObjectType, hook.objectType); err != nil {
 		return err
 	}
-	if resourceHooks.objectType == nil && descriptor.ObjectType != nil {
-		resourceHooks.objectType = descriptor.ObjectType
+	objectType := hook.objectType
+	if descriptor.ObjectType != nil {
+		objectType = descriptor.ObjectType
+	}
+	resourceHooks, exists := r.resources[descriptor.Name]
+	if !exists {
+		resourceHooks = newResourceHooks(objectType)
+		r.resources[descriptor.Name] = resourceHooks
+	} else if err := validateDescriptorType(descriptor.Name, resourceHooks.objectType, objectType); err != nil {
+		return err
+	}
+	if resourceHooks.objectType == nil {
+		resourceHooks.objectType = objectType
 	}
 	key := hookKey{operation: hook.meta.Operation, phase: hook.meta.Phase, name: hook.meta.Name}
 	if _, exists := resourceHooks.byName[key]; exists {
@@ -261,6 +268,9 @@ func validateHook(hook Hook) error {
 	if hook.code <= 0 {
 		return fmt.Errorf("admission hook %q has invalid error code %d", hook.meta.Name, hook.code)
 	}
+	if hook.objectType == nil {
+		return fmt.Errorf("admission hook %q has no object type", hook.meta.Name)
+	}
 	if err := validateOrderBand(hook.meta); err != nil {
 		return err
 	}
@@ -334,4 +344,11 @@ func validateDescriptorType(name string, existing, requested reflect.Type) error
 		return fmt.Errorf("admission resource %q is registered for %s, not %s", name, existing, requested)
 	}
 	return nil
+}
+
+func validateHookDescriptorType(name string, descriptorType, hookType reflect.Type) error {
+	if descriptorType == nil || descriptorType == hookType {
+		return nil
+	}
+	return fmt.Errorf("admission resource %q descriptor type %s does not match hook type %s", name, descriptorType, hookType)
 }

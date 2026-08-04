@@ -80,10 +80,11 @@ type DeleteValidator[T any] func(RequestContext, T, T) error
 // Hook is a registered, type-erased admission hook. Construct it with the
 // typed constructor matching the operation and phase.
 type Hook struct {
-	meta     HookMeta
-	code     int
-	mutate   func(RequestContext, any) (any, error)
-	validate func(RequestContext, any, any) error
+	meta       HookMeta
+	code       int
+	objectType reflect.Type
+	mutate     func(RequestContext, any) (any, error)
+	validate   func(RequestContext, any, any) error
 }
 
 // Meta returns the hook metadata supplied to its typed constructor.
@@ -112,8 +113,9 @@ func ValidateCreate[T any](meta HookMeta, code int, fn CreateValidator[T]) Hook 
 	meta.Operation = Create
 	meta.Phase = Validating
 	return Hook{
-		meta: meta,
-		code: code,
+		meta:       meta,
+		code:       code,
+		objectType: reflect.TypeFor[T](),
 		validate: func(ctx RequestContext, _, candidate any) error {
 			value, err := snapshotAs[T](candidate)
 			if err != nil {
@@ -163,8 +165,9 @@ func mutateHook[T any](meta HookMeta, code int, operation Operation, fn Mutator[
 	meta.Operation = operation
 	meta.Phase = Mutating
 	return Hook{
-		meta: meta,
-		code: code,
+		meta:       meta,
+		code:       code,
+		objectType: reflect.TypeFor[T](),
 		mutate: func(ctx RequestContext, candidate any) (any, error) {
 			value, ok := candidate.(T)
 			if !ok {
@@ -179,8 +182,9 @@ func validateOldAndCandidateHook[T any](meta HookMeta, code int, operation Opera
 	meta.Operation = operation
 	meta.Phase = Validating
 	return Hook{
-		meta: meta,
-		code: code,
+		meta:       meta,
+		code:       code,
+		objectType: reflect.TypeFor[T](),
 		validate: func(ctx RequestContext, old, candidate any) error {
 			oldValue, err := snapshotAs[T](old)
 			if err != nil {

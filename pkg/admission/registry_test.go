@@ -95,6 +95,19 @@ func TestRegistryBindsTypedHookToEmptyResourceDescriptor(t *testing.T) {
 	require.ErrorContains(t, err, "registered for")
 }
 
+func TestRegistryBindsStringHookRegistrationToItsHookType(t *testing.T) {
+	registry := admission.NewRegistry()
+	second := admission.NewResource[otherWidget]("same")
+	require.NoError(t, registry.RegisterHook("same", admission.ValidateCreate(
+		admission.HookMeta{Name: "community.widget", Order: 1}, 10001, validateWidget,
+	)))
+	err := registry.RegisterHook(second, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.other-widget", Order: 2}, 10002,
+		func(_ admission.RequestContext, _ otherWidget) error { return nil },
+	))
+	require.ErrorContains(t, err, "registered for")
+}
+
 func TestRegistryRejectsDuplicateMutatorOrder(t *testing.T) {
 	registry := newWidgetRegistry(t)
 	require.NoError(t, registry.RegisterHook(widgetResource, admission.MutateCreate(
