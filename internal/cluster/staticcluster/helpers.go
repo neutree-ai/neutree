@@ -2,6 +2,7 @@ package staticcluster
 
 import (
 	"context"
+	"maps"
 
 	"github.com/pkg/errors"
 
@@ -127,23 +128,10 @@ func copyRuntimeConfig(config *v1.RuntimeConfig) *v1.RuntimeConfig {
 	}
 
 	result := *config
-	result.Env = copyStringMap(config.Env)
+	result.Env = maps.Clone(config.Env)
 	result.Options = append([]string(nil), config.Options...)
 
 	return &result
-}
-
-func copyStringMap(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-
-	return result
 }
 
 func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
