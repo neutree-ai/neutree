@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
+	"github.com/neutree-ai/neutree/pkg/admission"
 )
 
 // Builder is the API application builder
@@ -25,6 +26,17 @@ type Builder struct {
 	routesToMiddlewares    map[string][]string
 	config                 *config.APIConfig
 	globalMiddlewaresInits []MiddlewareFactory
+	admissionConfigurers   []admissionConfigurer
+}
+
+type admissionConfigurer struct {
+	name      string
+	configure func(*AdmissionOptions) error
+}
+
+// AdmissionOptions exposes the admission registry to builder configurers.
+type AdmissionOptions struct {
+	Registry *admission.Registry
 }
 
 // NewBuilder creates a new API builder
@@ -34,6 +46,7 @@ func NewBuilder() *Builder {
 		routeInits:             make(map[string]RouteFactory),
 		routesToMiddlewares:    make(map[string][]string),
 		globalMiddlewaresInits: []MiddlewareFactory{},
+		admissionConfigurers:   []admissionConfigurer{},
 	}
 
 	// Register default route handlers
@@ -172,11 +185,21 @@ func (b *Builder) WithGlobalMiddleware(middlewareInit MiddlewareFactory) *Builde
 	return b
 }
 
+// WithAdmissionConfigurer registers a function that configures admission hooks.
+func (b *Builder) WithAdmissionConfigurer(name string, configure func(*AdmissionOptions) error) *Builder {
+	b.admissionConfigurers = append(b.admissionConfigurers, admissionConfigurer{
+		name:      name,
+		configure: configure,
+	})
+	return b
+}
+
 // Build creates and initializes all components
 func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+	admissionRegistry := admission.NewRegistry()
 
 	middlewareOptions := &MiddlewareOptions{
 		Config: b.config,
@@ -221,6 +244,7 @@ func (b *Builder) Build() (*App, error) {
 			Config:      b.config,
 			Group:       apiV1,
 			Middlewares: middlewares,
+			Admission:   admissionRegistry,
 		}
 
 		klog.Info("Initializing route:", name)
@@ -229,6 +253,21 @@ func (b *Builder) Build() (*App, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize route %s: %v", name, err)
 		}
+	}
+
+	configuredNames := make(map[string]struct{}, len(b.admissionConfigurers))
+	admissionOptions := &AdmissionOptions{Registry: admissionRegistry}
+	for _, configurer := range b.admissionConfigurers {
+		if _, exists := configuredNames[configurer.name]; exists {
+			return nil, fmt.Errorf("duplicate admission configurer %q", configurer.name)
+		}
+		configuredNames[configurer.name] = struct{}{}
+		if err := configurer.configure(admissionOptions); err != nil {
+			return nil, fmt.Errorf("failed to configure admission %q: %w", configurer.name, err)
+		}
+	}
+	if err := admissionRegistry.Seal(); err != nil {
+		return nil, fmt.Errorf("failed to seal admission registry: %w", err)
 	}
 
 	return NewApp(b.config), nil

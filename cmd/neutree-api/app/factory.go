@@ -15,6 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -26,6 +27,7 @@ type RouteOptions struct {
 	Config      *config.APIConfig
 	Group       *gin.RouterGroup
 	Middlewares []gin.HandlerFunc
+	Admission   *admission.Registry
 }
 
 type ModelRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *models.Dependencies)
@@ -51,6 +53,7 @@ func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 			AuthEndpoint:     deps.Config.AuthEndpoint,
 			AuthConfig:       deps.Config.AuthConfig,
 			ImageService:     registry.NewImageService(),
+			Admission:        deps.Admission,
 		})
 
 		return nil
