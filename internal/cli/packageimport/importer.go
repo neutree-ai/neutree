@@ -221,6 +221,14 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return nil, errors.Wrap(err, "failed to create image pusher")
 	}
 
+	var snapshot *imageSnapshot
+	if !opts.SkipImagePush && !opts.SkipImageCleanup {
+		snapshot, err = imagePusher.SnapshotLocalImages(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to snapshot local images")
+		}
+	}
+
 	err = imagePusher.LoadImages(ctx, manifest, opts.ExtractPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load images")
@@ -254,6 +262,15 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to push images to mirror registry")
+	}
+
+	if opts.SkipImageCleanup {
+		klog.Info("Skipping local image cleanup as per configuration")
+		return pushedImages, nil
+	}
+
+	if err := imagePusher.CleanupImages(ctx, snapshot, imagePrefix, manifest); err != nil {
+		return nil, errors.Wrap(err, "failed to clean local images")
 	}
 
 	return pushedImages, nil
