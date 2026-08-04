@@ -114,12 +114,14 @@ func (b *Builder) Build() (*App, error) {
 		return nil, fmt.Errorf("configuration is required to build the application")
 	}
 
-	acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
-	if err != nil {
-		return nil, fmt.Errorf("create accelerator manager: %w", err)
-	}
+	if b.config.AcceleratorManager == nil || len(b.acceleratorPlugins) > 0 {
+		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
+		if err != nil {
+			return nil, fmt.Errorf("create accelerator manager: %w", err)
+		}
 
-	b.config.AcceleratorManager = acceleratorManager
+		b.config.AcceleratorManager = acceleratorManager
+	}
 
 	registerControllers := make(map[string]controllers.Controller)
 	// Initialize controllers

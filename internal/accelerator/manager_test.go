@@ -338,11 +338,17 @@ func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 	assert.Contains(t, err.Error(), "accelerator plugin missing not found")
 }
 
-func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
-	detector := &fakeStaticNodeAcceleratorPlugin{accelerators: []v1.Accelerator{{ID: "0"}}}
+func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing.T) {
+	detector := &fakeStaticNodeAcceleratorPlugin{staticResponse: &v1.DetectStaticNodeAcceleratorResponse{
+		Matched: true,
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type:    "npu",
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0", ProductModel: "HUAWEI_Ascend910B"}},
+		},
+	}}
 	m := &manager{}
-	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
+	m.acceleratorsMap.Store("npu", registerPlugin{
+		resource:         "npu",
 		plugin:           detector,
 		lastRegisterTime: time.Now(),
 	})
@@ -354,15 +360,19 @@ func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, status)
-	assert.Equal(t, "custom_gpu", status.Type)
-	assert.Empty(t, status.Devices, "type discovery must not report detailed device data")
-	assert.Equal(t, 1, detector.getCalls)
-	assert.Equal(t, "10.0.0.10", detector.getRequest.NodeIp)
-	assert.Equal(t, "root", detector.getRequest.SSHAuth.SSHUser)
+	assert.Equal(t, "npu", status.Type)
+	require.Len(t, status.Devices, 1)
+	assert.Equal(t, "HUAWEI_Ascend910B", status.Devices[0].ProductModel)
+	assert.Zero(t, detector.getCalls)
 }
 
 func TestManagerDetectAcceleratorSupportsExternalPluginWithoutStaticDetectEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == v1.DetectStaticNodeAcceleratorPath {
+			http.NotFound(w, r)
+			return
+		}
+
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, v1.GetNodeAcceleratorPath, r.URL.Path)
 
@@ -445,6 +455,7 @@ type fakeStaticNodeAcceleratorPlugin struct {
 	staticRuntimeMatched bool
 	staticRuntimeErr     error
 	staticRuntimeCalls   int
+	staticResponse       *v1.DetectStaticNodeAcceleratorResponse
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
@@ -467,6 +478,10 @@ func (p *fakeStaticNodeAcceleratorPlugin) DetectStaticNodeAccelerator(
 	ctx context.Context,
 	request *v1.DetectStaticNodeAcceleratorRequest,
 ) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if p.staticResponse != nil {
+		return p.staticResponse, nil
+	}
+
 	return &v1.DetectStaticNodeAcceleratorResponse{}, nil
 }
 

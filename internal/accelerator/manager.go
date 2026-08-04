@@ -262,6 +262,26 @@ func (a *manager) DetectAccelerator(
 			return true
 		}
 
+		staticResponse, staticErr := p.plugin.Handle().DetectStaticNodeAccelerator(ctx, &v1.DetectStaticNodeAcceleratorRequest{
+			NodeIp:  nodeIP,
+			SSHAuth: sshAuth,
+		})
+		if staticErr == nil && staticResponse != nil && staticResponse.Matched && staticResponse.Accelerator != nil {
+			detected = staticResponse.Accelerator
+
+			return false
+		}
+
+		if staticErr != nil && p.plugin.Type() == publicaccelerator.InternalPluginType {
+			klog.Warningf("detect static node accelerator from plugin %s failed: %s", p.resource, staticErr.Error())
+
+			if detectErr == nil {
+				detectErr = errors.Wrapf(staticErr, "detect static node accelerator from plugin %s failed", p.resource)
+			}
+
+			return true
+		}
+
 		response, err := p.plugin.Handle().GetNodeAccelerator(ctx, &v1.GetNodeAcceleratorRequest{
 			NodeIp:  nodeIP,
 			SSHAuth: sshAuth,

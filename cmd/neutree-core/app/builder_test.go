@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
@@ -62,6 +63,22 @@ func TestBuilderBuildRequiresGinEngine(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Build() error = nil, want GinEngine validation error")
+	}
+}
+
+func TestBuilderBuildPreservesConfiguredAcceleratorManagerWithoutInjectedPlugins(t *testing.T) {
+	manager := &acceleratormocks.MockManager{}
+	config := &config.CoreConfig{AcceleratorManager: manager}
+	builder := NewBuilder().WithConfig(config)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if config.AcceleratorManager != manager {
+		t.Fatal("Build() replaced the configured AcceleratorManager without injected plugins")
 	}
 }
 
