@@ -94,14 +94,27 @@ func validateEndpointVGPURequest(
 
 func endpointPatchIncludesCluster(body []byte) (bool, *validationError) {
 	var payload struct {
-		Spec map[string]json.RawMessage `json:"spec"`
+		Spec json.RawMessage `json:"spec"`
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return false, invalidEndpointPayloadError(err)
 	}
 
-	_, ok := payload.Spec["cluster"]
+	if len(payload.Spec) == 0 {
+		return false, nil
+	}
+
+	if bytes.Equal(bytes.TrimSpace(payload.Spec), []byte("null")) {
+		return true, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(payload.Spec, &spec); err != nil {
+		return false, invalidEndpointPayloadError(err)
+	}
+
+	_, ok := spec["cluster"]
 
 	return ok, nil
 }

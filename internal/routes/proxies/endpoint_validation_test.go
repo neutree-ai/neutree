@@ -942,6 +942,10 @@ func TestEndpointVGPUValidationRejectsPatchThatChangesCluster(t *testing.T) {
 			name: "null cluster",
 			body: `{"spec":{"cluster":null}}`,
 		},
+		{
+			name: "null spec",
+			body: `{"spec":null}`,
+		},
 	}
 
 	for _, tt := range tests {
