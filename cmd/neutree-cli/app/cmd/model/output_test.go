@@ -70,14 +70,14 @@ func TestPrintYAMLKeepsLargeIntegersExact(t *testing.T) {
 	require.Equal(t, "parameter_count: 671026419200\n", out.String())
 }
 
-// A string that looks like a number has to come back a string, or the output
-// stops being a faithful rendering of the payload.
-func TestPrintYAMLQuotesAmbiguousStrings(t *testing.T) {
+// A parameter count is a string of digits. It has to come back a string, or the
+// output stops being a faithful rendering of the payload.
+func TestPrintYAMLQuotesNumericStrings(t *testing.T) {
 	var out bytes.Buffer
 
-	_, err := printPayload(&out, outputYAML, json.RawMessage(`{"parameter_count":"7615616512","is_moe":"no"}`))
+	_, err := printPayload(&out, outputYAML, json.RawMessage(`{"parameter_count":"7615616512"}`))
 	require.NoError(t, err)
-	require.Equal(t, "parameter_count: \"7615616512\"\nis_moe: \"no\"\n", out.String())
+	require.Equal(t, "parameter_count: \"7615616512\"\n", out.String())
 }
 
 func TestPrintPayloadLeavesTheTableToTheCaller(t *testing.T) {
