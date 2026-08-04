@@ -90,7 +90,7 @@ func runGet(opts *getOptions, modelTag string) error {
 	// Get model details
 	detail, err := c.Models.Get(workspace, registry, modelName, version)
 	if err != nil {
-		return fmt.Errorf("failed to get model %s: %w", modelTag, err)
+		return fmt.Errorf("failed to get model %s in registry %q: %w", modelTag, registry, err)
 	}
 
 	printed, err := printPayload(os.Stdout, opts.output, detail.Raw)

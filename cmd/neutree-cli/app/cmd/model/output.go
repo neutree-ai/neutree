@@ -102,11 +102,42 @@ func printYAML(w io.Writer, raw json.RawMessage) error {
 
 // plainStyle clears the flow and quoting styles the parser recorded while
 // reading the JSON body, so the output is block-style YAML instead of a
-// re-indented copy of the JSON.
+// re-indented copy of the JSON — except where dropping the quotes would change
+// what the value is.
 func plainStyle(node *yaml.Node) {
-	node.Style = 0
+	if node.Kind == yaml.ScalarNode {
+		node.Style = scalarStyle(node)
+	} else {
+		node.Style = 0
+	}
 
 	for _, child := range node.Content {
 		plainStyle(child)
 	}
+}
+
+// yaml11Booleans are the spellings YAML 1.1 reads as booleans. YAML 1.2 keeps
+// only true and false, and the encoder already quotes a string that spells one
+// of those; the rest are listed here.
+var yaml11Booleans = map[string]bool{
+	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true,
+	"n": true, "N": true, "no": true, "No": true, "NO": true,
+	"on": true, "On": true, "ON": true, "off": true, "Off": true, "OFF": true,
+}
+
+// scalarStyle picks the style to write a scalar with: plain, unless it is a
+// string that a YAML 1.1 reader would take for a boolean.
+//
+// The encoder already keeps a string quoted when YAML 1.2 would resolve it to
+// something else, which covers numbers, null and true/false — so a parameter
+// count of "7615616512" survives as a string. It does not cover the older
+// boolean spellings, which are still what PyYAML and ruby's YAML read: a label
+// value of "no" would come back as false there. Model info holds no such value,
+// but labels are free-form, so the quotes stay.
+func scalarStyle(node *yaml.Node) yaml.Style {
+	if node.Tag == "!!str" && yaml11Booleans[node.Value] {
+		return yaml.DoubleQuotedStyle
+	}
+
+	return 0
 }

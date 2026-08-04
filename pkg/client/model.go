@@ -97,6 +97,11 @@ type ModelList struct {
 	// response header; the body stays a bare array. Total is nil when the
 	// registry cannot count what matched (the header carries "*" in its place),
 	// which is not the same as counting zero.
+	//
+	// When the header names no range — it is absent, malformed, or reports the
+	// empty page as "*" — Offset falls back to the offset that was asked for.
+	// Reporting position 0 for a page fetched from offset 20 would be a wrong
+	// number rather than an absent one.
 	Offset int
 	Total  *int
 }
@@ -139,33 +144,41 @@ func (s *ModelsService) List(workspace, registry string, opts ModelListOptions) 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, responseError(resp.StatusCode, body)
 	}
 
-	result := &ModelList{Raw: body}
+	result := &ModelList{Raw: body, Offset: opts.Offset}
 	if err := json.Unmarshal(body, &result.Models); err != nil {
 		return nil, err
 	}
 
-	result.Offset, result.Total = parseContentRange(resp.Header.Get("Content-Range"))
+	offset, offsetKnown, total := parseContentRange(resp.Header.Get("Content-Range"))
+	if offsetKnown {
+		result.Offset = offset
+	}
+
+	result.Total = total
 
 	return result, nil
 }
 
 // parseContentRange reads the PostgREST-style "first-last/total" header the
-// listing endpoint answers with, returning the offset of the page and the total
-// number of matches. An absent, malformed or open-ended ("*") part yields a zero
-// offset and a nil total, so a server that cannot count is indistinguishable
-// from one that predates the header — both simply leave the total unknown.
-func parseContentRange(header string) (offset int, total *int) {
+// listing endpoint answers with, returning the offset of the page, whether the
+// header named it at all, and the total number of matches.
+//
+// The two unknowns are reported separately because they arise separately: a
+// public registry answers "0-9/*", naming the range but unable to count the
+// catalogue behind it, while a server that predates the header names neither. A
+// nil total therefore says nothing about whether the offset is trustworthy.
+func parseContentRange(header string) (offset int, offsetKnown bool, total *int) {
 	rangePart, totalPart, found := strings.Cut(strings.TrimSpace(header), "/")
 	if !found {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	if first, _, ok := strings.Cut(rangePart, "-"); ok {
 		if parsed, err := strconv.Atoi(first); err == nil && parsed >= 0 {
-			offset = parsed
+			offset, offsetKnown = parsed, true
 		}
 	}
 
@@ -173,7 +186,24 @@ func parseContentRange(header string) (offset int, total *int) {
 		total = &parsed
 	}
 
-	return offset, total
+	return offset, offsetKnown, total
+}
+
+// responseError turns a failed model request into an error carrying what the
+// server actually said. These endpoints answer with a JSON body holding a
+// "message", and some of those messages are the whole point of the response —
+// a registry refusing to page from an offset is stating a limit, not failing —
+// so the message leads and the status code follows it in parentheses.
+func responseError(statusCode int, body []byte) error {
+	var payload struct {
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(body, &payload); err == nil && payload.Message != "" {
+		return fmt.Errorf("%s (HTTP %d)", payload.Message, statusCode)
+	}
+
+	return fmt.Errorf("server returned non-200 status: %d, body: %s", statusCode, string(body))
 }
 
 // ModelDetail is one model version's detail response. As with ModelList, Raw is
@@ -208,7 +238,7 @@ func (s *ModelsService) Get(workspace, registry, modelName, version string) (*Mo
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+		return nil, responseError(resp.StatusCode, body)
 	}
 
 	modelVersion := &v1.ModelVersion{}

@@ -64,6 +64,7 @@ var listColumns = []listColumn{
 
 type listOptions struct {
 	output string
+	search string
 	limit  int
 	offset int
 }
@@ -81,6 +82,7 @@ func NewListCmd() *cobra.Command {
 	}
 
 	addOutputFlag(cmd, &opts.output)
+	cmd.Flags().StringVar(&opts.search, "search", "", "Only list models whose name matches this term")
 	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Maximum number of models to return (0 uses the server default)")
 	cmd.Flags().IntVar(&opts.offset, "offset", 0, "Number of models to skip before the first returned one")
 
@@ -103,13 +105,16 @@ func runList(opts *listOptions) error {
 		return fmt.Errorf("failed to get model registry %s: %w", registry, err)
 	}
 
-	// List models
+	// List models. The registry is named in the error because not every registry
+	// can serve every listing — a public one refuses to page from an offset —
+	// and a refusal that does not say which registry refused reads like a bug.
 	models, err := c.Models.List(workspace, registry, client.ModelListOptions{
+		Search: opts.search,
 		Limit:  opts.limit,
 		Offset: opts.offset,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to list models: %w", err)
+		return fmt.Errorf("failed to list models in registry %q: %w", registry, err)
 	}
 
 	printed, err := printPayload(os.Stdout, opts.output, models.Raw)

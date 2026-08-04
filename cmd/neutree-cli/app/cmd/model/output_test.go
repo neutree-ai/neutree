@@ -80,6 +80,29 @@ func TestPrintYAMLQuotesNumericStrings(t *testing.T) {
 	require.Equal(t, "parameter_count: \"7615616512\"\n", out.String())
 }
 
+// Labels are free-form, so a label value can spell one of the booleans YAML 1.1
+// recognises. go-yaml reads it back as a string either way, but PyYAML and
+// ruby's YAML do not — and output meant to be read by other tools should not
+// depend on which YAML version read it.
+func TestPrintYAMLQuotesYAML11BooleanSpellings(t *testing.T) {
+	var out bytes.Buffer
+
+	_, err := printPayload(&out, outputYAML,
+		json.RawMessage(`{"labels":{"a":"no","b":"Yes","c":"off","d":"N","e":"north"}}`))
+	require.NoError(t, err)
+	require.Equal(t, "labels:\n    a: \"no\"\n    b: \"Yes\"\n    c: \"off\"\n    d: \"N\"\n    e: north\n", out.String())
+}
+
+// The quoting is for strings only. A real boolean stays a bare boolean, or the
+// rendering would misreport the payload in the other direction.
+func TestPrintYAMLLeavesRealBooleansBare(t *testing.T) {
+	var out bytes.Buffer
+
+	_, err := printPayload(&out, outputYAML, json.RawMessage(`{"is_moe":false,"quantized":true}`))
+	require.NoError(t, err)
+	require.Equal(t, "is_moe: false\nquantized: true\n", out.String())
+}
+
 func TestPrintPayloadLeavesTheTableToTheCaller(t *testing.T) {
 	var out bytes.Buffer
 

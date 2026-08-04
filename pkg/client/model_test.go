@@ -84,6 +84,73 @@ func TestListOmitsUnsetQueryParameters(t *testing.T) {
 	require.Nil(t, models.Total)
 }
 
+// A server that names no range must not be read as one reporting the first
+// page: the offset that was asked for is the only thing known about where this
+// page sits, and reporting 0 instead would be a wrong number, not a missing one.
+func TestListFallsBackToTheRequestedOffset(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		offset int
+	}{
+		{name: "no header", header: "", offset: 20},
+		{name: "malformed header", header: "nonsense", offset: 20},
+		{name: "empty page names no range", header: "*/42", offset: 20},
+		// A header that does name the range wins: the server is the authority on
+		// where it actually started.
+		{name: "header wins", header: "17-18/42", offset: 17},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.header != "" {
+					w.Header().Set("Content-Range", tt.header)
+				}
+
+				_, _ = w.Write([]byte(`[{"name":"demo","versions":[]}]`))
+			}))
+			defer server.Close()
+
+			c := NewClient(server.URL, WithAPIKey("api-key"))
+
+			models, err := c.Models.List("default", "registry", ModelListOptions{Offset: 20})
+			require.NoError(t, err)
+			require.Equal(t, tt.offset, models.Offset)
+		})
+	}
+}
+
+// A registry refusing to page from an offset is stating a limit. The message
+// saying so is the useful part of the response, so it must not be buried in a
+// transport-level wrapper.
+func TestListSurfacesTheServersMessage(t *testing.T) {
+	const message = "This model registry cannot list models this way: " +
+		"operation not supported by this model registry"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"` + message + `"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, WithAPIKey("api-key"))
+
+	_, err := c.Models.List("default", "registry", ModelListOptions{Offset: 2})
+	require.Error(t, err)
+	require.Equal(t, message+" (HTTP 400)", err.Error())
+}
+
+// A body that carries no message still has to reach the user intact — it is all
+// there is to go on.
+func TestResponseErrorFallsBackToTheRawBody(t *testing.T) {
+	err := responseError(http.StatusBadGateway, []byte("<html>gateway</html>"))
+	require.EqualError(t, err, "server returned non-200 status: 502, body: <html>gateway</html>")
+
+	err = responseError(http.StatusInternalServerError, []byte(`{"message":""}`))
+	require.EqualError(t, err, `server returned non-200 status: 500, body: {"message":""}`)
+}
+
 func TestGetKeepsResponseBody(t *testing.T) {
 	body := `{"name":"v1","size":"64 B","alias":"pet","info":{"parameter_count":"7615616512",` +
 		`"field_sources":{"parameter_count":"auto"},"missing_fields":["quantization"]}}`
@@ -124,25 +191,29 @@ func TestGetOmitsLatestVersionFromQuery(t *testing.T) {
 
 func TestParseContentRange(t *testing.T) {
 	tests := []struct {
-		name   string
-		header string
-		offset int
-		total  *int
+		name        string
+		header      string
+		offset      int
+		offsetKnown bool
+		total       *int
 	}{
-		{name: "counted page", header: "0-9/57", offset: 0, total: ptr(57)},
-		{name: "later page", header: "20-29/57", offset: 20, total: ptr(57)},
+		{name: "counted page", header: "0-9/57", offset: 0, offsetKnown: true, total: ptr(57)},
+		{name: "later page", header: "20-29/57", offset: 20, offsetKnown: true, total: ptr(57)},
 		// A public registry reports the page it served but cannot count the
-		// catalogue behind it.
-		{name: "uncountable total", header: "0-9/*", offset: 0, total: nil},
-		{name: "empty page", header: "*/0", offset: 0, total: ptr(0)},
-		{name: "absent header", header: "", offset: 0, total: nil},
-		{name: "malformed header", header: "nonsense", offset: 0, total: nil},
+		// catalogue behind it. The range is still authoritative.
+		{name: "uncountable total", header: "0-9/*", offset: 0, offsetKnown: true, total: nil},
+		// The converse: a counted result whose page names no range.
+		{name: "empty page", header: "*/0", offset: 0, offsetKnown: false, total: ptr(0)},
+		{name: "absent header", header: "", offset: 0, offsetKnown: false, total: nil},
+		{name: "malformed header", header: "nonsense", offset: 0, offsetKnown: false, total: nil},
+		{name: "non-numeric range", header: "a-b/57", offset: 0, offsetKnown: false, total: ptr(57)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			offset, total := parseContentRange(tt.header)
+			offset, offsetKnown, total := parseContentRange(tt.header)
 			require.Equal(t, tt.offset, offset)
+			require.Equal(t, tt.offsetKnown, offsetKnown)
 
 			if tt.total == nil {
 				require.Nil(t, total)
