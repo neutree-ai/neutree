@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	kmount "k8s.io/utils/mount"
 
@@ -26,7 +28,11 @@ var (
 
 var (
 	mountInterface = kmount.New("")
+	readDir        = os.ReadDir
+	readDirChecks  sync.Map
 )
+
+const nfsReadTimeout = 10 * time.Second
 
 // IsMountExist checks whether the given NFS device is mounted at the specified
 // mount point. It takes the device identifier (device) and the target mount
@@ -34,18 +40,28 @@ var (
 // found, false otherwise. An error is returned if the list of current mounts
 // cannot be retrieved.
 func IsMountExist(device string, mountPoint string) (bool, error) {
+	existed, _, err := findMount(device, mountPoint)
+	return existed, err
+}
+
+func findMount(device string, mountPoint string) (bool, string, error) {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
-		return false, err
+		return false, "", errors.Wrapf(err, "failed to list NFS mounts for %s", mountPoint)
 	}
 
+	var unexpectedDevice string
 	for _, mp := range mountPoints {
 		if mountPoint == mp.Path && device == mp.Device {
-			return true, nil
+			return true, "", nil
+		}
+
+		if mountPoint == mp.Path && unexpectedDevice == "" {
+			unexpectedDevice = mp.Device
 		}
 	}
 
-	return false, nil
+	return false, unexpectedDevice, nil
 }
 
 // GetNFSVersion returns the NFS protocol version (e.g. "3", "4", "4.1", "4.2")
@@ -83,13 +99,16 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 }
 
 func MountNFS(device string, mountPoint string) error {
-	existed, err := IsMountExist(device, mountPoint)
+	existed, unexpectedDevice, err := findMount(device, mountPoint)
 	if err != nil {
 		return err
 	}
 
 	if existed {
-		return nil
+		return readDirWithTimeout(mountPoint, nfsReadTimeout)
+	}
+	if unexpectedDevice != "" {
+		return errors.Errorf("mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
 	}
 
 	err = os.MkdirAll(mountPoint, os.FileMode(0644))
@@ -103,7 +122,40 @@ func MountNFS(device string, mountPoint string) error {
 		return errors.Wrapf(err, "failed to mount nfs %s to %s", device, mountPoint)
 	}
 
-	return nil
+	return readDirWithTimeout(mountPoint, nfsReadTimeout)
+}
+
+type readDirCheck struct {
+	done chan struct{}
+	err  error
+}
+
+func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
+	newCheck := &readDirCheck{done: make(chan struct{})}
+	value, loaded := readDirChecks.LoadOrStore(mountPoint, newCheck)
+	check := newCheck
+	if loaded {
+		check = value.(*readDirCheck)
+	} else {
+		go func() {
+			_, check.err = readDir(mountPoint)
+			close(check.done)
+			readDirChecks.Delete(mountPoint)
+		}()
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-check.done:
+		if check.err != nil {
+			return errors.Wrapf(check.err, "failed to read NFS mount path %s", mountPoint)
+		}
+		return nil
+	case <-timer.C:
+		return errors.Errorf("timed out reading NFS mount path %s", mountPoint)
+	}
 }
 
 func Unmount(mountPoint string) error {

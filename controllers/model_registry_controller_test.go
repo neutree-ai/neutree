@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -120,10 +121,11 @@ func TestModelRegistryController_Sync_PendingOrNoStatus(t *testing.T) {
 			name:  "Pending/NoStatus -> Failed (connect error)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("Connect").Return(assert.AnError)
+				m.On("Connect").Return(errors.New("failed to read NFS mount path /mnt/registry"))
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+					assert.Contains(t, obj.Status.ErrorMessage, "/mnt/registry")
 				}).Return(nil)
 			},
 			wantErr: true,
@@ -222,10 +224,11 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			name:  "Connected -> Failed (healthy check failed)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
-				m.On("HealthyCheck").Return(assert.AnError)
+				m.On("HealthyCheck").Return(errors.New("timed out reading NFS mount path /mnt/registry"))
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseFAILED, obj.Status.Phase)
+					assert.Contains(t, obj.Status.ErrorMessage, "/mnt/registry")
 				}).Return(nil)
 			},
 			wantErr: true,
