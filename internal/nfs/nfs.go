@@ -136,6 +136,7 @@ type readDirCheck struct {
 func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 	readDirChecksMu.Lock()
 	check, loaded := readDirChecks[mountPoint]
+
 	if !loaded {
 		check = &readDirCheck{done: make(chan struct{})}
 		readDirChecks[mountPoint] = check
