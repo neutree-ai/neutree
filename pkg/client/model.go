@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -72,14 +73,56 @@ func NewModelsService(client *Client) *ModelsService {
 	}
 }
 
-// List lists all models in the specified registry
-func (s *ModelsService) List(workspace, registry, search string) ([]v1.GeneralModel, error) {
-	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models", s.client.baseURL, workspace, registry)
-	if search != "" {
-		url = fmt.Sprintf("%s?search=%s", url, search)
+// ModelListOptions narrows a model listing. A zero Limit asks for the server's
+// default page size, and a zero Offset for the first page.
+type ModelListOptions struct {
+	Search string
+	Limit  int
+	Offset int
+}
+
+// ModelList is one page of a model listing.
+//
+// Raw is the response body exactly as the server sent it. Callers that render
+// the payload rather than read fields off it should use Raw: a decode/re-encode
+// round trip through the structs below silently rewrites the payload (dropping
+// fields this build does not know about, and materialising ones the server
+// omitted), which is precisely what a machine-readable output format must not do.
+type ModelList struct {
+	Models []v1.GeneralModel
+	Raw    json.RawMessage
+
+	// Offset is the index of the first item of this page within the full result
+	// set, and Total the size of that set. Both come from the Content-Range
+	// response header; the body stays a bare array. Total is nil when the
+	// registry cannot count what matched (the header carries "*" in its place),
+	// which is not the same as counting zero.
+	Offset int
+	Total  *int
+}
+
+// List lists models in the specified registry.
+func (s *ModelsService) List(workspace, registry string, opts ModelListOptions) (*ModelList, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models", s.client.baseURL, workspace, registry)
+
+	query := url.Values{}
+	if opts.Search != "" {
+		query.Set("search", opts.Search)
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	if opts.Limit > 0 {
+		query.Set("limit", strconv.Itoa(opts.Limit))
+	}
+
+	if opts.Offset > 0 {
+		query.Set("offset", strconv.Itoa(opts.Offset))
+	}
+
+	if len(query) > 0 {
+		endpoint = endpoint + "?" + query.Encode()
+	}
+
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,27 +133,65 @@ func (s *ModelsService) List(workspace, registry, search string) ([]v1.GeneralMo
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var models []v1.GeneralModel
-	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
 
-	return models, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	result := &ModelList{Raw: body}
+	if err := json.Unmarshal(body, &result.Models); err != nil {
+		return nil, err
+	}
+
+	result.Offset, result.Total = parseContentRange(resp.Header.Get("Content-Range"))
+
+	return result, nil
+}
+
+// parseContentRange reads the PostgREST-style "first-last/total" header the
+// listing endpoint answers with, returning the offset of the page and the total
+// number of matches. An absent, malformed or open-ended ("*") part yields a zero
+// offset and a nil total, so a server that cannot count is indistinguishable
+// from one that predates the header — both simply leave the total unknown.
+func parseContentRange(header string) (offset int, total *int) {
+	rangePart, totalPart, found := strings.Cut(strings.TrimSpace(header), "/")
+	if !found {
+		return 0, nil
+	}
+
+	if first, _, ok := strings.Cut(rangePart, "-"); ok {
+		if parsed, err := strconv.Atoi(first); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	if parsed, err := strconv.Atoi(totalPart); err == nil && parsed >= 0 {
+		total = &parsed
+	}
+
+	return offset, total
+}
+
+// ModelDetail is one model version's detail response. As with ModelList, Raw is
+// the untouched response body and is what machine-readable output must render.
+type ModelDetail struct {
+	Version *v1.ModelVersion
+	Raw     json.RawMessage
 }
 
 // Get retrieves detailed information about a specific model version
-func (s *ModelsService) Get(workspace, registry, modelName, version string) (*v1.ModelVersion, error) {
-	url := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s", s.client.baseURL, workspace, registry, modelName)
+func (s *ModelsService) Get(workspace, registry, modelName, version string) (*ModelDetail, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models/%s",
+		s.client.baseURL, workspace, registry, modelName)
 	if version != "" && version != v1.LatestVersion {
-		url = fmt.Sprintf("%s?version=%s", url, version)
+		endpoint = endpoint + "?" + url.Values{"version": []string{version}}.Encode()
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -121,17 +202,21 @@ func (s *ModelsService) Get(workspace, registry, modelName, version string) (*v1
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	var modelVersion v1.ModelVersion
-	if err := json.NewDecoder(resp.Body).Decode(&modelVersion); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
 
-	return &modelVersion, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	modelVersion := &v1.ModelVersion{}
+	if err := json.Unmarshal(body, modelVersion); err != nil {
+		return nil, err
+	}
+
+	return &ModelDetail{Version: modelVersion, Raw: body}, nil
 }
 
 // Delete removes a specific model from the registry
