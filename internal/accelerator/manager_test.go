@@ -97,7 +97,7 @@ func TestManagerGetStaticNodeRuntimeConfig(t *testing.T) {
 	}
 }
 
-func TestManagerGetStaticNodeRuntimeConfigDoesNotUseFallbackWithoutOwningPlugin(t *testing.T) {
+func TestManagerGetStaticNodeRuntimeConfigRequiresOwningPlugin(t *testing.T) {
 	fallback := &fakeStaticNodeAcceleratorPlugin{
 		resourceSet:          true,
 		resource:             "fallback_gpu",
@@ -113,12 +113,13 @@ func TestManagerGetStaticNodeRuntimeConfigDoesNotUseFallbackWithoutOwningPlugin(
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "legacy_gpu"})
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accelerator plugin legacy_gpu not found")
 	assert.Nil(t, config)
 	assert.Zero(t, fallback.staticRuntimeCalls)
 }
 
-func TestManagerGetStaticNodeRuntimeConfigUsesFallbackWhenOwnerHasNoResolver(t *testing.T) {
+func TestManagerGetStaticNodeRuntimeConfigDoesNotUseFallbackWhenOwnerHasNoResolver(t *testing.T) {
 	fallback := &fakeStaticNodeAcceleratorPlugin{
 		resourceSet:          true,
 		resource:             "fallback_gpu",
@@ -140,51 +141,15 @@ func TestManagerGetStaticNodeRuntimeConfigUsesFallbackWhenOwnerHasNoResolver(t *
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
 
 	require.NoError(t, err)
-	require.NotNil(t, config)
-	assert.Equal(t, "true", config.Env["FALLBACK"])
-	assert.Equal(t, 1, fallback.staticRuntimeCalls)
-}
-
-func TestManagerGetStaticNodeRuntimeConfigStopsAtFirstFallbackError(t *testing.T) {
-	failing := &fakeStaticNodeAcceleratorPlugin{
-		resourceSet:      true,
-		resource:         "a_fallback_gpu",
-		staticRuntimeErr: errors.New("unsafe static runtime"),
-	}
-	laterMatch := &fakeStaticNodeAcceleratorPlugin{
-		resourceSet:          true,
-		resource:             "z_fallback_gpu",
-		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"LATER": "true"}},
-		staticRuntimeMatched: true,
-	}
-	m := &manager{}
-	m.acceleratorsMap.Store("owner_gpu", registerPlugin{
-		resource:         "owner_gpu",
-		plugin:           &plugin.GPUAcceleratorPlugin{},
-		lastRegisterTime: time.Now(),
-	})
-	m.acceleratorsMap.Store(failing.Resource(), registerPlugin{
-		resource:         failing.Resource(),
-		plugin:           failing,
-		lastRegisterTime: time.Now(),
-	})
-	m.acceleratorsMap.Store(laterMatch.Resource(), registerPlugin{
-		resource:         laterMatch.Resource(),
-		plugin:           laterMatch,
-		lastRegisterTime: time.Now(),
-	})
-
-	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "a_fallback_gpu")
 	assert.Nil(t, config)
+	assert.Zero(t, fallback.staticRuntimeCalls)
 }
 
-func TestManagerGetStaticNodeRuntimeConfigRejectsNilFallbackConfig(t *testing.T) {
-	fallback := &fakeStaticNodeAcceleratorPlugin{
+func TestManagerGetStaticNodeRuntimeConfigDoesNotCallUnrelatedResolver(t *testing.T) {
+	unrelated := &fakeStaticNodeAcceleratorPlugin{
 		resourceSet:          true,
-		resource:             "fallback_gpu",
+		resource:             "unrelated_gpu",
+		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"UNRELATED": "true"}},
 		staticRuntimeMatched: true,
 	}
 	m := &manager{}
@@ -193,16 +158,36 @@ func TestManagerGetStaticNodeRuntimeConfigRejectsNilFallbackConfig(t *testing.T)
 		plugin:           &plugin.GPUAcceleratorPlugin{},
 		lastRegisterTime: time.Now(),
 	})
-	m.acceleratorsMap.Store(fallback.Resource(), registerPlugin{
-		resource:         fallback.Resource(),
-		plugin:           fallback,
+	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{
+		resource:         unrelated.Resource(),
+		plugin:           unrelated,
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
+
+	require.NoError(t, err)
+	assert.Nil(t, config)
+	assert.Zero(t, unrelated.staticRuntimeCalls)
+}
+
+func TestManagerGetStaticNodeRuntimeConfigRejectsNilOwnerConfig(t *testing.T) {
+	owner := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "owner_gpu",
+		staticRuntimeMatched: true,
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{
+		resource:         owner.Resource(),
+		plugin:           owner,
 		lastRegisterTime: time.Now(),
 	})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "fallback_gpu returned nil config for a matched status")
+	assert.Contains(t, err.Error(), "owner_gpu returned nil config for a matched status")
 	assert.Nil(t, config)
 }
 
@@ -342,13 +327,13 @@ func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing
 	detector := &fakeStaticNodeAcceleratorPlugin{staticResponse: &v1.DetectStaticNodeAcceleratorResponse{
 		Matched: true,
 		Accelerator: &v1.StaticNodeAcceleratorStatus{
-			Type:    "npu",
-			Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0", ProductModel: "HUAWEI_Ascend910B"}},
+			Type:    "custom_gpu",
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0", ProductModel: "custom-model"}},
 		},
 	}}
 	m := &manager{}
-	m.acceleratorsMap.Store("npu", registerPlugin{
-		resource:         "npu",
+	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
+		resource:         "custom_gpu",
 		plugin:           detector,
 		lastRegisterTime: time.Now(),
 	})
@@ -360,26 +345,20 @@ func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing
 
 	require.NoError(t, err)
 	require.NotNil(t, status)
-	assert.Equal(t, "npu", status.Type)
+	assert.Equal(t, "custom_gpu", status.Type)
 	require.Len(t, status.Devices, 1)
-	assert.Equal(t, "HUAWEI_Ascend910B", status.Devices[0].ProductModel)
+	assert.Equal(t, "custom-model", status.Devices[0].ProductModel)
 	assert.Zero(t, detector.getCalls)
 }
 
-func TestManagerDetectAcceleratorSupportsExternalPluginWithoutStaticDetectEndpoint(t *testing.T) {
+func TestManagerDetectAcceleratorRequiresStaticDetectEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == v1.DetectStaticNodeAcceleratorPath {
 			http.NotFound(w, r)
 			return
 		}
 
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, v1.GetNodeAcceleratorPath, r.URL.Path)
-
-		err := json.NewEncoder(w).Encode(v1.GetNodeAcceleratorResponse{
-			Accelerators: []v1.Accelerator{{ID: "0"}},
-		})
-		require.NoError(t, err)
+		t.Fatalf("unexpected legacy detection request: %s", r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -395,9 +374,9 @@ func TestManagerDetectAcceleratorSupportsExternalPluginWithoutStaticDetectEndpoi
 		SSHPrivateKey: "key",
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	assert.Equal(t, "external_gpu", status.Type)
+	require.Error(t, err)
+	assert.Nil(t, status)
+	assert.Contains(t, err.Error(), "detect static node accelerator from plugin external_gpu failed")
 }
 
 func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testing.T) {
@@ -417,11 +396,11 @@ func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, status.Type)
-	assert.Equal(t, 1, detector.getCalls)
+	assert.Zero(t, detector.getCalls)
 }
 
 func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testing.T) {
-	detector := &fakeStaticNodeAcceleratorPlugin{getErr: errors.New("lspci unavailable")}
+	detector := &fakeStaticNodeAcceleratorPlugin{staticDetectErr: errors.New("lspci unavailable")}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
 		resource:         "custom_gpu",
@@ -437,7 +416,7 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 	require.Error(t, err)
 	require.Nil(t, status)
 	assert.Contains(t, err.Error(), "detect static node accelerator from plugin custom_gpu failed")
-	assert.Equal(t, 1, detector.getCalls)
+	assert.Zero(t, detector.getCalls)
 }
 
 type fakeStaticNodeAcceleratorPlugin struct {
@@ -456,6 +435,7 @@ type fakeStaticNodeAcceleratorPlugin struct {
 	staticRuntimeErr     error
 	staticRuntimeCalls   int
 	staticResponse       *v1.DetectStaticNodeAcceleratorResponse
+	staticDetectErr      error
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
@@ -478,6 +458,10 @@ func (p *fakeStaticNodeAcceleratorPlugin) DetectStaticNodeAccelerator(
 	ctx context.Context,
 	request *v1.DetectStaticNodeAcceleratorRequest,
 ) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if p.staticDetectErr != nil {
+		return nil, p.staticDetectErr
+	}
+
 	if p.staticResponse != nil {
 		return p.staticResponse, nil
 	}
