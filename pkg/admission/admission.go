@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 )
 
 // Operation identifies the write operation a hook handles.
@@ -54,8 +55,8 @@ func NewResource[T any](name string) Resource[T] {
 	return Resource[T]{Name: name}
 }
 
-func (r Resource[T]) admissionResourceName() string {
-	return r.Name
+func (r Resource[T]) admissionResourceDescriptor() resourceDescriptor {
+	return resourceDescriptor{Name: r.Name, ObjectType: reflect.TypeFor[T]()}
 }
 
 // RequestContext carries request-scoped values provided by the admission

@@ -17,6 +17,8 @@ type widget struct {
 	Labels map[string]string
 }
 
+type otherWidget struct{}
+
 var widgetResource = admission.NewResource[widget](testResource)
 
 func TestRegistryOrdersHooksByPhaseOrderAndName(t *testing.T) {
@@ -59,6 +61,38 @@ func TestRegistryRegistersResourceWhenHookIsRegistered(t *testing.T) {
 	chain, err := registry.Chain(unregistered, admission.Create)
 	require.NoError(t, err)
 	require.Len(t, chain.Hooks(), 1)
+}
+
+func TestRegistryRejectsDifferentDescriptorTypeForSameResourceName(t *testing.T) {
+	registry := admission.NewRegistry()
+	first := admission.NewResource[widget]("same")
+	second := admission.NewResource[otherWidget]("same")
+	require.NoError(t, registry.RegisterHook(first, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.widget", Order: 1}, 10001, validateWidget,
+	)))
+	err := registry.RegisterHook(second, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.other-widget", Order: 2}, 10002,
+		func(_ admission.RequestContext, _ otherWidget) error { return nil },
+	))
+	require.ErrorContains(t, err, "registered for")
+	require.NoError(t, registry.Seal())
+	_, err = registry.Chain(second, admission.Create)
+	require.ErrorContains(t, err, "registered for")
+}
+
+func TestRegistryBindsTypedHookToEmptyResourceDescriptor(t *testing.T) {
+	registry := admission.NewRegistry()
+	first := admission.NewResource[widget]("same")
+	second := admission.NewResource[otherWidget]("same")
+	require.NoError(t, registry.RegisterResource("same"))
+	require.NoError(t, registry.RegisterHook(first, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.widget", Order: 1}, 10001, validateWidget,
+	)))
+	err := registry.RegisterHook(second, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.other-widget", Order: 2}, 10002,
+		func(_ admission.RequestContext, _ otherWidget) error { return nil },
+	))
+	require.ErrorContains(t, err, "registered for")
 }
 
 func TestRegistryRejectsDuplicateMutatorOrder(t *testing.T) {

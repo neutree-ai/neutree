@@ -2,6 +2,7 @@ package admission
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -24,8 +25,9 @@ type Registry struct {
 }
 
 type resourceHooks struct {
-	hooks  map[Operation][]Hook
-	byName map[hookKey]struct{}
+	objectType reflect.Type
+	hooks      map[Operation][]Hook
+	byName     map[hookKey]struct{}
 }
 
 type hookKey struct {
@@ -35,7 +37,12 @@ type hookKey struct {
 }
 
 type resourceNamer interface {
-	admissionResourceName() string
+	admissionResourceDescriptor() resourceDescriptor
+}
+
+type resourceDescriptor struct {
+	Name       string
+	ObjectType reflect.Type
 }
 
 // Chain is an immutable, ordered operation-specific admission chain.
@@ -60,17 +67,20 @@ func (r *Registry) RegisterResource(resource any) error {
 	if r.sealed {
 		return fmt.Errorf("admission registry is sealed")
 	}
-	name, err := resolveResourceName(resource)
+	descriptor, err := resolveResourceDescriptor(resource)
 	if err != nil {
 		return err
 	}
-	if name == "" {
+	if descriptor.Name == "" {
 		return fmt.Errorf("admission resource name is empty")
 	}
-	if _, exists := r.resources[name]; exists {
-		return fmt.Errorf("admission resource %q is already registered", name)
+	if existing, exists := r.resources[descriptor.Name]; exists {
+		if err := validateDescriptorType(descriptor.Name, existing.objectType, descriptor.ObjectType); err != nil {
+			return err
+		}
+		return fmt.Errorf("admission resource %q is already registered", descriptor.Name)
 	}
-	r.resources[name] = newResourceHooks()
+	r.resources[descriptor.Name] = newResourceHooks(descriptor.ObjectType)
 	return nil
 }
 
@@ -82,30 +92,35 @@ func (r *Registry) RegisterHook(resource any, hook Hook) error {
 	if r.sealed {
 		return fmt.Errorf("admission registry is sealed")
 	}
-	name, err := resolveResourceName(resource)
+	descriptor, err := resolveResourceDescriptor(resource)
 	if err != nil {
 		return err
 	}
-	if name == "" {
+	if descriptor.Name == "" {
 		return fmt.Errorf("admission resource name is empty")
 	}
 	if err := validateHook(hook); err != nil {
 		return err
 	}
-	resourceHooks, exists := r.resources[name]
+	resourceHooks, exists := r.resources[descriptor.Name]
 	if !exists {
-		resourceHooks = newResourceHooks()
-		r.resources[name] = resourceHooks
+		resourceHooks = newResourceHooks(descriptor.ObjectType)
+		r.resources[descriptor.Name] = resourceHooks
+	} else if err := validateDescriptorType(descriptor.Name, resourceHooks.objectType, descriptor.ObjectType); err != nil {
+		return err
+	}
+	if resourceHooks.objectType == nil && descriptor.ObjectType != nil {
+		resourceHooks.objectType = descriptor.ObjectType
 	}
 	key := hookKey{operation: hook.meta.Operation, phase: hook.meta.Phase, name: hook.meta.Name}
 	if _, exists := resourceHooks.byName[key]; exists {
-		return fmt.Errorf("admission hook %q is already registered for resource %q", hook.meta.Name, name)
+		return fmt.Errorf("admission hook %q is already registered for resource %q", hook.meta.Name, descriptor.Name)
 	}
 	if existing, exists := r.codes[hook.code]; exists {
 		return fmt.Errorf("admission error code %d is already registered by hook %q", hook.code, existing.Name)
 	}
 	if hook.meta.Phase == Mutating && hasMutatorOrder(resourceHooks.hooks[hook.meta.Operation], hook.meta.Order) {
-		return fmt.Errorf("admission mutator order %d is already registered for resource %q", hook.meta.Order, name)
+		return fmt.Errorf("admission mutator order %d is already registered for resource %q", hook.meta.Order, descriptor.Name)
 	}
 
 	resourceHooks.hooks[hook.meta.Operation] = append(resourceHooks.hooks[hook.meta.Operation], hook)
@@ -149,13 +164,16 @@ func (r *Registry) Chain(resource any, operation Operation) (*Chain, error) {
 	if !r.sealed {
 		return nil, fmt.Errorf("admission registry is not sealed")
 	}
-	name, err := resolveResourceName(resource)
+	descriptor, err := resolveResourceDescriptor(resource)
 	if err != nil {
 		return nil, err
 	}
-	resourceHooks, exists := r.resources[name]
+	resourceHooks, exists := r.resources[descriptor.Name]
 	if !exists {
-		return nil, fmt.Errorf("admission resource %q is not registered", name)
+		return nil, fmt.Errorf("admission resource %q is not registered", descriptor.Name)
+	}
+	if err := validateDescriptorType(descriptor.Name, resourceHooks.objectType, descriptor.ObjectType); err != nil {
+		return nil, err
 	}
 	if !validOperation(operation) {
 		return nil, fmt.Errorf("invalid admission operation %d", operation)
@@ -279,14 +297,14 @@ func validPhase(phase Phase) bool {
 	return phase == Mutating || phase == Validating
 }
 
-func resolveResourceName(resource any) (string, error) {
+func resolveResourceDescriptor(resource any) (resourceDescriptor, error) {
 	switch value := resource.(type) {
 	case string:
-		return value, nil
+		return resourceDescriptor{Name: value}, nil
 	case resourceNamer:
-		return value.admissionResourceName(), nil
+		return value.admissionResourceDescriptor(), nil
 	default:
-		return "", fmt.Errorf("unsupported admission resource type %T", resource)
+		return resourceDescriptor{}, fmt.Errorf("unsupported admission resource type %T", resource)
 	}
 }
 
@@ -297,9 +315,23 @@ func contextError(ctx RequestContext) error {
 	return ctx.Context.Err()
 }
 
-func newResourceHooks() *resourceHooks {
+func newResourceHooks(objectType reflect.Type) *resourceHooks {
 	return &resourceHooks{
-		hooks:  make(map[Operation][]Hook),
-		byName: make(map[hookKey]struct{}),
+		objectType: objectType,
+		hooks:      make(map[Operation][]Hook),
+		byName:     make(map[hookKey]struct{}),
 	}
+}
+
+func validateDescriptorType(name string, existing, requested reflect.Type) error {
+	if requested == nil {
+		return nil
+	}
+	if existing == nil {
+		return nil
+	}
+	if existing != requested {
+		return fmt.Errorf("admission resource %q is registered for %s, not %s", name, existing, requested)
+	}
+	return nil
 }
