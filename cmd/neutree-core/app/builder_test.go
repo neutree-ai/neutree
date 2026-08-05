@@ -305,6 +305,15 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 			want: "v1.3.0",
 		},
 		{
+			name:     "workflow commit build uses highest persisted stable baseline",
+			identity: "c636802",
+			infos: []v1.ReleaseInfo{
+				{Metadata: &v1.Metadata{Name: "v1.1.1"}},
+				{Metadata: &v1.Metadata{Name: "v1.2.0"}},
+			},
+			want: "v1.2.0",
+		},
+		{
 			name:     "nightly resolves its stable baseline",
 			identity: "v1.2.0-nightly.20260805",
 			infos:    []v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}},

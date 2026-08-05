@@ -2,12 +2,15 @@ package releaseinfo
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
+
+var workflowShortCommitBuildPattern = regexp.MustCompile(`^[0-9a-f]{7}$`)
 
 // NormalizeClusterMinor returns the supported minor line for a complete Cluster
 // version. Cluster prereleases belong to the minor line of their final release.
@@ -40,7 +43,12 @@ func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.Release
 }
 
 func isDevelopmentOrDirtyBuild(buildIdentity string) bool {
-	for _, part := range strings.FieldsFunc(strings.ToLower(strings.TrimSpace(buildIdentity)), func(r rune) bool {
+	identity := strings.TrimSpace(buildIdentity)
+	if workflowShortCommitBuildPattern.MatchString(identity) {
+		return true
+	}
+
+	for _, part := range strings.FieldsFunc(strings.ToLower(identity), func(r rune) bool {
 		return r == '.' || r == '-' || r == '+'
 	}) {
 		if part == "dev" || part == "dirty" {

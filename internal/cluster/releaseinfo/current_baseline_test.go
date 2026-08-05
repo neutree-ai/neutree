@@ -86,6 +86,21 @@ func TestResolveCurrentControlPlaneBaseline(t *testing.T) {
 			want:     "v1.4.0",
 		},
 		{
+			name:     "workflow commit build uses highest persisted release info",
+			identity: "c636802",
+			infos: []v1.ReleaseInfo{
+				*releaseInfoNamed("v1.1.1"),
+				*releaseInfoNamed("v1.2.0"),
+			},
+			want: "v1.2.0",
+		},
+		{
+			name:     "nonworkflow hexadecimal identity remains invalid",
+			identity: "DEADBEEF",
+			infos:    []v1.ReleaseInfo{*releaseInfoNamed("v1.2.0")},
+			wantErr:  "v-prefixed",
+		},
+		{
 			name:     "no valid persisted release info",
 			identity: "dirty",
 			infos: []v1.ReleaseInfo{
