@@ -19,9 +19,11 @@ func admissionRouteRunners[T any](deps *Dependencies, tableName string, resource
 	if err := registerAdmissionResource(deps, resource); err != nil {
 		return nil, nil, err
 	}
+
 	if deps == nil || deps.Admission == nil {
 		return nil, nil, nil
 	}
+
 	return CreateAdmissionRunner(deps.Admission, resource), CreatePatchAdmissionRunner(deps, tableName, resource), nil
 }
 
@@ -29,9 +31,11 @@ func admissionPatchRunner[T any](deps *Dependencies, tableName string, resource 
 	if err := registerAdmissionResource(deps, resource); err != nil {
 		return nil, err
 	}
+
 	if deps == nil || deps.Admission == nil {
 		return nil, nil
 	}
+
 	return CreatePatchAdmissionRunner(deps, tableName, resource), nil
 }
 
@@ -39,6 +43,7 @@ func registerAdmissionResource[T any](deps *Dependencies, resource admission.Res
 	if deps == nil || deps.Admission == nil {
 		return nil
 	}
+
 	return deps.Admission.RegisterResource(resource)
 }
 
@@ -46,11 +51,13 @@ func withAdmissionRunner(runner gin.HandlerFunc, handler gin.HandlerFunc) []gin.
 	if runner == nil {
 		return []gin.HandlerFunc{handler}
 	}
+
 	return []gin.HandlerFunc{runner, handler}
 }
 
 func withRouteMiddlewares(middlewares, handlers []gin.HandlerFunc) []gin.HandlerFunc {
 	combined := make([]gin.HandlerFunc, 0, len(middlewares)+len(handlers))
 	combined = append(combined, middlewares...)
+
 	return append(combined, handlers...)
 }

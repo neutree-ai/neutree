@@ -94,6 +94,7 @@ func (r registryPatchAdmissionChainResolver) Chain(resource any, operation admis
 	if r.registry == nil {
 		return nil, errors.New("admission registry is unavailable")
 	}
+
 	return r.registry.Chain(resource, operation)
 }
 
@@ -111,10 +112,12 @@ func (r postgrestPatchAdmissionTargetReader) Read(ctx context.Context, table str
 	if err != nil {
 		return nil, errPatchAdmissionTargetRead
 	}
+
 	targetQuery := make(url.Values, len(selectors)+1)
 	for key, values := range selectors {
 		targetQuery[key] = append([]string(nil), values...)
 	}
+
 	targetQuery.Set("select", "*")
 	target.RawQuery = targetQuery.Encode()
 
@@ -122,29 +125,36 @@ func (r postgrestPatchAdmissionTargetReader) Read(ctx context.Context, table str
 	if err != nil {
 		return nil, errPatchAdmissionTargetRead
 	}
+
 	httpRequest.Header.Set("Authorization", "Bearer "+token)
 
 	client := r.client
 	if client == nil {
 		client = http.DefaultClient
 	}
+
 	response, err := client.Do(httpRequest)
 	if err != nil {
 		return nil, errPatchAdmissionTargetRead
 	}
+
 	defer response.Body.Close()
+
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return nil, errPatchAdmissionTargetRead
 	}
 
 	var resources []json.RawMessage
+
 	decoder := json.NewDecoder(response.Body)
 	if err := decoder.Decode(&resources); err != nil {
 		return nil, errPatchAdmissionTargetRead
 	}
+
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return nil, errPatchAdmissionTargetRead
 	}
+
 	return resources, nil
 }
 
@@ -157,13 +167,20 @@ func CreatePatchAdmissionRunner[T any](deps *Dependencies, tableName string, res
 
 // CreatePatchAdmissionRunnerWithOptions creates a PATCH admission runner with
 // an optional resource-owned mapping for malformed request payloads.
-func CreatePatchAdmissionRunnerWithOptions[T any](deps *Dependencies, tableName string, resource admission.Resource[T], options PatchAdmissionRunnerOptions) gin.HandlerFunc {
+func CreatePatchAdmissionRunnerWithOptions[T any](
+	deps *Dependencies,
+	tableName string,
+	resource admission.Resource[T],
+	options PatchAdmissionRunnerOptions,
+) gin.HandlerFunc {
 	baseURL := ""
 	var registry *admission.Registry
+
 	if deps != nil {
 		baseURL = deps.StorageAccessURL
 		registry = deps.Admission
 	}
+
 	return newPatchAdmissionRunnerWithOptions(
 		registryPatchAdmissionChainResolver{registry: registry},
 		postgrestPatchAdmissionTargetReader{baseURL: baseURL},
@@ -184,10 +201,12 @@ func newPatchAdmissionRunnerWithOptions[T any](
 ) gin.HandlerFunc {
 	tagConfig := extractStructTagConfig(reflect.TypeFor[T]())
 	topLevelFields := extractTopLevelJSONFields(reflect.TypeFor[T]())
+
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPatch {
 			return
 		}
+
 		if err := c.Request.Context().Err(); err != nil {
 			writePatchAdmissionError(c, err)
 			return
@@ -198,6 +217,7 @@ func newPatchAdmissionRunnerWithOptions[T any](
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
 		}
+
 		postgrestToken, ok := callerPostgrestToken(c)
 		if !ok {
 			writePatchAdmissionError(c, errPatchAdmissionTargetRead)
@@ -209,19 +229,23 @@ func newPatchAdmissionRunnerWithOptions[T any](
 			writePatchAdmissionBodyError(c, err, options)
 			return
 		}
+
 		if err := c.Request.Body.Close(); err != nil {
 			writePatchAdmissionBodyError(c, err, options)
 			return
 		}
+
 		normalizedBody, patch, err := normalizeAdmissionPatch(originalBody, topLevelFields)
 		if err != nil {
 			writePatchAdmissionInvalidRequestError(c, originalBody, err, options)
 			return
 		}
+
 		if containsMaskedAdmissionField(patch, tagConfig.excludeFields) {
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
 		}
+
 		deleteIntent := request.IsSoftDeleteRequest(patch)
 
 		resources, err := reader.Read(c.Request.Context(), tableName, selectors, postgrestToken)
@@ -229,6 +253,7 @@ func newPatchAdmissionRunnerWithOptions[T any](
 			writePatchAdmissionError(c, err)
 			return
 		}
+
 		switch len(resources) {
 		case 0:
 			c.AbortWithStatus(http.StatusNotFound)
@@ -244,25 +269,30 @@ func newPatchAdmissionRunnerWithOptions[T any](
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
 		}
+
 		oldMap = filterAdmissionObject(oldMap, tagConfig.excludeFields)
 		patch = filterAdmissionObject(patch, tagConfig.excludeFields)
 		candidateMap := cloneAdmissionObject(oldMap)
 		applyAdmissionPatch(candidateMap, patch)
+
 		oldJSON, err := json.Marshal(oldMap)
 		if err != nil {
 			writePatchAdmissionError(c, err)
 			return
 		}
+
 		old, err := decodePatchAdmissionCandidate[T](oldJSON, options)
 		if err != nil {
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
 		}
+
 		candidateJSON, err := json.Marshal(candidateMap)
 		if err != nil {
 			writePatchAdmissionError(c, err)
 			return
 		}
+
 		candidate, err := decodePatchAdmissionCandidate[T](candidateJSON, options)
 		if err != nil {
 			writePatchAdmissionInvalidRequestError(c, originalBody, err, options)
@@ -270,18 +300,22 @@ func newPatchAdmissionRunnerWithOptions[T any](
 		}
 
 		operation := admission.Update
+
 		if deleteIntent {
 			if !validSoftDeleteCandidate(oldMap, candidateMap) {
 				writePatchAdmissionError(c, errInvalidAdmissionRequest)
 				return
 			}
+
 			operation = admission.Delete
 		}
+
 		chain, err := resolver.Chain(resource, operation)
 		if err != nil {
 			writePatchAdmissionError(c, err)
 			return
 		}
+
 		if _, err := chain.Run(admission.RequestContext{Context: c.Request.Context()}, old, candidate); err != nil {
 			writePatchAdmissionError(c, err)
 			return
@@ -295,6 +329,7 @@ func decodePatchAdmissionCandidate[T any](raw []byte, options PatchAdmissionRunn
 	if options.PermissiveCandidates {
 		return decodePermissiveAdmissionCandidate[T](raw)
 	}
+
 	return decodeAdmissionCandidate[T](raw)
 }
 
@@ -307,19 +342,24 @@ func callerPostgrestToken(c *gin.Context) (string, bool) {
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
 		return "", false
 	}
+
 	return parts[1], true
 }
 
 func patchAdmissionSelectors(query url.Values) (url.Values, error) {
 	selectors := make(url.Values)
+
 	for key, values := range query {
 		if key == "select" || key == "returning" {
 			continue
 		}
+
 		if len(values) != 1 {
 			return nil, errInvalidAdmissionRequest
 		}
+
 		value := values[0]
+
 		switch key {
 		case "id", "metadata->>name":
 			if !isEqualPatchAdmissionSelector(value) {
@@ -332,17 +372,20 @@ func patchAdmissionSelectors(query url.Values) (url.Values, error) {
 		default:
 			return nil, errInvalidAdmissionRequest
 		}
+
 		selectors[key] = []string{values[0]}
 	}
 
 	if values, ok := selectors["id"]; ok && len(selectors) == 1 && len(values) == 1 {
 		return selectors, nil
 	}
+
 	if len(selectors) == 2 &&
 		isEqualPatchAdmissionSelector(selectors.Get("metadata->>name")) &&
 		(isEqualPatchAdmissionSelector(selectors.Get("metadata->>workspace")) || selectors.Get("metadata->>workspace") == "is.null") {
 		return selectors, nil
 	}
+
 	return nil, errInvalidAdmissionRequest
 }
 
@@ -355,10 +398,12 @@ func normalizeAdmissionPatch(body []byte, topLevelFields []string) ([]byte, map[
 	if err != nil {
 		return nil, nil, errInvalidAdmissionRequest
 	}
+
 	var patch map[string]interface{}
 	if err := json.Unmarshal(normalizedBody, &patch); err != nil || patch == nil {
 		return nil, nil, errInvalidAdmissionRequest
 	}
+
 	return normalizedBody, patch, nil
 }
 
@@ -367,6 +412,7 @@ func decodeAdmissionObject(raw []byte) (map[string]interface{}, error) {
 	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
 		return nil, errInvalidAdmissionRequest
 	}
+
 	return object, nil
 }
 
@@ -378,10 +424,12 @@ func normalizeAdmissionOldSnapshot[T any](raw []byte) (map[string]interface{}, e
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return nil, errInvalidAdmissionRequest
 	}
+
 	normalized, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, err
 	}
+
 	return decodeAdmissionObject(normalized)
 }
 
@@ -389,6 +437,7 @@ func cloneAdmissionObject(object map[string]interface{}) map[string]interface{} 
 	encoded, _ := json.Marshal(object)
 	var clone map[string]interface{}
 	_ = json.Unmarshal(encoded, &clone)
+
 	return clone
 }
 
@@ -406,6 +455,7 @@ func filterAdmissionObject(object map[string]interface{}, excludedFields map[str
 	if !ok {
 		return nil
 	}
+
 	return filtered
 }
 
@@ -419,6 +469,7 @@ func containsMaskedAdmissionField(patch map[string]interface{}, excludedFields m
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -426,6 +477,7 @@ func admissionPatchPathExists(value interface{}, path []string) bool {
 	if len(path) == 0 {
 		return true
 	}
+
 	switch current := value.(type) {
 	case map[string]interface{}:
 		next, ok := current[path[0]]
@@ -437,6 +489,7 @@ func admissionPatchPathExists(value interface{}, path []string) bool {
 			}
 		}
 	}
+
 	return false
 }
 
@@ -444,19 +497,25 @@ func validSoftDeleteCandidate(old, candidate map[string]interface{}) bool {
 	withoutDeleteFields := func(object map[string]interface{}) map[string]interface{} {
 		copy := cloneAdmissionObject(object)
 		metadata, ok := copy["metadata"].(map[string]interface{})
+
 		if !ok {
 			return copy
 		}
+
 		delete(metadata, "deletion_timestamp")
+
 		annotations, ok := metadata["annotations"].(map[string]interface{})
 		if ok {
 			delete(annotations, "neutree.ai/force-delete")
+
 			if len(annotations) == 0 {
 				delete(metadata, "annotations")
 			}
 		}
+
 		return copy
 	}
+
 	return reflect.DeepEqual(withoutDeleteFields(old), withoutDeleteFields(candidate))
 }
 
@@ -464,27 +523,33 @@ func writePatchAdmissionError(c *gin.Context, err error) {
 	var legacyDeleteResponse legacyDeleteAdmissionResponse
 	if errors.As(err, &legacyDeleteResponse) {
 		admissionError := legacyDeleteResponse.legacyDeleteAdmissionError()
+
 		c.Header("X-Powered-By", "Neutree")
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 			"code":    strconv.Itoa(admissionError.Code),
 			"message": admissionError.Message,
 			"hint":    admissionError.Hint,
 		})
+
 		return
 	}
+
 	if writeLegacyAdmissionResponse(c, err) {
 		return
 	}
+
 	var admissionError *admission.Error
 	if errors.As(err, &admissionError) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admissionError)
 		return
 	}
+
 	if errors.Is(err, errInvalidAdmissionRequest) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admission.Error{
 			Code:    admissionInvalidRequestErrorCode,
 			Message: errInvalidAdmissionRequest.Error(),
 		})
+
 		return
 	}
 
@@ -500,12 +565,14 @@ func writePatchAdmissionInvalidRequestError(c *gin.Context, body []byte, cause e
 		writePatchAdmissionError(c, options.InvalidRequestResponse(body, cause))
 		return
 	}
+
 	if options.InvalidRequestError != nil {
 		if admissionErr := options.InvalidRequestError(body, cause); admissionErr != nil {
 			writePatchAdmissionError(c, admissionErr)
 			return
 		}
 	}
+
 	writePatchAdmissionError(c, errInvalidAdmissionRequest)
 }
 
@@ -514,15 +581,18 @@ func writePatchAdmissionBodyError(c *gin.Context, cause error, options PatchAdmi
 		writePatchAdmissionError(c, options.BodyResponse(cause))
 		return
 	}
+
 	if options.BodyError != nil {
 		writePatchAdmissionError(c, options.BodyError(cause))
 		return
 	}
+
 	writePatchAdmissionError(c, cause)
 }
 
 func classifyPatchAdmissionFailure(err error) patchAdmissionFailure {
 	failure := patchAdmissionFailure{Cause: "unexpected"}
+
 	switch {
 	case errors.Is(err, errPatchAdmissionTargetRead):
 		failure.Cause = "caller_scoped_target_read"
@@ -531,8 +601,10 @@ func classifyPatchAdmissionFailure(err error) patchAdmissionFailure {
 	case errors.Is(err, context.DeadlineExceeded):
 		failure.Cause = "request_deadline_exceeded"
 	}
+
 	if err != nil {
 		failure.ErrorType = reflect.TypeOf(err).String()
 	}
+
 	return failure
 }

@@ -112,6 +112,7 @@ func MutateUpdate[T any](meta HookMeta, code int, fn Mutator[T]) Hook {
 func ValidateCreate[T any](meta HookMeta, code int, fn CreateValidator[T]) Hook {
 	meta.Operation = Create
 	meta.Phase = Validating
+
 	return Hook{
 		meta:       meta,
 		code:       code,
@@ -164,6 +165,7 @@ func ValidateDeleteHook[T any](meta HookMeta, code int, fn DeleteValidator[T]) H
 func mutateHook[T any](meta HookMeta, code int, operation Operation, fn Mutator[T]) Hook {
 	meta.Operation = operation
 	meta.Phase = Mutating
+
 	return Hook{
 		meta:       meta,
 		code:       code,
@@ -181,6 +183,7 @@ func mutateHook[T any](meta HookMeta, code int, operation Operation, fn Mutator[
 func validateOldAndCandidateHook[T any](meta HookMeta, code int, operation Operation, fn func(RequestContext, T, T) error) Hook {
 	meta.Operation = operation
 	meta.Phase = Validating
+
 	return Hook{
 		meta:       meta,
 		code:       code,
@@ -201,13 +204,16 @@ func validateOldAndCandidateHook[T any](meta HookMeta, code int, operation Opera
 
 func snapshotAs[T any](value any) (T, error) {
 	var copy T
+
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return copy, fmt.Errorf("snapshot admission candidate: %w", err)
 	}
+
 	if err := json.Unmarshal(encoded, &copy); err != nil {
 		return copy, fmt.Errorf("decode admission candidate snapshot: %w", err)
 	}
+
 	return copy, nil
 }
 

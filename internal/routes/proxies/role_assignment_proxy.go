@@ -25,11 +25,13 @@ func RegisterRoleAssignmentRoutes(group *gin.RouterGroup, middlewares []gin.Hand
 	if err != nil {
 		return err
 	}
+
 	handler := CreateStructProxyHandler[v1.RoleAssignment](deps, storage.ROLE_ASSIGNMENT_TABLE)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+
 	return nil
 }

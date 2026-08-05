@@ -25,11 +25,13 @@ func RegisterEngineRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	if err != nil {
 		return err
 	}
+
 	handler := CreateStructProxyHandler[v1.Engine](deps, storage.ENGINE_TABLE)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+
 	return nil
 }

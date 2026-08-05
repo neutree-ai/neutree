@@ -18,9 +18,11 @@ func RegisterAPIKeyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	if err != nil {
 		return err
 	}
+
 	handler := CreateStructProxyHandler[v1.ApiKey](deps, storage.API_KEY_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.PATCH("", rejectAPIKeyForceDelete(), withAdmissionRunner(patchRunner, handler)...)
+
 	return nil
 }

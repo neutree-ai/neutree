@@ -25,11 +25,13 @@ func RegisterOEMConfigRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFu
 	if err != nil {
 		return err
 	}
+
 	handler := CreateStructProxyHandler[v1.OEMConfig](deps, oemConfigTable)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withRouteMiddlewares(middlewares, withAdmissionRunner(createRunner, handler))...)
 	proxyGroup.PATCH("", withRouteMiddlewares(middlewares, withAdmissionRunner(patchRunner, handler))...)
+
 	return nil
 }

@@ -20,6 +20,7 @@ type workspaceDependencyCount struct {
 func validateWorkspaceDeleteDependencies(s storage.Storage, candidate v1.Workspace) error {
 	name := candidate.GetName()
 	counts := make([]workspaceDependencyCount, 0, 8)
+
 	for _, table := range []string{
 		storage.ENDPOINT_TABLE,
 		storage.CLUSTERS_TABLE,
@@ -33,6 +34,7 @@ func validateWorkspaceDeleteDependencies(s storage.Storage, candidate v1.Workspa
 		if err != nil {
 			return fmt.Errorf("failed to count %s: %w", table, err)
 		}
+
 		counts = append(counts, workspaceDependencyCount{resourceType: table, count: count})
 	}
 
@@ -40,38 +42,47 @@ func validateWorkspaceDeleteDependencies(s storage.Storage, candidate v1.Workspa
 	if err != nil {
 		return fmt.Errorf("failed to count role assignments: %w", err)
 	}
+
 	counts = append(counts, workspaceDependencyCount{resourceType: storage.ROLE_ASSIGNMENT_TABLE, count: count})
 
 	totalCount := 0
 	hint := "Resources still exist in this workspace:"
+
 	for _, dependency := range counts {
 		totalCount += dependency.count
+
 		if dependency.count > 0 {
 			hint += fmt.Sprintf("\n- %s: %d", dependency.resourceType, dependency.count)
 		}
 	}
+
 	if totalCount > 0 {
 		return newLegacyDeleteDependencyError(10125, fmt.Sprintf("cannot delete workspace '%s'", name), hint)
 	}
+
 	return nil
 }
 
 func RegisterWorkspaceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/workspaces")
 	proxyGroup.Use(middlewares...)
+
 	if err := registerWorkspaceAdmission(deps); err != nil {
 		return err
 	}
+
 	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
 		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, workspaceAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.WORKSPACE_TABLE, workspaceAdmissionResource)
 	}
+
 	handler := CreateStructProxyHandler[v1.Workspace](deps, storage.WORKSPACE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+
 	return nil
 }
 
@@ -79,9 +90,11 @@ func registerWorkspaceAdmission(deps *Dependencies) error {
 	if deps == nil || deps.Admission == nil {
 		return nil
 	}
+
 	if err := deps.Admission.RegisterResource(workspaceAdmissionResource); err != nil {
 		return err
 	}
+
 	return deps.Admission.RegisterHook(workspaceAdmissionResource, admission.ValidateDelete(
 		admission.HookMeta{Name: "community.workspace.dependencies.delete", Order: 10}, 10125,
 		func(_ admission.RequestContext, _, candidate v1.Workspace) error {

@@ -192,6 +192,7 @@ func (b *Builder) WithAdmissionConfigurer(name string, configure func(*Admission
 		name:      name,
 		configure: configure,
 	})
+
 	return b
 }
 
@@ -200,12 +201,15 @@ func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+
 	if err := b.validateAdmissionConfigurers(); err != nil {
 		return nil, err
 	}
+
 	if b.buildAttempted {
 		return nil, fmt.Errorf("build has already been attempted")
 	}
+
 	b.buildAttempted = true
 
 	admissionRegistry := admission.NewRegistry()
@@ -270,6 +274,7 @@ func (b *Builder) Build() (*App, error) {
 			return nil, fmt.Errorf("failed to configure admission %q: %w", configurer.name, err)
 		}
 	}
+
 	if err := admissionRegistry.Seal(); err != nil {
 		return nil, fmt.Errorf("failed to seal admission registry: %w", err)
 	}
@@ -279,17 +284,22 @@ func (b *Builder) Build() (*App, error) {
 
 func (b *Builder) validateAdmissionConfigurers() error {
 	names := make(map[string]struct{}, len(b.admissionConfigurers))
+
 	for _, configurer := range b.admissionConfigurers {
 		if configurer.name == "" {
 			return fmt.Errorf("admission configurer name is required")
 		}
+
 		if configurer.configure == nil {
 			return fmt.Errorf("admission configurer %q is nil", configurer.name)
 		}
+
 		if _, exists := names[configurer.name]; exists {
 			return fmt.Errorf("duplicate admission configurer %q", configurer.name)
 		}
+
 		names[configurer.name] = struct{}{}
 	}
+
 	return nil
 }

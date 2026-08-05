@@ -81,17 +81,20 @@ func RegisterModelCatalogRoutes(group *gin.RouterGroup, middlewares []gin.Handle
 	if err := registerModelCatalogAdmission(deps); err != nil {
 		return err
 	}
+
 	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
 		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, modelCatalogAdmissionResource, modelCatalogCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunnerWithOptions(deps, storage.MODEL_CATALOG_TABLE, modelCatalogAdmissionResource, modelCatalogPatchAdmissionRunnerOptions)
 	}
+
 	handler := CreateStructProxyHandler[v1.ModelCatalog](deps, "model_catalogs")
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+
 	return nil
 }
 
@@ -99,9 +102,11 @@ func registerModelCatalogAdmission(deps *Dependencies) error {
 	if deps == nil || deps.Admission == nil {
 		return nil
 	}
+
 	if err := deps.Admission.RegisterResource(modelCatalogAdmissionResource); err != nil {
 		return err
 	}
+
 	if err := deps.Admission.RegisterHook(modelCatalogAdmissionResource, admission.ValidateCreate(
 		admission.HookMeta{Name: "community.model-catalog.recipe.create", Order: 10}, 10223,
 		func(_ admission.RequestContext, candidate v1.ModelCatalog) error {
@@ -110,6 +115,7 @@ func registerModelCatalogAdmission(deps *Dependencies) error {
 	)); err != nil {
 		return err
 	}
+
 	return deps.Admission.RegisterHook(modelCatalogAdmissionResource, admission.ValidateUpdate(
 		admission.HookMeta{Name: "community.model-catalog.recipe.update", Order: 10}, 10224,
 		func(_ admission.RequestContext, _, candidate v1.ModelCatalog) error {
@@ -122,9 +128,11 @@ func validateModelCatalogRecipeCandidate(candidate v1.ModelCatalog) error {
 	if candidate.Spec == nil {
 		return nil
 	}
+
 	if err := recipe.ValidateModelCatalogSpec(candidate.Spec); err != nil {
 		return &admission.Error{Code: 10224, Message: err.Error(), Hint: "Fix the recipe definition and retry"}
 	}
+
 	return nil
 }
 
@@ -133,5 +141,6 @@ func modelCatalogInvalidPayloadAdmissionError(cause error) *admission.Error {
 	if cause != nil {
 		message += ": " + cause.Error()
 	}
+
 	return &admission.Error{Code: 10223, Message: message, Hint: "Check the model catalog spec fields and types"}
 }

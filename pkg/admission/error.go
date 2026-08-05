@@ -14,8 +14,10 @@ func (e *Error) Error() string {
 	if e == nil {
 		return ""
 	}
+
 	if e.Hint == "" {
 		return fmt.Sprintf("admission rejection %d: %s", e.Code, e.Message)
 	}
+
 	return fmt.Sprintf("admission rejection %d: %s (hint: %s)", e.Code, e.Message, e.Hint)
 }

@@ -177,25 +177,32 @@ func validateEndpointVGPUCandidate(store storage.Storage, endpoint *v1.Endpoint)
 	if endpoint == nil || endpoint.GetDeletionTimestamp() != "" || endpoint.Spec == nil {
 		return nil
 	}
+
 	if validationErr := validateEndpointReplicaCount(endpoint.Spec); validationErr != nil {
 		return validationErr
 	}
+
 	if endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
 		return nil
 	}
+
 	if endpointReplicaCount(endpoint.Spec) == 0 {
 		return nil
 	}
+
 	cluster, validationErr := resolveEndpointVGPUCluster(store, endpoint)
 	if validationErr != nil {
 		return validationErr
 	}
+
 	if validationErr := validateEndpointVGPUCluster(cluster); validationErr != nil {
 		return validationErr
 	}
+
 	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
 		return validationErr
 	}
+
 	return validateEndpointVGPUMemorySpec(endpoint.Spec.Resources, cluster)
 }
 

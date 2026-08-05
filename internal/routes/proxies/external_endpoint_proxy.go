@@ -37,6 +37,7 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 	if err != nil {
 		return err
 	}
+
 	handler := CreateStructProxyHandler[v1.ExternalEndpoint](deps, storage.EXTERNAL_ENDPOINT_TABLE)
 
 	// Only register allowed methods
@@ -46,6 +47,7 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 
 	// Test connectivity endpoint
 	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))
+
 	return nil
 }
 
