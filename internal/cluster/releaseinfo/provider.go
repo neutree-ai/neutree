@@ -23,14 +23,14 @@ func NewProvider(reader Reader, buildIdentity string) *Provider {
 
 // Current returns the database record selected by the control-plane baseline.
 func (provider *Provider) Current() (*v1.ReleaseInfo, error) {
-	baseline, _, err := NormalizeControlPlaneRelease(provider.buildIdentity)
-	if err != nil {
-		return nil, err
-	}
-
 	infos, err := provider.reader.ListReleaseInfo()
 	if err != nil {
 		return nil, fmt.Errorf("list release infos: %w", err)
+	}
+
+	baseline, err := ResolveCurrentControlPlaneBaseline(provider.buildIdentity, infos)
+	if err != nil {
+		return nil, err
 	}
 
 	for index := range infos {
