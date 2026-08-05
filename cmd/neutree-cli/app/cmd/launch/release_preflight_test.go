@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 func TestRunReleasePreflightReportsEveryIncompatibleCluster(t *testing.T) {
@@ -54,8 +55,28 @@ func TestBuildReleasePreflightTargetUsesCLIReleaseInfo(t *testing.T) {
 	assert.Equal(t, "v1.2.0", target.GetName())
 	assert.Equal(t, []string{"v1.1", "v1.2"}, target.Spec.CompatibleClusterBaselines)
 
+	target, err = buildReleasePreflightTarget("b64e294")
+	require.NoError(t, err)
+	assert.Equal(t, releaseprofile.CurrentCommunityReleaseInfoBaseline, target.GetName())
+
 	_, err = buildReleasePreflightTarget("dev")
 	require.Error(t, err)
+
+	_, err = buildReleasePreflightTarget("DEADBEEF")
+	require.Error(t, err)
+}
+
+func TestBuildReleasePreflightTargetWithBuilderUsesInjectedWorkflowBaseline(t *testing.T) {
+	builder := &preflightReleaseInfoBuilder{
+		baseline:    "v1.3.0",
+		compatibles: []string{"v1.2", "v1.3"},
+	}
+
+	target, err := buildReleasePreflightTargetWithBuilder("b64e294", builder)
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1.3.0", target.GetName())
+	assert.Equal(t, []string{"v1.2", "v1.3"}, target.Spec.CompatibleClusterBaselines)
 }
 
 func TestNeutreeCorePreflightDoesNotInheritInstallOnlyFlags(t *testing.T) {
@@ -86,4 +107,20 @@ func (lister *fakeClusterLister) List(kind, workspace string) ([]json.RawMessage
 	}
 
 	return lister.clusters, lister.err
+}
+
+type preflightReleaseInfoBuilder struct {
+	baseline    string
+	compatibles []string
+}
+
+func (builder *preflightReleaseInfoBuilder) BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error) {
+	return &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: baseline},
+		Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: append([]string(nil), builder.compatibles...)},
+	}, nil
+}
+
+func (builder *preflightReleaseInfoBuilder) CurrentReleaseInfoBaseline() string {
+	return builder.baseline
 }

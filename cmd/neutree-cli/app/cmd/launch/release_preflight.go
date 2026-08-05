@@ -21,6 +21,16 @@ type clusterLister interface {
 // NewNeutreeCorePreflightCmd checks the current clusters before a control-plane
 // upgrade. Installation intentionally does not invoke this command implicitly.
 func NewNeutreeCorePreflightCmd() *cobra.Command {
+	return NewNeutreeCorePreflightCmdWithReleaseInfoBuilder(releaseprofile.NewCommunityReleaseInfoBuilder())
+}
+
+// NewNeutreeCorePreflightCmdWithReleaseInfoBuilder creates a preflight command
+// that uses the supplied edition-specific ReleaseInfo builder.
+func NewNeutreeCorePreflightCmdWithReleaseInfoBuilder(releaseInfoBuilder releaseprofile.ReleaseInfoBuilder) *cobra.Command {
+	if releaseInfoBuilder == nil {
+		releaseInfoBuilder = releaseprofile.NewCommunityReleaseInfoBuilder()
+	}
+
 	return &cobra.Command{
 		Use:           "preflight",
 		Short:         "Check Cluster compatibility before upgrading Neutree Core",
@@ -35,7 +45,7 @@ func NewNeutreeCorePreflightCmd() *cobra.Command {
 				return fmt.Errorf("generic API client is unavailable")
 			}
 
-			target, err := buildReleasePreflightTarget(getCLIAppVersion())
+			target, err := buildReleasePreflightTargetWithBuilder(getCLIAppVersion(), releaseInfoBuilder)
 			if err != nil {
 				return err
 			}
@@ -46,12 +56,25 @@ func NewNeutreeCorePreflightCmd() *cobra.Command {
 }
 
 func buildReleasePreflightTarget(cliVersion string) (*v1.ReleaseInfo, error) {
-	baseline, err := releaseinfo.NormalizeControlPlaneRelease(cliVersion)
-	if err != nil {
-		return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
+	return buildReleasePreflightTargetWithBuilder(cliVersion, releaseprofile.NewCommunityReleaseInfoBuilder())
+}
+
+func buildReleasePreflightTargetWithBuilder(cliVersion string, releaseInfoBuilder releaseprofile.ReleaseInfoBuilder) (*v1.ReleaseInfo, error) {
+	if releaseInfoBuilder == nil {
+		return nil, fmt.Errorf("release info builder is required")
 	}
 
-	info, err := releaseprofile.NewCommunityReleaseInfoBuilder().BuildReleaseInfo(baseline)
+	baseline, err := releaseinfo.NormalizeControlPlaneRelease(cliVersion)
+	if err != nil {
+		baselineProvider, ok := releaseInfoBuilder.(releaseprofile.CurrentReleaseInfoBaselineProvider)
+		if !releaseinfo.IsWorkflowShortCommitBuild(cliVersion) || !ok {
+			return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
+		}
+
+		baseline = baselineProvider.CurrentReleaseInfoBaseline()
+	}
+
+	info, err := releaseInfoBuilder.BuildReleaseInfo(baseline)
 	if err != nil {
 		return nil, err
 	}

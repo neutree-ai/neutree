@@ -22,6 +22,18 @@ func (builder *testReleaseInfoBuilder) BuildReleaseInfo(string) (*v1.ReleaseInfo
 	return nil, nil
 }
 
+type testReleaseInfoBuilderWithBaseline struct {
+	baseline string
+}
+
+func (builder *testReleaseInfoBuilderWithBaseline) BuildReleaseInfo(string) (*v1.ReleaseInfo, error) {
+	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilderWithBaseline) CurrentReleaseInfoBaseline() string {
+	return builder.baseline
+}
+
 type testCurrentClusterProfileBuilder struct{}
 
 func (builder *testCurrentClusterProfileBuilder) BuildClusterProfile(string) (*v1.ClusterProfile, error) {
@@ -281,10 +293,11 @@ func TestAppRunStopsWhenCurrentReleaseInfoSynchronizationFails(t *testing.T) {
 
 func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testing.T) {
 	tests := []struct {
-		name     string
-		identity string
-		infos    []v1.ReleaseInfo
-		want     string
+		name           string
+		identity       string
+		infos          []v1.ReleaseInfo
+		releaseBuilder releaseprofile.ReleaseInfoBuilder
+		want           string
 	}{
 		{
 			name:     "development uses highest persisted stable baseline",
@@ -314,6 +327,17 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 			want: "v1.2.0",
 		},
 		{
+			name:     "workflow commit bootstrap uses current builder baseline",
+			identity: "b64e294",
+			want:     "v1.2.0",
+		},
+		{
+			name:           "workflow commit bootstrap uses injected builder baseline",
+			identity:       "b64e294",
+			releaseBuilder: &testReleaseInfoBuilderWithBaseline{baseline: "v1.3.0"},
+			want:           "v1.3.0",
+		},
+		{
 			name:     "nightly resolves its stable baseline",
 			identity: "v1.2.0-nightly.20260805",
 			infos:    []v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}},
@@ -332,6 +356,9 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 			store := storagemocks.NewMockStorage(t)
 			store.On("ListReleaseInfo").Return(tt.infos, nil).Once()
 			application := NewApp(&config.CoreConfig{Storage: store, Version: tt.identity}, map[string]controllers.Controller{})
+			if tt.releaseBuilder != nil {
+				application.releaseInfoBuilder = tt.releaseBuilder
+			}
 			syncErr := errors.New("stop after synchronization")
 			var gotBaseline string
 			application.synchronizeCurrentBaseline = func(

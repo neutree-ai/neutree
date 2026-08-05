@@ -12,23 +12,26 @@ import (
 func TestCommunityBuildersBuildV12ReleaseInfoAndClusterProfile(t *testing.T) {
 	var releaseBuilder ReleaseInfoBuilder = NewCommunityReleaseInfoBuilder()
 	var profileBuilder CurrentClusterProfileBuilder = NewCommunityClusterProfileBuilder()
+	baselineProvider, ok := releaseBuilder.(CurrentReleaseInfoBaselineProvider)
+	require.True(t, ok)
+	assert.Equal(t, CurrentCommunityReleaseInfoBaseline, baselineProvider.CurrentReleaseInfoBaseline())
 
-	info, err := releaseBuilder.BuildReleaseInfo("v1.2.0")
+	info, err := releaseBuilder.BuildReleaseInfo(CurrentCommunityReleaseInfoBaseline)
 	require.NoError(t, err)
 	require.NotNil(t, info.Metadata)
 	require.NotNil(t, info.Spec)
 	assert.Equal(t, "v1", info.APIVersion)
 	assert.Equal(t, v1.ReleaseInfoKind, info.Kind)
-	assert.Equal(t, "v1.2.0", info.Metadata.Name)
+	assert.Equal(t, CurrentCommunityReleaseInfoBaseline, info.Metadata.Name)
 	assert.Equal(t, []string{"v1.1", "v1.2"}, info.Spec.CompatibleClusterBaselines)
 
-	profile, err := profileBuilder.BuildClusterProfile("v1.2.0")
+	profile, err := profileBuilder.BuildClusterProfile(CurrentCommunityReleaseInfoBaseline)
 	require.NoError(t, err)
 	require.NotNil(t, profile.Metadata)
 	require.NotNil(t, profile.Spec)
 	assert.Equal(t, "v1", profile.APIVersion)
 	assert.Equal(t, v1.ClusterProfileKind, profile.Kind)
-	assert.Equal(t, "v1.2.0", profile.Metadata.Name)
+	assert.Equal(t, CurrentCommunityReleaseInfoBaseline, profile.Metadata.Name)
 	assert.Equal(t, v1.ClusterProfileComponents{
 		RayRuntime:       v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
 		Router:           v1.ImageRef{Image: "neutree/router", Tag: "v1.1.1"},

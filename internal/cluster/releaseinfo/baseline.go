@@ -33,7 +33,7 @@ func NormalizeClusterMinor(clusterVersion string) (string, error) {
 // to the newest persisted ReleaseInfo because they do not identify a released
 // control-plane baseline.
 func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.ReleaseInfo) (string, error) {
-	if isDevelopmentOrDirtyBuild(buildIdentity) {
+	if IsDevelopmentOrDirtyBuild(buildIdentity) {
 		return highestPersistedReleaseInfoBaseline(infos)
 	}
 
@@ -42,9 +42,11 @@ func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.Release
 	return baseline, err
 }
 
-func isDevelopmentOrDirtyBuild(buildIdentity string) bool {
+// IsDevelopmentOrDirtyBuild reports whether a build identity must resolve its
+// baseline from persisted ReleaseInfo data rather than its own version string.
+func IsDevelopmentOrDirtyBuild(buildIdentity string) bool {
 	identity := strings.TrimSpace(buildIdentity)
-	if workflowShortCommitBuildPattern.MatchString(identity) {
+	if IsWorkflowShortCommitBuild(identity) {
 		return true
 	}
 
@@ -57,6 +59,12 @@ func isDevelopmentOrDirtyBuild(buildIdentity string) bool {
 	}
 
 	return false
+}
+
+// IsWorkflowShortCommitBuild reports whether the identity is the exact short
+// commit tag emitted by the release workflow.
+func IsWorkflowShortCommitBuild(buildIdentity string) bool {
+	return workflowShortCommitBuildPattern.MatchString(strings.TrimSpace(buildIdentity))
 }
 
 func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error) {

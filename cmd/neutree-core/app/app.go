@@ -128,8 +128,23 @@ func (a *App) currentControlPlaneBaseline() (string, error) {
 	}
 
 	baseline, err := releaseinfo.ResolveCurrentControlPlaneBaseline(a.config.Version, infos)
-	if err != nil {
+	if err == nil {
+		return baseline, nil
+	}
+
+	if !releaseinfo.IsDevelopmentOrDirtyBuild(a.config.Version) {
 		return "", fmt.Errorf("resolve current control-plane baseline: %w", err)
+	}
+
+	provider, ok := a.releaseInfoBuilder.(releaseprofile.CurrentReleaseInfoBaselineProvider)
+	if !ok {
+		return "", fmt.Errorf("resolve current control-plane baseline: %w", err)
+	}
+
+	baseline = provider.CurrentReleaseInfoBaseline()
+	normalizedBaseline, normalizeErr := releaseinfo.NormalizeControlPlaneRelease(baseline)
+	if normalizeErr != nil || normalizedBaseline != baseline {
+		return "", fmt.Errorf("current release info builder baseline %q must be an exact stable release info baseline", baseline)
 	}
 
 	return baseline, nil
