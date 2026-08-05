@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,30 @@ var errPatchAdmissionTargetRead = errors.New("caller-scoped admission target rea
 type patchAdmissionFailure struct {
 	Cause     string
 	ErrorType string
+}
+
+type legacyDeleteAdmissionResponse interface {
+	legacyDeleteAdmissionError() *admission.Error
+}
+
+type legacyDeleteDependencyError struct {
+	admissionError *admission.Error
+}
+
+func newLegacyDeleteDependencyError(code int, message, hint string) error {
+	return &legacyDeleteDependencyError{admissionError: &admission.Error{Code: code, Message: message, Hint: hint}}
+}
+
+func (e *legacyDeleteDependencyError) Error() string {
+	return e.admissionError.Error()
+}
+
+func (e *legacyDeleteDependencyError) Unwrap() error {
+	return e.admissionError
+}
+
+func (e *legacyDeleteDependencyError) legacyDeleteAdmissionError() *admission.Error {
+	return e.admissionError
 }
 
 // recordPatchAdmissionFailure contains only a classified cause and the Go
@@ -289,7 +314,20 @@ func patchAdmissionSelectors(query url.Values) (url.Values, error) {
 		if key == "select" || key == "returning" {
 			continue
 		}
-		if len(values) != 1 || !strings.HasPrefix(values[0], "eq.") || len(strings.TrimPrefix(values[0], "eq.")) == 0 {
+		if len(values) != 1 {
+			return nil, errInvalidAdmissionRequest
+		}
+		value := values[0]
+		switch key {
+		case "id", "metadata->>name":
+			if !isEqualPatchAdmissionSelector(value) {
+				return nil, errInvalidAdmissionRequest
+			}
+		case "metadata->>workspace":
+			if !isEqualPatchAdmissionSelector(value) && value != "is.null" {
+				return nil, errInvalidAdmissionRequest
+			}
+		default:
 			return nil, errInvalidAdmissionRequest
 		}
 		selectors[key] = []string{values[0]}
@@ -298,10 +336,16 @@ func patchAdmissionSelectors(query url.Values) (url.Values, error) {
 	if values, ok := selectors["id"]; ok && len(selectors) == 1 && len(values) == 1 {
 		return selectors, nil
 	}
-	if len(selectors) == 2 && selectors.Get("metadata->>name") != "" && selectors.Get("metadata->>workspace") != "" {
+	if len(selectors) == 2 &&
+		isEqualPatchAdmissionSelector(selectors.Get("metadata->>name")) &&
+		(isEqualPatchAdmissionSelector(selectors.Get("metadata->>workspace")) || selectors.Get("metadata->>workspace") == "is.null") {
 		return selectors, nil
 	}
 	return nil, errInvalidAdmissionRequest
+}
+
+func isEqualPatchAdmissionSelector(value string) bool {
+	return strings.HasPrefix(value, "eq.") && len(strings.TrimPrefix(value, "eq.")) > 0
 }
 
 func normalizeAdmissionPatch(body []byte, topLevelFields []string) ([]byte, map[string]interface{}, error) {
@@ -415,6 +459,17 @@ func validSoftDeleteCandidate(old, candidate map[string]interface{}) bool {
 }
 
 func writePatchAdmissionError(c *gin.Context, err error) {
+	var legacyDeleteResponse legacyDeleteAdmissionResponse
+	if errors.As(err, &legacyDeleteResponse) {
+		admissionError := legacyDeleteResponse.legacyDeleteAdmissionError()
+		c.Header("X-Powered-By", "Neutree")
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"code":    strconv.Itoa(admissionError.Code),
+			"message": admissionError.Message,
+			"hint":    admissionError.Hint,
+		})
+		return
+	}
 	var admissionError *admission.Error
 	if errors.As(err, &admissionError) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admissionError)

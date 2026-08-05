@@ -6,7 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/neutree-ai/neutree/internal/middleware"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -19,7 +20,7 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 		counts        map[string]int
 		queryError    error
 		expectError   bool
-		expectedCode  string
+		expectedCode  int
 		expectedHints []string
 	}{
 		{
@@ -55,7 +56,7 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 			},
 			queryError:   nil,
 			expectError:  true,
-			expectedCode: "10125",
+			expectedCode: 10125,
 			expectedHints: []string{
 				storage.ENDPOINT_TABLE + ": 2",
 				storage.CLUSTERS_TABLE + ": 1",
@@ -113,15 +114,15 @@ func TestValidateWorkspaceDeletion(t *testing.T) {
 				).Return(count, tt.queryError)
 			}
 
-			validator := validateWorkspaceDeletion(mockStorage)
-			err := validator(tt.workspace, tt.workspaceName)
+			err := validateWorkspaceDeleteDependencies(mockStorage, v1.Workspace{Metadata: &v1.Metadata{Name: tt.workspaceName}})
 
 			if tt.expectError {
 				assert.Error(t, err)
 
 				if tt.queryError == nil {
-					deletionErr, ok := err.(*middleware.DeletionError)
-					assert.True(t, ok, "error should be DeletionError")
+					var deletionErr *admission.Error
+					ok := errors.As(err, &deletionErr)
+					assert.True(t, ok, "error should be admission.Error")
 					if ok {
 						assert.Equal(t, tt.expectedCode, deletionErr.Code)
 						for _, hint := range tt.expectedHints {

@@ -98,6 +98,62 @@ func TestAdmissionPatchRejectsNonCanonicalSelectorsBeforeTargetRead(t *testing.T
 	}
 }
 
+func TestPatchAdmissionSelectorsAllowOnlyCanonicalResourceKeys(t *testing.T) {
+	testCases := []struct {
+		name      string
+		query     string
+		wantError bool
+	}{
+		{name: "id", query: "id=eq.role-1"},
+		{name: "workspace resource", query: "metadata-%3E%3Ename=eq.admin&metadata-%3E%3Eworkspace=eq.default"},
+		{name: "global role", query: "metadata-%3E%3Ename=eq.admin&metadata-%3E%3Eworkspace=is.null"},
+		{name: "null name", query: "metadata-%3E%3Ename=is.null&metadata-%3E%3Eworkspace=is.null", wantError: true},
+		{name: "null id", query: "id=is.null", wantError: true},
+		{name: "global role with extra selector", query: "metadata-%3E%3Ename=eq.admin&metadata-%3E%3Eworkspace=is.null&status=eq.active", wantError: true},
+		{name: "non equal workspace", query: "metadata-%3E%3Ename=eq.admin&metadata-%3E%3Eworkspace=neq.default", wantError: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			query, err := url.ParseQuery(testCase.query)
+			require.NoError(t, err)
+
+			selectors, err := patchAdmissionSelectors(query)
+			if testCase.wantError {
+				require.ErrorIs(t, err, errInvalidAdmissionRequest)
+				require.Nil(t, selectors)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, query, selectors)
+		})
+	}
+}
+
+func TestAdmissionDeleteAllowsGlobalRoleSelectorAndForwards(t *testing.T) {
+	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{"id":1,"metadata":{"name":"admin"},"spec":{}}`)}}
+	chain := &fakePatchAdmissionChain{}
+	runner := newPatchAdmissionRunner(
+		fakePatchAdmissionResolver{chain: chain}, reader, roleAdmissionResource, "roles",
+	)
+
+	forwarded := false
+	status, _ := runPatchAdmissionRunner(
+		t,
+		runner,
+		"/?metadata-%3E%3Ename=eq.admin&metadata-%3E%3Eworkspace=is.null",
+		`{"metadata":{"name":"admin","deletion_timestamp":"2026-08-05T00:00:00Z"}}`,
+		func(*gin.Context) { forwarded = true },
+	)
+
+	require.Equal(t, http.StatusOK, status)
+	require.True(t, forwarded)
+	require.Equal(t, admission.Delete, chain.operation)
+	require.Equal(t, 1, chain.calls)
+	require.Equal(t, "eq.admin", reader.query.Get("metadata->>name"))
+	require.Equal(t, "is.null", reader.query.Get("metadata->>workspace"))
+}
+
 func TestAdmissionPatchAllowsReturningResponseParameter(t *testing.T) {
 	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{"id":"widget-1","metadata":{"name":"before","workspace":"default"},"spec":{"value":"before"}}`)}}
 	runner := newPatchAdmissionRunner(

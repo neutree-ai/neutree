@@ -6,55 +6,66 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func validateUserProfileDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
-	return func(workspace, username string) error {
-		userProfiles, err := s.ListUserProfile(storage.ListOption{
-			Filters: []storage.Filter{{Column: "metadata->>name", Operator: "eq", Value: username}},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to get user profile: %w", err)
-		}
+var userProfileAdmissionResource = admission.NewResource[v1.UserProfile](storage.USER_PROFILE_TABLE)
 
-		if len(userProfiles) == 0 {
-			return nil
-		}
-
-		userID := userProfiles[0].ID
-
-		count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, []storage.Filter{
-			{Column: "spec->>user_id", Operator: "eq", Value: userID},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to count role assignments: %w", err)
-		}
-
-		if count > 0 {
-			return &middleware.DeletionError{
-				Code:    "10130",
-				Message: fmt.Sprintf("cannot delete user_profile '%s'", username),
-				Hint:    fmt.Sprintf("%d role assignment(s) still reference this user", count),
-			}
-		}
-
+func validateUserProfileDeleteDependencies(s storage.Storage, candidate v1.UserProfile) error {
+	username := candidate.GetName()
+	userProfiles, err := s.ListUserProfile(storage.ListOption{Filters: []storage.Filter{{Column: "metadata->>name", Operator: "eq", Value: username}}})
+	if err != nil {
+		return fmt.Errorf("failed to get user profile: %w", err)
+	}
+	if len(userProfiles) == 0 {
 		return nil
 	}
+
+	userID := userProfiles[0].ID
+	count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, []storage.Filter{{Column: "spec->>user_id", Operator: "eq", Value: userID}})
+	if err != nil {
+		return fmt.Errorf("failed to count role assignments: %w", err)
+	}
+	if count > 0 {
+		return newLegacyDeleteDependencyError(
+			10130,
+			fmt.Sprintf("cannot delete user_profile '%s'", username),
+			fmt.Sprintf("%d role assignment(s) still reference this user", count),
+		)
+	}
+	return nil
 }
 
-func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/user_profiles")
 	proxyGroup.Use(middlewares...)
-
-	deletionValidation := middleware.DeletionValidation(
-		storage.USER_PROFILE_TABLE,
-		validateUserProfileDeletion(deps.Storage),
-	)
+	if err := registerUserProfileAdmission(deps); err != nil {
+		return err
+	}
+	var patchRunner gin.HandlerFunc
+	if deps != nil && deps.Admission != nil {
+		patchRunner = CreatePatchAdmissionRunner(deps, storage.USER_PROFILE_TABLE, userProfileAdmissionResource)
+	}
 	handler := CreateStructProxyHandler[v1.UserProfile](deps, storage.USER_PROFILE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", deletionValidation, handler)
+	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+	return nil
+}
+
+func registerUserProfileAdmission(deps *Dependencies) error {
+	if deps == nil || deps.Admission == nil {
+		return nil
+	}
+	if err := deps.Admission.RegisterResource(userProfileAdmissionResource); err != nil {
+		return err
+	}
+	return deps.Admission.RegisterHook(userProfileAdmissionResource, admission.ValidateDelete(
+		admission.HookMeta{Name: "community.user-profile.dependencies.delete", Order: 10}, 10130,
+		func(_ admission.RequestContext, _, candidate v1.UserProfile) error {
+			return validateUserProfileDeleteDependencies(deps.Storage, candidate)
+		},
+	))
 }

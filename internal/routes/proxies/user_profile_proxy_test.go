@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -23,7 +23,7 @@ func TestValidateUserProfileDeletion(t *testing.T) {
 		roleAssignmentCount int
 		countError          error
 		expectError         bool
-		expectedCode        string
+		expectedCode        int
 		expectedHint        string
 	}{
 		{
@@ -47,7 +47,7 @@ func TestValidateUserProfileDeletion(t *testing.T) {
 			},
 			roleAssignmentCount: 2,
 			expectError:         true,
-			expectedCode:        "10130",
+			expectedCode:        10130,
 			expectedHint:        "2 role assignment(s) still reference this user",
 		},
 		{
@@ -94,15 +94,15 @@ func TestValidateUserProfileDeletion(t *testing.T) {
 				).Return(tt.roleAssignmentCount, tt.countError)
 			}
 
-			validator := validateUserProfileDeletion(mockStorage)
-			err := validator(tt.workspace, tt.username)
+			err := validateUserProfileDeleteDependencies(mockStorage, v1.UserProfile{Metadata: &v1.Metadata{Name: tt.username}})
 
 			if tt.expectError {
 				assert.Error(t, err)
 
 				if tt.listError == nil && tt.countError == nil {
-					deletionErr, ok := err.(*middleware.DeletionError)
-					assert.True(t, ok, "error should be DeletionError")
+					var deletionErr *admission.Error
+					ok := errors.As(err, &deletionErr)
+					assert.True(t, ok, "error should be admission.Error")
 					if ok {
 						assert.Equal(t, tt.expectedCode, deletionErr.Code)
 						assert.Contains(t, deletionErr.Hint, tt.expectedHint)

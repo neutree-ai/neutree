@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -28,7 +28,7 @@ func TestValidateClusterDeletion(t *testing.T) {
 		endpointCount int
 		queryError    error
 		expectError   bool
-		expectedCode  string
+		expectedCode  int
 		expectedHint  string
 	}{
 		{
@@ -46,7 +46,7 @@ func TestValidateClusterDeletion(t *testing.T) {
 			endpointCount: 5,
 			queryError:    nil,
 			expectError:   true,
-			expectedCode:  "10126",
+			expectedCode:  10126,
 			expectedHint:  "5 endpoint(s) still reference this cluster",
 		},
 		{
@@ -71,15 +71,15 @@ func TestValidateClusterDeletion(t *testing.T) {
 				},
 			).Return(tt.endpointCount, tt.queryError)
 
-			validator := validateClusterDeletion(mockStorage)
-			err := validator(tt.workspace, tt.clusterName)
+			err := validateClusterDeleteDependencies(mockStorage, v1.Cluster{Metadata: &v1.Metadata{Workspace: tt.workspace, Name: tt.clusterName}})
 
 			if tt.expectError {
 				assert.Error(t, err)
 
 				if tt.queryError == nil {
-					deletionErr, ok := err.(*middleware.DeletionError)
-					assert.True(t, ok, "error should be DeletionError")
+					var deletionErr *admission.Error
+					ok := errors.As(err, &deletionErr)
+					assert.True(t, ok, "error should be admission.Error")
 					if ok {
 						assert.Equal(t, tt.expectedCode, deletionErr.Code)
 						assert.Contains(t, deletionErr.Hint, tt.expectedHint)

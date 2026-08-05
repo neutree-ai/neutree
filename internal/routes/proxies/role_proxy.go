@@ -6,63 +6,69 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func validateRoleDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
-	return func(workspace, name string) error {
-		filters := []storage.Filter{
-			{Column: "spec->>role", Operator: "eq", Value: name},
-		}
+var roleAdmissionResource = admission.NewResource[v1.Role](storage.ROLE_TABLE)
 
-		if workspace == "" {
-			filters = append(filters, storage.Filter{
-				Column:   "metadata->>workspace",
-				Operator: "is",
-				Value:    "null",
-			})
-		} else {
-			filters = append(filters, storage.Filter{
-				Column:   "metadata->>workspace",
-				Operator: "eq",
-				Value:    workspace,
-			})
-		}
+func validateRoleDeleteDependencies(s storage.Storage, candidate v1.Role) error {
+	workspace, name := candidate.GetWorkspace(), candidate.GetName()
+	filters := []storage.Filter{{Column: "spec->>role", Operator: "eq", Value: name}}
+	if workspace == "" {
+		filters = append(filters, storage.Filter{Column: "metadata->>workspace", Operator: "is", Value: "null"})
+	} else {
+		filters = append(filters, storage.Filter{Column: "metadata->>workspace", Operator: "eq", Value: workspace})
+	}
 
-		count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, filters)
-		if err != nil {
-			return fmt.Errorf("failed to count role assignments: %w", err)
-		}
-
-		if count > 0 {
-			displayWorkspace := workspace
-			if displayWorkspace == "" {
-				displayWorkspace = "global"
-			}
-
-			return &middleware.DeletionError{
-				Code:    "10129",
-				Message: fmt.Sprintf("cannot delete role '%s/%s'", displayWorkspace, name),
-				Hint:    fmt.Sprintf("%d role assignment(s) still reference this role", count),
-			}
-		}
-
+	count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, filters)
+	if err != nil {
+		return fmt.Errorf("failed to count role assignments: %w", err)
+	}
+	if count == 0 {
 		return nil
 	}
+
+	displayWorkspace := workspace
+	if displayWorkspace == "" {
+		displayWorkspace = "global"
+	}
+	return newLegacyDeleteDependencyError(
+		10129,
+		fmt.Sprintf("cannot delete role '%s/%s'", displayWorkspace, name),
+		fmt.Sprintf("%d role assignment(s) still reference this role", count),
+	)
 }
 
-func RegisterRoleRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+func RegisterRoleRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/roles")
 	proxyGroup.Use(middlewares...)
-
-	deletionValidation := middleware.DeletionValidation(
-		storage.ROLE_TABLE,
-		validateRoleDeletion(deps.Storage),
-	)
+	if err := registerRoleAdmission(deps); err != nil {
+		return err
+	}
+	var patchRunner gin.HandlerFunc
+	if deps != nil && deps.Admission != nil {
+		patchRunner = CreatePatchAdmissionRunner(deps, storage.ROLE_TABLE, roleAdmissionResource)
+	}
 	handler := CreateStructProxyHandler[v1.Role](deps, storage.ROLE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", deletionValidation, handler)
+	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+	return nil
+}
+
+func registerRoleAdmission(deps *Dependencies) error {
+	if deps == nil || deps.Admission == nil {
+		return nil
+	}
+	if err := deps.Admission.RegisterResource(roleAdmissionResource); err != nil {
+		return err
+	}
+	return deps.Admission.RegisterHook(roleAdmissionResource, admission.ValidateDelete(
+		admission.HookMeta{Name: "community.role.dependencies.delete", Order: 10}, 10129,
+		func(_ admission.RequestContext, _, candidate v1.Role) error {
+			return validateRoleDeleteDependencies(deps.Storage, candidate)
+		},
+	))
 }

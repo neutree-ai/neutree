@@ -16,7 +16,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
-	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -55,23 +54,20 @@ var clusterPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
 	PermissiveCandidates: true,
 }
 
-func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
-	return func(workspace, name string) error {
-		count, err := s.Count(storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters(workspace, name))
-		if err != nil {
-			return fmt.Errorf("failed to count endpoints: %w", err)
-		}
-
-		if count > 0 {
-			return &middleware.DeletionError{
-				Code:    "10126",
-				Message: fmt.Sprintf("cannot delete cluster '%s/%s'", workspace, name),
-				Hint:    fmt.Sprintf("%d endpoint(s) still reference this cluster", count),
-			}
-		}
-
-		return nil
+func validateClusterDeleteDependencies(s storage.Storage, candidate v1.Cluster) error {
+	workspace, name := candidate.GetWorkspace(), candidate.GetName()
+	count, err := s.Count(storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters(workspace, name))
+	if err != nil {
+		return fmt.Errorf("failed to count endpoints: %w", err)
 	}
+	if count > 0 {
+		return newLegacyDeleteDependencyError(
+			10126,
+			fmt.Sprintf("cannot delete cluster '%s/%s'", workspace, name),
+			fmt.Sprintf("%d endpoint(s) still reference this cluster", count),
+		)
+	}
+	return nil
 }
 
 func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
@@ -589,10 +585,6 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup := group.Group("/clusters")
 	proxyGroup.Use(middlewares...)
 
-	deletionValidation := middleware.DeletionValidation(
-		storage.CLUSTERS_TABLE,
-		validateClusterDeletion(deps.Storage),
-	)
 	if err := registerClusterAdmission(deps); err != nil {
 		return err
 	}
@@ -605,7 +597,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
-	proxyGroup.PATCH("", append([]gin.HandlerFunc{deletionValidation}, withAdmissionRunner(patchRunner, handler)...)...)
+	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 	return nil
 }
 
@@ -627,13 +619,21 @@ func registerClusterAdmission(deps *Dependencies) error {
 	)); err != nil {
 		return err
 	}
-	return deps.Admission.RegisterHook(clusterAdmissionResource, admission.ValidateUpdate(
+	if err := deps.Admission.RegisterHook(clusterAdmissionResource, admission.ValidateUpdate(
 		admission.HookMeta{Name: "community.cluster.version-and-accelerator-virtualization.update", Order: 10}, 10212,
 		func(_ admission.RequestContext, old, candidate v1.Cluster) error {
 			if validationErr := validateClusterAdmissionUpdate(deps.Storage, old, candidate); validationErr != nil {
 				return toAdmissionError(validationErr)
 			}
 			return nil
+		},
+	)); err != nil {
+		return err
+	}
+	return deps.Admission.RegisterHook(clusterAdmissionResource, admission.ValidateDelete(
+		admission.HookMeta{Name: "community.cluster.dependencies.delete", Order: 10}, 10126,
+		func(_ admission.RequestContext, _, candidate v1.Cluster) error {
+			return validateClusterDeleteDependencies(deps.Storage, candidate)
 		},
 	))
 }

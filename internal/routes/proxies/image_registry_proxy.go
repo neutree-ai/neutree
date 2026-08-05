@@ -10,33 +10,30 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func validateImageRegistryDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
-	return func(workspace, name string) error {
-		fmt.Println("validateImageRegistryDeletion", workspace, name)
+var imageRegistryAdmissionResource = admission.NewResource[v1.ImageRegistry](storage.IMAGE_REGISTRY_TABLE)
 
-		count, err := s.Count(storage.CLUSTERS_TABLE, []storage.Filter{
-			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-			{Column: "spec->>image_registry", Operator: "eq", Value: name},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to count clusters: %w", err)
-		}
-
-		if count > 0 {
-			return &middleware.DeletionError{
-				Code:    "10127",
-				Message: fmt.Sprintf("cannot delete image_registry '%s/%s'", workspace, name),
-				Hint:    fmt.Sprintf("%d cluster(s) still reference this image registry", count),
-			}
-		}
-
-		return nil
+func validateImageRegistryDeleteDependencies(s storage.Storage, candidate v1.ImageRegistry) error {
+	workspace, name := candidate.GetWorkspace(), candidate.GetName()
+	count, err := s.Count(storage.CLUSTERS_TABLE, []storage.Filter{
+		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
+		{Column: "spec->>image_registry", Operator: "eq", Value: name},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to count clusters: %w", err)
 	}
+	if count > 0 {
+		return newLegacyDeleteDependencyError(
+			10127,
+			fmt.Sprintf("cannot delete image_registry '%s/%s'", workspace, name),
+			fmt.Sprintf("%d cluster(s) still reference this image registry", count),
+		)
+	}
+	return nil
 }
 
 func validateImageRegistryURL() gin.HandlerFunc {
@@ -45,7 +42,6 @@ func validateImageRegistryURL() gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to read request body: %v", err)})
 			c.Abort()
-
 			return
 		}
 
@@ -58,17 +54,13 @@ func validateImageRegistryURL() gin.HandlerFunc {
 		if err := json.Unmarshal(body, &imageRegistry); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to parse image registry: %v", err)})
 			c.Abort()
-
 			return
 		}
 
 		if imageRegistry.Spec != nil && imageRegistry.Spec.URL != "" {
 			if _, err := util.GetImageRegistryHost(&imageRegistry); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": fmt.Sprintf("invalid image registry url: %v", err),
-				})
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid image registry url: %v", err)})
 				c.Abort()
-
 				return
 			}
 		}
@@ -77,17 +69,35 @@ func validateImageRegistryURL() gin.HandlerFunc {
 	}
 }
 
-func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/image_registries")
 	proxyGroup.Use(middlewares...)
-
-	deletionValidation := middleware.DeletionValidation(
-		storage.IMAGE_REGISTRY_TABLE,
-		validateImageRegistryDeletion(deps.Storage),
-	)
+	if err := registerImageRegistryAdmission(deps); err != nil {
+		return err
+	}
+	var patchRunner gin.HandlerFunc
+	if deps != nil && deps.Admission != nil {
+		patchRunner = CreatePatchAdmissionRunner(deps, storage.IMAGE_REGISTRY_TABLE, imageRegistryAdmissionResource)
+	}
 	handler := CreateStructProxyHandler[v1.ImageRegistry](deps, storage.IMAGE_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validateImageRegistryURL(), handler)
-	proxyGroup.PATCH("", deletionValidation, validateImageRegistryURL(), handler)
+	proxyGroup.PATCH("", append(withAdmissionRunner(patchRunner, validateImageRegistryURL()), handler)...)
+	return nil
+}
+
+func registerImageRegistryAdmission(deps *Dependencies) error {
+	if deps == nil || deps.Admission == nil {
+		return nil
+	}
+	if err := deps.Admission.RegisterResource(imageRegistryAdmissionResource); err != nil {
+		return err
+	}
+	return deps.Admission.RegisterHook(imageRegistryAdmissionResource, admission.ValidateDelete(
+		admission.HookMeta{Name: "community.image-registry.dependencies.delete", Order: 10}, 10127,
+		func(_ admission.RequestContext, _, candidate v1.ImageRegistry) error {
+			return validateImageRegistryDeleteDependencies(deps.Storage, candidate)
+		},
+	))
 }
