@@ -182,15 +182,19 @@ func (controller *ClusterController) validateReleaseInfoCompatibility(c *v1.Clus
 }
 
 func effectiveClusterVersion(c *v1.Cluster) string {
-	if c != nil && c.Status != nil && c.Status.Version != "" {
-		return c.Status.Version
-	}
-
-	if c == nil || c.Spec == nil {
+	if c == nil {
 		return ""
 	}
 
-	return c.Spec.Version
+	if c.Spec != nil && c.Spec.Version != "" {
+		return c.Spec.Version
+	}
+
+	if c.Status == nil {
+		return ""
+	}
+
+	return c.Status.Version
 }
 
 func (controller *ClusterController) syncInternalMetricsMonitor(c *v1.Cluster) error {

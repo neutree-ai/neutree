@@ -11,7 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
-func TestClusterImportForceUpdateUsesControlPlaneClient(t *testing.T) {
+func TestClusterImportDefersControlPlaneClientUntilManifestRequiresIt(t *testing.T) {
 	oldNewClient := clusterImportNewAPIClient
 	oldNewImporter := clusterImportNewImporter
 	t.Cleanup(func() {
@@ -25,8 +25,8 @@ func TestClusterImportForceUpdateUsesControlPlaneClient(t *testing.T) {
 		return client.NewClient("http://example.invalid"), nil
 	}
 	importer := &recordingClusterPackageImporter{}
-	clusterImportNewImporter = func(apiClient *client.Client) clusterPackageImporter {
-		require.NotNil(t, apiClient)
+	clusterImportNewImporter = func(apiClientFactory internalpackageimport.APIClientFactory) clusterPackageImporter {
+		assert.NotNil(t, apiClientFactory)
 		return importer
 	}
 
@@ -37,7 +37,7 @@ func TestClusterImportForceUpdateUsesControlPlaneClient(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.True(t, createdClient)
+	assert.False(t, createdClient)
 	require.NotNil(t, importer.options)
 	assert.True(t, importer.options.SkipImagePush)
 	assert.True(t, importer.options.ForceUpdate)

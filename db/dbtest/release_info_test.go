@@ -136,13 +136,13 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 	}
 }
 
-func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
-	upMigration, err := os.ReadFile("../migrations/088_remove_legacy_release_info.up.sql")
+func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
+	upMigration, err := os.ReadFile("../migrations/083_release_info_cluster_profiles.up.sql")
 	if err != nil {
 		t.Fatalf("read forward migration: %v", err)
 	}
 
-	downMigration, err := os.ReadFile("../migrations/088_remove_legacy_release_info.down.sql")
+	downMigration, err := os.ReadFile("../migrations/083_release_info_cluster_profiles.down.sql")
 	if err != nil {
 		t.Fatalf("read rollback migration: %v", err)
 	}
@@ -158,108 +158,47 @@ func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
 	}()
 
 	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
-		t.Fatalf("apply rollback migration: %v", err)
+		t.Fatalf("restore pre-release-profile schema: %v", err)
+	}
+	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
+		t.Fatalf("apply final release-profile migration: %v", err)
 	}
 
-	const releaseName = "v1.2.99"
+	const releaseName = "v1.2.0"
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec, status)
+		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
 		VALUES (
 			'v1',
 			'ReleaseInfo',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW(
-				'Stable',
-				'v1.2.99',
-				'["v1.1.0","v1.2.99"]'::jsonb,
-				'["v1.1","v1.2"]'::jsonb
-			)::api.release_info_spec,
-			ROW('legacy-revision')::api.release_info_status
+			ROW('["v1.1","v1.2"]'::jsonb)::api.release_info_spec
 		)
 	`, releaseName); err != nil {
-		t.Fatalf("insert legacy release info: %v", err)
+		t.Fatalf("insert final release info: %v", err)
 	}
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec, status)
+		INSERT INTO api.cluster_profiles (api_version, kind, metadata, spec)
 		VALUES (
 			'v1',
-			'ReleaseInfo',
-			ROW('v1.2.98', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW(
-				'Nightly',
-				'v1.2.98-nightly',
-				'["v1.2.98"]'::jsonb,
-				'["v1.2"]'::jsonb
-			)::api.release_info_spec,
-			NULL
+			'ClusterProfile',
+			ROW('v1.2.0', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			'{"components":{"ray_runtime":{"image":"neutree/neutree-serve","tag":"v1.1.1"}}}'::jsonb
 		)
 	`); err != nil {
-		t.Fatalf("insert nullable-status legacy release info: %v", err)
+		t.Fatalf("insert final cluster profile: %v", err)
 	}
 
-	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
-		t.Fatalf("apply forward migration: %v", err)
-	}
 	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
-		t.Fatalf("reapply rollback migration: %v", err)
+		t.Fatalf("roll back final release-profile migration: %v", err)
 	}
 
-	var attributes string
-	if err = tx.QueryRowContext(ctx, `
-		SELECT string_agg(attname, ',' ORDER BY attnum)
-		FROM pg_attribute
-		WHERE attrelid = 'api.release_info_spec'::regclass
-			AND attnum > 0
-			AND NOT attisdropped
-	`).Scan(&attributes); err != nil {
-		t.Fatalf("read rollback release info spec attributes: %v", err)
-	}
-
-	const expected = "channel,build_identity,cluster_versions,compatible_cluster_baselines"
-	if attributes != expected {
-		t.Fatalf("expected rollback release info spec order %q, got %q", expected, attributes)
-	}
-
-	var channel, buildIdentity, revision string
-	var clusterVersions, compatibleBaselines []byte
-	if err = tx.QueryRowContext(ctx, `
-		SELECT
-			(spec).channel,
-			(spec).build_identity,
-			(spec).cluster_versions,
-			(spec).compatible_cluster_baselines,
-			(status).revision
-		FROM api.release_infos
-		WHERE (metadata).name = $1
-	`, releaseName).Scan(
-		&channel,
-		&buildIdentity,
-		&clusterVersions,
-		&compatibleBaselines,
-		&revision,
-	); err != nil {
-		t.Fatalf("read restored legacy release info: %v", err)
-	}
-
-	if channel != "Stable" || buildIdentity != "v1.2.99" || revision != "legacy-revision" {
-		t.Fatalf("unexpected restored legacy values: channel=%q build=%q revision=%q", channel, buildIdentity, revision)
-	}
-	if string(clusterVersions) != `["v1.1.0", "v1.2.99"]` && string(clusterVersions) != `["v1.1.0","v1.2.99"]` {
-		t.Fatalf("unexpected restored cluster versions: %s", clusterVersions)
-	}
-	if string(compatibleBaselines) != `["v1.1", "v1.2"]` && string(compatibleBaselines) != `["v1.1","v1.2"]` {
-		t.Fatalf("unexpected restored compatible baselines: %s", compatibleBaselines)
-	}
-
-	var nullableStatusRestored bool
-	if err = tx.QueryRowContext(ctx, `
-		SELECT status IS NULL
-		FROM api.release_infos
-		WHERE (metadata).name = 'v1.2.98'
-	`).Scan(&nullableStatusRestored); err != nil {
-		t.Fatalf("read restored nullable status: %v", err)
-	}
-	if !nullableStatusRestored {
-		t.Fatal("expected rollback to restore a nullable legacy status")
+	for _, tableName := range []string{"api.release_infos", "api.cluster_profiles"} {
+		var exists bool
+		if err = tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, tableName).Scan(&exists); err != nil {
+			t.Fatalf("check rollback table %s: %v", tableName, err)
+		}
+		if exists {
+			t.Fatalf("rollback must remove %s", tableName)
+		}
 	}
 }

@@ -27,8 +27,8 @@ var (
 	clusterImportNewAPIClient = func() (*client.Client, error) {
 		return global.NewClient()
 	}
-	clusterImportNewImporter = func(apiClient *client.Client) clusterPackageImporter {
-		return packageimport.NewImporter(apiClient)
+	clusterImportNewImporter = func(apiClientFactory packageimport.APIClientFactory) clusterPackageImporter {
+		return packageimport.NewImporterWithAPIClientFactory(apiClientFactory)
 	}
 )
 
@@ -83,12 +83,7 @@ images:
 func runClusterImport(opts *ClusterImportOptions) error {
 	ctx := context.Background()
 
-	apiClient, err := clusterImportNewAPIClient()
-	if err != nil {
-		return err
-	}
-
-	importer := clusterImportNewImporter(apiClient)
+	importer := clusterImportNewImporter(clusterImportNewAPIClient)
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{

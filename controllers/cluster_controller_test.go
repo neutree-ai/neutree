@@ -691,7 +691,7 @@ func TestClusterControllerFailsIncompatibleReleaseInfoWithoutWorkloadReconcile(t
 	clusterObj := &v1.Cluster{
 		ID:       1,
 		Metadata: &v1.Metadata{Name: "incompatible", Workspace: "default"},
-		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"},
 		Status:   &v1.ClusterStatus{Initialized: true, Version: "v1.1.0"},
 	}
 	store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {
@@ -706,6 +706,31 @@ func TestClusterControllerFailsIncompatibleReleaseInfoWithoutWorkloadReconcile(t
 	store.AssertExpectations(t)
 }
 
+func TestClusterControllerReconcilesAnIncompatibleClusterUpgradingToCompatibleTarget(t *testing.T) {
+	store := storagemocks.NewMockStorage(t)
+	reconciler := new(clustermocks.MockClusterReconcile)
+	controller := newTestClusterController(store, reconciler)
+	controller.releaseInfoProvider = &testClusterReleaseInfoProvider{info: &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.2"}},
+	}}
+	clusterObj := &v1.Cluster{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "upgrade-target", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+		Status:   &v1.ClusterStatus{Initialized: true, Version: "v1.1.0"},
+	}
+
+	reconciler.On("Reconcile", mock.Anything, mock.Anything).Return(nil).Once()
+	store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {
+		return updated.Status.Phase == v1.ClusterPhaseRunning
+	})).Return(nil).Once()
+
+	require.NoError(t, controller.sync(clusterObj))
+	store.AssertExpectations(t)
+	reconciler.AssertExpectations(t)
+}
+
 func TestClusterControllerRecoversWhenReleaseInfoCompatibilityIsRestored(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	reconciler := new(clustermocks.MockClusterReconcile)
@@ -718,7 +743,7 @@ func TestClusterControllerRecoversWhenReleaseInfoCompatibilityIsRestored(t *test
 	clusterObj := &v1.Cluster{
 		ID:       1,
 		Metadata: &v1.Metadata{Name: "recovered", Workspace: "default"},
-		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"},
 		Status:   &v1.ClusterStatus{Initialized: true, Version: "v1.1.0"},
 	}
 	store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {

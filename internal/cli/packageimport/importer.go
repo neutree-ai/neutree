@@ -18,11 +18,16 @@ import (
 
 // Importer handles importing packages
 type Importer struct {
-	apiClient *client.Client
-	extractor *Extractor
-	parser    *Parser
-	validator *Validator
+	apiClient        *client.Client
+	apiClientFactory APIClientFactory
+	extractor        *Extractor
+	parser           *Parser
+	validator        *Validator
 }
+
+// APIClientFactory builds an API client only when a package needs to register
+// a ClusterProfile with the control plane.
+type APIClientFactory func() (*client.Client, error)
 
 // NewImporter creates a new Importer
 func NewImporter(apiClient *client.Client) *Importer {
@@ -31,6 +36,17 @@ func NewImporter(apiClient *client.Client) *Importer {
 		extractor: NewExtractor(),
 		parser:    NewParser(),
 		validator: NewValidator(),
+	}
+}
+
+// NewImporterWithAPIClientFactory creates an Importer that defers control-plane
+// client construction until a manifest includes a ClusterProfile.
+func NewImporterWithAPIClientFactory(apiClientFactory APIClientFactory) *Importer {
+	return &Importer{
+		apiClientFactory: apiClientFactory,
+		extractor:        NewExtractor(),
+		parser:           NewParser(),
+		validator:        NewValidator(),
 	}
 }
 
@@ -186,16 +202,38 @@ func (i *Importer) registerManifest(ctx context.Context, opts *ImportOptions, ma
 		return result, nil
 	}
 
-	if i.apiClient == nil {
-		return result, errors.New("API client is required to register cluster profile")
+	apiClient, err := i.clusterProfileAPIClient()
+	if err != nil {
+		return result, err
 	}
 
 	profile := manifest.ClusterProfile.ToAPIClusterProfile()
-	if _, err := i.apiClient.Clusters.UpsertClusterProfile(profile, opts.ForceUpdate); err != nil {
+	if _, err := apiClient.Clusters.UpsertClusterProfile(profile, opts.ForceUpdate); err != nil {
 		return result, errors.Wrap(err, "failed to register cluster profile")
 	}
 
 	return result, nil
+}
+
+func (i *Importer) clusterProfileAPIClient() (*client.Client, error) {
+	if i.apiClient != nil {
+		return i.apiClient, nil
+	}
+
+	if i.apiClientFactory == nil {
+		return nil, errors.New("API client is required to register cluster profile")
+	}
+
+	apiClient, err := i.apiClientFactory()
+	if err != nil {
+		return nil, errors.Wrap(err, "create API client for cluster profile")
+	}
+
+	if apiClient == nil {
+		return nil, errors.New("API client is required to register cluster profile")
+	}
+
+	return apiClient, nil
 }
 
 // registerEngines registers engine metadata from manifest.
