@@ -12,8 +12,9 @@
 
 - Location: `db/migrations/`.
 - Naming: `NNN_<description>.up.sql` + `NNN_<description>.down.sql`.
-- Current highest number: **059** — start new migrations at 060.
+- Current highest number: **079** — start new migrations at 080.
 - Any migration that touches RLS or permissions must ship with an integration test under `db/dbtest/`.
+- **Redefining an existing function**: `CREATE OR REPLACE` replaces the whole body, so base it on the *latest* migration that defines the function, not the first one you find. `grep -l 'FUNCTION api.<name>' db/migrations/*.up.sql` lists them all — copying an older body silently reverts every change made in between.
 
 > ⚠️ **Pair rule (new migrations)**: every new migration must ship `.up.sql` and `.down.sql` together; a missing `.down.sql` breaks rollback. The pre-commit hook (P0-2) enforces this.
 >
@@ -61,8 +62,17 @@ COMMIT;
 ## Testing
 
 - Unit tests: no real DB; use the mocks generated under `pkg/storage/mocks`.
-- Integration tests: `db/dbtest/` spins up a real PostgreSQL + PostgREST + GoTrue.
+- Integration tests: `db/dbtest/` spins up a real PostgreSQL + GoTrue.
 - Command: `make db-test`.
+
+> ⚠️ **JWT claims in tests**: the helpers in `db/dbtest/helper.go` set the legacy
+> per-claim GUCs (`request.jwt.claim.sub`). PostgREST 10 dropped those and only
+> sets `request.jwt.claims` (a single JSON value); we run PostgREST 14. `auth.uid()`
+> reads both, so tests using `sub` pass either way — but SQL that reads any *other*
+> claim from a legacy GUC is dead code in production while still passing here. That
+> is how NEU-579 went unnoticed. When a migration reads a claim, read it as
+> `NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> '<claim>'`
+> and assert it with a test that sets the JSON form.
 
 ## Row-Level Security
 
