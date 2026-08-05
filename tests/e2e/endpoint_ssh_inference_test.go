@@ -281,8 +281,9 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 			deleteEndpoint(epName)
 		})
 
+		// TestRail: pending — 模型管理 - 别名 - 修改运行中 endpoint 所服务模型的别名，不扰动该 endpoint
 		It("should not disturb a running endpoint when the served model's alias changes",
-			Label("C-NEU652-NODISTURB"), func() {
+			Label(needsTestRailID), func() {
 				By("Deploying an endpoint and waiting for Running")
 				yamlPath := applyEndpoint(epName, clusterName)
 				defer os.Remove(yamlPath)
