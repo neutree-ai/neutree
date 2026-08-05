@@ -183,7 +183,7 @@ func TestLegacyCreateAdmissionRoutesPreserveMalformedBodies(t *testing.T) {
 	}
 }
 
-func TestImageRegistryURLValidationRemainsOutsideAdmission(t *testing.T) {
+func TestImageRegistryURLAdmissionFailsBeforeLaterCreateHooks(t *testing.T) {
 	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		upstreamCalled = true
@@ -196,15 +196,19 @@ func TestImageRegistryURLValidationRemainsOutsideAdmission(t *testing.T) {
 		Admission:        registry,
 		StorageAccessURL: upstream.URL,
 	}))
-	admissionHookCalled := false
+	laterAdmissionHookCalled := false
 	require.NoError(t, registry.RegisterHook(imageRegistryAdmissionResource, admission.ValidateCreate(
 		admission.HookMeta{Name: "community.coverage.image-url", Order: 900}, 91903,
 		func(admission.RequestContext, v1.ImageRegistry) error {
-			admissionHookCalled = true
+			laterAdmissionHookCalled = true
 			return nil
 		},
 	)))
 	require.NoError(t, registry.Seal())
+	chain, err := registry.Chain(imageRegistryAdmissionResource, admission.Create)
+	require.NoError(t, err)
+	hooks := chain.Hooks()
+	require.Equal(t, []string{"community.image-registry.url.create", "community.coverage.image-url"}, []string{hooks[0].Name, hooks[1].Name})
 
 	response := newCloseNotifyRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/image_registries", strings.NewReader(`{"spec":{"url":"https://index.docker<>.io"}}`))
@@ -214,7 +218,7 @@ func TestImageRegistryURLValidationRemainsOutsideAdmission(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, response.ResponseRecorder.Code)
 	require.Contains(t, response.ResponseRecorder.Body.String(), "invalid image registry url")
 	require.False(t, upstreamCalled)
-	require.False(t, admissionHookCalled)
+	require.False(t, laterAdmissionHookCalled)
 }
 
 func defaultRESTAdmissionCoverageResources() []admissionCoverageResource {

@@ -39,11 +39,19 @@ func (e *invalidAdmissionRequestError) Unwrap() error {
 // candidates, and resources without an option retain framework errors.
 type CreateAdmissionRunnerOptions struct {
 	InvalidRequestError       func([]byte, error) *admission.Error
+	InvalidRequestResponse    func([]byte, error) error
 	ReadBodyError             func(error) *admission.Error
+	ReadBodyResponse          func(error) error
 	AllowEmptyBody            bool
 	RejectArray               bool
 	PermissiveCandidates      bool
 	PassthroughInvalidRequest bool
+}
+
+// legacyAdmissionResponse lets a resource retain a pre-existing non-admission
+// error envelope while its validation executes in an admission hook.
+type legacyAdmissionResponse interface {
+	legacyAdmissionResponse() (int, any)
 }
 
 type createAdmissionChain interface {
@@ -99,7 +107,9 @@ func newCreateAdmissionRunnerWithOptions[T any](resolver createAdmissionChainRes
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			if options.ReadBodyError != nil {
+			if options.ReadBodyResponse != nil {
+				writeAdmissionRunnerError(c, options.ReadBodyResponse(err))
+			} else if options.ReadBodyError != nil {
 				writeAdmissionRunnerError(c, options.ReadBodyError(err))
 			} else {
 				writeCreateAdmissionRunnerError(c, err, nil, options)
@@ -234,6 +244,9 @@ func replaceRequestBody(request *http.Request, body []byte) {
 }
 
 func writeAdmissionRunnerError(c *gin.Context, err error) {
+	if writeLegacyAdmissionResponse(c, err) {
+		return
+	}
 	var admissionError *admission.Error
 	if errors.As(err, &admissionError) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admissionError)
@@ -255,6 +268,15 @@ func writeAdmissionRunnerError(c *gin.Context, err error) {
 }
 
 func writeCreateAdmissionRunnerError(c *gin.Context, err error, body []byte, options CreateAdmissionRunnerOptions) {
+	if errors.Is(err, errInvalidAdmissionRequest) && options.InvalidRequestResponse != nil {
+		var invalidRequestErr *invalidAdmissionRequestError
+		if errors.As(err, &invalidRequestErr) {
+			writeAdmissionRunnerError(c, options.InvalidRequestResponse(body, invalidRequestErr.cause))
+			return
+		}
+		writeAdmissionRunnerError(c, options.InvalidRequestResponse(body, nil))
+		return
+	}
 	if errors.Is(err, errInvalidAdmissionRequest) && options.InvalidRequestError != nil {
 		var invalidRequestErr *invalidAdmissionRequestError
 		if errors.As(err, &invalidRequestErr) {
@@ -265,4 +287,14 @@ func writeCreateAdmissionRunnerError(c *gin.Context, err error, body []byte, opt
 		return
 	}
 	writeAdmissionRunnerError(c, err)
+}
+
+func writeLegacyAdmissionResponse(c *gin.Context, err error) bool {
+	var response legacyAdmissionResponse
+	if !errors.As(err, &response) {
+		return false
+	}
+	status, body := response.legacyAdmissionResponse()
+	c.AbortWithStatusJSON(status, body)
+	return true
 }

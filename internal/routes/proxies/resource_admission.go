@@ -79,9 +79,11 @@ type patchAdmissionTargetReader interface {
 // the original request body so resource-owned parsers can retain their legacy
 // message and hint without exposing the body to admission hooks.
 type PatchAdmissionRunnerOptions struct {
-	InvalidRequestError  func([]byte, error) *admission.Error
-	BodyError            func(error) *admission.Error
-	PermissiveCandidates bool
+	InvalidRequestError    func([]byte, error) *admission.Error
+	InvalidRequestResponse func([]byte, error) error
+	BodyError              func(error) *admission.Error
+	BodyResponse           func(error) error
+	PermissiveCandidates   bool
 }
 
 type registryPatchAdmissionChainResolver struct {
@@ -470,6 +472,9 @@ func writePatchAdmissionError(c *gin.Context, err error) {
 		})
 		return
 	}
+	if writeLegacyAdmissionResponse(c, err) {
+		return
+	}
 	var admissionError *admission.Error
 	if errors.As(err, &admissionError) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admissionError)
@@ -491,6 +496,10 @@ func writePatchAdmissionError(c *gin.Context, err error) {
 }
 
 func writePatchAdmissionInvalidRequestError(c *gin.Context, body []byte, cause error, options PatchAdmissionRunnerOptions) {
+	if options.InvalidRequestResponse != nil {
+		writePatchAdmissionError(c, options.InvalidRequestResponse(body, cause))
+		return
+	}
 	if options.InvalidRequestError != nil {
 		if admissionErr := options.InvalidRequestError(body, cause); admissionErr != nil {
 			writePatchAdmissionError(c, admissionErr)
@@ -501,6 +510,10 @@ func writePatchAdmissionInvalidRequestError(c *gin.Context, body []byte, cause e
 }
 
 func writePatchAdmissionBodyError(c *gin.Context, cause error, options PatchAdmissionRunnerOptions) {
+	if options.BodyResponse != nil {
+		writePatchAdmissionError(c, options.BodyResponse(cause))
+		return
+	}
 	if options.BodyError != nil {
 		writePatchAdmissionError(c, options.BodyError(cause))
 		return

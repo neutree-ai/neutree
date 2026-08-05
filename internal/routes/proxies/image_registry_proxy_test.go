@@ -1,6 +1,7 @@
 package proxies
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/admission"
@@ -29,10 +31,13 @@ func TestRegisterImageRegistryRoutesRejectsInvalidURLHostOnCreate(t *testing.T) 
 	}))
 	defer upstream.Close()
 
+	registry := admission.NewRegistry()
 	router := gin.New()
-	RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+	require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
 		StorageAccessURL: upstream.URL,
-	})
+		Admission:        registry,
+	}))
+	require.NoError(t, registry.Seal())
 
 	body := strings.NewReader(`{
 		"api_version":"v1",
@@ -88,16 +93,26 @@ func TestRegisterImageRegistryRoutesRejectsInvalidURLHostOnPatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	var upstreamCalled atomic.Bool
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`[{"id":118,"metadata":{"name":"invalid-registry","workspace":"default"},"spec":{"url":"https://registry.example.com","repository":"neutree"}}]`))
+			require.NoError(t, err)
+			return
+		}
 		upstreamCalled.Store(true)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
 
+	registry := admission.NewRegistry()
 	router := gin.New()
-	RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+	router.Use(func(c *gin.Context) { c.Set("postgrest_token", "image-registry-test-token") })
+	require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
 		StorageAccessURL: upstream.URL,
-	})
+		Admission:        registry,
+	}))
+	require.NoError(t, registry.Seal())
 
 	body := strings.NewReader(`{"spec":{"url":"https://index.docker<>.io"}}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/image_registries?id=eq.118", body)
@@ -134,6 +149,12 @@ func TestRegisterImageRegistryRoutesForwardsValidURLOnPatch(t *testing.T) {
 
 	var upstreamCalled atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`[{"id":118,"metadata":{"name":"registry","workspace":"default"},"spec":{"url":"https://registry.example.com","repository":"neutree"}}]`))
+			require.NoError(t, err)
+			return
+		}
 		upstreamCalled.Store(true)
 		assert.Equal(t, "/image_registries", r.URL.Path)
 		assert.Equal(t, "id=eq.118", r.URL.RawQuery)
@@ -147,11 +168,23 @@ func TestRegisterImageRegistryRoutesForwardsValidURLOnPatch(t *testing.T) {
 	}))
 	defer upstream.Close()
 
+	registry := admission.NewRegistry()
 	router := gin.New()
-	RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+	router.Use(func(c *gin.Context) { c.Set("postgrest_token", "image-registry-test-token") })
+	require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
 		StorageAccessURL: upstream.URL,
 		Storage:          storageMock,
-	})
+		Admission:        registry,
+	}))
+	var admittedOld, admittedCandidate v1.ImageRegistry
+	require.NoError(t, registry.RegisterHook(imageRegistryAdmissionResource, admission.ValidateUpdate(
+		admission.HookMeta{Name: "community.image-registry.capture-update", Order: 900}, 91904,
+		func(_ admission.RequestContext, old, candidate v1.ImageRegistry) error {
+			admittedOld, admittedCandidate = old, candidate
+			return nil
+		},
+	)))
+	require.NoError(t, registry.Seal())
 
 	body := strings.NewReader(`{"spec":{"url":"https://registry.example.com:5000"}}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/image_registries?id=eq.118", body)
@@ -162,6 +195,100 @@ func TestRegisterImageRegistryRoutesForwardsValidURLOnPatch(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
 	assert.True(t, upstreamCalled.Load(), "valid image registry patch should be forwarded to PostgREST")
+	assert.Equal(t, "https://registry.example.com", admittedOld.Spec.URL)
+	assert.Equal(t, "https://registry.example.com:5000", admittedCandidate.Spec.URL)
+}
+
+func TestImageRegistryURLAdmissionHooksRejectInvalidCandidates(t *testing.T) {
+	registry := admission.NewRegistry()
+	require.NoError(t, registerImageRegistryAdmission(&Dependencies{Admission: registry}))
+	require.NoError(t, registry.Seal())
+
+	candidate := v1.ImageRegistry{Spec: &v1.ImageRegistrySpec{URL: "https://index.docker<>.io"}}
+	for _, testCase := range []struct {
+		name      string
+		operation admission.Operation
+		hookName  string
+	}{
+		{name: "create", operation: admission.Create, hookName: "community.image-registry.url.create"},
+		{name: "update", operation: admission.Update, hookName: "community.image-registry.url.update"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			chain, err := registry.Chain(imageRegistryAdmissionResource, testCase.operation)
+			require.NoError(t, err)
+			require.Len(t, chain.Hooks(), 1)
+			require.Equal(t, testCase.hookName, chain.Hooks()[0].Name)
+
+			_, err = chain.Run(admission.RequestContext{Context: context.Background()}, v1.ImageRegistry{}, candidate)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid image registry url")
+		})
+	}
+}
+
+func TestImageRegistryAdmissionPreservesLegacyMalformedBodyResponse(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "create", method: http.MethodPost, path: "/api/v1/image_registries"},
+		{name: "update", method: http.MethodPatch, path: "/api/v1/image_registries?id=eq.118"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			upstreamCalled := false
+			upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				upstreamCalled = true
+			}))
+			t.Cleanup(upstream.Close)
+
+			registry := admission.NewRegistry()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("postgrest_token", "image-registry-test-token") })
+			require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+				Admission:        registry,
+				StorageAccessURL: upstream.URL,
+			}))
+			require.NoError(t, registry.Seal())
+
+			recorder := newCloseNotifyRecorder()
+			request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(`{"spec":`))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.ResponseRecorder.Code)
+			require.JSONEq(t, `{"error":"failed to parse image registry: unexpected end of JSON input"}`, recorder.ResponseRecorder.Body.String())
+			require.False(t, upstreamCalled)
+		})
+	}
+}
+
+func TestImageRegistryAdmissionPreservesLegacyBodyReadFailureResponse(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "create", method: http.MethodPost, path: "/api/v1/image_registries"},
+		{name: "update", method: http.MethodPatch, path: "/api/v1/image_registries?id=eq.118"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			registry := admission.NewRegistry()
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Set("postgrest_token", "image-registry-test-token") })
+			require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{Admission: registry}))
+			require.NoError(t, registry.Seal())
+
+			recorder := newCloseNotifyRecorder()
+			request := httptest.NewRequest(testCase.method, testCase.path, nil)
+			request.Body = &failingPatchBody{readErr: errors.New("body failed")}
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.ResponseRecorder.Code)
+			require.JSONEq(t, `{"error":"failed to read request body: body failed"}`, recorder.ResponseRecorder.Body.String())
+		})
+	}
 }
 
 func TestValidateImageRegistryDeletion(t *testing.T) {
