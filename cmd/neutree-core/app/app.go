@@ -6,11 +6,48 @@ import (
 
 	"k8s.io/klog/v2"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+type currentBaselineSynchronizer func(
+	releaseinfo.CurrentBaselineStore,
+	string,
+	releaseinfo.ReleaseInfoBuilder,
+	releaseinfo.CurrentClusterProfileBuilder,
+) error
+
+type currentBaselineStore struct {
+	storage storage.Storage
+}
+
+func (store currentBaselineStore) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
+	return store.storage.ListReleaseInfo()
+}
+
+func (store currentBaselineStore) CreateReleaseInfo(info *v1.ReleaseInfo) error {
+	return store.storage.CreateReleaseInfo(info)
+}
+
+func (store currentBaselineStore) UpdateReleaseInfo(id string, info *v1.ReleaseInfo) error {
+	return store.storage.UpdateReleaseInfo(id, info)
+}
+
+func (store currentBaselineStore) ListClusterProfile() ([]v1.ClusterProfile, error) {
+	return store.storage.ListClusterProfile(storage.ListOption{})
+}
+
+func (store currentBaselineStore) CreateClusterProfile(profile *v1.ClusterProfile) error {
+	return store.storage.CreateClusterProfile(profile)
+}
+
+func (store currentBaselineStore) UpdateClusterProfile(id string, profile *v1.ClusterProfile) error {
+	return store.storage.UpdateClusterProfile(id, profile)
+}
 
 // App represents the main application
 type App struct {
@@ -18,6 +55,7 @@ type App struct {
 	controllers                  map[string]controllers.Controller
 	releaseInfoBuilder           releaseinfo.ReleaseInfoBuilder
 	currentClusterProfileBuilder releaseinfo.CurrentClusterProfileBuilder
+	synchronizeCurrentBaseline   currentBaselineSynchronizer
 }
 
 // NewApp creates a new application instance
@@ -27,12 +65,25 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 		controllers:                  controllers,
 		releaseInfoBuilder:           releaseinfo.NewCommunityReleaseInfoBuilder(),
 		currentClusterProfileBuilder: releaseinfo.NewCommunityClusterProfileBuilder(),
+		synchronizeCurrentBaseline:   releaseinfo.SynchronizeCurrentBaseline,
 	}
 }
 
 // Run starts the application
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
+	baseline, err := a.currentControlPlaneBaseline()
+	if err != nil {
+		return err
+	}
+	if err := a.synchronizeCurrentBaseline(
+		currentBaselineStore{storage: a.config.Storage},
+		baseline,
+		a.releaseInfoBuilder,
+		a.currentClusterProfileBuilder,
+	); err != nil {
+		return fmt.Errorf("synchronize current release info: %w", err)
+	}
 
 	// Start accelerator manager
 	a.config.AcceleratorManager.Start(ctx)
@@ -65,4 +116,18 @@ func (a *App) Run(ctx context.Context) error {
 	<-ctx.Done()
 
 	return nil
+}
+
+func (a *App) currentControlPlaneBaseline() (string, error) {
+	infos, err := a.config.Storage.ListReleaseInfo()
+	if err != nil {
+		return "", fmt.Errorf("list release infos: %w", err)
+	}
+
+	baseline, err := releaseinfo.ResolveCurrentControlPlaneBaseline(a.config.Version, infos)
+	if err != nil {
+		return "", fmt.Errorf("resolve current control-plane baseline: %w", err)
+	}
+
+	return baseline, nil
 }

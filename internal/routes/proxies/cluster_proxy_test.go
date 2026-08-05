@@ -2,11 +2,9 @@ package proxies
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -504,406 +502,48 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	})
 }
 
-func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
+func TestValidateClusterVersionCreateMiddlewareRequiresExactCompatibleProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	t.Run("rejects SSH static flow downgrade before proxy handler", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{
-			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-		}, nil)
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"version": "v1.0.1"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
-		assert.Contains(t, recorder.Body.String(), "cluster version downgrade is not supported")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("allows SSH static flow version upgrade", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{
-			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-		}, nil)
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"version": "v1.2.0"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("uses the observed cluster version as the ReleaseInfo upgrade source", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{{
-			ID:     1,
-			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.2.0"},
-			Status: &v1.ClusterStatus{Version: "v1.1.0"},
-		}}, nil)
-		mockStorage.On("GetClusterUpgradeSnapshot", "1").Return(nil, storage.ErrResourceNotFound).Once()
-		provider := releaseInfoProvider{info: &v1.ReleaseInfo{Spec: &v1.ReleaseInfoSpec{
-			ClusterVersions: []v1.ReleaseInfoClusterVersion{
-				{Version: "v1.1.0", State: v1.ReleaseInfoClusterVersionStateActive, UpgradeTo: []string{"v1.1.1", "v1.2.0"}},
-				{Version: "v1.1.1", State: v1.ReleaseInfoClusterVersionStateActive},
-				{Version: "v1.2.0", State: v1.ReleaseInfoClusterVersionStateActive},
-			},
-		}}}
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage, &provider), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"version": "v1.1.1"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("rejects a target that conflicts with an in-flight upgrade snapshot", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{{
-			ID:     1,
-			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.2.0"},
-			Status: &v1.ClusterStatus{Version: "v1.1.0"},
-		}}, nil)
-		mockStorage.On("GetClusterUpgradeSnapshot", "1").Return(&v1.ClusterUpgradeSnapshot{
-			ClusterID:            1,
-			SourceClusterVersion: "v1.1.0",
-			TargetClusterVersion: "v1.2.0",
-		}, nil).Once()
-		provider := releaseInfoProvider{info: &v1.ReleaseInfo{Spec: &v1.ReleaseInfoSpec{
-			ClusterVersions: []v1.ReleaseInfoClusterVersion{
-				{Version: "v1.1.0", State: v1.ReleaseInfoClusterVersionStateActive, UpgradeTo: []string{"v1.1.1", "v1.2.0"}},
-				{Version: "v1.1.1", State: v1.ReleaseInfoClusterVersionStateActive},
-				{Version: "v1.2.0", State: v1.ReleaseInfoClusterVersionStateActive},
-			},
-		}}}
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage, &provider), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"version": "v1.1.1"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "in-flight upgrade snapshot")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("rejects downgrade using current spec version even when patch changes type", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{
-			{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-		}, nil)
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"type": "kubernetes", "version": "v1.0.1"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), "cluster version downgrade is not supported")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("skips storage lookup when patch does not update version", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"metadata": {"name": "cluster"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-	})
-
-	t.Run("restores request body and content length", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		body := `{"metadata":{"name":"cluster"}}`
-		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			restoredBody, err := io.ReadAll(c.Request.Body)
-			assert.NoError(t, err)
-			assert.Equal(t, body, string(restoredBody))
-			assert.Equal(t, int64(len(body)), c.Request.ContentLength)
-			assert.Equal(t, strconv.Itoa(len(body)), c.Request.Header.Get("Content-Length"))
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", nil)
-		req.Body = originalBody
-		req.ContentLength = 0
-		req.Header.Set("Content-Length", "0")
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, originalBody.closed)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-	})
-}
-
-type trackingReadCloser struct {
-	*strings.Reader
-	closed bool
-}
-
-func (r *trackingReadCloser) Close() error {
-	r.closed = true
-
-	return nil
-}
-
-func TestValidateClusterVersionNotDowngrade(t *testing.T) {
 	tests := []struct {
-		name            string
-		current         *v1.Cluster
-		desiredVersion  string
-		wantErrContains string
+		name     string
+		version  string
+		profiles []v1.ClusterProfile
+		wantCode int
 	}{
+		{name: "missing exact profile", version: "v1.2.0", wantCode: http.StatusBadRequest},
+		{name: "minor below current control plane", version: "v1.1.0", wantCode: http.StatusBadRequest},
 		{
-			name:           "allows legacy to static upgrade",
-			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
-			desiredVersion: "v1.1.0",
-		},
-		{
-			name:           "allows static flow upgrade",
-			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion: "v1.2.0",
-		},
-		{
-			name:           "allows static flow same version",
-			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion: "v1.1.0",
-		},
-		{
-			name:            "rejects static flow downgrade within static flow",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion:  "v1.0.2",
-			wantErrContains: "cluster version downgrade is not supported",
-		},
-		{
-			name:            "rejects static flow downgrade to legacy flow",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion:  "v1.0.1",
-			wantErrContains: "cluster version downgrade is not supported",
-		},
-		{
-			name:            "rejects static flow downgrade below legacy gate",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion:  "v1.0.0",
-			wantErrContains: "cluster version downgrade is not supported",
-		},
-		{
-			name:           "allows Kubernetes version upgrade",
-			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"}},
-			desiredVersion: "v1.2.0",
-		},
-		{
-			name:            "rejects Kubernetes version downgrade",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"}},
-			desiredVersion:  "v1.0.1",
-			wantErrContains: "cluster version downgrade is not supported",
-		},
-		{
-			name: "allows update equal to spec version when status version is newer",
-			current: &v1.Cluster{
-				Spec:   &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.1.0"},
-				Status: &v1.ClusterStatus{Version: "v1.2.0"},
-			},
-			desiredVersion: "v1.1.0",
-		},
-		{
-			name: "allows update when spec version is empty even if status version is newer",
-			current: &v1.Cluster{
-				Spec:   &v1.ClusterSpec{Type: v1.KubernetesClusterType},
-				Status: &v1.ClusterStatus{Version: "v1.2.0"},
-			},
-			desiredVersion: "v1.1.0",
-		},
-		{
-			name: "allows SSH update when spec version is empty even if status version is static flow",
-			current: &v1.Cluster{
-				Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
-				Status: &v1.ClusterStatus{Version: "v1.2.0"},
-			},
-			desiredVersion: "v1.0.1",
-		},
-		{
-			name:           "allows update when current spec version is invalid",
-			current:        &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "custom"}},
-			desiredVersion: "v1.1.0",
-		},
-		{
-			name:            "rejects invalid desired version when current spec version is invalid",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "custom"}},
-			desiredVersion:  "also-custom",
-			wantErrContains: "invalid desired cluster version",
-		},
-		{
-			name:            "rejects invalid desired version when current SSH cluster is legacy flow",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"}},
-			desiredVersion:  "custom",
-			wantErrContains: "invalid desired cluster version",
-		},
-		{
-			name:            "rejects invalid desired version when current SSH cluster is static flow",
-			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"}},
-			desiredVersion:  "custom",
-			wantErrContains: "invalid desired cluster version",
+			name:     "exact compatible profile",
+			version:  "v1.2.0-rc.1",
+			profiles: []v1.ClusterProfile{{Metadata: &v1.Metadata{Name: "v1.2.0-rc.1"}}},
+			wantCode: http.StatusNoContent,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateClusterVersionNotDowngrade(tt.current, tt.desiredVersion)
-			if tt.wantErrContains == "" {
-				assert.NoError(t, err)
-				return
+			store := storageMocks.NewMockStorage(t)
+			if tt.version != "v1.1.0" {
+				store.On("ListClusterProfile", mock.Anything).Return(tt.profiles, nil).Once()
 			}
-
-			if !assert.Error(t, err) {
-				return
-			}
-			assert.Contains(t, err.Error(), tt.wantErrContains)
-		})
-	}
-}
-
-func TestValidateReleaseInfoClusterVersionCreateAndUpgrade(t *testing.T) {
-	info := &v1.ReleaseInfo{
-		Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{
-			{Version: "v1.1.0", State: v1.ReleaseInfoClusterVersionStateActive, UpgradeTo: []string{"v1.1.1", "v1.2.0"}},
-			{Version: "v1.1.1", State: v1.ReleaseInfoClusterVersionStateActive, UpgradeTo: []string{"v1.2.0"}},
-			{Version: "v1.2.0", State: v1.ReleaseInfoClusterVersionStateActive},
-			{Version: "v1.0.2", State: v1.ReleaseInfoClusterVersionStateRetired},
-		}},
-	}
-
-	assert.NoError(t, validateReleaseInfoClusterVersionCreate(info, "v1.1.0"))
-	assert.ErrorContains(t, validateReleaseInfoClusterVersionCreate(info, ""), "spec.version is required")
-	assert.ErrorContains(t, validateReleaseInfoClusterVersionCreate(info, "v1.0.2"), "not active")
-	assert.ErrorContains(t, validateReleaseInfoClusterVersionCreate(info, "v1.3.0"), "not supported")
-
-	assert.NoError(t, validateReleaseInfoClusterVersionUpdate(info, "v1.1.0", "v1.2.0"))
-	assert.NoError(t, validateReleaseInfoClusterVersionUpdate(info, "v1.1.0", "v1.1.0"))
-	assert.ErrorContains(t, validateReleaseInfoClusterVersionUpdate(info, "v1.1.0", "v1.0.2"), "not active")
-	assert.ErrorContains(t, validateReleaseInfoClusterVersionUpdate(info, "v1.2.0", "v1.1.1"), "not allowed")
-}
-
-func TestValidateClusterVersionCreateMiddlewareRequiresExplicitReleaseInfoVersion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	provider := releaseInfoProvider{info: &v1.ReleaseInfo{
-		Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{
-			{Version: "v1.1.0", State: v1.ReleaseInfoClusterVersionStateActive},
-		}},
-	}}
-
-	tests := []struct {
-		name       string
-		body       string
-		wantStatus int
-	}{
-		{name: "missing version", body: `{"spec":{"type":"ssh"}}`, wantStatus: http.StatusBadRequest},
-		{name: "unsupported version", body: `{"spec":{"type":"ssh","version":"v1.2.0"}}`, wantStatus: http.StatusBadRequest},
-		{name: "active version", body: `{"spec":{"type":"ssh","version":"v1.1.0"}}`, wantStatus: http.StatusNoContent},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+			provider := releaseInfoProvider{info: &v1.ReleaseInfo{
+				Metadata: &v1.Metadata{Name: "v1.2.0"},
+				Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.1", "v1.2"}},
+			}}
 			proxyCalled := false
 			router := gin.New()
-			router.POST("/clusters", validateClusterVersionCreate(&provider), func(c *gin.Context) {
+			router.POST("/clusters", validateClusterVersionCreate(store, &provider), func(c *gin.Context) {
 				proxyCalled = true
 				c.Status(http.StatusNoContent)
 			})
 
 			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(tt.body)))
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(
+				`{"spec":{"type":"ssh","version":"`+tt.version+`"}}`)))
 
-			assert.Equal(t, tt.wantStatus, recorder.Code)
-			assert.Equal(t, tt.wantStatus == http.StatusNoContent, proxyCalled)
+			assert.Equal(t, tt.wantCode, recorder.Code)
+			assert.Equal(t, tt.wantCode == http.StatusNoContent, proxyCalled)
+			store.AssertExpectations(t)
 		})
 	}
 }
@@ -915,6 +555,115 @@ type releaseInfoProvider struct {
 
 func (provider *releaseInfoProvider) Current() (*v1.ReleaseInfo, error) {
 	return provider.info, provider.err
+}
+
+func TestValidateClusterVersionUpdateRequiresExactCompatibleProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := storageMocks.NewMockStorage(t)
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Spec:   &v1.ClusterSpec{Version: "v1.2.0"},
+		Status: &v1.ClusterStatus{Version: "v1.2.0-alpha.1"},
+	}}, nil).Once()
+	store.On("ListClusterProfile", mock.Anything).Return([]v1.ClusterProfile{
+		{Metadata: &v1.Metadata{Name: "v1.2.0"}},
+	}, nil).Once()
+	provider := &releaseInfoProvider{info: &v1.ReleaseInfo{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.2"}},
+	}}
+
+	proxyCalled := false
+	router := gin.New()
+	router.PATCH("/clusters", validateClusterVersionUpdate(store, provider), func(c *gin.Context) {
+		proxyCalled = true
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPatch,
+		"/clusters?id=eq.1",
+		strings.NewReader(`{"spec":{"version":"v1.2.0"}}`),
+	))
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, proxyCalled)
+	store.AssertExpectations(t)
+}
+
+func TestValidateClusterVersionUpdateRejectsInvalidSemanticTargets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name        string
+		desired     string
+		profiles    []v1.ClusterProfile
+		wantError   string
+		listProfile bool
+	}{
+		{name: "downgrade", desired: "v1.1.0", wantError: "strictly greater"},
+		{name: "same version", desired: "v1.2.0", wantError: "strictly greater"},
+		{name: "missing exact profile", desired: "v1.2.1", listProfile: true, wantError: "cluster profile v1.2.1 not found"},
+		{name: "incompatible minor", desired: "v1.3.0", wantError: "not compatible with current release info"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := storageMocks.NewMockStorage(t)
+			store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+				Spec:   &v1.ClusterSpec{Version: "v1.2.0"},
+				Status: &v1.ClusterStatus{Version: "v1.2.0"},
+			}}, nil).Once()
+			if tt.listProfile {
+				store.On("ListClusterProfile", mock.Anything).Return(tt.profiles, nil).Once()
+			}
+			provider := &releaseInfoProvider{info: &v1.ReleaseInfo{
+				Metadata: &v1.Metadata{Name: "v1.2.0"},
+				Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.2"}},
+			}}
+
+			proxyCalled := false
+			router := gin.New()
+			router.PATCH("/clusters", validateClusterVersionUpdate(store, provider), func(c *gin.Context) {
+				proxyCalled = true
+				c.Status(http.StatusNoContent)
+			})
+
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(
+				http.MethodPatch,
+				"/clusters?id=eq.1",
+				strings.NewReader(`{"spec":{"version":"`+tt.desired+`"}}`),
+			))
+
+			assert.False(t, proxyCalled)
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), tt.wantError)
+			store.AssertExpectations(t)
+		})
+	}
+}
+
+func TestValidateClusterVersionUpdateAllowsNonVersionAndDeletionPatches(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, body := range []string{
+		`{"metadata":{"name":"cluster"}}`,
+		`{"metadata":{"deletion_timestamp":"2026-08-05T00:00:00Z"},"spec":{"version":"v1.2.0"}}`,
+	} {
+		store := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(store), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body)))
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		store.AssertNotCalled(t, "ListCluster", mock.Anything)
+	}
 }
 
 func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -10,6 +11,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
@@ -18,6 +20,8 @@ import (
 
 type ClusterController struct {
 	storage storage.Storage
+
+	releaseInfoProvider ReleaseInfoProvider
 
 	syncHandler func(cluster *v1.Cluster) error
 
@@ -31,8 +35,13 @@ type ClusterController struct {
 	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
 }
 
+type ReleaseInfoProvider interface {
+	Current() (*v1.ReleaseInfo, error)
+}
+
 type ClusterControllerOption struct {
 	Storage                         storage.Storage
+	ReleaseInfoProvider             ReleaseInfoProvider
 	MetricsRemoteWriteURL           string
 	ClusterProfileComponentResolver cluster.ClusterProfileComponentResolver
 
@@ -43,7 +52,8 @@ type ClusterControllerOption struct {
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
 	c := &ClusterController{
-		storage: opt.Storage,
+		storage:             opt.Storage,
+		releaseInfoProvider: opt.ReleaseInfoProvider,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
@@ -100,6 +110,14 @@ func (controller *ClusterController) sync(obj *v1.Cluster) error {
 }
 
 func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
+	if err := controller.validateReleaseInfoCompatibility(c); err != nil {
+		if updateErr := controller.updateStatus(c, v1.ClusterPhaseFailed, err); updateErr != nil {
+			klog.Errorf("failed to update incompatible cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
+		}
+
+		return err
+	}
+
 	var reconcileErr error
 	defer func() {
 		controller.updateClusterStatus(c, reconcileErr)
@@ -131,6 +149,45 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 	}
 
 	return nil
+}
+
+func (controller *ClusterController) validateReleaseInfoCompatibility(c *v1.Cluster) error {
+	if controller.releaseInfoProvider == nil {
+		return nil
+	}
+
+	info, err := controller.releaseInfoProvider.Current()
+	if err != nil {
+		return fmt.Errorf("get current release info: %w", err)
+	}
+	if info == nil || info.Spec == nil {
+		return fmt.Errorf("current release info metadata and spec are required")
+	}
+
+	effectiveVersion := effectiveClusterVersion(c)
+	minor, err := releaseinfo.NormalizeClusterMinor(effectiveVersion)
+	if err != nil {
+		return fmt.Errorf("normalize effective cluster version %q: %w", effectiveVersion, err)
+	}
+	for _, compatibleMinor := range info.Spec.CompatibleClusterBaselines {
+		if minor == compatibleMinor {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cluster version %s is not compatible with current release info", effectiveVersion)
+}
+
+func effectiveClusterVersion(c *v1.Cluster) string {
+	if c != nil && c.Status != nil && c.Status.Version != "" {
+		return c.Status.Version
+	}
+
+	if c == nil || c.Spec == nil {
+		return ""
+	}
+
+	return c.Spec.Version
 }
 
 func (controller *ClusterController) syncInternalMetricsMonitor(c *v1.Cluster) error {
