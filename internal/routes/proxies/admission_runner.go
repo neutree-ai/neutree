@@ -22,6 +22,29 @@ const (
 
 var errInvalidAdmissionRequest = errors.New("invalid admission request")
 
+type invalidAdmissionRequestError struct {
+	cause error
+}
+
+func (e *invalidAdmissionRequestError) Error() string {
+	return errInvalidAdmissionRequest.Error()
+}
+
+func (e *invalidAdmissionRequestError) Unwrap() error {
+	return errInvalidAdmissionRequest
+}
+
+// CreateAdmissionRunnerOptions permits a resource to preserve a pre-existing
+// client error contract for request decoding. Hooks still run only on decoded
+// candidates, and resources without an option retain framework errors.
+type CreateAdmissionRunnerOptions struct {
+	InvalidRequestError  func([]byte, error) *admission.Error
+	ReadBodyError        func(error) *admission.Error
+	AllowEmptyBody       bool
+	RejectArray          bool
+	PermissiveCandidates bool
+}
+
 type createAdmissionChain interface {
 	Run(admission.RequestContext, any, any) (any, error)
 }
@@ -44,38 +67,56 @@ func (r registryCreateAdmissionChainResolver) CreateChain(resource any) (createA
 // CreateAdmissionRunner returns middleware that admits POST request objects
 // against the resource's Create chain before the proxy receives the body.
 func CreateAdmissionRunner[T any](registry *admission.Registry, resource admission.Resource[T]) gin.HandlerFunc {
-	return newCreateAdmissionRunner(registryCreateAdmissionChainResolver{registry: registry}, resource)
+	return CreateAdmissionRunnerWithOptions(registry, resource, CreateAdmissionRunnerOptions{})
 }
 
 func newCreateAdmissionRunner[T any](resolver createAdmissionChainResolver, resource admission.Resource[T]) gin.HandlerFunc {
+	return newCreateAdmissionRunnerWithOptions(resolver, resource, CreateAdmissionRunnerOptions{})
+}
+
+// CreateAdmissionRunnerWithOptions creates a POST admission runner with an
+// optional resource-owned mapping for legacy body decoding errors.
+func CreateAdmissionRunnerWithOptions[T any](registry *admission.Registry, resource admission.Resource[T], options CreateAdmissionRunnerOptions) gin.HandlerFunc {
+	return newCreateAdmissionRunnerWithOptions(registryCreateAdmissionChainResolver{registry: registry}, resource, options)
+}
+
+func newCreateAdmissionRunnerWithOptions[T any](resolver createAdmissionChainResolver, resource admission.Resource[T], options CreateAdmissionRunnerOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
 			return
 		}
 		if err := c.Request.Context().Err(); err != nil {
-			writeAdmissionRunnerError(c, err)
+			writeCreateAdmissionRunnerError(c, err, nil, options)
 			return
 		}
 
 		chain, err := resolver.CreateChain(resource)
 		if err != nil {
-			writeAdmissionRunnerError(c, err)
+			writeCreateAdmissionRunnerError(c, err, nil, options)
 			return
 		}
 
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			writeAdmissionRunnerError(c, err)
+			if options.ReadBodyError != nil {
+				writeAdmissionRunnerError(c, options.ReadBodyError(err))
+			} else {
+				writeCreateAdmissionRunnerError(c, err, nil, options)
+			}
 			return
 		}
 		if err := c.Request.Body.Close(); err != nil {
-			writeAdmissionRunnerError(c, err)
+			writeCreateAdmissionRunnerError(c, err, nil, options)
+			return
+		}
+		if len(bytes.TrimSpace(body)) == 0 && options.AllowEmptyBody {
+			replaceRequestBody(c.Request, body)
 			return
 		}
 
-		approved, err := admitCreateBody[T](c.Request.Context(), chain, body)
+		approved, err := admitCreateBodyWithOptions[T](c.Request.Context(), chain, body, options)
 		if err != nil {
-			writeAdmissionRunnerError(c, err)
+			writeCreateAdmissionRunnerError(c, err, body, options)
 			return
 		}
 		replaceRequestBody(c.Request, approved)
@@ -83,25 +124,32 @@ func newCreateAdmissionRunner[T any](resolver createAdmissionChainResolver, reso
 }
 
 func admitCreateBody[T any](ctx context.Context, chain createAdmissionChain, body []byte) ([]byte, error) {
+	return admitCreateBodyWithOptions[T](ctx, chain, body, CreateAdmissionRunnerOptions{})
+}
+
+func admitCreateBodyWithOptions[T any](ctx context.Context, chain createAdmissionChain, body []byte, options CreateAdmissionRunnerOptions) ([]byte, error) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
 		return nil, errInvalidAdmissionRequest
 	}
 	switch trimmed[0] {
 	case '{':
-		approved, err := runCreateAdmissionCandidate[T](ctx, chain, trimmed)
+		approved, err := runCreateAdmissionCandidateWithOptions[T](ctx, chain, trimmed, options)
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(approved)
 	case '[':
+		if options.RejectArray {
+			return nil, errInvalidAdmissionRequest
+		}
 		var rawCandidates []json.RawMessage
 		if err := decodeSingleJSONValue(trimmed, &rawCandidates); err != nil {
 			return nil, err
 		}
 		approved := make([]any, 0, len(rawCandidates))
 		for _, raw := range rawCandidates {
-			result, err := runCreateAdmissionCandidate[T](ctx, chain, raw)
+			result, err := runCreateAdmissionCandidateWithOptions[T](ctx, chain, raw, options)
 			if err != nil {
 				return nil, err
 			}
@@ -114,14 +162,36 @@ func admitCreateBody[T any](ctx context.Context, chain createAdmissionChain, bod
 }
 
 func runCreateAdmissionCandidate[T any](ctx context.Context, chain createAdmissionChain, raw []byte) (any, error) {
+	return runCreateAdmissionCandidateWithOptions[T](ctx, chain, raw, CreateAdmissionRunnerOptions{})
+}
+
+func runCreateAdmissionCandidateWithOptions[T any](ctx context.Context, chain createAdmissionChain, raw []byte, options CreateAdmissionRunnerOptions) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	candidate, err := decodeAdmissionCandidate[T](raw)
+	var candidate any
+	var err error
+	if options.PermissiveCandidates {
+		candidate, err = decodePermissiveAdmissionCandidate[T](raw)
+	} else {
+		candidate, err = decodeAdmissionCandidate[T](raw)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return chain.Run(admission.RequestContext{Context: ctx}, nil, candidate)
+}
+
+func decodePermissiveAdmissionCandidate[T any](raw []byte) (map[string]any, error) {
+	var typed T
+	if err := decodeAdmissionJSONValue(json.NewDecoder(bytes.NewReader(raw)), &typed); err != nil {
+		return nil, err
+	}
+	var candidate map[string]any
+	if err := decodeAdmissionJSONValue(json.NewDecoder(bytes.NewReader(raw)), &candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 func decodeAdmissionCandidate[T any](raw []byte) (T, error) {
@@ -144,10 +214,10 @@ func decodeSingleJSONValue(raw []byte, value any) error {
 
 func decodeAdmissionJSONValue(decoder *json.Decoder, value any) error {
 	if err := decoder.Decode(value); err != nil {
-		return errInvalidAdmissionRequest
+		return &invalidAdmissionRequestError{cause: err}
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return errInvalidAdmissionRequest
+		return &invalidAdmissionRequestError{cause: err}
 	}
 	return nil
 }
@@ -177,4 +247,17 @@ func writeAdmissionRunnerError(c *gin.Context, err error) {
 		Code:    admissionInternalErrorCode,
 		Message: "internal admission error",
 	})
+}
+
+func writeCreateAdmissionRunnerError(c *gin.Context, err error, body []byte, options CreateAdmissionRunnerOptions) {
+	if errors.Is(err, errInvalidAdmissionRequest) && options.InvalidRequestError != nil {
+		var invalidRequestErr *invalidAdmissionRequestError
+		if errors.As(err, &invalidRequestErr) {
+			writeAdmissionRunnerError(c, options.InvalidRequestError(body, invalidRequestErr.cause))
+			return
+		}
+		writeAdmissionRunnerError(c, options.InvalidRequestError(body, nil))
+		return
+	}
+	writeAdmissionRunnerError(c, err)
 }

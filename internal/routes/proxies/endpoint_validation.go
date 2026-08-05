@@ -12,8 +12,35 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+var endpointCreateAdmissionRunnerOptions = CreateAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, cause error) *admission.Error {
+		if _, validationErr := parseEndpointBody(body); validationErr != nil {
+			return toAdmissionError(validationErr)
+		}
+		return toAdmissionError(invalidEndpointPayloadError(cause))
+	},
+	ReadBodyError: func(cause error) *admission.Error {
+		return toAdmissionError(invalidEndpointPayloadError(cause))
+	},
+	AllowEmptyBody:       true,
+	RejectArray:          true,
+	PermissiveCandidates: true,
+}
+
+var endpointPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, _ error) *admission.Error {
+		_, validationErr := parseEndpointBody(body)
+		return toAdmissionError(validationErr)
+	},
+	BodyError: func(cause error) *admission.Error {
+		return toAdmissionError(invalidEndpointPayloadError(cause))
+	},
+	PermissiveCandidates: true,
+}
 
 func validateEndpointVGPU(store storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -142,6 +169,34 @@ func validateEndpointVGPUPreflight(
 	// Capacity is intentionally left to scheduling/runtime status. Cluster
 	// resource snapshots can be stale and should not be used as admission gates.
 	return nil
+}
+
+// validateEndpointVGPUCandidate is the typed admission form of the endpoint
+// vGPU preflight. Trusted cluster reads stay in this route-owned closure.
+func validateEndpointVGPUCandidate(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.GetDeletionTimestamp() != "" || endpoint.Spec == nil {
+		return nil
+	}
+	if validationErr := validateEndpointReplicaCount(endpoint.Spec); validationErr != nil {
+		return validationErr
+	}
+	if endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+	if endpointReplicaCount(endpoint.Spec) == 0 {
+		return nil
+	}
+	cluster, validationErr := resolveEndpointVGPUCluster(store, endpoint)
+	if validationErr != nil {
+		return validationErr
+	}
+	if validationErr := validateEndpointVGPUCluster(cluster); validationErr != nil {
+		return validationErr
+	}
+	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
+		return validationErr
+	}
+	return validateEndpointVGPUMemorySpec(endpoint.Spec.Resources, cluster)
 }
 
 func endpointVGPUValidationTarget(

@@ -49,6 +49,16 @@ type patchAdmissionTargetReader interface {
 	Read(context.Context, string, url.Values, string) ([]json.RawMessage, error)
 }
 
+// PatchAdmissionRunnerOptions permits a resource to preserve a pre-existing
+// client error contract for malformed PATCH payloads. The callback receives
+// the original request body so resource-owned parsers can retain their legacy
+// message and hint without exposing the body to admission hooks.
+type PatchAdmissionRunnerOptions struct {
+	InvalidRequestError  func([]byte, error) *admission.Error
+	BodyError            func(error) *admission.Error
+	PermissiveCandidates bool
+}
+
 type registryPatchAdmissionChainResolver struct {
 	registry *admission.Registry
 }
@@ -115,22 +125,35 @@ func (r postgrestPatchAdmissionTargetReader) Read(ctx context.Context, table str
 // resource proxy persists it. Routes opt into this runner alongside their
 // existing struct proxy handler.
 func CreatePatchAdmissionRunner[T any](deps *Dependencies, tableName string, resource admission.Resource[T]) gin.HandlerFunc {
+	return CreatePatchAdmissionRunnerWithOptions(deps, tableName, resource, PatchAdmissionRunnerOptions{})
+}
+
+// CreatePatchAdmissionRunnerWithOptions creates a PATCH admission runner with
+// an optional resource-owned mapping for malformed request payloads.
+func CreatePatchAdmissionRunnerWithOptions[T any](deps *Dependencies, tableName string, resource admission.Resource[T], options PatchAdmissionRunnerOptions) gin.HandlerFunc {
 	baseURL := ""
 	var registry *admission.Registry
 	if deps != nil {
 		baseURL = deps.StorageAccessURL
 		registry = deps.Admission
 	}
-	return newPatchAdmissionRunner(
+	return newPatchAdmissionRunnerWithOptions(
 		registryPatchAdmissionChainResolver{registry: registry},
 		postgrestPatchAdmissionTargetReader{baseURL: baseURL},
 		resource,
 		tableName,
+		options,
 	)
 }
 
 func newPatchAdmissionRunner[T any](
 	resolver patchAdmissionChainResolver, reader patchAdmissionTargetReader, resource admission.Resource[T], tableName string,
+) gin.HandlerFunc {
+	return newPatchAdmissionRunnerWithOptions(resolver, reader, resource, tableName, PatchAdmissionRunnerOptions{})
+}
+
+func newPatchAdmissionRunnerWithOptions[T any](
+	resolver patchAdmissionChainResolver, reader patchAdmissionTargetReader, resource admission.Resource[T], tableName string, options PatchAdmissionRunnerOptions,
 ) gin.HandlerFunc {
 	tagConfig := extractStructTagConfig(reflect.TypeFor[T]())
 	topLevelFields := extractTopLevelJSONFields(reflect.TypeFor[T]())
@@ -156,16 +179,16 @@ func newPatchAdmissionRunner[T any](
 
 		originalBody, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			writePatchAdmissionError(c, err)
+			writePatchAdmissionBodyError(c, err, options)
 			return
 		}
 		if err := c.Request.Body.Close(); err != nil {
-			writePatchAdmissionError(c, err)
+			writePatchAdmissionBodyError(c, err, options)
 			return
 		}
 		normalizedBody, patch, err := normalizeAdmissionPatch(originalBody, topLevelFields)
 		if err != nil {
-			writePatchAdmissionError(c, errInvalidAdmissionRequest)
+			writePatchAdmissionInvalidRequestError(c, originalBody, err, options)
 			return
 		}
 		if containsMaskedAdmissionField(patch, tagConfig.excludeFields) {
@@ -203,7 +226,7 @@ func newPatchAdmissionRunner[T any](
 			writePatchAdmissionError(c, err)
 			return
 		}
-		old, err := decodeAdmissionCandidate[T](oldJSON)
+		old, err := decodePatchAdmissionCandidate[T](oldJSON, options)
 		if err != nil {
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
@@ -213,9 +236,9 @@ func newPatchAdmissionRunner[T any](
 			writePatchAdmissionError(c, err)
 			return
 		}
-		candidate, err := decodeAdmissionCandidate[T](candidateJSON)
+		candidate, err := decodePatchAdmissionCandidate[T](candidateJSON, options)
 		if err != nil {
-			writePatchAdmissionError(c, errInvalidAdmissionRequest)
+			writePatchAdmissionInvalidRequestError(c, originalBody, err, options)
 			return
 		}
 
@@ -239,6 +262,13 @@ func newPatchAdmissionRunner[T any](
 
 		replaceRequestBody(c.Request, normalizedBody)
 	}
+}
+
+func decodePatchAdmissionCandidate[T any](raw []byte, options PatchAdmissionRunnerOptions) (any, error) {
+	if options.PermissiveCandidates {
+		return decodePermissiveAdmissionCandidate[T](raw)
+	}
+	return decodeAdmissionCandidate[T](raw)
 }
 
 func callerPostgrestToken(c *gin.Context) (string, bool) {
@@ -403,6 +433,24 @@ func writePatchAdmissionError(c *gin.Context, err error) {
 		Code:    admissionInternalErrorCode,
 		Message: "internal admission error",
 	})
+}
+
+func writePatchAdmissionInvalidRequestError(c *gin.Context, body []byte, cause error, options PatchAdmissionRunnerOptions) {
+	if options.InvalidRequestError != nil {
+		if admissionErr := options.InvalidRequestError(body, cause); admissionErr != nil {
+			writePatchAdmissionError(c, admissionErr)
+			return
+		}
+	}
+	writePatchAdmissionError(c, errInvalidAdmissionRequest)
+}
+
+func writePatchAdmissionBodyError(c *gin.Context, cause error, options PatchAdmissionRunnerOptions) {
+	if options.BodyError != nil {
+		writePatchAdmissionError(c, options.BodyError(cause))
+		return
+	}
+	writePatchAdmissionError(c, cause)
 }
 
 func classifyPatchAdmissionFailure(err error) patchAdmissionFailure {

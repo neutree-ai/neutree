@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
@@ -17,8 +18,42 @@ import (
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+var clusterCreateAdmissionRunnerOptions = CreateAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, cause error) *admission.Error {
+		var cluster v1.Cluster
+		if err := json.Unmarshal(body, &cluster); err != nil {
+			return toAdmissionError(invalidClusterPayloadError(err))
+		}
+		return toAdmissionError(invalidClusterPayloadError(cause))
+	},
+	ReadBodyError: func(cause error) *admission.Error {
+		return toAdmissionError(&validationError{Code: "10209", Message: "invalid cluster payload", Hint: cause.Error()})
+	},
+	AllowEmptyBody:       true,
+	RejectArray:          true,
+	PermissiveCandidates: true,
+}
+
+var clusterPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, _ error) *admission.Error {
+		if _, _, err := clusterPatchDesiredVersion(body); err != nil {
+			return toAdmissionError(invalidClusterPayloadError(err))
+		}
+		var cluster v1.Cluster
+		if err := json.Unmarshal(body, &cluster); err != nil {
+			return toAdmissionError(invalidClusterPayloadError(err))
+		}
+		return nil
+	},
+	BodyError: func(cause error) *admission.Error {
+		return toAdmissionError(invalidClusterPayloadError(cause))
+	},
+	PermissiveCandidates: true,
+}
 
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
@@ -548,7 +583,9 @@ func acceleratorVirtualizationValidationError(err error) *validationError {
 	}
 }
 
-func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+var clusterAdmissionResource = admission.NewResource[v1.Cluster](storage.CLUSTERS_TABLE)
+
+func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/clusters")
 	proxyGroup.Use(middlewares...)
 
@@ -556,11 +593,99 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 		storage.CLUSTERS_TABLE,
 		validateClusterDeletion(deps.Storage),
 	)
+	if err := registerClusterAdmission(deps); err != nil {
+		return err
+	}
+	var createRunner, patchRunner gin.HandlerFunc
+	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, clusterAdmissionResource, clusterCreateAdmissionRunnerOptions)
+		patchRunner = CreatePatchAdmissionRunnerWithOptions(deps, storage.CLUSTERS_TABLE, clusterAdmissionResource, clusterPatchAdmissionRunnerOptions)
+	}
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
-	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
-	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, acceleratorVirtualizationValidation, handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
+	proxyGroup.PATCH("", append([]gin.HandlerFunc{deletionValidation}, withAdmissionRunner(patchRunner, handler)...)...)
+	return nil
+}
+
+func registerClusterAdmission(deps *Dependencies) error {
+	if deps == nil || deps.Admission == nil {
+		return nil
+	}
+	if err := deps.Admission.RegisterResource(clusterAdmissionResource); err != nil {
+		return err
+	}
+	if err := deps.Admission.RegisterHook(clusterAdmissionResource, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.cluster.accelerator-virtualization.create", Order: 10}, 10208,
+		func(_ admission.RequestContext, candidate v1.Cluster) error {
+			if validationErr := validateClusterAcceleratorVirtualizationCandidate(candidate); validationErr != nil {
+				return toAdmissionError(validationErr)
+			}
+			return nil
+		},
+	)); err != nil {
+		return err
+	}
+	return deps.Admission.RegisterHook(clusterAdmissionResource, admission.ValidateUpdate(
+		admission.HookMeta{Name: "community.cluster.version-and-accelerator-virtualization.update", Order: 10}, 10212,
+		func(_ admission.RequestContext, old, candidate v1.Cluster) error {
+			if validationErr := validateClusterAdmissionUpdate(deps.Storage, old, candidate); validationErr != nil {
+				return toAdmissionError(validationErr)
+			}
+			return nil
+		},
+	))
+}
+
+func validateClusterAdmissionUpdate(store storage.Storage, old, candidate v1.Cluster) *validationError {
+	if candidate.GetDeletionTimestamp() != "" {
+		return nil
+	}
+	if clusterVersionChanged(old, candidate) {
+		if err := validateClusterVersionNotDowngrade(&old, candidate.GetVersion()); err != nil {
+			return &validationError{Code: "10212", Message: "invalid cluster version update", Hint: err.Error()}
+		}
+	}
+	if !clusterAcceleratorVirtualizationChanged(old, candidate) {
+		return nil
+	}
+	if validationErr := validateClusterAcceleratorVirtualizationCandidate(candidate); validationErr != nil {
+		return validationErr
+	}
+	if clusterAcceleratorVirtualizationDisableRequestedByCandidate(old, candidate) {
+		return validateClusterAcceleratorVirtualizationDisable(store, candidate, nil)
+	}
+	return nil
+}
+
+func clusterVersionChanged(old, candidate v1.Cluster) bool {
+	return old.GetVersion() != candidate.GetVersion()
+}
+
+func clusterAcceleratorVirtualizationChanged(old, candidate v1.Cluster) bool {
+	if old.Spec == nil || candidate.Spec == nil {
+		return old.Spec != candidate.Spec
+	}
+	return !reflect.DeepEqual(old.Spec.AcceleratorVirtualization, candidate.Spec.AcceleratorVirtualization)
+}
+
+func clusterAcceleratorVirtualizationDisableRequestedByCandidate(old, candidate v1.Cluster) bool {
+	if !clusterAcceleratorVirtualizationChanged(old, candidate) || candidate.Spec == nil {
+		return false
+	}
+	return candidate.Spec.AcceleratorVirtualization == nil || !candidate.Spec.AcceleratorVirtualization.Enabled
+}
+
+func validateClusterAcceleratorVirtualizationCandidate(cluster v1.Cluster) *validationError {
+	if cluster.GetDeletionTimestamp() != "" || cluster.Spec == nil || cluster.Spec.AcceleratorVirtualization == nil || !cluster.Spec.AcceleratorVirtualization.Enabled {
+		return nil
+	}
+	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
+		return acceleratorVirtualizationValidationError(err)
+	}
+	if err := clustervalidation.ValidateAcceleratorVirtualizationClusterSupport(cluster.Spec.Type, cluster.Spec.Version); err != nil {
+		return acceleratorVirtualizationValidationError(err)
+	}
+	return nil
 }
