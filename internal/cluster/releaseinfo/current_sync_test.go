@@ -84,6 +84,30 @@ func TestSynchronizeCurrentBaselineDoesNotSeedHistoryForOtherBaseline(t *testing
 	assert.Equal(t, "v1.3.0", store.createdClusterProfiles[0].GetName())
 }
 
+func TestSynchronizeCurrentBaselineRejectsPrereleaseBeforeBuildersOrStore(t *testing.T) {
+	store := &currentBaselineMemoryStore{}
+	releaseBuilderCalled := false
+	profileBuilderCalled := false
+
+	err := SynchronizeCurrentBaseline(
+		store,
+		"v1.3.0-rc.1",
+		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
+			releaseBuilderCalled = true
+			return releaseInfoBuilderOutput(baseline, []string{"v1.3"}, nil), nil
+		}),
+		clusterProfileBuilderFunc(func(baseline string) (*v1.ClusterProfile, error) {
+			profileBuilderCalled = true
+			return clusterProfileBuilderOutput(baseline, nil), nil
+		}),
+	)
+	require.ErrorContains(t, err, "stable release info baseline")
+	assert.False(t, releaseBuilderCalled)
+	assert.False(t, profileBuilderCalled)
+	assert.Zero(t, store.listReleaseInfoCalls)
+	assert.Zero(t, store.listClusterProfileCalls)
+}
+
 func TestSynchronizeCurrentBaselineRejectsBuilderOutputForAnotherBaseline(t *testing.T) {
 	store := &currentBaselineMemoryStore{}
 
@@ -215,6 +239,9 @@ type currentBaselineMemoryStore struct {
 	releaseInfos    []v1.ReleaseInfo
 	clusterProfiles []v1.ClusterProfile
 
+	listReleaseInfoCalls    int
+	listClusterProfileCalls int
+
 	createdReleaseInfos      []*v1.ReleaseInfo
 	updatedReleaseInfos      []*v1.ReleaseInfo
 	updatedReleaseInfoIDs    []string
@@ -224,6 +251,7 @@ type currentBaselineMemoryStore struct {
 }
 
 func (store *currentBaselineMemoryStore) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
+	store.listReleaseInfoCalls++
 	return store.releaseInfos, nil
 }
 
@@ -239,6 +267,7 @@ func (store *currentBaselineMemoryStore) UpdateReleaseInfo(id string, info *v1.R
 }
 
 func (store *currentBaselineMemoryStore) ListClusterProfile() ([]v1.ClusterProfile, error) {
+	store.listClusterProfileCalls++
 	return store.clusterProfiles, nil
 }
 

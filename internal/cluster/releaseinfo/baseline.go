@@ -56,11 +56,7 @@ func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error)
 
 	for index := range infos {
 		name := infos[index].GetName()
-		if !strings.HasPrefix(name, "v") {
-			continue
-		}
-
-		version, err := semver.StrictNewVersion(strings.TrimPrefix(name, "v"))
+		version, err := parseStableReleaseInfoBaseline(name)
 		if err != nil {
 			continue
 		}
@@ -76,4 +72,25 @@ func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error)
 	}
 
 	return selectedName, nil
+}
+
+func parseStableReleaseInfoBaseline(baseline string) (*semver.Version, error) {
+	if !strings.HasPrefix(baseline, "v") {
+		return nil, fmt.Errorf("must use v-prefixed semantic version")
+	}
+
+	version, err := semver.StrictNewVersion(strings.TrimPrefix(baseline, "v"))
+	if err != nil {
+		return nil, err
+	}
+	if version.Prerelease() != "" || version.Metadata() != "" {
+		return nil, fmt.Errorf("must be a stable release info baseline")
+	}
+
+	stableBaseline := fmt.Sprintf("v%d.%d.%d", version.Major(), version.Minor(), version.Patch())
+	if baseline != stableBaseline {
+		return nil, fmt.Errorf("must be an exact stable release info baseline")
+	}
+
+	return version, nil
 }

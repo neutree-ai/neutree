@@ -70,6 +70,16 @@ func TestResolveCurrentControlPlaneBaseline(t *testing.T) {
 			want: "v1.2.0",
 		},
 		{
+			name:     "development build ignores prerelease and metadata release info names",
+			identity: "dev",
+			infos: []v1.ReleaseInfo{
+				*releaseInfoNamed("v1.2.0"),
+				*releaseInfoNamed("v1.3.0-rc.1"),
+				*releaseInfoNamed("v1.2.1+build.1"),
+			},
+			want: "v1.2.0",
+		},
+		{
 			name:     "raw development marker uses highest persisted release info",
 			identity: "dev",
 			infos:    []v1.ReleaseInfo{*releaseInfoNamed("v1.4.0")},

@@ -31,6 +31,9 @@ func SynchronizeCurrentBaseline(
 	releaseInfoBuilder ReleaseInfoBuilder,
 	clusterProfileBuilder CurrentClusterProfileBuilder,
 ) error {
+	if _, err := parseStableReleaseInfoBaseline(baseline); err != nil {
+		return fmt.Errorf("invalid stable release info baseline %q: %w", baseline, err)
+	}
 	if store == nil {
 		return fmt.Errorf("current baseline store is required")
 	}
