@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 type Planner struct {
@@ -180,7 +181,12 @@ func (r *Planner) buildDesiredNodePlans(
 }
 
 func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, bool, error) {
-	if r == nil || r.ClusterProfileComponentsResolver == nil {
+	profileAware, err := isClusterProfileAwareVersion(version)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, false, err
+	}
+
+	if !profileAware || r == nil || r.ClusterProfileComponentsResolver == nil {
 		return v1.ClusterProfileComponents{}, false, nil
 	}
 
@@ -190,4 +196,18 @@ func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents
 	}
 
 	return components, true, nil
+}
+
+func isClusterProfileAwareVersion(version string) (bool, error) {
+	baseVersion, err := semver.BaseVersion(version)
+	if err != nil {
+		return false, fmt.Errorf("parse static node cluster version %q: %w", version, err)
+	}
+
+	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
+	if err != nil {
+		return false, fmt.Errorf("invalid static node cluster version %q: %w", version, err)
+	}
+
+	return !legacy, nil
 }

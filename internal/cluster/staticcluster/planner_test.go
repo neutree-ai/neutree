@@ -262,8 +262,8 @@ func TestPlannerPlanRendersExactClusterProfileRayRuntime(t *testing.T) {
 		tag     string
 	}{
 		{name: "stable", version: "v1.2.0", tag: "v1.1.1"},
-		{name: "alpha", version: "v1.2.0-alpha.1", tag: "v1.1.1-alpha.1"},
-		{name: "release candidate", version: "v1.2.0-rc.1", tag: "v1.1.1-rc.1"},
+		{name: "minimum alpha", version: "v1.1.0-alpha.1", tag: "v1.1.0-alpha.1"},
+		{name: "minimum release candidate", version: "v1.1.0-rc.1", tag: "v1.1.0-rc.1"},
 	}
 
 	for _, tt := range tests {
@@ -314,6 +314,38 @@ func TestPlannerPlanRendersExactClusterProfileRayRuntime(t *testing.T) {
 			assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:vmagent-"+tt.tag, vmagent.Image)
 		})
 	}
+}
+
+func TestPlannerPlanLegacyVersionSkipsClusterProfileResolver(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.0.3"
+	resolverCalls := 0
+	planner := &Planner{
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(string) (v1.ClusterProfileComponents, error) {
+			resolverCalls++
+
+			return v1.ClusterProfileComponents{}, fmt.Errorf("profile is unavailable")
+		}),
+	}
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+
+	assert.Zero(t, resolverCalls)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	rayHead := findComponent(head.Spec.Components, rayHeadComponentName)
+	require.NotNil(t, rayHead)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.0.3", rayHead.Image)
 }
 
 func TestPlannerRejectsSelectedProfileMissingRayRuntimeTag(t *testing.T) {
