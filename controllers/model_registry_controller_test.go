@@ -107,10 +107,11 @@ func TestModelRegistryController_Sync_PendingOrNoStatus(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:  "Pending/NoStatus -> Connected (connect success)",
+			name:  "Pending/NoStatus -> Connected (connect and health check success)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Connect").Return(nil)
+				m.On("HealthyCheck").Return(nil)
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseCONNECTED, obj.Status.Phase)
@@ -204,9 +205,10 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:  "Connected -> Connected (healthy check success)",
+			name:  "Connected -> Connected (connect and health check success)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
+				m.On("Connect").Return(nil)
 				m.On("HealthyCheck").Return(nil)
 				// A registry with no counters yet is measured on the spot, and the
 				// result is written back even though the phase did not change.
@@ -224,6 +226,7 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			name:  "Connected -> Failed (healthy check failed)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
+				m.On("Connect").Return(nil)
 				m.On("HealthyCheck").Return(errors.New("timed out reading NFS mount path /mnt/registry"))
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
@@ -307,11 +310,12 @@ func TestModelRegistryController_Sync_Failed(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name:  "Failed -> Connected (reconnect success)",
+			name:  "Failed -> Connected (disconnect, reconnect, and health check success)",
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(nil)
 				m.On("Connect").Return(nil)
+				m.On("HealthyCheck").Return(nil)
 				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.ModelRegistry)
 					assert.Equal(t, v1.ModelRegistryPhaseCONNECTED, obj.Status.Phase)

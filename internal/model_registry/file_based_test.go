@@ -1,10 +1,13 @@
 package model_registry
 
 import (
+	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_newFileTypeModelRegistry(t *testing.T) {
@@ -156,4 +159,38 @@ func Test_newNFSTypeModelRegistry(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNFSFileHealthyCheck(t *testing.T) {
+	originalMountExists := isNFSMountExist
+	originalListModels := listBentoModels
+	t.Cleanup(func() {
+		isNFSMountExist = originalMountExists
+		listBentoModels = originalListModels
+	})
+
+	registry := &nfsFile{
+		targetPath:    "/mnt/registry",
+		nfsServerPath: "nfs.example.internal:/exports/models",
+	}
+
+	t.Run("returns an error when the expected mount is absent", func(t *testing.T) {
+		isNFSMountExist = func(string, string) (bool, error) { return false, nil }
+		listBentoModels = func(string) ([]bentoml.Model, error) {
+			return nil, errors.New("must not list models")
+		}
+
+		err := registry.HealthyCheck()
+		require.ErrorContains(t, err, "expected NFS mount")
+	})
+
+	t.Run("lists models after confirming the expected mount", func(t *testing.T) {
+		isNFSMountExist = func(string, string) (bool, error) { return true, nil }
+		listBentoModels = func(string) ([]bentoml.Model, error) {
+			return nil, errors.New("model list failed")
+		}
+
+		err := registry.HealthyCheck()
+		require.ErrorContains(t, err, "failed to list models at path /mnt/registry")
+	})
 }

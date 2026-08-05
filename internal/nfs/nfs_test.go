@@ -91,10 +91,9 @@ func TestMountNFS(t *testing.T) {
 			wantMount: true,
 		},
 		{
-			name:       "existing expected mount with unreadable root fails with target path",
+			name:       "existing expected mount with unreadable target is idempotent",
 			targetKind: "file",
 			mounter:    func() kmount.Interface { return kmount.NewFakeMounter(nil) },
-			wantErr:    "registry",
 		},
 	}
 
@@ -149,6 +148,18 @@ func TestMountNFS(t *testing.T) {
 	}
 }
 
+func TestMountNFSCreatesTraversableTarget(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "registry")
+	mounter := kmount.NewFakeMounter(nil)
+	useMountInterface(t, mounter)
+
+	require.NoError(t, MountNFS(testNFSDevice, target))
+
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+}
+
 func TestIsMountExistRequiresMatchingSourceAndTarget(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
 	useMountInterface(t, kmount.NewFakeMounter([]kmount.MountPoint{{
@@ -192,26 +203,24 @@ func TestMountNFSIncludesTargetWhenMountListingFails(t *testing.T) {
 	require.ErrorContains(t, err, "mount list failed")
 }
 
-func TestReadDirWithTimeout(t *testing.T) {
+func TestCheckMountWithTimeout(t *testing.T) {
 	release := make(chan struct{})
 	completed := make(chan struct{})
-	originalReadDir := readDir
-	readDir = func(string) ([]os.DirEntry, error) {
+	check := func(string) error {
 		<-release
 		close(completed)
-		return nil, nil
+		return nil
 	}
 	t.Cleanup(func() {
 		close(release)
 		<-completed
-		readDir = originalReadDir
 	})
 
-	err := readDirWithTimeout("/mnt/registry", time.Millisecond)
-	require.ErrorContains(t, err, "timed out reading NFS mount path /mnt/registry")
+	err := CheckMountWithTimeout("/mnt/registry", time.Millisecond, check)
+	require.ErrorContains(t, err, "timed out checking NFS mount path /mnt/registry")
 }
 
-func TestReadDirWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
+func TestCheckMountWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
 	require.NoError(t, os.Mkdir(target, 0o755))
 
@@ -226,30 +235,57 @@ func TestReadDirWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
 	completed := make(chan struct{})
 	var calls atomic.Int32
 
-	originalReadDir := readDir
-	readDir = func(string) ([]os.DirEntry, error) {
+	check := func(string) error {
 		if calls.Add(1) == 1 {
 			<-release
 			close(completed)
 		}
 
-		return nil, nil
+		return nil
 	}
 	t.Cleanup(func() {
 		close(release)
 		<-completed
-		readDir = originalReadDir
 	})
 
-	err := readDirWithTimeout(target, time.Millisecond)
-	require.ErrorContains(t, err, "timed out reading NFS mount path "+target)
+	err := CheckMountWithTimeout(target, time.Millisecond, check)
+	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
 
-	err = readDirWithTimeout(target, time.Millisecond)
-	require.ErrorContains(t, err, "timed out reading NFS mount path "+target)
+	err = CheckMountWithTimeout(target, time.Millisecond, check)
+	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
 	require.EqualValues(t, 1, calls.Load())
 
 	require.NoError(t, Unmount(target))
-	require.NoError(t, readDirWithTimeout(target, time.Second))
+	require.NoError(t, CheckMountWithTimeout(target, time.Second, check))
+	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestCheckMountWithTimeoutRetriesWhenMountIsAlreadyAbsent(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "registry")
+	require.NoError(t, os.Mkdir(target, 0o755))
+	useMountInterface(t, kmount.NewFakeMounter(nil))
+
+	release := make(chan struct{})
+	completed := make(chan struct{})
+	var calls atomic.Int32
+	check := func(string) error {
+		if calls.Add(1) == 1 {
+			<-release
+			close(completed)
+		}
+
+		return nil
+	}
+	t.Cleanup(func() {
+		close(release)
+		<-completed
+	})
+
+	err := CheckMountWithTimeout(target, time.Millisecond, check)
+	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
+
+	require.NoError(t, Unmount(target))
+	require.NoError(t, CheckMountWithTimeout(target, time.Second, check))
 	require.EqualValues(t, 2, calls.Load())
 }
 
@@ -268,26 +304,8 @@ func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 	}
 	useMountInterface(t, mounter)
 
-	releaseRead := make(chan struct{})
-	completedRead := make(chan struct{})
-	var calls atomic.Int32
 	var releaseUnmountOnce sync.Once
-	var releaseReadOnce sync.Once
 	releaseUnmount := func() { releaseUnmountOnce.Do(func() { close(mounter.release) }) }
-	releaseReadDir := func() { releaseReadOnce.Do(func() { close(releaseRead) }) }
-
-	originalReadDir := readDir
-	readDir = func(string) ([]os.DirEntry, error) {
-		if calls.Add(1) == 1 {
-			<-releaseRead
-			close(completedRead)
-		}
-
-		return nil, nil
-	}
-
-	firstCheckErr := readDirWithTimeout(target, time.Millisecond)
-	require.ErrorContains(t, firstCheckErr, "timed out reading NFS mount path "+target)
 
 	unmountResult := make(chan error, 1)
 	go func() { unmountResult <- Unmount(target) }()
@@ -300,7 +318,6 @@ func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 
 	t.Cleanup(func() {
 		releaseUnmount()
-		releaseReadDir()
 		if !unmountCollected {
 			require.NoError(t, <-unmountResult)
 		}
@@ -309,8 +326,6 @@ func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 			require.NoError(t, <-mountResult)
 		}
 
-		<-completedRead
-		readDir = originalReadDir
 	})
 
 	require.Never(t, func() bool {
@@ -328,10 +343,53 @@ func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 	unmountCollected = true
 	require.NoError(t, <-mountResult)
 	mountCollected = true
-	require.EqualValues(t, 2, calls.Load())
 }
 
-func TestReadDirWithTimeoutCoalescesConcurrentChecks(t *testing.T) {
+func TestWithMountLockWaitsForConcurrentUnmount(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "registry")
+	require.NoError(t, os.Mkdir(target, 0o755))
+	mounter := &blockingUnmountMounter{
+		FakeMounter: kmount.NewFakeMounter([]kmount.MountPoint{{
+			Device: testNFSDevice,
+			Path:   target,
+			Type:   "nfs",
+		}}),
+		unmounted: make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	useMountInterface(t, mounter)
+
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	probeResult := make(chan error, 1)
+	go func() {
+		probeResult <- WithMountLock(target, func() error {
+			close(probeStarted)
+			<-releaseProbe
+			return nil
+		})
+	}()
+	<-probeStarted
+
+	unmountResult := make(chan error, 1)
+	go func() { unmountResult <- Unmount(target) }()
+	require.Never(t, func() bool {
+		select {
+		case <-mounter.unmounted:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, 10*time.Millisecond)
+
+	close(releaseProbe)
+	require.NoError(t, <-probeResult)
+	<-mounter.unmounted
+	close(mounter.release)
+	require.NoError(t, <-unmountResult)
+}
+
+func TestCheckMountWithTimeoutCoalescesConcurrentChecks(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
 	release := make(chan struct{})
 	started := make(chan struct{})
@@ -342,22 +400,20 @@ func TestReadDirWithTimeoutCoalescesConcurrentChecks(t *testing.T) {
 		releaseOnce.Do(func() { close(release) })
 	}
 
-	originalReadDir := readDir
-	readDir = func(string) ([]os.DirEntry, error) {
+	check := func(string) error {
 		calls.Add(1)
 		startOnce.Do(func() { close(started) })
 		<-release
-		return nil, nil
+		return nil
 	}
 	t.Cleanup(func() {
-		readDir = originalReadDir
 		closeRelease()
 	})
 
 	results := make(chan error, 2)
-	go func() { results <- readDirWithTimeout(target, time.Second) }()
+	go func() { results <- CheckMountWithTimeout(target, time.Second, check) }()
 	<-started
-	go func() { results <- readDirWithTimeout(target, time.Second) }()
+	go func() { results <- CheckMountWithTimeout(target, time.Second, check) }()
 
 	require.Never(t, func() bool {
 		return calls.Load() > 1

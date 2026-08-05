@@ -93,42 +93,26 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
-	if obj.Status == nil || obj.Status.Phase == "" || obj.Status.Phase == v1.ModelRegistryPhasePENDING {
-		err = modelRegistry.Connect()
-		if err != nil {
-			return errors.Wrapf(err, "failed to connect model registry %s/%s",
-				obj.Metadata.Workspace, obj.Metadata.Name)
-		}
-
-		return nil
-	}
-
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
 		if err = modelRegistry.Disconnect(); err != nil {
 			return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
 
-		if err = modelRegistry.Connect(); err != nil {
-			return errors.Wrapf(err, "failed to connect model registry %s/%s",
-				obj.Metadata.Workspace, obj.Metadata.Name)
-		}
-
-		return nil
 	}
 
-	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
-		if err = modelRegistry.HealthyCheck(); err != nil {
-			return errors.Wrapf(err, "health check failed for model registry %s/%s",
-				obj.Metadata.Workspace, obj.Metadata.Name)
-		}
-
-		// Measured only here, on a registry known to be reachable right now, and
-		// only when the previous counters have gone stale. This is also why an
-		// unreachable registry keeps its last known counters: the code that would
-		// overwrite them never runs.
-		stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
+	if err = modelRegistry.Connect(); err != nil {
+		return errors.Wrapf(err, "failed to connect model registry %s/%s",
+			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
+
+	if err = modelRegistry.HealthyCheck(); err != nil {
+		return errors.Wrapf(err, "health check failed for model registry %s/%s",
+			obj.Metadata.Workspace, obj.Metadata.Name)
+	}
+
+	// Refresh only after a registry has passed both connection and health checks.
+	stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
 
 	return nil
 }

@@ -27,15 +27,12 @@ var (
 )
 
 var (
-	mountInterface  = kmount.New("")
-	readDir         = os.ReadDir
-	readDirChecksMu sync.Mutex
-	readDirChecks   = make(map[string]*readDirCheck)
-	mountLocksMu    sync.Mutex
-	mountLocks      = make(map[string]*mountLock)
+	mountInterface = kmount.New("")
+	mountChecksMu  sync.Mutex
+	mountChecks    = make(map[string]*mountCheck)
+	mountLocksMu   sync.Mutex
+	mountLocks     = make(map[string]*mountLock)
 )
-
-const nfsReadTimeout = 10 * time.Second
 
 // IsMountExist checks whether the given NFS device is mounted at the specified
 // mount point. It takes the device identifier (device) and the target mount
@@ -112,14 +109,14 @@ func MountNFS(device string, mountPoint string) error {
 	}
 
 	if existed {
-		return readDirWithTimeout(mountPoint, nfsReadTimeout)
+		return nil
 	}
 
 	if unexpectedDevice != "" {
 		return errors.Errorf("mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
 	}
 
-	err = os.MkdirAll(mountPoint, os.FileMode(0644))
+	err = os.MkdirAll(mountPoint, 0o755)
 	if err != nil {
 		return err
 	}
@@ -130,10 +127,10 @@ func MountNFS(device string, mountPoint string) error {
 		return errors.Wrapf(err, "failed to mount nfs %s to %s", device, mountPoint)
 	}
 
-	return readDirWithTimeout(mountPoint, nfsReadTimeout)
+	return nil
 }
 
-type readDirCheck struct {
+type mountCheck struct {
 	done chan struct{}
 	err  error
 }
@@ -170,22 +167,33 @@ func lockMountPoint(mountPoint string) func() {
 	}
 }
 
-func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
-	readDirChecksMu.Lock()
-	check, loaded := readDirChecks[mountPoint]
+// WithMountLock serializes a mount-point operation with mount and unmount
+// operations for the same target.
+func WithMountLock(mountPoint string, operation func() error) error {
+	unlock := lockMountPoint(mountPoint)
+	defer unlock()
+
+	return operation()
+}
+
+// CheckMountWithTimeout runs checkFunc with a caller timeout while coalescing
+// concurrent checks for the same mount point.
+func CheckMountWithTimeout(mountPoint string, timeout time.Duration, checkFunc func(string) error) error {
+	mountChecksMu.Lock()
+	check, loaded := mountChecks[mountPoint]
 
 	if !loaded {
-		check = &readDirCheck{done: make(chan struct{})}
-		readDirChecks[mountPoint] = check
+		check = &mountCheck{done: make(chan struct{})}
+		mountChecks[mountPoint] = check
 	}
-	readDirChecksMu.Unlock()
+	mountChecksMu.Unlock()
 
 	if !loaded {
 		go func() {
-			_, check.err = readDir(mountPoint)
+			check.err = checkFunc(mountPoint)
 			close(check.done)
 
-			forgetReadDirCheck(mountPoint, check)
+			forgetMountCheck(mountPoint, check)
 		}()
 	}
 
@@ -195,29 +203,29 @@ func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 	select {
 	case <-check.done:
 		if check.err != nil {
-			return errors.Wrapf(check.err, "failed to read NFS mount path %s", mountPoint)
+			return errors.Wrapf(check.err, "failed to check NFS mount path %s", mountPoint)
 		}
 
 		return nil
 	case <-timer.C:
-		return errors.Errorf("timed out reading NFS mount path %s", mountPoint)
+		return errors.Errorf("timed out checking NFS mount path %s", mountPoint)
 	}
 }
 
-func forgetReadDirCheck(mountPoint string, check *readDirCheck) {
-	readDirChecksMu.Lock()
-	defer readDirChecksMu.Unlock()
+func forgetMountCheck(mountPoint string, check *mountCheck) {
+	mountChecksMu.Lock()
+	defer mountChecksMu.Unlock()
 
-	if readDirChecks[mountPoint] == check {
-		delete(readDirChecks, mountPoint)
+	if mountChecks[mountPoint] == check {
+		delete(mountChecks, mountPoint)
 	}
 }
 
-func resetReadDirCheck(mountPoint string) {
-	readDirChecksMu.Lock()
-	defer readDirChecksMu.Unlock()
+func resetMountCheck(mountPoint string) {
+	mountChecksMu.Lock()
+	defer mountChecksMu.Unlock()
 
-	delete(readDirChecks, mountPoint)
+	delete(mountChecks, mountPoint)
 }
 
 func Unmount(mountPoint string) error {
@@ -236,6 +244,8 @@ func Unmount(mountPoint string) error {
 				return errors.Wrapf(err, "failed to unmount nfs from %s", mountPoint)
 			}
 
+			resetMountCheck(mountPoint)
+
 			break
 		}
 	}
@@ -245,9 +255,7 @@ func Unmount(mountPoint string) error {
 		return err
 	}
 
-	// A successful unmount starts a new mount generation, so stale reads cannot
-	// block the Controller's subsequent reconnect attempt.
-	resetReadDirCheck(mountPoint)
+	resetMountCheck(mountPoint)
 
 	return nil
 }
