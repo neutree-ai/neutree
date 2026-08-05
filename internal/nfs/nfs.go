@@ -208,6 +208,7 @@ func Unmount(mountPoint string) error {
 	// A successful unmount starts a new mount generation, so stale reads cannot
 	// block the Controller's subsequent reconnect attempt.
 	resetReadDirCheck(mountPoint)
+
 	return nil
 }
 
