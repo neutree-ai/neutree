@@ -7,11 +7,12 @@ import (
 )
 
 // legacyCreateAdmissionRunnerOptions keeps resources that historically
-// forwarded empty and unknown-field request bodies compatible while still
-// running registered create hooks for valid object candidates.
+// forwarded empty, unknown-field, and malformed request bodies compatible
+// while still running registered create hooks for valid object candidates.
 var legacyCreateAdmissionRunnerOptions = CreateAdmissionRunnerOptions{
-	AllowEmptyBody:       true,
-	PermissiveCandidates: true,
+	AllowEmptyBody:            true,
+	PermissiveCandidates:      true,
+	PassthroughInvalidRequest: true,
 }
 
 func admissionRouteRunners[T any](deps *Dependencies, tableName string, resource admission.Resource[T]) (gin.HandlerFunc, gin.HandlerFunc, error) {

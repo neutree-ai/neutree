@@ -267,51 +267,48 @@ func TestDefaultBuilderAdmissionCoverageMatchesMountedResourceWrites(t *testing.
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	expected := map[string]map[string]admission.Operation{
-		"/api/v1/api_keys":           {http.MethodPatch: admission.Update},
-		"/api/v1/workspaces":         {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/roles":              {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/role_assignments":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/user_profiles":      {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/clusters":           {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/image_registries":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/model_registries":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/endpoints":          {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/engines":            {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/model_catalogs":     {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/oem_configs":        {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
-		"/api/v1/external_endpoints": {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+	expected := defaultRESTAdmissionCoverageRoutes()
+	expectedByInit := make(map[string]restAdmissionCoverageRoute, len(expected))
+	for _, route := range expected {
+		expectedByInit[route.initName] = route
 	}
-	found := make(map[string]map[string]struct{}, len(expected))
+	noResourceWriteRouteInits := map[string]struct{}{
+		"rest/rpc":                  {},
+		"rest/static-node-clusters": {},
+		"rest/static-nodes":         {},
+	}
+	for name := range builder.routeInits {
+		if !strings.HasPrefix(name, "rest/") {
+			continue
+		}
+		if _, knownResource := expectedByInit[name]; knownResource {
+			continue
+		}
+		if _, knownNonResource := noResourceWriteRouteInits[name]; !knownNonResource {
+			t.Errorf("uncovered default REST route initializer %q", name)
+		}
+	}
+
+	mounted := make(map[string]map[string]struct{}, len(expected))
 	for _, route := range builder.config.GinEngine.Routes() {
 		if route.Method != http.MethodPost && route.Method != http.MethodPatch {
 			continue
 		}
-		if !strings.Contains(route.Handler, "internal/routes/proxies.CreateStructProxyHandler") {
-			continue
+		if mounted[route.Path] == nil {
+			mounted[route.Path] = make(map[string]struct{})
 		}
-		operations, isResourceWrite := expected[route.Path]
-		if !isResourceWrite {
-			t.Errorf("uncovered default REST resource write %s %s", route.Method, route.Path)
-			continue
-		}
-		operation, expectedMethod := operations[route.Method]
-		if !expectedMethod {
-			t.Errorf("unexpected resource write route %s %s", route.Method, route.Path)
-			continue
-		}
-		if _, err := registry.Chain(strings.TrimPrefix(route.Path, "/api/v1/"), operation); err != nil {
-			t.Errorf("resource write %s %s has no admission descriptor: %v", route.Method, route.Path, err)
-		}
-		if found[route.Path] == nil {
-			found[route.Path] = make(map[string]struct{})
-		}
-		found[route.Path][route.Method] = struct{}{}
+		mounted[route.Path][route.Method] = struct{}{}
 	}
-	for path, operations := range expected {
-		for method := range operations {
-			if _, ok := found[path][method]; !ok {
-				t.Errorf("default resource write %s %s is not mounted", method, path)
+	for _, route := range expected {
+		if _, exists := builder.routeInits[route.initName]; !exists {
+			t.Errorf("default resource route initializer %q is not registered", route.initName)
+		}
+		for method, operation := range route.operations {
+			if _, ok := mounted[route.path][method]; !ok {
+				t.Errorf("default resource write %s %s is not mounted", method, route.path)
+			}
+			if _, err := registry.Chain(route.resource, operation); err != nil {
+				t.Errorf("resource write %s %s has no admission descriptor: %v", method, route.path, err)
 			}
 		}
 	}
@@ -320,6 +317,31 @@ func TestDefaultBuilderAdmissionCoverageMatchesMountedResourceWrites(t *testing.
 	}
 	if err := registry.RegisterResource("after-build"); err == nil || !strings.Contains(err.Error(), "sealed") {
 		t.Errorf("registry accepted registration after default Build(), error = %v", err)
+	}
+}
+
+type restAdmissionCoverageRoute struct {
+	initName   string
+	path       string
+	resource   string
+	operations map[string]admission.Operation
+}
+
+func defaultRESTAdmissionCoverageRoutes() []restAdmissionCoverageRoute {
+	return []restAdmissionCoverageRoute{
+		{initName: "rest/api-keys", path: "/api/v1/api_keys", resource: "api_keys", operations: map[string]admission.Operation{http.MethodPatch: admission.Update}},
+		{initName: "rest/workspaces", path: "/api/v1/workspaces", resource: "workspaces", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/roles", path: "/api/v1/roles", resource: "roles", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/role-assignments", path: "/api/v1/role_assignments", resource: "role_assignments", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/user-profiles", path: "/api/v1/user_profiles", resource: "user_profiles", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/clusters", path: "/api/v1/clusters", resource: "clusters", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/image-registries", path: "/api/v1/image_registries", resource: "image_registries", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/model-registries", path: "/api/v1/model_registries", resource: "model_registries", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/endpoints", path: "/api/v1/endpoints", resource: "endpoints", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/engines", path: "/api/v1/engines", resource: "engines", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/model-catalogs", path: "/api/v1/model_catalogs", resource: "model_catalogs", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/oem-configs", path: "/api/v1/oem_configs", resource: "oem_configs", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
+		{initName: "rest/external-endpoints", path: "/api/v1/external_endpoints", resource: "external_endpoints", operations: map[string]admission.Operation{http.MethodPost: admission.Create, http.MethodPatch: admission.Update}},
 	}
 }
 

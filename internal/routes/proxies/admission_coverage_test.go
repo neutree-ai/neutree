@@ -144,6 +144,45 @@ func TestLegacyCreateAdmissionRoutesPreserveEmptyAndUnknownBodies(t *testing.T) 
 	}
 }
 
+func TestLegacyCreateAdmissionRoutesPreserveMalformedBodies(t *testing.T) {
+	legacyResources := []admissionCoverageResource{
+		newAdmissionCoverageResource("workspaces", "/workspaces", true, RegisterWorkspaceRoutes, workspaceAdmissionResource),
+		newAdmissionCoverageResource("roles", "/roles", true, RegisterRoleRoutes, roleAdmissionResource),
+		newAdmissionCoverageResource("user profiles", "/user_profiles", true, RegisterUserProfileRoutes, userProfileAdmissionResource),
+		newAdmissionCoverageResource("model registries", "/model_registries", true, RegisterModelRegistryRoutes, modelRegistryAdmissionResource),
+	}
+	const malformedBody = `{"metadata":`
+
+	for _, resource := range legacyResources {
+		t.Run(resource.name, func(t *testing.T) {
+			var forwardedBody string
+			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				body, err := io.ReadAll(request.Body)
+				require.NoError(t, err)
+				forwardedBody = string(body)
+				writer.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(upstream.Close)
+
+			registry := admission.NewRegistry()
+			router := gin.New()
+			require.NoError(t, resource.register(router.Group(""), nil, &Dependencies{
+				Admission:        registry,
+				StorageAccessURL: upstream.URL,
+			}))
+			require.NoError(t, registry.Seal())
+
+			response := newCloseNotifyRecorder()
+			request := httptest.NewRequest(http.MethodPost, resource.path, strings.NewReader(malformedBody))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusNoContent, response.ResponseRecorder.Code)
+			require.Equal(t, malformedBody, forwardedBody)
+		})
+	}
+}
+
 func TestImageRegistryURLValidationRemainsOutsideAdmission(t *testing.T) {
 	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

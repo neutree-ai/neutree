@@ -38,11 +38,12 @@ func (e *invalidAdmissionRequestError) Unwrap() error {
 // client error contract for request decoding. Hooks still run only on decoded
 // candidates, and resources without an option retain framework errors.
 type CreateAdmissionRunnerOptions struct {
-	InvalidRequestError  func([]byte, error) *admission.Error
-	ReadBodyError        func(error) *admission.Error
-	AllowEmptyBody       bool
-	RejectArray          bool
-	PermissiveCandidates bool
+	InvalidRequestError       func([]byte, error) *admission.Error
+	ReadBodyError             func(error) *admission.Error
+	AllowEmptyBody            bool
+	RejectArray               bool
+	PermissiveCandidates      bool
+	PassthroughInvalidRequest bool
 }
 
 type createAdmissionChain interface {
@@ -116,6 +117,10 @@ func newCreateAdmissionRunnerWithOptions[T any](resolver createAdmissionChainRes
 
 		approved, err := admitCreateBodyWithOptions[T](c.Request.Context(), chain, body, options)
 		if err != nil {
+			if options.PassthroughInvalidRequest && errors.Is(err, errInvalidAdmissionRequest) {
+				replaceRequestBody(c.Request, body)
+				return
+			}
 			writeCreateAdmissionRunnerError(c, err, body, options)
 			return
 		}
