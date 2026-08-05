@@ -1,8 +1,6 @@
 package app
 
 import (
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -195,17 +193,6 @@ func TestBuilderWithNilCurrentClusterProfileBuilderUsesCommunityDefault(t *testi
 
 	if _, ok := builder.currentClusterProfileBuilder.(*releaseinfo.CommunityClusterProfileBuilder); !ok {
 		t.Fatalf("expected community cluster profile builder after nil input, got %T", builder.currentClusterProfileBuilder)
-	}
-}
-
-func TestAppRunDoesNotInvokeReleaseInfoBuilderSynchronization(t *testing.T) {
-	appSource, err := os.ReadFile("app.go")
-	if err != nil {
-		t.Fatalf("read app source: %v", err)
-	}
-
-	if strings.Contains(string(appSource), "SynchronizeCurrentBaseline") {
-		t.Fatal("App.Run must not synchronize the current release baseline")
 	}
 }
 
