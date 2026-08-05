@@ -137,12 +137,12 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 }
 
 func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
-	upMigration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.up.sql")
+	upMigration, err := os.ReadFile("../migrations/088_remove_legacy_release_info.up.sql")
 	if err != nil {
 		t.Fatalf("read forward migration: %v", err)
 	}
 
-	downMigration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.down.sql")
+	downMigration, err := os.ReadFile("../migrations/088_remove_legacy_release_info.down.sql")
 	if err != nil {
 		t.Fatalf("read rollback migration: %v", err)
 	}
