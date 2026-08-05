@@ -326,8 +326,9 @@ func staticNodeTargets(nodes []v1.StaticNode, port int) []string {
 }
 
 // engineContainerIdentity is what identifies one running engine container across
-// two observations: a container that was restarted keeps neither its ID nor its
-// StartedAt, and one that was replaced keeps neither.
+// two observations. Both halves are needed and they catch different things: a
+// replaced container comes back with a new ID, and a restarted one keeps its ID
+// but gets a new StartedAt. Comparing only IDs would miss the restart.
 type engineContainerIdentity struct {
 	Node      string `json:"node"`
 	Name      string `json:"name"`
