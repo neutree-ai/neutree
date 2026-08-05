@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -117,19 +118,27 @@ func TestCallDatabaseFunction_FailureDoesNotPoisonListQueries(t *testing.T) {
 }
 
 func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
-	requests := make(chan *http.Request, 3)
+	type capturedRequest struct {
+		request *http.Request
+		body    []byte
+	}
+
+	requests := make(chan capturedRequest, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests <- r.Clone(r.Context())
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		requests <- capturedRequest{request: r.Clone(r.Context()), body: body}
 		switch r.Method {
 		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ReleaseInfo","metadata":{"name":"v1.2.0"},"spec":{"channel":"Stable","build_identity":"v1.2.0"},"status":{"revision":"r1"}}]`))
+			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ReleaseInfo","metadata":{"name":"v1.2.0"},"spec":{"compatible_cluster_baselines":["v1.1","v1.2"]}}]`))
 		case http.MethodPost:
-			_, _ = io.Copy(io.Discard, r.Body)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`[]`))
 		case http.MethodPatch:
-			_, _ = io.Copy(io.Discard, r.Body)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -142,23 +151,46 @@ func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
 	assert.Equal(t, "v1.2.0", infos[0].GetName())
+	assert.Equal(t, []string{"v1.1", "v1.2"}, infos[0].Spec.CompatibleClusterBaselines)
 
-	info := &v1.ReleaseInfo{Metadata: &v1.Metadata{Name: "v1.2.0"}}
+	info := &v1.ReleaseInfo{
+		APIVersion: "v1",
+		Kind:       v1.ReleaseInfoKind,
+		Metadata:   &v1.Metadata{Name: "v1.2.0"},
+		Spec:       &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.1", "v1.2"}},
+	}
 	require.NoError(t, s.CreateReleaseInfo(info))
 	require.NoError(t, s.UpdateReleaseInfo("7", info))
 
 	first := <-requests
-	assert.Equal(t, http.MethodGet, first.Method)
-	assert.Equal(t, "/release_infos", first.URL.Path)
+	assert.Equal(t, http.MethodGet, first.request.Method)
+	assert.Equal(t, "/release_infos", first.request.URL.Path)
 
 	second := <-requests
-	assert.Equal(t, http.MethodPost, second.Method)
-	assert.Equal(t, "/release_infos", second.URL.Path)
+	assert.Equal(t, http.MethodPost, second.request.Method)
+	assert.Equal(t, "/release_infos", second.request.URL.Path)
+	assertReleaseInfoPayloadIsMinimal(t, second.body)
 
 	third := <-requests
-	assert.Equal(t, http.MethodPatch, third.Method)
-	assert.Equal(t, "/release_infos", third.URL.Path)
-	assert.Equal(t, "eq.7", third.URL.Query().Get("id"))
+	assert.Equal(t, http.MethodPatch, third.request.Method)
+	assert.Equal(t, "/release_infos", third.request.URL.Path)
+	assert.Equal(t, "eq.7", third.request.URL.Query().Get("id"))
+	assertReleaseInfoPayloadIsMinimal(t, third.body)
+}
+
+func assertReleaseInfoPayloadIsMinimal(t *testing.T, body []byte) {
+	t.Helper()
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(body, &payload))
+	assert.NotContains(t, payload, "status")
+
+	spec, ok := payload["spec"].(map[string]interface{})
+	require.True(t, ok, "release info payload must contain an object spec")
+	assert.Equal(t, []interface{}{"v1.1", "v1.2"}, spec["compatible_cluster_baselines"])
+	assert.NotContains(t, spec, "channel")
+	assert.NotContains(t, spec, "build_identity")
+	assert.NotContains(t, spec, "cluster_versions")
 }
 
 func TestClusterProfileStorageUsesInternalTable(t *testing.T) {

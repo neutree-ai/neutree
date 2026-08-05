@@ -1,8 +1,32 @@
--- Restore the schema shape expected by migrations 081--085. Historic values
--- discarded by the forward migration are intentionally not reconstructed.
-ALTER TYPE api.release_info_spec ADD ATTRIBUTE channel TEXT;
-ALTER TYPE api.release_info_spec ADD ATTRIBUTE build_identity TEXT;
-ALTER TYPE api.release_info_spec ADD ATTRIBUTE cluster_versions JSONB;
+-- Restore the schema shape expected by migrations 081--085. Recreate the
+-- composite type rather than appending attributes: PostgreSQL preserves append
+-- order, while the v085 positional contract is channel/build/versions/baselines.
+-- Historic values discarded by the forward migration are intentionally not
+-- reconstructed.
+ALTER TABLE api.release_infos
+    ALTER COLUMN spec TYPE JSONB
+    USING jsonb_build_object(
+        'compatible_cluster_baselines',
+        (spec).compatible_cluster_baselines
+    );
+
+DROP TYPE api.release_info_spec;
+
+CREATE TYPE api.release_info_spec AS (
+    channel TEXT,
+    build_identity TEXT,
+    cluster_versions JSONB,
+    compatible_cluster_baselines JSONB
+);
+
+ALTER TABLE api.release_infos
+    ALTER COLUMN spec TYPE api.release_info_spec
+    USING ROW(
+        NULL::TEXT,
+        NULL::TEXT,
+        NULL::JSONB,
+        spec -> 'compatible_cluster_baselines'
+    )::api.release_info_spec;
 
 CREATE TYPE api.release_info_status AS (
     revision TEXT

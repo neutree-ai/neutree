@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"os"
 	"testing"
 )
 
@@ -132,5 +133,42 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 	}
 	if snapshotsExist {
 		t.Fatal("legacy cluster upgrade snapshots table must be removed")
+	}
+}
+
+func TestReleaseInfoRollbackRestoresLegacyCompositeOrder(t *testing.T) {
+	migration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.down.sql")
+	if err != nil {
+		t.Fatalf("read rollback migration: %v", err)
+	}
+
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+	tx, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin rollback transaction: %v", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err = tx.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatalf("apply rollback migration: %v", err)
+	}
+
+	var attributes string
+	if err = tx.QueryRowContext(ctx, `
+		SELECT string_agg(attname, ',' ORDER BY attnum)
+		FROM pg_attribute
+		WHERE attrelid = 'api.release_info_spec'::regclass
+			AND attnum > 0
+			AND NOT attisdropped
+	`).Scan(&attributes); err != nil {
+		t.Fatalf("read rollback release info spec attributes: %v", err)
+	}
+
+	const expected = "channel,build_identity,cluster_versions,compatible_cluster_baselines"
+	if attributes != expected {
+		t.Fatalf("expected rollback release info spec order %q, got %q", expected, attributes)
 	}
 }
