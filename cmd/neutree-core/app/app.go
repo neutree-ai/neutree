@@ -8,13 +8,16 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/cron"
 )
 
 // App represents the main application
 type App struct {
-	config      *config.CoreConfig
-	controllers map[string]controllers.Controller
+	config                       *config.CoreConfig
+	controllers                  map[string]controllers.Controller
+	releaseInfoBuilder           releaseinfo.ReleaseInfoBuilder
+	currentClusterProfileBuilder releaseinfo.CurrentClusterProfileBuilder
 }
 
 // NewApp creates a new application instance
