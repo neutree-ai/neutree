@@ -124,6 +124,48 @@ func TestReleaseInfoIsGlobalInternalState(t *testing.T) {
 	}
 }
 
+func TestReleaseInfoAllowsNilStatusDuringTransition(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	serviceTx, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin service role transaction: %v", err)
+	}
+	defer func() {
+		_ = serviceTx.Rollback()
+	}()
+
+	if _, err = serviceTx.ExecContext(ctx, "SET LOCAL ROLE service_role"); err != nil {
+		t.Fatalf("set service_role: %v", err)
+	}
+
+	const releaseName = "v1.2.0-statusless"
+	if _, err = serviceTx.ExecContext(ctx, `
+		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
+		VALUES (
+			'v1',
+			'ReleaseInfo',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW('Stable', 'v1.2.0', '[{"version":"v1.2.0"}]'::jsonb, '["v1.2"]'::jsonb)::api.release_info_spec
+		)
+	`, releaseName); err != nil {
+		t.Fatalf("insert statusless release info as service_role: %v", err)
+	}
+
+	var statusIsNull bool
+	if err = serviceTx.QueryRowContext(ctx, `
+		SELECT status IS NULL
+		FROM api.release_infos
+		WHERE (metadata).name = $1
+	`, releaseName).Scan(&statusIsNull); err != nil {
+		t.Fatalf("read statusless release info as service_role: %v", err)
+	}
+	if !statusIsNull {
+		t.Fatal("expected transition release info status to be NULL")
+	}
+}
+
 func TestClusterUpgradeSnapshotIsGlobalInternalState(t *testing.T) {
 	adminDB := GetTestDB(t)
 	ctx := context.Background()

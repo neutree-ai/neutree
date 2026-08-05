@@ -1,6 +1,10 @@
 -- NEU-605: split cluster-version component images from the release baseline.
 ALTER TYPE api.release_info_spec ADD ATTRIBUTE compatible_cluster_baselines JSONB;
 
+-- ReleaseInfo builders transition to the new baseline field before the legacy
+-- status is removed in a later migration.
+ALTER TABLE api.release_infos ALTER COLUMN status DROP NOT NULL;
+
 CREATE TABLE api.cluster_profiles (
     id SERIAL PRIMARY KEY,
     api_version TEXT NOT NULL,
