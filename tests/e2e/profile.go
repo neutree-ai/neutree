@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	defaultModelVersion = "latest"
+	defaultModelVersion           = "latest"
+	maintainedVLLMVersionPrevious = "v0.17.1"
+	maintainedVLLMVersionCurrent  = "v0.24.0"
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
@@ -18,8 +20,8 @@ const (
 )
 
 var maintainedVLLMVersions = map[string]struct{}{
-	"v0.17.1": {},
-	"v0.24.0": {},
+	maintainedVLLMVersionPrevious: {},
+	maintainedVLLMVersionCurrent:  {},
 }
 
 // EngineProfile carries per-engine configuration loaded from the test profile
@@ -240,11 +242,14 @@ func validateMaintainedVLLMVersions(engineProfile EngineProfile) error {
 		if version == "" {
 			continue
 		}
+
 		if _, ok := maintainedVLLMVersions[version]; !ok {
 			return fmt.Errorf(
-				"engines.vllm.%s %q is not maintained; supported versions are v0.17.1 and v0.24.0",
+				"engines.vllm.%s %q is not maintained; supported versions are %s and %s",
 				field,
 				version,
+				maintainedVLLMVersionPrevious,
+				maintainedVLLMVersionCurrent,
 			)
 		}
 	}
@@ -337,11 +342,11 @@ func profileEngineOldVersion() string {
 		return v
 	}
 
-	if profileEngineVersion() == "v0.17.1" {
-		return "v0.24.0"
+	if profileEngineVersion() == maintainedVLLMVersionPrevious {
+		return maintainedVLLMVersionCurrent
 	}
 
-	return "v0.17.1"
+	return maintainedVLLMVersionPrevious
 }
 
 // profileEngineVersionFor returns the configured version for the named engine,
