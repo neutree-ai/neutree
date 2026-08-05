@@ -17,6 +17,7 @@ type RouterComponent struct {
 	imagePrefix     string
 	imagePullSecret string
 	routerImage     string
+	profileSelected bool
 	config          v1.KubernetesClusterConfig
 	ctrlClient      client.Client
 	logger          klog.Logger
@@ -24,7 +25,7 @@ type RouterComponent struct {
 
 func NewRouterComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client) *RouterComponent {
-	return NewRouterComponentWithImage(
+	return newRouterComponent(
 		cluster,
 		namespace,
 		imagePrefix,
@@ -32,11 +33,27 @@ func NewRouterComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSe
 		"",
 		config,
 		ctrlClient,
+		false,
 	)
 }
 
 func NewRouterComponentWithImage(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret,
 	routerImage string, config v1.KubernetesClusterConfig, ctrlClient client.Client) *RouterComponent {
+	return newRouterComponent(
+		cluster,
+		namespace,
+		imagePrefix,
+		imagePullSecret,
+		routerImage,
+		config,
+		ctrlClient,
+		true,
+	)
+}
+
+func newRouterComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret,
+	routerImage string, config v1.KubernetesClusterConfig, ctrlClient client.Client,
+	profileSelected bool) *RouterComponent {
 	logger := klog.LoggerWithValues(klog.Background(),
 		"cluster", cluster.Metadata.WorkspaceName(),
 		"component", "router",
@@ -48,6 +65,7 @@ func NewRouterComponentWithImage(cluster *v1.Cluster, namespace, imagePrefix, im
 		imagePrefix:     imagePrefix,
 		imagePullSecret: imagePullSecret,
 		routerImage:     routerImage,
+		profileSelected: profileSelected,
 		config:          config,
 		ctrlClient:      ctrlClient,
 		logger:          logger,

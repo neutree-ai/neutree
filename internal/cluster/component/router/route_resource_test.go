@@ -137,6 +137,25 @@ func TestBuildRouterDeploymentUsesSelectedImage(t *testing.T) {
 	t.Fatalf("router deployment not found in resources")
 }
 
+func TestSelectedRouterImageRequiresImage(t *testing.T) {
+	routerComponent := NewRouterComponentWithImage(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"",
+		v1.KubernetesClusterConfig{},
+		nil,
+	)
+
+	_, err := routerComponent.GetRouteResources()
+
+	assert.ErrorContains(t, err, "cluster profile component router requires image and tag")
+}
+
 func Test_BuildRouterService(t *testing.T) {
 	// Test implementation goes here
 	routerComponent := &RouterComponent{

@@ -2,7 +2,9 @@ package staticcluster
 
 import (
 	"context"
+	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -143,25 +145,26 @@ func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
 	return util.RewriteImageRef(imageRegistry, image)
 }
 
-func profileComponentImage(cluster *v1.StaticNodeCluster, component v1.ImageRef) string {
-	if component.Image == "" {
-		return ""
+func profileComponentImage(cluster *v1.StaticNodeCluster, componentName string, component v1.ImageRef) (string, error) {
+	if strings.TrimSpace(component.Image) == "" || strings.TrimSpace(component.Tag) == "" {
+		return "", fmt.Errorf("cluster profile component %s requires image and tag", componentName)
 	}
 
-	image := component.Image
-	if component.Tag != "" {
-		image += ":" + component.Tag
-	}
-
-	return staticComponentImage(cluster, image)
+	return staticComponentImage(cluster, component.Image+":"+component.Tag), nil
 }
 
-func componentImage(cluster *v1.StaticNodeCluster, component v1.ImageRef, legacyImage string) string {
-	if image := profileComponentImage(cluster, component); image != "" {
-		return image
+func componentImage(
+	cluster *v1.StaticNodeCluster,
+	componentName string,
+	component v1.ImageRef,
+	legacyImage string,
+	profileSelected bool,
+) (string, error) {
+	if profileSelected {
+		return profileComponentImage(cluster, componentName, component)
 	}
 
-	return staticComponentImage(cluster, legacyImage)
+	return staticComponentImage(cluster, legacyImage), nil
 }
 
 func copyAuth(auth *v1.Auth) *v1.Auth {

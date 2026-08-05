@@ -1,6 +1,9 @@
 package router
 
 import (
+	"fmt"
+	"strings"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -159,11 +162,15 @@ type RouteManifestVariables struct {
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
-func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
+func (r *RouterComponent) buildManifestVariables() (RouteManifestVariables, error) {
 	version := r.cluster.Spec.Version
 	routerImage := r.routerImage
 
-	if routerImage == "" {
+	if r.profileSelected && strings.TrimSpace(routerImage) == "" {
+		return RouteManifestVariables{}, fmt.Errorf("cluster profile component router requires image and tag")
+	}
+
+	if !r.profileSelected && routerImage == "" {
 		routerImage = "neutree/router:" + version
 	}
 
@@ -202,5 +209,5 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 		Replicas:        replicas,
 		Resources:       resources,
 		AccessMode:      string(accessMode),
-	}
+	}, nil
 }

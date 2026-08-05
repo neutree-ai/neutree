@@ -316,6 +316,40 @@ func TestPlannerPlanRendersExactClusterProfileRayRuntime(t *testing.T) {
 	}
 }
 
+func TestPlannerRejectsSelectedProfileMissingRayRuntimeTag(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+			assert.Equal(t, cluster.Spec.Version, version)
+			return v1.ClusterProfileComponents{
+				RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve"},
+			}, nil
+		}),
+	}
+
+	_, err := planner.Plan(context.Background(), cluster, currentNodes)
+
+	require.ErrorContains(t, err, "cluster profile component ray_runtime requires image and tag")
+}
+
 func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -687,7 +721,10 @@ func TestPlannerUsesClusterProfileRuntimeImage(t *testing.T) {
 		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
 			assert.Equal(t, cluster.Spec.Version, version)
 			return v1.ClusterProfileComponents{
-				RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+				RayRuntime:   v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+				NodeExporter: v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+				NodeAgent:    v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0-rc.1"},
+				VMAgent:      v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
 			}, nil
 		}),
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
@@ -1268,10 +1305,12 @@ func TestPlannerCompletesRayRecreateUpgradeWithTargetProfileImage(t *testing.T) 
 			}, nil
 		}),
 	}
-	markStaticNodeUpgradeReady(t, planner, cluster, currentNodes, buildRayRuntimeImage(cluster, v1.ImageRef{
+	targetImage, err := buildRayRuntimeImage(cluster, v1.ImageRef{
 		Image: "neutree/neutree-serve",
 		Tag:   "v1.1.1",
-	}))
+	}, true)
+	require.NoError(t, err)
+	markStaticNodeUpgradeReady(t, planner, cluster, currentNodes, targetImage)
 
 	desiredNodePlans, err := planner.Plan(context.Background(), cluster, currentNodes)
 
@@ -1314,7 +1353,9 @@ func TestPlannerKeepsReadyWhenObservedVersionMatchesSpec(t *testing.T) {
 		Version: "v1.2.1",
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
-	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, buildRayRuntimeImage(cluster, v1.ImageRef{}))
+	targetImage, err := buildRayRuntimeImage(cluster, v1.ImageRef{}, false)
+	require.NoError(t, err)
+	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, targetImage)
 
 	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
 

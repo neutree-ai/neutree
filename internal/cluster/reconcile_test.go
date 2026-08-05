@@ -63,6 +63,8 @@ func TestNewReconcileWithClusterProfileUsesExactVersionForKubernetes(t *testing.
 		{name: "stable", version: "v1.2.0", tag: "v1.1.1"},
 		{name: "alpha", version: "v1.2.0-alpha.1", tag: "v1.1.1-alpha.1"},
 		{name: "release candidate", version: "v1.2.0-rc.1", tag: "v1.1.1-rc.1"},
+		{name: "v1.1 alpha", version: "v1.1.0-alpha.1", tag: "v1.1.0-alpha.1"},
+		{name: "v1.1 release candidate", version: "v1.1.0-rc.1", tag: "v1.1.0-rc.1"},
 	}
 
 	for _, tt := range tests {

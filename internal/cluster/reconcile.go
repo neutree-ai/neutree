@@ -42,6 +42,7 @@ type ReconcileContext struct {
 	ImageRegistry *v1.ImageRegistry
 	// ProfileComponents is the exact ClusterProfile selected by spec.version.
 	ProfileComponents v1.ClusterProfileComponents
+	ProfileSelected   bool
 
 	// ssh cluster specific fields
 	sshClusterConfig    *v1.RaySSHProvisionClusterConfig
@@ -139,7 +140,12 @@ func resolveClusterProfileComponents(
 }
 
 func isClusterProfileAwareVersion(version string) (bool, error) {
-	legacy, err := semver.LessThan(version, "v1.1.0")
+	baseVersion, err := semver.BaseVersion(version)
+	if err != nil {
+		return false, fmt.Errorf("parse cluster version %q: %w", version, err)
+	}
+
+	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
 	if err != nil {
 		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
 	}
@@ -153,16 +159,12 @@ func IsClusterProfileAwareVersion(version string) (bool, error) {
 	return isClusterProfileAwareVersion(version)
 }
 
-func profileImage(ref v1.ImageRef) string {
-	if ref.Image == "" {
-		return ""
+func profileImage(componentName string, ref v1.ImageRef) (string, error) {
+	if ref.Image == "" || ref.Tag == "" {
+		return "", fmt.Errorf("cluster profile component %s requires image and tag", componentName)
 	}
 
-	if ref.Tag == "" {
-		return ref.Image
-	}
-
-	return ref.Image + ":" + ref.Tag
+	return ref.Image + ":" + ref.Tag, nil
 }
 
 func isStaticNodeClusterFlowVersion(version string) (bool, error) {

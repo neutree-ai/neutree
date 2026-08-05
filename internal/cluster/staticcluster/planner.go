@@ -72,7 +72,7 @@ func (r *Planner) buildDesiredNodePlans(
 		return nil, errors.New("static node cluster spec.nodes is required")
 	}
 
-	profileComponents, err := r.profileComponents(cluster.Spec.Version)
+	profileComponents, profileSelected, err := r.profileComponents(cluster.Spec.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,10 @@ func (r *Planner) buildDesiredNodePlans(
 			return nil, err
 		}
 
-		components := buildNodeComponents(cluster, desiredNode, profileComponents, profile, r.MetricsRemoteWriteURL)
+		components, err := buildNodeComponents(cluster, desiredNode, profileComponents, profileSelected, profile, r.MetricsRemoteWriteURL)
+		if err != nil {
+			return nil, err
+		}
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
@@ -176,15 +179,15 @@ func (r *Planner) buildDesiredNodePlans(
 	return plans, nil
 }
 
-func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, error) {
+func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, bool, error) {
 	if r == nil || r.ClusterProfileComponentsResolver == nil {
-		return v1.ClusterProfileComponents{}, nil
+		return v1.ClusterProfileComponents{}, false, nil
 	}
 
 	components, err := r.ClusterProfileComponentsResolver.ComponentsFor(version)
 	if err != nil {
-		return v1.ClusterProfileComponents{}, fmt.Errorf("resolve cluster profile components: %w", err)
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("resolve cluster profile components: %w", err)
 	}
 
-	return components, nil
+	return components, true, nil
 }
