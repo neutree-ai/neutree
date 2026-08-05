@@ -98,7 +98,6 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
 				obj.Metadata.Workspace, obj.Metadata.Name)
 		}
-
 	}
 
 	if err = modelRegistry.Connect(); err != nil {
