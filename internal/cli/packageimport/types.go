@@ -51,6 +51,7 @@ func (profile *ClusterProfile) ToAPIClusterProfile() *v1.ClusterProfile {
 	}
 
 	components := profile.Components
+
 	return &v1.ClusterProfile{
 		APIVersion: "v1",
 		Kind:       v1.ClusterProfileKind,

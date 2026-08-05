@@ -28,6 +28,7 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid cluster profile payload: %v", err)})
 			return
 		}
+
 		if err := validateProfileForUpsert(request.Profile); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -38,11 +39,13 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get release info: %v", err)})
 			return
 		}
+
 		minor, err := releaseinfo.NormalizeClusterMinor(request.Profile.GetName())
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+
 		if !compatibleClusterBaselines(info.Spec.CompatibleClusterBaselines)[minor] {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cluster profile %s is not compatible with current release info", request.Profile.GetName())})
 			return
@@ -53,19 +56,24 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list cluster profiles: %v", err)})
 			return
 		}
+
 		for index := range profiles {
 			if profiles[index].GetName() != request.Profile.GetName() {
 				continue
 			}
+
 			if !request.ForceUpdate {
 				c.JSON(http.StatusOK, profileUpsertResponse{Operation: "unchanged"})
 				return
 			}
+
 			if err := deps.Storage.UpdateClusterProfile(profiles[index].GetID(), request.Profile); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update cluster profile: %v", err)})
 				return
 			}
+
 			c.JSON(http.StatusOK, profileUpsertResponse{Operation: "updated"})
+
 			return
 		}
 
@@ -73,6 +81,7 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create cluster profile: %v", err)})
 			return
 		}
+
 		c.JSON(http.StatusOK, profileUpsertResponse{Operation: "created"})
 	}
 }
@@ -81,21 +90,27 @@ func validateProfileForUpsert(profile *v1.ClusterProfile) error {
 	if profile == nil {
 		return fmt.Errorf("profile is required")
 	}
+
 	if profile.APIVersion != "v1" {
 		return fmt.Errorf("profile api_version must be v1")
 	}
+
 	if profile.Kind != v1.ClusterProfileKind {
 		return fmt.Errorf("profile kind must be %s", v1.ClusterProfileKind)
 	}
+
 	if profile.Metadata == nil || strings.TrimSpace(profile.Metadata.Name) == "" {
 		return fmt.Errorf("profile metadata.name is required")
 	}
+
 	if profile.Metadata.Workspace != "" {
 		return fmt.Errorf("profile metadata.workspace is not supported")
 	}
+
 	if profile.Spec == nil {
 		return fmt.Errorf("profile spec is required")
 	}
+
 	if _, err := releaseinfo.NormalizeClusterMinor(profile.Metadata.Name); err != nil {
 		return err
 	}
@@ -115,6 +130,7 @@ func validateProfileForUpsert(profile *v1.ClusterProfile) error {
 		if strings.TrimSpace(component.ref.Image) == "" {
 			return fmt.Errorf("profile spec.components.%s.image is required", component.name)
 		}
+
 		if strings.TrimSpace(component.ref.Tag) == "" {
 			return fmt.Errorf("profile spec.components.%s.tag is required", component.name)
 		}

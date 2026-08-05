@@ -81,6 +81,7 @@ func (b *Builder) WithReleaseInfoBuilder(builder releaseprofile.ReleaseInfoBuild
 	}
 
 	b.releaseInfoBuilder = builder
+
 	return b
 }
 
@@ -92,6 +93,7 @@ func (b *Builder) WithCurrentClusterProfileBuilder(builder releaseprofile.Curren
 	}
 
 	b.currentClusterProfileBuilder = builder
+
 	return b
 }
 

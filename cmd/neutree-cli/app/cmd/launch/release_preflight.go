@@ -63,6 +63,7 @@ func runReleasePreflight(lister clusterLister, target *v1.ReleaseInfo, output io
 	if lister == nil {
 		return fmt.Errorf("cluster lister is required")
 	}
+
 	if target == nil || target.Spec == nil {
 		return fmt.Errorf("target release info is required")
 	}
@@ -78,6 +79,7 @@ func runReleasePreflight(lister clusterLister, target *v1.ReleaseInfo, output io
 	}
 
 	incompatible := 0
+
 	for _, rawCluster := range rawClusters {
 		var cluster v1.Cluster
 		if err := json.Unmarshal(rawCluster, &cluster); err != nil {
@@ -85,6 +87,7 @@ func runReleasePreflight(lister clusterLister, target *v1.ReleaseInfo, output io
 		}
 
 		version := effectiveClusterVersion(&cluster)
+
 		minor, versionErr := releaseinfo.NormalizeClusterMinor(version)
 		if versionErr == nil && compatible[minor] {
 			continue
@@ -92,20 +95,25 @@ func runReleasePreflight(lister clusterLister, target *v1.ReleaseInfo, output io
 
 		incompatible++
 		name := cluster.GetName()
+
 		workspace := ""
 		if cluster.Metadata != nil {
 			workspace = cluster.Metadata.Workspace
 		}
+
 		if workspace == "" {
 			workspace = "default"
 		}
+
 		if version == "" {
 			version = "<empty>"
 		}
+
 		if versionErr != nil {
 			_, _ = fmt.Fprintf(output, "%s/%s: %s (invalid Cluster version: %v)\n", workspace, name, version, versionErr)
 			continue
 		}
+
 		_, _ = fmt.Fprintf(output, "%s/%s: %s is not compatible with target ReleaseInfo %s\n", workspace, name, version, target.GetName())
 	}
 
@@ -121,6 +129,7 @@ func compatibleClusterMinorSet(baselines []string) map[string]bool {
 	for _, baseline := range baselines {
 		compatible[strings.TrimSpace(baseline)] = true
 	}
+
 	return compatible
 }
 
@@ -128,8 +137,10 @@ func effectiveClusterVersion(cluster *v1.Cluster) string {
 	if cluster != nil && cluster.Status != nil && strings.TrimSpace(cluster.Status.Version) != "" {
 		return strings.TrimSpace(cluster.Status.Version)
 	}
+
 	if cluster != nil && cluster.Spec != nil {
 		return strings.TrimSpace(cluster.Spec.Version)
 	}
+
 	return ""
 }

@@ -73,10 +73,12 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 // Run starts the application
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
+
 	baseline, err := a.currentControlPlaneBaseline()
 	if err != nil {
 		return err
 	}
+
 	if err := a.synchronizeCurrentBaseline(
 		currentBaselineStore{storage: a.config.Storage},
 		baseline,

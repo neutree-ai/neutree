@@ -190,6 +190,7 @@ func (p *Parser) validateClusterProfile(profile *ClusterProfile) error {
 		if strings.TrimSpace(component.ref.Image) == "" {
 			return errors.Errorf("cluster_profile.components.%s.image is required", component.name)
 		}
+
 		if strings.TrimSpace(component.ref.Tag) == "" {
 			return errors.Errorf("cluster_profile.components.%s.tag is required", component.name)
 		}

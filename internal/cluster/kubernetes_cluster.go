@@ -199,6 +199,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileDeleteComps := []component.Component{}
 
 	var routerComp *router.RouterComponent
+
 	if reconcileCtx.ProfileSelected {
 		routerImage, err := profileImage("router", reconcileCtx.ProfileComponents.Router)
 		if err != nil {
@@ -297,6 +298,7 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 			c.acceleratorMgr,
 		)
 	}
+
 	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
 		reconcileComps = append(reconcileComps, metricsComp)
 	} else {

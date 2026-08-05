@@ -47,8 +47,10 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 
 		compatible := compatibleClusterBaselines(info.Spec.CompatibleClusterBaselines)
 		versions := make([]availableClusterVersion, 0, len(profiles))
+
 		for _, profile := range profiles {
 			profileName := profile.GetName()
+
 			minor, err := releaseinfo.NormalizeClusterMinor(profileName)
 			if err != nil || !compatible[minor] || !clusterMinorAtLeast(minor, currentBaseline) {
 				continue
@@ -83,6 +85,7 @@ func currentReleaseInfo(deps *Dependencies) (*v1.ReleaseInfo, error) {
 	if deps == nil || deps.ReleaseInfoProvider == nil {
 		return nil, fmt.Errorf("release info provider is required")
 	}
+
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("storage is required")
 	}
@@ -91,6 +94,7 @@ func currentReleaseInfo(deps *Dependencies) (*v1.ReleaseInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if info == nil || info.Metadata == nil || info.Spec == nil {
 		return nil, fmt.Errorf("release info metadata and spec are required")
 	}

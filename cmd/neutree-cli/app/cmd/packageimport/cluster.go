@@ -87,6 +87,7 @@ func runClusterImport(opts *ClusterImportOptions) error {
 	if err != nil {
 		return err
 	}
+
 	importer := clusterImportNewImporter(apiClient)
 
 	// Prepare import options

@@ -181,9 +181,11 @@ func (i *Importer) registerManifest(ctx context.Context, opts *ImportOptions, ma
 	if err != nil {
 		return result, err
 	}
+
 	if manifest.ClusterProfile == nil {
 		return result, nil
 	}
+
 	if i.apiClient == nil {
 		return result, errors.New("API client is required to register cluster profile")
 	}

@@ -110,6 +110,7 @@ func buildMetricsComponents(
 	if err != nil {
 		return nil, err
 	}
+
 	components = append(components, nodeAgent)
 
 	if role == v1.StaticNodeRoleHead {
@@ -117,6 +118,7 @@ func buildMetricsComponents(
 		if err != nil {
 			return nil, err
 		}
+
 		components = append(components, vmagent)
 	}
 

@@ -35,12 +35,15 @@ func SynchronizeCurrentBaseline(
 	if _, err := parseStableReleaseInfoBaseline(baseline); err != nil {
 		return fmt.Errorf("invalid stable release info baseline %q: %w", baseline, err)
 	}
+
 	if store == nil {
 		return fmt.Errorf("current baseline store is required")
 	}
+
 	if releaseInfoBuilder == nil {
 		return fmt.Errorf("release info builder is required")
 	}
+
 	if clusterProfileBuilder == nil {
 		return fmt.Errorf("cluster profile builder is required")
 	}
@@ -49,6 +52,7 @@ func SynchronizeCurrentBaseline(
 	if err != nil {
 		return fmt.Errorf("build release info: %w", err)
 	}
+
 	if err := validateCurrentReleaseInfoBuilderOutput(baseline, info); err != nil {
 		return err
 	}
@@ -57,6 +61,7 @@ func SynchronizeCurrentBaseline(
 	if err != nil {
 		return fmt.Errorf("build cluster profile: %w", err)
 	}
+
 	if err := validateCurrentClusterProfileBuilderOutput(baseline, profile); err != nil {
 		return err
 	}
@@ -65,6 +70,7 @@ func SynchronizeCurrentBaseline(
 	if err != nil {
 		return fmt.Errorf("list release infos: %w", err)
 	}
+
 	profiles, err := store.ListClusterProfile()
 	if err != nil {
 		return fmt.Errorf("list cluster profiles: %w", err)
@@ -99,6 +105,7 @@ func SynchronizeCurrentBaseline(
 		if err != nil {
 			return fmt.Errorf("build historical cluster profile %s: %w", historicalVersion, err)
 		}
+
 		if err := store.CreateClusterProfile(deepCopyClusterProfile(historical)); err != nil {
 			return fmt.Errorf("create historical cluster profile %s: %w", historicalVersion, err)
 		}
@@ -111,27 +118,34 @@ func validateCurrentReleaseInfoBuilderOutput(baseline string, info *v1.ReleaseIn
 	if info == nil || info.Metadata == nil || info.Spec == nil {
 		return fmt.Errorf("release info builder output requires release info, metadata, and spec")
 	}
+
 	if info.APIVersion != "v1" {
 		return fmt.Errorf("release info builder output api version must be v1")
 	}
+
 	if info.Kind != v1.ReleaseInfoKind {
 		return fmt.Errorf("release info builder output kind must be %s", v1.ReleaseInfoKind)
 	}
+
 	if info.Metadata.Name != baseline {
 		return fmt.Errorf("release info builder output name %q must match requested baseline %q", info.Metadata.Name, baseline)
 	}
+
 	if len(info.Spec.CompatibleClusterBaselines) == 0 {
 		return fmt.Errorf("release info builder output compatible cluster baselines are required")
 	}
 
 	seenBaselines := make(map[string]struct{}, len(info.Spec.CompatibleClusterBaselines))
+
 	for _, compatibleBaseline := range info.Spec.CompatibleClusterBaselines {
 		if !compatibleClusterBaselinePattern.MatchString(compatibleBaseline) {
 			return fmt.Errorf("invalid compatible cluster baseline %q", compatibleBaseline)
 		}
+
 		if _, found := seenBaselines[compatibleBaseline]; found {
 			return fmt.Errorf("duplicate compatible cluster baseline %q", compatibleBaseline)
 		}
+
 		seenBaselines[compatibleBaseline] = struct{}{}
 	}
 
@@ -142,12 +156,15 @@ func validateCurrentClusterProfileBuilderOutput(baseline string, profile *v1.Clu
 	if profile == nil || profile.Metadata == nil || profile.Spec == nil {
 		return fmt.Errorf("cluster profile builder output requires cluster profile, metadata, and spec")
 	}
+
 	if profile.APIVersion != "v1" {
 		return fmt.Errorf("cluster profile builder output api version must be v1")
 	}
+
 	if profile.Kind != v1.ClusterProfileKind {
 		return fmt.Errorf("cluster profile builder output kind must be %s", v1.ClusterProfileKind)
 	}
+
 	if profile.Metadata.Name != baseline {
 		return fmt.Errorf("cluster profile builder output name %q must match requested baseline %q", profile.Metadata.Name, baseline)
 	}
@@ -166,6 +183,7 @@ func validateCurrentClusterProfileBuilderOutput(baseline string, profile *v1.Clu
 		if strings.TrimSpace(component.ref.Image) == "" {
 			return fmt.Errorf("cluster profile builder output %s image is required", component.name)
 		}
+
 		if strings.TrimSpace(component.ref.Tag) == "" {
 			return fmt.Errorf("cluster profile builder output %s tag is required", component.name)
 		}
@@ -216,6 +234,7 @@ func deepCopyReleaseInfoSpec(spec *v1.ReleaseInfoSpec) *v1.ReleaseInfoSpec {
 func deepCopyClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {
 	copy := *profile
 	copy.Metadata = deepCopyMetadata(profile.Metadata)
+
 	if profile.Spec != nil {
 		spec := *profile.Spec
 		copy.Spec = &spec
@@ -232,6 +251,7 @@ func deepCopyMetadata(metadata *v1.Metadata) *v1.Metadata {
 	copy := *metadata
 	copy.Labels = copyStringMap(metadata.Labels)
 	copy.Annotations = copyStringMap(metadata.Annotations)
+
 	return &copy
 }
 

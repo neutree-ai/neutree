@@ -160,15 +160,18 @@ func (controller *ClusterController) validateReleaseInfoCompatibility(c *v1.Clus
 	if err != nil {
 		return fmt.Errorf("get current release info: %w", err)
 	}
+
 	if info == nil || info.Spec == nil {
 		return fmt.Errorf("current release info metadata and spec are required")
 	}
 
 	effectiveVersion := effectiveClusterVersion(c)
 	minor, err := releaseinfo.NormalizeClusterMinor(effectiveVersion)
+
 	if err != nil {
 		return fmt.Errorf("normalize effective cluster version %q: %w", effectiveVersion, err)
 	}
+
 	for _, compatibleMinor := range info.Spec.CompatibleClusterBaselines {
 		if minor == compatibleMinor {
 			return nil
@@ -294,7 +297,6 @@ func (controller *ClusterController) updateClusterStatus(
 		klog.Errorf("failed to update cluster %s status, err: %v", c.Metadata.WorkspaceName(), updateErr)
 		return
 	}
-
 }
 
 func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.ClusterPhase, err error) error {

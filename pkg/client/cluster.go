@@ -34,10 +34,12 @@ func (service *ClustersService) UpsertClusterProfile(profile *v1.ClusterProfile,
 	}
 
 	requestURL := fmt.Sprintf("%s/api/v1/clusters/profile_upsert", service.client.baseURL)
+
 	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := service.client.do(req)

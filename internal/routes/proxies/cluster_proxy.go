@@ -292,6 +292,7 @@ func validateClusterVersionCreateTarget(s storage.Storage, info *v1.ReleaseInfo,
 	if err != nil {
 		return fmt.Errorf("invalid current control-plane baseline: %w", err)
 	}
+
 	if !clusterMinorAtLeast(minor, currentBaseline) {
 		return fmt.Errorf("cluster version %s is below current control-plane baseline %s", version, info.Metadata.Name)
 	}
@@ -325,6 +326,7 @@ func validateCompatibleClusterVersion(info *v1.ReleaseInfo, version string) (str
 	if err != nil {
 		return "", err
 	}
+
 	for _, compatibleMinor := range info.Spec.CompatibleClusterBaselines {
 		if minor == compatibleMinor {
 			return minor, nil
@@ -343,6 +345,7 @@ func requireExactClusterProfile(s storage.Storage, version string) error {
 	if err != nil {
 		return fmt.Errorf("list cluster profiles: %w", err)
 	}
+
 	for _, profile := range profiles {
 		if profile.GetName() == version {
 			return nil
@@ -357,10 +360,12 @@ func validateStrictClusterVersionIncrease(currentVersion, desiredVersion string)
 	if err != nil {
 		return fmt.Errorf("invalid effective current cluster version %q: %w", currentVersion, err)
 	}
+
 	desired, err := parseStrictClusterVersion(desiredVersion)
 	if err != nil {
 		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
 	}
+
 	if !desired.GreaterThan(current) {
 		return fmt.Errorf(
 			"cluster version update must be strictly greater than effective current version %s",

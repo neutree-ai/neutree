@@ -59,6 +59,7 @@ func buildRayComponent(
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
+
 	env := rayRuntimeEnv(profile)
 	dockerRunOptions := rayRuntimeDockerRunOptions(profile)
 	command := []string{"/bin/bash", "-lc"}

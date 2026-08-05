@@ -35,6 +35,7 @@ func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.Release
 	}
 
 	baseline, err := NormalizeControlPlaneRelease(buildIdentity)
+
 	return baseline, err
 }
 
@@ -56,6 +57,7 @@ func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error)
 
 	for index := range infos {
 		name := infos[index].GetName()
+
 		version, err := parseStableReleaseInfoBaseline(name)
 		if err != nil {
 			continue
@@ -83,6 +85,7 @@ func parseStableReleaseInfoBaseline(baseline string) (*semver.Version, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if version.Prerelease() != "" || version.Metadata() != "" {
 		return nil, fmt.Errorf("must be a stable release info baseline")
 	}

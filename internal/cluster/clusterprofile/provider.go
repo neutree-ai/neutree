@@ -47,6 +47,7 @@ func (provider *Provider) ComponentsFor(clusterVersion string) (v1.ClusterProfil
 	if err != nil {
 		return v1.ClusterProfileComponents{}, err
 	}
+
 	if profile.Spec == nil {
 		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster profile %s has no spec", clusterVersion)
 	}

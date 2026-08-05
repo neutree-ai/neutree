@@ -136,6 +136,7 @@ func (r *Planner) buildDesiredNodePlans(
 		if err != nil {
 			return nil, err
 		}
+
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
