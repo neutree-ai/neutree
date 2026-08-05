@@ -229,6 +229,38 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
+func assertK8sClusterProfileImages(ctx context.Context, k8sH *K8sHelper, namespace string) {
+	assertK8sDeploymentImageSuffix(ctx, k8sH, namespace, "router", "neutree/router:v1.1.1")
+	assertK8sDeploymentImageSuffix(ctx, k8sH, namespace, "vmagent", "victoriametrics/vmagent:v1.115.0")
+	assertK8sDeploymentImageSuffix(ctx, k8sH, namespace, "neutree-kube-state-metrics", "kube-state-metrics/kube-state-metrics:v2.15.0")
+	assertK8sDaemonSetImageSuffix(ctx, k8sH, namespace, "neutree-node-exporter", "prometheus/node-exporter:v1.8.2")
+	assertK8sDaemonSetImageSuffix(ctx, k8sH, namespace, "neutree-node-agent", "neutree/neutree-node-agent:v1.1.0-rc.1")
+}
+
+func assertK8sDeploymentImageSuffix(
+	ctx context.Context,
+	k8sH *K8sHelper,
+	namespace, name, expectedSuffix string,
+) {
+	deployment, err := k8sH.GetDeployment(ctx, namespace, name)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "deployment %s should exist", name)
+	ExpectWithOffset(1, deployment.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+	ExpectWithOffset(1, deployment.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix(expectedSuffix),
+		"deployment %s should use ClusterProfile image suffix %s", name, expectedSuffix)
+}
+
+func assertK8sDaemonSetImageSuffix(
+	ctx context.Context,
+	k8sH *K8sHelper,
+	namespace, name, expectedSuffix string,
+) {
+	daemonSet, err := k8sH.GetDaemonSet(ctx, namespace, name)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "daemonset %s should exist", name)
+	ExpectWithOffset(1, daemonSet.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+	ExpectWithOffset(1, daemonSet.Spec.Template.Spec.Containers[0].Image).To(HaveSuffix(expectedSuffix),
+		"daemonset %s should use ClusterProfile image suffix %s", name, expectedSuffix)
+}
+
 func assertK8sExternalAcceleratorExporterResources(
 	ctx context.Context,
 	k8sH *K8sHelper,

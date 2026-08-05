@@ -83,6 +83,15 @@ var _ = Describe("SSH Cluster Lifecycle", Ordered, Label("cluster", "ssh", "life
 		}
 	})
 
+	It("should render the v1.2.0 ClusterProfile image tags", Label("release-profile"), func() {
+		if profileClusterVersion() != "v1.2.0" {
+			Skip("release profile image assertions require cluster.version=v1.2.0")
+		}
+
+		eventuallyStaticNodeClusterReady(clusterName, profileClusterVersion(), 1)
+		assertStaticNodeClusterProfileImages(clusterName)
+	})
+
 	It("should show Updating then Running on spec change", Label("C2642277"), func() {
 		// Safety net for --test-filter runs that skip the preceding "transition
 		// to Running" case: ensure the cluster is Running before reading Status.
