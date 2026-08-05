@@ -142,6 +142,7 @@ func (a *App) currentControlPlaneBaseline() (string, error) {
 	}
 
 	baseline = provider.CurrentReleaseInfoBaseline()
+
 	normalizedBaseline, normalizeErr := releaseinfo.NormalizeControlPlaneRelease(baseline)
 	if normalizeErr != nil {
 		return "", fmt.Errorf("current release info builder baseline %q must be an exact stable release info baseline", baseline)
