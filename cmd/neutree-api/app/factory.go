@@ -145,7 +145,8 @@ type MiddlewareFactory func(deps *MiddlewareOptions) gin.HandlerFunc
 func CommonMiddlewareFactory(register MiddlewareRegisterFunc) MiddlewareFactory {
 	return func(deps *MiddlewareOptions) gin.HandlerFunc {
 		return register(middleware.Dependencies{
-			Config: deps.Config.AuthConfig,
+			Config:  deps.Config.AuthConfig,
+			Storage: deps.Config.Storage,
 		})
 	}
 }
