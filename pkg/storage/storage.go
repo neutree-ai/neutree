@@ -20,6 +20,7 @@ const (
 	IMAGE_REGISTRY_TABLE      = "image_registries"
 	CLUSTERS_TABLE            = "clusters"
 	MODEL_REGISTRY_TABLE      = "model_registries"
+	MODEL_ALIAS_TABLE         = "model_aliases"
 	MODEL_CATALOG_TABLE       = "model_catalogs"
 	ROLE_TABLE                = "roles"
 	ROLE_ASSIGNMENT_TABLE     = "role_assignments"
@@ -55,6 +56,23 @@ type ModelRegistryStorage interface {
 	GetModelRegistry(id string) (*v1.ModelRegistry, error)
 	// ListModelRegistry retrieves a list of model registries with optional filters.
 	ListModelRegistry(option ListOption) ([]v1.ModelRegistry, error)
+}
+
+type ModelAliasStorage interface {
+	// CreateModelAlias creates a new model alias in the database. The unique
+	// index on (model_registry_id, alias_normalized) rejects an alias already
+	// taken in the same registry, so a duplicate surfaces here as an error.
+	CreateModelAlias(data *v1.ModelAlias) error
+	// DeleteModelAlias deletes a model alias by its ID.
+	DeleteModelAlias(id string) error
+	// UpdateModelAlias updates an existing model alias in the database. This is
+	// how an alias is repointed at a different model, including taking over an
+	// orphaned row.
+	UpdateModelAlias(id string, data *v1.ModelAlias) error
+	// GetModelAlias retrieves a model alias by its ID.
+	GetModelAlias(id string) (*v1.ModelAlias, error)
+	// ListModelAlias retrieves a list of model aliases with optional filters.
+	ListModelAlias(option ListOption) ([]v1.ModelAlias, error)
 }
 
 type ClusterStorage interface {
@@ -209,6 +227,7 @@ type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
 	ModelRegistryStorage
+	ModelAliasStorage
 	RoleStorage
 	RoleAssignmentStorage
 	WorkspaceStorage

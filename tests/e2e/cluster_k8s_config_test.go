@@ -148,6 +148,11 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			assertK8sMetricsResources(ctx, k8sH, namespace, cluster.Spec.Version)
 		})
 
+		// TestRail: C2739216
+		It("should not schedule node-agent on tainted control-plane nodes", Label("metrics", "control-plane-taint", "C2739216"), func() {
+			assertK8sNodeAgentControlPlaneScheduling(context.Background(), k8sH, namespace, cluster.Spec.Version)
+		})
+
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
 			ctx := context.Background()
 

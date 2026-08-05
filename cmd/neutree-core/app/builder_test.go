@@ -3,7 +3,10 @@ package app
 import (
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
+	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
+	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
 
 func TestNewBuilder(t *testing.T) {
@@ -31,6 +34,71 @@ func TestBuilderWithConfig(t *testing.T) {
 	if builder.config != config {
 		t.Errorf("Expected config to be set in builder, got %v", builder.config)
 	}
+}
+
+func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
+	config := &config.CoreConfig{GinEngine: gin.New()}
+	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if config.AcceleratorManager == nil {
+		t.Fatal("Build() did not initialize AcceleratorManager")
+	}
+	if _, ok := config.AcceleratorManager.GetPlugin("injected-test"); !ok {
+		t.Fatal("Build() did not register the injected accelerator plugin")
+	}
+}
+
+func TestBuilderBuildRequiresGinEngine(t *testing.T) {
+	builder := NewBuilder().WithConfig(&config.CoreConfig{})
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err == nil {
+		t.Fatal("Build() error = nil, want GinEngine validation error")
+	}
+}
+
+func TestBuilderBuildPreservesConfiguredAcceleratorManagerWithoutInjectedPlugins(t *testing.T) {
+	manager := &acceleratormocks.MockManager{}
+	config := &config.CoreConfig{GinEngine: gin.New(), AcceleratorManager: manager}
+	builder := NewBuilder().WithConfig(config)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if config.AcceleratorManager != manager {
+		t.Fatal("Build() replaced the configured AcceleratorManager without injected plugins")
+	}
+}
+
+func TestBuilderBuildRequiresGinEngineWithConfiguredAcceleratorManager(t *testing.T) {
+	builder := NewBuilder().WithConfig(&config.CoreConfig{AcceleratorManager: &acceleratormocks.MockManager{}})
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
+	if err == nil {
+		t.Fatal("Build() error = nil, want GinEngine validation error")
+	}
+}
+
+type internalTestPlugin struct {
+	plugin.AcceleratorPlugin
+}
+
+func (internalTestPlugin) Type() string {
+	return plugin.InternalPluginType
 }
 
 func TestBuilderWithController(t *testing.T) {

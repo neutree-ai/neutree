@@ -554,6 +554,7 @@ type ApiModelRegistryStatus struct {
 	Phase              string      `json:"phase"`
 	LastTransitionTime interface{} `json:"last_transition_time"`
 	ErrorMessage       string      `json:"error_message"`
+	Stats              interface{} `json:"stats"`
 }
 
 type ApiEngineVersion struct {

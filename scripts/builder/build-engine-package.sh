@@ -547,10 +547,10 @@ if [ -z "$MANIFEST_ONLY" ]; then
     print_info "Standalone manifest copied to: $OUTPUT_DIR/$MANIFEST_OUTPUT"
     # Calculate checksum
     print_info "Calculating checksum..."
-    if command -v md5sum &> /dev/null; then
-        md5sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
+    if command -v sha256sum &> /dev/null; then
+        sha256sum "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.sha256"
     else
-        md5 "$OUTPUT_DIR/$OUTPUT_FILE" | awk '{print $4}' > "${OUTPUT_DIR}/${OUTPUT_FILE}.md5"
+        shasum -a 256 "$OUTPUT_DIR/$OUTPUT_FILE" > "${OUTPUT_DIR}/${OUTPUT_FILE}.sha256"
     fi
 
     # Get package size

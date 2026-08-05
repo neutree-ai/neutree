@@ -73,8 +73,8 @@ metadata:
   name: vmagent-node-reader-{{ .HashSuffix }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
+    cluster: {{ .ClusterName | quote }}
+    workspace: {{ .Workspace | quote }}
 rules:
 - apiGroups: [""]
   resources: ["nodes", "nodes/metrics", "nodes/proxy"]
@@ -93,8 +93,8 @@ metadata:
   name: vmagent-node-reader-{{ .HashSuffix }}
   labels:
     app: vmagent
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
+    cluster: {{ .ClusterName | quote }}
+    workspace: {{ .Workspace | quote }}
 subjects:
 - kind: ServiceAccount
   name: vmagent-service-account
@@ -177,8 +177,8 @@ spec:
     metadata:
       labels:
         app: neutree-kube-state-metrics
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       imagePullSecrets:
@@ -224,8 +224,8 @@ metadata:
   name: {{ .NeutreeNodeAgentMetricsName }}-{{ .HashSuffix }}
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
+    cluster: {{ .ClusterName | quote }}
+    workspace: {{ .Workspace | quote }}
 rules:
 - apiGroups: [""]
   resources: ["nodes"]
@@ -243,8 +243,8 @@ metadata:
   name: {{ .NeutreeNodeAgentMetricsName }}-{{ .HashSuffix }}
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
-    cluster: {{ .ClusterName }}
-    workspace: {{ .Workspace }}
+    cluster: {{ .ClusterName | quote }}
+    workspace: {{ .Workspace | quote }}
 subjects:
 - kind: ServiceAccount
   name: {{ .NeutreeNodeAgentMetricsName }}
@@ -268,14 +268,14 @@ spec:
   selector:
     matchLabels:
       app: {{ .NodeExporterName }}
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
         app: {{ .NodeExporterName }}
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       hostNetwork: true
@@ -316,19 +316,17 @@ spec:
   selector:
     matchLabels:
       app: {{ .NeutreeNodeAgentMetricsName }}
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
         app: {{ .NeutreeNodeAgentMetricsName }}
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
-      tolerations:
-      - operator: Exists
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
       containers:
@@ -395,8 +393,8 @@ metadata:
   namespace: {{ $.Namespace }}
   labels:
     app: {{ .AppLabel }}
-    cluster: {{ $.ClusterName }}
-    workspace: {{ $.Workspace }}
+    cluster: {{ $.ClusterName | quote }}
+    workspace: {{ $.Workspace | quote }}
     neutree.ai/cluster-version: {{ $.ClusterVersion }}
 data:
 {{ .ConfigFileData | toYaml | indent 2 }}
@@ -415,15 +413,15 @@ spec:
   selector:
     matchLabels:
       app: {{ .AppLabel }}
-      cluster: {{ $.ClusterName }}
-      workspace: {{ $.Workspace }}
+      cluster: {{ $.ClusterName | quote }}
+      workspace: {{ $.Workspace | quote }}
   template:
     metadata:
       labels:
         app: {{ .AppLabel }}
         neutree.ai/metrics-target: accelerator-exporter
-        cluster: {{ $.ClusterName }}
-        workspace: {{ $.Workspace }}
+        cluster: {{ $.ClusterName | quote }}
+        workspace: {{ $.Workspace | quote }}
         neutree.ai/cluster-version: {{ $.ClusterVersion }}
 {{ if .ConfigChecksum }}
       annotations:
@@ -481,14 +479,14 @@ spec:
   selector:
     matchLabels:
       app: vmagent
-      cluster: {{ .ClusterName }}
-      workspace: {{ .Workspace }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
         app: vmagent
-        cluster: {{ .ClusterName }}
-        workspace: {{ .Workspace }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
       affinity:

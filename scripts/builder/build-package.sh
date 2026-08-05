@@ -357,10 +357,10 @@ cd "$CURRENT_DIR" || exit 1
 
 # Calculate checksum
 log_info "Calculating checksum..."
-if command -v md5sum &> /dev/null; then
-    md5sum "$PACKAGE_FILE" > "${PACKAGE_FILE}.md5"
+if command -v sha256sum &> /dev/null; then
+    sha256sum "$PACKAGE_FILE" > "${PACKAGE_FILE}.sha256"
 else
-    md5 "$PACKAGE_FILE" | awk '{print $4}' > "${PACKAGE_FILE}.md5"
+    shasum -a 256 "$PACKAGE_FILE" > "${PACKAGE_FILE}.sha256"
 fi
 
 # Clean up
@@ -368,4 +368,4 @@ rm -rf "$TEMP_DIR"
 
 log_info "Package created successfully: $PACKAGE_FILE"
 log_info "Package size: $(du -h "$PACKAGE_FILE" | cut -f1)"
-log_info "Checksum: $(cat "${PACKAGE_FILE}.md5")"
+log_info "Checksum: $(cat "${PACKAGE_FILE}.sha256")"

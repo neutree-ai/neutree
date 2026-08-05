@@ -196,6 +196,88 @@ func (s *postgrestStorage) GetModelRegistry(id string) (*v1.ModelRegistry, error
 	return &response[0], nil
 }
 
+func (s *postgrestStorage) ListModelAlias(option ListOption) ([]v1.ModelAlias, error) {
+	var response []v1.ModelAlias
+	err := s.genericList(MODEL_ALIAS_TABLE, &response, option)
+
+	return response, err
+}
+
+// withoutDerivedFields returns a copy with the server-derived fields cleared, so
+// a caller round-tripping an object read from the database does not send them
+// back. Workspace is derived by a trigger from the referenced registry and is
+// what the RLS policies are protecting, so it must never look client-writable.
+func withoutDerivedFields(data *v1.ModelAlias) *v1.ModelAlias {
+	if data == nil {
+		return nil
+	}
+
+	sent := *data
+	sent.Workspace = ""
+
+	return &sent
+}
+
+func (s *postgrestStorage) CreateModelAlias(data *v1.ModelAlias) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).
+		Insert(withoutDerivedFields(data), false, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteModelAlias(id string) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateModelAlias(id string, data *v1.ModelAlias) error {
+	var (
+		err error
+	)
+
+	if _, _, err = s.postgrestClient.From(MODEL_ALIAS_TABLE).
+		Update(withoutDerivedFields(data), "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetModelAlias(id string) (*v1.ModelAlias, error) {
+	var (
+		response []v1.ModelAlias
+		err      error
+	)
+
+	responseContent, _, err := s.postgrestClient.From(MODEL_ALIAS_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
 func (s *postgrestStorage) ListCluster(option ListOption) ([]v1.Cluster, error) {
 	var response []v1.Cluster
 	err := s.genericList(CLUSTERS_TABLE, &response, option)

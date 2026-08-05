@@ -6,6 +6,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -151,4 +152,49 @@ func Test_BuildRouterService(t *testing.T) {
 	}
 
 	t.Fatalf("router service not found in resources")
+}
+
+func TestBuildRouterResourcesWithNumericClusterMetadata(t *testing.T) {
+	routerComponent := &RouterComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "123", Workspace: "456"},
+			Spec:     &v1.ClusterSpec{Version: "1.0.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+	}
+
+	objs, err := routerComponent.GetRouteResources()
+	require.NoError(t, err)
+
+	foundDeployment := false
+	foundService := false
+	for _, obj := range objs.Items {
+		switch obj.GetKind() {
+		case "Deployment":
+			foundDeployment = true
+			deploymentData, err := json.Marshal(obj.Object)
+			require.NoError(t, err)
+
+			deployment := &appsv1.Deployment{}
+			require.NoError(t, json.Unmarshal(deploymentData, deployment))
+			assert.Equal(t, "123", deployment.Spec.Selector.MatchLabels["cluster"])
+			assert.Equal(t, "456", deployment.Spec.Selector.MatchLabels["workspace"])
+			assert.Equal(t, "123", deployment.Spec.Template.Labels["cluster"])
+			assert.Equal(t, "456", deployment.Spec.Template.Labels["workspace"])
+		case "Service":
+			foundService = true
+			serviceData, err := json.Marshal(obj.Object)
+			require.NoError(t, err)
+
+			service := &corev1.Service{}
+			require.NoError(t, json.Unmarshal(serviceData, service))
+			assert.Equal(t, "123", service.Spec.Selector["cluster"])
+			assert.Equal(t, "456", service.Spec.Selector["workspace"])
+		}
+	}
+
+	require.True(t, foundDeployment, "router deployment not found in resources")
+	require.True(t, foundService, "router service not found in resources")
 }

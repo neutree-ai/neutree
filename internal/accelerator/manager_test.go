@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
@@ -31,6 +32,229 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), profile.AcceleratorType)
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
+}
+
+func TestManagerGetStaticNodeRuntimeConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		plugin  *fakeStaticNodeAcceleratorPlugin
+		wantNil bool
+		wantErr string
+	}{
+		{
+			name: "matching resolver",
+			plugin: &fakeStaticNodeAcceleratorPlugin{
+				staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"VISIBLE_DEVICES": "0,1"}},
+				staticRuntimeMatched: true,
+			},
+		},
+		{
+			name:    "owner resolver does not match",
+			plugin:  &fakeStaticNodeAcceleratorPlugin{},
+			wantNil: true,
+			wantErr: "static runtime resolver for accelerator type custom_gpu from owner plugin custom_gpu did not match",
+		},
+		{
+			name: "owner resolver returns nil config",
+			plugin: &fakeStaticNodeAcceleratorPlugin{
+				staticRuntimeMatched: true,
+			},
+			wantNil: true,
+			wantErr: "static runtime resolver for accelerator type custom_gpu from plugin custom_gpu returned nil config for a matched status",
+		},
+		{
+			name:    "resolver error",
+			plugin:  &fakeStaticNodeAcceleratorPlugin{staticRuntimeErr: errors.New("unsupported static runtime")},
+			wantNil: true,
+			wantErr: "get static node runtime config for accelerator type custom_gpu from plugin custom_gpu",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &manager{}
+			m.acceleratorsMap.Store(tt.plugin.Resource(), registerPlugin{
+				resource:         tt.plugin.Resource(),
+				plugin:           tt.plugin,
+				lastRegisterTime: time.Now(),
+			})
+
+			config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "custom_gpu"})
+
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			if tt.wantNil {
+				assert.Nil(t, config)
+				return
+			}
+			require.NotNil(t, config)
+			assert.Equal(t, "0,1", config.Env["VISIBLE_DEVICES"])
+		})
+	}
+}
+
+func TestManagerGetStaticNodeRuntimeConfigRequiresOwningPlugin(t *testing.T) {
+	fallback := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "fallback_gpu",
+		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"FALLBACK": "true"}},
+		staticRuntimeMatched: true,
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store(fallback.Resource(), registerPlugin{
+		resource:         fallback.Resource(),
+		plugin:           fallback,
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "legacy_gpu"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accelerator plugin legacy_gpu not found")
+	assert.Nil(t, config)
+	assert.Zero(t, fallback.staticRuntimeCalls)
+}
+
+func TestManagerGetStaticNodeRuntimeConfigDoesNotUseFallbackWhenOwnerHasNoResolver(t *testing.T) {
+	fallback := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "fallback_gpu",
+		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"FALLBACK": "true"}},
+		staticRuntimeMatched: true,
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store("owner_gpu", registerPlugin{
+		resource:         "owner_gpu",
+		plugin:           &plugin.GPUAcceleratorPlugin{},
+		lastRegisterTime: time.Now(),
+	})
+	m.acceleratorsMap.Store(fallback.Resource(), registerPlugin{
+		resource:         fallback.Resource(),
+		plugin:           fallback,
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
+
+	require.NoError(t, err)
+	assert.Nil(t, config)
+	assert.Zero(t, fallback.staticRuntimeCalls)
+}
+
+func TestManagerGetStaticNodeRuntimeConfigDoesNotCallUnrelatedResolver(t *testing.T) {
+	unrelated := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "unrelated_gpu",
+		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"UNRELATED": "true"}},
+		staticRuntimeMatched: true,
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store("owner_gpu", registerPlugin{
+		resource:         "owner_gpu",
+		plugin:           &plugin.GPUAcceleratorPlugin{},
+		lastRegisterTime: time.Now(),
+	})
+	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{
+		resource:         unrelated.Resource(),
+		plugin:           unrelated,
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
+
+	require.NoError(t, err)
+	assert.Nil(t, config)
+	assert.Zero(t, unrelated.staticRuntimeCalls)
+}
+
+func TestManagerGetStaticNodeRuntimeConfigRejectsNilOwnerConfig(t *testing.T) {
+	owner := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "owner_gpu",
+		staticRuntimeMatched: true,
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{
+		resource:         owner.Resource(),
+		plugin:           owner,
+		lastRegisterTime: time.Now(),
+	})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "owner_gpu returned nil config for a matched status")
+	assert.Nil(t, config)
+}
+
+func TestManagerGetStaticNodeRuntimeConfigPrioritizesOwningPlugin(t *testing.T) {
+	owner := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:          true,
+		resource:             "owner_gpu",
+		staticRuntimeConfig:  &v1.RuntimeConfig{Env: map[string]string{"OWNER": "true"}},
+		staticRuntimeMatched: true,
+	}
+	unrelated := &fakeStaticNodeAcceleratorPlugin{
+		resourceSet:      true,
+		resource:         "unrelated_gpu",
+		staticRuntimeErr: errors.New("must not resolve unrelated accelerator"),
+	}
+	m := &manager{}
+	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{resource: owner.Resource(), plugin: owner, lastRegisterTime: time.Now()})
+	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{resource: unrelated.Resource(), plugin: unrelated, lastRegisterTime: time.Now()})
+
+	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: owner.Resource()})
+
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	assert.Equal(t, "true", config.Env["OWNER"])
+}
+
+func TestNewManagerWithPluginsRegistersInjectedPlugin(t *testing.T) {
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+
+	manager, err := NewManagerWithPlugins(gin.New(), injected)
+
+	require.NoError(t, err)
+	assert.Contains(t, manager.SupportPlugins(), injected.Resource())
+	assert.Contains(t, manager.SupportPlugins(), v1.AcceleratorTypeNVIDIAGPU.String())
+}
+
+func TestNewManagerWithPluginsRequiresGinEngine(t *testing.T) {
+	_, err := NewManagerWithPlugins(nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gin engine is required")
+}
+
+func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
+	var typedNil *fakeStaticNodeAcceleratorPlugin
+	emptyResource := &fakeStaticNodeAcceleratorPlugin{resourceSet: true}
+	injected := &fakeStaticNodeAcceleratorPlugin{}
+
+	tests := []struct {
+		name    string
+		plugins []plugin.AcceleratorPlugin
+		message string
+	}{
+		{name: "nil plugin", plugins: []plugin.AcceleratorPlugin{nil}, message: "accelerator plugin is nil"},
+		{name: "typed nil plugin", plugins: []plugin.AcceleratorPlugin{typedNil}, message: "accelerator plugin is nil"},
+		{name: "empty resource", plugins: []plugin.AcceleratorPlugin{emptyResource}, message: "resource is required"},
+		{name: "duplicate resource", plugins: []plugin.AcceleratorPlugin{injected, injected}, message: "already registered"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewManagerWithPlugins(gin.New(), tt.plugins...)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.message)
+		})
+	}
 }
 
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
@@ -99,8 +323,14 @@ func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
 	assert.Contains(t, err.Error(), "accelerator plugin missing not found")
 }
 
-func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
-	detector := &fakeStaticNodeAcceleratorPlugin{accelerators: []v1.Accelerator{{ID: "0"}}}
+func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing.T) {
+	detector := &fakeStaticNodeAcceleratorPlugin{staticResponse: &v1.DetectStaticNodeAcceleratorResponse{
+		Matched: true,
+		Accelerator: &v1.StaticNodeAcceleratorStatus{
+			Type:    "custom_gpu",
+			Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0", ProductModel: "custom-model"}},
+		},
+	}}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
 		resource:         "custom_gpu",
@@ -116,21 +346,19 @@ func TestManagerDetectAcceleratorUsesNodeAcceleratorProbe(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, "custom_gpu", status.Type)
-	assert.Empty(t, status.Devices, "type discovery must not report detailed device data")
-	assert.Equal(t, 1, detector.getCalls)
-	assert.Equal(t, "10.0.0.10", detector.getRequest.NodeIp)
-	assert.Equal(t, "root", detector.getRequest.SSHAuth.SSHUser)
+	require.Len(t, status.Devices, 1)
+	assert.Equal(t, "custom-model", status.Devices[0].ProductModel)
+	assert.Zero(t, detector.getCalls)
 }
 
-func TestManagerDetectAcceleratorSupportsExternalPluginWithoutStaticDetectEndpoint(t *testing.T) {
+func TestManagerDetectAcceleratorRequiresStaticDetectEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, v1.GetNodeAcceleratorPath, r.URL.Path)
+		if r.URL.Path == v1.DetectStaticNodeAcceleratorPath {
+			http.NotFound(w, r)
+			return
+		}
 
-		err := json.NewEncoder(w).Encode(v1.GetNodeAcceleratorResponse{
-			Accelerators: []v1.Accelerator{{ID: "0"}},
-		})
-		require.NoError(t, err)
+		t.Fatalf("unexpected legacy detection request: %s", r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -146,9 +374,9 @@ func TestManagerDetectAcceleratorSupportsExternalPluginWithoutStaticDetectEndpoi
 		SSHPrivateKey: "key",
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	assert.Equal(t, "external_gpu", status.Type)
+	require.Error(t, err)
+	assert.Nil(t, status)
+	assert.Contains(t, err.Error(), "detect static node accelerator from plugin external_gpu failed")
 }
 
 func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testing.T) {
@@ -168,11 +396,11 @@ func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, v1.StaticNodeAcceleratorTypeCPU, status.Type)
-	assert.Equal(t, 1, detector.getCalls)
+	assert.Zero(t, detector.getCalls)
 }
 
 func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testing.T) {
-	detector := &fakeStaticNodeAcceleratorPlugin{getErr: errors.New("lspci unavailable")}
+	detector := &fakeStaticNodeAcceleratorPlugin{staticDetectErr: errors.New("lspci unavailable")}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
 		resource:         "custom_gpu",
@@ -188,19 +416,33 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 	require.Error(t, err)
 	require.Nil(t, status)
 	assert.Contains(t, err.Error(), "detect static node accelerator from plugin custom_gpu failed")
-	assert.Equal(t, 1, detector.getCalls)
+	assert.Zero(t, detector.getCalls)
 }
 
 type fakeStaticNodeAcceleratorPlugin struct {
+	resourceSet bool
+	resource    string
+
 	accelerators []v1.Accelerator
 	getErr       error
 	getCalls     int
 	getRequest   *v1.GetNodeAcceleratorRequest
 
 	acceleratorProfile *v1.AcceleratorProfile
+
+	staticRuntimeConfig  *v1.RuntimeConfig
+	staticRuntimeMatched bool
+	staticRuntimeErr     error
+	staticRuntimeCalls   int
+	staticResponse       *v1.DetectStaticNodeAcceleratorResponse
+	staticDetectErr      error
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) Resource() string {
+	if p.resourceSet {
+		return p.resource
+	}
+
 	return "custom_gpu"
 }
 
@@ -216,6 +458,14 @@ func (p *fakeStaticNodeAcceleratorPlugin) DetectStaticNodeAccelerator(
 	ctx context.Context,
 	request *v1.DetectStaticNodeAcceleratorRequest,
 ) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	if p.staticDetectErr != nil {
+		return nil, p.staticDetectErr
+	}
+
+	if p.staticResponse != nil {
+		return p.staticResponse, nil
+	}
+
 	return &v1.DetectStaticNodeAcceleratorResponse{}, nil
 }
 
@@ -256,4 +506,10 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetContainerRuntimeConfig() (v1.Runtim
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.AcceleratorProfile, error) {
 	return p.acceleratorProfile, nil
+}
+
+func (p *fakeStaticNodeAcceleratorPlugin) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error) {
+	p.staticRuntimeCalls++
+
+	return p.staticRuntimeConfig, p.staticRuntimeMatched, p.staticRuntimeErr
 }

@@ -462,7 +462,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 					v1.StaticNodeRoleHead,
 					v1.StaticNodePhaseReady,
 					true,
-					cpuAcceleratorStatus(),
+					nvidiaAcceleratorStatus(),
 					nil,
 				),
 				staticNodeStatusWithAccelerator(
@@ -476,21 +476,49 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			}
 
 			nodes := plannedStaticNodes(t, &Planner{
+				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+					profiles: map[string]*v1.AcceleratorProfile{
+						v1.AcceleratorTypeNVIDIAGPU.String(): {
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+							MetricsExporter: &v1.AcceleratorExporterProfile{
+								Name:  "dcgm-exporter",
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
+							},
+						},
+					},
+				},
 				MetricsRemoteWriteURL: tt.metricsRemoteWriteURL,
 			}, cluster, currentNodes)
 
 			head := findStaticNode(nodes, "head-0")
 			require.NotNil(t, head)
-			assertNodeComponentNames(t, head.Spec.Components, []string{"ray-head"})
+			assertNodeComponentNames(t, head.Spec.Components, []string{
+				"ray-head",
+				nodeExporterComponentName,
+				acceleratorExporterComponentName,
+				nodeAgentComponentName,
+			})
+			assert.Nil(t, findComponent(head.Spec.Components, vmagentComponentName))
 			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 			})
 
 			worker := findStaticNode(nodes, "worker-0")
 			require.NotNil(t, worker)
-			assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker"})
+			assertNodeComponentNames(t, worker.Spec.Components, []string{
+				"ray-worker",
+				nodeExporterComponentName,
+				nodeAgentComponentName,
+			})
+			assert.Nil(t, findComponent(worker.Spec.Components, vmagentComponentName))
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
-				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
+				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
 			})
 		})
 	}
@@ -1516,6 +1544,72 @@ func staticNodeWithAcceleratorStatus(
 
 type fakeAcceleratorProfileProvider struct {
 	profiles map[string]*v1.AcceleratorProfile
+}
+
+func TestPlannerRuntimeProfileOverridesStaticNodeRuntimeConfigOnCopy(t *testing.T) {
+	profileConfig := &v1.RuntimeConfig{
+		ImageSuffix: "base-image",
+		Runtime:     "base-runtime",
+		Env:         map[string]string{"PROFILE_ONLY": "true", "CONFLICT": "profile"},
+		Options:     []string{"--profile"},
+	}
+	resolvedConfig := &v1.RuntimeConfig{
+		Env: map[string]string{"VISIBLE_DEVICES": "0,1", "CONFLICT": "resolver"},
+	}
+	planner := &Planner{AcceleratorProfileProvider: staticNodeRuntimeConfigProfileProvider{
+		fakeAcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{
+			"custom_accelerator": {AcceleratorType: "custom_accelerator", ClusterRuntime: profileConfig},
+		}},
+		runtimeConfig: resolvedConfig,
+	}}
+
+	profile, err := planner.runtimeProfile(context.Background(), v1.StaticNodeAcceleratorStatus{
+		Type:    "custom_accelerator",
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{{ID: "0"}, {ID: "1"}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.ClusterRuntime)
+	assert.Equal(t, "0,1", profile.ClusterRuntime.Env["VISIBLE_DEVICES"])
+	assert.Equal(t, "resolver", profile.ClusterRuntime.Env["CONFLICT"])
+	assert.Equal(t, "base-image", profile.ClusterRuntime.ImageSuffix)
+	assert.Equal(t, "base-runtime", profile.ClusterRuntime.Runtime)
+	assert.Equal(t, []string{"--profile"}, profile.ClusterRuntime.Options)
+	assert.NotSame(t, resolvedConfig, profile.ClusterRuntime)
+	assert.Equal(t, "true", profileConfig.Env["PROFILE_ONLY"])
+	assert.Equal(t, "profile", profileConfig.Env["CONFLICT"])
+	profile.ClusterRuntime.Env["VISIBLE_DEVICES"] = "changed"
+	assert.Equal(t, "0,1", resolvedConfig.Env["VISIBLE_DEVICES"])
+}
+
+func TestMergeRuntimeConfigDoesNotClearBaseOptions(t *testing.T) {
+	merged := mergeRuntimeConfig(
+		&v1.RuntimeConfig{Options: []string{"--profile"}},
+		&v1.RuntimeConfig{Options: []string{}},
+	)
+
+	require.NotNil(t, merged)
+	assert.Equal(t, []string{"--profile"}, merged.Options)
+}
+
+func TestMergeRuntimeConfigDoesNotClearBaseEnvValue(t *testing.T) {
+	merged := mergeRuntimeConfig(
+		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": "true"}},
+		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": ""}},
+	)
+
+	require.NotNil(t, merged)
+	assert.Equal(t, "true", merged.Env["PROFILE_ONLY"])
+}
+
+type staticNodeRuntimeConfigProfileProvider struct {
+	fakeAcceleratorProfileProvider
+	runtimeConfig *v1.RuntimeConfig
+}
+
+func (p staticNodeRuntimeConfigProfileProvider) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error) {
+	return p.runtimeConfig, nil
 }
 
 func (f fakeAcceleratorProfileProvider) GetAcceleratorProfile(
