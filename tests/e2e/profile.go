@@ -358,7 +358,7 @@ func profileEngineVersionFor(name string) string {
 
 	switch name {
 	case "vllm":
-		return "v0.24.0"
+		return maintainedVLLMVersionCurrent
 	case "sglang":
 		return "v0.5.10"
 	case "llama-cpp":
