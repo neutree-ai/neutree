@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -319,7 +319,9 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 				// it is really in the live run options first means a change to that
 				// convention fails here, loudly, instead of silently selecting
 				// nothing and leaving the gate below to guess why.
-				registryMountPath := filepath.Join("/mnt", profileWorkspace(), epName)
+				// path, not path/filepath: this is a mount destination inside a Linux
+				// container on a remote node, not a path on whatever host runs the suite.
+				registryMountPath := path.Join("/mnt", profileWorkspace(), epName)
 				Expect(orchestrationPathValue(before, "backend_container.run_options")).
 					To(ContainSubstring("dst="+registryMountPath),
 						"the engine container does not mount the NFS registry at the per-endpoint path "+
