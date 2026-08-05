@@ -1,26 +1,16 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// ClusterReleaseInfoReference is the public ReleaseInfo identity returned by
-// Cluster preflight endpoints. It intentionally excludes component refs.
-type ClusterReleaseInfoReference struct {
-	Baseline string `json:"baseline"`
-	Revision string `json:"revision"`
-}
-
-// ClusterUpgradePreflight is the public result of a matrix-only upgrade check.
-type ClusterUpgradePreflight struct {
-	Allowed       bool                        `json:"allowed"`
-	SourceVersion string                      `json:"source_version"`
-	TargetVersion string                      `json:"target_version,omitempty"`
-	UpgradeTo     []string                    `json:"upgrade_to"`
-	ReleaseInfo   ClusterReleaseInfoReference `json:"release_info"`
+type ClusterProfileUpsertResult struct {
+	Operation string `json:"operation"`
 }
 
 // ClustersService owns calls to Cluster-specific helper endpoints.
@@ -32,23 +22,23 @@ func NewClustersService(client *Client) *ClustersService {
 	return &ClustersService{client: client}
 }
 
-// UpgradePreflight checks a Cluster version edge against the current
-// ReleaseInfo. An empty targetVersion returns the available targets instead.
-func (service *ClustersService) UpgradePreflight(workspace, name, targetVersion string) (*ClusterUpgradePreflight, error) {
-	query := url.Values{}
-	query.Set("workspace", workspace)
-	query.Set("name", name)
-
-	if targetVersion != "" {
-		query.Set("target_version", targetVersion)
-	}
-
-	requestURL := fmt.Sprintf("%s/api/v1/clusters/upgrade_preflight?%s", service.client.baseURL, query.Encode())
-
-	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
+// UpsertClusterProfile sends the only internal cluster profile write request.
+// The control plane owns create/no-op/force-update semantics.
+func (service *ClustersService) UpsertClusterProfile(profile *v1.ClusterProfile, forceUpdate bool) (*ClusterProfileUpsertResult, error) {
+	payload, err := json.Marshal(struct {
+		Profile     *v1.ClusterProfile `json:"profile"`
+		ForceUpdate bool               `json:"force_update"`
+	}{Profile: profile, ForceUpdate: forceUpdate})
 	if err != nil {
 		return nil, err
 	}
+
+	requestURL := fmt.Sprintf("%s/api/v1/clusters/profile_upsert", service.client.baseURL)
+	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := service.client.do(req)
 	if err != nil {
@@ -60,7 +50,7 @@ func (service *ClustersService) UpgradePreflight(workspace, name, targetVersion 
 		return nil, err
 	}
 
-	result := &ClusterUpgradePreflight{}
+	result := &ClusterProfileUpsertResult{}
 	if err = json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return nil, err
 	}

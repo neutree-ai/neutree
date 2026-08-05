@@ -1,10 +1,15 @@
 package packageimport
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -457,4 +462,42 @@ engines:
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "engine name is empty")
 	})
+}
+
+func TestRegisterManifestRegistersClusterProfileAfterPackageImport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "/api/v1/clusters/profile_upsert", request.URL.Path)
+
+		var payload struct {
+			Profile     *v1.ClusterProfile `json:"profile"`
+			ForceUpdate bool               `json:"force_update"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		require.NotNil(t, payload.Profile)
+		assert.Equal(t, "v1.2.0-alpha.1", payload.Profile.GetName())
+		assert.Equal(t, "neutree/neutree-serve", payload.Profile.Spec.Components.RayRuntime.Image)
+		assert.Equal(t, "v1.2.0-alpha.1", payload.Profile.Spec.Components.RayRuntime.Tag)
+		assert.True(t, payload.ForceUpdate)
+		_, _ = writer.Write([]byte(`{"operation":"updated"}`))
+	}))
+	defer server.Close()
+
+	importer := NewImporter(client.NewClient(server.URL))
+	result, err := importer.registerManifest(context.Background(), &ImportOptions{ForceUpdate: true}, &PackageManifest{
+		ClusterProfile: &ClusterProfile{
+			Version: "v1.2.0-alpha.1",
+			Components: ClusterProfileComponents{
+				RayRuntime:       ClusterImageRef{Image: "neutree/neutree-serve", Tag: "v1.2.0-alpha.1"},
+				Router:           ClusterImageRef{Image: "neutree/router", Tag: "v1.2.0-alpha.1"},
+				NodeAgent:        ClusterImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.2.0-alpha.1"},
+				NodeExporter:     ClusterImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+				VMAgent:          ClusterImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
+				KubeStateMetrics: ClusterImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
+			},
+		},
+	}, &ImportResult{})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }

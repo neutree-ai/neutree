@@ -80,16 +80,17 @@ Examples:
 		},
 	}
 
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
+	neutreeCoreInstallCmd.Flags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
+	neutreeCoreInstallCmd.Flags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
+	neutreeCoreInstallCmd.Flags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
+	neutreeCoreInstallCmd.Flags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
+	neutreeCoreInstallCmd.Flags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
+	neutreeCoreInstallCmd.Flags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
 		defaultVictoriaLogsRetentionPeriod, "VictoriaLogs log retention period (e.g. 30d, 90d, 1y)")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
+	neutreeCoreInstallCmd.Flags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
+	neutreeCoreInstallCmd.AddCommand(NewNeutreeCorePreflightCmd())
 
 	return neutreeCoreInstallCmd
 }

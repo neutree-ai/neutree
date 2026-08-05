@@ -527,3 +527,70 @@ func TestParserValidateManifest(t *testing.T) {
 		})
 	}
 }
+
+func TestParseManifestFileValidatesClusterProfile(t *testing.T) {
+	parser := NewParser()
+
+	tests := []struct {
+		name    string
+		profile string
+		wantErr string
+	}{
+		{
+			name: "accepts a complete exact cluster profile",
+			profile: `
+  version: v1.2.0-alpha.1
+  components:
+    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
+    router: {image: neutree/router, tag: v1.2.0-alpha.1}
+    node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
+    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+`,
+		},
+		{
+			name: "rejects profile missing a required component",
+			profile: `
+  version: v1.2.0-alpha.1
+  components:
+    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
+    router: {image: neutree/router, tag: v1.2.0-alpha.1}
+    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+`,
+			wantErr: "node_agent",
+		},
+		{
+			name: "rejects non semantic profile version",
+			profile: `
+  version: v1.2
+  components:
+    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
+    router: {image: neutree/router, tag: v1.2.0-alpha.1}
+    node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
+    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+`,
+			wantErr: "invalid cluster version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifestPath := t.TempDir() + "/manifest.yaml"
+			content := "manifest_version: \"1.0\"\ncluster_profile:\n" + tt.profile
+			require.NoError(t, os.WriteFile(manifestPath, []byte(content), 0o644))
+
+			_, err := parser.ParseManifestFile(manifestPath)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}

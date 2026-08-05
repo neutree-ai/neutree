@@ -8,7 +8,6 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/apply"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cleanup"
-	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/cluster"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/delete"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/engine"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/export"
@@ -55,7 +54,6 @@ Examples:
 
 	neutreeCliCmd.AddCommand(apply.NewApplyCmd())
 	neutreeCliCmd.AddCommand(cleanup.NewCleanupCmd())
-	neutreeCliCmd.AddCommand(cluster.NewClusterCmd())
 	neutreeCliCmd.AddCommand(delete.NewDeleteCmd())
 	neutreeCliCmd.AddCommand(engine.NewEngineCmd())
 	neutreeCliCmd.AddCommand(export.NewExportCmd())

@@ -71,7 +71,7 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 	// If skip image load, just register engine metadata
 	if opts.SkipImageLoad {
 		klog.Info("Skipping image handling as per configuration")
-		return i.registerEngines(ctx, opts, manifest, result)
+		return i.registerManifest(ctx, opts, manifest, result)
 	}
 
 	// If package_url is present, stream-extract and push images
@@ -118,13 +118,13 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 
 		result.ImagesImported = pushedImages
 
-		return i.registerEngines(ctx, opts, manifest, result)
+		return i.registerManifest(ctx, opts, manifest, result)
 	}
 
 	// No package_url and not skipping images — register metadata only
 	klog.Info("No package URL specified, registering engine metadata only (no images to process)")
 
-	return i.registerEngines(ctx, opts, manifest, result)
+	return i.registerManifest(ctx, opts, manifest, result)
 }
 
 // importFromArchive handles the traditional tar.gz archive import flow.
@@ -173,7 +173,27 @@ func (i *Importer) importFromArchive(ctx context.Context, opts *ImportOptions, r
 
 	result.ImagesImported = pushedImages
 
-	return i.registerEngines(ctx, opts, manifest, result)
+	return i.registerManifest(ctx, opts, manifest, result)
+}
+
+func (i *Importer) registerManifest(ctx context.Context, opts *ImportOptions, manifest *PackageManifest, result *ImportResult) (*ImportResult, error) {
+	result, err := i.registerEngines(ctx, opts, manifest, result)
+	if err != nil {
+		return result, err
+	}
+	if manifest.ClusterProfile == nil {
+		return result, nil
+	}
+	if i.apiClient == nil {
+		return result, errors.New("API client is required to register cluster profile")
+	}
+
+	profile := manifest.ClusterProfile.ToAPIClusterProfile()
+	if _, err := i.apiClient.Clusters.UpsertClusterProfile(profile, opts.ForceUpdate); err != nil {
+		return result, errors.Wrap(err, "failed to register cluster profile")
+	}
+
+	return result, nil
 }
 
 // registerEngines registers engine metadata from manifest.

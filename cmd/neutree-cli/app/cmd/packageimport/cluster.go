@@ -7,14 +7,30 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/internal/cli/packageimport"
+	"github.com/neutree-ai/neutree/pkg/client"
 )
 
 type ClusterImportOptions struct {
 	packagePath string
 	extractPath string
 	importLocal bool
+	forceUpdate bool
 }
+
+type clusterPackageImporter interface {
+	Import(context.Context, *packageimport.ImportOptions) (*packageimport.ImportResult, error)
+}
+
+var (
+	clusterImportNewAPIClient = func() (*client.Client, error) {
+		return global.NewClient()
+	}
+	clusterImportNewImporter = func(apiClient *client.Client) clusterPackageImporter {
+		return packageimport.NewImporter(apiClient)
+	}
+)
 
 func NewClusterImportCmd() *cobra.Command {
 	opts := &ClusterImportOptions{}
@@ -57,6 +73,7 @@ images:
 	cmd.Flags().StringVar(&opts.extractPath, "extract-path", "",
 		"Parent directory for extraction; a unique subdirectory is created automatically (default: system temp dir)")
 	cmd.Flags().BoolVar(&opts.importLocal, "local", false, "Skip pushing images to the registry, only load images locally")
+	cmd.Flags().BoolVar(&opts.forceUpdate, "force-update", false, "Overwrite an existing exact cluster profile")
 
 	_ = cmd.MarkFlagRequired("package")
 
@@ -66,13 +83,18 @@ images:
 func runClusterImport(opts *ClusterImportOptions) error {
 	ctx := context.Background()
 
-	// Cluster no need to create apiclient
-	importer := packageimport.NewImporter(nil)
+	apiClient, err := clusterImportNewAPIClient()
+	if err != nil {
+		return err
+	}
+	importer := clusterImportNewImporter(apiClient)
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
 		PackagePath: opts.packagePath,
+		Workspace:   workspace,
 		ExtractPath: opts.extractPath,
+		ForceUpdate: opts.forceUpdate,
 	}
 
 	// if not importLocal, set registry info

@@ -16,6 +16,54 @@ type PackageManifest struct {
 
 	// Engines contains the list of engines need to be imported
 	Engines []*EngineMetadata `json:"engines" yaml:"engines"`
+
+	// ClusterProfile contains the exact Cluster component image profile carried
+	// by a cluster image package.
+	ClusterProfile *ClusterProfile `json:"cluster_profile,omitempty" yaml:"cluster_profile,omitempty"`
+}
+
+// ClusterProfile is the package YAML representation of one exact Cluster
+// profile. It deliberately does not carry workspace resource fields.
+type ClusterProfile struct {
+	Version    string                   `json:"version" yaml:"version"`
+	Components ClusterProfileComponents `json:"components" yaml:"components"`
+}
+
+type ClusterProfileComponents struct {
+	RayRuntime       ClusterImageRef `json:"ray_runtime" yaml:"ray_runtime"`
+	Router           ClusterImageRef `json:"router" yaml:"router"`
+	NodeAgent        ClusterImageRef `json:"node_agent" yaml:"node_agent"`
+	NodeExporter     ClusterImageRef `json:"node_exporter" yaml:"node_exporter"`
+	VMAgent          ClusterImageRef `json:"vmagent" yaml:"vmagent"`
+	KubeStateMetrics ClusterImageRef `json:"kube_state_metrics" yaml:"kube_state_metrics"`
+}
+
+type ClusterImageRef struct {
+	Image string `json:"image" yaml:"image"`
+	Tag   string `json:"tag" yaml:"tag"`
+}
+
+// ToAPIClusterProfile converts the validated package payload to the
+// control-plane API representation.
+func (profile *ClusterProfile) ToAPIClusterProfile() *v1.ClusterProfile {
+	if profile == nil {
+		return nil
+	}
+
+	components := profile.Components
+	return &v1.ClusterProfile{
+		APIVersion: "v1",
+		Kind:       v1.ClusterProfileKind,
+		Metadata:   &v1.Metadata{Name: profile.Version},
+		Spec: &v1.ClusterProfileSpec{Components: v1.ClusterProfileComponents{
+			RayRuntime:       v1.ImageRef{Image: components.RayRuntime.Image, Tag: components.RayRuntime.Tag},
+			Router:           v1.ImageRef{Image: components.Router.Image, Tag: components.Router.Tag},
+			NodeAgent:        v1.ImageRef{Image: components.NodeAgent.Image, Tag: components.NodeAgent.Tag},
+			NodeExporter:     v1.ImageRef{Image: components.NodeExporter.Image, Tag: components.NodeExporter.Tag},
+			VMAgent:          v1.ImageRef{Image: components.VMAgent.Image, Tag: components.VMAgent.Tag},
+			KubeStateMetrics: v1.ImageRef{Image: components.KubeStateMetrics.Image, Tag: components.KubeStateMetrics.Tag},
+		}},
+	}
 }
 
 type EngineMetadata struct {
@@ -97,6 +145,10 @@ type ImportOptions struct {
 
 	// Force forces the import even if the engine version already exists
 	Force bool
+
+	// ForceUpdate overwrites an existing exact ClusterProfile during cluster
+	// package import. It is independent from engine --force behavior.
+	ForceUpdate bool
 
 	// ExtractPath is the path to extract the package to (temporary directory)
 	ExtractPath string
