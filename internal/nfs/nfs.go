@@ -148,9 +148,7 @@ func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 			_, check.err = readDir(mountPoint)
 			close(check.done)
 
-			readDirChecksMu.Lock()
-			delete(readDirChecks, mountPoint)
-			readDirChecksMu.Unlock()
+			forgetReadDirCheck(mountPoint, check)
 		}()
 	}
 
@@ -165,7 +163,17 @@ func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 
 		return nil
 	case <-timer.C:
+		forgetReadDirCheck(mountPoint, check)
 		return errors.Errorf("timed out reading NFS mount path %s", mountPoint)
+	}
+}
+
+func forgetReadDirCheck(mountPoint string, check *readDirCheck) {
+	readDirChecksMu.Lock()
+	defer readDirChecksMu.Unlock()
+
+	if readDirChecks[mountPoint] == check {
+		delete(readDirChecks, mountPoint)
 	}
 }
 

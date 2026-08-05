@@ -195,6 +195,34 @@ func TestReadDirWithTimeout(t *testing.T) {
 	require.ErrorContains(t, err, "timed out reading NFS mount path /mnt/registry")
 }
 
+func TestReadDirWithTimeoutAllowsRetryAfterTimeout(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "registry")
+	release := make(chan struct{})
+	completed := make(chan struct{})
+	var calls atomic.Int32
+
+	originalReadDir := readDir
+	readDir = func(string) ([]os.DirEntry, error) {
+		if calls.Add(1) == 1 {
+			<-release
+			close(completed)
+		}
+
+		return nil, nil
+	}
+	t.Cleanup(func() {
+		close(release)
+		<-completed
+		readDir = originalReadDir
+	})
+
+	err := readDirWithTimeout(target, time.Millisecond)
+	require.ErrorContains(t, err, "timed out reading NFS mount path "+target)
+
+	require.NoError(t, readDirWithTimeout(target, time.Second))
+	require.EqualValues(t, 2, calls.Load())
+}
+
 func TestReadDirWithTimeoutCoalescesConcurrentChecks(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
 	release := make(chan struct{})
