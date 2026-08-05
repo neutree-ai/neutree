@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -28,7 +29,7 @@ func TestReleaseInfoIsGlobalInternalState(t *testing.T) {
 			'v1',
 			'ReleaseInfo',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('Stable', 'v1.2.0', '[{"version":"v1.2.0"}]'::jsonb)::api.release_info_spec,
+			ROW('Stable', 'v1.2.0', '[{"version":"v1.2.0"}]'::jsonb, '["v1.1","v1.2"]'::jsonb)::api.release_info_spec,
 			ROW('revision-a')::api.release_info_status
 		)
 	`, releaseName); err != nil {
@@ -43,13 +44,46 @@ func TestReleaseInfoIsGlobalInternalState(t *testing.T) {
 		t.Fatalf("update release info as service_role: %v", err)
 	}
 
-	var revision string
+	var (
+		channel                 string
+		buildIdentity           string
+		clusterVersionsJSON     []byte
+		compatibleBaselinesJSON []byte
+		revision                string
+	)
 	if err = serviceTx.QueryRowContext(ctx, `
-		SELECT (status).revision
+		SELECT
+			(spec).channel,
+			(spec).build_identity,
+			(spec).cluster_versions,
+			(spec).compatible_cluster_baselines,
+			(status).revision
 		FROM api.release_infos
 		WHERE (metadata).name = $1
-	`, releaseName).Scan(&revision); err != nil {
+	`, releaseName).Scan(&channel, &buildIdentity, &clusterVersionsJSON, &compatibleBaselinesJSON, &revision); err != nil {
 		t.Fatalf("read release info as service_role: %v", err)
+	}
+	if channel != "Stable" {
+		t.Fatalf("expected persisted release info channel, got %q", channel)
+	}
+	if buildIdentity != "v1.2.0" {
+		t.Fatalf("expected persisted release info build identity, got %q", buildIdentity)
+	}
+	var clusterVersions []struct {
+		Version string `json:"version"`
+	}
+	if err = json.Unmarshal(clusterVersionsJSON, &clusterVersions); err != nil {
+		t.Fatalf("decode persisted release info cluster versions: %v", err)
+	}
+	if len(clusterVersions) != 1 || clusterVersions[0].Version != "v1.2.0" {
+		t.Fatalf("expected persisted release info cluster version v1.2.0, got %#v", clusterVersions)
+	}
+	var compatibleBaselines []string
+	if err = json.Unmarshal(compatibleBaselinesJSON, &compatibleBaselines); err != nil {
+		t.Fatalf("decode persisted compatible cluster baselines: %v", err)
+	}
+	if len(compatibleBaselines) != 2 || compatibleBaselines[0] != "v1.1" || compatibleBaselines[1] != "v1.2" {
+		t.Fatalf("expected persisted compatible cluster baselines [v1.1 v1.2], got %#v", compatibleBaselines)
 	}
 	if revision != "revision-b" {
 		t.Fatalf("expected updated release info revision, got %q", revision)
@@ -81,7 +115,7 @@ func TestReleaseInfoIsGlobalInternalState(t *testing.T) {
 			'v1',
 			'ReleaseInfo',
 			ROW('v1.2.1', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('Stable', 'v1.2.1', '[]'::jsonb)::api.release_info_spec,
+			ROW('Stable', 'v1.2.1', '[]'::jsonb, '[]'::jsonb)::api.release_info_spec,
 			ROW('revision-c')::api.release_info_status
 		)
 	`)

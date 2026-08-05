@@ -219,6 +219,52 @@ func (_c *MockStorage_CreateCluster_Call) RunAndReturn(run func(*v1.Cluster) err
 	return _c
 }
 
+// CreateClusterProfile provides a mock function with given fields: data
+func (_m *MockStorage) CreateClusterProfile(data *v1.ClusterProfile) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateClusterProfile")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.ClusterProfile) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateClusterProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateClusterProfile'
+type MockStorage_CreateClusterProfile_Call struct {
+	*mock.Call
+}
+
+// CreateClusterProfile is a helper method to define mock.On call
+//   - data *v1.ClusterProfile
+func (_e *MockStorage_Expecter) CreateClusterProfile(data interface{}) *MockStorage_CreateClusterProfile_Call {
+	return &MockStorage_CreateClusterProfile_Call{Call: _e.mock.On("CreateClusterProfile", data)}
+}
+
+func (_c *MockStorage_CreateClusterProfile_Call) Run(run func(data *v1.ClusterProfile)) *MockStorage_CreateClusterProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.ClusterProfile))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateClusterProfile_Call) Return(_a0 error) *MockStorage_CreateClusterProfile_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateClusterProfile_Call) RunAndReturn(run func(*v1.ClusterProfile) error) *MockStorage_CreateClusterProfile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateClusterUpgradeSnapshot provides a mock function with given fields: data
 func (_m *MockStorage) CreateClusterUpgradeSnapshot(data *v1.ClusterUpgradeSnapshot) error {
 	ret := _m.Called(data)
@@ -2622,6 +2668,64 @@ func (_c *MockStorage_ListCluster_Call) RunAndReturn(run func(storage.ListOption
 	return _c
 }
 
+// ListClusterProfile provides a mock function with given fields: option
+func (_m *MockStorage) ListClusterProfile(option storage.ListOption) ([]v1.ClusterProfile, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListClusterProfile")
+	}
+
+	var r0 []v1.ClusterProfile
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.ClusterProfile, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.ClusterProfile); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.ClusterProfile)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListClusterProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClusterProfile'
+type MockStorage_ListClusterProfile_Call struct {
+	*mock.Call
+}
+
+// ListClusterProfile is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListClusterProfile(option interface{}) *MockStorage_ListClusterProfile_Call {
+	return &MockStorage_ListClusterProfile_Call{Call: _e.mock.On("ListClusterProfile", option)}
+}
+
+func (_c *MockStorage_ListClusterProfile_Call) Run(run func(option storage.ListOption)) *MockStorage_ListClusterProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListClusterProfile_Call) Return(_a0 []v1.ClusterProfile, _a1 error) *MockStorage_ListClusterProfile_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListClusterProfile_Call) RunAndReturn(run func(storage.ListOption) ([]v1.ClusterProfile, error)) *MockStorage_ListClusterProfile_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListEndpoint provides a mock function with given fields: option
 func (_m *MockStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpoint, error) {
 	ret := _m.Called(option)
@@ -3523,6 +3627,53 @@ func (_c *MockStorage_UpdateCluster_Call) Return(_a0 error) *MockStorage_UpdateC
 }
 
 func (_c *MockStorage_UpdateCluster_Call) RunAndReturn(run func(string, *v1.Cluster) error) *MockStorage_UpdateCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateClusterProfile provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateClusterProfile(id string, data *v1.ClusterProfile) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateClusterProfile")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.ClusterProfile) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateClusterProfile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateClusterProfile'
+type MockStorage_UpdateClusterProfile_Call struct {
+	*mock.Call
+}
+
+// UpdateClusterProfile is a helper method to define mock.On call
+//   - id string
+//   - data *v1.ClusterProfile
+func (_e *MockStorage_Expecter) UpdateClusterProfile(id interface{}, data interface{}) *MockStorage_UpdateClusterProfile_Call {
+	return &MockStorage_UpdateClusterProfile_Call{Call: _e.mock.On("UpdateClusterProfile", id, data)}
+}
+
+func (_c *MockStorage_UpdateClusterProfile_Call) Run(run func(id string, data *v1.ClusterProfile)) *MockStorage_UpdateClusterProfile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.ClusterProfile))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateClusterProfile_Call) Return(_a0 error) *MockStorage_UpdateClusterProfile_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateClusterProfile_Call) RunAndReturn(run func(string, *v1.ClusterProfile) error) *MockStorage_UpdateClusterProfile_Call {
 	_c.Call.Return(run)
 	return _c
 }
