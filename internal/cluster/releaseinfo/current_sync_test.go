@@ -72,10 +72,10 @@ func TestSynchronizeCurrentBaselineDoesNotSeedHistoryForOtherBaseline(t *testing
 		store,
 		"v1.3.0",
 		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
-			return &v1.ReleaseInfo{Metadata: &v1.Metadata{Name: baseline}, Spec: &v1.ReleaseInfoSpec{}}, nil
+			return releaseInfoBuilderOutput(baseline, []string{"v1.3"}, nil), nil
 		}),
 		clusterProfileBuilderFunc(func(baseline string) (*v1.ClusterProfile, error) {
-			return &v1.ClusterProfile{Metadata: &v1.Metadata{Name: baseline}, Spec: &v1.ClusterProfileSpec{}}, nil
+			return clusterProfileBuilderOutput(baseline, nil), nil
 		}),
 	)
 	require.NoError(t, err)
@@ -91,10 +91,10 @@ func TestSynchronizeCurrentBaselineRejectsBuilderOutputForAnotherBaseline(t *tes
 		store,
 		"v1.2.0",
 		releaseInfoBuilderFunc(func(string) (*v1.ReleaseInfo, error) {
-			return &v1.ReleaseInfo{Metadata: &v1.Metadata{Name: "v1.1.0"}, Spec: &v1.ReleaseInfoSpec{}}, nil
+			return releaseInfoBuilderOutput("v1.1.0", []string{"v1.1"}, nil), nil
 		}),
 		clusterProfileBuilderFunc(func(baseline string) (*v1.ClusterProfile, error) {
-			return &v1.ClusterProfile{Metadata: &v1.Metadata{Name: baseline}, Spec: &v1.ClusterProfileSpec{}}, nil
+			return clusterProfileBuilderOutput(baseline, nil), nil
 		}),
 	)
 	require.ErrorContains(t, err, "release info builder output name")
@@ -109,21 +109,106 @@ func TestSynchronizeCurrentBaselineRejectsLegacyReleaseInfoBuilderFields(t *test
 		store,
 		"v1.2.0",
 		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
-			return &v1.ReleaseInfo{
-				Metadata: &v1.Metadata{Name: baseline},
-				Spec: &v1.ReleaseInfoSpec{
-					CompatibleClusterBaselines: []string{"v1.2"},
-					BuildIdentity:              baseline,
-				},
-			}, nil
+			return releaseInfoBuilderOutput(baseline, []string{"v1.2"}, func(info *v1.ReleaseInfo) {
+				info.Spec.BuildIdentity = baseline
+			}), nil
 		}),
 		clusterProfileBuilderFunc(func(baseline string) (*v1.ClusterProfile, error) {
-			return &v1.ClusterProfile{Metadata: &v1.Metadata{Name: baseline}, Spec: &v1.ClusterProfileSpec{}}, nil
+			return clusterProfileBuilderOutput(baseline, nil), nil
 		}),
 	)
 	require.ErrorContains(t, err, "legacy fields")
 	assert.Empty(t, store.createdReleaseInfos)
 	assert.Empty(t, store.createdClusterProfiles)
+}
+
+func TestValidateCurrentReleaseInfoBuilderOutputRejectsInvalidStructure(t *testing.T) {
+	testCases := []struct {
+		name string
+		info *v1.ReleaseInfo
+		want string
+	}{
+		{
+			name: "wrong api version",
+			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2"}, func(info *v1.ReleaseInfo) {
+				info.APIVersion = "v2"
+			}),
+			want: "api version",
+		},
+		{
+			name: "wrong kind",
+			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2"}, func(info *v1.ReleaseInfo) {
+				info.Kind = "Other"
+			}),
+			want: "kind",
+		},
+		{
+			name: "empty compatible baselines",
+			info: releaseInfoBuilderOutput("v1.2.0", nil, nil),
+			want: "compatible cluster baselines",
+		},
+		{
+			name: "malformed compatible baseline",
+			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2.0"}, nil),
+			want: "invalid compatible cluster baseline",
+		},
+		{
+			name: "duplicate compatible baseline",
+			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.1", "v1.1"}, nil),
+			want: "duplicate compatible cluster baseline",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateCurrentReleaseInfoBuilderOutput("v1.2.0", testCase.info)
+			require.ErrorContains(t, err, testCase.want)
+		})
+	}
+}
+
+func TestValidateCurrentClusterProfileBuilderOutputRejectsInvalidStructure(t *testing.T) {
+	testCases := []struct {
+		name    string
+		profile *v1.ClusterProfile
+		want    string
+	}{
+		{
+			name: "wrong api version",
+			profile: clusterProfileBuilderOutput("v1.2.0", func(profile *v1.ClusterProfile) {
+				profile.APIVersion = "v2"
+			}),
+			want: "api version",
+		},
+		{
+			name: "wrong kind",
+			profile: clusterProfileBuilderOutput("v1.2.0", func(profile *v1.ClusterProfile) {
+				profile.Kind = "Other"
+			}),
+			want: "kind",
+		},
+		{
+			name: "missing component image",
+			profile: clusterProfileBuilderOutput("v1.2.0", func(profile *v1.ClusterProfile) {
+				profile.Spec.Components.RayRuntime.Image = ""
+			}),
+			want: "ray runtime image",
+		},
+		{
+			name: "missing component tag",
+			profile: clusterProfileBuilderOutput("v1.2.0", func(profile *v1.ClusterProfile) {
+				profile.Spec.Components.KubeStateMetrics.Tag = ""
+			}),
+			want: "kube state metrics tag",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateCurrentClusterProfileBuilderOutput("v1.2.0", testCase.profile)
+			require.ErrorContains(t, err, testCase.want)
+		})
+	}
 }
 
 type currentBaselineMemoryStore struct {
@@ -209,4 +294,41 @@ func assertProfileTags(t *testing.T, profile *v1.ClusterProfile, rayRuntime, rou
 	assert.Equal(t, "v1.8.2", profile.Spec.Components.NodeExporter.Tag)
 	assert.Equal(t, "v1.115.0", profile.Spec.Components.VMAgent.Tag)
 	assert.Equal(t, "v2.15.0", profile.Spec.Components.KubeStateMetrics.Tag)
+}
+
+func releaseInfoBuilderOutput(baseline string, compatibleClusterBaselines []string, mutate func(*v1.ReleaseInfo)) *v1.ReleaseInfo {
+	info := &v1.ReleaseInfo{
+		APIVersion: "v1",
+		Kind:       v1.ReleaseInfoKind,
+		Metadata:   &v1.Metadata{Name: baseline},
+		Spec: &v1.ReleaseInfoSpec{
+			CompatibleClusterBaselines: compatibleClusterBaselines,
+		},
+	}
+	if mutate != nil {
+		mutate(info)
+	}
+
+	return info
+}
+
+func clusterProfileBuilderOutput(baseline string, mutate func(*v1.ClusterProfile)) *v1.ClusterProfile {
+	profile := &v1.ClusterProfile{
+		APIVersion: "v1",
+		Kind:       v1.ClusterProfileKind,
+		Metadata:   &v1.Metadata{Name: baseline},
+		Spec: &v1.ClusterProfileSpec{Components: v1.ClusterProfileComponents{
+			RayRuntime:       v1.ImageRef{Image: "ray", Tag: "tag"},
+			Router:           v1.ImageRef{Image: "router", Tag: "tag"},
+			NodeAgent:        v1.ImageRef{Image: "node-agent", Tag: "tag"},
+			NodeExporter:     v1.ImageRef{Image: "node-exporter", Tag: "tag"},
+			VMAgent:          v1.ImageRef{Image: "vmagent", Tag: "tag"},
+			KubeStateMetrics: v1.ImageRef{Image: "kube-state-metrics", Tag: "tag"},
+		}},
+	}
+	if mutate != nil {
+		mutate(profile)
+	}
+
+	return profile
 }

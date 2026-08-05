@@ -2,9 +2,13 @@ package releaseinfo
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
+
+var compatibleClusterBaselinePattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
 
 // CurrentBaselineStore persists the ReleaseInfo and ClusterProfile pair for
 // the current control-plane baseline. It is independent from the legacy seed
@@ -100,11 +104,31 @@ func validateCurrentReleaseInfoBuilderOutput(baseline string, info *v1.ReleaseIn
 	if info == nil || info.Metadata == nil || info.Spec == nil {
 		return fmt.Errorf("release info builder output requires release info, metadata, and spec")
 	}
+	if info.APIVersion != "v1" {
+		return fmt.Errorf("release info builder output api version must be v1")
+	}
+	if info.Kind != v1.ReleaseInfoKind {
+		return fmt.Errorf("release info builder output kind must be %s", v1.ReleaseInfoKind)
+	}
 	if info.Metadata.Name != baseline {
 		return fmt.Errorf("release info builder output name %q must match requested baseline %q", info.Metadata.Name, baseline)
 	}
 	if info.Spec.Channel != "" || info.Spec.BuildIdentity != "" || info.Spec.ClusterVersions != nil || info.Status != nil {
 		return fmt.Errorf("release info builder output must not set legacy fields")
+	}
+	if len(info.Spec.CompatibleClusterBaselines) == 0 {
+		return fmt.Errorf("release info builder output compatible cluster baselines are required")
+	}
+
+	seenBaselines := make(map[string]struct{}, len(info.Spec.CompatibleClusterBaselines))
+	for _, compatibleBaseline := range info.Spec.CompatibleClusterBaselines {
+		if !compatibleClusterBaselinePattern.MatchString(compatibleBaseline) {
+			return fmt.Errorf("invalid compatible cluster baseline %q", compatibleBaseline)
+		}
+		if _, found := seenBaselines[compatibleBaseline]; found {
+			return fmt.Errorf("duplicate compatible cluster baseline %q", compatibleBaseline)
+		}
+		seenBaselines[compatibleBaseline] = struct{}{}
 	}
 
 	return nil
@@ -114,8 +138,33 @@ func validateCurrentClusterProfileBuilderOutput(baseline string, profile *v1.Clu
 	if profile == nil || profile.Metadata == nil || profile.Spec == nil {
 		return fmt.Errorf("cluster profile builder output requires cluster profile, metadata, and spec")
 	}
+	if profile.APIVersion != "v1" {
+		return fmt.Errorf("cluster profile builder output api version must be v1")
+	}
+	if profile.Kind != v1.ClusterProfileKind {
+		return fmt.Errorf("cluster profile builder output kind must be %s", v1.ClusterProfileKind)
+	}
 	if profile.Metadata.Name != baseline {
 		return fmt.Errorf("cluster profile builder output name %q must match requested baseline %q", profile.Metadata.Name, baseline)
+	}
+
+	for _, component := range []struct {
+		name string
+		ref  v1.ImageRef
+	}{
+		{name: "ray runtime", ref: profile.Spec.Components.RayRuntime},
+		{name: "router", ref: profile.Spec.Components.Router},
+		{name: "node agent", ref: profile.Spec.Components.NodeAgent},
+		{name: "node exporter", ref: profile.Spec.Components.NodeExporter},
+		{name: "vmagent", ref: profile.Spec.Components.VMAgent},
+		{name: "kube state metrics", ref: profile.Spec.Components.KubeStateMetrics},
+	} {
+		if strings.TrimSpace(component.ref.Image) == "" {
+			return fmt.Errorf("cluster profile builder output %s image is required", component.name)
+		}
+		if strings.TrimSpace(component.ref.Tag) == "" {
+			return fmt.Errorf("cluster profile builder output %s tag is required", component.name)
+		}
 	}
 
 	return nil
