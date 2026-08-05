@@ -3,7 +3,6 @@ package model_registry
 import (
 	"io"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
