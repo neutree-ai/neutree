@@ -279,7 +279,14 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		})
 
 		AfterAll(func() {
-			deleteEndpoint(epName)
+			// Guarded because the BeforeAll above can Skip before epName is set,
+			// and Ginkgo still runs AfterAll in that case. deleteEndpoint asserts
+			// success, so an unguarded call would turn a clean skip on a
+			// non-private registry into a failing suite. Same guard as the Chat
+			// Inference block above.
+			if epName != "" {
+				deleteEndpoint(epName)
+			}
 		})
 
 		// TestRail: pending — 模型管理 - 别名 - 修改运行中 endpoint 所服务模型的别名，不扰动该 endpoint
