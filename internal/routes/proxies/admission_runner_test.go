@@ -112,6 +112,44 @@ func TestAdmissionRunnerWritesExpectedAdmissionError(t *testing.T) {
 	require.JSONEq(t, `{"code":10001,"message":"rejected"}`, body)
 }
 
+func TestAdmissionRunnerRejectsInvalidClientPayload(t *testing.T) {
+	testCases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "malformed object", body: `{"name":`},
+		{name: "scalar", body: `"widget"`},
+		{name: "multiple values", body: `{"name":"first"} {"name":"second"}`},
+		{name: "unknown field", body: `{"name":"input","unknown":"value"}`},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fakeChain := &fakeCreateAdmissionChain{run: func(_ admission.RequestContext, _ any, candidate any) (any, error) {
+				return candidate, nil
+			}}
+			runner := newCreateAdmissionRunner[admissionRunnerWidget](
+				fakeCreateAdmissionResolver{chain: fakeChain},
+				admissionRunnerWidgetResource,
+			)
+			forwarded := false
+
+			status, body := runAdmissionRunnerWithNext(
+				t,
+				runner,
+				http.MethodPost,
+				testCase.body,
+				func(*gin.Context) { forwarded = true },
+			)
+
+			require.Equal(t, http.StatusBadRequest, status)
+			require.JSONEq(t, `{"code":10301,"message":"invalid admission request"}`, body)
+			require.False(t, forwarded)
+			require.Zero(t, fakeChain.calls)
+		})
+	}
+}
+
 func TestAdmissionRunnerRedactsUnexpectedErrors(t *testing.T) {
 	runner := newCreateAdmissionRunner[admissionRunnerWidget](
 		fakeCreateAdmissionResolver{chain: &fakeCreateAdmissionChain{run: func(_ admission.RequestContext, _ any, _ any) (any, error) {
@@ -138,9 +176,10 @@ func TestAdmissionRunnerStopsWhenRequestContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	status, _ := runAdmissionRunnerWithContext(t, runner, ctx, http.MethodPost, `{"name":"input"}`)
+	status, body := runAdmissionRunnerWithContext(t, runner, ctx, http.MethodPost, `{"name":"input"}`)
 
 	require.Equal(t, http.StatusInternalServerError, status)
+	require.JSONEq(t, `{"code":10300,"message":"internal admission error"}`, body)
 	require.Equal(t, 0, fakeChain.calls)
 }
 
@@ -158,7 +197,7 @@ func TestAdmissionRunnerStopsArrayWhenRequestContextIsCancelled(t *testing.T) {
 		admissionRunnerWidgetResource,
 	)
 
-	status, _ := runAdmissionRunnerWithContext(
+	status, body := runAdmissionRunnerWithContext(
 		t,
 		runner,
 		ctx,
@@ -167,6 +206,7 @@ func TestAdmissionRunnerStopsArrayWhenRequestContextIsCancelled(t *testing.T) {
 	)
 
 	require.Equal(t, http.StatusInternalServerError, status)
+	require.JSONEq(t, `{"code":10300,"message":"internal admission error"}`, body)
 	require.Equal(t, 1, fakeChain.calls)
 }
 

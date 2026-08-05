@@ -15,7 +15,12 @@ import (
 	"github.com/neutree-ai/neutree/pkg/admission"
 )
 
-const admissionInternalErrorCode = 10300
+const (
+	admissionInternalErrorCode       = 10300
+	admissionInvalidRequestErrorCode = 10301
+)
+
+var errInvalidAdmissionRequest = errors.New("invalid admission request")
 
 type createAdmissionChain interface {
 	Run(admission.RequestContext, any, any) (any, error)
@@ -80,7 +85,7 @@ func newCreateAdmissionRunner[T any](resolver createAdmissionChainResolver, reso
 func admitCreateBody[T any](ctx context.Context, chain createAdmissionChain, body []byte) ([]byte, error) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
-		return nil, errors.New("admission request body is empty")
+		return nil, errInvalidAdmissionRequest
 	}
 	switch trimmed[0] {
 	case '{':
@@ -104,7 +109,7 @@ func admitCreateBody[T any](ctx context.Context, chain createAdmissionChain, bod
 		}
 		return json.Marshal(approved)
 	default:
-		return nil, errors.New("admission request body must be an object or array")
+		return nil, errInvalidAdmissionRequest
 	}
 }
 
@@ -123,21 +128,26 @@ func decodeAdmissionCandidate[T any](raw []byte) (T, error) {
 	var candidate T
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return candidate, errors.New("admission candidate must be an object")
+		return candidate, errInvalidAdmissionRequest
 	}
-	if err := decodeSingleJSONValue(trimmed, &candidate); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decodeAdmissionJSONValue(decoder, &candidate); err != nil {
 		return candidate, err
 	}
 	return candidate, nil
 }
 
 func decodeSingleJSONValue(raw []byte, value any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
+	return decodeAdmissionJSONValue(json.NewDecoder(bytes.NewReader(raw)), value)
+}
+
+func decodeAdmissionJSONValue(decoder *json.Decoder, value any) error {
 	if err := decoder.Decode(value); err != nil {
-		return err
+		return errInvalidAdmissionRequest
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return errors.New("admission request body contains multiple JSON values")
+		return errInvalidAdmissionRequest
 	}
 	return nil
 }
@@ -152,6 +162,13 @@ func writeAdmissionRunnerError(c *gin.Context, err error) {
 	var admissionError *admission.Error
 	if errors.As(err, &admissionError) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, admissionError)
+		return
+	}
+	if errors.Is(err, errInvalidAdmissionRequest) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, admission.Error{
+			Code:    admissionInvalidRequestErrorCode,
+			Message: errInvalidAdmissionRequest.Error(),
+		})
 		return
 	}
 
