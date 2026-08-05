@@ -12,7 +12,6 @@ import (
 )
 
 type ImageService interface {
-	CheckImageExists(image string, auth authn.Authenticator, useHTTP bool) (bool, error)
 	// CheckPullPermission checks if the provided auth has pull permission for the image
 	CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error)
 	ListImageTags(imageRepo string, auth authn.Authenticator, useHTTP bool) ([]string, error)
@@ -30,26 +29,6 @@ func NewImageService() ImageService {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
 		},
 	}
-}
-
-func (svc *imageService) CheckImageExists(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
-	ref, err := name.ParseReference(image, registryNameOptions(useHTTP)...)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to parse image "+image)
-	}
-
-	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(svc.registryTransport(ref.Context().Registry.RegistryStr(), useHTTP)))
-	if err != nil {
-		if transportErr, ok := err.(*transport.Error); ok {
-			if transportErr.StatusCode == http.StatusNotFound {
-				return false, nil
-			}
-		}
-
-		return false, errors.Wrap(err, "failed to request image "+image)
-	}
-
-	return true, nil
 }
 
 func (svc *imageService) CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {

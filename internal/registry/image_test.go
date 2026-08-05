@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,6 +14,12 @@ import (
 )
 
 const testImageConfig = `{"architecture":"amd64","os":"linux","config":{"Labels":{"neutree.ai/cluster-version":"v1.2.0"}},"rootfs":{"type":"layers","diff_ids":[]}}`
+
+func TestImageServiceDoesNotExposeReleaseProfileAvailabilityCheck(t *testing.T) {
+	serviceType := reflect.TypeOf((*ImageService)(nil)).Elem()
+	_, exists := serviceType.MethodByName("CheckImageExists")
+	require.False(t, exists, "release-profile availability checks must not call the registry")
+}
 
 func TestImageService_CheckPullPermissionUsesConfiguredScheme(t *testing.T) {
 	tests := []struct {
@@ -35,36 +42,6 @@ func TestImageService_CheckPullPermissionUsesConfiguredScheme(t *testing.T) {
 
 			require.NoError(t, err)
 			require.True(t, allowed)
-		})
-	}
-}
-
-func TestImageService_CheckImageExistsUsesConfiguredSchemeAndPreservesNotFound(t *testing.T) {
-	tests := []struct {
-		name      string
-		newServer func(http.Handler) *httptest.Server
-		useHTTP   bool
-		scheme    string
-	}{
-		{name: "explicit HTTP", newServer: httptest.NewServer, useHTTP: true, scheme: "http"},
-		{name: "HTTPS by default", newServer: httptest.NewTLSServer, scheme: "https"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := tt.newServer(testRegistryHandler())
-			t.Cleanup(server.Close)
-
-			registryHost := strings.TrimPrefix(server.URL, tt.scheme+"://")
-			service := NewImageService()
-
-			exists, err := service.CheckImageExists(registryHost+"/neutree/router:v1.2.0", authn.Anonymous, tt.useHTTP)
-			require.NoError(t, err)
-			require.True(t, exists)
-
-			exists, err = service.CheckImageExists(registryHost+"/neutree/router:missing", authn.Anonymous, tt.useHTTP)
-			require.NoError(t, err)
-			require.False(t, exists)
 		})
 	}
 }
