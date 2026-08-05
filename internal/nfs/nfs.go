@@ -163,7 +163,6 @@ func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
 
 		return nil
 	case <-timer.C:
-		forgetReadDirCheck(mountPoint, check)
 		return errors.Errorf("timed out reading NFS mount path %s", mountPoint)
 	}
 }
@@ -175,6 +174,13 @@ func forgetReadDirCheck(mountPoint string, check *readDirCheck) {
 	if readDirChecks[mountPoint] == check {
 		delete(readDirChecks, mountPoint)
 	}
+}
+
+func resetReadDirCheck(mountPoint string) {
+	readDirChecksMu.Lock()
+	defer readDirChecksMu.Unlock()
+
+	delete(readDirChecks, mountPoint)
 }
 
 func Unmount(mountPoint string) error {
@@ -194,7 +200,15 @@ func Unmount(mountPoint string) error {
 		}
 	}
 
-	return os.RemoveAll(mountPoint)
+	err = os.RemoveAll(mountPoint)
+	if err != nil {
+		return err
+	}
+
+	// A successful unmount starts a new mount generation, so stale reads cannot
+	// block the Controller's subsequent reconnect attempt.
+	resetReadDirCheck(mountPoint)
+	return nil
 }
 
 type KubernetesNfsMounter struct {

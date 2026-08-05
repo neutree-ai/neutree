@@ -195,8 +195,17 @@ func TestReadDirWithTimeout(t *testing.T) {
 	require.ErrorContains(t, err, "timed out reading NFS mount path /mnt/registry")
 }
 
-func TestReadDirWithTimeoutAllowsRetryAfterTimeout(t *testing.T) {
+func TestReadDirWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
+	require.NoError(t, os.Mkdir(target, 0o755))
+
+	mounter := kmount.NewFakeMounter([]kmount.MountPoint{{
+		Device: testNFSDevice,
+		Path:   target,
+		Type:   "nfs",
+	}})
+	useMountInterface(t, mounter)
+
 	release := make(chan struct{})
 	completed := make(chan struct{})
 	var calls atomic.Int32
@@ -219,6 +228,11 @@ func TestReadDirWithTimeoutAllowsRetryAfterTimeout(t *testing.T) {
 	err := readDirWithTimeout(target, time.Millisecond)
 	require.ErrorContains(t, err, "timed out reading NFS mount path "+target)
 
+	err = readDirWithTimeout(target, time.Millisecond)
+	require.ErrorContains(t, err, "timed out reading NFS mount path "+target)
+	require.EqualValues(t, 1, calls.Load())
+
+	require.NoError(t, Unmount(target))
 	require.NoError(t, readDirWithTimeout(target, time.Second))
 	require.EqualValues(t, 2, calls.Load())
 }
