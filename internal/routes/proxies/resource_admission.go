@@ -84,6 +84,7 @@ type PatchAdmissionRunnerOptions struct {
 	BodyError              func(error) *admission.Error
 	BodyResponse           func(error) error
 	PermissiveCandidates   bool
+	DropEmptyMaskedFields  []string
 }
 
 type registryPatchAdmissionChainResolver struct {
@@ -239,6 +240,15 @@ func newPatchAdmissionRunnerWithOptions[T any](
 		if err != nil {
 			writePatchAdmissionInvalidRequestError(c, originalBody, err, options)
 			return
+		}
+
+		patch, droppedEmptyMaskedFields := dropEmptyMaskedAdmissionFields(patch, options.DropEmptyMaskedFields)
+		if droppedEmptyMaskedFields {
+			normalizedBody, err = json.Marshal(patch)
+			if err != nil {
+				writePatchAdmissionError(c, err)
+				return
+			}
 		}
 
 		if containsMaskedAdmissionField(patch, tagConfig.excludeFields) {
@@ -471,6 +481,59 @@ func containsMaskedAdmissionField(patch map[string]interface{}, excludedFields m
 	}
 
 	return false
+}
+
+// dropEmptyMaskedAdmissionFields removes only an explicit empty object at a
+// resource-approved masked path. This preserves legacy clients that serialize
+// zero-value nested structs while keeping every non-empty masked write denied.
+func dropEmptyMaskedAdmissionFields(patch map[string]interface{}, paths []string) (map[string]interface{}, bool) {
+	if len(paths) == 0 {
+		return patch, false
+	}
+
+	filtered := cloneAdmissionObject(patch)
+	changed := false
+
+	for _, path := range paths {
+		if dropEmptyAdmissionObjectField(filtered, strings.Split(path, ".")) {
+			changed = true
+		}
+	}
+
+	if !changed {
+		return patch, false
+	}
+
+	return filtered, true
+}
+
+func dropEmptyAdmissionObjectField(object map[string]interface{}, path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	value, ok := object[path[0]]
+	if !ok {
+		return false
+	}
+
+	if len(path) == 1 {
+		emptyObject, ok := value.(map[string]interface{})
+		if !ok || len(emptyObject) != 0 {
+			return false
+		}
+
+		delete(object, path[0])
+
+		return true
+	}
+
+	nested, ok := value.(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	return dropEmptyAdmissionObjectField(nested, path[1:])
 }
 
 func admissionPatchPathExists(value interface{}, path []string) bool {
