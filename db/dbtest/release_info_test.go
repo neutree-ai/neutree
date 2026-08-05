@@ -136,8 +136,13 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 	}
 }
 
-func TestReleaseInfoRollbackRestoresLegacyCompositeOrder(t *testing.T) {
-	migration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.down.sql")
+func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
+	upMigration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.up.sql")
+	if err != nil {
+		t.Fatalf("read forward migration: %v", err)
+	}
+
+	downMigration, err := os.ReadFile("../migrations/086_remove_legacy_release_info.down.sql")
 	if err != nil {
 		t.Fatalf("read rollback migration: %v", err)
 	}
@@ -152,8 +157,34 @@ func TestReleaseInfoRollbackRestoresLegacyCompositeOrder(t *testing.T) {
 		_ = tx.Rollback()
 	}()
 
-	if _, err = tx.ExecContext(ctx, string(migration)); err != nil {
+	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
 		t.Fatalf("apply rollback migration: %v", err)
+	}
+
+	const releaseName = "v1.2.99"
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO api.release_infos (api_version, kind, metadata, spec, status)
+		VALUES (
+			'v1',
+			'ReleaseInfo',
+			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW(
+				'Stable',
+				'v1.2.99',
+				'["v1.1.0","v1.2.99"]'::jsonb,
+				'["v1.1","v1.2"]'::jsonb
+			)::api.release_info_spec,
+			ROW('legacy-revision')::api.release_info_status
+		)
+	`, releaseName); err != nil {
+		t.Fatalf("insert legacy release info: %v", err)
+	}
+
+	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
+		t.Fatalf("apply forward migration: %v", err)
+	}
+	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
+		t.Fatalf("reapply rollback migration: %v", err)
 	}
 
 	var attributes string
@@ -170,5 +201,36 @@ func TestReleaseInfoRollbackRestoresLegacyCompositeOrder(t *testing.T) {
 	const expected = "channel,build_identity,cluster_versions,compatible_cluster_baselines"
 	if attributes != expected {
 		t.Fatalf("expected rollback release info spec order %q, got %q", expected, attributes)
+	}
+
+	var channel, buildIdentity, revision string
+	var clusterVersions, compatibleBaselines []byte
+	if err = tx.QueryRowContext(ctx, `
+		SELECT
+			(spec).channel,
+			(spec).build_identity,
+			(spec).cluster_versions,
+			(spec).compatible_cluster_baselines,
+			(status).revision
+		FROM api.release_infos
+		WHERE (metadata).name = $1
+	`, releaseName).Scan(
+		&channel,
+		&buildIdentity,
+		&clusterVersions,
+		&compatibleBaselines,
+		&revision,
+	); err != nil {
+		t.Fatalf("read restored legacy release info: %v", err)
+	}
+
+	if channel != "Stable" || buildIdentity != "v1.2.99" || revision != "legacy-revision" {
+		t.Fatalf("unexpected restored legacy values: channel=%q build=%q revision=%q", channel, buildIdentity, revision)
+	}
+	if string(clusterVersions) != `["v1.1.0", "v1.2.99"]` && string(clusterVersions) != `["v1.1.0","v1.2.99"]` {
+		t.Fatalf("unexpected restored cluster versions: %s", clusterVersions)
+	}
+	if string(compatibleBaselines) != `["v1.1", "v1.2"]` && string(compatibleBaselines) != `["v1.1","v1.2"]` {
+		t.Fatalf("unexpected restored compatible baselines: %s", compatibleBaselines)
 	}
 }
