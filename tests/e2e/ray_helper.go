@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -316,9 +317,16 @@ func requireOrchestrationPath(snapshot *ServeAppSnapshot) string {
 		"Ray Serve application %s is %q, not RUNNING", snapshot.Name, snapshot.Status)
 	Expect(snapshot.Args).NotTo(BeEmpty(),
 		"Ray Serve application %s has no deployed_app_config args", snapshot.Name)
-	Expect(snapshot.LastDeployedTimeS).NotTo(BeElementOf("", "null", "0"),
-		"Ray Serve application %s reports no last_deployed_time_s, so a comparison of it "+
-			"would not detect a redeploy", snapshot.Name)
+	// Parsed rather than compared as text: last_deployed_time_s is a JSON number,
+	// so "0" is only one of its spellings and 0.0 or 0e0 would walk straight past
+	// a string comparison into a gate that is supposed to stop them.
+	deployedAt, err := strconv.ParseFloat(snapshot.LastDeployedTimeS, 64)
+	Expect(err).NotTo(HaveOccurred(),
+		"Ray Serve application %s reports last_deployed_time_s as %q, which is not a number",
+		snapshot.Name, snapshot.LastDeployedTimeS)
+	Expect(deployedAt).To(BeNumerically(">", 0),
+		"Ray Serve application %s reports last_deployed_time_s=%v, so a comparison of it "+
+			"would not detect a redeploy", snapshot.Name, deployedAt)
 
 	for _, field := range orchestrationPathFields {
 		Expect(orchestrationPathValue(snapshot, field)).NotTo(BeElementOf("", "null", `""`),

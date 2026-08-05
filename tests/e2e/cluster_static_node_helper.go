@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -335,25 +336,40 @@ type engineContainerIdentity struct {
 	StartedAt string `json:"started_at"`
 }
 
-// engineContainersOnNodes returns every container on the cluster's nodes that is
-// running image, keyed by container ID.
+// engineContainersOnNodes returns the containers on the cluster's nodes that are
+// running one endpoint's engine, keyed by container ID.
 //
-// The image is not a literal in this file on purpose. Filtering on a tag written
-// down by the test author is how a comparison ends up being made between two
-// empty sets: get the tag wrong and the filter matches nothing, both
-// observations come back empty, and "nothing changed" reads as a pass. The
-// caller therefore passes the image read out of the live Ray Serve config — the
-// system under test names its own engine image, so the filter cannot drift away
-// from what is actually running.
+// Neither of the two things it filters on is a literal in this file, and that is
+// the point.
+//
+// `image` comes from the live Ray Serve config. Filtering on a tag written down
+// by the test author is how a comparison ends up being made between two empty
+// sets: get the tag wrong and the filter matches nothing, both observations come
+// back empty, and "nothing changed" reads as a pass. Letting the system under
+// test name its own engine image means the filter cannot drift away from what is
+// actually running.
+//
+// `registryMountPath` is what makes the result one endpoint's containers rather
+// than every container on the node built from that image. The image alone is not
+// a scope: a cluster routinely runs several endpoints off the same engine image
+// — the sibling-isolation and multi-version blocks in the SSH endpoint suite each
+// stand up two — and set equality over all of them turns unrelated container
+// churn into a failure that reads as "changing an alias disturbed an endpoint".
+// The NFS registry mount is per endpoint by construction (`/mnt/<workspace>/
+// <endpoint>`, ray_orchestrator.go) and it is attached only to the Backend
+// container, not to the Controller or app_builder, which get the image with
+// nothing but `--rm`. So it selects exactly the replicas of one endpoint.
 //
 // The remaining way to observe nothing is that the engine is not running at all,
 // which is a broken probe rather than a passing test. So this fails the spec on
 // an empty result instead of returning one.
-func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image string) map[string]engineContainerIdentity {
+func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image,
+	registryMountPath string) map[string]engineContainerIdentity {
 	GinkgoHelper()
 
 	Expect(nodes).NotTo(BeEmpty(), "no static nodes to probe for engine containers")
 	Expect(image).NotTo(BeEmpty(), "engine image to probe for must not be empty")
+	Expect(registryMountPath).NotTo(BeEmpty(), "engine registry mount path to probe for must not be empty")
 
 	// StartedAt has to come from `docker inspect`: `docker ps` only offers
 	// CreatedAt, which a restart does not move — so a restarted container would
@@ -362,9 +378,11 @@ func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image stri
 	// `docker inspect` with no arguments, which exits non-zero.
 	command := "docker ps -q --no-trunc --filter " + shellSingleQuote("ancestor="+image) +
 		" | xargs -r docker inspect --format " +
-		shellSingleQuote("{{.Name}}|{{.Id}}|{{.Config.Image}}|{{.State.StartedAt}}")
+		shellSingleQuote("{{.Name}}|{{.Id}}|{{.Config.Image}}|{{.State.StartedAt}}|"+
+			"{{range .Mounts}}{{.Destination}};{{end}}")
 
 	found := map[string]engineContainerIdentity{}
+	skipped := 0
 
 	for _, node := range nodes {
 		if node.Spec == nil || node.Spec.IP == "" {
@@ -377,7 +395,13 @@ func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image stri
 
 		for _, line := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
 			fields := strings.Split(strings.TrimSpace(line), "|")
-			if len(fields) != 4 {
+			if len(fields) != 5 {
+				continue
+			}
+
+			if !slices.Contains(strings.Split(fields[4], ";"), registryMountPath) {
+				skipped++
+
 				continue
 			}
 
@@ -392,11 +416,14 @@ func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image stri
 	}
 
 	// The gate. Everything downstream compares this map against a later one, and
-	// comparing two empty maps succeeds for the wrong reason.
+	// comparing two empty maps succeeds for the wrong reason. The skipped count is
+	// in the message because "the image matched nothing" and "the image matched
+	// other endpoints' containers but none of this one's" are different failures.
 	Expect(found).NotTo(BeEmpty(),
-		"engine container probe found no container running image %q on any of the %d cluster nodes — "+
-			"the probe is not observing the engine, so a comparison against it would pass vacuously",
-		image, len(nodes))
+		"engine container probe found no container running image %q with %s mounted, on any of the %d "+
+			"cluster nodes (%d container(s) matched the image but not the mount) — the probe is not "+
+			"observing this endpoint's engine, so a comparison against it would pass vacuously",
+		image, registryMountPath, len(nodes), skipped)
 
 	return found
 }

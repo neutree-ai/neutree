@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -303,7 +304,21 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 				nodes := getStaticNodesForCluster(clusterName)
 				Expect(nodes).NotTo(BeEmpty(), "cluster %s reported no static nodes", clusterName)
 
-				containersBefore := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage)
+				// Scopes the container probe to this endpoint. The engine image
+				// alone does not: sibling endpoints on this cluster run the same
+				// image, so a set comparison over "everything built from that
+				// image" would turn their churn into a failure blamed on aliases.
+				// The path is the one orchestration builds per endpoint; asserting
+				// it is really in the live run options first means a change to that
+				// convention fails here, loudly, instead of silently selecting
+				// nothing and leaving the gate below to guess why.
+				registryMountPath := filepath.Join("/mnt", profileWorkspace(), epName)
+				Expect(orchestrationPathValue(before, "backend_container.run_options")).
+					To(ContainSubstring("dst="+registryMountPath),
+						"the engine container does not mount the NFS registry at the per-endpoint path "+
+							"this probe scopes on")
+
+				containersBefore := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage, registryMountPath)
 
 				epBefore := getEndpoint(epName)
 				Expect(epBefore.Status.Phase).To(BeEquivalentTo("Running"))
@@ -317,6 +332,14 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 				// followed by a sampling window, so a redeploy triggered by any one
 				// of them is caught while it is happening rather than only in the
 				// end-state comparison.
+				//
+				// That is three × 20s of deliberate waiting. It is the cost of the
+				// sampling half of the assertion and it is intentional: a redeploy
+				// that starts and finishes between two end-state reads would leave
+				// last_deployed_time_s moved, but a phase flicker that resolves the
+				// same way would not, and only sampling sees it. The end-state
+				// checks below are the definitive guards; this is what covers the
+				// window between them.
 				for _, alias := range []string{
 					"E2E Served " + Cfg.RunID,
 					"E2E Served Renamed " + Cfg.RunID,
@@ -362,7 +385,7 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 					"last_deployed_time_s moved — the Serve app was redeployed")
 
 				By("Verifying the engine containers were neither replaced nor restarted")
-				containersAfter := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage)
+				containersAfter := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage, registryMountPath)
 				Expect(containersAfter).To(Equal(containersBefore),
 					"the engine container set changed across an alias write")
 
