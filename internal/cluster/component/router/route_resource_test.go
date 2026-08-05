@@ -101,7 +101,7 @@ func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
 	t.Fatalf("router deployment not found in resources")
 }
 
-func TestBuildRouterDeploymentUsesReleaseInfoImage(t *testing.T) {
+func TestBuildRouterDeploymentUsesSelectedImage(t *testing.T) {
 	routerComponent := NewRouterComponentWithImage(
 		&v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},

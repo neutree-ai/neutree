@@ -104,20 +104,6 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 }
 
 func (m *MetricsComponent) acceleratorTypes() []string {
-	if m.releaseComponents != nil {
-		if m.cluster == nil || m.cluster.Spec == nil || m.cluster.Spec.Config == nil ||
-			m.cluster.Spec.Config.AcceleratorType == nil {
-			return nil
-		}
-
-		acceleratorType := strings.TrimSpace(*m.cluster.Spec.Config.AcceleratorType)
-		if acceleratorType == "" {
-			return nil
-		}
-
-		return []string{acceleratorType}
-	}
-
 	acceleratorTypes := append([]string{}, m.acceleratorMgr.SupportPlugins()...)
 	sort.Strings(acceleratorTypes)
 
@@ -149,9 +135,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	exporterProfile := profile.MetricsExporter
 
 	exporterImage := ""
-	if m.releaseComponents != nil {
-		exporterImage = m.releaseComponents["dcgm_exporter"]
-	} else if acceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() {
+	if acceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() {
 		exporterImage = componentversion.NVIDIADCGMExporterImage
 	}
 

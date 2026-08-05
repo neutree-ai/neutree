@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -586,14 +587,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		Namespace:                        m.namespace,
 		ImagePullSecret:                  m.imagePullSecret,
 		Version:                          version,
-		VMAgentImage:                     m.componentImage("vmagent", defaultVMAgentImage),
+		VMAgentImage:                     m.componentImage(m.profileComponents.VMAgent, defaultVMAgentImage),
 		NodeExporterName:                 nodeExporterDaemonSetName,
-		NodeExporterImage:                m.componentImage("node_exporter", defaultNodeExporterImage),
+		NodeExporterImage:                m.componentImage(m.profileComponents.NodeExporter, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     m.componentImage("node_agent", neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
+		NeutreeNodeAgentMetricsImage:     m.componentImage(m.profileComponents.NodeAgent, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsImage:            m.componentImage("kube_state_metrics", defaultKubeStateMetricsImage),
+		KubeStateMetricsImage:            m.componentImage(m.profileComponents.KubeStateMetrics, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),
@@ -605,10 +606,13 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	}
 }
 
-func (m *MetricsComponent) componentImage(component, legacyImage string) string {
+func (m *MetricsComponent) componentImage(component v1.ImageRef, legacyImage string) string {
 	image := legacyImage
-	if m != nil && m.releaseComponents != nil && m.releaseComponents[component] != "" {
-		image = m.releaseComponents[component]
+	if component.Image != "" {
+		image = component.Image
+		if component.Tag != "" {
+			image += ":" + component.Tag
+		}
 	}
 
 	return util.RewriteImageRef(m.imagePrefix, image)

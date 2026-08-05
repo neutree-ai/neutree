@@ -6,7 +6,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
+	"github.com/neutree-ai/neutree/internal/cluster/clusterprofile"
 	"github.com/neutree-ai/neutree/internal/cluster/staticnode"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -27,16 +27,15 @@ type ControllerFactory func(opts *ControllerOptions) (controllers.Controller, er
 
 func NewClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
-		releaseInfoProvider := releaseinfo.NewProvider(opts.config.Storage, opts.config.Version)
+		clusterProfileProvider := clusterprofile.NewProvider(opts.config.Storage)
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
-				Storage:                  opts.config.Storage,
-				Gw:                       opts.config.Gateway,
-				AcceleratorManager:       opts.config.AcceleratorManager,
-				ReleaseComponentResolver: releaseInfoProvider,
-				ReleaseInfoProvider:      releaseInfoProvider,
-				ObsCollectConfigManager:  opts.config.ObsCollectConfigManager,
-				MetricsRemoteWriteURL:    opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
+				Storage:                         opts.config.Storage,
+				Gw:                              opts.config.Gateway,
+				AcceleratorManager:              opts.config.AcceleratorManager,
+				ClusterProfileComponentResolver: clusterProfileProvider,
+				ObsCollectConfigManager:         opts.config.ObsCollectConfigManager,
+				MetricsRemoteWriteURL:           opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
 			},
 		)
 
@@ -275,9 +274,10 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
-				Storage:                    opts.config.Storage,
-				AcceleratorProfileProvider: opts.config.AcceleratorManager,
-				MetricsRemoteWriteURL:      opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
+				Storage:                          opts.config.Storage,
+				ClusterProfileComponentsResolver: clusterprofile.NewProvider(opts.config.Storage),
+				AcceleratorProfileProvider:       opts.config.AcceleratorManager,
+				MetricsRemoteWriteURL:            opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
 			},
 		)
 		if err != nil {

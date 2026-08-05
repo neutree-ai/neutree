@@ -11,8 +11,13 @@ import (
 )
 
 type Planner struct {
-	AcceleratorProfileProvider AcceleratorProfileProvider
-	MetricsRemoteWriteURL      string
+	ClusterProfileComponentsResolver ClusterProfileComponentsResolver
+	AcceleratorProfileProvider       AcceleratorProfileProvider
+	MetricsRemoteWriteURL            string
+}
+
+type ClusterProfileComponentsResolver interface {
+	ComponentsFor(clusterVersion string) (v1.ClusterProfileComponents, error)
 }
 
 type AcceleratorProfileProvider interface {
@@ -65,6 +70,11 @@ func (r *Planner) buildDesiredNodePlans(
 
 	if len(cluster.Spec.Nodes) == 0 {
 		return nil, errors.New("static node cluster spec.nodes is required")
+	}
+
+	profileComponents, err := r.profileComponents(cluster.Spec.Version)
+	if err != nil {
+		return nil, err
 	}
 
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
@@ -121,7 +131,7 @@ func (r *Planner) buildDesiredNodePlans(
 			return nil, err
 		}
 
-		components := buildNodeComponents(cluster, desiredNode, profile, r.MetricsRemoteWriteURL)
+		components := buildNodeComponents(cluster, desiredNode, profileComponents, profile, r.MetricsRemoteWriteURL)
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
@@ -164,4 +174,17 @@ func (r *Planner) buildDesiredNodePlans(
 	}
 
 	return plans, nil
+}
+
+func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, error) {
+	if r == nil || r.ClusterProfileComponentsResolver == nil {
+		return v1.ClusterProfileComponents{}, nil
+	}
+
+	components, err := r.ClusterProfileComponentsResolver.ComponentsFor(version)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, fmt.Errorf("resolve cluster profile components: %w", err)
+	}
+
+	return components, nil
 }

@@ -82,10 +82,15 @@ func buildMetricsComponents(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
 	role v1.StaticNodeRole,
+	profileComponents v1.ClusterProfileComponents,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
 ) []v1.NodeComponentSpec {
-	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
+	if !util.IsHTTPOrHTTPSURL(metricsRemoteWriteURL) {
+		return nil
+	}
+
+	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster, profileComponents.NodeExporter)}
 
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
 		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
@@ -95,19 +100,19 @@ func buildMetricsComponents(
 		}
 	}
 
-	components = append(components, buildNodeAgentComponent(cluster, node, profile))
+	components = append(components, buildNodeAgentComponent(cluster, node, profileComponents.NodeAgent, profile))
 
-	if role == v1.StaticNodeRoleHead && util.IsHTTPOrHTTPSURL(metricsRemoteWriteURL) {
-		components = append(components, buildVMAgentComponent(cluster, metricsRemoteWriteURL))
+	if role == v1.StaticNodeRoleHead {
+		components = append(components, buildVMAgentComponent(cluster, profileComponents.VMAgent, metricsRemoteWriteURL))
 	}
 
 	return components
 }
 
-func buildNodeExporterComponent(cluster *v1.StaticNodeCluster) v1.NodeComponentSpec {
+func buildNodeExporterComponent(cluster *v1.StaticNodeCluster, component v1.ImageRef) v1.NodeComponentSpec {
 	return v1.NodeComponentSpec{
 		Name:  nodeExporterComponentName,
-		Image: componentImage(cluster, "node_exporter", defaultNodeExporterImage),
+		Image: componentImage(cluster, component, defaultNodeExporterImage),
 		Args: []string{
 			"--path.rootfs=/host",
 			fmt.Sprintf("--web.listen-address=:%d", defaultNodeExporterPort),
@@ -152,10 +157,6 @@ func acceleratorExporterImage(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
 ) string {
-	if image := releaseComponentImage(cluster, "dcgm_exporter"); image != "" {
-		return image
-	}
-
 	if exporter == nil || exporter.Name != "dcgm-exporter" {
 		return ""
 	}
@@ -188,6 +189,7 @@ func buildAcceleratorExporterComponent(
 func buildNodeAgentComponent(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
+	component v1.ImageRef,
 	profile *v1.AcceleratorProfile,
 ) v1.NodeComponentSpec {
 	args := []string{
@@ -209,7 +211,7 @@ func buildNodeAgentComponent(
 
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
-		Image:            componentImage(cluster, "node_agent", defaultNodeAgentImage(cluster)),
+		Image:            componentImage(cluster, component, defaultNodeAgentImage(cluster)),
 		Args:             args,
 		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
@@ -313,7 +315,11 @@ func copyMetricsStringMap(values map[string]string) map[string]string {
 	return copied
 }
 
-func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL string) v1.NodeComponentSpec {
+func buildVMAgentComponent(
+	cluster *v1.StaticNodeCluster,
+	component v1.ImageRef,
+	metricsRemoteWriteURL string,
+) v1.NodeComponentSpec {
 	vmagentArgs := []string{
 		"-promscrape.config=" + vmagentConfigPath,
 		fmt.Sprintf("-httpListenAddr=:%d", defaultVMAgentPort),
@@ -324,7 +330,7 @@ func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL 
 
 	return v1.NodeComponentSpec{
 		Name:             vmagentComponentName,
-		Image:            componentImage(cluster, "vmagent", defaultVMAgentImage),
+		Image:            componentImage(cluster, component, defaultVMAgentImage),
 		Args:             vmagentArgs,
 		DockerRunOptions: []string{"--net=host"},
 		Volumes: []v1.NodeComponentVolume{

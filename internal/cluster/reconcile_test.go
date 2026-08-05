@@ -1,13 +1,9 @@
 package cluster
 
 import (
-	"errors"
 	"testing"
 
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -58,61 +54,50 @@ func TestNewReconcileRejectsInvalidClusterVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid cluster version")
 }
 
-func TestNewReconcileWithReleaseInfoResolvesReleaseAwareClusterComponents(t *testing.T) {
-	resolver := componentResolverFunc(func(version, acceleratorType string) (map[string]string, error) {
-		assert.Equal(t, "v1.1.0", version)
-		assert.Equal(t, "amd_gpu", acceleratorType)
-		return map[string]string{"ray_runtime": "neutree/neutree-serve:v1.1.0-rocm", "router": "neutree/router:v1.1.0"}, nil
-	})
-
-	reconciler, err := NewReconcileWithReleaseInfo(&v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.1.0",
-			Config:  &v1.ClusterConfig{AcceleratorType: stringPointer("amd_gpu")},
-		},
-	}, nil, nil, "", resolver)
-
-	require.NoError(t, err)
-	staticReconciler, ok := reconciler.(*staticRayReconciler)
-	require.True(t, ok)
-	assert.Equal(t, "neutree/neutree-serve:v1.1.0-rocm", staticReconciler.releaseComponents["ray_runtime"])
-}
-
-func TestNewReconcileWithReleaseInfoRejectsMissingReleaseMatrix(t *testing.T) {
-	resolver := componentResolverFunc(func(string, string) (map[string]string, error) {
-		return nil, errors.New("release info v1.2.0 not found")
-	})
-
-	reconciler, err := NewReconcileWithReleaseInfo(&v1.Cluster{
-		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
-	}, nil, nil, "", resolver)
-
-	require.ErrorContains(t, err, "resolve release components")
-	assert.Nil(t, reconciler)
-}
-
-func TestNewReconcileWithReleaseInfoPersistsUpgradeSnapshot(t *testing.T) {
-	store := new(storagemocks.MockStorage)
-	resolver := &releaseInfoResolver{
-		info: &v1.ReleaseInfo{
-			Metadata: &v1.Metadata{Name: "v1.2.0"},
-			Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{
-				{
-					Version:   "v1.1.0",
-					State:     v1.ReleaseInfoClusterVersionStateActive,
-					UpgradeTo: []string{"v1.2.0"},
-				},
-				{
-					Version:    "v1.2.0",
-					State:      v1.ReleaseInfoClusterVersionStateActive,
-					Components: map[string]string{"ray_runtime": "neutree/neutree-serve:v1.1.1"},
-				},
-			}},
-			Status: &v1.ReleaseInfoStatus{Revision: "revision-2"},
-		},
-		components: map[string]string{"ray_runtime": "neutree/neutree-serve:v1.1.1"},
+func TestNewReconcileWithClusterProfileUsesExactVersionForKubernetes(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		tag     string
+	}{
+		{name: "stable", version: "v1.2.0", tag: "v1.1.1"},
+		{name: "alpha", version: "v1.2.0-alpha.1", tag: "v1.1.1-alpha.1"},
+		{name: "release candidate", version: "v1.2.0-rc.1", tag: "v1.1.1-rc.1"},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolvedVersion := ""
+			resolver := clusterProfileComponentResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+				resolvedVersion = version
+				return v1.ClusterProfileComponents{
+					RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: tt.tag},
+					Router:     v1.ImageRef{Image: "neutree/router", Tag: tt.tag},
+				}, nil
+			})
+
+			reconciler, err := NewReconcileWithClusterProfile(&v1.Cluster{
+				Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: tt.version},
+			}, nil, nil, "", resolver)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.version, resolvedVersion)
+			nativeReconciler, ok := reconciler.(*NativeKubernetesClusterReconciler)
+			require.True(t, ok)
+			assert.Equal(t, tt.tag, nativeReconciler.profileComponents.RayRuntime.Tag)
+			assert.Equal(t, tt.tag, nativeReconciler.profileComponents.Router.Tag)
+		})
+	}
+}
+
+func TestNewReconcileWithClusterProfileUsesTargetProfileDuringUpgradeWithoutSnapshot(t *testing.T) {
+	resolver := clusterProfileComponentResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+		assert.Equal(t, "v1.2.0", version)
+
+		return v1.ClusterProfileComponents{
+			RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+		}, nil
+	})
 	cluster := &v1.Cluster{
 		ID: 7,
 		Spec: &v1.ClusterSpec{
@@ -122,124 +107,18 @@ func TestNewReconcileWithReleaseInfoPersistsUpgradeSnapshot(t *testing.T) {
 		Status: &v1.ClusterStatus{Version: "v1.1.0"},
 	}
 
-	store.On("GetClusterUpgradeSnapshot", "7").Return(nil, storage.ErrResourceNotFound).Once()
-	store.On("CreateClusterUpgradeSnapshot", mock.MatchedBy(func(snapshot *v1.ClusterUpgradeSnapshot) bool {
-		return snapshot.ClusterID == 7 &&
-			snapshot.SourceClusterVersion == "v1.1.0" &&
-			snapshot.TargetClusterVersion == "v1.2.0" &&
-			snapshot.SourceReleaseInfo.Baseline == "v1.2.0" &&
-			snapshot.TargetReleaseInfo.Baseline == "v1.2.0" &&
-			snapshot.TargetReleaseInfo.Revision == "revision-2" &&
-			snapshot.Components["ray_runtime"] == "neutree/neutree-serve:v1.1.1"
-	})).Return(nil).Once()
-
-	reconciler, err := NewReconcileWithReleaseInfo(cluster, nil, store, "", resolver)
+	reconciler, err := NewReconcileWithClusterProfile(cluster, nil, nil, "", resolver)
 
 	require.NoError(t, err)
 	staticReconciler, ok := reconciler.(*staticRayReconciler)
 	require.True(t, ok)
-	assert.Equal(t, "neutree/neutree-serve:v1.1.1", staticReconciler.releaseComponents["ray_runtime"])
-	store.AssertExpectations(t)
+	assert.Equal(t, "v1.1.1", staticReconciler.profileComponents.RayRuntime.Tag)
 }
 
-func TestNewReconcileWithReleaseInfoSnapshotsComponentsFromCurrentReleaseInfo(t *testing.T) {
-	store := new(storagemocks.MockStorage)
-	resolver := &releaseInfoResolver{
-		info: &v1.ReleaseInfo{
-			Metadata: &v1.Metadata{Name: "v1.2.0"},
-			Spec: &v1.ReleaseInfoSpec{ClusterVersions: []v1.ReleaseInfoClusterVersion{
-				{
-					Version:   "v1.1.0",
-					State:     v1.ReleaseInfoClusterVersionStateActive,
-					UpgradeTo: []string{"v1.2.0"},
-				},
-				{
-					Version: "v1.2.0",
-					State:   v1.ReleaseInfoClusterVersionStateActive,
-					Components: map[string]string{
-						"ray_runtime": "registry.example/release-info-runtime:v1.2.0",
-					},
-					AcceleratorComponents: map[string]map[string]string{
-						"amd_gpu": {"ray_runtime": "registry.example/release-info-runtime:v1.2.0-rocm"},
-					},
-				},
-			}},
-			Status: &v1.ReleaseInfoStatus{Revision: "nightly-revision-9"},
-		},
-		components: map[string]string{"ray_runtime": "registry.example/stale-components-for:v0"},
-	}
-	acceleratorType := "amd_gpu"
-	cluster := &v1.Cluster{
-		ID: 8,
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.2.0",
-			Config:  &v1.ClusterConfig{AcceleratorType: &acceleratorType},
-		},
-		Status: &v1.ClusterStatus{Version: "v1.1.0"},
-	}
+type clusterProfileComponentResolverFunc func(string) (v1.ClusterProfileComponents, error)
 
-	store.On("GetClusterUpgradeSnapshot", "8").Return(nil, storage.ErrResourceNotFound).Once()
-	store.On("CreateClusterUpgradeSnapshot", mock.MatchedBy(func(snapshot *v1.ClusterUpgradeSnapshot) bool {
-		return snapshot.TargetReleaseInfo.Revision == "nightly-revision-9" &&
-			snapshot.Components["ray_runtime"] == "registry.example/release-info-runtime:v1.2.0-rocm"
-	})).Return(nil).Once()
-
-	reconciler, err := NewReconcileWithReleaseInfo(cluster, nil, store, "", resolver)
-
-	require.NoError(t, err)
-	staticReconciler, ok := reconciler.(*staticRayReconciler)
-	require.True(t, ok)
-	assert.Equal(t, "registry.example/release-info-runtime:v1.2.0-rocm", staticReconciler.releaseComponents["ray_runtime"])
-	store.AssertExpectations(t)
-}
-
-func TestNewReconcileWithReleaseInfoReusesUpgradeSnapshot(t *testing.T) {
-	store := new(storagemocks.MockStorage)
-	cluster := &v1.Cluster{
-		ID: 7,
-		Spec: &v1.ClusterSpec{
-			Type:    v1.SSHClusterType,
-			Version: "v1.2.0",
-		},
-		Status: &v1.ClusterStatus{Version: "v1.1.0"},
-	}
-	store.On("GetClusterUpgradeSnapshot", "7").Return(&v1.ClusterUpgradeSnapshot{
-		ClusterID:            7,
-		SourceClusterVersion: "v1.1.0",
-		TargetClusterVersion: "v1.2.0",
-		Components:           map[string]string{"ray_runtime": "snapshot/serve:v1.1.1"},
-	}, nil).Once()
-
-	reconciler, err := NewReconcileWithReleaseInfo(cluster, nil, store, "", componentResolverFunc(func(string, string) (map[string]string, error) {
-		t.Fatal("resolver must not be called when an upgrade snapshot exists")
-		return nil, nil
-	}))
-
-	require.NoError(t, err)
-	staticReconciler, ok := reconciler.(*staticRayReconciler)
-	require.True(t, ok)
-	assert.Equal(t, "snapshot/serve:v1.1.1", staticReconciler.releaseComponents["ray_runtime"])
-	store.AssertExpectations(t)
-}
-
-type componentResolverFunc func(string, string) (map[string]string, error)
-
-func (resolver componentResolverFunc) ComponentsFor(version, acceleratorType string) (map[string]string, error) {
-	return resolver(version, acceleratorType)
-}
-
-type releaseInfoResolver struct {
-	info       *v1.ReleaseInfo
-	components map[string]string
-}
-
-func (resolver *releaseInfoResolver) ComponentsFor(string, string) (map[string]string, error) {
-	return resolver.components, nil
-}
-
-func (resolver *releaseInfoResolver) Current() (*v1.ReleaseInfo, error) {
-	return resolver.info, nil
+func (resolver clusterProfileComponentResolverFunc) ComponentsFor(version string) (v1.ClusterProfileComponents, error) {
+	return resolver(version)
 }
 
 func stringPointer(value string) *string {

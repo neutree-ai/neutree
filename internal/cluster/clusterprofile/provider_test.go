@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func TestProviderResolvesExactClusterProfileVersion(t *testing.T) {
@@ -44,7 +45,7 @@ type reader struct {
 	err      error
 }
 
-func (reader *reader) ListClusterProfile() ([]v1.ClusterProfile, error) {
+func (reader *reader) ListClusterProfile(storage.ListOption) ([]v1.ClusterProfile, error) {
 	return reader.profiles, reader.err
 }
 

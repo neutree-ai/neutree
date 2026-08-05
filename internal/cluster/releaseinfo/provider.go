@@ -57,27 +57,3 @@ func (provider *Provider) ClusterVersion(version string) (*v1.ReleaseInfoCluster
 
 	return nil, fmt.Errorf("cluster version %s is not supported by release info %s", version, info.GetName())
 }
-
-// ComponentsFor resolves generic components plus selected accelerator overrides.
-func (provider *Provider) ComponentsFor(clusterVersion, acceleratorType string) (map[string]string, error) {
-	version, err := provider.ClusterVersion(clusterVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	components := copyComponents(version.Components)
-	for name, image := range version.AcceleratorComponents[acceleratorType] {
-		components[name] = image
-	}
-
-	return components, nil
-}
-
-func copyComponents(components map[string]string) map[string]string {
-	copied := make(map[string]string, len(components))
-	for name, image := range components {
-		copied[name] = image
-	}
-
-	return copied
-}

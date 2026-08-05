@@ -27,7 +27,7 @@ type staticRayReconciler struct {
 	storage            storage.Storage
 	acceleratorManager accelerator.Manager
 	legacy             ClusterReconcile
-	releaseComponents  map[string]string
+	profileComponents  v1.ClusterProfileComponents
 }
 
 func (r *staticRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error {
@@ -316,7 +316,6 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
-			Components:      copyReleaseComponents(r.releaseComponents),
 			Metrics:         copyStaticClusterMetricsConfig(c.Spec.Config),
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),

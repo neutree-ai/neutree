@@ -4,12 +4,13 @@ import (
 	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // Reader is the read-only storage boundary used by runtime ClusterProfile
 // consumers.
 type Reader interface {
-	ListClusterProfile() ([]v1.ClusterProfile, error)
+	ListClusterProfile(option storage.ListOption) ([]v1.ClusterProfile, error)
 }
 
 // Provider resolves a ClusterProfile by its complete Cluster version.
@@ -25,7 +26,7 @@ func NewProvider(reader Reader) *Provider {
 // ProfileFor returns the exact full-version ClusterProfile. It deliberately
 // does not fall back to a baseline or minor profile.
 func (provider *Provider) ProfileFor(clusterVersion string) (*v1.ClusterProfile, error) {
-	profiles, err := provider.reader.ListClusterProfile()
+	profiles, err := provider.reader.ListClusterProfile(storage.ListOption{})
 	if err != nil {
 		return nil, fmt.Errorf("list cluster profiles: %w", err)
 	}

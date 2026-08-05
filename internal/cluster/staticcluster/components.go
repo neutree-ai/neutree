@@ -21,6 +21,7 @@ const (
 func buildNodeComponents(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
+	profileComponents v1.ClusterProfileComponents,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
 ) []v1.NodeComponentSpec {
@@ -29,9 +30,9 @@ func buildNodeComponents(
 		role = node.Spec.Role
 	}
 
-	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
+	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profileComponents, profile)}
 
-	return append(components, buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)...)
+	return append(components, buildMetricsComponents(cluster, node, role, profileComponents, profile, metricsRemoteWriteURL)...)
 }
 
 func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
@@ -41,9 +42,10 @@ func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeCompo
 func buildRayComponent(
 	cluster *v1.StaticNodeCluster,
 	role v1.StaticNodeRole,
+	profileComponents v1.ClusterProfileComponents,
 	profile *v1.AcceleratorProfile,
 ) v1.NodeComponentSpec {
-	image := buildRayRuntimeImage(cluster, clusterRuntimeImageSuffix(profile))
+	image := buildRayRuntimeImage(cluster, profileComponents.RayRuntime)
 	env := rayRuntimeEnv(profile)
 	dockerRunOptions := rayRuntimeDockerRunOptions(profile)
 	command := []string{"/bin/bash", "-lc"}
@@ -117,14 +119,6 @@ func rayRuntimeDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options = append(options, profile.ClusterRuntime.Options...)
 
 	return options
-}
-
-func clusterRuntimeImageSuffix(profile *v1.AcceleratorProfile) string {
-	if profile == nil || profile.ClusterRuntime == nil {
-		return ""
-	}
-
-	return profile.ClusterRuntime.ImageSuffix
 }
 
 func rayStartCommand(
@@ -240,8 +234,8 @@ func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
 	}
 }
 
-func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string) string {
-	if image := releaseComponentImage(cluster, "ray_runtime"); image != "" {
+func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, component v1.ImageRef) string {
+	if image := profileComponentImage(cluster, component); image != "" {
 		return image
 	}
 
@@ -249,12 +243,7 @@ func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string
 		return ""
 	}
 
-	imageSuffix := ""
-	if len(imageSuffixes) > 0 {
-		imageSuffix = imageSuffixes[0]
-	}
-
-	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, imageSuffix)
+	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, "")
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {

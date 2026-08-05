@@ -4,13 +4,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestProviderResolvesCurrentBaselineAndAcceleratorOverrides(t *testing.T) {
+func TestProviderResolvesCurrentBaseline(t *testing.T) {
 	store := &releaseInfoReader{infos: []v1.ReleaseInfo{
 		*mustSeed(t, "v1.1.0"),
 		*mustSeed(t, "v1.2.0"),
@@ -21,11 +20,6 @@ func TestProviderResolvesCurrentBaselineAndAcceleratorOverrides(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "v1.2.0", info.GetName())
 
-	components, err := provider.ComponentsFor("v1.2.0", "amd_gpu")
-	require.NoError(t, err)
-	assert.Equal(t, "neutree/neutree-serve:v1.1.1-rocm", components["ray_runtime"])
-	assert.Equal(t, "neutree/router:v1.1.1", components["router"])
-	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-rc.1", components["node_agent"])
 }
 
 func TestProviderReturnsErrorWhenCurrentBaselineIsMissing(t *testing.T) {

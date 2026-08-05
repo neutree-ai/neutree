@@ -143,21 +143,21 @@ func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
 	return util.RewriteImageRef(imageRegistry, image)
 }
 
-func releaseComponentImage(cluster *v1.StaticNodeCluster, component string) string {
-	if cluster == nil || cluster.Spec == nil {
+func profileComponentImage(cluster *v1.StaticNodeCluster, component v1.ImageRef) string {
+	if component.Image == "" {
 		return ""
 	}
 
-	image := cluster.Spec.Components[component]
-	if image == "" {
-		return ""
+	image := component.Image
+	if component.Tag != "" {
+		image += ":" + component.Tag
 	}
 
 	return staticComponentImage(cluster, image)
 }
 
-func componentImage(cluster *v1.StaticNodeCluster, component, legacyImage string) string {
-	if image := releaseComponentImage(cluster, component); image != "" {
+func componentImage(cluster *v1.StaticNodeCluster, component v1.ImageRef, legacyImage string) string {
+	if image := profileComponentImage(cluster, component); image != "" {
 		return image
 	}
 

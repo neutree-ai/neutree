@@ -27,32 +27,32 @@ type NativeKubernetesClusterReconciler struct {
 	storage               storage.Storage
 	acceleratorMgr        accelerator.Manager
 	metricsRemoteWriteURL string
-	releaseComponents     map[string]string
+	profileComponents     v1.ClusterProfileComponents
 }
 
 func NewNativeKubernetesClusterReconciler(
 	storage storage.Storage,
 	acceleratorMgr accelerator.Manager,
 	metricsRemoteWriteURL string) *NativeKubernetesClusterReconciler {
-	return NewNativeKubernetesClusterReconcilerWithReleaseComponents(
+	return NewNativeKubernetesClusterReconcilerWithClusterProfileComponents(
 		storage,
 		acceleratorMgr,
 		metricsRemoteWriteURL,
-		nil,
+		v1.ClusterProfileComponents{},
 	)
 }
 
-func NewNativeKubernetesClusterReconcilerWithReleaseComponents(
+func NewNativeKubernetesClusterReconcilerWithClusterProfileComponents(
 	storage storage.Storage,
 	acceleratorMgr accelerator.Manager,
 	metricsRemoteWriteURL string,
-	releaseComponents map[string]string,
+	profileComponents v1.ClusterProfileComponents,
 ) *NativeKubernetesClusterReconciler {
 	c := &NativeKubernetesClusterReconciler{
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		storage:               storage,
 		acceleratorMgr:        acceleratorMgr,
-		releaseComponents:     copyReleaseComponents(releaseComponents),
+		profileComponents:     profileComponents,
 	}
 
 	return c
@@ -64,7 +64,7 @@ func (c *NativeKubernetesClusterReconciler) Reconcile(ctx context.Context, clust
 	reconcileCtx := &ReconcileContext{
 		Cluster:           cluster,
 		Ctx:               ctx,
-		ReleaseComponents: copyReleaseComponents(c.releaseComponents),
+		ProfileComponents: c.profileComponents,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 		logger:           klog.LoggerWithValues(klog.Background(), "cluster", cluster.Metadata.WorkspaceName()),
@@ -184,7 +184,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		reconcileCtx.clusterNamespace,
 		imagePrefix,
 		ImagePullSecretName,
-		reconcileCtx.ReleaseComponents["router"],
+		profileImage(reconcileCtx.ProfileComponents.Router),
 		*reconcileCtx.kubernetesClusterConfig,
 		reconcileCtx.ctrClient,
 	)
@@ -234,7 +234,7 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	reconcileDeleteComps := []component.Component{}
 
 	// Only install metrics component when metrics remote write url is valid.
-	metricsComp := metrics.NewMetricsComponentWithReleaseComponents(
+	metricsComp := metrics.NewMetricsComponentWithClusterProfileComponents(
 		reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace,
 		imagePrefix,
@@ -243,7 +243,7 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 		*reconcileCtx.kubernetesClusterConfig,
 		reconcileCtx.ctrClient,
 		c.acceleratorMgr,
-		reconcileCtx.ReleaseComponents,
+		reconcileCtx.ProfileComponents,
 	)
 	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
 		reconcileComps = append(reconcileComps, metricsComp)
@@ -269,7 +269,7 @@ func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context,
 	reconcileCtx := &ReconcileContext{
 		Cluster:           cluster,
 		Ctx:               ctx,
-		ReleaseComponents: copyReleaseComponents(c.releaseComponents),
+		ProfileComponents: c.profileComponents,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 	}

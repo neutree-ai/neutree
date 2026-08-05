@@ -25,8 +25,6 @@ type StaticNodeClusterSpec struct {
 	Version string `json:"version,omitempty"`
 	// ImageRegistry is the registry prefix used when rendering static node component images.
 	ImageRegistry string `json:"image_registry,omitempty"`
-	// Components is the controller-owned resolved ReleaseInfo image snapshot.
-	Components map[string]string `json:"components,omitempty"`
 	// Metrics configures static-node observability collectors.
 	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	// Nodes declares the desired static machines that make up the cluster.
