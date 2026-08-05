@@ -36,9 +36,10 @@ type ReleaseInfo struct {
 }
 
 type ReleaseInfoSpec struct {
-	Channel         ReleaseInfoChannel          `json:"channel,omitempty"`
-	BuildIdentity   string                      `json:"build_identity,omitempty"`
-	ClusterVersions []ReleaseInfoClusterVersion `json:"cluster_versions,omitempty"`
+	CompatibleClusterBaselines []string                    `json:"compatible_cluster_baselines,omitempty"`
+	Channel                    ReleaseInfoChannel          `json:"channel,omitempty"`
+	BuildIdentity              string                      `json:"build_identity,omitempty"`
+	ClusterVersions            []ReleaseInfoClusterVersion `json:"cluster_versions,omitempty"`
 }
 
 type ReleaseInfoClusterVersion struct {

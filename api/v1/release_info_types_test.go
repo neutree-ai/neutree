@@ -36,8 +36,9 @@ func TestReleaseInfoJSONRoundTripPreservesComponentMatrix(t *testing.T) {
 		Kind:       ReleaseInfoKind,
 		Metadata:   &Metadata{Name: "v1.2.0"},
 		Spec: &ReleaseInfoSpec{
-			Channel:       ReleaseInfoChannelStable,
-			BuildIdentity: "v1.2.0",
+			CompatibleClusterBaselines: []string{"v1.2.0"},
+			Channel:                    ReleaseInfoChannelStable,
+			BuildIdentity:              "v1.2.0",
 			ClusterVersions: []ReleaseInfoClusterVersion{
 				{
 					Version:   "v1.2.0",
@@ -66,6 +67,7 @@ func TestReleaseInfoJSONRoundTripPreservesComponentMatrix(t *testing.T) {
 	require.NotNil(t, output.Spec)
 	require.Len(t, output.Spec.ClusterVersions, 1)
 	assert.Equal(t, "v1.2.0", output.Metadata.Name)
+	assert.Equal(t, []string{"v1.2.0"}, output.Spec.CompatibleClusterBaselines)
 	assert.Equal(t, ReleaseInfoChannelStable, output.Spec.Channel)
 	assert.Equal(t, "neutree/neutree-serve:v1.1.1-rocm", output.Spec.ClusterVersions[0].AcceleratorComponents["amd_gpu"]["ray_runtime"])
 	assert.Equal(t, "seed-v1.2.0", output.Status.Revision)

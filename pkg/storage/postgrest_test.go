@@ -161,6 +161,53 @@ func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
 	assert.Equal(t, "eq.7", third.URL.Query().Get("id"))
 }
 
+func TestClusterProfileStorageUsesInternalTable(t *testing.T) {
+	requests := make(chan *http.Request, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ClusterProfile","metadata":{"name":"v1.2.0-rc.1"},"spec":{"components":{"ray_runtime":{"image":"neutree/neutree-serve","tag":"v1.2.0-rc.1"}}}}]`))
+		case http.MethodPost:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`[]`))
+		case http.MethodPatch:
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := newTestStorage(t, server.URL)
+	profiles, err := s.ListClusterProfile(ListOption{Filters: []Filter{{Column: "id", Operator: "eq", Value: "7"}}})
+	require.NoError(t, err)
+	require.Len(t, profiles, 1)
+	assert.Equal(t, "v1.2.0-rc.1", profiles[0].GetName())
+	assert.Equal(t, "neutree/neutree-serve", profiles[0].Spec.Components.RayRuntime.Image)
+
+	profile := &v1.ClusterProfile{Metadata: &v1.Metadata{Name: "v1.2.0-rc.1"}}
+	require.NoError(t, s.CreateClusterProfile(profile))
+	require.NoError(t, s.UpdateClusterProfile("7", profile))
+
+	first := <-requests
+	assert.Equal(t, http.MethodGet, first.Method)
+	assert.Equal(t, "/cluster_profiles", first.URL.Path)
+	assert.Equal(t, "eq.7", first.URL.Query().Get("id"))
+
+	second := <-requests
+	assert.Equal(t, http.MethodPost, second.Method)
+	assert.Equal(t, "/cluster_profiles", second.URL.Path)
+
+	third := <-requests
+	assert.Equal(t, http.MethodPatch, third.Method)
+	assert.Equal(t, "/cluster_profiles", third.URL.Path)
+	assert.Equal(t, "eq.7", third.URL.Query().Get("id"))
+}
+
 func TestClusterUpgradeSnapshotStorageUsesInternalTable(t *testing.T) {
 	requests := make(chan *http.Request, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

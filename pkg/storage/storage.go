@@ -28,6 +28,7 @@ const (
 	API_KEY_TABLE                  = "api_keys"
 	USER_PROFILE_TABLE             = "user_profiles"
 	EXTERNAL_ENDPOINT_TABLE        = "external_endpoints"
+	CLUSTER_PROFILE_TABLE          = "cluster_profiles"
 	RELEASE_INFO_TABLE             = "release_infos"
 	CLUSTER_UPGRADE_SNAPSHOT_TABLE = "cluster_upgrade_snapshots"
 	STATIC_NODE_CLUSTER_TABLE      = "static_node_clusters"
@@ -231,6 +232,12 @@ type ReleaseInfoStorage interface {
 	UpdateReleaseInfo(id string, data *v1.ReleaseInfo) error
 }
 
+type ClusterProfileStorage interface {
+	ListClusterProfile(option ListOption) ([]v1.ClusterProfile, error)
+	CreateClusterProfile(data *v1.ClusterProfile) error
+	UpdateClusterProfile(id string, data *v1.ClusterProfile) error
+}
+
 // ClusterUpgradeSnapshotStorage persists private controller upgrade inputs.
 // Snapshots are neither user-facing resources nor general-purpose history.
 type ClusterUpgradeSnapshotStorage interface {
@@ -255,6 +262,7 @@ type Storage interface {
 	ExternalEndpointStorage
 	StaticNodeClusterStorage
 	StaticNodeStorage
+	ClusterProfileStorage
 	ReleaseInfoStorage
 	ClusterUpgradeSnapshotStorage
 
