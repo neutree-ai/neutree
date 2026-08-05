@@ -430,6 +430,7 @@ func TestModelRegistryController_UpdateStatus_CarriesStatsForward(t *testing.T) 
 			input:     testModelRegistry(v1.ModelRegistryPhaseCONNECTED),
 			wantPhase: v1.ModelRegistryPhaseFAILED,
 			mockSetup: func(m *modelregistrymocks.MockModelRegistry) {
+				m.On("Connect").Return(nil)
 				m.On("HealthyCheck").Return(assert.AnError)
 			},
 			wantErr: true,
@@ -441,6 +442,7 @@ func TestModelRegistryController_UpdateStatus_CarriesStatsForward(t *testing.T) 
 			mockSetup: func(m *modelregistrymocks.MockModelRegistry) {
 				m.On("Disconnect").Return(nil)
 				m.On("Connect").Return(nil)
+				m.On("HealthyCheck").Return(nil)
 			},
 		},
 	}
