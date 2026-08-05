@@ -75,14 +75,15 @@ func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	if err := registerImageRegistryAdmission(deps); err != nil {
 		return err
 	}
-	var patchRunner gin.HandlerFunc
+	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, imageRegistryAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.IMAGE_REGISTRY_TABLE, imageRegistryAdmissionResource)
 	}
 	handler := CreateStructProxyHandler[v1.ImageRegistry](deps, storage.IMAGE_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", validateImageRegistryURL(), handler)
+	proxyGroup.POST("", append([]gin.HandlerFunc{validateImageRegistryURL()}, withAdmissionRunner(createRunner, handler)...)...)
 	proxyGroup.PATCH("", append(withAdmissionRunner(patchRunner, validateImageRegistryURL()), handler)...)
 	return nil
 }

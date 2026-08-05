@@ -37,14 +37,15 @@ func RegisterModelRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	if err := registerModelRegistryAdmission(deps); err != nil {
 		return err
 	}
-	var patchRunner gin.HandlerFunc
+	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, modelRegistryAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.MODEL_REGISTRY_TABLE, modelRegistryAdmissionResource)
 	}
 	handler := CreateStructProxyHandler[v1.ModelRegistry](deps, storage.MODEL_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 	return nil
 }

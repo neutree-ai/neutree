@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -139,6 +140,186 @@ func TestProxiesRouteFactoryWithErrorAbortsBuildOnAdmissionRegistrationFailure(t
 	err := buildAdmissionWithoutPanic(t, builder)
 	if err == nil || !strings.Contains(err.Error(), "already registered") {
 		t.Errorf("Build() error = %v, want admission registration failure", err)
+	}
+}
+
+func TestBuilderAdmissionConfigurerRegistersOrderedEnterpriseHooks(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	var registry *admission.Registry
+	builder.WithAdmissionConfigurer("enterprise.admission", func(options *AdmissionOptions) error {
+		registry = options.Registry
+		resource := admission.NewResource[v1.Engine]("enterprise-test")
+		if err := options.Registry.RegisterHook(resource, admission.ValidateCreate(
+			admission.HookMeta{Name: "enterprise.second", Order: 1001}, 91802,
+			func(admission.RequestContext, v1.Engine) error { return nil },
+		)); err != nil {
+			return err
+		}
+		return options.Registry.RegisterHook(resource, admission.ValidateCreate(
+			admission.HookMeta{Name: "enterprise.first", Order: 1000}, 91801,
+			func(admission.RequestContext, v1.Engine) error { return nil },
+		))
+	})
+
+	_, err := builder.Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	chain, err := registry.Chain(admission.NewResource[v1.Engine]("enterprise-test"), admission.Create)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if got := chain.Hooks(); !reflect.DeepEqual(got, []admission.HookMeta{
+		{Name: "enterprise.first", Operation: admission.Create, Phase: admission.Validating, Order: 1000},
+		{Name: "enterprise.second", Operation: admission.Create, Phase: admission.Validating, Order: 1001},
+	}) {
+		t.Errorf("enterprise hook order = %v", got)
+	}
+	if err := registry.RegisterHook(admission.NewResource[v1.Engine]("enterprise-test"), admission.ValidateCreate(
+		admission.HookMeta{Name: "enterprise.after-seal", Order: 1002}, 91803,
+		func(admission.RequestContext, v1.Engine) error { return nil },
+	)); err == nil || !strings.Contains(err.Error(), "sealed") {
+		t.Errorf("RegisterHook() after Build() error = %v, want sealed error", err)
+	}
+}
+
+func TestBuilderAdmissionConfigurerRejectsEnterpriseHookOutsideReservedOrderBand(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	builder.WithAdmissionConfigurer("enterprise.admission", func(options *AdmissionOptions) error {
+		return options.Registry.RegisterHook(admission.NewResource[v1.Engine]("enterprise-test"), admission.ValidateCreate(
+			admission.HookMeta{Name: "enterprise.invalid-order", Order: 999}, 91804,
+			func(admission.RequestContext, v1.Engine) error { return nil },
+		))
+	})
+
+	err := buildAdmissionWithoutPanic(t, builder)
+	if err == nil || !strings.Contains(err.Error(), "outside 1000-1999") {
+		t.Errorf("Build() error = %v, want enterprise order-band error", err)
+	}
+}
+
+func TestBuilderAdmissionConfigurerAppendsEnterpriseHooksAfterDefaultCommunityHooks(t *testing.T) {
+	builder := NewBuilder().WithConfig(&config.APIConfig{
+		GinEngine:    gin.New(),
+		StaticConfig: &config.StaticConfig{},
+	})
+	var registry *admission.Registry
+	builder.WithAdmissionConfigurer("enterprise.admission", func(options *AdmissionOptions) error {
+		registry = options.Registry
+		return options.Registry.RegisterHook(admission.NewResource[v1.Endpoint]("endpoints"), admission.ValidateCreate(
+			admission.HookMeta{Name: "enterprise.endpoint.create", Order: 1000}, 91805,
+			func(admission.RequestContext, v1.Endpoint) error { return nil },
+		))
+	})
+
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	chain, err := registry.Chain(admission.NewResource[v1.Endpoint]("endpoints"), admission.Create)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	hooks := chain.Hooks()
+	if len(hooks) < 2 {
+		t.Fatalf("endpoint create hooks = %v, want default community and enterprise hooks", hooks)
+	}
+	enterpriseIndex := -1
+	for index, hook := range hooks {
+		if hook.Name == "enterprise.endpoint.create" {
+			enterpriseIndex = index
+			if hook.Order != 1000 {
+				t.Errorf("enterprise hook order = %d, want 1000", hook.Order)
+			}
+			continue
+		}
+		if enterpriseIndex >= 0 {
+			t.Errorf("community hook %q ran after enterprise hook", hook.Name)
+		}
+	}
+	if enterpriseIndex == -1 {
+		t.Error("enterprise hook was not registered")
+	}
+}
+
+func TestAdmissionOptionsExposeOnlyRegistry(t *testing.T) {
+	optionsType := reflect.TypeFor[AdmissionOptions]()
+	if optionsType.NumField() != 1 {
+		t.Fatalf("AdmissionOptions exposes %d fields, want only Registry", optionsType.NumField())
+	}
+	field := optionsType.Field(0)
+	if field.Name != "Registry" || field.Type != reflect.TypeFor[*admission.Registry]() {
+		t.Errorf("AdmissionOptions field = %s %s, want Registry *admission.Registry", field.Name, field.Type)
+	}
+}
+
+func TestDefaultBuilderAdmissionCoverageMatchesMountedResourceWrites(t *testing.T) {
+	builder := NewBuilder().WithConfig(&config.APIConfig{
+		GinEngine:    gin.New(),
+		StaticConfig: &config.StaticConfig{},
+	})
+	var registry *admission.Registry
+	builder.WithAdmissionConfigurer("coverage", func(options *AdmissionOptions) error {
+		registry = options.Registry
+		return nil
+	})
+
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	expected := map[string]map[string]admission.Operation{
+		"/api/v1/api_keys":           {http.MethodPatch: admission.Update},
+		"/api/v1/workspaces":         {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/roles":              {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/role_assignments":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/user_profiles":      {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/clusters":           {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/image_registries":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/model_registries":   {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/endpoints":          {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/engines":            {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/model_catalogs":     {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/oem_configs":        {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+		"/api/v1/external_endpoints": {http.MethodPost: admission.Create, http.MethodPatch: admission.Update},
+	}
+	found := make(map[string]map[string]struct{}, len(expected))
+	for _, route := range builder.config.GinEngine.Routes() {
+		if route.Method != http.MethodPost && route.Method != http.MethodPatch {
+			continue
+		}
+		if !strings.Contains(route.Handler, "internal/routes/proxies.CreateStructProxyHandler") {
+			continue
+		}
+		operations, isResourceWrite := expected[route.Path]
+		if !isResourceWrite {
+			t.Errorf("uncovered default REST resource write %s %s", route.Method, route.Path)
+			continue
+		}
+		operation, expectedMethod := operations[route.Method]
+		if !expectedMethod {
+			t.Errorf("unexpected resource write route %s %s", route.Method, route.Path)
+			continue
+		}
+		if _, err := registry.Chain(strings.TrimPrefix(route.Path, "/api/v1/"), operation); err != nil {
+			t.Errorf("resource write %s %s has no admission descriptor: %v", route.Method, route.Path, err)
+		}
+		if found[route.Path] == nil {
+			found[route.Path] = make(map[string]struct{})
+		}
+		found[route.Path][route.Method] = struct{}{}
+	}
+	for path, operations := range expected {
+		for method := range operations {
+			if _, ok := found[path][method]; !ok {
+				t.Errorf("default resource write %s %s is not mounted", method, path)
+			}
+		}
+	}
+	if _, err := registry.Chain("unregistered-resource", admission.Create); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Errorf("unregistered write Chain() error = %v, want not registered", err)
+	}
+	if err := registry.RegisterResource("after-build"); err == nil || !strings.Contains(err.Error(), "sealed") {
+		t.Errorf("registry accepted registration after default Build(), error = %v", err)
 	}
 }
 

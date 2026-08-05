@@ -62,14 +62,15 @@ func RegisterWorkspaceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFu
 	if err := registerWorkspaceAdmission(deps); err != nil {
 		return err
 	}
-	var patchRunner gin.HandlerFunc
+	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, workspaceAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.WORKSPACE_TABLE, workspaceAdmissionResource)
 	}
 	handler := CreateStructProxyHandler[v1.Workspace](deps, storage.WORKSPACE_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 	return nil
 }

@@ -6,6 +6,14 @@ import (
 	"github.com/neutree-ai/neutree/pkg/admission"
 )
 
+// legacyCreateAdmissionRunnerOptions keeps resources that historically
+// forwarded empty and unknown-field request bodies compatible while still
+// running registered create hooks for valid object candidates.
+var legacyCreateAdmissionRunnerOptions = CreateAdmissionRunnerOptions{
+	AllowEmptyBody:       true,
+	PermissiveCandidates: true,
+}
+
 func admissionRouteRunners[T any](deps *Dependencies, tableName string, resource admission.Resource[T]) (gin.HandlerFunc, gin.HandlerFunc, error) {
 	if err := registerAdmissionResource(deps, resource); err != nil {
 		return nil, nil, err

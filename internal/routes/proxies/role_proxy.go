@@ -46,14 +46,15 @@ func RegisterRoleRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	if err := registerRoleAdmission(deps); err != nil {
 		return err
 	}
-	var patchRunner gin.HandlerFunc
+	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, roleAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.ROLE_TABLE, roleAdmissionResource)
 	}
 	handler := CreateStructProxyHandler[v1.Role](deps, storage.ROLE_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 	return nil
 }

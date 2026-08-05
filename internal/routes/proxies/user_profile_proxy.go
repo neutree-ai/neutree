@@ -43,14 +43,15 @@ func RegisterUserProfileRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 	if err := registerUserProfileAdmission(deps); err != nil {
 		return err
 	}
-	var patchRunner gin.HandlerFunc
+	var createRunner, patchRunner gin.HandlerFunc
 	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, userProfileAdmissionResource, legacyCreateAdmissionRunnerOptions)
 		patchRunner = CreatePatchAdmissionRunner(deps, storage.USER_PROFILE_TABLE, userProfileAdmissionResource)
 	}
 	handler := CreateStructProxyHandler[v1.UserProfile](deps, storage.USER_PROFILE_TABLE)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
 	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 	return nil
 }
