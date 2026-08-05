@@ -675,6 +675,11 @@ var _ = Describe("Model", Ordered, func() {
 			DeferCleanup(Model.EnsureDeleted, holder, version)
 			DeferCleanup(Model.EnsureDeleted, claimant, version)
 			DeferCleanup(Model.EnsureAliasCleared, holder, version)
+			// The claimant's write is supposed to be refused, so on the happy path
+			// there is nothing to clear. This is here for the path where the
+			// assertion below fails: an alias applied by a bug outlives its model
+			// directory, because model deletion only drops alias rows best effort.
+			DeferCleanup(Model.EnsureAliasCleared, claimant, version)
 
 			ExpectSuccess(pushModel(holder, version, 64))
 			ExpectSuccess(pushModel(claimant, version, 64))
@@ -707,6 +712,8 @@ var _ = Describe("Model", Ordered, func() {
 
 			DeferCleanup(Model.EnsureDeleted, shadowed, version)
 			DeferCleanup(Model.EnsureDeleted, claimant, version)
+			// As above: only reachable if the refusal this spec asserts is broken.
+			DeferCleanup(Model.EnsureAliasCleared, claimant, version)
 
 			ExpectSuccess(pushModel(shadowed, version, 64))
 			ExpectSuccess(pushModel(claimant, version, 64))
