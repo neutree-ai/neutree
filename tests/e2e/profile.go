@@ -297,15 +297,15 @@ func profileEngineName() string { return defaultEngineName }
 // the version explicitly via withEngine(name, version).
 func profileEngineVersion() string { return profileEngineVersionFor(defaultEngineName) }
 
-// profileEngineOldVersion returns the old-version for the default engine,
-// used by the multi-version isolation test on vLLM.
+// profileEngineOldVersion returns the other maintained version for the default
+// engine, used by vLLM multi-version and upgrade tests.
 func profileEngineOldVersion() string {
 	v := profile.Engines[defaultEngineName].OldVersion
 	if v != "" {
 		return v
 	}
 
-	return "v0.8.5"
+	return "v0.17.1"
 }
 
 // profileEngineVersionFor returns the configured version for the named engine,
@@ -317,7 +317,7 @@ func profileEngineVersionFor(name string) string {
 
 	switch name {
 	case "vllm":
-		return "v0.11.2"
+		return "v0.24.0"
 	case "sglang":
 		return "v0.5.10"
 	case "llama-cpp":

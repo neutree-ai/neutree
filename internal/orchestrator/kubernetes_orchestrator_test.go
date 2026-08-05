@@ -758,7 +758,7 @@ func TestBuildVllmDeployment(t *testing.T) {
 		},
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.11.2"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0"), data)
 	if err != nil {
 		t.Fatalf("Failed to build deployment: %v", err)
 	}
@@ -1141,9 +1141,9 @@ func Test_getDeployTemplate(t *testing.T) {
 	// inline base64 fixture. This proves the decode path against production
 	// data and removes any "test fixture is out of sync with the real
 	// template" failure mode.
-	vllmTemplateB64, err := engine.GetDeployTemplate("vllm-v0.11.2")
+	vllmTemplateB64, err := engine.GetDeployTemplate("vllm-v0.24.0")
 	require.NoError(t, err)
-	vllmTemplateRaw := realEmbeddedTemplate(t, "vllm-v0.11.2")
+	vllmTemplateRaw := realEmbeddedTemplate(t, "vllm-v0.24.0")
 
 	tests := []struct {
 		name             string
@@ -3324,8 +3324,8 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 		templateKey string
 	}{
 		{
-			name:        "vllm-v0.11.2",
-			templateKey: "vllm-v0.11.2",
+			name:        "vllm-v0.24.0",
+			templateKey: "vllm-v0.24.0",
 		},
 		{
 			name:        "vllm-v0.17.1",
@@ -3427,8 +3427,8 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 		templateKey string
 	}{
 		{
-			name:        "vllm-v0.11.2",
-			templateKey: "vllm-v0.11.2",
+			name:        "vllm-v0.24.0",
+			templateKey: "vllm-v0.24.0",
 		},
 		{
 			name:        "vllm-v0.17.1",
@@ -3651,7 +3651,7 @@ func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 }
 
 // realEmbeddedTemplate decodes the production embedded K8s deploy template for
-// the given engine key (e.g. "vllm-v0.11.2", "llama-cpp-v0.3.7",
+// the given engine key (e.g. "vllm-v0.24.0", "llama-cpp-v0.3.7",
 // "sglang-v0.5.10"). Tests that need a representative template should use this
 // instead of pasting an inline fixture, so future edits to the real template
 // (probe paths, label additions, etc.) propagate automatically and there is no

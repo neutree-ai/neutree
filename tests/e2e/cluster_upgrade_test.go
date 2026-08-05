@@ -24,8 +24,8 @@ func requireOldVersion() string {
 
 // skipIfEndpointIncompatibleOldCluster skips the endpoint-compatibility tests
 // when the profile's cluster old_version is <= v1.0.0. Clusters at that version
-// ship a Ray/engine base that does not support the current Engine.OldVersion
-// (e.g. v0.11.2), so deploying the endpoint on the pre-upgrade cluster fails
+// ship a Ray/engine base that does not support the maintained old-version
+// profile (v0.17.1), so deploying the endpoint on the pre-upgrade cluster fails
 // with an irrelevant incompatibility error. Once old_version moves past v1.0.0
 // the compatibility window is valid again and the tests run.
 func skipIfEndpointIncompatibleOldCluster(oldVersion string) {

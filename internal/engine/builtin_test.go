@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"reflect"
+	"sort"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -33,15 +35,18 @@ func TestGetBuiltinEngines(t *testing.T) {
 		t.Error("expected sglang engine to be registered")
 	}
 
-	// Verify vllm versions have nvidia_gpu image and deploy template
+	// Verify the maintained vLLM support window exactly. New installations
+	// must not receive retired versions through the builtin registry.
 	for _, e := range engines {
 		if e.Metadata.Name != "vllm" {
 			continue
 		}
 
+		gotVersions := make([]string, 0, len(e.Spec.Versions))
 		for _, v := range e.Spec.Versions {
+			gotVersions = append(gotVersions, v.Version)
 			switch v.Version {
-			case "v0.11.2", "v0.17.1", "v0.24.0":
+			case "v0.17.1", "v0.24.0":
 				img, ok := v.Images["nvidia_gpu"]
 				if !ok {
 					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
@@ -66,10 +71,24 @@ func TestGetBuiltinEngines(t *testing.T) {
 				}
 			}
 		}
+
+		sort.Strings(gotVersions)
+		if want := []string{"v0.17.1", "v0.24.0"}; !reflect.DeepEqual(gotVersions, want) {
+			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
+		}
 	}
 
 	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
 		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
+	}
+
+	for _, retiredVersion := range []string{"v0.8.5", "v0.11.2"} {
+		if _, err := GetEngineSchema("vllm-" + retiredVersion); err == nil {
+			t.Errorf("retired vLLM %s schema must not be registered", retiredVersion)
+		}
+		if _, err := GetDeployTemplate("vllm-" + retiredVersion); err == nil {
+			t.Errorf("retired vLLM %s template must not be registered", retiredVersion)
+		}
 	}
 
 	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).

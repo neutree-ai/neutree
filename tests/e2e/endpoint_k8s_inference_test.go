@@ -97,7 +97,8 @@ var _ = Describe("K8s Endpoint", Ordered, Label("endpoint", "k8s"), func() {
 				Skip("engine.old_version not configured, skipping multi-version test")
 			}
 
-			// Only vLLM v0.11.2+ has K8s deploy templates; v0.8.5 does not.
+			// Profiles may override the maintained default, so skip only when the
+			// configured version has no Kubernetes deploy template.
 			if profileEngineOldVersion() != profileEngineVersion() &&
 				!engineVersionSupportsK8s(profileEngineOldVersion()) {
 				Skip("engine.old_version " + profileEngineOldVersion() + " does not support K8s deployment")

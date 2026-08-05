@@ -419,14 +419,14 @@ ENGINE_PACKAGE_SCRIPT := scripts/builder/build-engine-package.sh
 ENGINE_PACKAGE_OUTPUT_DIR ?= dist
 ENGINE_BASE_DIR := internal/engine
 ENGINE_NAME ?= vllm
-ENGINE_VERSION ?= v0.11.2
+ENGINE_VERSION ?= v0.24.0
 # ENGINE_DIR_VERSION strips any prerelease/build suffix (e.g. -neutree1, -beta,
 # -cu130) from ENGINE_VERSION so schema.json / templates lookups always resolve
 # to the upstream version directory under internal/engine/<name>/. The full
 # ENGINE_VERSION (with suffix) is still passed to the script via -v so the
 # manifest's version field carries the patch identifier.
 ENGINE_DIR_VERSION = $(shell echo $(ENGINE_VERSION) | sed 's/-.*//')
-ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.11.2-ray2.53.0
+ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.24.0-neutree1-ray2.53.0
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
 

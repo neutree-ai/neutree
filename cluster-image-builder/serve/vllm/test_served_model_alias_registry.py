@@ -6,9 +6,8 @@ import unittest
 
 
 VLLM_APP_FILES = (
-    pathlib.Path("v0_8_5/app.py"),
-    pathlib.Path("v0_11_2/app.py"),
     pathlib.Path("v0_17_1/app.py"),
+    pathlib.Path("v0_24_0/app.py"),
 )
 
 
@@ -79,6 +78,22 @@ def _calls_base_model_path_directly(node):
     return isinstance(node, ast.Call) and _is_name(node.func, "BaseModelPath")
 
 
+def _uses_base_model_path_alias_comprehension(node):
+    if not isinstance(node, ast.ListComp) or not isinstance(node.elt, ast.Call):
+        return False
+
+    if not _is_name(node.elt.func, "BaseModelPath"):
+        return False
+
+    if len(node.generators) != 1 or not _is_name(node.generators[0].target, "name"):
+        return False
+
+    keyword_values = {keyword.arg: keyword.value for keyword in node.elt.keywords}
+    return _is_name(keyword_values.get("name"), "name") and _is_self_model_path(
+        keyword_values.get("model_path")
+    )
+
+
 def _is_model_config_served_model_name(node):
     return (
         isinstance(node, ast.Attribute)
@@ -112,30 +127,41 @@ class TestVLLMServedModelAliasRegistry(unittest.TestCase):
                     node for node in ast.walk(tree) if _calls_base_model_path_directly(node)
                 ]
 
+                alias_comprehensions = [
+                    node for node in ast.walk(tree) if _uses_base_model_path_alias_comprehension(node)
+                ]
+
                 self.assertTrue(
-                    _imports_build_base_model_paths(tree),
-                    f"{app_file} should import build_base_model_paths",
-                )
-                self.assertEqual(
-                    len(alias_helper_calls),
-                    1,
-                    f"{app_file} should build OpenAI base model paths through build_base_model_paths",
+                    _imports_build_base_model_paths(tree) or alias_comprehensions,
+                    f"{app_file} should register aliases with their actual model path",
                 )
                 self.assertEqual(
                     len(served_model_names_assignments),
                     1,
                     f"{app_file} should store the effective served_model_name after coercion",
                 )
-                self.assertEqual(
-                    len(served_model_names_calls),
-                    1,
-                    f"{app_file} should use the effective served_model_name as alias source",
-                )
-                self.assertEqual(
-                    direct_base_model_path_calls,
-                    [],
-                    f"{app_file} should not pass served_model_name directly into BaseModelPath",
-                )
+                if _imports_build_base_model_paths(tree):
+                    self.assertEqual(
+                        len(alias_helper_calls),
+                        1,
+                        f"{app_file} should build OpenAI base model paths through build_base_model_paths",
+                    )
+                    self.assertEqual(
+                        len(served_model_names_calls),
+                        1,
+                        f"{app_file} should use the effective served_model_name as alias source",
+                    )
+                    self.assertEqual(
+                        direct_base_model_path_calls,
+                        [],
+                        f"{app_file} should not pass served_model_name directly into BaseModelPath",
+                    )
+                else:
+                    self.assertEqual(
+                        len(alias_comprehensions),
+                        1,
+                        f"{app_file} should build one BaseModelPath for each effective alias",
+                    )
 
     def test_metrics_labels_do_not_use_raw_model_config_served_model_name(self):
         base_dir = pathlib.Path(__file__).parent
