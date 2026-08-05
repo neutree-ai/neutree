@@ -23,8 +23,10 @@ type App struct {
 // NewApp creates a new application instance
 func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller) *App {
 	return &App{
-		config:      c,
-		controllers: controllers,
+		config:                       c,
+		controllers:                  controllers,
+		releaseInfoBuilder:           releaseinfo.NewCommunityReleaseInfoBuilder(),
+		currentClusterProfileBuilder: releaseinfo.NewCommunityClusterProfileBuilder(),
 	}
 }
 

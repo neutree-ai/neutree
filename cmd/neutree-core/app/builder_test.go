@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
+	"github.com/neutree-ai/neutree/controllers"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
@@ -130,6 +131,22 @@ func TestNewBuilderUsesCommunityClusterProfileBuilder(t *testing.T) {
 
 	if _, ok := builder.currentClusterProfileBuilder.(*releaseinfo.CommunityClusterProfileBuilder); !ok {
 		t.Fatalf("expected community cluster profile builder, got %T", builder.currentClusterProfileBuilder)
+	}
+}
+
+func TestNewAppUsesCommunityReleaseInfoBuilder(t *testing.T) {
+	application := NewApp(&config.CoreConfig{}, map[string]controllers.Controller{})
+
+	if _, ok := application.releaseInfoBuilder.(*releaseinfo.CommunityReleaseInfoBuilder); !ok {
+		t.Fatalf("expected community release info builder, got %T", application.releaseInfoBuilder)
+	}
+}
+
+func TestNewAppUsesCommunityClusterProfileBuilder(t *testing.T) {
+	application := NewApp(&config.CoreConfig{}, map[string]controllers.Controller{})
+
+	if _, ok := application.currentClusterProfileBuilder.(*releaseinfo.CommunityClusterProfileBuilder); !ok {
+		t.Fatalf("expected community cluster profile builder, got %T", application.currentClusterProfileBuilder)
 	}
 }
 
