@@ -85,6 +85,7 @@ type PatchAdmissionRunnerOptions struct {
 	BodyResponse                 func(error) error
 	PermissiveCandidates         bool
 	AdmissionIgnoredMaskedFields []string
+	SoftDeleteIgnoredNullFields  []string
 }
 
 type registryPatchAdmissionChainResolver struct {
@@ -303,7 +304,7 @@ func newPatchAdmissionRunnerWithOptions[T any](
 		operation := admission.Update
 
 		if deleteIntent {
-			if !validSoftDeleteCandidate(oldMap, candidateMap) {
+			if !validSoftDeleteCandidate(oldMap, candidateMap, options.SoftDeleteIgnoredNullFields) {
 				writePatchAdmissionError(c, errInvalidAdmissionRequest)
 				return
 			}
@@ -502,7 +503,7 @@ func admissionPatchPathExists(value interface{}, path []string) bool {
 	return false
 }
 
-func validSoftDeleteCandidate(old, candidate map[string]interface{}) bool {
+func validSoftDeleteCandidate(old, candidate map[string]interface{}, ignoredNullFields []string) bool {
 	withoutDeleteFields := func(object map[string]interface{}) map[string]interface{} {
 		copy := cloneAdmissionObject(object)
 		metadata, ok := copy["metadata"].(map[string]interface{})
@@ -522,10 +523,36 @@ func validSoftDeleteCandidate(old, candidate map[string]interface{}) bool {
 			}
 		}
 
+		removeSoftDeleteIgnoredNullFields(copy, ignoredNullFields)
+
 		return copy
 	}
 
 	return reflect.DeepEqual(withoutDeleteFields(old), withoutDeleteFields(candidate))
+}
+
+func removeSoftDeleteIgnoredNullFields(object map[string]interface{}, paths []string) {
+	for _, path := range paths {
+		segments := strings.Split(path, ".")
+		current := object
+
+		for index, segment := range segments {
+			if index == len(segments)-1 {
+				if current[segment] == nil {
+					delete(current, segment)
+				}
+
+				break
+			}
+
+			nested, ok := current[segment].(map[string]interface{})
+			if !ok {
+				break
+			}
+
+			current = nested
+		}
+	}
 }
 
 func writePatchAdmissionError(c *gin.Context, err error) {

@@ -51,7 +51,8 @@ var clusterPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
 	BodyError: func(cause error) *admission.Error {
 		return toAdmissionError(invalidClusterPayloadError(cause))
 	},
-	PermissiveCandidates: true,
+	PermissiveCandidates:        true,
+	SoftDeleteIgnoredNullFields: []string{"metadata.annotations", "metadata.labels", "metadata.display_name"},
 }
 
 func validateClusterDeleteDependencies(s storage.Storage, candidate v1.Cluster) error {

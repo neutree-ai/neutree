@@ -230,6 +230,92 @@ func TestAdmissionDeleteRunsDeleteChainForAllowedMetadataOnlyChange(t *testing.T
 	require.Equal(t, 1, chain.calls)
 }
 
+func TestClusterAdmissionDeleteAllowsCLIFullMetadataWithNullCompatibilityFields(t *testing.T) {
+	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{
+		"id":4,
+		"metadata":{
+			"annotations":null,
+			"creation_timestamp":"2026-08-05T08:28:55.776747+00:00",
+			"deletion_timestamp":null,
+			"display_name":null,
+			"labels":null,
+			"name":"e2e-vgpu-k8s-640192",
+			"update_timestamp":"2026-08-05T08:42:46.16844+00:00",
+			"workspace":"default"
+		},
+		"spec":{"type":"kubernetes","version":"v1.1.0"}
+	}`)}}
+	chain := &fakePatchAdmissionChain{}
+	runner := newPatchAdmissionRunnerWithOptions(
+		fakePatchAdmissionResolver{chain: chain}, reader, clusterAdmissionResource, "clusters", clusterPatchAdmissionRunnerOptions,
+	)
+
+	status, _ := runPatchAdmissionRunner(t, runner, "/?id=eq.4", `{
+		"metadata":{
+			"annotations":null,
+			"creation_timestamp":"2026-08-05T08:28:55.776747+00:00",
+			"deletion_timestamp":"2026-08-05T08:40:57Z",
+			"display_name":null,
+			"labels":null,
+			"name":"e2e-vgpu-k8s-640192",
+			"update_timestamp":"2026-08-05T08:42:46.16844+00:00",
+			"workspace":"default"
+		}
+	}`, func(*gin.Context) {})
+
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, admission.Delete, chain.operation)
+	require.Equal(t, 1, chain.calls)
+}
+
+func TestClusterAdmissionDeleteRejectsUnknownNullMetadataField(t *testing.T) {
+	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{
+		"id":4,
+		"metadata":{"name":"e2e-vgpu-k8s-640192","workspace":"default"},
+		"spec":{"type":"kubernetes","version":"v1.1.0"}
+	}`)}}
+	chain := &fakePatchAdmissionChain{}
+	runner := newPatchAdmissionRunnerWithOptions(
+		fakePatchAdmissionResolver{chain: chain}, reader, clusterAdmissionResource, "clusters", clusterPatchAdmissionRunnerOptions,
+	)
+
+	status, _ := runPatchAdmissionRunner(t, runner, "/?id=eq.4", `{
+		"metadata":{
+			"name":"e2e-vgpu-k8s-640192",
+			"workspace":"default",
+			"deletion_timestamp":"2026-08-05T08:40:57Z",
+			"unexpected":null
+		}
+	}`, func(*gin.Context) {})
+
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Zero(t, chain.calls)
+}
+
+func TestAdmissionDeleteRejectsUnknownNullMetadataFieldForOtherResources(t *testing.T) {
+	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{
+		"id":"widget-1",
+		"metadata":{"name":"before","workspace":"default"},
+		"spec":{"value":"before"}
+	}`)}}
+	chain := &fakePatchAdmissionChain{}
+	runner := newPatchAdmissionRunner(
+		fakePatchAdmissionResolver{chain: chain}, reader, admissionPatchWidgetResource, "widgets",
+	)
+
+	status, _ := runPatchAdmissionRunner(t, runner, "/?id=eq.widget-1", `{
+		"metadata":{
+			"name":"before",
+			"workspace":"default",
+			"deletion_timestamp":"2026-08-05T08:40:57Z",
+			"unexpected":null
+		}
+	}`, func(*gin.Context) {})
+
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Zero(t, chain.calls)
+}
+
 func TestAdmissionPatchUsesUpdateChainForAlreadySoftDeletedTarget(t *testing.T) {
 	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{"id":"widget-1","metadata":{"name":"before","workspace":"default","deletion_timestamp":"2026-05-28T07:20:48Z"},"spec":{"value":"before"}}`)}}
 	chain := &fakePatchAdmissionChain{}
