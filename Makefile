@@ -426,7 +426,8 @@ ENGINE_VERSION ?= v0.24.0
 # ENGINE_VERSION (with suffix) is still passed to the script via -v so the
 # manifest's version field carries the patch identifier.
 ENGINE_DIR_VERSION = $(shell echo $(ENGINE_VERSION) | sed 's/-.*//')
-ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:v0.24.0-neutree1-ray2.53.0
+ENGINE_VLLM_IMAGE_TAG = $(if $(filter v0.24.0,$(ENGINE_DIR_VERSION)),v0.24.0-neutree1-ray2.53.0,$(ENGINE_VERSION)-ray2.53.0)
+ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:$(ENGINE_VLLM_IMAGE_TAG)
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
 

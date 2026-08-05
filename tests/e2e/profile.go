@@ -17,6 +17,11 @@ const (
 	defaultEngineName = "vllm"
 )
 
+var maintainedVLLMVersions = map[string]struct{}{
+	"v0.17.1": {},
+	"v0.24.0": {},
+}
+
 // EngineProfile carries per-engine configuration loaded from the test profile
 // under engines.<name>.
 type EngineProfile struct {
@@ -158,9 +163,16 @@ func LoadProfile() error {
 		return fmt.Errorf("failed to read profile %s: %w", path, err)
 	}
 
-	if err := yaml.Unmarshal(data, &profile); err != nil {
+	var loadedProfile Profile
+	if err := yaml.Unmarshal(data, &loadedProfile); err != nil {
 		return fmt.Errorf("failed to parse profile %s: %w", path, err)
 	}
+
+	if err := validateMaintainedVLLMVersions(loadedProfile.Engines[defaultEngineName]); err != nil {
+		return fmt.Errorf("invalid profile %s: %w", path, err)
+	}
+
+	profile = loadedProfile
 
 	// Compute derived fields.
 
@@ -215,6 +227,26 @@ func LoadProfile() error {
 
 	if profile.ControlPlane.K8sNamespace == "" {
 		profile.ControlPlane.K8sNamespace = "neutree-e2e"
+	}
+
+	return nil
+}
+
+func validateMaintainedVLLMVersions(engineProfile EngineProfile) error {
+	for field, version := range map[string]string{
+		"version":     engineProfile.Version,
+		"old_version": engineProfile.OldVersion,
+	} {
+		if version == "" {
+			continue
+		}
+		if _, ok := maintainedVLLMVersions[version]; !ok {
+			return fmt.Errorf(
+				"engines.vllm.%s %q is not maintained; supported versions are v0.17.1 and v0.24.0",
+				field,
+				version,
+			)
+		}
 	}
 
 	return nil
@@ -303,6 +335,10 @@ func profileEngineOldVersion() string {
 	v := profile.Engines[defaultEngineName].OldVersion
 	if v != "" {
 		return v
+	}
+
+	if profileEngineVersion() == "v0.17.1" {
+		return "v0.24.0"
 	}
 
 	return "v0.17.1"
