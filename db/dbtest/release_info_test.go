@@ -179,6 +179,23 @@ func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
 	`, releaseName); err != nil {
 		t.Fatalf("insert legacy release info: %v", err)
 	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO api.release_infos (api_version, kind, metadata, spec, status)
+		VALUES (
+			'v1',
+			'ReleaseInfo',
+			ROW('v1.2.98', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
+			ROW(
+				'Nightly',
+				'v1.2.98-nightly',
+				'["v1.2.98"]'::jsonb,
+				'["v1.2"]'::jsonb
+			)::api.release_info_spec,
+			NULL
+		)
+	`); err != nil {
+		t.Fatalf("insert nullable-status legacy release info: %v", err)
+	}
 
 	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
 		t.Fatalf("apply forward migration: %v", err)
@@ -232,5 +249,17 @@ func TestReleaseInfoMigrationRoundTripRestoresLegacyValues(t *testing.T) {
 	}
 	if string(compatibleBaselines) != `["v1.1", "v1.2"]` && string(compatibleBaselines) != `["v1.1","v1.2"]` {
 		t.Fatalf("unexpected restored compatible baselines: %s", compatibleBaselines)
+	}
+
+	var nullableStatusRestored bool
+	if err = tx.QueryRowContext(ctx, `
+		SELECT status IS NULL
+		FROM api.release_infos
+		WHERE (metadata).name = 'v1.2.98'
+	`).Scan(&nullableStatusRestored); err != nil {
+		t.Fatalf("read restored nullable status: %v", err)
+	}
+	if !nullableStatusRestored {
+		t.Fatal("expected rollback to restore a nullable legacy status")
 	}
 }

@@ -9,7 +9,7 @@ CREATE TABLE api.release_info_086_legacy_backup (
     channel TEXT,
     build_identity TEXT,
     cluster_versions JSONB,
-    status JSONB NOT NULL
+    status JSONB
 );
 
 INSERT INTO api.release_info_086_legacy_backup (

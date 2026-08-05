@@ -69,14 +69,13 @@ ALTER TABLE api.release_infos
     ADD COLUMN status api.release_info_status;
 
 UPDATE api.release_infos AS release_info
-SET status = COALESCE(
-    jsonb_populate_record(NULL::api.release_info_status, backup.status),
-    ROW(NULL)::api.release_info_status
-)
+SET status = CASE
+    WHEN backup.status IS NULL THEN NULL
+    ELSE jsonb_populate_record(NULL::api.release_info_status, backup.status)
+END
 FROM api.release_info_086_legacy_backup AS backup
 WHERE backup.release_info_id = release_info.id;
 
-ALTER TABLE api.release_infos ALTER COLUMN status SET NOT NULL;
 DROP TABLE api.release_info_086_legacy_backup;
 
 ALTER TYPE api.cluster_status ADD ATTRIBUTE release_info JSONB;
