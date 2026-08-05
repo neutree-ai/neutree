@@ -31,6 +31,8 @@ var (
 	readDir         = os.ReadDir
 	readDirChecksMu sync.Mutex
 	readDirChecks   = make(map[string]*readDirCheck)
+	mountLocksMu    sync.Mutex
+	mountLocks      = make(map[string]*mountLock)
 )
 
 const nfsReadTimeout = 10 * time.Second
@@ -101,6 +103,9 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 }
 
 func MountNFS(device string, mountPoint string) error {
+	unlock := lockMountPoint(mountPoint)
+	defer unlock()
+
 	existed, unexpectedDevice, err := findMount(device, mountPoint)
 	if err != nil {
 		return err
@@ -131,6 +136,35 @@ func MountNFS(device string, mountPoint string) error {
 type readDirCheck struct {
 	done chan struct{}
 	err  error
+}
+
+type mountLock struct {
+	mu    sync.Mutex
+	users int
+}
+
+func lockMountPoint(mountPoint string) func() {
+	mountLocksMu.Lock()
+	lock := mountLocks[mountPoint]
+	if lock == nil {
+		lock = &mountLock{}
+		mountLocks[mountPoint] = lock
+	}
+	lock.users++
+	mountLocksMu.Unlock()
+
+	lock.mu.Lock()
+
+	return func() {
+		lock.mu.Unlock()
+
+		mountLocksMu.Lock()
+		lock.users--
+		if lock.users == 0 && mountLocks[mountPoint] == lock {
+			delete(mountLocks, mountPoint)
+		}
+		mountLocksMu.Unlock()
+	}
 }
 
 func readDirWithTimeout(mountPoint string, timeout time.Duration) error {
@@ -184,6 +218,9 @@ func resetReadDirCheck(mountPoint string) {
 }
 
 func Unmount(mountPoint string) error {
+	unlock := lockMountPoint(mountPoint)
+	defer unlock()
+
 	mountPoints, err := mountInterface.List()
 	if err != nil {
 		return err

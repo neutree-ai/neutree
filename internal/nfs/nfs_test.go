@@ -33,6 +33,22 @@ func (m *listFailingMounter) List() ([]kmount.MountPoint, error) {
 	return nil, m.err
 }
 
+type blockingUnmountMounter struct {
+	*kmount.FakeMounter
+	unmounted chan struct{}
+	release   chan struct{}
+}
+
+func (m *blockingUnmountMounter) Unmount(target string) error {
+	if err := m.FakeMounter.Unmount(target); err != nil {
+		return err
+	}
+
+	close(m.unmounted)
+	<-m.release
+	return nil
+}
+
 func useMountInterface(t *testing.T, mounter kmount.Interface) {
 	t.Helper()
 
@@ -234,6 +250,84 @@ func TestReadDirWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
 
 	require.NoError(t, Unmount(target))
 	require.NoError(t, readDirWithTimeout(target, time.Second))
+	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "registry")
+	require.NoError(t, os.Mkdir(target, 0o755))
+
+	mounter := &blockingUnmountMounter{
+		FakeMounter: kmount.NewFakeMounter([]kmount.MountPoint{{
+			Device: testNFSDevice,
+			Path:   target,
+			Type:   "nfs",
+		}}),
+		unmounted: make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+	useMountInterface(t, mounter)
+
+	releaseRead := make(chan struct{})
+	completedRead := make(chan struct{})
+	var calls atomic.Int32
+	var releaseUnmountOnce sync.Once
+	var releaseReadOnce sync.Once
+	releaseUnmount := func() { releaseUnmountOnce.Do(func() { close(mounter.release) }) }
+	releaseReadDir := func() { releaseReadOnce.Do(func() { close(releaseRead) }) }
+
+	originalReadDir := readDir
+	readDir = func(string) ([]os.DirEntry, error) {
+		if calls.Add(1) == 1 {
+			<-releaseRead
+			close(completedRead)
+		}
+
+		return nil, nil
+	}
+
+	firstCheckErr := readDirWithTimeout(target, time.Millisecond)
+	require.ErrorContains(t, firstCheckErr, "timed out reading NFS mount path "+target)
+
+	unmountResult := make(chan error, 1)
+	go func() { unmountResult <- Unmount(target) }()
+	<-mounter.unmounted
+
+	mountResult := make(chan error, 1)
+	go func() { mountResult <- MountNFS(testNFSDevice, target) }()
+	var unmountCollected bool
+	var mountCollected bool
+
+	t.Cleanup(func() {
+		releaseUnmount()
+		releaseReadDir()
+		if !unmountCollected {
+			require.NoError(t, <-unmountResult)
+		}
+
+		if !mountCollected {
+			require.NoError(t, <-mountResult)
+		}
+
+		<-completedRead
+		readDir = originalReadDir
+	})
+
+	require.Never(t, func() bool {
+		for _, action := range mounter.GetLog() {
+			if action.Action == kmount.FakeActionMount {
+				return true
+			}
+		}
+
+		return false
+	}, 100*time.Millisecond, 5*time.Millisecond)
+
+	releaseUnmount()
+	require.NoError(t, <-unmountResult)
+	unmountCollected = true
+	require.NoError(t, <-mountResult)
+	mountCollected = true
 	require.EqualValues(t, 2, calls.Load())
 }
 
