@@ -146,10 +146,12 @@ type mountLock struct {
 func lockMountPoint(mountPoint string) func() {
 	mountLocksMu.Lock()
 	lock := mountLocks[mountPoint]
+
 	if lock == nil {
 		lock = &mountLock{}
 		mountLocks[mountPoint] = lock
 	}
+
 	lock.users++
 	mountLocksMu.Unlock()
 
@@ -160,6 +162,7 @@ func lockMountPoint(mountPoint string) func() {
 
 		mountLocksMu.Lock()
 		lock.users--
+
 		if lock.users == 0 && mountLocks[mountPoint] == lock {
 			delete(mountLocks, mountPoint)
 		}
