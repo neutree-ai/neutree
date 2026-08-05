@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/assert"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 // Helper function to create a test self-contained API key
@@ -111,9 +116,27 @@ func TestAuth(t *testing.T) {
 		JwtSecret: jwtSecret,
 	}
 
+	const (
+		testUserID = "12345678-1234-1234-1234-123456789abc"
+		testKeyID  = "87654321-4321-4321-4321-abcdef123456"
+	)
+
+	// liveKey is the stored row of a key that has not been revoked.
+	liveKey := func() *storagemocks.MockStorage {
+		s := &storagemocks.MockStorage{}
+		s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+			ID:       testKeyID,
+			Metadata: &v1.Metadata{Name: "live"},
+			Spec:     &v1.ApiKeySpec{},
+		}, nil)
+
+		return s
+	}
+
 	tests := []struct {
 		name                 string
 		setupAuth            func() string
+		setupStorage         func() *storagemocks.MockStorage
 		expectedStatus       int
 		expectUserID         string
 		expectPostgrestToken bool
@@ -141,16 +164,88 @@ func TestAuth(t *testing.T) {
 			name: "Valid self-contained API key",
 			setupAuth: func() string {
 				apiKey, _ := createTestAPIKey(
-					"12345678-1234-1234-1234-123456789abc",
-					"87654321-4321-4321-4321-abcdef123456",
+					testUserID,
+					testKeyID,
 					jwtSecret,
 					0, // Never expires
 				)
 				return apiKey
 			},
+			setupStorage:         liveKey,
 			expectedStatus:       http.StatusOK,
-			expectUserID:         "12345678-1234-1234-1234-123456789abc",
+			expectUserID:         testUserID,
 			expectPostgrestToken: true, // API keys should generate postgrest_token
+		},
+		{
+			// NEU-600: a cryptographically valid key whose row is gone must not
+			// authenticate, otherwise deleting a key never revokes it.
+			name: "Deleted API key is rejected",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testUserID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(nil, storage.ErrResourceNotFound)
+
+				return s
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "API key pending deletion is rejected",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testUserID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+					ID: testKeyID,
+					Metadata: &v1.Metadata{
+						Name:              "deleting",
+						DeletionTimestamp: "2026-08-05T07:20:48Z",
+					},
+					Spec: &v1.ApiKeySpec{},
+				}, nil)
+
+				return s
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "Disabled API key is rejected",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testUserID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(&v1.ApiKey{
+					ID:       testKeyID,
+					Metadata: &v1.Metadata{Name: "disabled"},
+					Spec:     &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{Disabled: true}},
+				}, nil)
+
+				return s
+			},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			// Fail closed: an unreachable store must deny rather than grant, and
+			// says so with a server error so it is not mistaken for a bad key.
+			name: "Unreachable storage denies the request",
+			setupAuth: func() string {
+				apiKey, _ := createTestAPIKey(testUserID, testKeyID, jwtSecret, 0)
+				return apiKey
+			},
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", testKeyID).Return(nil, assert.AnError)
+
+				return s
+			},
+			expectedStatus: http.StatusInternalServerError,
 		},
 		{
 			name: "Invalid API Key format",
@@ -177,9 +272,17 @@ func TestAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Left as a nil interface when the case has no storage, so that a
+			// typed-nil mock never reaches the middleware.
+			var store storage.Storage
+			if tt.setupStorage != nil {
+				store = tt.setupStorage()
+			}
+
 			r := gin.New()
 			r.Use(Auth(Dependencies{
-				Config: config,
+				Config:  config,
+				Storage: store,
 			}))
 			r.GET("/test", func(c *gin.Context) {
 				userID, _ := GetUserID(c)
@@ -282,6 +385,105 @@ func TestParseBearerToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyAPIKeyNotRevoked(t *testing.T) {
+	const keyID = "87654321-4321-4321-4321-abcdef123456"
+
+	tests := []struct {
+		name         string
+		setupStorage func() *storagemocks.MockStorage
+		wantErr      bool
+		wantUnknown  bool
+	}{
+		{
+			name: "live key passes",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID, Spec: &v1.ApiKeySpec{}}, nil)
+
+				return s
+			},
+		},
+		{
+			name: "key without limits passes",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{ID: keyID}, nil)
+
+				return s
+			},
+		},
+		{
+			name: "missing row is a revocation",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(nil, storage.ErrResourceNotFound)
+
+				return s
+			},
+			wantErr: true,
+		},
+		{
+			name: "deletion timestamp is a revocation",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{
+					ID:       keyID,
+					Metadata: &v1.Metadata{DeletionTimestamp: "2026-08-05T07:20:48Z"},
+				}, nil)
+
+				return s
+			},
+			wantErr: true,
+		},
+		{
+			name: "disabled is a revocation",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(&v1.ApiKey{
+					ID:   keyID,
+					Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{Disabled: true}},
+				}, nil)
+
+				return s
+			},
+			wantErr: true,
+		},
+		{
+			name: "storage failure is reported as unknown, not as a valid key",
+			setupStorage: func() *storagemocks.MockStorage {
+				s := &storagemocks.MockStorage{}
+				s.On("GetApiKey", keyID).Return(nil, assert.AnError)
+
+				return s
+			},
+			wantErr:     true,
+			wantUnknown: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := verifyAPIKeyNotRevoked(tt.setupStorage(), keyID)
+
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+
+			assert.Error(t, err)
+			assert.Equal(t, tt.wantUnknown, errors.Is(err, errAPIKeyStateUnknown))
+		})
+	}
+}
+
+// A missing storage dependency must deny rather than skip the check.
+func TestVerifyAPIKeyNotRevokedWithoutStorage(t *testing.T) {
+	err := verifyAPIKeyNotRevoked(nil, "87654321-4321-4321-4321-abcdef123456")
+
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, errAPIKeyStateUnknown))
 }
 
 func TestParseSelfContainedAPIKey(t *testing.T) {

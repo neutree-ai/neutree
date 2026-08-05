@@ -14,11 +14,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	"k8s.io/klog/v2"
+
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type Dependencies struct {
-	Config AuthConfig
+	Config  AuthConfig
+	Storage storage.Storage
 }
+
+// errAPIKeyStateUnknown marks a failure to determine whether an API key is still
+// valid, as opposed to having determined that it is not. Authentication fails
+// closed either way; the distinction only decides the status code the caller sees.
+var errAPIKeyStateUnknown = errors.New("failed to verify API key")
 
 // AuthConfig holds the configuration for JWT authentication
 type AuthConfig struct {
@@ -66,13 +75,25 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 			parsedInfo, err = parseBearerToken(deps.Config, authHeader)
 			is_api_key = false
 		case strings.HasPrefix(authHeader, "sk_"):
-			parsedInfo, err = parseApiKey(authHeader, deps.Config)
+			parsedInfo, err = parseApiKey(authHeader, deps.Config, deps.Storage)
 			is_api_key = true
 		default:
 			err = errors.New("invalid Authorization header format")
 		}
 
 		if err != nil {
+			// Why the key was refused stays server-side when the cause is a storage
+			// failure: the detail describes control-plane internals, not the request.
+			if errors.Is(err, errAPIKeyStateUnknown) {
+				klog.Errorf("Failed to verify API key: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": errAPIKeyStateUnknown.Error(),
+				})
+				c.Abort()
+
+				return
+			}
+
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": err.Error(),
 			})
@@ -135,9 +156,13 @@ func parseBearerToken(config AuthConfig, authHeader string) (*ParsedInfo, error)
 	}, nil
 }
 
-func parseApiKey(authHeader string, config AuthConfig) (*ParsedInfo, error) {
+func parseApiKey(authHeader string, config AuthConfig, store storage.Storage) (*ParsedInfo, error) {
 	payload, err := parseSelfContainedAPIKey(authHeader, config.JwtSecret)
 	if err != nil {
+		return nil, err
+	}
+
+	if err = verifyAPIKeyNotRevoked(store, payload.KeyID); err != nil {
 		return nil, err
 	}
 
@@ -145,6 +170,45 @@ func parseApiKey(authHeader string, config AuthConfig) (*ParsedInfo, error) {
 		UserID: payload.UserID,
 		KeyID:  &payload.KeyID,
 	}, nil
+}
+
+// verifyAPIKeyNotRevoked confirms the key backing a self-contained token is still
+// live.
+//
+// The signature proves who issued the token and the embedded expiry bounds its
+// natural lifetime, but neither says anything about whether the key has since been
+// revoked: deleting or disabling a key only changes database and gateway state. So
+// without this read a deleted or disabled key keeps working against the control
+// plane until its own expiry, and keys created without expires_in never expire at
+// all (NEU-600).
+//
+// Identity still comes from the signed payload — this read only establishes
+// liveness, so it queries by primary key and no field of the returned row is
+// trusted for identity. Any failure to reach the store denies the request: a
+// revocation check that fails open is not a revocation check.
+func verifyAPIKeyNotRevoked(store storage.Storage, keyID string) error {
+	if store == nil {
+		return fmt.Errorf("%w: no storage configured", errAPIKeyStateUnknown)
+	}
+
+	apiKey, err := store.GetApiKey(keyID)
+	if err != nil {
+		if errors.Is(err, storage.ErrResourceNotFound) {
+			return errors.New("API key has been revoked")
+		}
+
+		return fmt.Errorf("%w: %s", errAPIKeyStateUnknown, err.Error())
+	}
+
+	if apiKey.Metadata != nil && apiKey.Metadata.DeletionTimestamp != "" {
+		return errors.New("API key has been revoked")
+	}
+
+	if apiKey.Spec != nil && apiKey.Spec.Limits != nil && apiKey.Spec.Limits.Disabled {
+		return errors.New("API key is disabled")
+	}
+
+	return nil
 }
 
 func parseSelfContainedAPIKey(apiKey string, jwtSecret string) (*SelfContainedPayload, error) {

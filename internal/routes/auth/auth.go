@@ -29,7 +29,8 @@ type Dependencies struct {
 // RegisterAuthRoutes registers authentication-related routes
 func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	authMiddleware := middleware.Auth(middleware.Dependencies{
-		Config: deps.AuthConfig,
+		Config:  deps.AuthConfig,
+		Storage: deps.Storage,
 	})
 
 	authGroup := group.Group("/auth")
