@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -203,92 +202,6 @@ func TestMountNFSIncludesTargetWhenMountListingFails(t *testing.T) {
 	require.ErrorContains(t, err, "mount list failed")
 }
 
-func TestCheckMountWithTimeout(t *testing.T) {
-	release := make(chan struct{})
-	completed := make(chan struct{})
-	check := func(string) error {
-		<-release
-		close(completed)
-		return nil
-	}
-	t.Cleanup(func() {
-		close(release)
-		<-completed
-	})
-
-	err := CheckMountWithTimeout("/mnt/registry", time.Millisecond, check)
-	require.ErrorContains(t, err, "timed out checking NFS mount path /mnt/registry")
-}
-
-func TestCheckMountWithTimeoutRetriesAfterSuccessfulUnmount(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "registry")
-	require.NoError(t, os.Mkdir(target, 0o755))
-
-	mounter := kmount.NewFakeMounter([]kmount.MountPoint{{
-		Device: testNFSDevice,
-		Path:   target,
-		Type:   "nfs",
-	}})
-	useMountInterface(t, mounter)
-
-	release := make(chan struct{})
-	completed := make(chan struct{})
-	var calls atomic.Int32
-
-	check := func(string) error {
-		if calls.Add(1) == 1 {
-			<-release
-			close(completed)
-		}
-
-		return nil
-	}
-	t.Cleanup(func() {
-		close(release)
-		<-completed
-	})
-
-	err := CheckMountWithTimeout(target, time.Millisecond, check)
-	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
-
-	err = CheckMountWithTimeout(target, time.Millisecond, check)
-	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
-	require.EqualValues(t, 1, calls.Load())
-
-	require.NoError(t, Unmount(target))
-	require.NoError(t, CheckMountWithTimeout(target, time.Second, check))
-	require.EqualValues(t, 2, calls.Load())
-}
-
-func TestCheckMountWithTimeoutRetriesWhenMountIsAlreadyAbsent(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "registry")
-	require.NoError(t, os.Mkdir(target, 0o755))
-	useMountInterface(t, kmount.NewFakeMounter(nil))
-
-	release := make(chan struct{})
-	completed := make(chan struct{})
-	var calls atomic.Int32
-	check := func(string) error {
-		if calls.Add(1) == 1 {
-			<-release
-			close(completed)
-		}
-
-		return nil
-	}
-	t.Cleanup(func() {
-		close(release)
-		<-completed
-	})
-
-	err := CheckMountWithTimeout(target, time.Millisecond, check)
-	require.ErrorContains(t, err, "timed out checking NFS mount path "+target)
-
-	require.NoError(t, Unmount(target))
-	require.NoError(t, CheckMountWithTimeout(target, time.Second, check))
-	require.EqualValues(t, 2, calls.Load())
-}
-
 func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "registry")
 	require.NoError(t, os.Mkdir(target, 0o755))
@@ -343,83 +256,4 @@ func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
 	unmountCollected = true
 	require.NoError(t, <-mountResult)
 	mountCollected = true
-}
-
-func TestWithMountLockWaitsForConcurrentUnmount(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "registry")
-	require.NoError(t, os.Mkdir(target, 0o755))
-	mounter := &blockingUnmountMounter{
-		FakeMounter: kmount.NewFakeMounter([]kmount.MountPoint{{
-			Device: testNFSDevice,
-			Path:   target,
-			Type:   "nfs",
-		}}),
-		unmounted: make(chan struct{}),
-		release:   make(chan struct{}),
-	}
-	useMountInterface(t, mounter)
-
-	probeStarted := make(chan struct{})
-	releaseProbe := make(chan struct{})
-	probeResult := make(chan error, 1)
-	go func() {
-		probeResult <- WithMountLock(target, func() error {
-			close(probeStarted)
-			<-releaseProbe
-			return nil
-		})
-	}()
-	<-probeStarted
-
-	unmountResult := make(chan error, 1)
-	go func() { unmountResult <- Unmount(target) }()
-	require.Never(t, func() bool {
-		select {
-		case <-mounter.unmounted:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, 10*time.Millisecond)
-
-	close(releaseProbe)
-	require.NoError(t, <-probeResult)
-	<-mounter.unmounted
-	close(mounter.release)
-	require.NoError(t, <-unmountResult)
-}
-
-func TestCheckMountWithTimeoutCoalescesConcurrentChecks(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "registry")
-	release := make(chan struct{})
-	started := make(chan struct{})
-	var startOnce sync.Once
-	var releaseOnce sync.Once
-	var calls atomic.Int32
-	closeRelease := func() {
-		releaseOnce.Do(func() { close(release) })
-	}
-
-	check := func(string) error {
-		calls.Add(1)
-		startOnce.Do(func() { close(started) })
-		<-release
-		return nil
-	}
-	t.Cleanup(func() {
-		closeRelease()
-	})
-
-	results := make(chan error, 2)
-	go func() { results <- CheckMountWithTimeout(target, time.Second, check) }()
-	<-started
-	go func() { results <- CheckMountWithTimeout(target, time.Second, check) }()
-
-	require.Never(t, func() bool {
-		return calls.Load() > 1
-	}, 100*time.Millisecond, 5*time.Millisecond)
-
-	closeRelease()
-	require.NoError(t, <-results)
-	require.NoError(t, <-results)
 }

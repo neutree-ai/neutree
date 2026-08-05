@@ -2,7 +2,9 @@ package model_registry
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
@@ -164,9 +166,11 @@ func Test_newNFSTypeModelRegistry(t *testing.T) {
 func TestNFSFileHealthyCheck(t *testing.T) {
 	originalMountExists := isNFSMountExist
 	originalListModels := listBentoModels
+	originalTimeout := nfsListModelsTimeout
 	t.Cleanup(func() {
 		isNFSMountExist = originalMountExists
 		listBentoModels = originalListModels
+		nfsListModelsTimeout = originalTimeout
 	})
 
 	registry := &nfsFile{
@@ -181,7 +185,7 @@ func TestNFSFileHealthyCheck(t *testing.T) {
 		}
 
 		err := registry.HealthyCheck()
-		require.ErrorContains(t, err, "expected NFS mount")
+		require.ErrorContains(t, err, "does not exist")
 	})
 
 	t.Run("lists models after confirming the expected mount", func(t *testing.T) {
@@ -191,6 +195,103 @@ func TestNFSFileHealthyCheck(t *testing.T) {
 		}
 
 		err := registry.HealthyCheck()
-		require.ErrorContains(t, err, "failed to list models at path /mnt/registry")
+		require.ErrorContains(t, err, "failed to list models at NFS path /mnt/registry")
 	})
+}
+
+func TestNFSFileListModelsTimesOut(t *testing.T) {
+	originalListModels := listBentoModels
+	originalTimeout := nfsListModelsTimeout
+	t.Cleanup(func() {
+		listBentoModels = originalListModels
+		nfsListModelsTimeout = originalTimeout
+	})
+
+	release := make(chan struct{})
+	completed := make(chan struct{})
+	listBentoModels = func(string) ([]bentoml.Model, error) {
+		<-release
+		close(completed)
+		return nil, nil
+	}
+	nfsListModelsTimeout = time.Millisecond
+	t.Cleanup(func() {
+		close(release)
+		<-completed
+	})
+
+	registry := &nfsFile{targetPath: "/mnt/registry"}
+	_, err := registry.ListModels(ListOption{})
+	require.ErrorContains(t, err, "timed out listing models at NFS path /mnt/registry")
+}
+
+func TestNFSFileListModelsCoalescesTimedOutCalls(t *testing.T) {
+	originalListModels := listBentoModels
+	originalTimeout := nfsListModelsTimeout
+	t.Cleanup(func() {
+		listBentoModels = originalListModels
+		nfsListModelsTimeout = originalTimeout
+	})
+
+	release := make(chan struct{})
+	completed := make(chan struct{})
+	var calls atomic.Int32
+	listBentoModels = func(string) ([]bentoml.Model, error) {
+		calls.Add(1)
+		<-release
+		close(completed)
+		return nil, nil
+	}
+	nfsListModelsTimeout = time.Millisecond
+	t.Cleanup(func() {
+		close(release)
+		<-completed
+	})
+
+	registry := &nfsFile{targetPath: "/mnt/registry-coalesced"}
+	results := make(chan error, 2)
+	go func() {
+		_, err := registry.ListModels(ListOption{})
+		results <- err
+	}()
+	go func() {
+		_, err := registry.ListModels(ListOption{})
+		results <- err
+	}()
+
+	require.ErrorContains(t, <-results, "timed out listing models")
+	require.ErrorContains(t, <-results, "timed out listing models")
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestNFSFileDisconnectStartsNewListModelsGeneration(t *testing.T) {
+	originalListModels := listBentoModels
+	originalTimeout := nfsListModelsTimeout
+	originalUnmount := unmountNFS
+	t.Cleanup(func() {
+		listBentoModels = originalListModels
+		nfsListModelsTimeout = originalTimeout
+		unmountNFS = originalUnmount
+	})
+
+	release := make(chan struct{})
+	var calls atomic.Int32
+	listBentoModels = func(string) ([]bentoml.Model, error) {
+		if calls.Add(1) == 1 {
+			<-release
+		}
+
+		return nil, nil
+	}
+	nfsListModelsTimeout = time.Millisecond
+	unmountNFS = func(string) error { return nil }
+	t.Cleanup(func() { close(release) })
+
+	registry := &nfsFile{targetPath: "/mnt/registry-generation"}
+	_, err := registry.ListModels(ListOption{})
+	require.ErrorContains(t, err, "timed out listing models")
+	require.NoError(t, registry.Disconnect())
+	_, err = registry.ListModels(ListOption{})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, calls.Load())
 }

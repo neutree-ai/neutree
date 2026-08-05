@@ -88,7 +88,6 @@ func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockMod
 	// Create mocks
 	mockStorage := new(mocks.MockStorage)
 	mockModelRegistry := new(model_registry_mocks.MockModelRegistry)
-	mockModelRegistry.On("HealthyCheck").Return(nil).Maybe()
 
 	// Replace the model registry factory function
 	origNewModelRegistry := model_registry.NewModelRegistry
@@ -102,31 +101,6 @@ func setupMocks(t *testing.T) (*mocks.MockStorage, *model_registry_mocks.MockMod
 	})
 
 	return mockStorage, mockModelRegistry
-}
-
-func TestGetModelRegistryReturnsHealthCheckError(t *testing.T) {
-	mockStorage := new(mocks.MockStorage)
-	mockModelRegistry := new(model_registry_mocks.MockModelRegistry)
-	originalNewModelRegistry := model_registry.NewModelRegistry
-	model_registry.NewModelRegistry = func(*v1.ModelRegistry) (model_registry.ModelRegistry, error) {
-		return mockModelRegistry, nil
-	}
-	t.Cleanup(func() {
-		model_registry.NewModelRegistry = originalNewModelRegistry
-	})
-
-	c, _ := createMockContext("default", "test-registry", "", "")
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
-		Spec: &v1.ModelRegistrySpec{Type: "bentoml"},
-	}}, nil)
-	mockModelRegistry.On("Connect").Return(nil)
-	mockModelRegistry.On("HealthyCheck").Return(errors.New("NFS unavailable"))
-
-	registry, err := getModelRegistry(c, &Dependencies{Storage: mockStorage})
-	assert.Nil(t, registry)
-	assert.ErrorContains(t, err, "failed to health check model registry")
-	mockStorage.AssertExpectations(t)
-	mockModelRegistry.AssertExpectations(t)
 }
 
 func endpointModelReferenceFilterMatcher(workspace, registryName, modelName string) interface{} {

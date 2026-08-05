@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	kmount "k8s.io/utils/mount"
 
@@ -28,8 +27,6 @@ var (
 
 var (
 	mountInterface = kmount.New("")
-	mountChecksMu  sync.Mutex
-	mountChecks    = make(map[string]*mountCheck)
 	mountLocksMu   sync.Mutex
 	mountLocks     = make(map[string]*mountLock)
 )
@@ -130,11 +127,6 @@ func MountNFS(device string, mountPoint string) error {
 	return nil
 }
 
-type mountCheck struct {
-	done chan struct{}
-	err  error
-}
-
 type mountLock struct {
 	mu    sync.Mutex
 	users int
@@ -167,67 +159,6 @@ func lockMountPoint(mountPoint string) func() {
 	}
 }
 
-// WithMountLock serializes a mount-point operation with mount and unmount
-// operations for the same target.
-func WithMountLock(mountPoint string, operation func() error) error {
-	unlock := lockMountPoint(mountPoint)
-	defer unlock()
-
-	return operation()
-}
-
-// CheckMountWithTimeout runs checkFunc with a caller timeout while coalescing
-// concurrent checks for the same mount point.
-func CheckMountWithTimeout(mountPoint string, timeout time.Duration, checkFunc func(string) error) error {
-	mountChecksMu.Lock()
-	check, loaded := mountChecks[mountPoint]
-
-	if !loaded {
-		check = &mountCheck{done: make(chan struct{})}
-		mountChecks[mountPoint] = check
-	}
-	mountChecksMu.Unlock()
-
-	if !loaded {
-		go func() {
-			check.err = checkFunc(mountPoint)
-			close(check.done)
-
-			forgetMountCheck(mountPoint, check)
-		}()
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case <-check.done:
-		if check.err != nil {
-			return errors.Wrapf(check.err, "failed to check NFS mount path %s", mountPoint)
-		}
-
-		return nil
-	case <-timer.C:
-		return errors.Errorf("timed out checking NFS mount path %s", mountPoint)
-	}
-}
-
-func forgetMountCheck(mountPoint string, check *mountCheck) {
-	mountChecksMu.Lock()
-	defer mountChecksMu.Unlock()
-
-	if mountChecks[mountPoint] == check {
-		delete(mountChecks, mountPoint)
-	}
-}
-
-func resetMountCheck(mountPoint string) {
-	mountChecksMu.Lock()
-	defer mountChecksMu.Unlock()
-
-	delete(mountChecks, mountPoint)
-}
-
 func Unmount(mountPoint string) error {
 	unlock := lockMountPoint(mountPoint)
 	defer unlock()
@@ -244,8 +175,6 @@ func Unmount(mountPoint string) error {
 				return errors.Wrapf(err, "failed to unmount nfs from %s", mountPoint)
 			}
 
-			resetMountCheck(mountPoint)
-
 			break
 		}
 	}
@@ -254,8 +183,6 @@ func Unmount(mountPoint string) error {
 	if err != nil {
 		return err
 	}
-
-	resetMountCheck(mountPoint)
 
 	return nil
 }
