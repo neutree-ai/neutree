@@ -14,10 +14,13 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const defaultWorkspace = "default"
+
+var externalEndpointAdmissionResource = admission.NewResource[v1.ExternalEndpoint](storage.EXTERNAL_ENDPOINT_TABLE)
 
 // RegisterExternalEndpointRoutes registers external endpoint routes
 // The auth.credential field is masked in API responses (api:"-" tag)
@@ -26,19 +29,24 @@ const defaultWorkspace = "default"
 // Disallowed methods:
 //   - PUT: Not supported (use PATCH for updates)
 //   - DELETE: Use deletion timestamp pattern instead
-func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/external_endpoints")
 	proxyGroup.Use(middlewares...)
 
+	createRunner, patchRunner, err := admissionRouteRunners(deps, storage.EXTERNAL_ENDPOINT_TABLE, externalEndpointAdmissionResource)
+	if err != nil {
+		return err
+	}
 	handler := CreateStructProxyHandler[v1.ExternalEndpoint](deps, storage.EXTERNAL_ENDPOINT_TABLE)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
+	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
 
 	// Test connectivity endpoint
 	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))
+	return nil
 }
 
 // testConnectivityRequest is the request body for the test connectivity endpoint.

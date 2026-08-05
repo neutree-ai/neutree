@@ -67,10 +67,10 @@ func NewBuilder() *Builder {
 		// Auth middleware is applied to:
 		// - Validate and pass-through JWT tokens to PostgREST
 		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
-		"rest/api-keys":             ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
+		"rest/api-keys":             ProxiesRouteFactoryWithError(proxies.RegisterAPIKeyRoutes),
 		"rest/workspaces":           ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
 		"rest/roles":                ProxiesRouteFactory(proxies.RegisterRoleRoutes),
-		"rest/role-assignments":     ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
+		"rest/role-assignments":     ProxiesRouteFactoryWithError(proxies.RegisterRoleAssignmentRoutes),
 		"rest/user-profiles":        ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
 		"rest/clusters":             ProxiesRouteFactory(proxies.RegisterClusterRoutes),
 		"clusters":                  ClustersRouteFactory(clusters.RegisterClusterRoutes),
@@ -79,11 +79,11 @@ func NewBuilder() *Builder {
 		"rest/image-registries":     ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
 		"rest/model-registries":     ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
 		"rest/endpoints":            ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
-		"rest/engines":              ProxiesRouteFactory(proxies.RegisterEngineRoutes),
+		"rest/engines":              ProxiesRouteFactoryWithError(proxies.RegisterEngineRoutes),
 		"rest/model-catalogs":       ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
-		"rest/oem-configs":          ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/oem-configs":          ProxiesRouteFactoryWithError(proxies.RegisterOEMConfigRoutes),
 		"rest/rpc":                  ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
-		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
+		"rest/external-endpoints":   ProxiesRouteFactoryWithError(proxies.RegisterExternalEndpointRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {

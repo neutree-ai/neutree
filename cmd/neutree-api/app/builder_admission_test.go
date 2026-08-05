@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/pkg/admission"
@@ -124,6 +125,20 @@ func TestBuilderPassesAdmissionRegistryToProxyRoutes(t *testing.T) {
 	}
 	if proxyRegistry != configuredRegistry {
 		t.Error("proxy route did not receive the shared admission registry")
+	}
+}
+
+func TestProxiesRouteFactoryWithErrorAbortsBuildOnAdmissionRegistrationFailure(t *testing.T) {
+	builder := newAdmissionTestBuilder()
+	register := func(_ *gin.RouterGroup, _ []gin.HandlerFunc, deps *proxies.Dependencies) error {
+		return deps.Admission.RegisterResource(admission.NewResource[v1.Engine]("engines"))
+	}
+	builder.WithRoute("first", ProxiesRouteFactoryWithError(register))
+	builder.WithRoute("duplicate", ProxiesRouteFactoryWithError(register))
+
+	err := buildAdmissionWithoutPanic(t, builder)
+	if err == nil || !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("Build() error = %v, want admission registration failure", err)
 	}
 }
 

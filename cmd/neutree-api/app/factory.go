@@ -45,6 +45,11 @@ func ModelsRouteFactory(register ModelRegisterFunc) RouteFactory {
 
 type ProxyRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *proxies.Dependencies)
 
+// ProxyRegisterWithErrorFunc registers proxy routes and reports setup failures.
+// It is used by routes that must fail application startup when admission
+// resource descriptor registration fails.
+type ProxyRegisterWithErrorFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *proxies.Dependencies) error
+
 func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
@@ -57,6 +62,20 @@ func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 		})
 
 		return nil
+	}
+}
+
+// ProxiesRouteFactoryWithError adapts an error-returning proxy route registrar.
+func ProxiesRouteFactoryWithError(register ProxyRegisterWithErrorFunc) RouteFactory {
+	return func(deps *RouteOptions) error {
+		return register(deps.Group, deps.Middlewares, &proxies.Dependencies{
+			Storage:          deps.Config.Storage,
+			StorageAccessURL: deps.Config.StorageAccessURL,
+			AuthEndpoint:     deps.Config.AuthEndpoint,
+			AuthConfig:       deps.Config.AuthConfig,
+			ImageService:     registry.NewImageService(),
+			Admission:        deps.Admission,
+		})
 	}
 }
 
