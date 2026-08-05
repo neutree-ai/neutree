@@ -79,12 +79,12 @@ type patchAdmissionTargetReader interface {
 // the original request body so resource-owned parsers can retain their legacy
 // message and hint without exposing the body to admission hooks.
 type PatchAdmissionRunnerOptions struct {
-	InvalidRequestError    func([]byte, error) *admission.Error
-	InvalidRequestResponse func([]byte, error) error
-	BodyError              func(error) *admission.Error
-	BodyResponse           func(error) error
-	PermissiveCandidates   bool
-	DropEmptyMaskedFields  []string
+	InvalidRequestError          func([]byte, error) *admission.Error
+	InvalidRequestResponse       func([]byte, error) error
+	BodyError                    func(error) *admission.Error
+	BodyResponse                 func(error) error
+	PermissiveCandidates         bool
+	AdmissionIgnoredMaskedFields []string
 }
 
 type registryPatchAdmissionChainResolver struct {
@@ -242,16 +242,7 @@ func newPatchAdmissionRunnerWithOptions[T any](
 			return
 		}
 
-		patch, droppedEmptyMaskedFields := dropEmptyMaskedAdmissionFields(patch, options.DropEmptyMaskedFields)
-		if droppedEmptyMaskedFields {
-			normalizedBody, err = json.Marshal(patch)
-			if err != nil {
-				writePatchAdmissionError(c, err)
-				return
-			}
-		}
-
-		if containsMaskedAdmissionField(patch, tagConfig.excludeFields) {
+		if containsMaskedAdmissionField(patch, tagConfig.excludeFields, options.AdmissionIgnoredMaskedFields) {
 			writePatchAdmissionError(c, errInvalidAdmissionRequest)
 			return
 		}
@@ -470,11 +461,20 @@ func filterAdmissionObject(object map[string]interface{}, excludedFields map[str
 }
 
 // containsMaskedAdmissionField prevents a request from persisting a field
-// that the generic typed admission candidate must redact. Resource-specific
-// adapters can add an explicit, non-secret representation if they need to
-// admit writes to a masked field in the future.
-func containsMaskedAdmissionField(patch map[string]interface{}, excludedFields map[string]struct{}) bool {
+// that the generic typed admission candidate must redact. A resource can list
+// a legacy masked path as admission-ignored when its existing proxy handler
+// owns that field's compatibility behavior; admission hooks still never see it.
+func containsMaskedAdmissionField(patch map[string]interface{}, excludedFields map[string]struct{}, ignoredPaths []string) bool {
+	ignored := make(map[string]struct{}, len(ignoredPaths))
+	for _, path := range ignoredPaths {
+		ignored[path] = struct{}{}
+	}
+
 	for path := range excludedFields {
+		if _, ok := ignored[path]; ok {
+			continue
+		}
+
 		if admissionPatchPathExists(patch, strings.Split(path, ".")) {
 			return true
 		}
@@ -482,60 +482,6 @@ func containsMaskedAdmissionField(patch map[string]interface{}, excludedFields m
 
 	return false
 }
-
-// dropEmptyMaskedAdmissionFields removes only an explicit empty object at a
-// resource-approved masked path. This preserves legacy clients that serialize
-// zero-value nested structs while keeping every non-empty masked write denied.
-func dropEmptyMaskedAdmissionFields(patch map[string]interface{}, paths []string) (map[string]interface{}, bool) {
-	if len(paths) == 0 {
-		return patch, false
-	}
-
-	filtered := cloneAdmissionObject(patch)
-	changed := false
-
-	for _, path := range paths {
-		if dropEmptyAdmissionObjectField(filtered, strings.Split(path, ".")) {
-			changed = true
-		}
-	}
-
-	if !changed {
-		return patch, false
-	}
-
-	return filtered, true
-}
-
-func dropEmptyAdmissionObjectField(object map[string]interface{}, path []string) bool {
-	if len(path) == 0 {
-		return false
-	}
-
-	value, ok := object[path[0]]
-	if !ok {
-		return false
-	}
-
-	if len(path) == 1 {
-		emptyObject, ok := value.(map[string]interface{})
-		if !ok || len(emptyObject) != 0 {
-			return false
-		}
-
-		delete(object, path[0])
-
-		return true
-	}
-
-	nested, ok := value.(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	return dropEmptyAdmissionObjectField(nested, path[1:])
-}
-
 func admissionPatchPathExists(value interface{}, path []string) bool {
 	if len(path) == 0 {
 		return true

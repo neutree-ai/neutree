@@ -272,6 +272,86 @@ func TestRegisterImageRegistryRoutesPreservesCredentialsForCLIPatchWithEmptyAuth
 	}, forwardedBody["spec"].(map[string]interface{})["authconfig"])
 }
 
+func TestRegisterImageRegistryRoutesForwardsCLIPatchWithAuthConfigOutsideAdmissionCandidate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	storageMock := storageMocks.NewMockStorage(t)
+	storageMock.EXPECT().
+		GenericQuery(storage.IMAGE_REGISTRY_TABLE, "spec", mock.Anything, mock.Anything).
+		Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
+			resources := result.(*[]map[string]interface{})
+			*resources = []map[string]interface{}{
+				{
+					"spec": map[string]interface{}{
+						"authconfig": map[string]interface{}{
+							"username": "existing-user",
+							"password": "existing-password",
+						},
+					},
+				},
+			}
+		}).
+		Return(nil)
+
+	var forwardedBody map[string]interface{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(`[{"id":118,"metadata":{"name":"registry","workspace":"default"},"spec":{"url":"https://registry.example.com","repository":"neutree"}}]`))
+			require.NoError(t, err)
+			return
+		}
+
+		require.Equal(t, http.MethodPatch, r.Method)
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &forwardedBody))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	registry := admission.NewRegistry()
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("postgrest_token", "image-registry-test-token") })
+	require.NoError(t, RegisterImageRegistryRoutes(router.Group("/api/v1"), nil, &Dependencies{
+		StorageAccessURL: upstream.URL,
+		Storage:          storageMock,
+		Admission:        registry,
+	}))
+	var admittedCandidate v1.ImageRegistry
+	require.NoError(t, registry.RegisterHook(imageRegistryAdmissionResource, admission.ValidateUpdate(
+		admission.HookMeta{Name: "community.image-registry.capture-masked-update", Order: 900}, 91905,
+		func(_ admission.RequestContext, _, candidate v1.ImageRegistry) error {
+			admittedCandidate = candidate
+			return nil
+		},
+	)))
+	require.NoError(t, registry.Seal())
+
+	body := strings.NewReader(`{
+		"api_version":"v1",
+		"kind":"ImageRegistry",
+		"metadata":{"name":"registry","workspace":"default"},
+		"spec":{
+			"url":"https://registry.example.com:5000",
+			"repository":"updated-repository",
+			"authconfig":{"username":"updated-user","password":"updated-password"}
+		}
+	}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/image_registries?id=eq.118", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
+	require.Equal(t, map[string]interface{}{
+		"username": "updated-user",
+		"password": "updated-password",
+	}, forwardedBody["spec"].(map[string]interface{})["authconfig"])
+	require.Equal(t, v1.ImageRegistryAuthConfig{}, admittedCandidate.Spec.AuthConfig)
+}
+
 func TestImageRegistryURLAdmissionHooksRejectInvalidCandidates(t *testing.T) {
 	registry := admission.NewRegistry()
 	require.NoError(t, registerImageRegistryAdmission(&Dependencies{Admission: registry}))

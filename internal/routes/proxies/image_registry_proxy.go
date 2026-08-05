@@ -34,8 +34,8 @@ var imageRegistryPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
 	BodyResponse: func(cause error) error {
 		return newLegacyImageRegistryURLAdmissionError(fmt.Sprintf("failed to read request body: %v", cause))
 	},
-	PermissiveCandidates:  true,
-	DropEmptyMaskedFields: []string{"spec.authconfig"},
+	PermissiveCandidates:         true,
+	AdmissionIgnoredMaskedFields: []string{"spec.authconfig"},
 }
 
 type legacyImageRegistryURLAdmissionError struct {

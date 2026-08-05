@@ -330,22 +330,6 @@ func TestAdmissionPatchRejectsMaskedFieldWriteBeforeAdmission(t *testing.T) {
 	}
 }
 
-func TestDropEmptyMaskedAdmissionFieldsOnlyDropsEmptyObjects(t *testing.T) {
-	patch := map[string]interface{}{
-		"spec": map[string]interface{}{
-			"authconfig": map[string]interface{}{},
-			"secret":     map[string]interface{}{"value": "new-secret"},
-		},
-	}
-
-	filtered, changed := dropEmptyMaskedAdmissionFields(patch, []string{"spec.authconfig", "spec.secret"})
-
-	require.True(t, changed)
-	require.NotContains(t, filtered["spec"].(map[string]interface{}), "authconfig")
-	require.Equal(t, map[string]interface{}{"value": "new-secret"}, filtered["spec"].(map[string]interface{})["secret"])
-	require.Contains(t, patch["spec"].(map[string]interface{}), "authconfig", "the original patch must remain unchanged")
-}
-
 func TestAdmissionPatchUsesInboundBearerWhenPostgrestTokenIsAbsent(t *testing.T) {
 	reader := &fakePatchAdmissionReader{targets: []json.RawMessage{json.RawMessage(`{"id":"widget-1","metadata":{"name":"before","workspace":"default"},"spec":{"value":"before"}}`)}}
 	runner := newPatchAdmissionRunner(
