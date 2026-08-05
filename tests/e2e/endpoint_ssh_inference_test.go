@@ -238,6 +238,146 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		})
 	})
 
+	// --- Model Alias Non-Disturbance (NEU-652) ---
+	//
+	// NEU-620 gave a model version a display alias. The alias is a label: nothing
+	// in orchestration reads it and it never reaches spec.model.name, so renaming
+	// it must not move a deployment that is already serving that model.
+	//
+	// A unit test can only show the handler wrote nothing to the registry. What
+	// it cannot show — and what this covers — is that the Serve app was not
+	// redeployed and the engine containers were not restarted underneath a
+	// running endpoint. That acceptance item was previously carried by prose in a
+	// PR description, which is not re-runnable and goes stale silently.
+	//
+	// Lives under the SSH inference file to reuse its cluster and model registry
+	// fixture, exactly as "Sibling Endpoint Update Isolation" above does. The case
+	// itself is an orchestration-stability assertion, not an inference one.
+	Describe("Model Alias Non-Disturbance", Ordered, Label("model", "alias", "isolation"), func() {
+		var (
+			epName  string
+			sshUser string
+			keyFile string
+			modelH  *ModelHelper
+		)
+
+		BeforeAll(func() {
+			// Aliases only exist on a private registry — a public one is read-only
+			// and has none, which the ticket puts out of scope.
+			if profile.ModelRegistry.Type != v1.BentoMLModelRegistryType {
+				Skip("model alias requires a private (bentoml) model registry")
+			}
+
+			epName = "e2e-ep-ssh-alias-" + Cfg.RunID
+			sshUser = profileSSHUser()
+			keyFile = expandHome(profile.SSHNodes[0].KeyFile)
+			// A local instance rather than the package-level Model, which belongs
+			// to the model suite's fixture and is nil here. It resolves to the same
+			// registry the BeforeAll above set up.
+			modelH = NewModelHelper()
+		})
+
+		AfterAll(func() {
+			deleteEndpoint(epName)
+		})
+
+		It("should not disturb a running endpoint when the served model's alias changes",
+			Label("C-NEU652-NODISTURB"), func() {
+				By("Deploying an endpoint and waiting for Running")
+				yamlPath := applyEndpoint(epName, clusterName)
+				defer os.Remove(yamlPath)
+				waitEndpointRunning(epName)
+
+				cluster := getClusterFullJSON(clusterName)
+				Expect(cluster.Status.DashboardURL).NotTo(BeEmpty())
+
+				rayH := NewRayHelper(cluster.Status.DashboardURL)
+				appName := profileWorkspace() + "_" + epName
+
+				By("Recording the orchestration baseline")
+				before, err := rayH.GetServeAppSnapshot(appName)
+				Expect(err).NotTo(HaveOccurred())
+				engineImage := requireOrchestrationPath(before)
+
+				nodes := getStaticNodesForCluster(clusterName)
+				Expect(nodes).NotTo(BeEmpty(), "cluster %s reported no static nodes", clusterName)
+
+				containersBefore := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage)
+
+				epBefore := getEndpoint(epName)
+				Expect(epBefore.Status.Phase).To(BeEquivalentTo("Running"))
+				lastTransitionBefore := epBefore.Status.LastTransitionTime
+
+				modelName, modelVersion := profileModelName(), profileModelVersion()
+				DeferCleanup(modelH.EnsureAliasCleared, modelName, modelVersion)
+
+				By("Changing the alias of the model this endpoint is serving")
+				// Set, rename, clear: the three shapes an alias write takes. Each is
+				// followed by a sampling window, so a redeploy triggered by any one
+				// of them is caught while it is happening rather than only in the
+				// end-state comparison.
+				for _, alias := range []string{
+					"E2E Served " + Cfg.RunID,
+					"E2E Served Renamed " + Cfg.RunID,
+					"",
+				} {
+					body, status := modelH.SetAlias(modelName, modelVersion, alias)
+					Expect(status).To(Equal(http.StatusOK),
+						"failed to write alias %q on %s:%s: %s", alias, modelName, modelVersion, body)
+
+					if alias != "" {
+						By("Verifying the alias did not leak into the orchestration path")
+						current, err := rayH.GetServeAppSnapshot(appName)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(string(current.DeployedAppConfig)).NotTo(ContainSubstring(alias),
+							"alias %q reached the deployed Serve config", alias)
+					}
+
+					By("Sampling endpoint phase for 20s after the alias write")
+					Consistently(func() v1.EndpointPhase {
+						return getEndpoint(epName).Status.Phase
+					}, 20*time.Second, 1*time.Second).
+						Should(BeEquivalentTo("Running"),
+							"endpoint phase flickered after the alias was set to %q", alias)
+				}
+
+				By("Verifying the Serve app was not redeployed")
+				after, err := rayH.GetServeAppSnapshot(appName)
+				Expect(err).NotTo(HaveOccurred())
+				requireOrchestrationPath(after)
+
+				// Named first, so a failure says which field moved; the whole-config
+				// comparison after it is the one that also catches a field nothing
+				// here knows to look at.
+				for _, field := range orchestrationPathFields {
+					Expect(orchestrationPathValue(after, field)).
+						To(Equal(orchestrationPathValue(before, field)),
+							"orchestration path field %s changed across an alias write", field)
+				}
+
+				Expect(string(after.DeployedAppConfig)).To(Equal(string(before.DeployedAppConfig)),
+					"the deployed Serve config changed across an alias write")
+				Expect(after.LastDeployedTimeS).To(Equal(before.LastDeployedTimeS),
+					"last_deployed_time_s moved — the Serve app was redeployed")
+
+				By("Verifying the engine containers were neither replaced nor restarted")
+				containersAfter := engineContainersOnNodes(nodes, sshUser, keyFile, engineImage)
+				Expect(containersAfter).To(Equal(containersBefore),
+					"the engine container set changed across an alias write")
+
+				By("Verifying the controller never wrote an intermediate phase")
+				epAfter := getEndpoint(epName)
+				Expect(epAfter.Status.LastTransitionTime).To(Equal(lastTransitionBefore),
+					"endpoint LastTransitionTime changed — before=%q after=%q",
+					lastTransitionBefore, epAfter.Status.LastTransitionTime)
+
+				By("Verifying the endpoint still serves inference")
+				code, respBody, err := inferChat(epAfter.Status.ServiceURL, "Hello after an alias change")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(code).To(Equal(http.StatusOK), "inference after an alias change failed: %s", respBody)
+			})
+	})
+
 	// --- Tensor Parallel (TP=2) ---
 
 	Describe("Tensor Parallel TP=2", Ordered, Label("inference", "tp2"), func() {

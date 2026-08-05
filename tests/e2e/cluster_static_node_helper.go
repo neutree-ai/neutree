@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -321,6 +322,90 @@ func staticNodeTargets(nodes []v1.StaticNode, port int) []string {
 	}
 
 	return targets
+}
+
+// engineContainerIdentity is what identifies one running engine container across
+// two observations: a container that was restarted keeps neither its ID nor its
+// StartedAt, and one that was replaced keeps neither.
+type engineContainerIdentity struct {
+	Node      string `json:"node"`
+	Name      string `json:"name"`
+	ID        string `json:"id"`
+	Image     string `json:"image"`
+	StartedAt string `json:"started_at"`
+}
+
+// engineContainersOnNodes returns every container on the cluster's nodes that is
+// running image, keyed by container ID.
+//
+// The image is not a literal in this file on purpose. Filtering on a tag written
+// down by the test author is how a comparison ends up being made between two
+// empty sets: get the tag wrong and the filter matches nothing, both
+// observations come back empty, and "nothing changed" reads as a pass. The
+// caller therefore passes the image read out of the live Ray Serve config — the
+// system under test names its own engine image, so the filter cannot drift away
+// from what is actually running.
+//
+// The remaining way to observe nothing is that the engine is not running at all,
+// which is a broken probe rather than a passing test. So this fails the spec on
+// an empty result instead of returning one.
+func engineContainersOnNodes(nodes []v1.StaticNode, sshUser, keyFile, image string) map[string]engineContainerIdentity {
+	GinkgoHelper()
+
+	Expect(nodes).NotTo(BeEmpty(), "no static nodes to probe for engine containers")
+	Expect(image).NotTo(BeEmpty(), "engine image to probe for must not be empty")
+
+	// StartedAt has to come from `docker inspect`: `docker ps` only offers
+	// CreatedAt, which a restart does not move — so a restarted container would
+	// present the same ID and the same CreatedAt and read as undisturbed.
+	// `xargs -r` is what keeps an empty container list from invoking
+	// `docker inspect` with no arguments, which exits non-zero.
+	command := "docker ps -q --no-trunc --filter " + shellSingleQuote("ancestor="+image) +
+		" | xargs -r docker inspect --format " +
+		shellSingleQuote("{{.Name}}|{{.Id}}|{{.Config.Image}}|{{.State.StartedAt}}")
+
+	found := map[string]engineContainerIdentity{}
+
+	for _, node := range nodes {
+		if node.Spec == nil || node.Spec.IP == "" {
+			continue
+		}
+
+		r := RunSSH(sshUser, node.Spec.IP, keyFile, command)
+		Expect(r.ExitCode).To(Equal(0),
+			"engine container probe failed on node %s: %s", node.Spec.IP, r.String())
+
+		for _, line := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
+			fields := strings.Split(strings.TrimSpace(line), "|")
+			if len(fields) != 4 {
+				continue
+			}
+
+			found[fields[1]] = engineContainerIdentity{
+				Node:      node.Spec.IP,
+				Name:      strings.TrimPrefix(fields[0], "/"),
+				ID:        fields[1],
+				Image:     fields[2],
+				StartedAt: fields[3],
+			}
+		}
+	}
+
+	// The gate. Everything downstream compares this map against a later one, and
+	// comparing two empty maps succeeds for the wrong reason.
+	Expect(found).NotTo(BeEmpty(),
+		"engine container probe found no container running image %q on any of the %d cluster nodes — "+
+			"the probe is not observing the engine, so a comparison against it would pass vacuously",
+		image, len(nodes))
+
+	return found
+}
+
+// shellSingleQuote quotes s for a POSIX shell. Image references carry ':' and
+// '/', and a docker filter value reaches the node through `ssh <host> <command>`,
+// which is a shell.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func getStaticNodesForCluster(clusterName string) []v1.StaticNode {
