@@ -679,46 +679,6 @@ func TestComputeClusterSpecHash(t *testing.T) {
 	})
 }
 
-func TestClusterControllerDoesNotWriteReleaseInfoOrUpgradeSnapshotState(t *testing.T) {
-	store := new(storagemocks.MockStorage)
-	reconciler := new(clustermocks.MockClusterReconcile)
-	controller := newTestClusterController(store, reconciler)
-	clusterObj := &v1.Cluster{
-		ID:       1,
-		Metadata: &v1.Metadata{Name: "release-aware"},
-		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
-		Status: &v1.ClusterStatus{
-			Initialized:      true,
-			Version:          "v1.1.1",
-			ObservedSpecHash: cluster.ComputeClusterSpecHash(&v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"}),
-			ReleaseInfo: &v1.ReleaseInfoReference{
-				Baseline: "v1.2.0",
-				Revision: "legacy-revision",
-			},
-			ReleaseCompatibility: &v1.ClusterReleaseCompatibility{
-				EffectiveVersion: "v1.2.0",
-				ResolvedVersion:  "v1.2.0",
-				State:            v1.ClusterReleaseCompatibilityStateCompatible,
-			},
-		},
-	}
-
-	reconciler.On("Reconcile", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		obj := args.Get(1).(*v1.Cluster)
-		obj.Status.Version = obj.Spec.Version
-	}).Return(nil).Once()
-	store.On("UpdateCluster", "1", mock.MatchedBy(func(updated *v1.Cluster) bool {
-		return updated.Status.Phase == v1.ClusterPhaseRunning &&
-			updated.Status.ReleaseInfo == nil &&
-			updated.Status.ReleaseCompatibility == nil &&
-			updated.Status.ObservedSpecHash == cluster.ComputeClusterSpecHash(clusterObj.Spec)
-	})).Return(nil).Once()
-
-	require.NoError(t, controller.sync(clusterObj))
-	store.AssertExpectations(t)
-	reconciler.AssertExpectations(t)
-}
-
 func TestClusterControllerFailsIncompatibleReleaseInfoWithoutWorkloadReconcile(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	reconciler := new(clustermocks.MockClusterReconcile)

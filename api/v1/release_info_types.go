@@ -11,47 +11,17 @@ const (
 	ReleaseInfoListKind = "ReleaseInfoList"
 )
 
-type ReleaseInfoChannel string
-
-const (
-	ReleaseInfoChannelStable  ReleaseInfoChannel = "Stable"
-	ReleaseInfoChannelNightly ReleaseInfoChannel = "Nightly"
-)
-
-type ReleaseInfoClusterVersionState string
-
-const (
-	ReleaseInfoClusterVersionStateActive  ReleaseInfoClusterVersionState = "Active"
-	ReleaseInfoClusterVersionStateRetired ReleaseInfoClusterVersionState = "Retired"
-)
-
 // ReleaseInfo is the control-plane-owned release matrix for a baseline version.
 type ReleaseInfo struct {
-	ID         int                `json:"id,omitempty"`
-	APIVersion string             `json:"api_version,omitempty"`
-	Kind       string             `json:"kind,omitempty"`
-	Metadata   *Metadata          `json:"metadata,omitempty"`
-	Spec       *ReleaseInfoSpec   `json:"spec,omitempty"`
-	Status     *ReleaseInfoStatus `json:"status,omitempty"`
+	ID         int              `json:"id,omitempty"`
+	APIVersion string           `json:"api_version,omitempty"`
+	Kind       string           `json:"kind,omitempty"`
+	Metadata   *Metadata        `json:"metadata,omitempty"`
+	Spec       *ReleaseInfoSpec `json:"spec,omitempty"`
 }
 
 type ReleaseInfoSpec struct {
-	CompatibleClusterBaselines []string                    `json:"compatible_cluster_baselines,omitempty"`
-	Channel                    ReleaseInfoChannel          `json:"channel,omitempty"`
-	BuildIdentity              string                      `json:"build_identity,omitempty"`
-	ClusterVersions            []ReleaseInfoClusterVersion `json:"cluster_versions,omitempty"`
-}
-
-type ReleaseInfoClusterVersion struct {
-	Version               string                         `json:"version,omitempty"`
-	State                 ReleaseInfoClusterVersionState `json:"state,omitempty"`
-	UpgradeTo             []string                       `json:"upgrade_to,omitempty"`
-	Components            map[string]string              `json:"components,omitempty"`
-	AcceleratorComponents map[string]map[string]string   `json:"accelerator_components,omitempty"`
-}
-
-type ReleaseInfoStatus struct {
-	Revision string `json:"revision,omitempty"`
+	CompatibleClusterBaselines []string `json:"compatible_cluster_baselines,omitempty"`
 }
 
 func (obj *ReleaseInfo) GetName() string {
@@ -128,7 +98,7 @@ func (obj *ReleaseInfo) GetSpec() interface{} {
 }
 
 func (obj *ReleaseInfo) GetStatus() interface{} {
-	return obj.Status
+	return nil
 }
 
 func (obj *ReleaseInfo) GetKind() string {

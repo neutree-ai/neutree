@@ -11,14 +11,15 @@ import (
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type currentBaselineSynchronizer func(
 	releaseinfo.CurrentBaselineStore,
 	string,
-	releaseinfo.ReleaseInfoBuilder,
-	releaseinfo.CurrentClusterProfileBuilder,
+	releaseprofile.ReleaseInfoBuilder,
+	releaseprofile.CurrentClusterProfileBuilder,
 ) error
 
 type currentBaselineStore struct {
@@ -53,8 +54,8 @@ func (store currentBaselineStore) UpdateClusterProfile(id string, profile *v1.Cl
 type App struct {
 	config                       *config.CoreConfig
 	controllers                  map[string]controllers.Controller
-	releaseInfoBuilder           releaseinfo.ReleaseInfoBuilder
-	currentClusterProfileBuilder releaseinfo.CurrentClusterProfileBuilder
+	releaseInfoBuilder           releaseprofile.ReleaseInfoBuilder
+	currentClusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder
 	synchronizeCurrentBaseline   currentBaselineSynchronizer
 }
 
@@ -63,8 +64,8 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 	return &App{
 		config:                       c,
 		controllers:                  controllers,
-		releaseInfoBuilder:           releaseinfo.NewCommunityReleaseInfoBuilder(),
-		currentClusterProfileBuilder: releaseinfo.NewCommunityClusterProfileBuilder(),
+		releaseInfoBuilder:           releaseprofile.NewCommunityReleaseInfoBuilder(),
+		currentClusterProfileBuilder: releaseprofile.NewCommunityClusterProfileBuilder(),
 		synchronizeCurrentBaseline:   releaseinfo.SynchronizeCurrentBaseline,
 	}
 }

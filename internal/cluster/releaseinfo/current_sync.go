@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 var compatibleClusterBaselinePattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
@@ -28,8 +29,8 @@ type CurrentBaselineStore interface {
 func SynchronizeCurrentBaseline(
 	store CurrentBaselineStore,
 	baseline string,
-	releaseInfoBuilder ReleaseInfoBuilder,
-	clusterProfileBuilder CurrentClusterProfileBuilder,
+	releaseInfoBuilder releaseprofile.ReleaseInfoBuilder,
+	clusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder,
 ) error {
 	if _, err := parseStableReleaseInfoBaseline(baseline); err != nil {
 		return fmt.Errorf("invalid stable release info baseline %q: %w", baseline, err)
@@ -94,7 +95,10 @@ func SynchronizeCurrentBaseline(
 			continue
 		}
 
-		historical := communityHistoricalClusterProfile(historicalVersion)
+		historical, err := releaseprofile.CommunityHistoricalClusterProfile(historicalVersion)
+		if err != nil {
+			return fmt.Errorf("build historical cluster profile %s: %w", historicalVersion, err)
+		}
 		if err := store.CreateClusterProfile(deepCopyClusterProfile(historical)); err != nil {
 			return fmt.Errorf("create historical cluster profile %s: %w", historicalVersion, err)
 		}
@@ -115,9 +119,6 @@ func validateCurrentReleaseInfoBuilderOutput(baseline string, info *v1.ReleaseIn
 	}
 	if info.Metadata.Name != baseline {
 		return fmt.Errorf("release info builder output name %q must match requested baseline %q", info.Metadata.Name, baseline)
-	}
-	if info.Spec.Channel != "" || info.Spec.BuildIdentity != "" || info.Spec.ClusterVersions != nil || info.Status != nil {
-		return fmt.Errorf("release info builder output must not set legacy fields")
 	}
 	if len(info.Spec.CompatibleClusterBaselines) == 0 {
 		return fmt.Errorf("release info builder output compatible cluster baselines are required")
@@ -197,10 +198,6 @@ func deepCopyReleaseInfo(info *v1.ReleaseInfo) *v1.ReleaseInfo {
 	copy := *info
 	copy.Metadata = deepCopyMetadata(info.Metadata)
 	copy.Spec = deepCopyReleaseInfoSpec(info.Spec)
-	if info.Status != nil {
-		status := *info.Status
-		copy.Status = &status
-	}
 
 	return &copy
 }
@@ -212,28 +209,8 @@ func deepCopyReleaseInfoSpec(spec *v1.ReleaseInfoSpec) *v1.ReleaseInfoSpec {
 
 	copy := *spec
 	copy.CompatibleClusterBaselines = append([]string(nil), spec.CompatibleClusterBaselines...)
-	if spec.ClusterVersions != nil {
-		copy.ClusterVersions = make([]v1.ReleaseInfoClusterVersion, len(spec.ClusterVersions))
-		for index := range spec.ClusterVersions {
-			copy.ClusterVersions[index] = deepCopyReleaseInfoClusterVersion(spec.ClusterVersions[index])
-		}
-	}
 
 	return &copy
-}
-
-func deepCopyReleaseInfoClusterVersion(version v1.ReleaseInfoClusterVersion) v1.ReleaseInfoClusterVersion {
-	copy := version
-	copy.UpgradeTo = append([]string(nil), version.UpgradeTo...)
-	copy.Components = copyStringMap(version.Components)
-	if version.AcceleratorComponents != nil {
-		copy.AcceleratorComponents = make(map[string]map[string]string, len(version.AcceleratorComponents))
-		for accelerator, components := range version.AcceleratorComponents {
-			copy.AcceleratorComponents[accelerator] = copyStringMap(components)
-		}
-	}
-
-	return copy
 }
 
 func deepCopyClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {

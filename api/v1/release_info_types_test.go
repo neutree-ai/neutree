@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,34 +30,15 @@ func TestReleaseInfoSchemeRegistration(t *testing.T) {
 	assert.IsType(t, &ReleaseInfo{}, tableObj)
 }
 
-func TestReleaseInfoJSONRoundTripPreservesComponentMatrix(t *testing.T) {
+func TestReleaseInfoJSONRoundTripPreservesCompatibleBaselines(t *testing.T) {
 	input := &ReleaseInfo{
 		ID:         1,
 		APIVersion: "v1",
 		Kind:       ReleaseInfoKind,
 		Metadata:   &Metadata{Name: "v1.2.0"},
 		Spec: &ReleaseInfoSpec{
-			CompatibleClusterBaselines: []string{"v1.2.0"},
-			Channel:                    ReleaseInfoChannelStable,
-			BuildIdentity:              "v1.2.0",
-			ClusterVersions: []ReleaseInfoClusterVersion{
-				{
-					Version:   "v1.2.0",
-					State:     ReleaseInfoClusterVersionStateActive,
-					UpgradeTo: []string{},
-					Components: map[string]string{
-						"ray_runtime": "neutree/neutree-serve:v1.1.1",
-						"router":      "neutree/router:v1.1.1",
-					},
-					AcceleratorComponents: map[string]map[string]string{
-						"amd_gpu": {
-							"ray_runtime": "neutree/neutree-serve:v1.1.1-rocm",
-						},
-					},
-				},
-			},
+			CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
 		},
-		Status: &ReleaseInfoStatus{Revision: "seed-v1.2.0"},
 	}
 
 	payload, err := json.Marshal(input)
@@ -65,12 +47,20 @@ func TestReleaseInfoJSONRoundTripPreservesComponentMatrix(t *testing.T) {
 	var output ReleaseInfo
 	require.NoError(t, json.Unmarshal(payload, &output))
 	require.NotNil(t, output.Spec)
-	require.Len(t, output.Spec.ClusterVersions, 1)
 	assert.Equal(t, "v1.2.0", output.Metadata.Name)
-	assert.Equal(t, []string{"v1.2.0"}, output.Spec.CompatibleClusterBaselines)
-	assert.Equal(t, ReleaseInfoChannelStable, output.Spec.Channel)
-	assert.Equal(t, "neutree/neutree-serve:v1.1.1-rocm", output.Spec.ClusterVersions[0].AcceleratorComponents["amd_gpu"]["ray_runtime"])
-	assert.Equal(t, "seed-v1.2.0", output.Status.Revision)
+	assert.Equal(t, []string{"v1.1", "v1.2"}, output.Spec.CompatibleClusterBaselines)
+}
+
+func TestReleaseInfoAPIShapeOmitsLegacyMatrixState(t *testing.T) {
+	releaseInfoType := reflect.TypeOf(ReleaseInfo{})
+	_, hasStatus := releaseInfoType.FieldByName("Status")
+	assert.False(t, hasStatus, "ReleaseInfo must not expose mutable status")
+
+	specType := reflect.TypeOf(ReleaseInfoSpec{})
+	for _, field := range []string{"Channel", "BuildIdentity", "ClusterVersions"} {
+		_, found := specType.FieldByName(field)
+		assert.False(t, found, "ReleaseInfo.spec must not expose legacy %s", field)
+	}
 }
 
 func TestReleaseInfoListSetItems(t *testing.T) {

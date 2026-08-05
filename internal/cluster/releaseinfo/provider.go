@@ -41,19 +41,3 @@ func (provider *Provider) Current() (*v1.ReleaseInfo, error) {
 
 	return nil, fmt.Errorf("release info %s not found", baseline)
 }
-
-// ClusterVersion returns the selected Cluster version from the current matrix.
-func (provider *Provider) ClusterVersion(version string) (*v1.ReleaseInfoClusterVersion, error) {
-	info, err := provider.Current()
-	if err != nil {
-		return nil, err
-	}
-
-	for index := range info.Spec.ClusterVersions {
-		if info.Spec.ClusterVersions[index].Version == version {
-			return &info.Spec.ClusterVersions[index], nil
-		}
-	}
-
-	return nil, fmt.Errorf("cluster version %s is not supported by release info %s", version, info.GetName())
-}

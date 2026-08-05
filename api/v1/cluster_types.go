@@ -197,60 +197,7 @@ type ClusterStatus struct {
 	// Used to detect spec changes and trigger the Updating phase.
 	ObservedSpecHash string `json:"observed_spec_hash,omitempty"`
 
-	// ReleaseInfo identifies the control-plane matrix that last validated a
-	// successfully reconciled ReleaseInfo-aware cluster. It is status-only so a
-	// revision update never changes the workload desired spec.
-	ReleaseInfo *ReleaseInfoReference `json:"release_info,omitempty"`
-
-	// ReleaseCompatibility reports how this cluster's requested release maps to
-	// the current control-plane ReleaseInfo matrix.
-	ReleaseCompatibility *ClusterReleaseCompatibility `json:"release_compatibility,omitempty"`
-
 	ComponentStatus map[string]*ComponentStatus `json:"component_status,omitempty"`
-}
-
-// ReleaseInfoReference identifies one persisted ReleaseInfo matrix revision.
-// Baseline is the normalized control-plane release key, such as v1.2.0.
-type ReleaseInfoReference struct {
-	Baseline string `json:"baseline,omitempty"`
-	Revision string `json:"revision,omitempty"`
-}
-
-type ClusterReleaseCompatibilityState string
-
-const (
-	ClusterReleaseCompatibilityStateCompatible  ClusterReleaseCompatibilityState = "Compatible"
-	ClusterReleaseCompatibilityStateUnsupported ClusterReleaseCompatibilityState = "Unsupported"
-	ClusterReleaseCompatibilityStateRetired     ClusterReleaseCompatibilityState = "Retired"
-)
-
-// ClusterReleaseCompatibility is the user-visible compatibility summary. It
-// deliberately excludes private component references and upgrade snapshots.
-type ClusterReleaseCompatibility struct {
-	EffectiveVersion string                           `json:"effective_version,omitempty"`
-	ResolvedVersion  string                           `json:"resolved_version,omitempty"`
-	State            ClusterReleaseCompatibilityState `json:"state,omitempty"`
-	Reason           string                           `json:"reason,omitempty"`
-}
-
-// ClusterUpgradeEdge records the allowed version transition captured when an
-// upgrade starts. It remains private controller state via ClusterUpgradeSnapshot.
-type ClusterUpgradeEdge struct {
-	From string `json:"from,omitempty"`
-	To   string `json:"to,omitempty"`
-}
-
-// ClusterUpgradeSnapshot is private controller state. It freezes the
-// ReleaseInfo inputs used by an in-flight upgrade so future nightly revisions
-// cannot reinterpret the operation.
-type ClusterUpgradeSnapshot struct {
-	ClusterID            int                   `json:"cluster_id,omitempty"`
-	SourceClusterVersion string                `json:"source_cluster_version,omitempty"`
-	TargetClusterVersion string                `json:"target_cluster_version,omitempty"`
-	SourceReleaseInfo    *ReleaseInfoReference `json:"source_release_info,omitempty"`
-	TargetReleaseInfo    *ReleaseInfoReference `json:"target_release_info,omitempty"`
-	AllowedEdge          ClusterUpgradeEdge    `json:"allowed_edge,omitempty"`
-	Components           map[string]string     `json:"components,omitempty"`
 }
 
 const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"

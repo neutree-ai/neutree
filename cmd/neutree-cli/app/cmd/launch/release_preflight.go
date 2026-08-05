@@ -11,6 +11,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 type clusterLister interface {
@@ -45,12 +46,12 @@ func NewNeutreeCorePreflightCmd() *cobra.Command {
 }
 
 func buildReleasePreflightTarget(cliVersion string) (*v1.ReleaseInfo, error) {
-	baseline, _, err := releaseinfo.NormalizeControlPlaneRelease(cliVersion)
+	baseline, err := releaseinfo.NormalizeControlPlaneRelease(cliVersion)
 	if err != nil {
 		return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
 	}
 
-	info, err := releaseinfo.NewCommunityReleaseInfoBuilder().BuildReleaseInfo(baseline)
+	info, err := releaseprofile.NewCommunityReleaseInfoBuilder().BuildReleaseInfo(baseline)
 	if err != nil {
 		return nil, err
 	}

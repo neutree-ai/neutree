@@ -11,8 +11,8 @@ import (
 
 func TestProviderResolvesCurrentBaseline(t *testing.T) {
 	store := &releaseInfoReader{infos: []v1.ReleaseInfo{
-		*mustSeed(t, "v1.1.0"),
-		*mustSeed(t, "v1.2.0"),
+		*releaseInfoNamed("v1.1.0"),
+		*releaseInfoNamed("v1.2.0"),
 	}}
 	provider := NewProvider(store, "v1.2.0-nightly.20260804")
 
@@ -23,7 +23,7 @@ func TestProviderResolvesCurrentBaseline(t *testing.T) {
 }
 
 func TestProviderReturnsErrorWhenCurrentBaselineIsMissing(t *testing.T) {
-	provider := NewProvider(&releaseInfoReader{infos: []v1.ReleaseInfo{*mustSeed(t, "v1.1.0")}}, "v1.2.0")
+	provider := NewProvider(&releaseInfoReader{infos: []v1.ReleaseInfo{*releaseInfoNamed("v1.1.0")}}, "v1.2.0")
 
 	_, err := provider.Current()
 	require.ErrorContains(t, err, "release info v1.2.0 not found")

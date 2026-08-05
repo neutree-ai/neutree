@@ -1,4 +1,4 @@
-package releaseinfo
+package releaseprofile
 
 import (
 	"testing"
@@ -21,10 +21,6 @@ func TestCommunityBuildersBuildV12ReleaseInfoAndClusterProfile(t *testing.T) {
 	assert.Equal(t, v1.ReleaseInfoKind, info.Kind)
 	assert.Equal(t, "v1.2.0", info.Metadata.Name)
 	assert.Equal(t, []string{"v1.1", "v1.2"}, info.Spec.CompatibleClusterBaselines)
-	assert.Empty(t, info.Spec.Channel)
-	assert.Empty(t, info.Spec.BuildIdentity)
-	assert.Nil(t, info.Spec.ClusterVersions)
-	assert.Nil(t, info.Status)
 
 	profile, err := profileBuilder.BuildClusterProfile("v1.2.0")
 	require.NoError(t, err)
@@ -41,4 +37,14 @@ func TestCommunityBuildersBuildV12ReleaseInfoAndClusterProfile(t *testing.T) {
 		VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
 		KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
 	}, profile.Spec.Components)
+}
+
+func TestCommunityHistoricalClusterProfileSupportsSeededVersions(t *testing.T) {
+	profile, err := CommunityHistoricalClusterProfile("v1.1.0")
+	require.NoError(t, err)
+	assert.Equal(t, "v1.1.0", profile.GetName())
+	assert.Equal(t, "v1.1.0", profile.Spec.Components.RayRuntime.Tag)
+
+	_, err = CommunityHistoricalClusterProfile("v1.3.0")
+	require.ErrorContains(t, err, "not supported")
 }

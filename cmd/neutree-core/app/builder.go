@@ -8,8 +8,8 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 // Builder is the application builder
@@ -18,8 +18,8 @@ type Builder struct {
 	config             *config.CoreConfig
 	acceleratorPlugins []publicaccelerator.Plugin
 
-	releaseInfoBuilder           releaseinfo.ReleaseInfoBuilder
-	currentClusterProfileBuilder releaseinfo.CurrentClusterProfileBuilder
+	releaseInfoBuilder           releaseprofile.ReleaseInfoBuilder
+	currentClusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -31,8 +31,8 @@ type Builder struct {
 func NewBuilder() *Builder {
 	b := &Builder{
 		controllerInits:              make(map[string]ControllerFactory),
-		releaseInfoBuilder:           releaseinfo.NewCommunityReleaseInfoBuilder(),
-		currentClusterProfileBuilder: releaseinfo.NewCommunityClusterProfileBuilder(),
+		releaseInfoBuilder:           releaseprofile.NewCommunityReleaseInfoBuilder(),
+		currentClusterProfileBuilder: releaseprofile.NewCommunityClusterProfileBuilder(),
 		beforeHooks:                  make(map[string][]controllers.HookFunc),
 		afterHooks:                   make(map[string][]controllers.HookFunc),
 		globalBeforeHooks:            []controllers.HookFunc{},
@@ -74,9 +74,9 @@ func (b *Builder) WithAcceleratorPlugins(plugins ...publicaccelerator.Plugin) *B
 }
 
 // WithReleaseInfoBuilder configures the builder used for release metadata.
-func (b *Builder) WithReleaseInfoBuilder(builder releaseinfo.ReleaseInfoBuilder) *Builder {
+func (b *Builder) WithReleaseInfoBuilder(builder releaseprofile.ReleaseInfoBuilder) *Builder {
 	if builder == nil {
-		b.releaseInfoBuilder = releaseinfo.NewCommunityReleaseInfoBuilder()
+		b.releaseInfoBuilder = releaseprofile.NewCommunityReleaseInfoBuilder()
 		return b
 	}
 
@@ -85,9 +85,9 @@ func (b *Builder) WithReleaseInfoBuilder(builder releaseinfo.ReleaseInfoBuilder)
 }
 
 // WithCurrentClusterProfileBuilder configures the builder used for the current cluster profile.
-func (b *Builder) WithCurrentClusterProfileBuilder(builder releaseinfo.CurrentClusterProfileBuilder) *Builder {
+func (b *Builder) WithCurrentClusterProfileBuilder(builder releaseprofile.CurrentClusterProfileBuilder) *Builder {
 	if builder == nil {
-		b.currentClusterProfileBuilder = releaseinfo.NewCommunityClusterProfileBuilder()
+		b.currentClusterProfileBuilder = releaseprofile.NewCommunityClusterProfileBuilder()
 		return b
 	}
 

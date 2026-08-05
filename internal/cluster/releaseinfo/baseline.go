@@ -34,7 +34,7 @@ func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.Release
 		return highestPersistedReleaseInfoBaseline(infos)
 	}
 
-	baseline, _, err := NormalizeControlPlaneRelease(buildIdentity)
+	baseline, err := NormalizeControlPlaneRelease(buildIdentity)
 	return baseline, err
 }
 

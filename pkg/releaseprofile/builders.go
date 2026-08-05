@@ -1,4 +1,4 @@
-package releaseinfo
+package releaseprofile
 
 import (
 	"fmt"
@@ -6,13 +6,14 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// ReleaseInfoBuilder builds one ReleaseInfo for a control-plane baseline.
+// ReleaseInfoBuilder builds the current ReleaseInfo candidate for a
+// control-plane baseline. Core owns persistence of the returned object.
 type ReleaseInfoBuilder interface {
 	BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error)
 }
 
-// CurrentClusterProfileBuilder builds the current ClusterProfile for a
-// control-plane baseline.
+// CurrentClusterProfileBuilder builds the current ClusterProfile candidate for
+// a control-plane baseline. Core owns persistence of the returned object.
 type CurrentClusterProfileBuilder interface {
 	BuildClusterProfile(baseline string) (*v1.ClusterProfile, error)
 }
@@ -65,14 +66,16 @@ func (builder *CommunityClusterProfileBuilder) BuildClusterProfile(baseline stri
 	), nil
 }
 
-func communityHistoricalClusterProfile(clusterVersion string) *v1.ClusterProfile {
+// CommunityHistoricalClusterProfile returns a historical community Profile.
+// Core uses it only to seed missing initial v1.2 compatibility profiles.
+func CommunityHistoricalClusterProfile(clusterVersion string) (*v1.ClusterProfile, error) {
 	switch clusterVersion {
 	case "v1.1.0":
-		return communityClusterProfile(clusterVersion, "v1.1.0", "v1.1.0", "v1.1.0-alpha.8")
+		return communityClusterProfile(clusterVersion, "v1.1.0", "v1.1.0", "v1.1.0-alpha.8"), nil
 	case "v1.1.1":
-		return communityClusterProfile(clusterVersion, "v1.1.1", "v1.1.1", "v1.1.0-rc.1")
+		return communityClusterProfile(clusterVersion, "v1.1.1", "v1.1.1", "v1.1.0-rc.1"), nil
 	default:
-		return nil
+		return nil, fmt.Errorf("community historical cluster profile %q is not supported", clusterVersion)
 	}
 }
 

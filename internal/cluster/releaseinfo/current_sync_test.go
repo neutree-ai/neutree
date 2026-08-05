@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 func TestSynchronizeCurrentBaselineCreatesCurrentPairAndMissingHistoricalProfiles(t *testing.T) {
@@ -15,8 +16,8 @@ func TestSynchronizeCurrentBaselineCreatesCurrentPairAndMissingHistoricalProfile
 	err := SynchronizeCurrentBaseline(
 		store,
 		"v1.2.0",
-		NewCommunityReleaseInfoBuilder(),
-		NewCommunityClusterProfileBuilder(),
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
 	)
 	require.NoError(t, err)
 	require.Len(t, store.createdReleaseInfos, 1)
@@ -26,10 +27,6 @@ func TestSynchronizeCurrentBaselineCreatesCurrentPairAndMissingHistoricalProfile
 
 	assert.Equal(t, "v1.2.0", store.createdReleaseInfos[0].GetName())
 	assert.Equal(t, []string{"v1.1", "v1.2"}, store.createdReleaseInfos[0].Spec.CompatibleClusterBaselines)
-	assert.Nil(t, store.createdReleaseInfos[0].Spec.ClusterVersions)
-	assert.Empty(t, store.createdReleaseInfos[0].Spec.Channel)
-	assert.Empty(t, store.createdReleaseInfos[0].Spec.BuildIdentity)
-	assert.Nil(t, store.createdReleaseInfos[0].Status)
 	assertProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.0"), "v1.1.0", "v1.1.0", "v1.1.0-alpha.8")
 	assertProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.1"), "v1.1.1", "v1.1.1", "v1.1.0-rc.1")
 	assertProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.2.0"), "v1.1.1", "v1.1.1", "v1.1.0-rc.1")
@@ -50,8 +47,8 @@ func TestSynchronizeCurrentBaselineOverwritesOnlyCurrentPairAndPreservesExisting
 	err := SynchronizeCurrentBaseline(
 		store,
 		"v1.2.0",
-		NewCommunityReleaseInfoBuilder(),
-		NewCommunityClusterProfileBuilder(),
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
 	)
 	require.NoError(t, err)
 	require.Empty(t, store.createdReleaseInfos)
@@ -122,26 +119,6 @@ func TestSynchronizeCurrentBaselineRejectsBuilderOutputForAnotherBaseline(t *tes
 		}),
 	)
 	require.ErrorContains(t, err, "release info builder output name")
-	assert.Empty(t, store.createdReleaseInfos)
-	assert.Empty(t, store.createdClusterProfiles)
-}
-
-func TestSynchronizeCurrentBaselineRejectsLegacyReleaseInfoBuilderFields(t *testing.T) {
-	store := &currentBaselineMemoryStore{}
-
-	err := SynchronizeCurrentBaseline(
-		store,
-		"v1.2.0",
-		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
-			return releaseInfoBuilderOutput(baseline, []string{"v1.2"}, func(info *v1.ReleaseInfo) {
-				info.Spec.BuildIdentity = baseline
-			}), nil
-		}),
-		clusterProfileBuilderFunc(func(baseline string) (*v1.ClusterProfile, error) {
-			return clusterProfileBuilderOutput(baseline, nil), nil
-		}),
-	)
-	require.ErrorContains(t, err, "legacy fields")
 	assert.Empty(t, store.createdReleaseInfos)
 	assert.Empty(t, store.createdClusterProfiles)
 }

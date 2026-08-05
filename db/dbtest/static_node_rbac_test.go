@@ -17,7 +17,7 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'v1',
 			'StaticNodeCluster',
 				ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL, NULL)::api.static_node_cluster_spec,
+				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
 			ROW('Ready', 0, 0, FALSE, FALSE, 'v1.0.2', NULL, NULL)::api.static_node_cluster_status
 		)
 	`, clusterName, workspace)
@@ -40,7 +40,7 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 	}
 }
 
-func TestStaticNodeClusterSpecPersistsReleaseComponents(t *testing.T) {
+func TestStaticNodeClusterSpecOmitsReleaseComponents(t *testing.T) {
 	adminDB := GetTestDB(t)
 	ctx := context.Background()
 
@@ -52,34 +52,22 @@ func TestStaticNodeClusterSpecPersistsReleaseComponents(t *testing.T) {
 		_ = tx.Rollback()
 	}()
 
-	var runtimeImage string
+	var componentsExist bool
 	err = tx.QueryRowContext(ctx, `
-		WITH inserted AS (
-			INSERT INTO api.static_node_clusters (api_version, kind, metadata, spec, status)
-			VALUES (
-				'v1',
-				'StaticNodeCluster',
-				ROW('release-components', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW(
-					'v1.1.0',
-					'registry.example.com/neutree',
-					NULL,
-					jsonb_build_array(),
-					NULL,
-					jsonb_build_object('ray_runtime', 'neutree/neutree-serve:v1.1.0')
-				)::api.static_node_cluster_spec,
-				ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
-			)
-			RETURNING spec
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_attribute
+			WHERE attrelid = 'api.static_node_cluster_spec'::regclass
+				AND attname = 'components'
+				AND attnum > 0
+				AND NOT attisdropped
 		)
-		SELECT (spec).components->>'ray_runtime' FROM inserted
-	`).Scan(&runtimeImage)
+	`).Scan(&componentsExist)
 	if err != nil {
-		t.Fatalf("failed to persist static node release components: %v", err)
+		t.Fatalf("check static node release components schema: %v", err)
 	}
-
-	if runtimeImage != "neutree/neutree-serve:v1.1.0" {
-		t.Fatalf("expected persisted ray runtime image, got %q", runtimeImage)
+	if componentsExist {
+		t.Fatal("static node cluster spec must not persist release components")
 	}
 }
 

@@ -265,52 +265,6 @@ func (_c *MockStorage_CreateClusterProfile_Call) RunAndReturn(run func(*v1.Clust
 	return _c
 }
 
-// CreateClusterUpgradeSnapshot provides a mock function with given fields: data
-func (_m *MockStorage) CreateClusterUpgradeSnapshot(data *v1.ClusterUpgradeSnapshot) error {
-	ret := _m.Called(data)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateClusterUpgradeSnapshot")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1.ClusterUpgradeSnapshot) error); ok {
-		r0 = rf(data)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockStorage_CreateClusterUpgradeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateClusterUpgradeSnapshot'
-type MockStorage_CreateClusterUpgradeSnapshot_Call struct {
-	*mock.Call
-}
-
-// CreateClusterUpgradeSnapshot is a helper method to define mock.On call
-//   - data *v1.ClusterUpgradeSnapshot
-func (_e *MockStorage_Expecter) CreateClusterUpgradeSnapshot(data interface{}) *MockStorage_CreateClusterUpgradeSnapshot_Call {
-	return &MockStorage_CreateClusterUpgradeSnapshot_Call{Call: _e.mock.On("CreateClusterUpgradeSnapshot", data)}
-}
-
-func (_c *MockStorage_CreateClusterUpgradeSnapshot_Call) Run(run func(data *v1.ClusterUpgradeSnapshot)) *MockStorage_CreateClusterUpgradeSnapshot_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*v1.ClusterUpgradeSnapshot))
-	})
-	return _c
-}
-
-func (_c *MockStorage_CreateClusterUpgradeSnapshot_Call) Return(_a0 error) *MockStorage_CreateClusterUpgradeSnapshot_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockStorage_CreateClusterUpgradeSnapshot_Call) RunAndReturn(run func(*v1.ClusterUpgradeSnapshot) error) *MockStorage_CreateClusterUpgradeSnapshot_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreateEndpoint provides a mock function with given fields: data
 func (_m *MockStorage) CreateEndpoint(data *v1.Endpoint) error {
 	ret := _m.Called(data)
@@ -1043,52 +997,6 @@ func (_c *MockStorage_DeleteCluster_Call) Return(_a0 error) *MockStorage_DeleteC
 }
 
 func (_c *MockStorage_DeleteCluster_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteCluster_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// DeleteClusterUpgradeSnapshot provides a mock function with given fields: clusterID
-func (_m *MockStorage) DeleteClusterUpgradeSnapshot(clusterID string) error {
-	ret := _m.Called(clusterID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for DeleteClusterUpgradeSnapshot")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(clusterID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockStorage_DeleteClusterUpgradeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteClusterUpgradeSnapshot'
-type MockStorage_DeleteClusterUpgradeSnapshot_Call struct {
-	*mock.Call
-}
-
-// DeleteClusterUpgradeSnapshot is a helper method to define mock.On call
-//   - clusterID string
-func (_e *MockStorage_Expecter) DeleteClusterUpgradeSnapshot(clusterID interface{}) *MockStorage_DeleteClusterUpgradeSnapshot_Call {
-	return &MockStorage_DeleteClusterUpgradeSnapshot_Call{Call: _e.mock.On("DeleteClusterUpgradeSnapshot", clusterID)}
-}
-
-func (_c *MockStorage_DeleteClusterUpgradeSnapshot_Call) Run(run func(clusterID string)) *MockStorage_DeleteClusterUpgradeSnapshot_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockStorage_DeleteClusterUpgradeSnapshot_Call) Return(_a0 error) *MockStorage_DeleteClusterUpgradeSnapshot_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockStorage_DeleteClusterUpgradeSnapshot_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteClusterUpgradeSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1852,64 +1760,6 @@ func (_c *MockStorage_GetCluster_Call) Return(_a0 *v1.Cluster, _a1 error) *MockS
 }
 
 func (_c *MockStorage_GetCluster_Call) RunAndReturn(run func(string) (*v1.Cluster, error)) *MockStorage_GetCluster_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetClusterUpgradeSnapshot provides a mock function with given fields: clusterID
-func (_m *MockStorage) GetClusterUpgradeSnapshot(clusterID string) (*v1.ClusterUpgradeSnapshot, error) {
-	ret := _m.Called(clusterID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetClusterUpgradeSnapshot")
-	}
-
-	var r0 *v1.ClusterUpgradeSnapshot
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (*v1.ClusterUpgradeSnapshot, error)); ok {
-		return rf(clusterID)
-	}
-	if rf, ok := ret.Get(0).(func(string) *v1.ClusterUpgradeSnapshot); ok {
-		r0 = rf(clusterID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*v1.ClusterUpgradeSnapshot)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(clusterID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockStorage_GetClusterUpgradeSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusterUpgradeSnapshot'
-type MockStorage_GetClusterUpgradeSnapshot_Call struct {
-	*mock.Call
-}
-
-// GetClusterUpgradeSnapshot is a helper method to define mock.On call
-//   - clusterID string
-func (_e *MockStorage_Expecter) GetClusterUpgradeSnapshot(clusterID interface{}) *MockStorage_GetClusterUpgradeSnapshot_Call {
-	return &MockStorage_GetClusterUpgradeSnapshot_Call{Call: _e.mock.On("GetClusterUpgradeSnapshot", clusterID)}
-}
-
-func (_c *MockStorage_GetClusterUpgradeSnapshot_Call) Run(run func(clusterID string)) *MockStorage_GetClusterUpgradeSnapshot_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
-	})
-	return _c
-}
-
-func (_c *MockStorage_GetClusterUpgradeSnapshot_Call) Return(_a0 *v1.ClusterUpgradeSnapshot, _a1 error) *MockStorage_GetClusterUpgradeSnapshot_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockStorage_GetClusterUpgradeSnapshot_Call) RunAndReturn(run func(string) (*v1.ClusterUpgradeSnapshot, error)) *MockStorage_GetClusterUpgradeSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

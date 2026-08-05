@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,25 +57,10 @@ func TestClusterAcceleratorVirtualizationDisabledWhenMissing(t *testing.T) {
 	assert.False(t, spec.AcceleratorVirtualizationEnabled())
 }
 
-func TestClusterReleaseCompatibilitySerialization(t *testing.T) {
-	cluster := &Cluster{Status: &ClusterStatus{
-		ReleaseInfo: &ReleaseInfoReference{Baseline: "v1.2.0", Revision: "revision-2"},
-		ReleaseCompatibility: &ClusterReleaseCompatibility{
-			EffectiveVersion: "v1.2.0",
-			ResolvedVersion:  "v1.2.0",
-			State:            ClusterReleaseCompatibilityStateRetired,
-			Reason:           "cluster version v1.2.0 is retired",
-		},
-	}}
-
-	data, err := json.Marshal(cluster)
-	require.NoError(t, err)
-
-	var got Cluster
-	require.NoError(t, json.Unmarshal(data, &got))
-	require.NotNil(t, got.Status.ReleaseInfo)
-	assert.Equal(t, "revision-2", got.Status.ReleaseInfo.Revision)
-	require.NotNil(t, got.Status.ReleaseCompatibility)
-	assert.Equal(t, ClusterReleaseCompatibilityStateRetired, got.Status.ReleaseCompatibility.State)
-	assert.Equal(t, "cluster version v1.2.0 is retired", got.Status.ReleaseCompatibility.Reason)
+func TestClusterStatusAPIShapeOmitsLegacyReleaseState(t *testing.T) {
+	statusType := reflect.TypeOf(ClusterStatus{})
+	for _, field := range []string{"ReleaseInfo", "ReleaseCompatibility"} {
+		_, found := statusType.FieldByName(field)
+		assert.False(t, found, "Cluster.status must not expose legacy %s", field)
+	}
 }
