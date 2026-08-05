@@ -496,63 +496,6 @@ func (_c *MockModelRegistry_GetNFSVersion_Call) RunAndReturn(run func() (string,
 	return _c
 }
 
-// GetReadme provides a mock function with given fields: name, version
-func (_m *MockModelRegistry) GetReadme(name string, version string) (string, error) {
-	ret := _m.Called(name, version)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetReadme")
-	}
-
-	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
-		return rf(name, version)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) string); ok {
-		r0 = rf(name, version)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(name, version)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockModelRegistry_GetReadme_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReadme'
-type MockModelRegistry_GetReadme_Call struct {
-	*mock.Call
-}
-
-// GetReadme is a helper method to define mock.On call
-//   - name string
-//   - version string
-func (_e *MockModelRegistry_Expecter) GetReadme(name interface{}, version interface{}) *MockModelRegistry_GetReadme_Call {
-	return &MockModelRegistry_GetReadme_Call{Call: _e.mock.On("GetReadme", name, version)}
-}
-
-func (_c *MockModelRegistry_GetReadme_Call) Run(run func(name string, version string)) *MockModelRegistry_GetReadme_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *MockModelRegistry_GetReadme_Call) Return(_a0 string, _a1 error) *MockModelRegistry_GetReadme_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockModelRegistry_GetReadme_Call) RunAndReturn(run func(string, string) (string, error)) *MockModelRegistry_GetReadme_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // HealthyCheck provides a mock function with no fields
 func (_m *MockModelRegistry) HealthyCheck() error {
 	ret := _m.Called()

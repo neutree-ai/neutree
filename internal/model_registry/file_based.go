@@ -16,9 +16,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
 
-// readmeFileName is the model card a private registry serves verbatim.
-const readmeFileName = "README.md"
-
 func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) *ModelPage {
 	// Convert to GeneralModel format
 	generalModelMap := make(map[string]*v1.GeneralModel)
@@ -138,26 +135,6 @@ func (s *bentomlStore) GetModelDetail(name, version string) (*v1.ModelVersion, e
 	detail.Info.MergeManual(manual)
 
 	return detail, nil
-}
-
-func (s *bentomlStore) GetReadme(name, version string) (string, error) {
-	model, err := bentoml.GetModelDetail(s.path, name, version)
-	if err != nil {
-		return "", err
-	}
-
-	readmePath := filepath.Join(bentoml.ModelDir(s.path, model.Name, model.Version), readmeFileName)
-
-	content, err := os.ReadFile(readmePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", errors.Wrapf(ErrNotFound, "model %s:%s has no %s", name, version, readmeFileName)
-		}
-
-		return "", errors.Wrapf(err, "failed to read %s of model %s:%s", readmeFileName, name, version)
-	}
-
-	return string(content), nil
 }
 
 func (s *bentomlStore) DeleteModel(name, version string) error {

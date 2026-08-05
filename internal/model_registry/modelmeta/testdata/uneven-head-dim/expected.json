@@ -1,0 +1,24 @@
+{
+  "context_length": "8192",
+  "architecture": "CustomForCausalLM",
+  "num_hidden_layers": 24,
+  "num_attention_heads": 32,
+  "num_key_value_heads": 8,
+  "max_position_embeddings": 8192,
+  "is_moe": false,
+  "parameter_dtype": "bfloat16",
+  "field_sources": {
+    "architecture": "auto",
+    "context_length": "auto",
+    "is_moe": "auto",
+    "max_position_embeddings": "auto",
+    "num_attention_heads": "auto",
+    "num_hidden_layers": "auto",
+    "num_key_value_heads": "auto",
+    "parameter_dtype": "auto"
+  },
+  "missing_fields": [
+    "head_dim",
+    "parameter_count"
+  ]
+}

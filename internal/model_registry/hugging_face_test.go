@@ -269,11 +269,6 @@ func TestHuggingFace_UnsupportedOperationsAreTyped(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotSupported)
 	})
 
-	t.Run("GetReadme", func(t *testing.T) {
-		_, err := hf.GetReadme("qwen3", "latest")
-		assert.ErrorIs(t, err, ErrNotSupported)
-	})
-
 	t.Run("SetManualModelInfo", func(t *testing.T) {
 		assert.ErrorIs(t, hf.SetManualModelInfo("qwen3", "latest", &v1.ModelInfo{}), ErrNotSupported)
 	})

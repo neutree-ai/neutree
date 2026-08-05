@@ -264,22 +264,6 @@ func TestSetManualModelInfo_LeavesPhysicalCoordinatesAlone(t *testing.T) {
 	assert.Equal(t, "v1", version.Name)
 }
 
-func TestGetReadme(t *testing.T) {
-	home := t.TempDir()
-	dir := writeStoredModel(t, home, "qwen3", "v1", nil)
-
-	store := &localFile{bentomlStore: bentomlStore{path: home}}
-
-	_, err := store.GetReadme("qwen3", "v1")
-	assert.ErrorIs(t, err, ErrNotFound)
-
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Qwen3\n"), 0o600))
-
-	content, err := store.GetReadme("qwen3", "v1")
-	require.NoError(t, err)
-	assert.Equal(t, "# Qwen3\n", content)
-}
-
 func TestCollectUsage(t *testing.T) {
 	home := t.TempDir()
 	dir := writeStoredModel(t, home, "qwen3", "v1", nil)

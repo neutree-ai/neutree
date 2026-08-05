@@ -1,0 +1,18 @@
+{
+  "is_moe": false,
+  "parameter_dtype": "float32",
+  "field_sources": {
+    "is_moe": "auto",
+    "parameter_dtype": "auto"
+  },
+  "missing_fields": [
+    "architecture",
+    "num_hidden_layers",
+    "num_attention_heads",
+    "num_key_value_heads",
+    "head_dim",
+    "max_position_embeddings",
+    "context_length",
+    "parameter_count"
+  ]
+}

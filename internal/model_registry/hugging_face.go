@@ -247,11 +247,6 @@ func (hf *huggingFace) GetModelDetail(name, version string) (*v1.ModelVersion, e
 	return nil, errHuggingFaceNotSupported
 }
 
-// GetReadme is not implemented for HuggingFace.
-func (hf *huggingFace) GetReadme(name, version string) (string, error) {
-	return "", errHuggingFaceNotSupported
-}
-
 // DeleteModel returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) DeleteModel(name, version string) error {
 	return errHuggingFaceNotSupported

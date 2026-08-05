@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,136 +17,93 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestParse_ConfigFields(t *testing.T) {
-	tests := []struct {
-		name    string
-		fixture string
-		assert  func(t *testing.T, info *v1.ModelInfo)
-		// missing is the exact MissingFields set expected for a fixture holding
-		// no weight files at all, so every case also pins parameter_count.
-		missing []string
-	}{
-		{
-			name:    "dense checkpoint states every shape parameter",
-			fixture: "dense",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, "LlamaForCausalLM", info.Architecture)
-				assert.Equal(t, 32, deref(t, info.NumHiddenLayers))
-				assert.Equal(t, 32, deref(t, info.NumAttentionHeads))
-				assert.Equal(t, 32, deref(t, info.NumKeyValueHeads))
-				assert.Equal(t, 128, deref(t, info.HeadDim))
-				assert.Equal(t, 8192, deref(t, info.MaxPositionEmbeddings))
-				assert.Equal(t, "8192", info.ContextLength)
-				assert.Equal(t, "float16", info.ParameterDtype)
-				assert.False(t, derefBool(t, info.IsMoE))
-				// A dense checkpoint has no experts to count, so the expert fields
-				// are absent rather than missing.
-				assert.Nil(t, info.NumExperts)
-				assert.Nil(t, info.NumExpertsPerToken)
-				// head_dim was stated outright, so it is auto and not derived.
-				assert.Equal(t, v1.ModelInfoSourceAuto, info.FieldSources[v1.ModelInfoFieldHeadDim])
-				// An unquantized checkpoint answers the question by omission.
-				assert.Nil(t, info.QuantizationBits)
-				assert.NotContains(t, info.MissingFields, v1.ModelInfoFieldQuantizationBits)
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "grouped-query checkpoint derives head_dim",
-			fixture: "gqa",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, 28, deref(t, info.NumAttentionHeads))
-				assert.Equal(t, 4, deref(t, info.NumKeyValueHeads))
-				assert.Less(t, deref(t, info.NumKeyValueHeads), deref(t, info.NumAttentionHeads))
-				// hidden_size 3584 / 28 heads.
-				assert.Equal(t, 128, deref(t, info.HeadDim))
-				assert.Equal(t, v1.ModelInfoSourceDerived, info.FieldSources[v1.ModelInfoFieldHeadDim])
-				assert.Equal(t, "131072", info.ContextLength)
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			// Truncating 3000/32 to 93 and stamping it "derived" would be worse
-			// than saying nothing: the value would look like it came from the
-			// checkpoint, and nothing downstream could tell it was wrong.
-			name:    "head_dim that does not divide evenly is missing, not truncated",
-			fixture: "uneven-head-dim",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, 32, deref(t, info.NumAttentionHeads))
-				assert.Nil(t, info.HeadDim)
-				assert.NotContains(t, info.FieldSources, v1.ModelInfoFieldHeadDim)
-			},
-			missing: []string{v1.ModelInfoFieldHeadDim, v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "mixture-of-experts checkpoint reports its expert counts",
-			fixture: "moe",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.True(t, derefBool(t, info.IsMoE))
-				assert.Equal(t, 128, deref(t, info.NumExperts))
-				assert.Equal(t, 8, deref(t, info.NumExpertsPerToken))
-				assert.Equal(t, "Qwen3MoeForCausalLM", info.Architecture)
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "gptq checkpoint states its weight width",
-			fixture: "quant-gptq",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, 4, deref(t, info.QuantizationBits))
-				assert.Equal(t, v1.ModelInfoSourceAuto, info.FieldSources[v1.ModelInfoFieldQuantizationBits])
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "awq checkpoint states its weight width under w_bit",
-			fixture: "quant-awq",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, 4, deref(t, info.QuantizationBits))
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "fp8 checkpoint implies its weight width from the method",
-			fixture: "quant-fp8",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Equal(t, 8, deref(t, info.QuantizationBits))
-				assert.True(t, derefBool(t, info.IsMoE))
-			},
-			missing: []string{v1.ModelInfoFieldParameterCount},
-		},
-		{
-			name:    "sparse config leaves everything it does not state missing",
-			fixture: "sparse",
-			assert: func(t *testing.T, info *v1.ModelInfo) {
-				assert.Empty(t, info.Architecture)
-				assert.Equal(t, "float32", info.ParameterDtype)
-				// Reading the config settles dense vs. MoE even when nothing else
-				// is stated.
-				assert.False(t, derefBool(t, info.IsMoE))
-			},
-			missing: []string{
-				v1.ModelInfoFieldArchitecture,
-				v1.ModelInfoFieldNumHiddenLayers,
-				v1.ModelInfoFieldNumAttentionHeads,
-				v1.ModelInfoFieldNumKeyValueHeads,
-				v1.ModelInfoFieldHeadDim,
-				v1.ModelInfoFieldMaxPositionEmbeddings,
-				v1.ModelInfoFieldContextLength,
-				v1.ModelInfoFieldParameterCount,
-			},
-		},
+// goldenFileName holds the ModelInfo its sibling config.json is expected to
+// parse into, serialized the way the API serves it. The expectation lives beside
+// the input on purpose: adding a case is adding a directory, with no Go code to
+// touch and nothing to keep in step across two files.
+const goldenFileName = "expected.json"
+
+// updateGolden rewrites every golden from what Parse currently returns:
+//
+//	go test ./internal/model_registry/modelmeta -run TestParse_MatchesGolden -update
+//
+// It is off by default, and TestMain fails any run that sets it, so a rewrite
+// can never be mistaken for a passing verification — read the resulting diff,
+// then re-run without the flag to actually check it. Pass the package path
+// rather than ./...: the flag only exists in this package's test binary.
+var updateGolden = flag.Bool("update", false, "rewrite the modelmeta golden files from the current parser output")
+
+// TestMain turns a golden rewrite into a failure. Blessing the current output
+// and reporting success in the same run is what makes golden tests rot: on CI it
+// would be a green build asserting nothing, and locally it hides the moment an
+// expectation changed.
+func TestMain(m *testing.M) {
+	flag.Parse()
+
+	code := m.Run()
+
+	if *updateGolden && code == 0 {
+		fmt.Fprintf(os.Stderr, "-update rewrote the golden files; review the diff and re-run without -update to verify them\n")
+
+		code = 1
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			info := Parse(filepath.Join("testdata", tt.fixture))
+	os.Exit(code)
+}
 
-			tt.assert(t, info)
-			assert.ElementsMatch(t, tt.missing, info.MissingFields)
-			assertNoFieldBothSetAndMissing(t, info)
+// The values every fixture parses into, pinned whole. Comparing the serialized
+// form rather than field by field also pins what a client actually receives:
+// which keys are omitted, and the order the parser reports MissingFields in.
+func TestParse_MatchesGolden(t *testing.T) {
+	for _, fixture := range fixtureDirs(t) {
+		t.Run(fixture, func(t *testing.T) {
+			golden := filepath.Join("testdata", fixture, goldenFileName)
+			got := marshalGolden(t, Parse(filepath.Join("testdata", fixture)))
+
+			if *updateGolden {
+				require.NoError(t, os.WriteFile(golden, got, 0o600))
+
+				return
+			}
+
+			want, err := os.ReadFile(golden)
+			require.NoError(t, err, "fixture %q has no %s — generate it with -update", fixture, goldenFileName)
+
+			assert.Equal(t, string(want), string(got))
 		})
 	}
+}
+
+// fixtureDirs names every checkpoint fixture. Both sweeps walk the same set, so
+// a new directory is picked up by all of them at once.
+func fixtureDirs(t *testing.T) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir("testdata")
+	require.NoError(t, err)
+
+	var dirs []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+
+	require.NotEmpty(t, dirs)
+
+	return dirs
+}
+
+// marshalGolden renders info in the one canonical form goldens are stored in, so
+// that a byte comparison is a comparison of values and not of formatting.
+func marshalGolden(t *testing.T, info *v1.ModelInfo) []byte {
+	t.Helper()
+
+	raw, err := json.MarshalIndent(info, "", "  ")
+	require.NoError(t, err)
+
+	return append(raw, '\n')
 }
 
 // A checkpoint whose config.json cannot be read tells us nothing at all — the
@@ -316,13 +275,9 @@ var backingKeys = map[string][]string{
 // key it can come from. Nothing may arrive from the directory name, and none of
 // these fixtures ship weights, so the parameter count may never be sourced.
 func TestParse_FixturesOnlyPopulateWhatTheConfigStates(t *testing.T) {
-	entries, err := os.ReadDir("testdata")
-	require.NoError(t, err)
-	require.NotEmpty(t, entries)
-
-	for _, entry := range entries {
-		t.Run(entry.Name(), func(t *testing.T) {
-			dir := filepath.Join("testdata", entry.Name())
+	for _, fixture := range fixtureDirs(t) {
+		t.Run(fixture, func(t *testing.T) {
+			dir := filepath.Join("testdata", fixture)
 			info := Parse(dir)
 
 			assertNoFieldBothSetAndMissing(t, info)
@@ -380,20 +335,6 @@ func assertNoFieldBothSetAndMissing(t *testing.T, info *v1.ModelInfo) {
 	for i := 1; i < len(sorted); i++ {
 		assert.NotEqual(t, sorted[i-1], sorted[i], "field %q listed twice in missing_fields", sorted[i])
 	}
-}
-
-func deref(t *testing.T, v *int) int {
-	t.Helper()
-	require.NotNil(t, v)
-
-	return *v
-}
-
-func derefBool(t *testing.T, v *bool) bool {
-	t.Helper()
-	require.NotNil(t, v)
-
-	return *v
 }
 
 func u64le(v uint64) []byte {

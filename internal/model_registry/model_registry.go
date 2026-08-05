@@ -71,10 +71,6 @@ type ModelRegistry interface {
 	// the checkpoint. GetModelVersion stays the cheap call for code that only
 	// needs to resolve a version or read its recorded metadata.
 	GetModelDetail(name, version string) (*v1.ModelVersion, error)
-	// GetReadme returns the model's README.md verbatim. It wraps ErrNotFound when
-	// the model has no README, and ErrNotSupported on a registry that does not
-	// serve one.
-	GetReadme(name, version string) (string, error)
 	DeleteModel(name, version string) error
 	ImportModel(reader io.Reader, name, version string, progress io.Writer) error
 	ExportModel(name, version, outputPath string) error
