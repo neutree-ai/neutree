@@ -48,6 +48,9 @@ An Engine defines an inference runtime (e.g., vLLM). Each engine can have multip
 Neutree maintains Engine versions carried by the current release and the
 previous minor release.
 
+Maintained Engine versions are automatically registered in every workspace. If
+removed, they are restored automatically.
+
 ## Endpoint
 
 An Endpoint is a deployed inference service. Key configurations:
