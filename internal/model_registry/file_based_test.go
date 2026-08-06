@@ -147,8 +147,8 @@ func Test_newNFSTypeModelRegistry(t *testing.T) {
 					t.Errorf("expected nfsFile type, got %T", registry)
 				}
 
-				if nfsFileRegistry.targetPath != tt.expectTarget {
-					t.Errorf("unexpected target path: got %v, want %v", nfsFileRegistry.targetPath, tt.expectTarget)
+				if nfsFileRegistry.path != tt.expectTarget {
+					t.Errorf("unexpected target path: got %v, want %v", nfsFileRegistry.path, tt.expectTarget)
 				}
 				if nfsFileRegistry.nfsServerPath != tt.expectNFS {
 					t.Errorf("unexpected NFS server path: got %v, want %v", nfsFileRegistry.nfsServerPath, tt.expectNFS)

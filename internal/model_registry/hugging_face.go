@@ -33,10 +33,15 @@ var (
 )
 
 const (
-	listModelPath              = "/api/models"
-	whoamiPath                 = "/api/whoami-v2"
-	errHuggingFaceNotSupported = "operation not supported for Hugging Face registry"
+	listModelPath = "/api/models"
+	whoamiPath    = "/api/whoami-v2"
 )
+
+// errHuggingFaceNotSupported wraps ErrNotSupported so a caller can tell "a
+// public registry cannot do this" from "it tried and failed", and answer with a
+// clear refusal instead of a server error. Hugging Face is read-only here; the
+// write and detail operations are not implemented against it.
+var errHuggingFaceNotSupported = errors.Wrap(ErrNotSupported, "operation not supported for Hugging Face registry")
 
 type huggingFace struct {
 	apiToken string
@@ -88,12 +93,25 @@ type HuggingFaceModel struct {
 	ModelID       string    `json:"modelId,omitempty"`
 }
 
-// ListModels retrieves all models from the Hugging Face Hub API by page.
-func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) {
+// ListModels retrieves the first page of models from the Hugging Face Hub API.
+//
+// Offset is refused rather than ignored. The Hub's supported pagination is an
+// opaque, server-generated cursor carried in a Link header, which cannot express
+// "start at row N"; its `skip` parameter, which could, is documented by the Hub
+// itself as deprecated and rejects values past a few thousand. Silently serving
+// the first page for every offset would make a paging client believe it was
+// walking the catalogue while it re-read the same rows.
+//
+// The Hub also does not report how many models matched, so Total is unknown.
+func (hf *huggingFace) ListModels(option ListOption) (*ModelPage, error) {
 	var (
 		allHFModels []HuggingFaceModel
-		result      []v1.GeneralModel
+		result      = []v1.GeneralModel{}
 	)
+
+	if option.Offset > 0 {
+		return nil, errors.Wrap(ErrNotSupported, "the Hugging Face Hub API cannot list models from an offset")
+	}
 
 	allHFModels, err := hf.getModelsList(option)
 	if err != nil {
@@ -112,7 +130,7 @@ func (hf *huggingFace) ListModels(option ListOption) ([]v1.GeneralModel, error) 
 		})
 	}
 
-	return result, nil
+	return &ModelPage{Models: result}, nil
 }
 
 // HealthyCheck checks the health of the Hugging Face Hub API.
@@ -220,27 +238,44 @@ func (hf *huggingFace) whoami() (string, error) {
 // Implement the remaining ModelRegistry interface methods with "not supported" errors
 
 func (hf *huggingFace) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
-	return nil, errors.New(errHuggingFaceNotSupported)
+	return nil, errHuggingFaceNotSupported
+}
+
+// GetModelDetail is not implemented for HuggingFace: reading a public
+// checkpoint's files would mean downloading them.
+func (hf *huggingFace) GetModelDetail(name, version string) (*v1.ModelVersion, error) {
+	return nil, errHuggingFaceNotSupported
 }
 
 // DeleteModel returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) DeleteModel(name, version string) error {
-	return errors.New(errHuggingFaceNotSupported)
+	return errHuggingFaceNotSupported
 }
 
 // ImportModel returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
-	return errors.New(errHuggingFaceNotSupported)
+	return errHuggingFaceNotSupported
 }
 
 // ExportModel returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) ExportModel(name, version, outputPath string) error {
-	return errors.New(errHuggingFaceNotSupported)
+	return errHuggingFaceNotSupported
 }
 
 // GetModelPath returns an error for HuggingFace as it's read-only
 func (hf *huggingFace) GetModelPath(name, version string) (string, error) {
-	return "", errors.New(errHuggingFaceNotSupported)
+	return "", errHuggingFaceNotSupported
+}
+
+// SetManualModelInfo returns an error for HuggingFace as it's read-only
+func (hf *huggingFace) SetManualModelInfo(name, version string, info *v1.ModelInfo) error {
+	return errHuggingFaceNotSupported
+}
+
+// CollectUsage is not implemented for HuggingFace: the Hub's storage is not ours
+// to measure, and the model count is unbounded.
+func (hf *huggingFace) CollectUsage() (*RegistryUsage, error) {
+	return nil, errHuggingFaceNotSupported
 }
 
 func (hf *huggingFace) GetNFSVersion() (string, error) {

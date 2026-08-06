@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -205,6 +206,16 @@ func TestModelRegistryController_Sync_Connected(t *testing.T) {
 			input: testModelRegistry(),
 			mockSetup: func(input *v1.ModelRegistry, s *storagemocks.MockStorage, m *modelregistrymocks.MockModelRegistry) {
 				m.On("HealthyCheck").Return(nil)
+				// A registry with no counters yet is measured on the spot, and the
+				// result is written back even though the phase did not change.
+				m.On("CollectUsage").Return(&model_registry.RegistryUsage{ModelCount: 2, StorageBytes: 8192}, nil)
+				s.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+					obj := args.Get(1).(*v1.ModelRegistry)
+					assert.Equal(t, v1.ModelRegistryPhaseCONNECTED, obj.Status.Phase)
+					assert.Equal(t, 2, obj.Status.Stats.ModelCount)
+					assert.Equal(t, int64(8192), obj.Status.Stats.StorageBytes)
+					assert.NotEmpty(t, obj.Status.Stats.StatsUpdatedAt)
+				}).Return(nil)
 			},
 		},
 		{
@@ -494,4 +505,93 @@ func TestModelRegistryController_Reconcile(t *testing.T) {
 			mockStorage.AssertExpectations(t)
 		})
 	}
+}
+
+// The reconcile loop runs every ten seconds; walking a model tree cannot. The
+// staleness timestamp is what holds it off, so it has to survive the write-back
+// as well as be consulted before the walk.
+func TestModelRegistryController_Sync_ThrottlesStatsCollection(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	mockModel := &modelregistrymocks.MockModelRegistry{}
+
+	mockModel.On("HealthyCheck").Return(nil)
+	mockModel.On("CollectUsage").Return(&model_registry.RegistryUsage{ModelCount: 1, StorageBytes: 64}, nil)
+
+	obj := &v1.ModelRegistry{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+		Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
+	}
+
+	// Feed the persisted status back in, the way the next reconcile would read it.
+	mockStorage.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+		written := args.Get(1).(*v1.ModelRegistry) //nolint:errcheck
+		obj.Status = written.Status
+	}).Return(nil)
+
+	c := newTestModelRegistryController(mockStorage, mockModel)
+
+	for i := 0; i < 5; i++ {
+		assert.NoError(t, c.sync(obj))
+	}
+
+	mockModel.AssertNumberOfCalls(t, "CollectUsage", 1)
+	mockStorage.AssertNumberOfCalls(t, "UpdateModelRegistry", 1)
+	assert.Equal(t, 1, obj.Status.Stats.ModelCount)
+	assert.Equal(t, int64(64), obj.Status.Stats.StorageBytes)
+}
+
+// An unreachable registry must keep the counters it last reported. Zeroing them
+// would show a mount failure as an empty registry.
+func TestModelRegistryController_Sync_UnreachableRegistryKeepsStats(t *testing.T) {
+	previous := &v1.ModelRegistryStats{
+		ModelCount:     4,
+		StorageBytes:   2048,
+		StatsUpdatedAt: "2026-01-01T00:00:00Z",
+	}
+
+	mockStorage := &storagemocks.MockStorage{}
+	mockModel := &modelregistrymocks.MockModelRegistry{}
+
+	mockModel.On("HealthyCheck").Return(assert.AnError)
+	mockStorage.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+		written := args.Get(1).(*v1.ModelRegistry) //nolint:errcheck
+		assert.Equal(t, v1.ModelRegistryPhaseFAILED, written.Status.Phase)
+		assert.Equal(t, previous, written.Status.Stats)
+	}).Return(nil)
+
+	c := newTestModelRegistryController(mockStorage, mockModel)
+
+	err := c.sync(&v1.ModelRegistry{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+		Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED, Stats: previous},
+	})
+	assert.Error(t, err)
+
+	mockModel.AssertNotCalled(t, "CollectUsage")
+	mockStorage.AssertExpectations(t)
+}
+
+// A public registry reports ErrNotSupported rather than a failure, and gets no
+// stats block at all — its storage is not ours to measure.
+func TestModelRegistryController_Sync_PublicRegistryHasNoStats(t *testing.T) {
+	mockStorage := &storagemocks.MockStorage{}
+	mockModel := &modelregistrymocks.MockModelRegistry{}
+
+	mockModel.On("HealthyCheck").Return(nil)
+	mockModel.On("CollectUsage").Return(nil, errors.Wrap(model_registry.ErrNotSupported, "hugging face"))
+
+	c := newTestModelRegistryController(mockStorage, mockModel)
+
+	obj := &v1.ModelRegistry{
+		ID:       1,
+		Metadata: &v1.Metadata{Name: "public", Workspace: "default"},
+		Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
+	}
+	assert.NoError(t, c.sync(obj))
+
+	// Nothing measured, nothing to write: the phase did not change either.
+	mockStorage.AssertNotCalled(t, "UpdateModelRegistry", mock.Anything, mock.Anything)
+	assert.Nil(t, obj.Status.Stats)
 }

@@ -4,16 +4,18 @@ import (
 	"io"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
+	"github.com/neutree-ai/neutree/internal/model_registry/modelmeta"
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
 
-func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) []v1.GeneralModel {
+func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) *ModelPage {
 	// Convert to GeneralModel format
 	generalModelMap := make(map[string]*v1.GeneralModel)
 
@@ -43,6 +45,7 @@ func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options 
 			CreationTime: model.CreationTime,
 			Size:         model.Size,
 			Module:       model.Module,
+			Labels:       model.Labels,
 		})
 	}
 
@@ -52,31 +55,51 @@ func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options 
 		generalModels = append(generalModels, *model)
 	}
 
-	// Apply limit if specified
-	if options.Limit > 0 && len(generalModels) > options.Limit {
-		generalModels = generalModels[:options.Limit]
-	}
+	// Go randomises map iteration order, so the slice above comes out in a
+	// different order on every call. Sort by name before paging: without a
+	// stable order, offset/limit hand back overlapping pages that silently drop
+	// models, and even a bare limit returns a different subset each request.
+	sort.Slice(generalModels, func(i, j int) bool {
+		return generalModels[i].Name < generalModels[j].Name
+	})
 
-	return generalModels
+	return pageOf(generalModels, options)
 }
 
-// todo: Current model repository for local file types has not yet been fully designed
-// and will be improved after the design is completed.
-type localFile struct {
+// pageOf applies Offset and Limit. An offset past the end is an empty page, not
+// an error — a client paging a registry that shrank under it should see the end
+// of the list, not a failure.
+func pageOf(models []v1.GeneralModel, options ListOption) *ModelPage {
+	page := &ModelPage{Total: KnownTotal(len(models))}
+
+	start := options.Offset
+	if start < 0 {
+		start = 0
+	}
+
+	if start > len(models) {
+		start = len(models)
+	}
+
+	end := len(models)
+	if options.Limit > 0 && start+options.Limit < end {
+		end = start + options.Limit
+	}
+
+	page.Models = models[start:end]
+
+	return page
+}
+
+// bentomlStore is the BentoML-layout model tree both file-based registries read:
+// the local one addresses it directly, the NFS one through its mount point.
+type bentomlStore struct {
 	path string
 }
 
-func (f *localFile) Connect() error {
-	return nil
-}
-
-func (f *localFile) Disconnect() error {
-	return nil
-}
-
-func (f *localFile) ListModels(options ListOption) ([]v1.GeneralModel, error) {
+func (s *bentomlStore) ListModels(options ListOption) (*ModelPage, error) {
 	// Get BentoML models
-	bentomlModels, err := bentoml.ListModels(f.path)
+	bentomlModels, err := bentoml.ListModels(s.path)
 	if err != nil {
 		return nil, err
 	}
@@ -85,34 +108,92 @@ func (f *localFile) ListModels(options ListOption) ([]v1.GeneralModel, error) {
 	return convertBentoMLModelsToGeneralModels(bentomlModels, options), nil
 }
 
-func (f *localFile) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
-	bentomlModel, err := bentoml.GetModelDetail(f.path, name, version)
+func (s *bentomlStore) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
+	model, err := bentoml.GetModelDetail(s.path, name, version)
 	if err != nil {
 		return nil, err
 	}
 
+	return modelVersionFromYAML(model), nil
+}
+
+func (s *bentomlStore) GetModelDetail(name, version string) (*v1.ModelVersion, error) {
+	model, err := bentoml.GetModelDetail(s.path, name, version)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := modelVersionFromYAML(model)
+	detail.Info = modelmeta.Parse(bentoml.ModelDir(s.path, model.Name, model.Version))
+
+	manual, err := bentoml.ReadManualModelInfo(model.Metadata)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read hand-filled model info of %s:%s", name, version)
+	}
+
+	detail.Info.MergeManual(manual)
+
+	return detail, nil
+}
+
+func (s *bentomlStore) DeleteModel(name, version string) error {
+	return bentoml.DeleteModel(s.path, name, version)
+}
+
+func (s *bentomlStore) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
+	return bentoml.ImportModel(s.path, reader, name, version, true, progress)
+}
+
+func (s *bentomlStore) ExportModel(name, version, outputPath string) error {
+	return bentoml.ExportModel(s.path, name, version, outputPath)
+}
+
+func (s *bentomlStore) GetModelPath(name, version string) (string, error) {
+	return bentoml.GetModelPath(s.path, name, version)
+}
+
+func (s *bentomlStore) CollectUsage() (*RegistryUsage, error) {
+	usage, err := bentoml.CollectUsage(s.path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RegistryUsage{ModelCount: usage.ModelCount, StorageBytes: usage.StorageBytes}, nil
+}
+
+// SetManualModelInfo records the model info fields a user filled in by hand. The
+// block is replaced wholesale, so the caller sends the complete set of overrides
+// it wants kept.
+func (s *bentomlStore) SetManualModelInfo(name, version string, info *v1.ModelInfo) error {
+	return bentoml.WriteManualModelInfo(s.path, name, version, info)
+}
+
+// modelVersionFromYAML projects a model.yaml onto the API shape. Labels come
+// along: they are what a user writes into model.yaml, and until now both read
+// paths decoded into a struct that did not have them, so everything written
+// there was silently unreadable.
+func modelVersionFromYAML(model *bentoml.ModelYAML) *v1.ModelVersion {
 	return &v1.ModelVersion{
-		Name:         bentomlModel.Version,
-		CreationTime: bentomlModel.CreationTime,
-		Size:         bentomlModel.Size,
-		Module:       bentomlModel.Module,
-	}, nil
+		Name:         model.Version,
+		CreationTime: model.CreationTime,
+		Size:         model.Size,
+		Module:       model.Module,
+		Labels:       model.Labels,
+	}
 }
 
-func (f *localFile) DeleteModel(name, version string) error {
-	return bentoml.DeleteModel(f.path, name, version)
+// todo: Current model repository for local file types has not yet been fully designed
+// and will be improved after the design is completed.
+type localFile struct {
+	bentomlStore
 }
 
-func (f *localFile) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
-	return bentoml.ImportModel(f.path, reader, name, version, true, progress)
+func (f *localFile) Connect() error {
+	return nil
 }
 
-func (f *localFile) ExportModel(name, version, outputPath string) error {
-	return bentoml.ExportModel(f.path, name, version, outputPath)
-}
-
-func (f *localFile) GetModelPath(name, version string) (string, error) {
-	return bentoml.GetModelPath(f.path, name, version)
+func (f *localFile) Disconnect() error {
+	return nil
 }
 
 func (f *localFile) HealthyCheck() error {
@@ -129,79 +210,39 @@ func (f *localFile) GetNFSVersion() (string, error) {
 }
 
 type nfsFile struct {
-	targetPath    string
+	bentomlStore
+
 	nfsServerPath string
 }
 
 func (n *nfsFile) Connect() error {
-	return nfs.MountNFS(n.nfsServerPath, n.targetPath)
+	return nfs.MountNFS(n.nfsServerPath, n.path)
 }
 
 func (n *nfsFile) Disconnect() error {
-	return nfs.Unmount(n.targetPath)
-}
-
-func (n *nfsFile) ListModels(options ListOption) ([]v1.GeneralModel, error) {
-	// Get BentoML models
-	bentomlModels, err := bentoml.ListModels(n.targetPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to GeneralModel format using the helper function
-	return convertBentoMLModelsToGeneralModels(bentomlModels, options), nil
-}
-
-func (n *nfsFile) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
-	bentomlModel, err := bentoml.GetModelDetail(n.targetPath, name, version)
-	if err != nil {
-		return nil, err
-	}
-
-	return &v1.ModelVersion{
-		Name:         bentomlModel.Version,
-		CreationTime: bentomlModel.CreationTime,
-		Size:         bentomlModel.Size,
-		Module:       bentomlModel.Module,
-	}, nil
-}
-
-func (n *nfsFile) DeleteModel(name, version string) error {
-	return bentoml.DeleteModel(n.targetPath, name, version)
-}
-
-func (n *nfsFile) ImportModel(reader io.Reader, name, version string, progress io.Writer) error {
-	return bentoml.ImportModel(n.targetPath, reader, name, version, true, progress)
-}
-
-func (n *nfsFile) ExportModel(name, version, outputPath string) error {
-	return bentoml.ExportModel(n.targetPath, name, version, outputPath)
-}
-
-func (n *nfsFile) GetModelPath(name, version string) (string, error) {
-	return bentoml.GetModelPath(n.targetPath, name, version)
+	return nfs.Unmount(n.path)
 }
 
 func (n *nfsFile) HealthyCheck() error {
-	existed, err := nfs.IsMountExist(n.nfsServerPath, n.targetPath)
+	existed, err := nfs.IsMountExist(n.nfsServerPath, n.path)
 	if err != nil {
-		return errors.Wrapf(err, "failed to check NFS mount %s to %s", n.nfsServerPath, n.targetPath)
+		return errors.Wrapf(err, "failed to check NFS mount %s to %s", n.nfsServerPath, n.path)
 	}
 
 	if !existed {
-		return errors.Errorf("NFS mount %s to %s does not exist", n.nfsServerPath, n.targetPath)
+		return errors.Errorf("NFS mount %s to %s does not exist", n.nfsServerPath, n.path)
 	}
 
 	// Try to list models to verify functionality
-	if _, err := bentoml.ListModels(n.targetPath); err != nil {
-		return errors.Wrapf(err, "failed to list models at NFS path %s", n.targetPath)
+	if _, err := bentoml.ListModels(n.path); err != nil {
+		return errors.Wrapf(err, "failed to list models at NFS path %s", n.path)
 	}
 
 	return nil
 }
 
 func (n *nfsFile) GetNFSVersion() (string, error) {
-	return nfs.GetNFSVersion(n.nfsServerPath, n.targetPath)
+	return nfs.GetNFSVersion(n.nfsServerPath, n.path)
 }
 
 func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
@@ -217,7 +258,7 @@ func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
 		}
 
 		return &localFile{
-			path: modelRegistryURL.Path,
+			bentomlStore: bentomlStore{path: modelRegistryURL.Path},
 		}, nil
 	case string(v1.BentoMLModelRegistryConnectTypeNFS):
 		if modelRegistryURL.Host == "" || modelRegistryURL.Path == "" {
@@ -225,7 +266,7 @@ func newFileBased(registry *v1.ModelRegistry) (ModelRegistry, error) {
 		}
 
 		return &nfsFile{
-			targetPath:    filepath.Join("/mnt", registry.Key()),
+			bentomlStore:  bentomlStore{path: filepath.Join("/mnt", registry.Key())},
 			nfsServerPath: modelRegistryURL.Host + modelRegistryURL.Path,
 		}, nil
 	default:

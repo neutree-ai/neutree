@@ -257,3 +257,84 @@ func TestHuggingFace_HealthyCheck(t *testing.T) {
 		})
 	}
 }
+
+// A public registry refuses the operations it does not implement with a typed
+// error, so a caller can answer "this registry kind cannot do that" instead of
+// reporting a server failure.
+func TestHuggingFace_UnsupportedOperationsAreTyped(t *testing.T) {
+	hf := &huggingFace{url: "https://huggingface.co"}
+
+	t.Run("GetModelDetail", func(t *testing.T) {
+		_, err := hf.GetModelDetail("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("SetManualModelInfo", func(t *testing.T) {
+		assert.ErrorIs(t, hf.SetManualModelInfo("qwen3", "latest", &v1.ModelInfo{}), ErrNotSupported)
+	})
+
+	t.Run("CollectUsage", func(t *testing.T) {
+		_, err := hf.CollectUsage()
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("GetModelVersion", func(t *testing.T) {
+		_, err := hf.GetModelVersion("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	t.Run("DeleteModel", func(t *testing.T) {
+		assert.ErrorIs(t, hf.DeleteModel("qwen3", "latest"), ErrNotSupported)
+	})
+
+	t.Run("GetModelPath", func(t *testing.T) {
+		_, err := hf.GetModelPath("qwen3", "latest")
+		assert.ErrorIs(t, err, ErrNotSupported)
+	})
+
+	// The wording predates the typed error and is kept so existing messages do
+	// not change.
+	_, err := hf.GetModelDetail("qwen3", "latest")
+	assert.Contains(t, err.Error(), "operation not supported for Hugging Face registry")
+}
+
+// Paging a public registry from an offset is refused rather than silently
+// answered with the first page. The Hub's own pagination is an opaque cursor
+// that cannot express "start at row N", and its deprecated skip parameter stops
+// working past a few thousand rows — so a client that believed an offset had
+// been honoured would re-read the same models while thinking it was advancing.
+func TestHuggingFace_ListModelsRefusesAnOffset(t *testing.T) {
+	hf := &huggingFace{url: "https://huggingface.co"}
+
+	page, err := hf.ListModels(ListOption{Offset: 10, Limit: 5})
+
+	assert.Nil(t, page)
+	assert.ErrorIs(t, err, ErrNotSupported)
+}
+
+// The Hub does not report how many models matched, so the total is unknown
+// rather than the size of the page that came back.
+func TestHuggingFace_ListModelsReportsAnUnknownTotal(t *testing.T) {
+	hf := &huggingFace{
+		url: "https://huggingface.co",
+		client: &http.Client{
+			Transport: &MockRoundTripper{
+				RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+					assert.NotContains(t, req.URL.RawQuery, "offset")
+					assert.NotContains(t, req.URL.RawQuery, "skip")
+
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body: io.NopCloser(bytes.NewBufferString(
+							`[{"modelId":"a"},{"modelId":"b"}]`)),
+					}, nil
+				},
+			},
+		},
+	}
+
+	page, err := hf.ListModels(ListOption{Limit: 2})
+	assert.NoError(t, err)
+	assert.Len(t, page.Models, 2)
+	assert.Nil(t, page.Total, "the Hub states no match count, so none may be invented")
+}
