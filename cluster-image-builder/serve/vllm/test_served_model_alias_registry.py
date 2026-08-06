@@ -85,7 +85,11 @@ def _uses_base_model_path_alias_comprehension(node):
     if not _is_name(node.elt.func, "BaseModelPath"):
         return False
 
-    if len(node.generators) != 1 or not _is_name(node.generators[0].target, "name"):
+    if len(node.generators) != 1:
+        return False
+
+    generator = node.generators[0]
+    if not _is_name(generator.target, "name") or not _is_self_served_model_names(generator.iter):
         return False
 
     keyword_values = {keyword.arg: keyword.value for keyword in node.elt.keywords}
