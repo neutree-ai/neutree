@@ -45,9 +45,9 @@ An Engine defines an inference runtime (e.g., vLLM). Each engine can have multip
 
 ### Engine Version Maintenance
 
-For each Engine, Neutree maintains the versions included in the current
-generally available release and the immediately preceding generally available
-minor release.
+For each Engine, the Neutree codebase maintains only two versions: the version
+included in the current generally available release and the version included in
+the immediately preceding generally available minor release.
 
 Maintained Engine versions are automatically registered in every workspace. If
 removed, they are restored automatically.
