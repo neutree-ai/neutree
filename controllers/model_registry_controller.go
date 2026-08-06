@@ -110,8 +110,10 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
 
-	// Refresh only after a registry has passed both connection and health checks.
-	stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
+	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
+		// Refresh only after a registry has passed both connection and health checks.
+		stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
+	}
 
 	return nil
 }

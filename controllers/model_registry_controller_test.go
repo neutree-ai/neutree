@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -523,6 +523,7 @@ func TestModelRegistryController_Sync_ThrottlesStatsCollection(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	mockModel := &modelregistrymocks.MockModelRegistry{}
 
+	mockModel.On("Connect").Return(nil)
 	mockModel.On("HealthyCheck").Return(nil)
 	mockModel.On("CollectUsage").Return(&model_registry.RegistryUsage{ModelCount: 1, StorageBytes: 64}, nil)
 
@@ -562,6 +563,7 @@ func TestModelRegistryController_Sync_UnreachableRegistryKeepsStats(t *testing.T
 	mockStorage := &storagemocks.MockStorage{}
 	mockModel := &modelregistrymocks.MockModelRegistry{}
 
+	mockModel.On("Connect").Return(nil)
 	mockModel.On("HealthyCheck").Return(assert.AnError)
 	mockStorage.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
 		written := args.Get(1).(*v1.ModelRegistry) //nolint:errcheck
@@ -588,8 +590,9 @@ func TestModelRegistryController_Sync_PublicRegistryHasNoStats(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
 	mockModel := &modelregistrymocks.MockModelRegistry{}
 
+	mockModel.On("Connect").Return(nil)
 	mockModel.On("HealthyCheck").Return(nil)
-	mockModel.On("CollectUsage").Return(nil, errors.Wrap(model_registry.ErrNotSupported, "hugging face"))
+	mockModel.On("CollectUsage").Return(nil, pkgerrors.Wrap(model_registry.ErrNotSupported, "hugging face"))
 
 	c := newTestModelRegistryController(mockStorage, mockModel)
 

@@ -1,16 +1,57 @@
 package bentoml
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestListModelsWithContextReturnsOnDeadline(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+
+	models, err := listModelsWithContext(ctx, "/mnt/blocked", func(string) ([]Model, error) {
+		<-release
+		return nil, nil
+	})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, models)
+}
+
+func TestListModelsWithContextDoesNotStartWorkAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	models, err := listModelsWithContext(ctx, "/mnt/blocked", func(string) ([]Model, error) {
+		close(started)
+		<-release
+		return nil, nil
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, models)
+	select {
+	case <-started:
+		t.Fatal("started a filesystem read after context cancellation")
+	case <-time.After(10 * time.Millisecond):
+	}
+}
 
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
