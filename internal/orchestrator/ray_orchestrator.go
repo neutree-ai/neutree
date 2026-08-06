@@ -1003,6 +1003,29 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv["ENGINE_VERSION"] = endpoint.Spec.Engine.Version
 		}
 
+		targetEngineVersion, err := findEngineVersion(endpoint, engine)
+		if err != nil {
+			return dashboard.RayServeApplication{}, err
+		}
+
+		if targetEngineVersion.NativeRuntime != nil {
+			nativeContainer, err := buildNativeEngineContainerConfig(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
+			if err != nil {
+				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build native engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
+			}
+
+			app.ImportPath = "serve.native_engine.app:app_builder"
+			app.Args["native_runtime"] = nativeRuntimeConfig(targetEngineVersion.NativeRuntime)
+			app.Args["native_container"] = nativeContainer
+			app.Args["native_env"] = applicationEnv
+			app.Args["engine_identity"] = map[string]string{
+				"name":    endpoint.Spec.Engine.Engine,
+				"version": endpoint.Spec.Engine.Version,
+			}
+
+			return app, nil
+		}
+
 		baseConfig, backendConfig, err := buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
@@ -1085,6 +1108,35 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
 	acceleratorMgr accelerator.Manager,
 	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (baseConfig, backendConfig map[string]interface{}, err error) {
+	return buildEngineContainerConfigsForImage(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry,
+		func(version *v1.EngineVersion, acceleratorType string) *v1.EngineImage {
+			return version.GetImageForSSHAccelerator(acceleratorType)
+		})
+}
+
+// buildNativeEngineContainerConfig builds the Docker sibling configuration for
+// a raw engine image. Unlike the legacy wrapper path, it deliberately ignores
+// ssh_<accelerator> image overrides and selects the engine's upstream image.
+func buildNativeEngineContainerConfig(endpoint *v1.Endpoint,
+	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
+	acceleratorMgr accelerator.Manager,
+	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (map[string]interface{}, error) {
+	_, backendConfig, err := buildEngineContainerConfigsForImage(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry,
+		func(version *v1.EngineVersion, acceleratorType string) *v1.EngineImage {
+			return version.GetImageForAccelerator(acceleratorType)
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return backendConfig, nil
+}
+
+func buildEngineContainerConfigsForImage(endpoint *v1.Endpoint,
+	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
+	acceleratorMgr accelerator.Manager,
+	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry,
+	imageSelector func(*v1.EngineVersion, string) *v1.EngineImage) (baseConfig, backendConfig map[string]interface{}, err error) {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Engine == nil {
 		return nil, nil, errors.New("endpoint with engine spec is required for SSH cluster")
 	}
@@ -1093,18 +1145,9 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		return nil, nil, errors.New("engine is required for SSH cluster")
 	}
 
-	// Find the matching engine version
-	var targetVersion *v1.EngineVersion
-
-	for _, ev := range engine.Spec.Versions {
-		if ev.Version == endpoint.Spec.Engine.Version {
-			targetVersion = ev
-			break
-		}
-	}
-
-	if targetVersion == nil {
-		return nil, nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
+	targetVersion, err := findEngineVersion(endpoint, engine)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Get accelerator type from endpoint resources (consistent with K8s orchestrator).
@@ -1128,9 +1171,7 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		}
 	}
 
-	// SSH clusters use GetImageForSSHAccelerator which tries "ssh_<type>" first,
-	// then falls back to generic accelerator key.
-	engineImage := targetVersion.GetImageForSSHAccelerator(acceleratorType)
+	engineImage := imageSelector(targetVersion, acceleratorType)
 	if engineImage == nil {
 		return nil, nil, errors.Errorf("no engine image configured for accelerator %q in engine %s version %s",
 			acceleratorType, engine.Metadata.Name, endpoint.Spec.Engine.Version)
@@ -1213,6 +1254,35 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 	}
 
 	return baseConfig, backendConfig, nil
+}
+
+func findEngineVersion(endpoint *v1.Endpoint, engine *v1.Engine) (*v1.EngineVersion, error) {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Engine == nil {
+		return nil, errors.New("endpoint with engine spec is required for SSH cluster")
+	}
+
+	if engine == nil || engine.Spec == nil {
+		return nil, errors.New("engine is required for SSH cluster")
+	}
+
+	for _, version := range engine.Spec.Versions {
+		if version.Version == endpoint.Spec.Engine.Version {
+			return version, nil
+		}
+	}
+
+	return nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
+}
+
+func nativeRuntimeConfig(runtime *v1.NativeEngineRuntime) map[string]interface{} {
+	return map[string]interface{}{
+		"command":      runtime.Command,
+		"run_options":  runtime.RunOptions,
+		"protocol":     runtime.Protocol,
+		"health_path":  runtime.HealthPath,
+		"metrics_path": runtime.MetricsPath,
+		"port":         runtime.Port,
+	}
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {

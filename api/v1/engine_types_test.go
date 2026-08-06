@@ -1,10 +1,38 @@
 package v1
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestEngineVersionNativeRuntimeJSONRoundTrip(t *testing.T) {
+	runtime := &NativeEngineRuntime{
+		Command:     []string{"vllm", "serve"},
+		RunOptions:  []string{"--ipc=host"},
+		Protocol:    "openai",
+		HealthPath:  "/health",
+		MetricsPath: "/metrics",
+		Port:        8001,
+	}
+
+	encoded, err := json.Marshal(&EngineVersion{Version: "v0.17.1", NativeRuntime: runtime})
+	assert.NoError(t, err)
+
+	var decoded EngineVersion
+	assert.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Equal(t, runtime, decoded.NativeRuntime)
+}
+
+func TestEngineVersionNativeRuntimeIsOptional(t *testing.T) {
+	encoded, err := json.Marshal(&EngineVersion{Version: "v0.17.1"})
+	assert.NoError(t, err)
+
+	var decoded EngineVersion
+	assert.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.Nil(t, decoded.NativeRuntime)
+}
 
 func TestEngineVersion_GetImageForAccelerator(t *testing.T) {
 	tests := []struct {

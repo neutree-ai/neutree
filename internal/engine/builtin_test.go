@@ -52,10 +52,10 @@ func TestGetBuiltinEngines(t *testing.T) {
 					continue
 				}
 				if v.Version == "v0.24.0" {
-					if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
+					if got, want := img.ImageName, "vllm/vllm-openai"; got != want {
 						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
 					}
-					if got, want := img.Tag, "v0.24.0-neutree1-ray2.53.0"; got != want {
+					if got, want := img.Tag, "v0.24.0"; got != want {
 						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
 					}
 				}
@@ -70,6 +70,32 @@ func TestGetBuiltinEngines(t *testing.T) {
 
 	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
 		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
+	}
+
+	for _, e := range engines {
+		if e.Metadata.Name != v1.EngineNameVLLM {
+			continue
+		}
+
+		for _, version := range e.Spec.Versions {
+			if version.Version != "v0.24.0" {
+				continue
+			}
+
+			if version.NativeRuntime == nil {
+				t.Fatal("vllm v0.24.0 must opt into the native engine runner")
+			}
+
+			if len(version.NativeRuntime.Command) != 0 {
+				t.Fatalf("native vllm must retain the image entrypoint, got override %v", version.NativeRuntime.Command)
+			}
+			if got, want := version.NativeRuntime.RunOptions, []string{"--ipc=host"}; !equalStringSlices(got, want) {
+				t.Fatalf("native vllm run options: got %v, want %v", got, want)
+			}
+			if got, want := version.NativeRuntime.Protocol, "openai"; got != want {
+				t.Fatalf("native vllm protocol: got %q, want %q", got, want)
+			}
+		}
 	}
 
 	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).
@@ -122,4 +148,16 @@ func TestGetBuiltinEngines(t *testing.T) {
 			}
 		}
 	}
+}
+
+func equalStringSlices(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

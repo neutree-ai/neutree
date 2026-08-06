@@ -2041,6 +2041,79 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_NativeVLLMUsesClusterRunner(t *testing.T) {
+	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "native-vllm"},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM, Version: "v0.24.0"},
+			Model: &v1.ModelSpec{
+				Name:    "Qwen/Qwen2.5-0.5B-Instruct",
+				Version: "main",
+				Task:    v1.TextGenerationModelTask,
+			},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{v1.AcceleratorTypeKey: nvidiaGPU},
+			},
+			DeploymentOptions: map[string]interface{}{},
+			Env:               map[string]string{"HF_TOKEN": "test-token"},
+		},
+	}
+	cluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			Version: "v1.0.1",
+			Config: &v1.ClusterConfig{ModelCaches: []v1.ModelCache{
+				{Name: "default", HostPath: &corev1.HostPathVolumeSource{Path: "/data/models"}},
+			}},
+		},
+		Status: &v1.ClusterStatus{AcceleratorType: &nvidiaGPU},
+	}
+	modelRegistry := &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{
+		Type: v1.HuggingFaceModelRegistryType,
+		Url:  "https://huggingface.co",
+	}}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: v1.EngineNameVLLM},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{{
+			Version: "v0.24.0",
+			NativeRuntime: &v1.NativeEngineRuntime{
+				Protocol: "openai", HealthPath: "/health", MetricsPath: "/metrics", Port: 8000,
+				RunOptions: []string{"--ipc=host"},
+			},
+			Images: map[string]*v1.EngineImage{
+				"nvidia_gpu":     {ImageName: "vllm/vllm-openai", Tag: "v0.24.0"},
+				"ssh_nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.24.0-ray2.53.0"},
+			},
+		}}},
+	}
+	mgr := acceleratormocks.NewMockManager(t)
+	mgr.EXPECT().GetConverter(nvidiaGPU).Return(plugin.NewGPUConverter(), true)
+	mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
+
+	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, nil, mgr)
+	require.NoError(t, err)
+
+	assert.Equal(t, "serve.native_engine.app:app_builder", app.ImportPath)
+	assert.NotContains(t, app.RuntimeEnv, "container")
+	assert.NotContains(t, app.Args, "backend_container")
+	assert.Equal(t, map[string]interface{}{
+		"image": "vllm/vllm-openai:v0.24.0",
+		"run_options": []string{
+			"--runtime=nvidia", "--gpus all",
+			"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
+			"--rm",
+		},
+	}, app.Args["native_container"])
+	assert.Equal(t, "test-token", app.Args["native_env"].(map[string]string)["HF_TOKEN"])
+
+	runtime, ok := app.Args["native_runtime"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "openai", runtime["protocol"])
+	assert.Equal(t, "/health", runtime["health_path"])
+	assert.Equal(t, "/metrics", runtime["metrics_path"])
+	assert.Equal(t, []string{"--ipc=host"}, runtime["run_options"])
+}
+
 func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
 
