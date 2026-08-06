@@ -4,9 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	kmount "k8s.io/utils/mount"
@@ -30,22 +28,6 @@ type listFailingMounter struct {
 
 func (m *listFailingMounter) List() ([]kmount.MountPoint, error) {
 	return nil, m.err
-}
-
-type blockingUnmountMounter struct {
-	*kmount.FakeMounter
-	unmounted chan struct{}
-	release   chan struct{}
-}
-
-func (m *blockingUnmountMounter) Unmount(target string) error {
-	if err := m.FakeMounter.Unmount(target); err != nil {
-		return err
-	}
-
-	close(m.unmounted)
-	<-m.release
-	return nil
 }
 
 func useMountInterface(t *testing.T, mounter kmount.Interface) {
@@ -200,60 +182,4 @@ func TestMountNFSIncludesTargetWhenMountListingFails(t *testing.T) {
 	err := MountNFS(testNFSDevice, target)
 	require.ErrorContains(t, err, target)
 	require.ErrorContains(t, err, "mount list failed")
-}
-
-func TestMountNFSWaitsForConcurrentUnmount(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "registry")
-	require.NoError(t, os.Mkdir(target, 0o755))
-
-	mounter := &blockingUnmountMounter{
-		FakeMounter: kmount.NewFakeMounter([]kmount.MountPoint{{
-			Device: testNFSDevice,
-			Path:   target,
-			Type:   "nfs",
-		}}),
-		unmounted: make(chan struct{}),
-		release:   make(chan struct{}),
-	}
-	useMountInterface(t, mounter)
-
-	var releaseUnmountOnce sync.Once
-	releaseUnmount := func() { releaseUnmountOnce.Do(func() { close(mounter.release) }) }
-
-	unmountResult := make(chan error, 1)
-	go func() { unmountResult <- Unmount(target) }()
-	<-mounter.unmounted
-
-	mountResult := make(chan error, 1)
-	go func() { mountResult <- MountNFS(testNFSDevice, target) }()
-	var unmountCollected bool
-	var mountCollected bool
-
-	t.Cleanup(func() {
-		releaseUnmount()
-		if !unmountCollected {
-			require.NoError(t, <-unmountResult)
-		}
-
-		if !mountCollected {
-			require.NoError(t, <-mountResult)
-		}
-
-	})
-
-	require.Never(t, func() bool {
-		for _, action := range mounter.GetLog() {
-			if action.Action == kmount.FakeActionMount {
-				return true
-			}
-		}
-
-		return false
-	}, 100*time.Millisecond, 5*time.Millisecond)
-
-	releaseUnmount()
-	require.NoError(t, <-unmountResult)
-	unmountCollected = true
-	require.NoError(t, <-mountResult)
-	mountCollected = true
 }

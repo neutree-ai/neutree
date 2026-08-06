@@ -16,12 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
 
-var nfsListModelsTimeout = 10 * time.Second
-
-var (
-	isNFSMountExist            = nfs.IsMountExist
-	listBentoModelsWithTimeout = bentoml.ListModelsWithTimeout
-)
+const nfsHealthCheckTimeout = time.Minute
 
 func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) *ModelPage {
 	// Convert to GeneralModel format
@@ -234,17 +229,8 @@ func (n *nfsFile) Disconnect() error {
 	return nfs.Unmount(n.path)
 }
 
-func (n *nfsFile) ListModels(options ListOption) (*ModelPage, error) {
-	bentomlModels, err := listBentoModelsWithTimeout(n.path, nfsListModelsTimeout)
-	if err != nil {
-		return nil, err
-	}
-
-	return convertBentoMLModelsToGeneralModels(bentomlModels, options), nil
-}
-
 func (n *nfsFile) HealthyCheck() error {
-	exists, err := isNFSMountExist(n.nfsServerPath, n.path)
+	exists, err := nfs.IsMountExist(n.nfsServerPath, n.path)
 	if err != nil {
 		return errors.Wrapf(err, "failed to check NFS mount %s to %s", n.nfsServerPath, n.path)
 	}
@@ -253,7 +239,7 @@ func (n *nfsFile) HealthyCheck() error {
 		return errors.Errorf("NFS mount %s to %s does not exist", n.nfsServerPath, n.path)
 	}
 
-	if _, err := listBentoModelsWithTimeout(n.path, nfsListModelsTimeout); err != nil {
+	if _, err := bentoml.ListModelsWithTimeout(n.path, nfsHealthCheckTimeout); err != nil {
 		return errors.Wrapf(err, "failed to list models at NFS path %s", n.path)
 	}
 

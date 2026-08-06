@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	kmount "k8s.io/utils/mount"
 
@@ -25,11 +24,7 @@ var (
 	}
 )
 
-var (
-	mountInterface = kmount.New("")
-	mountLocksMu   sync.Mutex
-	mountLocks     = make(map[string]*mountLock)
-)
+var mountInterface = kmount.New("")
 
 // IsMountExist checks whether the given NFS device is mounted at the specified
 // mount point. It takes the device identifier (device) and the target mount
@@ -97,9 +92,6 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 }
 
 func MountNFS(device string, mountPoint string) error {
-	unlock := lockMountPoint(mountPoint)
-	defer unlock()
-
 	existed, unexpectedDevice, err := findMount(device, mountPoint)
 	if err != nil {
 		return err
@@ -127,42 +119,7 @@ func MountNFS(device string, mountPoint string) error {
 	return nil
 }
 
-type mountLock struct {
-	mu    sync.Mutex
-	users int
-}
-
-func lockMountPoint(mountPoint string) func() {
-	mountLocksMu.Lock()
-	lock := mountLocks[mountPoint]
-
-	if lock == nil {
-		lock = &mountLock{}
-		mountLocks[mountPoint] = lock
-	}
-
-	lock.users++
-	mountLocksMu.Unlock()
-
-	lock.mu.Lock()
-
-	return func() {
-		lock.mu.Unlock()
-
-		mountLocksMu.Lock()
-		lock.users--
-
-		if lock.users == 0 && mountLocks[mountPoint] == lock {
-			delete(mountLocks, mountPoint)
-		}
-		mountLocksMu.Unlock()
-	}
-}
-
 func Unmount(mountPoint string) error {
-	unlock := lockMountPoint(mountPoint)
-	defer unlock()
-
 	mountPoints, err := mountInterface.List()
 	if err != nil {
 		return err

@@ -311,22 +311,6 @@ func ListModels(homePath string) ([]Model, error) {
 // The underlying filesystem operation cannot be cancelled after it enters the
 // kernel, so its result is discarded when the caller's context is done.
 func ListModelsWithContext(ctx context.Context, homePath string) ([]Model, error) {
-	return listModelsWithContext(ctx, homePath, ListModels)
-}
-
-// ListModelsWithTimeout applies timeout to ListModelsWithContext.
-func ListModelsWithTimeout(homePath string, timeout time.Duration) ([]Model, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	return ListModelsWithContext(ctx, homePath)
-}
-
-func listModelsWithContext(
-	ctx context.Context,
-	homePath string,
-	listModels func(string) ([]Model, error),
-) ([]Model, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrapf(err, "list models at path %s", homePath)
 	}
@@ -338,7 +322,7 @@ func listModelsWithContext(
 
 	resultCh := make(chan result, 1)
 	go func() {
-		models, err := listModels(homePath)
+		models, err := ListModels(homePath)
 		resultCh <- result{models: models, err: err}
 	}()
 
@@ -348,6 +332,14 @@ func listModelsWithContext(
 	case <-ctx.Done():
 		return nil, errors.Wrapf(ctx.Err(), "list models at path %s", homePath)
 	}
+}
+
+// ListModelsWithTimeout applies timeout to ListModelsWithContext.
+func ListModelsWithTimeout(homePath string, timeout time.Duration) ([]Model, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return ListModelsWithContext(ctx, homePath)
 }
 
 // CopyModelFile copies a model file to a temporary location

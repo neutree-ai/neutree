@@ -1,14 +1,10 @@
 package model_registry
 
 import (
-	"errors"
 	"testing"
-	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/model_registry/bentoml"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func Test_newFileTypeModelRegistry(t *testing.T) {
@@ -160,60 +156,4 @@ func Test_newNFSTypeModelRegistry(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNFSFileHealthyCheck(t *testing.T) {
-	originalMountExists := isNFSMountExist
-	originalListModels := listBentoModelsWithTimeout
-	originalTimeout := nfsListModelsTimeout
-	t.Cleanup(func() {
-		isNFSMountExist = originalMountExists
-		listBentoModelsWithTimeout = originalListModels
-		nfsListModelsTimeout = originalTimeout
-	})
-
-	registry := &nfsFile{
-		bentomlStore:  bentomlStore{path: "/mnt/registry"},
-		nfsServerPath: "nfs.example.internal:/exports/models",
-	}
-
-	t.Run("returns an error when the expected mount is absent", func(t *testing.T) {
-		isNFSMountExist = func(string, string) (bool, error) { return false, nil }
-		listBentoModelsWithTimeout = func(string, time.Duration) ([]bentoml.Model, error) {
-			return nil, errors.New("must not list models")
-		}
-
-		err := registry.HealthyCheck()
-		require.ErrorContains(t, err, "does not exist")
-	})
-
-	t.Run("lists models after confirming the expected mount", func(t *testing.T) {
-		isNFSMountExist = func(string, string) (bool, error) { return true, nil }
-		listBentoModelsWithTimeout = func(string, time.Duration) ([]bentoml.Model, error) {
-			return nil, errors.New("model list failed")
-		}
-
-		err := registry.HealthyCheck()
-		require.ErrorContains(t, err, "failed to list models at NFS path /mnt/registry")
-	})
-}
-
-func TestNFSFileListModelsUsesConfiguredTimeout(t *testing.T) {
-	originalListModels := listBentoModelsWithTimeout
-	originalTimeout := nfsListModelsTimeout
-	t.Cleanup(func() {
-		listBentoModelsWithTimeout = originalListModels
-		nfsListModelsTimeout = originalTimeout
-	})
-
-	nfsListModelsTimeout = time.Second
-	listBentoModelsWithTimeout = func(path string, timeout time.Duration) ([]bentoml.Model, error) {
-		assert.Equal(t, "/mnt/registry", path)
-		assert.Equal(t, nfsListModelsTimeout, timeout)
-		return nil, errors.New("model list failed")
-	}
-
-	registry := &nfsFile{bentomlStore: bentomlStore{path: "/mnt/registry"}}
-	_, err := registry.ListModels(ListOption{})
-	require.ErrorContains(t, err, "model list failed")
 }

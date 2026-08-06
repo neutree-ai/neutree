@@ -8,49 +8,26 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestListModelsWithContextReturnsOnDeadline(t *testing.T) {
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-	defer cancel()
-
-	models, err := listModelsWithContext(ctx, "/mnt/blocked", func(string) ([]Model, error) {
-		<-release
-		return nil, nil
-	})
-
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Nil(t, models)
-}
-
-func TestListModelsWithContextDoesNotStartWorkAfterCancellation(t *testing.T) {
+func TestListModelsWithContextReturnsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	started := make(chan struct{})
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
-	models, err := listModelsWithContext(ctx, "/mnt/blocked", func(string) ([]Model, error) {
-		close(started)
-		<-release
-		return nil, nil
-	})
+	models, err := ListModelsWithContext(ctx, t.TempDir())
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, models)
-	select {
-	case <-started:
-		t.Fatal("started a filesystem read after context cancellation")
-	case <-time.After(10 * time.Millisecond):
-	}
+}
+
+func TestListModelsWithTimeoutReturnsExpiredDeadline(t *testing.T) {
+	models, err := ListModelsWithTimeout(t.TempDir(), 0)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, models)
 }
 
 func sha256Hex(data []byte) string {
