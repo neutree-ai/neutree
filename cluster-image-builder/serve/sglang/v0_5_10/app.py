@@ -1,8 +1,5 @@
 """Ray Serve deployment for SGLang v0.5.10 inference (Neutree static cluster path).
 
-Mirrors the vLLM v0.24.0 / llama_cpp v0.3.7 app structure so the Go
-ray_orchestrator can drive it via ``serve.sglang.v0_5_10.app:app_builder``.
-
 Architecture:
     Controller (FastAPI ingress, CPU-only)
         - HTTP routing, request id middleware, optional custom replica scheduler
@@ -56,10 +53,7 @@ SCHEDULER_CLASS_PATHS = {
 
 
 def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[RequestRouterConfig]:
-    """Build RequestRouterConfig based on scheduler configuration.
-
-    See the vLLM v0.24.0 app for full documentation of supported scheduler types.
-    """
+    """Build RequestRouterConfig based on scheduler configuration."""
     scheduler_type = scheduler_config.get("type", SchedulerType.POW2)
 
     if scheduler_type == SchedulerType.POW2:
@@ -480,11 +474,7 @@ class Controller:
 
 
 def app_builder(args: Dict[str, Any]) -> Application:
-    """Application builder that assembles the Backend + Controller deployments.
-
-    Mirrors the vLLM v0.24.0 / llama_cpp v0.3.7 builders so the Go
-    ray_orchestrator can drive it without engine-specific branches.
-    """
+    """Application builder that assembles the Backend + Controller deployments."""
     model = args.get("model", {})
     deployment_options = args.get("deployment_options", {})
     engine_args = args.get("engine_args") or {}
