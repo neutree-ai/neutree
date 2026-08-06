@@ -43,10 +43,10 @@ An Engine defines an inference runtime (e.g., vLLM). Each engine can have multip
 - **Version schema**: Each version defines configurable parameters via JSON schema
 - **Deploy template**: Kubernetes mode uses templates to generate Deployment manifests
 
-### vLLM Support Window
+### Engine Version Maintenance
 
-New Neutree installations provide vLLM `v0.24.0` and `v0.17.1`. Upgrading an
-existing workspace does not remove versions already present in its Engine.
+Neutree maintains Engine versions carried by the current release and the
+previous minor release.
 
 ## Endpoint
 
