@@ -111,7 +111,10 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseCONNECTED {
-		// Refresh only after a registry has passed both connection and health checks.
+		// Measured only here, on a registry known to be reachable right now, and
+		// only when the previous counters have gone stale. This is also why an
+		// unreachable registry keeps its last known counters: the code that would
+		// overwrite them never runs.
 		stats, statsRefreshed = c.stats.Refresh(modelRegistry, stats, obj.Metadata.WorkspaceName())
 	}
 
