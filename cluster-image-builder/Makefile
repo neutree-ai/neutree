@@ -18,7 +18,7 @@ RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head 
 # Engine image build args
 ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
-ENGINE_VLLM_VERSION ?= v0.11.2
+ENGINE_VLLM_VERSION ?= v0.24.0
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
 # Optional override of the upstream vLLM base image tag (defaults to
 # ENGINE_VLLM_VERSION). Use to point at non-standard upstream tags (e.g. dev
@@ -50,7 +50,7 @@ RAY_SHORT_VERSION ?= ray2.53.0
 
 # Optional Neutree-side patch suffix appended only to the output image tag.
 # Empty (default) keeps the upstream tag unchanged. Setting e.g. "1" produces
-# tags like "v0.11.2-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
+# tags like "v0.24.0-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
 # and pip install version still resolve to the upstream version.
 # Use = (recursive) so the value is re-evaluated each time it is referenced,
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.

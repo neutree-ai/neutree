@@ -43,6 +43,16 @@ An Engine defines an inference runtime (e.g., vLLM). Each engine can have multip
 - **Version schema**: Each version defines configurable parameters via JSON schema
 - **Deploy template**: Kubernetes mode uses templates to generate Deployment manifests
 
+### Engine Version Maintenance
+
+For each Engine, the Neutree codebase maintains at most two versions: the
+version included in the current generally available release and, when present,
+the version included in the immediately preceding generally available minor
+release.
+
+Maintained Engine versions are automatically registered in every workspace. If
+removed, they are restored automatically.
+
 ## Endpoint
 
 An Endpoint is a deployed inference service. Key configurations:

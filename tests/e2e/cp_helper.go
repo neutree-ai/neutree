@@ -400,21 +400,22 @@ func mirrorRegistryArgs() []string {
 }
 
 // canDeploySSHEndpoint checks if the engine version is compatible with SSH clusters.
-// SSH clusters on v1.0.0 only support vllm v0.8.5.
+// SSH clusters on v1.0.0 predate the maintained vLLM support window.
 func canDeploySSHEndpoint() bool {
 	if profileEngineName() != v1.EngineNameVLLM {
 		return true
 	}
 
 	if profile.Cluster.OldVersion == "v1.0.0" {
-		return profileEngineOldVersion() == "v0.8.5"
+		return false
 	}
 
 	return true
 }
 
 // canDeployK8sEndpoint checks if the engine version is compatible with K8s clusters.
-// K8s clusters require vllm >= v0.11.2.
+// K8s clusters require vLLM versions at or after v0.11.2; both maintained
+// versions satisfy this constraint.
 func canDeployK8sEndpoint() bool {
 	if profileEngineName() != v1.EngineNameVLLM {
 		return true

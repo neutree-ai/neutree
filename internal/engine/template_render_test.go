@@ -129,10 +129,6 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 		template string
 	}{
 		{
-			name:     "vllm v0.11.2",
-			template: vllmV0_11_2DeployTemplate,
-		},
-		{
 			name:     "vllm v0.17.1",
 			template: vllmV0_17_1DeployTemplate,
 		},
@@ -172,10 +168,6 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 		name     string
 		template string
 	}{
-		{
-			name:     "vllm v0.11.2",
-			template: vllmV0_11_2DeployTemplate,
-		},
 		{
 			name:     "vllm v0.17.1",
 			template: vllmV0_17_1DeployTemplate,

@@ -10,12 +10,19 @@ import (
 )
 
 const (
-	defaultModelVersion = "latest"
+	defaultModelVersion           = "latest"
+	maintainedVLLMVersionPrevious = "v0.17.1"
+	maintainedVLLMVersionCurrent  = "v0.24.0"
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
 	defaultEngineName = "vllm"
 )
+
+var maintainedVLLMVersions = map[string]struct{}{
+	maintainedVLLMVersionPrevious: {},
+	maintainedVLLMVersionCurrent:  {},
+}
 
 // EngineProfile carries per-engine configuration loaded from the test profile
 // under engines.<name>.
@@ -158,9 +165,16 @@ func LoadProfile() error {
 		return fmt.Errorf("failed to read profile %s: %w", path, err)
 	}
 
-	if err := yaml.Unmarshal(data, &profile); err != nil {
+	var loadedProfile Profile
+	if err := yaml.Unmarshal(data, &loadedProfile); err != nil {
 		return fmt.Errorf("failed to parse profile %s: %w", path, err)
 	}
+
+	if err := validateMaintainedVLLMVersions(loadedProfile.Engines[defaultEngineName]); err != nil {
+		return fmt.Errorf("invalid profile %s: %w", path, err)
+	}
+
+	profile = loadedProfile
 
 	// Compute derived fields.
 
@@ -215,6 +229,29 @@ func LoadProfile() error {
 
 	if profile.ControlPlane.K8sNamespace == "" {
 		profile.ControlPlane.K8sNamespace = "neutree-e2e"
+	}
+
+	return nil
+}
+
+func validateMaintainedVLLMVersions(engineProfile EngineProfile) error {
+	for field, version := range map[string]string{
+		"version":     engineProfile.Version,
+		"old_version": engineProfile.OldVersion,
+	} {
+		if version == "" {
+			continue
+		}
+
+		if _, ok := maintainedVLLMVersions[version]; !ok {
+			return fmt.Errorf(
+				"engines.vllm.%s %q is not maintained; supported versions are %s and %s",
+				field,
+				version,
+				maintainedVLLMVersionPrevious,
+				maintainedVLLMVersionCurrent,
+			)
+		}
 	}
 
 	return nil
@@ -297,15 +334,19 @@ func profileEngineName() string { return defaultEngineName }
 // the version explicitly via withEngine(name, version).
 func profileEngineVersion() string { return profileEngineVersionFor(defaultEngineName) }
 
-// profileEngineOldVersion returns the old-version for the default engine,
-// used by the multi-version isolation test on vLLM.
+// profileEngineOldVersion returns the other maintained version for the default
+// engine, used by vLLM multi-version and upgrade tests.
 func profileEngineOldVersion() string {
 	v := profile.Engines[defaultEngineName].OldVersion
 	if v != "" {
 		return v
 	}
 
-	return "v0.8.5"
+	if profileEngineVersion() == maintainedVLLMVersionPrevious {
+		return maintainedVLLMVersionCurrent
+	}
+
+	return maintainedVLLMVersionPrevious
 }
 
 // profileEngineVersionFor returns the configured version for the named engine,
@@ -317,7 +358,7 @@ func profileEngineVersionFor(name string) string {
 
 	switch name {
 	case "vllm":
-		return "v0.11.2"
+		return maintainedVLLMVersionCurrent
 	case "sglang":
 		return "v0.5.10"
 	case "llama-cpp":
