@@ -3,10 +3,12 @@ package model_registry
 import (
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
 
@@ -15,6 +17,9 @@ import (
 	"github.com/neutree-ai/neutree/internal/model_registry/modelmeta"
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
+
+// readmeFileName is the model card a private registry serves verbatim.
+const readmeFileName = "README.md"
 
 const nfsHealthCheckTimeout = time.Minute
 
@@ -137,6 +142,64 @@ func (s *bentomlStore) GetModelDetail(name, version string) (*v1.ModelVersion, e
 	detail.Info.MergeManual(manual)
 
 	return detail, nil
+}
+
+func (s *bentomlStore) GetReadme(name, version string) (*Readme, error) {
+	model, err := bentoml.GetModelDetail(s.path, name, version)
+	if err != nil {
+		return nil, err
+	}
+
+	readmePath := filepath.Join(bentoml.ModelDir(s.path, model.Name, model.Version), readmeFileName)
+
+	file, err := os.Open(readmePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Wrapf(ErrNotFound, "model %s:%s has no %s", name, version, readmeFileName)
+		}
+
+		return nil, errors.Wrapf(err, "failed to read %s of model %s:%s", readmeFileName, name, version)
+	}
+	defer file.Close()
+
+	readme, err := readCappedReadme(file)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read %s of model %s:%s", readmeFileName, name, version)
+	}
+
+	return readme, nil
+}
+
+// readCappedReadme reads at most MaxReadmeBytes, asking for one byte more so it
+// can tell "exactly at the limit" from "longer than the limit" without reading
+// the rest.
+func readCappedReadme(source io.Reader) (*Readme, error) {
+	content, err := io.ReadAll(io.LimitReader(source, MaxReadmeBytes+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(content) > MaxReadmeBytes {
+		return &Readme{Content: string(truncateUTF8(content, MaxReadmeBytes)), Truncated: true}, nil
+	}
+
+	return &Readme{Content: string(content)}, nil
+}
+
+// truncateUTF8 cuts at or before limit without splitting a rune, so the result
+// is still text. Markdown cut mid-document is expected here; markdown cut
+// mid-character is a decoding error in whatever displays it.
+func truncateUTF8(content []byte, limit int) []byte {
+	if len(content) <= limit {
+		return content
+	}
+
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(content[cut]) {
+		cut--
+	}
+
+	return content[:cut]
 }
 
 func (s *bentomlStore) DeleteModel(name, version string) error {

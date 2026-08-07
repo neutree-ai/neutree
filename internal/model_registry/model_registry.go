@@ -45,6 +45,28 @@ func KnownTotal(total int) *int {
 	return &total
 }
 
+// MaxReadmeBytes caps how much of a model's README is read.
+//
+// A README is arbitrary content from outside this system: a file in a directory
+// anybody with push rights can write, or a document on a public hub. It is
+// displayed, not processed, and no display needs a megabyte, so the limit is
+// applied while reading rather than after — an unbounded read is the failure
+// mode, not an unbounded response.
+const MaxReadmeBytes = 1 << 20
+
+// Readme is a model's README as the registry holds it: markdown exactly as
+// stored, never rendered, because rendering someone else's markup into HTML on
+// the server would make this an injection vector for every client that displays
+// it.
+type Readme struct {
+	// Content is the markdown, truncated to MaxReadmeBytes.
+	Content string
+	// Truncated says the file was longer than MaxReadmeBytes and Content is its
+	// beginning. A reader that cannot tell a truncated document from a complete
+	// one has no way to say so to the person looking at it.
+	Truncated bool
+}
+
 // RegistryUsage is a raw observation of what a registry's backing storage holds.
 // It is what the registry can see; turning it into a status is the aggregator's
 // job.
@@ -71,6 +93,12 @@ type ModelRegistry interface {
 	// the checkpoint. GetModelVersion stays the cheap call for code that only
 	// needs to resolve a version or read its recorded metadata.
 	GetModelDetail(name, version string) (*v1.ModelVersion, error)
+	// GetReadme returns the model's README.md verbatim, capped at MaxReadmeBytes.
+	// It wraps ErrNotFound when the model has no README, and ErrNotSupported on a
+	// registry that does not serve one. Those two are kept apart deliberately: "no
+	// README was written" and "this registry cannot tell you" are different
+	// answers, and collapsing them would leave a caller unable to say which it got.
+	GetReadme(name, version string) (*Readme, error)
 	DeleteModel(name, version string) error
 	ImportModel(reader io.Reader, name, version string, progress io.Writer) error
 	ExportModel(name, version, outputPath string) error

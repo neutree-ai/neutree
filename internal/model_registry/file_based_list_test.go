@@ -1,10 +1,12 @@
 package model_registry
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -262,6 +264,61 @@ func TestSetManualModelInfo_LeavesPhysicalCoordinatesAlone(t *testing.T) {
 	version, err := store.GetModelVersion("qwen3", "v1")
 	require.NoError(t, err)
 	assert.Equal(t, "v1", version.Name)
+}
+
+func TestGetReadme(t *testing.T) {
+	home := t.TempDir()
+	dir := writeStoredModel(t, home, "qwen3", "v1", nil)
+
+	store := &localFile{bentomlStore: bentomlStore{path: home}}
+
+	_, err := store.GetReadme("qwen3", "v1")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Qwen3\n"), 0o600))
+
+	readme, err := store.GetReadme("qwen3", "v1")
+	require.NoError(t, err)
+	assert.Equal(t, "# Qwen3\n", readme.Content)
+	assert.False(t, readme.Truncated)
+}
+
+// A README is content from outside this system: a file anyone with push rights
+// can write. It is read up to a limit rather than in full, and a reader is told
+// when it was cut so it can say so.
+func TestGetReadme_CapsWhatItReads(t *testing.T) {
+	home := t.TempDir()
+	dir := writeStoredModel(t, home, "qwen3", "v1", nil)
+
+	oversized := bytes.Repeat([]byte("a"), MaxReadmeBytes+4096)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), oversized, 0o600))
+
+	store := &localFile{bentomlStore: bentomlStore{path: home}}
+
+	readme, err := store.GetReadme("qwen3", "v1")
+	require.NoError(t, err)
+	assert.True(t, readme.Truncated)
+	assert.Len(t, readme.Content, MaxReadmeBytes)
+}
+
+// Cutting a document short is expected; cutting a character in half is a
+// decoding error in whatever displays the result.
+func TestGetReadme_TruncatesOnARuneBoundary(t *testing.T) {
+	home := t.TempDir()
+	dir := writeStoredModel(t, home, "qwen3", "v1", nil)
+
+	// Three-byte runes do not divide the limit evenly, so the cut lands inside
+	// one unless it is moved back.
+	multibyte := bytes.Repeat([]byte("千"), MaxReadmeBytes)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), multibyte, 0o600))
+
+	store := &localFile{bentomlStore: bentomlStore{path: home}}
+
+	readme, err := store.GetReadme("qwen3", "v1")
+	require.NoError(t, err)
+	assert.True(t, readme.Truncated)
+	assert.True(t, utf8.ValidString(readme.Content))
+	assert.LessOrEqual(t, len(readme.Content), MaxReadmeBytes)
 }
 
 func TestCollectUsage(t *testing.T) {

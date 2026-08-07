@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -26,6 +27,10 @@ type Dependencies struct {
 	Storage     storage.Storage
 	TempDirFunc func() (string, error) // Function to get a temporary directory
 	AuthConfig  middleware.AuthConfig
+	// QueryCache holds recent listings from public registries so that paging
+	// through results does not re-query the hub for every page. Nil disables
+	// caching, which is what tests and any registry-free deployment want.
+	QueryCache *model_registry.QueryCache
 }
 
 const modelReferencedByEndpointCode = "10131"
@@ -103,6 +108,14 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	{
 		modelRegistries := workspaces.Group("/model_registries/:registry")
 		{
+			// Check the registry now instead of waiting for the reconcile to come
+			// round again. Editing the registry itself is what this amounts to
+			// operationally — it rewrites the registry's status — so it reuses the
+			// registry's own update permission rather than a model-level one.
+			modelRegistries.POST("/retry_connection",
+				middleware.RequireWorkspacePermission("model_registry:update", permissionDeps),
+				retryConnection(deps))
+
 			models := modelRegistries.Group("/models")
 			{
 				// List all models in a registry
@@ -132,6 +145,11 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 				models.POST("/:model/finalize",
 					middleware.RequireWorkspacePermission("model:push", permissionDeps),
 					finalizeModel(deps))
+
+				// Read a model's card, as markdown
+				models.GET("/:model/readme",
+					middleware.RequireWorkspacePermission("model:read", permissionDeps),
+					getModelReadme(deps))
 
 				// Download a model
 				models.GET("/:model/download",
@@ -247,8 +265,10 @@ type registryHandle struct {
 	client   model_registry.ModelRegistry
 }
 
-// getModelRegistry retrieves and connects to a model registry
-func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, error) {
+// findModelRegistry reads the stored registry the request names, without
+// reaching out to it. Handlers that only need the row — or that want to decide
+// for themselves what a failure to connect means — use this.
+func findModelRegistry(c *gin.Context, deps *Dependencies) (*v1.ModelRegistry, error) {
 	workspace := c.Param("workspace")
 	registryName := c.Param("registry")
 
@@ -275,8 +295,18 @@ func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, erro
 		return nil, fmt.Errorf("model registry not found: %s/%s", workspace, registryName)
 	}
 
+	return &modelRegistries[0], nil
+}
+
+// getModelRegistry retrieves and connects to a model registry
+func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, error) {
+	registry, err := findModelRegistry(c, deps)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create model registry client
-	modelRegistry, err := model_registry.NewModelRegistry(&modelRegistries[0])
+	modelRegistry, err := model_registry.NewModelRegistry(registry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model registry client: %w", err)
 	}
@@ -286,7 +316,7 @@ func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, erro
 		return nil, fmt.Errorf("failed to connect to model registry: %w", err)
 	}
 
-	return &registryHandle{registry: &modelRegistries[0], client: modelRegistry}, nil
+	return &registryHandle{registry: registry, client: modelRegistry}, nil
 }
 
 // listModels handles listing all models in a registry
@@ -316,18 +346,29 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer handle.client.Disconnect() //nolint:errcheck
 
-		// List models
-		page, err := handle.client.ListModels(model_registry.ListOption{
+		// List models. Public registries answer from the cache when they have
+		// already been asked this exact question recently; private ones are read
+		// straight through, since listing a local tree is cheap and a model pushed
+		// a moment ago has to show up.
+		page, meta, err := deps.QueryCache.ListModels(handle.registry, handle.client, model_registry.ListOption{
 			Search: search,
 			Offset: offset,
 			Limit:  limit,
 		})
 		if err != nil {
+			// Answered before the shared mapping so the wording an existing caller
+			// asserts on is preserved: a registry that cannot page is refusing the
+			// shape of this listing, which is more specific than "cannot do that".
 			if errors.Is(err, model_registry.ErrNotSupported) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"message": fmt.Sprintf("This model registry cannot list models this way: %v", err),
+					"reason":  reasonNotSupported,
 				})
 
+				return
+			}
+
+			if respondRegistryError(c, "Failed to list models", err) {
 				return
 			}
 
@@ -355,7 +396,32 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 		// array. Wrapping the body in an envelope would break every existing
 		// caller for the sake of one number.
 		c.Header("Content-Range", contentRange(offset, len(page.Models), page.Total))
+		// When this data was read from the registry, and whether this request is
+		// what read it. A listing served from cache describes the hub as of
+		// FetchedAt, not as of now, and a client showing it to someone has no way
+		// to say so unless it is told.
+		setDataTimestamp(c, meta)
 		c.JSON(http.StatusOK, page.Models)
+	}
+}
+
+// Headers stating how old the data in the response is. A public registry is
+// read through a cache, so "when was this true" is a different question from
+// "when did you ask", and only the server can answer the first.
+const (
+	dataTimestampHeader = "X-Neutree-Data-Timestamp"
+	dataCachedHeader    = "X-Neutree-Data-Cached"
+)
+
+func setDataTimestamp(c *gin.Context, meta model_registry.QueryMeta) {
+	if meta.FetchedAt.IsZero() {
+		return
+	}
+
+	c.Header(dataTimestampHeader, meta.FetchedAt.UTC().Format(time.RFC3339))
+
+	if meta.Cached {
+		c.Header(dataCachedHeader, "true")
 	}
 }
 
@@ -421,6 +487,14 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 		// about itself.
 		modelVersion, err := handle.client.GetModelDetail(modelName, version)
 		if err != nil {
+			// A registry that refuses this — because it cannot do it, or because it
+			// rejected our credentials — is not a server fault. Answering 500 would
+			// make a read-only or unauthenticated public registry look like a broken
+			// deployment.
+			if respondRegistryError(c, fmt.Sprintf("Failed to get model %s:%s", modelName, version), err) {
+				return
+			}
+
 			klog.Errorf("Failed to get model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to get model %s:%s: %v", modelName, version, err),

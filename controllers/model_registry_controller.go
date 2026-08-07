@@ -15,6 +15,11 @@ import (
 type ModelRegistryController struct {
 	storage storage.Storage
 	stats   model_registry.StatsAggregator
+	// checkedAtWriteInterval is how far the recorded check time may trail the real
+	// one before an otherwise unchanged status is written back.
+	checkedAtWriteInterval time.Duration
+	// now overrides the clock in tests.
+	now func() time.Time
 
 	syncHandler func(modelRegistry *v1.ModelRegistry) error
 }
@@ -24,17 +29,29 @@ type ModelRegistryControllerOption struct {
 	// StatsStaleAfter overrides how long collected registry counters stay usable
 	// before the tree is walked again. Zero uses the package default.
 	StatsStaleAfter time.Duration
+	// CheckedAtWriteInterval overrides how often an unchanged reachability result
+	// is persisted purely to advance its timestamp. Zero uses the package default.
+	CheckedAtWriteInterval time.Duration
 }
 
 func NewModelRegistryController(option *ModelRegistryControllerOption) (*ModelRegistryController, error) {
 	c := &ModelRegistryController{
-		storage: option.Storage,
-		stats:   model_registry.StatsAggregator{StaleAfter: option.StatsStaleAfter},
+		storage:                option.Storage,
+		stats:                  model_registry.StatsAggregator{StaleAfter: option.StatsStaleAfter},
+		checkedAtWriteInterval: option.CheckedAtWriteInterval,
 	}
 
 	c.syncHandler = c.sync
 
 	return c, nil
+}
+
+func (c *ModelRegistryController) clock() time.Time {
+	if c.now == nil {
+		return time.Now()
+	}
+
+	return c.now()
 }
 
 func (c *ModelRegistryController) Reconcile(obj interface{}) error {
@@ -63,7 +80,9 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		return c.syncDeletion(obj)
 	}
 
-	// Defer block to handle status updates for non-deletion paths
+	// Defer block to handle status updates for non-deletion paths. Every path
+	// through this function below this point has checked whether the registry
+	// answers, so reaching here is what "checked" means.
 	defer func() {
 		// Determine phase based on error
 		phase := v1.ModelRegistryPhaseCONNECTED
@@ -71,16 +90,22 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 			phase = v1.ModelRegistryPhaseFAILED
 		}
 
-		// Skip update if already in correct phase, no error change, and the
-		// counters were not recomputed. The recomputation has to be written even
-		// when the counters came out identical: its timestamp is what stops the
-		// next reconcile, ten seconds later, from walking the model tree again.
-		if !statsRefreshed && obj.Status != nil && obj.Status.Phase == phase &&
-			(err != nil) == (obj.Status.ErrorMessage != "") {
+		errMessage := FormatErrorForStatus(err)
+		now := c.clock()
+
+		// Not every check is worth a write. What is written back, and when, is
+		// decided in one place shared with the on-demand retry path — including the
+		// throttle that keeps an unchanged result from being persisted ten times a
+		// minute purely to move its timestamp.
+		if !model_registry.NeedsStatusWrite(obj.Status, phase, errMessage, statsRefreshed,
+			now, c.checkedAtWriteInterval) {
 			return
 		}
 
-		updateErr := c.updateStatus(obj, phase, err, stats)
+		newStatus := model_registry.NextStatus(obj.Status, phase, errMessage, now)
+		newStatus.Stats = stats
+
+		updateErr := c.updateStatus(obj, newStatus)
 		if updateErr != nil {
 			klog.Errorf("failed to update model registry %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -163,7 +188,13 @@ func (c *ModelRegistryController) syncDeletion(obj *v1.ModelRegistry) error {
 		phase = v1.ModelRegistryPhaseFAILED
 	}
 
-	updateErr := c.updateStatus(obj, phase, deleteErr, currentStats(obj))
+	// A deletion is not a reachability check, so the recorded check time is
+	// carried over rather than moved: what happened here says nothing about
+	// whether the registry is answering.
+	newStatus := model_registry.NextStatus(obj.Status, phase, FormatErrorForStatus(deleteErr), c.clock())
+	newStatus.LastCheckedAt = currentCheckedAt(obj)
+
+	updateErr := c.updateStatus(obj, newStatus)
 	if updateErr != nil {
 		klog.Errorf("failed to update model registry %s/%s status: %v",
 			obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -189,19 +220,22 @@ func currentStats(obj *v1.ModelRegistry) *v1.ModelRegistryStats {
 	return obj.Status.Stats
 }
 
-func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, phase v1.ModelRegistryPhase,
-	err error, stats *v1.ModelRegistryStats) error {
-	newStatus := &v1.ModelRegistryStatus{
-		LastTransitionTime: FormatStatusTime(),
-		Phase:              phase,
-		ErrorMessage:       FormatErrorForStatus(err),
-		// PostgREST replaces a composite-type column as a whole, so any attribute
-		// missing from the PATCH body is nulled rather than left alone. Stats is
-		// therefore always passed in — carried forward from the observed object
-		// when this reconcile did not recompute it — or every phase or error
-		// transition wipes it. Same reason as ClusterController.updateStatus.
-		Stats: stats,
+func currentCheckedAt(obj *v1.ModelRegistry) string {
+	if obj.Status == nil {
+		return ""
 	}
 
+	return obj.Status.LastCheckedAt
+}
+
+// updateStatus persists a status built by model_registry.NextStatus.
+//
+// PostgREST replaces a composite-type column as a whole, so any attribute
+// missing from the PATCH body is nulled rather than left alone. Every attribute
+// therefore has to be present in what is passed here — carried forward from the
+// observed object when this reconcile did not produce a new value — or a phase
+// change wipes the statistics and the check time along with it. Same reason as
+// ClusterController.updateStatus.
+func (c *ModelRegistryController) updateStatus(obj *v1.ModelRegistry, newStatus *v1.ModelRegistryStatus) error {
 	return c.storage.UpdateModelRegistry(strconv.Itoa(obj.ID), &v1.ModelRegistry{Status: newStatus})
 }

@@ -188,6 +188,10 @@ services:
       - --core-server-port=3001
       - --core-server-host=0.0.0.0
       - --auth-endpoint=http://auth:9999
+{{ if .BuiltinPublicModelRegistries }}
+      - --enable-builtin-public-model-registries
+      - --hugging-face-endpoint={{ .HuggingFaceEndpoint }}
+{{ end }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/collect:/etc/neutree/collect
     ports:

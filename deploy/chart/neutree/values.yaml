@@ -32,6 +32,20 @@ system:
   # AI inference trace APIs and the Vector trace pipeline altogether.
   aiTraceStoreUrl: ""
 
+# Built-in public model registries. These are read-only catalogues hosted
+# outside the deployment, so they are off by default: an installation with no
+# route to the internet would otherwise show every user a registry stuck in
+# Failed.
+publicModelRegistries:
+  # Provision a built-in registry for each supported public hub into every
+  # workspace. Turning this back off withdraws the registries the control plane
+  # provisioned; registries created by hand are never touched.
+  enabled: false
+  huggingFace:
+    # Address the built-in Hugging Face registry points at. Set this to a mirror
+    # reachable from inside the network when the Hub itself is not.
+    url: "https://huggingface.co"
+
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.
   # This explicit value takes precedence over the embedded VictoriaMetrics
