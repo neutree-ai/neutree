@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cluster/staticnode"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -153,8 +154,9 @@ func NewRoleAssignmentControllerFactory() ControllerFactory {
 func NewWorkspaceControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		workspaceController, err := controllers.NewWorkspaceController(&controllers.WorkspaceControllerOption{
-			Storage:        opts.config.Storage,
-			EngineRegistry: opts.config.EngineRegistry,
+			Storage:           opts.config.Storage,
+			EngineRegistry:    opts.config.EngineRegistry,
+			BuiltinRegistries: builtinModelRegistryConfig(opts),
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create workspace controller")
@@ -371,4 +373,15 @@ func NewExternalEndpointControllerFactory() ControllerFactory {
 
 		return ctrl, nil
 	}
+}
+
+// builtinModelRegistryConfig reads the built-in registry configuration, treating
+// its absence as "provision nothing". A build or a test that leaves the section
+// unset gets an offline deployment, which is the safe end of the switch.
+func builtinModelRegistryConfig(opts *ControllerOptions) model_registry.BuiltinConfig {
+	if opts.config.ModelRegistryConfig == nil {
+		return model_registry.BuiltinConfig{}
+	}
+
+	return opts.config.ModelRegistryConfig.Builtin
 }

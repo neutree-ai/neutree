@@ -88,6 +88,9 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, v1.WorkspacePhaseCREATED),
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
+				// Teardown also removes the model registries the control plane
+				// provisioned into this workspace.
+				s.On("ListModelRegistry", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED && r.Status.ErrorMessage == ""
 				})).Return(nil).Once()
@@ -99,6 +102,9 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, v1.WorkspacePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
+				// Teardown also removes the model registries the control plane
+				// provisioned into this workspace.
+				s.On("ListModelRegistry", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED
 				})).Return(assert.AnError).Once()
@@ -110,6 +116,9 @@ func TestWorkspaceController_Sync_Deletion(t *testing.T) {
 			input: testWorkspaceWithDeletionTimestamp(workspaceID, ""), // No initial status
 			mockSetup: func(s *storagemocks.MockStorage) {
 				s.On("ListEngine", mock.Anything).Return(nil, nil)
+				// Teardown also removes the model registries the control plane
+				// provisioned into this workspace.
+				s.On("ListModelRegistry", mock.Anything).Return(nil, nil)
 				s.On("UpdateWorkspace", workspaceIDStr, mock.MatchedBy(func(r *v1.Workspace) bool {
 					return r.Status != nil && r.Status.Phase == v1.WorkspacePhaseDELETED && r.Status.ErrorMessage == ""
 				})).Return(nil).Once()

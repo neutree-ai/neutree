@@ -506,6 +506,11 @@ func TestForceDelete_WorkspaceController(t *testing.T) {
 			// Mock ListEngine for DeleteWorkspaceEngine
 			mockStorage.On("ListEngine", mock.Anything).Return([]v1.Engine{}, nil).Once()
 
+			// Workspace teardown also removes the model registries the control plane
+			// provisioned, so that they are not left pointing at a workspace that no
+			// longer exists.
+			mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{}, nil).Once()
+
 			// Mock UpdateWorkspace for status update
 			mockStorage.On("UpdateWorkspace", "1", mock.MatchedBy(func(w *v1.Workspace) bool {
 				return w.Status != nil && w.Status.Phase == tt.wantPhase

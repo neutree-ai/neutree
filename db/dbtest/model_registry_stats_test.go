@@ -60,10 +60,13 @@ func TestModelRegistryStatusPatchReplacesWholeComposite(t *testing.T) {
 	id := createTestModelRegistry(t, db, s, "patch-semantics")
 
 	// Populate every attribute of the composite, including ones the Go struct
-	// used for the PATCH below does not send.
+	// used for the PATCH below does not send. The attribute order is the order
+	// they were added in: phase, last_transition_time, error_message, then stats
+	// (081) and last_checked_at (084).
 	_, err := db.Exec(`UPDATE api.model_registries
 		SET status = ROW('Connected', '2026-01-01T00:00:00Z', 'previous failure',
-		                 '{"model_count": 3, "storage_bytes": 4096}'::jsonb)::api.model_registry_status
+		                 '{"model_count": 3, "storage_bytes": 4096}'::jsonb,
+		                 '2026-01-01T00:00:00Z')::api.model_registry_status
 		WHERE id = $1`, id)
 	require.NoError(t, err)
 
@@ -79,20 +82,25 @@ func TestModelRegistryStatusPatchReplacesWholeComposite(t *testing.T) {
 		phaseSet, timeSet bool
 		errorMessageNull  bool
 		statsNull         bool
+		lastCheckedAtNull bool
 	)
 
 	require.NoError(t, db.QueryRow(`SELECT
 			(status).phase IS NOT NULL,
 			(status).last_transition_time IS NOT NULL,
 			(status).error_message IS NULL,
-			(status).stats IS NULL
+			(status).stats IS NULL,
+			(status).last_checked_at IS NULL
 		FROM api.model_registries WHERE id = $1`, id).
-		Scan(&phaseSet, &timeSet, &errorMessageNull, &statsNull))
+		Scan(&phaseSet, &timeSet, &errorMessageNull, &statsNull, &lastCheckedAtNull))
 
 	assert.True(t, phaseSet, "attributes named in the PATCH body are written")
 	assert.True(t, timeSet, "attributes named in the PATCH body are written")
 	assert.True(t, errorMessageNull, "PostgREST replaces the whole composite: error_message should be nulled")
 	assert.True(t, statsNull, "PostgREST replaces the whole composite: stats should be nulled")
+	assert.True(t, lastCheckedAtNull,
+		"PostgREST replaces the whole composite: last_checked_at should be nulled too, which is why "+
+			"model_registry.NextStatus has to carry it forward")
 }
 
 // TestModelRegistryStatsSurviveConnectivityReconcile is the regression test for
@@ -109,7 +117,8 @@ func TestModelRegistryStatsSurviveConnectivityReconcile(t *testing.T) {
 
 	_, err := db.Exec(`UPDATE api.model_registries
 		SET status = ROW('Connected', '2026-01-01T00:00:00Z', NULL,
-		                 '{"model_count": 3, "storage_bytes": 4096, "stats_updated_at": "2026-01-01T00:00:00Z"}'::jsonb)::api.model_registry_status
+		                 '{"model_count": 3, "storage_bytes": 4096, "stats_updated_at": "2026-01-01T00:00:00Z"}'::jsonb,
+		                 '2026-01-01T00:00:00Z')::api.model_registry_status
 		WHERE id = $1`, id)
 	require.NoError(t, err)
 
@@ -144,6 +153,13 @@ func TestModelRegistryStatsSurviveConnectivityReconcile(t *testing.T) {
 	assert.Equal(t, 3, after.Status.Stats.ModelCount)
 	assert.Equal(t, int64(4096), after.Status.Stats.StorageBytes)
 	assert.Equal(t, "2026-01-01T00:00:00Z", after.Status.Stats.StatsUpdatedAt)
+
+	// The other half of the same write: the reconcile did check the registry, so
+	// the check time moves rather than being carried over. This is the only place
+	// last_checked_at (084) is exercised against a real PostgREST.
+	require.NotEmpty(t, after.Status.LastCheckedAt, "a reconcile records when it checked")
+	assert.NotEqual(t, "2026-01-01T00:00:00Z", after.Status.LastCheckedAt,
+		"the seeded check time is stale, so this reconcile must have replaced it")
 }
 
 // TestModelRegistryStatsReadableThroughPostgREST checks the new attribute is

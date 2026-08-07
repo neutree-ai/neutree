@@ -45,6 +45,22 @@ func KnownTotal(total int) *int {
 	return &total
 }
 
+// MaxReadmeBytes caps how much of a model's README is read. A README is content
+// from outside this system, so the limit is applied while reading rather than to
+// the response: the failure mode to avoid is an unbounded read.
+const MaxReadmeBytes = 1 << 20
+
+// Readme is a model's README exactly as stored. It is markdown and must stay
+// markdown — rendering it to HTML server-side would make every client that
+// displays it an injection target.
+type Readme struct {
+	// Content is the markdown, truncated to MaxReadmeBytes.
+	Content string
+	// Truncated says the file was longer than MaxReadmeBytes, so a reader can say
+	// so rather than presenting a cut document as complete.
+	Truncated bool
+}
+
 // RegistryUsage is a raw observation of what a registry's backing storage holds.
 // It is what the registry can see; turning it into a status is the aggregator's
 // job.
@@ -71,6 +87,11 @@ type ModelRegistry interface {
 	// the checkpoint. GetModelVersion stays the cheap call for code that only
 	// needs to resolve a version or read its recorded metadata.
 	GetModelDetail(name, version string) (*v1.ModelVersion, error)
+	// GetReadme returns the model's README.md verbatim, capped at MaxReadmeBytes.
+	// It wraps ErrNotFound when the model has no README and ErrNotSupported when
+	// the registry cannot serve one; callers distinguish the two, so they must not
+	// be collapsed.
+	GetReadme(name, version string) (*Readme, error)
 	DeleteModel(name, version string) error
 	ImportModel(reader io.Reader, name, version string, progress io.Writer) error
 	ExportModel(name, version, outputPath string) error

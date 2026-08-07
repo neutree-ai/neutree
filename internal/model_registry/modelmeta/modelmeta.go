@@ -39,6 +39,10 @@ var allFields = []string{
 	v1.ModelInfoFieldParameterCount,
 }
 
+// configFields is everything config.json alone can establish: all of the above
+// except the parameter count, which is only in the weight files.
+var configFields = allFields[:len(allFields)-1]
+
 // hfConfig is the subset of config.json this package reads. Every scalar is a
 // pointer so that a key present with value 0 is distinguishable from an absent
 // key — the difference between "the checkpoint says zero" and "we don't know".
@@ -88,24 +92,57 @@ func (q *quantizationConfig) bits() *int {
 // MissingFields names everything, because that file is what the rest of the
 // parse is anchored on.
 func Parse(dir string) *v1.ModelInfo {
-	info := &v1.ModelInfo{}
+	raw, err := os.ReadFile(filepath.Join(dir, ConfigFileName))
+	if err != nil {
+		raw = nil
+	}
 
-	cfg := readConfig(dir)
-	if cfg == nil {
-		info.MissingFields = append(info.MissingFields, allFields...)
+	info := ParseConfig(raw)
+
+	if decodeConfig(raw) == nil {
+		// Nothing is anchored, so the count is not read either. Appended here
+		// rather than inside ParseConfig so that the missing-field list stays in
+		// the declared order.
+		info.MarkFieldMissing(v1.ModelInfoFieldParameterCount)
 
 		return info
 	}
 
-	applyConfig(info, cfg)
 	applyParameterCount(info, dir)
 
 	return info
 }
 
-func readConfig(dir string) *hfConfig {
-	raw, err := os.ReadFile(filepath.Join(dir, ConfigFileName))
-	if err != nil {
+// ParseConfig reports what a config.json states about a checkpoint, without
+// touching the weight files.
+//
+// It exists because a public hub serves that one file over HTTP while the
+// weights stay where they are: the shape of a model — layers, heads, KV heads,
+// head_dim, experts, quantization — is readable without downloading a
+// checkpoint, and it is the same file with the same meaning either way, so it is
+// read by the same code. The parameter count is deliberately not its business:
+// that lives in the weight files, and a caller that has none has to say so
+// itself.
+//
+// Like Parse, it never fails and never guesses. Absent or malformed input yields
+// an empty ModelInfo naming every field it could not establish.
+func ParseConfig(raw []byte) *v1.ModelInfo {
+	info := &v1.ModelInfo{}
+
+	cfg := decodeConfig(raw)
+	if cfg == nil {
+		info.MissingFields = append(info.MissingFields, configFields...)
+
+		return info
+	}
+
+	applyConfig(info, cfg)
+
+	return info
+}
+
+func decodeConfig(raw []byte) *hfConfig {
+	if len(raw) == 0 {
 		return nil
 	}
 

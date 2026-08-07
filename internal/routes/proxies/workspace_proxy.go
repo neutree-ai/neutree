@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -9,6 +10,52 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// userModelRegistryCount counts the model registries in a workspace that would
+// keep a user from deleting it: the ones they created.
+//
+// Registries the control plane provisions are excluded. They exist in every
+// workspace whenever the built-in public registries option is on, and the API
+// refuses to delete them, so counting them would make every workspace
+// permanently undeletable. The built-in engines are excluded from this check the
+// same way — by not being counted at all — and this keeps the two consistent.
+//
+// Registries already marked for deletion are excluded for the same reason the
+// model deletion path excludes soft-deleted endpoints: an object on its way out
+// must not block the removal that releases it.
+//
+// Counted in Go rather than through a filter because the marker is a JSON key
+// containing a dot and a slash, which a PostgREST column expression cannot
+// address without quoting rules this codebase does not otherwise rely on.
+func userModelRegistryCount(s storage.Storage, workspace string) (int, error) {
+	registries, err := s.ListModelRegistry(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to count %s: %w", storage.MODEL_REGISTRY_TABLE, err)
+	}
+
+	count := 0
+
+	for i := range registries {
+		metadata := registries[i].Metadata
+		if metadata == nil {
+			count++
+
+			continue
+		}
+
+		if v1.IsBuiltin(metadata.Annotations) || metadata.DeletionTimestamp != "" {
+			continue
+		}
+
+		count++
+	}
+
+	return count, nil
+}
 
 func validateWorkspaceDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
@@ -33,6 +80,13 @@ func validateWorkspaceDeletion(s storage.Storage) middleware.DeletionValidatorFu
 
 			counts[table] = count
 		}
+
+		registries, err := userModelRegistryCount(s, name)
+		if err != nil {
+			return err
+		}
+
+		counts[storage.MODEL_REGISTRY_TABLE] = registries
 
 		count, err := s.Count(storage.ROLE_ASSIGNMENT_TABLE, []storage.Filter{
 			{Column: "spec->>workspace", Operator: "eq", Value: name},
