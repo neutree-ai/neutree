@@ -11,10 +11,8 @@ func TestEngineVersionNativeRuntimeJSONRoundTrip(t *testing.T) {
 	runtime := &NativeEngineRuntime{
 		Command:     []string{"vllm", "serve"},
 		RunOptions:  []string{"--ipc=host"},
-		Protocol:    "openai",
 		HealthPath:  "/health",
 		MetricsPath: "/metrics",
-		Port:        8001,
 	}
 
 	encoded, err := json.Marshal(&EngineVersion{Version: "v0.17.1", NativeRuntime: runtime})

@@ -1291,10 +1291,8 @@ func nativeRuntimeConfig(runtime *v1.NativeEngineRuntime) map[string]interface{}
 	return map[string]interface{}{
 		"command":      runtime.Command,
 		"run_options":  runtime.RunOptions,
-		"protocol":     runtime.Protocol,
 		"health_path":  runtime.HealthPath,
 		"metrics_path": runtime.MetricsPath,
-		"port":         runtime.Port,
 	}
 }
 

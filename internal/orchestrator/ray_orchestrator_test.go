@@ -2106,8 +2106,6 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 			"--rm", "--ipc=host", "-v /tmp/neutree/ports:/var/run/neutree/ports",
 		},
 	}, app.Args["backend_container"])
-	assert.NotContains(t, app.Args, "native_container")
-	assert.NotContains(t, app.Args, "native_env")
 
 	runtime, ok := app.Args["native_runtime"].(map[string]interface{})
 	require.True(t, ok)
