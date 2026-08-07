@@ -82,20 +82,14 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
     && uv pip install --system -r python/requirements.txt \
     && uv pip install --system .whl/*.whl
 
-# Generic native-engine Ray Serve runner dependencies. Engine packages remain
-# outside this cluster image and are launched as raw Docker siblings.
-COPY requirements/common.txt ./requirements/common.txt
-RUN uv pip install --system -r requirements/common.txt
-
 # Relax Python patch version check (cluster 3.12.x vs engine 3.12.x)
 ENV RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor
 # Disable OTEL metrics backend due to metrics loss issue, fall back to OpenCensus
 ENV RAY_enable_open_telemetry=false
 
-# Copy GPU detection, Ray start scripts, and generic native engine runner.
+# Copy GPU detection and Ray start scripts.
 COPY start.py ./
 COPY accelerator ./accelerator
-COPY serve/native_engine ./serve/native_engine
 
 EXPOSE 8265 6379 8000
 

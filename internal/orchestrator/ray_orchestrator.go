@@ -47,6 +47,9 @@ var clusterLocks sync.Map
 const (
 	modelDownloadLogTailLines = 200
 
+	nativeEnginePortHostPath  = "/tmp/neutree/ports"
+	nativeEnginePortMountPath = "/var/run/neutree/ports"
+
 	modelDownloadStartMarker  = "NEUTREE_MODEL_DOWNLOAD_START"
 	modelDownloadDoneMarker   = "NEUTREE_MODEL_DOWNLOAD_DONE"
 	modelDownloadFailedMarker = "NEUTREE_MODEL_DOWNLOAD_FAILED"
@@ -986,7 +989,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	//
 	// Two container configs are produced for new clusters:
 	//   - baseConfig → app.RuntimeEnv["container"]: engine image + --rm only,
-	//     inherited by app_builder and Controller (no GPU required).
+	//     inherited by app_builder (no GPU required).
 	//   - backendConfig → app.Args["backend_container"]: full config with GPU
 	//     options, volume mounts, and NFS. The Python app_builder sets this on
 	//     Backend's ray_actor_options.runtime_env.container to override the
@@ -1009,15 +1012,21 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 
 		if targetEngineVersion.NativeRuntime != nil {
-			nativeContainer, err := buildNativeEngineContainerConfig(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
+			if len(targetEngineVersion.NativeRuntime.Command) == 0 {
+				return dashboard.RayServeApplication{}, errors.Errorf(
+					"native engine runtime command is required for endpoint %s",
+					endpoint.Metadata.WorkspaceName())
+			}
+			baseConfig, backendConfig, err := buildNativeEngineContainerConfigs(
+				endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry, targetEngineVersion.NativeRuntime)
 			if err != nil {
-				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build native engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
+				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build native engine container configs for endpoint %s", endpoint.Metadata.WorkspaceName())
 			}
 
 			app.ImportPath = "serve.native_engine.app:app_builder"
+			app.RuntimeEnv["container"] = baseConfig
 			app.Args["native_runtime"] = nativeRuntimeConfig(targetEngineVersion.NativeRuntime)
-			app.Args["native_container"] = nativeContainer
-			app.Args["native_env"] = applicationEnv
+			app.Args["backend_container"] = backendConfig
 			app.Args["engine_identity"] = map[string]string{
 				"name":    endpoint.Spec.Engine.Engine,
 				"version": endpoint.Spec.Engine.Version,
@@ -1098,8 +1107,7 @@ func setDefaultTensorParallelSize(endpoint *v1.Endpoint, app *dashboard.RayServe
 // engine version isolation on SSH clusters (version > v1.0.0):
 //
 //   - baseConfig:    engine image + --rm only. Used as the application-level
-//     runtime_env.container so the app_builder and Controller can run on any
-//     node (no GPU required).
+//     runtime_env.container so app_builder can run on any node (no GPU required).
 //   - backendConfig: engine image + --rm + GPU options + volume mounts + NFS.
 //     Set on Backend deployment's ray_actor_options.runtime_env.container to
 //     override the app-level config. Ray replaces "container" per-key (no deep
@@ -1114,22 +1122,27 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		})
 }
 
-// buildNativeEngineContainerConfig builds the Docker sibling configuration for
-// a raw engine image. Unlike the legacy wrapper path, it deliberately ignores
-// ssh_<accelerator> image overrides and selects the engine's upstream image.
-func buildNativeEngineContainerConfig(endpoint *v1.Endpoint,
+// buildNativeEngineContainerConfigs builds runtime-env containers for a direct
+// engine child process. The backend shares the node-local port allocator state
+// with all engine containers on the same host.
+func buildNativeEngineContainerConfigs(endpoint *v1.Endpoint,
 	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
 	acceleratorMgr accelerator.Manager,
-	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry) (map[string]interface{}, error) {
-	_, backendConfig, err := buildEngineContainerConfigsForImage(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry,
-		func(version *v1.EngineVersion, acceleratorType string) *v1.EngineImage {
-			return version.GetImageForAccelerator(acceleratorType)
-		})
+	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry,
+	runtime *v1.NativeEngineRuntime) (baseConfig, backendConfig map[string]interface{}, err error) {
+	baseConfig, backendConfig, err = buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return backendConfig, nil
+	runOptions, ok := backendConfig["run_options"].([]string)
+	if !ok {
+		return nil, nil, errors.New("native engine backend container has invalid run_options")
+	}
+	runOptions = append(runOptions, runtime.RunOptions...)
+	runOptions = append(runOptions, fmt.Sprintf("-v %s:%s", nativeEnginePortHostPath, nativeEnginePortMountPath))
+	backendConfig["run_options"] = runOptions
+	return baseConfig, backendConfig, nil
 }
 
 func buildEngineContainerConfigsForImage(endpoint *v1.Endpoint,
@@ -1179,7 +1192,7 @@ func buildEngineContainerConfigsForImage(endpoint *v1.Endpoint,
 
 	imageRef := util.BuildEngineImageRef(imagePrefix, engineImage)
 
-	// Base config: engine image + --rm only (for app_builder and Controller).
+	// Base config: engine image + --rm only (for app_builder).
 	baseConfig = map[string]interface{}{
 		"image":       imageRef,
 		"run_options": []string{"--rm"},

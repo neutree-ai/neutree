@@ -14,12 +14,15 @@ ALL_ARCH ?= amd64 arm64
 RAY_REPO ?= https://github.com/neutree-ai/ray.git
 RAY_VERSION ?= ray-2.53.0-neutree
 RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head -c 7)
+ENGINE_RAY_VERSION ?= ray-2.53.0-neutree-fix
+ENGINE_RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(ENGINE_RAY_VERSION) | cut -f1 | head -c 7)
 
 # Engine image build args
 ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
 ENGINE_VLLM_ROCM_BASE_IMAGE_REPO ?= vllm/vllm-openai-rocm
 ENGINE_VLLM_VERSION ?= v0.11.2
 ENGINE_VLLM_DIR_VERSION ?= $(shell echo $(ENGINE_VLLM_VERSION) | sed 's/-.*//' | tr '.' '_')
+ENGINE_VLLM_DOCKER_TARGET ?= $(if $(filter v0.24.0,$(ENGINE_VLLM_VERSION)),native,legacy)
 # Optional override of the upstream vLLM base image tag (defaults to
 # ENGINE_VLLM_VERSION). Use to point at non-standard upstream tags (e.g. dev
 # builds) without editing the Makefile; release workflows expose this via the
@@ -77,12 +80,12 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+	docker build --target $(ENGINE_VLLM_DOCKER_TARGET) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(ENGINE_RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-vllm-rocm
 docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+	docker build --target $(ENGINE_VLLM_DOCKER_TARGET) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(ENGINE_RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-llama-cpp

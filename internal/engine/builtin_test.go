@@ -86,14 +86,14 @@ func TestGetBuiltinEngines(t *testing.T) {
 				t.Fatal("vllm v0.24.0 must opt into the native engine runner")
 			}
 
-			if len(version.NativeRuntime.Command) != 0 {
-				t.Fatalf("native vllm must retain the image entrypoint, got override %v", version.NativeRuntime.Command)
+			if got, want := version.NativeRuntime.Command, []string{"vllm", "serve"}; !equalStringSlices(got, want) {
+				t.Fatalf("native vllm direct server command: got %v, want %v", got, want)
 			}
 			if got, want := version.NativeRuntime.RunOptions, []string{"--ipc=host"}; !equalStringSlices(got, want) {
 				t.Fatalf("native vllm run options: got %v, want %v", got, want)
 			}
-			if got, want := version.NativeRuntime.Protocol, "openai"; got != want {
-				t.Fatalf("native vllm protocol: got %q, want %q", got, want)
+			if image := version.GetImageForSSHAccelerator(string(v1.AcceleratorTypeNVIDIAGPU)); image == nil || image.ImageName != "neutree/engine-vllm" {
+				t.Fatalf("native vllm must use the Ray-injected SSH engine image, got %#v", image)
 			}
 		}
 	}

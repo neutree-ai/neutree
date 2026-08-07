@@ -33,7 +33,7 @@ COPY --from=ray_fetch ${COMMON_WORKDIR}/ray /ray
 RUN /ray/python/build-wheel-manylinux2014.sh
 
 # --- Engine image ---
-FROM ${ENGINE_BASE_IMAGE}
+FROM ${ENGINE_BASE_IMAGE} AS engine-base
 
 ENV HOME=/home/ray
 WORKDIR ${HOME}
@@ -48,12 +48,13 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 RUN --mount=type=bind,src=requirements,target=requirements \
     uv pip install --system -r requirements/common.txt
 
-# Copy Neutree serve layer code (shared + specified engine version only)
-ARG ENGINE_VERSION_DIR
+# Copy shared Neutree serve layer code. The versioned vLLM app is intentionally
+# added only by the legacy target below; the native target uses raw HTTP
+# passthrough and does not carry request compatibility code.
 COPY serve/_metrics ./serve/_metrics
 COPY serve/_replica_scheduler ./serve/_replica_scheduler
 COPY serve/_utils ./serve/_utils
-COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
+COPY serve/native_engine ./serve/native_engine
 # Copy downloader sources only; do NOT `pip install` downloader/requirements.txt.
 # Its huggingface-hub<1.0 pin would downgrade the newer huggingface_hub already
 # shipped by the vllm base image, breaking newer transformers releases.
@@ -62,7 +63,19 @@ COPY downloader ./downloader
 # Ensure "python" is in PATH (some base images only provide "python3")
 RUN ln -sf $(which python3) /usr/bin/python 2>/dev/null || true
 
-# Reset ENTRYPOINT from base image (vllm/vllm-openai sets "vllm serve")
-# so that Ray can execute its own commands in this container.
+FROM engine-base AS legacy
+
+ARG ENGINE_VERSION_DIR
+COPY serve/vllm/${ENGINE_VERSION_DIR} ./serve/vllm/${ENGINE_VERSION_DIR}
+
+# Reset ENTRYPOINT from base image (vllm/vllm-openai sets "vllm serve") so
+# Ray can execute legacy request-compatible serving code in this container.
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+FROM engine-base AS native
+
+# The direct runner starts `vllm serve` as a child of the Ray Actor. There is
+# deliberately no versioned serve/vllm app in this target.
 ENTRYPOINT []
 CMD ["/bin/bash"]

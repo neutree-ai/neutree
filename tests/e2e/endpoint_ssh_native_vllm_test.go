@@ -15,8 +15,8 @@ import (
 )
 
 // This suite is profile-gated because it needs a static NVIDIA cluster whose
-// cluster image contains serve/native_engine and a vLLM 0.24.0-compatible
-// model. It verifies the full Ray-to-raw-Docker path without a wrapper image.
+// engine image contains serve/native_engine and a vLLM 0.24.0-compatible
+// model. It verifies the direct Ray-actor child process path.
 var _ = Describe("SSH Native vLLM Endpoint", Ordered, Label("endpoint", "ssh", "native-vllm", "vllm-0.24.0"), func() {
 	var clusterName string
 	var endpointName string
@@ -43,7 +43,7 @@ var _ = Describe("SSH Native vLLM Endpoint", Ordered, Label("endpoint", "ssh", "
 		}
 	})
 
-	It("runs the raw vLLM image through the cluster-native runner", func() {
+	It("runs vLLM as a direct child of the engine container actor", func() {
 		yamlPath := applyEndpoint(endpointName, clusterName, withEngine("vllm", "v0.24.0"))
 		defer os.Remove(yamlPath)
 		waitEndpointRunning(endpointName)
@@ -55,8 +55,9 @@ var _ = Describe("SSH Native vLLM Endpoint", Ordered, Label("endpoint", "ssh", "
 		Expect(err).NotTo(HaveOccurred())
 		Expect(appConfig).NotTo(BeNil())
 		Expect(appConfig.ImportPath).To(Equal("serve.native_engine.app:app_builder"))
-		Expect(appConfig.RuntimeEnv).NotTo(HaveKey("container"))
-		Expect(appConfig.Args).To(HaveKey("native_container"))
+		Expect(appConfig.RuntimeEnv).To(HaveKey("container"))
+		Expect(appConfig.Args).To(HaveKey("backend_container"))
+		Expect(appConfig.Args).NotTo(HaveKey("native_container"))
 
 		deployments, err := rayHelper.GetAppRuntimeDeployments(profileWorkspace(), endpointName)
 		Expect(err).NotTo(HaveOccurred())
@@ -77,7 +78,7 @@ var _ = Describe("SSH Native vLLM Endpoint", Ordered, Label("endpoint", "ssh", "
 		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			g.Expect(nativeRunnerLogs(endpointName)).To(ContainSubstring("[native-engine:"))
+			g.Expect(nativeRunnerLogs(endpointName)).To(ContainSubstring("[native-engine]"))
 		}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 		Eventually(func(g Gomega) {

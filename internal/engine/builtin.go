@@ -124,16 +124,19 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						Version:      "v0.24.0",
 						ValuesSchema: vllmV0_24_0EngineSchema,
 						NativeRuntime: &v1.NativeEngineRuntime{
+							Command:     []string{"vllm", "serve"},
 							RunOptions:  []string{"--ipc=host"},
-							Protocol:    "openai",
 							HealthPath:  "/health",
 							MetricsPath: "/metrics",
-							Port:        8000,
 						},
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
 								ImageName: "vllm/vllm-openai",
 								Tag:       "v0.24.0",
+							},
+							v1.SSHImageKeyPrefix + "nvidia_gpu": {
+								ImageName: "neutree/engine-vllm",
+								Tag:       "v0.24.0-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{

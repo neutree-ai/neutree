@@ -16,8 +16,10 @@ def build_engine_args(
     engine_args: Mapping[str, Any],
     port: int,
 ) -> list[str]:
-    """Convert API engine arguments to an argv for the raw engine image."""
+    """Convert API engine arguments to an argv for a direct engine process."""
     command = [str(value) for value in (runtime.get("command") or [])]
+    if not command:
+        raise ValueError("native engine runtime.command is required for a direct server")
     model_path = str(model.get("path", ""))
     serve_name = str(model.get("serve_name", ""))
     if not model_path:
