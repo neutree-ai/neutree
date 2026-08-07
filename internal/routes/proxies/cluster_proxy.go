@@ -192,13 +192,17 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		var current *v1.Cluster
-		var validationErr *validationError
+		var (
+			current       *v1.Cluster
+			validationErr *validationError
+		)
+
 		if hasVersion {
 			current, validationErr = resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
 		} else {
 			current, validationErr = resolveClusterForConfigurationUpdate(s, patch, c.Request.URL.Query())
 		}
+
 		if validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
@@ -234,6 +238,7 @@ func clusterPatchIsSoftDelete(body []byte) (bool, error) {
 	var payload struct {
 		Metadata *v1.Metadata `json:"metadata"`
 	}
+
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return false, err
 	}
@@ -419,13 +424,27 @@ func clusterPatchDesiredVersion(body []byte) (string, bool, error) {
 func resolveClusterForVersionUpdate(
 	s storage.Storage, patch v1.Cluster, queryParams url.Values,
 ) (*v1.Cluster, *validationError) {
-	return resolveClusterForPatchUpdate(s, patch, queryParams, "10212", "failed to validate cluster version update", "cluster identity is required when updating spec.version")
+	return resolveClusterForPatchUpdate(
+		s,
+		patch,
+		queryParams,
+		"10212",
+		"failed to validate cluster version update",
+		"cluster identity is required when updating spec.version",
+	)
 }
 
 func resolveClusterForConfigurationUpdate(
 	s storage.Storage, patch v1.Cluster, queryParams url.Values,
 ) (*v1.Cluster, *validationError) {
-	return resolveClusterForPatchUpdate(s, patch, queryParams, "10209", "failed to validate cluster configuration update", "cluster identity is required when updating cluster configuration")
+	return resolveClusterForPatchUpdate(
+		s,
+		patch,
+		queryParams,
+		"10209",
+		"failed to validate cluster configuration update",
+		"cluster identity is required when updating cluster configuration",
+	)
 }
 
 func resolveClusterForPatchUpdate(
