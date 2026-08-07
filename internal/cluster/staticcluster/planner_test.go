@@ -23,8 +23,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
-				Name: "dcgm-exporter",
-				Args: []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
+				Name:  "dcgm-exporter",
+				Image: "example.com/accelerator/dcgm-exporter:test",
+				Args:  []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 				Env: map[string]string{
 					"NVIDIA_VISIBLE_DEVICES": "all",
 				},
@@ -114,7 +115,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
-		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
+		acceleratorExporterComponentName: "registry.example.com/neutree/accelerator/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 	assertNodeComponentNames(t, head.Spec.Components, []string{
@@ -133,7 +134,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, 19100, nodeExporter.HealthCheck.Port)
 	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
 	require.NotNil(t, exporter)
-	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless", exporter.Image)
+	assert.Equal(t, "registry.example.com/neutree/accelerator/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
 	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
@@ -390,13 +391,22 @@ func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 		{
 			name: "empty name",
 			exporter: &v1.AcceleratorExporterProfile{
+				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Port:  9400,
+			},
+		},
+		{
+			name: "empty image",
+			exporter: &v1.AcceleratorExporterProfile{
+				Name: "dcgm-exporter",
 				Port: 9400,
 			},
 		},
 		{
 			name: "invalid port",
 			exporter: &v1.AcceleratorExporterProfile{
-				Name: "dcgm-exporter",
+				Name:  "dcgm-exporter",
+				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
 			},
 		},
 	}
@@ -472,8 +482,9 @@ func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 					MetricsExporter: &v1.AcceleratorExporterProfile{
-						Name: "dcgm-exporter",
-						Port: 19400,
+						Name:  "dcgm-exporter",
+						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:  19400,
 					},
 				},
 			},
@@ -530,6 +541,7 @@ func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 					MetricsExporter: &v1.AcceleratorExporterProfile{
 						Name:        "dcgm-exporter",
+						Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:test",
 						Port:        19400,
 						MetricsPath: "/dcgm/metrics",
 					},
@@ -596,8 +608,9 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 						v1.AcceleratorTypeNVIDIAGPU.String(): {
 							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 							MetricsExporter: &v1.AcceleratorExporterProfile{
-								Name: "dcgm-exporter",
-								Port: 19400,
+								Name:  "dcgm-exporter",
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
 							},
 						},
 					},

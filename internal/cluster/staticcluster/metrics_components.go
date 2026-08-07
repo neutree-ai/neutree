@@ -100,9 +100,7 @@ func buildMetricsComponents(
 
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
 		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-			if image := acceleratorExporterImage(cluster, exporter); image != "" {
-				components = append(components, buildAcceleratorExporterComponent(exporter, image))
-			}
+			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 		}
 	}
 
@@ -175,27 +173,17 @@ func acceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorE
 func validAcceleratorExporterProfile(exporter *v1.AcceleratorExporterProfile) bool {
 	return exporter != nil &&
 		strings.TrimSpace(exporter.Name) != "" &&
+		strings.TrimSpace(exporter.Image) != "" &&
 		exporter.Port > 0
 }
 
-func acceleratorExporterImage(
+func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
-) string {
-	if exporter == nil || exporter.Name != "dcgm-exporter" {
-		return ""
-	}
-
-	return staticComponentImage(cluster, componentversion.NVIDIADCGMExporterImage)
-}
-
-func buildAcceleratorExporterComponent(
-	exporter *v1.AcceleratorExporterProfile,
-	image string,
 ) v1.NodeComponentSpec {
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
-		Image:            image,
+		Image:            staticComponentImage(cluster, exporter.Image),
 		Args:             append([]string{}, exporter.Args...),
 		Env:              copyMetricsStringMap(exporter.Env),
 		Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),

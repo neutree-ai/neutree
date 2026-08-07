@@ -134,12 +134,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 
 	exporterProfile := profile.MetricsExporter
 
-	exporterImage := ""
-	if acceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() {
-		exporterImage = componentversion.NVIDIADCGMExporterImage
-	}
-
-	if strings.TrimSpace(exporterImage) == "" ||
+	if strings.TrimSpace(exporterProfile.Image) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {
 		return metricsAcceleratorExporter{}, false
@@ -155,7 +150,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Name:            name,
 		AcceleratorType: acceleratorType,
 		ExporterName:    exporterProfile.Name,
-		Image:           util.RewriteImageRef(m.imagePrefix, exporterImage),
+		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
 		Args:            append([]string{}, exporterProfile.Args...),
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,

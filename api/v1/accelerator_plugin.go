@@ -124,6 +124,8 @@ type AcceleratorProfile struct {
 type AcceleratorExporterProfile struct {
 	// Name is the exporter identity used for stable workload, container, and scrape-job names.
 	Name string `json:"name,omitempty"`
+	// Image is the exporter container image.
+	Image string `json:"image,omitempty"`
 	// Args are passed to the exporter image entrypoint.
 	Args []string `json:"args,omitempty"`
 	// Port is the metrics port exposed by the exporter.
