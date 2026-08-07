@@ -1,7 +1,9 @@
 package proxies
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -507,6 +509,256 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	t.Run("rejects image registry switch for initialized cluster before proxy handler", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{
+			{
+				Spec:   &v1.ClusterSpec{ImageRegistry: "current-registry"},
+				Status: &v1.ClusterStatus{Initialized: true},
+			},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"image_registry": "replacement-registry"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "image registry")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows kubeconfig rotation for the same Kubernetes API server", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.KubernetesClusterType,
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "old-token"),
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
+			testEncodedKubeconfig("https://api.example.test:6443", "rotated-token"))
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects kubeconfig rotation for a different Kubernetes API server", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.KubernetesClusterType,
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "old-token"),
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
+			testEncodedKubeconfig("https://other-api.example.test:6443", "rotated-token"))
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "current Kubernetes API server")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows SSH private key rotation for an initialized cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.SSHClusterType,
+				Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Auth: v1.Auth{SSHPrivateKey: "old-private-key"},
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := fmt.Sprintf(`{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":%q}}}}}`,
+			base64.StdEncoding.EncodeToString([]byte("rotated-private-key")))
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects empty SSH private key for an initialized cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": " "}}}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "SSH private key cannot be empty")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects malformed SSH private key for an initialized cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": "invalid-base64"}}}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "SSH private key must be base64 encoded")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows image registry change before cluster initialization", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec:   &v1.ClusterSpec{ImageRegistry: "current-registry"},
+			Status: &v1.ClusterStatus{Initialized: false},
+		}}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"image_registry": "replacement-registry"}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("skips malformed configuration validation for a soft delete patch", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"metadata": {"deletion_timestamp": "2026-08-07T00:00:00Z"},
+			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
 	t.Run("rejects SSH static flow downgrade before proxy handler", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -641,6 +893,69 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
+}
+
+func TestRegisterClusterRoutesSoftDeleteBypassesMalformedGuardedConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockStorage := storageMocks.NewMockStorage(t)
+	mockStorage.On("Count", storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters("default", "cluster")).Return(0, nil).Once()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/clusters", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{
+			"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
+			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+		}`, string(body))
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	RegisterClusterRoutes(router.Group("/api/v1"), nil, &Dependencies{
+		Storage:          mockStorage,
+		StorageAccessURL: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/clusters?id=eq.1", strings.NewReader(`{
+		"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
+		"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := newCloseNotifyRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
+	mockStorage.AssertExpectations(t)
+	mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+}
+
+func testEncodedKubeconfig(server, token string) string {
+	content := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: primary
+  cluster:
+    server: %s
+contexts:
+- name: primary
+  context:
+    cluster: primary
+    user: primary
+current-context: primary
+users:
+- name: primary
+  user:
+    token: %s
+`, server, token)
+
+	return base64.StdEncoding.EncodeToString([]byte(content))
 }
 
 type trackingReadCloser struct {

@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -17,6 +19,7 @@ import (
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -63,6 +66,21 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 		if len(bytes.TrimSpace(body)) == 0 {
 			c.Next()
 			return
+		}
+
+		if c.Request.Method == http.MethodPatch {
+			isSoftDelete, err := clusterPatchIsSoftDelete(body)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if isSoftDelete {
+				c.Next()
+				return
+			}
 		}
 
 		if validationErr := validateClusterAcceleratorVirtualizationBody(body); validationErr != nil {
@@ -132,6 +150,19 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
+		isSoftDelete, err := clusterPatchIsSoftDelete(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if isSoftDelete {
+			c.Next()
+			return
+		}
+
 		desiredVersion, hasVersion, err := clusterPatchDesiredVersion(body)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
@@ -140,7 +171,15 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if !hasVersion {
+		configurationUpdate, err := parseClusterPatchConfigurationUpdate(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if !hasVersion && !configurationUpdate.hasChanges() {
 			c.Next()
 			return
 		}
@@ -153,12 +192,13 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if patch.GetDeletionTimestamp() != "" {
-			c.Next()
-			return
+		var current *v1.Cluster
+		var validationErr *validationError
+		if hasVersion {
+			current, validationErr = resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
+		} else {
+			current, validationErr = resolveClusterForConfigurationUpdate(s, patch, c.Request.URL.Query())
 		}
-
-		current, validationErr := resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
 		if validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
@@ -166,18 +206,184 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
-			c.JSON(http.StatusBadRequest, &validationError{
-				Code:    "10212",
-				Message: "invalid cluster version update",
-				Hint:    err.Error(),
-			})
+		if hasVersion {
+			if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10212",
+					Message: "invalid cluster version update",
+					Hint:    err.Error(),
+				})
+				c.Abort()
+
+				return
+			}
+		}
+
+		if err := validateClusterConfigurationUpdate(current, configurationUpdate); err != nil {
+			c.JSON(http.StatusBadRequest, clusterConfigurationUpdateError(err))
 			c.Abort()
 
 			return
 		}
 
 		c.Next()
+	}
+}
+
+func clusterPatchIsSoftDelete(body []byte) (bool, error) {
+	var payload struct {
+		Metadata *v1.Metadata `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, err
+	}
+
+	return payload.Metadata != nil && payload.Metadata.DeletionTimestamp != "", nil
+}
+
+type clusterPatchConfigurationUpdate struct {
+	imageRegistry    string
+	imageRegistrySet bool
+	kubeconfig       string
+	kubeconfigSet    bool
+	sshPrivateKey    string
+	sshPrivateKeySet bool
+}
+
+func (u clusterPatchConfigurationUpdate) hasChanges() bool {
+	return u.imageRegistrySet || u.kubeconfigSet || u.sshPrivateKeySet
+}
+
+func parseClusterPatchConfigurationUpdate(body []byte) (clusterPatchConfigurationUpdate, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return clusterPatchConfigurationUpdate{}, err
+	}
+
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return clusterPatchConfigurationUpdate{}, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return clusterPatchConfigurationUpdate{}, err
+	}
+
+	update := clusterPatchConfigurationUpdate{}
+	if imageRegistryRaw, ok := spec["image_registry"]; ok {
+		if err := json.Unmarshal(imageRegistryRaw, &update.imageRegistry); err != nil {
+			return clusterPatchConfigurationUpdate{}, err
+		}
+
+		update.imageRegistrySet = true
+	}
+
+	configRaw, ok := spec["config"]
+	if !ok {
+		return update, nil
+	}
+
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(configRaw, &config); err != nil {
+		return clusterPatchConfigurationUpdate{}, err
+	}
+
+	if kubernetesConfigRaw, ok := config["kubernetes_config"]; ok {
+		var kubernetesConfig map[string]json.RawMessage
+		if err := json.Unmarshal(kubernetesConfigRaw, &kubernetesConfig); err != nil {
+			return clusterPatchConfigurationUpdate{}, err
+		}
+
+		if kubeconfigRaw, ok := kubernetesConfig["kubeconfig"]; ok {
+			if err := json.Unmarshal(kubeconfigRaw, &update.kubeconfig); err != nil {
+				return clusterPatchConfigurationUpdate{}, err
+			}
+
+			update.kubeconfigSet = true
+		}
+	}
+
+	if sshConfigRaw, ok := config["ssh_config"]; ok {
+		var sshConfig map[string]json.RawMessage
+		if err := json.Unmarshal(sshConfigRaw, &sshConfig); err != nil {
+			return clusterPatchConfigurationUpdate{}, err
+		}
+
+		authRaw, ok := sshConfig["auth"]
+		if !ok {
+			return update, nil
+		}
+
+		var auth map[string]json.RawMessage
+		if err := json.Unmarshal(authRaw, &auth); err != nil {
+			return clusterPatchConfigurationUpdate{}, err
+		}
+
+		if sshPrivateKeyRaw, ok := auth["ssh_private_key"]; ok {
+			if err := json.Unmarshal(sshPrivateKeyRaw, &update.sshPrivateKey); err != nil {
+				return clusterPatchConfigurationUpdate{}, err
+			}
+
+			update.sshPrivateKeySet = true
+		}
+	}
+
+	return update, nil
+}
+
+func validateClusterConfigurationUpdate(current *v1.Cluster, update clusterPatchConfigurationUpdate) error {
+	if current == nil || current.Spec == nil || !current.IsInitialized() {
+		return nil
+	}
+
+	if update.imageRegistrySet && update.imageRegistry != current.Spec.ImageRegistry {
+		return errors.New("image registry cannot be changed after cluster initialization")
+	}
+
+	if current.Spec.Type == v1.KubernetesClusterType && update.kubeconfigSet {
+		if strings.TrimSpace(update.kubeconfig) == "" {
+			return errors.New("kubeconfig cannot be empty for an initialized cluster")
+		}
+
+		currentKubeconfig, err := util.GetKubeConfigFromCluster(current)
+		if err != nil {
+			return fmt.Errorf("failed to read current kubeconfig: %w", err)
+		}
+
+		currentAPIServer, err := util.GetApiServerUrlFromDecodedKubeConfig(currentKubeconfig)
+		if err != nil {
+			return fmt.Errorf("failed to parse current kubeconfig: %w", err)
+		}
+
+		updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(update.kubeconfig)
+		if err != nil {
+			return fmt.Errorf("failed to parse updated kubeconfig: %w", err)
+		}
+
+		if currentAPIServer != updatedAPIServer {
+			return errors.New("kubeconfig must reference the current Kubernetes API server")
+		}
+	}
+
+	if current.Spec.Type == v1.SSHClusterType && update.sshPrivateKeySet {
+		if strings.TrimSpace(update.sshPrivateKey) == "" {
+			return errors.New("SSH private key cannot be empty for an initialized cluster")
+		}
+
+		if _, err := base64.StdEncoding.DecodeString(update.sshPrivateKey); err != nil {
+			return fmt.Errorf("SSH private key must be base64 encoded: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func clusterConfigurationUpdateError(err error) *validationError {
+	return &validationError{
+		Code:    "10209",
+		Message: "invalid cluster configuration update",
+		Hint:    err.Error(),
 	}
 }
 
@@ -213,6 +419,18 @@ func clusterPatchDesiredVersion(body []byte) (string, bool, error) {
 func resolveClusterForVersionUpdate(
 	s storage.Storage, patch v1.Cluster, queryParams url.Values,
 ) (*v1.Cluster, *validationError) {
+	return resolveClusterForPatchUpdate(s, patch, queryParams, "10212", "failed to validate cluster version update", "cluster identity is required when updating spec.version")
+}
+
+func resolveClusterForConfigurationUpdate(
+	s storage.Storage, patch v1.Cluster, queryParams url.Values,
+) (*v1.Cluster, *validationError) {
+	return resolveClusterForPatchUpdate(s, patch, queryParams, "10209", "failed to validate cluster configuration update", "cluster identity is required when updating cluster configuration")
+}
+
+func resolveClusterForPatchUpdate(
+	s storage.Storage, patch v1.Cluster, queryParams url.Values, code, message, identityHint string,
+) (*v1.Cluster, *validationError) {
 	filters := queryParamsToFilters(queryParams)
 	if len(filters) == 0 && patch.Metadata != nil && patch.Metadata.Workspace != "" && patch.Metadata.Name != "" {
 		filters = []storage.Filter{
@@ -223,25 +441,25 @@ func resolveClusterForVersionUpdate(
 
 	if len(filters) == 0 {
 		return nil, &validationError{
-			Code:    "10212",
-			Message: "failed to validate cluster version update",
-			Hint:    "cluster identity is required when updating spec.version",
+			Code:    code,
+			Message: message,
+			Hint:    identityHint,
 		}
 	}
 
 	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
 	if err != nil {
 		return nil, &validationError{
-			Code:    "10212",
-			Message: "failed to validate cluster version update",
+			Code:    code,
+			Message: message,
 			Hint:    err.Error(),
 		}
 	}
 
 	if len(clusters) != 1 {
 		return nil, &validationError{
-			Code:    "10212",
-			Message: "failed to validate cluster version update",
+			Code:    code,
+			Message: message,
 			Hint:    fmt.Sprintf("expected exactly one cluster from patch filters, got %d", len(clusters)),
 		}
 	}
@@ -249,8 +467,8 @@ func resolveClusterForVersionUpdate(
 	current := &clusters[0]
 	if current.Spec == nil {
 		return nil, &validationError{
-			Code:    "10212",
-			Message: "failed to validate cluster version update",
+			Code:    code,
+			Message: message,
 			Hint:    "current cluster spec is required",
 		}
 	}

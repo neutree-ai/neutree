@@ -568,6 +568,42 @@ func TestCreateStructProxyHandlerFiltersUnknownTopLevelFieldsAndInfersColumns(t 
 	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
 }
 
+func TestCreateStructProxyHandlerMasksClusterCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/clusters", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{
+				"metadata": {"name": "cluster", "workspace": "default"},
+				"spec": {
+					"config": {
+						"kubernetes_config": {"kubeconfig": "synthetic-kubeconfig"},
+						"ssh_config": {"auth": {"ssh_private_key": "synthetic-private-key"}}
+					}
+				}
+			}
+		]`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	router.GET("/api/v1/clusters", CreateStructProxyHandler[v1.Cluster](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.CLUSTERS_TABLE))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters?select=*", nil)
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
+	assert.NotContains(t, recorder.Body.String(), "synthetic-kubeconfig")
+	assert.NotContains(t, recorder.Body.String(), "synthetic-private-key")
+}
+
 func TestCreateStructProxyHandlerFiltersSoftDeletePayloadAndInfersColumns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
