@@ -24,9 +24,7 @@ var (
 	}
 )
 
-var (
-	mountInterface = kmount.New("")
-)
+var mountInterface = kmount.New("")
 
 // IsMountExist checks whether the given NFS device is mounted at the specified
 // mount point. It takes the device identifier (device) and the target mount
@@ -34,18 +32,29 @@ var (
 // found, false otherwise. An error is returned if the list of current mounts
 // cannot be retrieved.
 func IsMountExist(device string, mountPoint string) (bool, error) {
+	existed, _, err := findMount(device, mountPoint)
+	return existed, err
+}
+
+func findMount(device string, mountPoint string) (bool, string, error) {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
-		return false, err
+		return false, "", errors.Wrapf(err, "failed to list NFS mounts for %s", mountPoint)
 	}
+
+	var unexpectedDevice string
 
 	for _, mp := range mountPoints {
 		if mountPoint == mp.Path && device == mp.Device {
-			return true, nil
+			return true, "", nil
+		}
+
+		if mountPoint == mp.Path && unexpectedDevice == "" {
+			unexpectedDevice = mp.Device
 		}
 	}
 
-	return false, nil
+	return false, unexpectedDevice, nil
 }
 
 // GetNFSVersion returns the NFS protocol version (e.g. "3", "4", "4.1", "4.2")
@@ -83,7 +92,7 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 }
 
 func MountNFS(device string, mountPoint string) error {
-	existed, err := IsMountExist(device, mountPoint)
+	existed, unexpectedDevice, err := findMount(device, mountPoint)
 	if err != nil {
 		return err
 	}
@@ -92,7 +101,11 @@ func MountNFS(device string, mountPoint string) error {
 		return nil
 	}
 
-	err = os.MkdirAll(mountPoint, os.FileMode(0644))
+	if unexpectedDevice != "" {
+		return errors.Errorf("mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
+	}
+
+	err = os.MkdirAll(mountPoint, 0o755)
 	if err != nil {
 		return err
 	}
@@ -123,7 +136,12 @@ func Unmount(mountPoint string) error {
 		}
 	}
 
-	return os.RemoveAll(mountPoint)
+	err = os.RemoveAll(mountPoint)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type KubernetesNfsMounter struct {

@@ -1,6 +1,7 @@
 package bentoml
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestListModelsWithContextReturnsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	models, err := ListModelsWithContext(ctx, t.TempDir())
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, models)
+}
+
+func TestListModelsWithTimeoutReturnsExpiredDeadline(t *testing.T) {
+	models, err := ListModelsWithTimeout(t.TempDir(), 0)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, models)
+}
 
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)

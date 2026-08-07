@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/neutree-ai/neutree/internal/model_registry/modelmeta"
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
+
+const nfsHealthCheckTimeout = time.Minute
 
 func convertBentoMLModelsToGeneralModels(bentomlModels []bentoml.Model, options ListOption) *ModelPage {
 	// Convert to GeneralModel format
@@ -220,21 +223,23 @@ func (n *nfsFile) Connect() error {
 }
 
 func (n *nfsFile) Disconnect() error {
+	// Disconnect intentionally keeps nfs.Unmount's synchronous behavior. A
+	// ListModels timeout has already made the registry Failed; unmount retains
+	// its lifecycle semantics before the controller reconnects.
 	return nfs.Unmount(n.path)
 }
 
 func (n *nfsFile) HealthyCheck() error {
-	existed, err := nfs.IsMountExist(n.nfsServerPath, n.path)
+	exists, err := nfs.IsMountExist(n.nfsServerPath, n.path)
 	if err != nil {
 		return errors.Wrapf(err, "failed to check NFS mount %s to %s", n.nfsServerPath, n.path)
 	}
 
-	if !existed {
+	if !exists {
 		return errors.Errorf("NFS mount %s to %s does not exist", n.nfsServerPath, n.path)
 	}
 
-	// Try to list models to verify functionality
-	if _, err := bentoml.ListModels(n.path); err != nil {
+	if _, err := bentoml.ListModelsWithTimeout(n.path, nfsHealthCheckTimeout); err != nil {
 		return errors.Wrapf(err, "failed to list models at NFS path %s", n.path)
 	}
 

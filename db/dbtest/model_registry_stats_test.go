@@ -121,6 +121,7 @@ func TestModelRegistryStatsSurviveConnectivityReconcile(t *testing.T) {
 	// BentoML store: the connectivity check fails, which is what pushes the
 	// controller into a status write-back.
 	mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
+	mockRegistry.On("Connect").Return(nil)
 	mockRegistry.On("HealthyCheck").Return(assert.AnError)
 
 	original := model_registry.NewModelRegistry
