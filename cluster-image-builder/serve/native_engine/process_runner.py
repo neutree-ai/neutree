@@ -17,7 +17,11 @@ class EngineExitedBeforeReady(RuntimeError):
 
 
 class DirectEngineRunner:
-    """Start one engine process without detaching it from the Actor group."""
+    """Start one engine process without detaching it from the Actor group.
+
+    This class intentionally has no stop method. On Actor exit Ray's process
+    group cleanup owns termination of this process and every descendant.
+    """
 
     def __init__(
         self,
@@ -48,6 +52,8 @@ class DirectEngineRunner:
             self._command,
             stdout=sys.stdout,
             stderr=sys.stderr,
+            # A new session would detach vLLM from the Ray worker's process
+            # group and prevent Ray cleanup from owning the full lifecycle.
             start_new_session=False,
         )
         self._wait_until_healthy()

@@ -34,6 +34,11 @@ class LocalPortAllocator:
     The directory must be a host bind mount shared by every backend container
     on a node. ``flock`` serializes Neutree allocations; the bind probe also
     excludes listeners that do not participate in the allocator.
+
+    ``allocated_ports.json`` is a recovery ledger, not the ownership authority.
+    Each live allocation keeps a per-port file descriptor locked until Actor
+    exit or explicit release; the kernel releases that lock when Ray tears down
+    the Actor process, including when container PID namespaces differ.
     """
 
     def __init__(
@@ -64,6 +69,8 @@ class LocalPortAllocator:
             for port in range(self._start, self._end + 1):
                 port_key = str(port)
                 if port_key in allocations:
+                    # A stale ledger entry is reclaimable only after taking its
+                    # lock and proving the port has no listener.
                     if not self._take_port_lock(port):
                         continue
                     if not self._is_port_available(port):
@@ -104,6 +111,8 @@ class LocalPortAllocator:
         except BlockingIOError:
             lock_file.close()
             return False
+        # Retain the descriptor, rather than only locking during allocation:
+        # this is the live Actor's cross-container ownership token.
         self._port_locks[port] = lock_file
         return True
 

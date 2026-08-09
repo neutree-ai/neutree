@@ -1140,6 +1140,9 @@ func buildNativeEngineContainerConfigs(endpoint *v1.Endpoint,
 		return nil, nil, errors.New("native engine backend container has invalid run_options")
 	}
 	runOptions = append(runOptions, runtime.RunOptions...)
+	// Static Ray workers use host networking. Every engine runtime-env container
+	// on one node must therefore see this same host directory so the per-port
+	// flock allocation protects the shared TCP namespace.
 	runOptions = append(runOptions, fmt.Sprintf("-v %s:%s", nativeEnginePortHostPath, nativeEnginePortMountPath))
 	backendConfig["run_options"] = runOptions
 	return baseConfig, backendConfig, nil

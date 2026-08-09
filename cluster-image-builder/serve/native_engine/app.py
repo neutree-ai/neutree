@@ -111,6 +111,11 @@ class NativeEngineRunner:
             try:
                 runner.start()
             except EngineExitedBeforeReady:
+                # vLLM cannot receive a socket that was pre-bound by the allocator.
+                # A non-participating process can therefore win the narrow race before
+                # vLLM binds. Retry once only when the failed port is now occupied.
+                # Other failures must fail the Actor so Ray cleans its child process
+                # group and closes the allocator's lock descriptors.
                 if attempt == 0 and not is_port_available_on_loopback(lease.port):
                     self._allocator.release(lease)
                     continue
