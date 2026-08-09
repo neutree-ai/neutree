@@ -247,16 +247,26 @@ func clusterPatchIsSoftDelete(body []byte) (bool, error) {
 }
 
 type clusterPatchConfigurationUpdate struct {
-	imageRegistry    string
-	imageRegistrySet bool
-	kubeconfig       string
-	kubeconfigSet    bool
-	sshPrivateKey    string
-	sshPrivateKeySet bool
+	imageRegistry           string
+	imageRegistrySet        bool
+	configCleared           bool
+	kubernetesConfigCleared bool
+	kubeconfig              string
+	kubeconfigSet           bool
+	sshConfigCleared        bool
+	sshAuthCleared          bool
+	sshPrivateKey           string
+	sshPrivateKeySet        bool
 }
 
 func (u clusterPatchConfigurationUpdate) hasChanges() bool {
-	return u.imageRegistrySet || u.kubeconfigSet || u.sshPrivateKeySet
+	return u.imageRegistrySet ||
+		u.configCleared ||
+		u.kubernetesConfigCleared ||
+		u.kubeconfigSet ||
+		u.sshConfigCleared ||
+		u.sshAuthCleared ||
+		u.sshPrivateKeySet
 }
 
 func parseClusterPatchConfigurationUpdate(body []byte) (clusterPatchConfigurationUpdate, error) {
@@ -289,48 +299,66 @@ func parseClusterPatchConfigurationUpdate(body []byte) (clusterPatchConfiguratio
 		return update, nil
 	}
 
+	if isJSONNull(configRaw) {
+		update.configCleared = true
+		return update, nil
+	}
+
 	var config map[string]json.RawMessage
 	if err := json.Unmarshal(configRaw, &config); err != nil {
 		return clusterPatchConfigurationUpdate{}, err
 	}
 
 	if kubernetesConfigRaw, ok := config["kubernetes_config"]; ok {
-		var kubernetesConfig map[string]json.RawMessage
-		if err := json.Unmarshal(kubernetesConfigRaw, &kubernetesConfig); err != nil {
-			return clusterPatchConfigurationUpdate{}, err
-		}
-
-		if kubeconfigRaw, ok := kubernetesConfig["kubeconfig"]; ok {
-			if err := json.Unmarshal(kubeconfigRaw, &update.kubeconfig); err != nil {
+		if isJSONNull(kubernetesConfigRaw) {
+			update.kubernetesConfigCleared = true
+		} else {
+			var kubernetesConfig map[string]json.RawMessage
+			if err := json.Unmarshal(kubernetesConfigRaw, &kubernetesConfig); err != nil {
 				return clusterPatchConfigurationUpdate{}, err
 			}
 
-			update.kubeconfigSet = true
+			if kubeconfigRaw, ok := kubernetesConfig["kubeconfig"]; ok {
+				if err := json.Unmarshal(kubeconfigRaw, &update.kubeconfig); err != nil {
+					return clusterPatchConfigurationUpdate{}, err
+				}
+
+				update.kubeconfigSet = true
+			}
 		}
 	}
 
 	if sshConfigRaw, ok := config["ssh_config"]; ok {
-		var sshConfig map[string]json.RawMessage
-		if err := json.Unmarshal(sshConfigRaw, &sshConfig); err != nil {
-			return clusterPatchConfigurationUpdate{}, err
-		}
-
-		authRaw, ok := sshConfig["auth"]
-		if !ok {
-			return update, nil
-		}
-
-		var auth map[string]json.RawMessage
-		if err := json.Unmarshal(authRaw, &auth); err != nil {
-			return clusterPatchConfigurationUpdate{}, err
-		}
-
-		if sshPrivateKeyRaw, ok := auth["ssh_private_key"]; ok {
-			if err := json.Unmarshal(sshPrivateKeyRaw, &update.sshPrivateKey); err != nil {
+		if isJSONNull(sshConfigRaw) {
+			update.sshConfigCleared = true
+		} else {
+			var sshConfig map[string]json.RawMessage
+			if err := json.Unmarshal(sshConfigRaw, &sshConfig); err != nil {
 				return clusterPatchConfigurationUpdate{}, err
 			}
 
-			update.sshPrivateKeySet = true
+			authRaw, ok := sshConfig["auth"]
+			if !ok {
+				return update, nil
+			}
+
+			if isJSONNull(authRaw) {
+				update.sshAuthCleared = true
+				return update, nil
+			}
+
+			var auth map[string]json.RawMessage
+			if err := json.Unmarshal(authRaw, &auth); err != nil {
+				return clusterPatchConfigurationUpdate{}, err
+			}
+
+			if sshPrivateKeyRaw, ok := auth["ssh_private_key"]; ok {
+				if err := json.Unmarshal(sshPrivateKeyRaw, &update.sshPrivateKey); err != nil {
+					return clusterPatchConfigurationUpdate{}, err
+				}
+
+				update.sshPrivateKeySet = true
+			}
 		}
 	}
 
@@ -342,46 +370,70 @@ func validateClusterConfigurationUpdate(current *v1.Cluster, update clusterPatch
 		return nil
 	}
 
+	if update.configCleared {
+		return errors.New("config cannot be cleared after cluster initialization")
+	}
+
 	if update.imageRegistrySet && update.imageRegistry != current.Spec.ImageRegistry {
 		return errors.New("image registry cannot be changed after cluster initialization")
 	}
 
-	if current.Spec.Type == v1.KubernetesClusterType && update.kubeconfigSet {
-		if strings.TrimSpace(update.kubeconfig) == "" {
-			return errors.New("kubeconfig cannot be empty for an initialized cluster")
+	if current.Spec.Type == v1.KubernetesClusterType {
+		if update.kubernetesConfigCleared {
+			return errors.New("kubernetes_config cannot be cleared for an initialized cluster")
 		}
 
-		currentKubeconfig, err := util.GetKubeConfigFromCluster(current)
-		if err != nil {
-			return fmt.Errorf("failed to read current kubeconfig: %w", err)
-		}
+		if update.kubeconfigSet {
+			if strings.TrimSpace(update.kubeconfig) == "" {
+				return errors.New("kubeconfig cannot be empty for an initialized cluster")
+			}
 
-		currentAPIServer, err := util.GetApiServerUrlFromDecodedKubeConfig(currentKubeconfig)
-		if err != nil {
-			return fmt.Errorf("failed to parse current kubeconfig: %w", err)
-		}
+			currentKubeconfig, err := util.GetKubeConfigFromCluster(current)
+			if err != nil {
+				return fmt.Errorf("failed to read current kubeconfig: %w", err)
+			}
 
-		updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(update.kubeconfig)
-		if err != nil {
-			return fmt.Errorf("failed to parse updated kubeconfig: %w", err)
-		}
+			currentAPIServer, err := util.GetApiServerUrlFromDecodedKubeConfig(currentKubeconfig)
+			if err != nil {
+				return fmt.Errorf("failed to parse current kubeconfig: %w", err)
+			}
 
-		if currentAPIServer != updatedAPIServer {
-			return errors.New("kubeconfig must reference the current Kubernetes API server")
+			updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(update.kubeconfig)
+			if err != nil {
+				return fmt.Errorf("failed to parse updated kubeconfig: %w", err)
+			}
+
+			if currentAPIServer != updatedAPIServer {
+				return errors.New("kubeconfig must reference the current Kubernetes API server")
+			}
 		}
 	}
 
-	if current.Spec.Type == v1.SSHClusterType && update.sshPrivateKeySet {
-		if strings.TrimSpace(update.sshPrivateKey) == "" {
-			return errors.New("SSH private key cannot be empty for an initialized cluster")
+	if current.Spec.Type == v1.SSHClusterType {
+		if update.sshConfigCleared {
+			return errors.New("ssh_config cannot be cleared for an initialized cluster")
 		}
 
-		if _, err := base64.StdEncoding.DecodeString(update.sshPrivateKey); err != nil {
-			return fmt.Errorf("SSH private key must be base64 encoded: %w", err)
+		if update.sshAuthCleared {
+			return errors.New("SSH auth cannot be cleared for an initialized cluster")
+		}
+
+		if update.sshPrivateKeySet {
+			if strings.TrimSpace(update.sshPrivateKey) == "" {
+				return errors.New("SSH private key cannot be empty for an initialized cluster")
+			}
+
+			if _, err := base64.StdEncoding.DecodeString(update.sshPrivateKey); err != nil {
+				return fmt.Errorf("SSH private key must be base64 encoded: %w", err)
+			}
 		}
 	}
 
 	return nil
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 func clusterConfigurationUpdateError(err error) *validationError {
