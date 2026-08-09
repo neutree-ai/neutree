@@ -240,6 +240,7 @@ func (m *ManifestApply) ApplyManifests(
 				klog.ErrorS(err, "Failed to delete resource",
 					"kind", obj.GetKind(),
 					"name", obj.GetName())
+
 				if deleteErr == nil {
 					deleteErr = errors.Wrapf(err, "failed to delete object %s/%s", obj.GetKind(), obj.GetName())
 				}
