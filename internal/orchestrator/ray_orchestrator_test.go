@@ -2082,7 +2082,7 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 			},
 			Images: map[string]*v1.EngineImage{
 				"nvidia_gpu":     {ImageName: "vllm/vllm-openai", Tag: "v0.24.0"},
-				"ssh_nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.24.0-ray2.53.0"},
+				"ssh_nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.24.0-native-ray2.53.0"},
 			},
 		}}},
 	}
@@ -2095,11 +2095,11 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 
 	assert.Equal(t, "serve.native_engine.app:app_builder", app.ImportPath)
 	assert.Equal(t, map[string]interface{}{
-		"image":       "neutree/engine-vllm:v0.24.0-ray2.53.0",
+		"image":       "neutree/engine-vllm:v0.24.0-native-ray2.53.0",
 		"run_options": []string{"--rm"},
 	}, app.RuntimeEnv["container"])
 	assert.Equal(t, map[string]interface{}{
-		"image": "neutree/engine-vllm:v0.24.0-ray2.53.0",
+		"image": "neutree/engine-vllm:v0.24.0-native-ray2.53.0",
 		"run_options": []string{
 			"--runtime=nvidia", "--gpus all",
 			"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),

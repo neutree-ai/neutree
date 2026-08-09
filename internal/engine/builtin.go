@@ -136,7 +136,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 							},
 							v1.SSHImageKeyPrefix + "nvidia_gpu": {
 								ImageName: "neutree/engine-vllm",
-								Tag:       "v0.24.0-ray2.53.0",
+								Tag:       "v0.24.0-native-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
