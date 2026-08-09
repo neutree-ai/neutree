@@ -15,6 +15,7 @@ import (
 
 // MetricsStatus represents the status of metrics component resources
 type MetricsStatus struct {
+	VMAgentRequired                       bool
 	DeploymentReady                       bool
 	NodeExporterRequired                  bool
 	NodeExporterDaemonSetReady            bool
@@ -40,13 +41,13 @@ type MetricsStatus struct {
 
 func (m MetricsStatus) String() string {
 	base := fmt.Sprintf(
-		"DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
+		"VMAgentRequired: %v, DeploymentReady: %v, PodsReady: %d/%d, NodeExporterDaemonSetReady: %v, "+
 			"NodeExporterRequired: %v, NodeExporterPodsReady: %d/%d, NeutreeNodeAgentMetricsRequired: %v, "+
 			"NeutreeNodeAgentMetricsDaemonSetReady: %v, NeutreeNodeAgentMetricsPodsReady: %d/%d, KubeStateMetricsRequired: %v, "+
 			"KubeStateMetricsDeploymentReady: %v, KubeStateMetricsPodsReady: %d/%d, "+
 			"AcceleratorExporterRequired: %v, AcceleratorExporterDaemonSetsReady: %v, "+
 			"AcceleratorExporterPodsReady: %d/%d, Errors: %v",
-		m.DeploymentReady, m.PodsReady, m.TotalPods,
+		m.VMAgentRequired, m.DeploymentReady, m.PodsReady, m.TotalPods,
 		m.NodeExporterDaemonSetReady, m.NodeExporterRequired, m.NodeExporterPodsReady, m.NodeExporterTotalPods,
 		m.NeutreeNodeAgentMetricsRequired, m.NeutreeNodeAgentMetricsDaemonSetReady,
 		m.NeutreeNodeAgentMetricsPodsReady, m.NeutreeNodeAgentMetricsTotalPods,
@@ -64,7 +65,7 @@ func (m MetricsStatus) Ready() bool {
 		return false
 	}
 
-	return m.DeploymentReady &&
+	return (!m.VMAgentRequired || m.DeploymentReady) &&
 		(!m.NodeExporterRequired || m.NodeExporterDaemonSetReady) &&
 		(!m.NeutreeNodeAgentMetricsRequired || m.NeutreeNodeAgentMetricsDaemonSetReady) &&
 		(!m.KubeStateMetricsRequired || m.KubeStateMetricsDeploymentReady) &&
@@ -74,21 +75,23 @@ func (m MetricsStatus) Ready() bool {
 // CheckResourcesStatus checks the status of all metrics resources
 func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsStatus, error) {
 	status := &MetricsStatus{
-		Errors: []string{},
+		VMAgentRequired: util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL),
+		Errors:          []string{},
 	}
 
-	// Check Deployment status
-	deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
-	if err != nil {
-		status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
-		status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
-	} else {
-		status.DeploymentReady = deploymentReady
-		status.PodsReady = podsReady
-		status.TotalPods = totalPods
-
-		if !deploymentReady {
+	if status.VMAgentRequired {
+		deploymentReady, podsReady, totalPods, err := m.checkDeploymentStatus(ctx)
+		if err != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("deployment check failed: %v", err))
 			status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+		} else {
+			status.DeploymentReady = deploymentReady
+			status.PodsReady = podsReady
+			status.TotalPods = totalPods
+
+			if !deploymentReady {
+				status.Diagnostics = append(status.Diagnostics, component.DeploymentDiagnostics(ctx, m.ctrlClient, m.namespace, "vmagent", m.metricsPodLabels())...)
+			}
 		}
 	}
 

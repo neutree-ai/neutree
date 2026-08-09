@@ -226,6 +226,7 @@ func (m *ManifestApply) ApplyManifests(
 	}
 
 	deleteObjects := diff.DeletedObjects
+	var deleteErr error
 
 	for i := range deleteObjects {
 		obj := &deleteObjects[i]
@@ -239,9 +240,15 @@ func (m *ManifestApply) ApplyManifests(
 				klog.ErrorS(err, "Failed to delete resource",
 					"kind", obj.GetKind(),
 					"name", obj.GetName())
-				// Continue with other resources
+				if deleteErr == nil {
+					deleteErr = errors.Wrapf(err, "failed to delete object %s/%s", obj.GetKind(), obj.GetName())
+				}
 			}
 		}
+	}
+
+	if deleteErr != nil {
+		return 0, deleteErr
 	}
 
 	return len(objects) + len(deleteObjects), nil
