@@ -280,7 +280,8 @@ func TestManagerAddInternalPluginsFailsAtomically(t *testing.T) {
 		plugins []plugin.AcceleratorPlugin
 		message string
 	}{
-		{name: "batch with duplicate resource", plugins: []plugin.AcceleratorPlugin{valid, &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: v1.AcceleratorTypeNVIDIAGPU.String()}}, message: "already registered"},
+		{name: "batch with duplicate of manager-registered resource", plugins: []plugin.AcceleratorPlugin{valid, &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: v1.AcceleratorTypeNVIDIAGPU.String()}}, message: "already registered"},
+		{name: "batch with duplicate resource within batch", plugins: []plugin.AcceleratorPlugin{valid, valid}, message: "already registered"},
 		{name: "batch with empty resource", plugins: []plugin.AcceleratorPlugin{valid, emptyResource}, message: "resource is required"},
 		{name: "batch with typed nil", plugins: []plugin.AcceleratorPlugin{valid, typedNil}, message: "accelerator plugin is nil"},
 	}

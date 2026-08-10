@@ -53,7 +53,9 @@ type Manager interface {
 	GetImageSuffix(acceleratorType string) string
 
 	// AddInternalPlugins registers internal accelerator plugins on an existing
-	// manager without re-registering manager-owned routes.
+	// manager without re-registering manager-owned routes. All plugins must be
+	// internal type: the health sync loop removes any plugin whose Type() is
+	// not InternalPluginType. The batch is validated atomically.
 	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
 }
 
@@ -109,6 +111,7 @@ func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.P
 // AddInternalPlugins registers internal accelerator plugins on an existing
 // manager. All plugins are validated before any is stored, so an invalid
 // input fails atomically without leaving partially registered plugins.
+// Validation is per invocation: concurrent calls are not serialized.
 func (a *manager) AddInternalPlugins(plugins ...publicaccelerator.Plugin) error {
 	seen := make(map[string]struct{}, len(plugins))
 
