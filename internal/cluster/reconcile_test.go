@@ -25,8 +25,8 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 			wantStatic: true,
 		},
 		{
-			name:       "SSH v1.1.0 uses static Ray reconciler",
-			version:    "v1.1.0",
+			name:       "SSH v1.0.3 uses static Ray reconciler",
+			version:    "v1.0.3",
 			wantStatic: true,
 		},
 	}
@@ -42,6 +42,15 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 			assert.Equal(t, tt.wantStatic, isStatic)
 		})
 	}
+}
+
+func TestNewReconcileRequiresClusterProfileResolverForProfileAwareCluster(t *testing.T) {
+	reconciler, err := NewReconcile(&v1.Cluster{
+		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
+	}, nil, nil, "")
+
+	require.ErrorContains(t, err, "cluster profile component resolver is required")
+	assert.Nil(t, reconciler)
 }
 
 func TestNewReconcileRejectsInvalidClusterVersion(t *testing.T) {

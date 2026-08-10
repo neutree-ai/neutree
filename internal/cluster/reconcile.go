@@ -65,7 +65,12 @@ type ReconcileContext struct {
 
 func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
-	return newReconcile(cluster, acceleratorManager, s, metricsRemoteWriteURL, v1.ClusterProfileComponents{})
+	components, err := resolveClusterProfileComponents(cluster, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster version: %w", err)
+	}
+
+	return newReconcile(cluster, acceleratorManager, s, metricsRemoteWriteURL, components)
 }
 
 func NewReconcileWithClusterProfile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,

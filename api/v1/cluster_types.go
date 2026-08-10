@@ -278,8 +278,6 @@ const (
 	ClusterPhaseUpdating     ClusterPhase = "Updating"
 	ClusterPhaseUpgrading    ClusterPhase = "Upgrading"
 	ClusterPhaseDeleting     ClusterPhase = "Deleting"
-	ClusterPhaseUnsupported  ClusterPhase = "Unsupported"
-	ClusterPhaseRetired      ClusterPhase = "Retired"
 )
 
 // Image name constants for Neutree components.

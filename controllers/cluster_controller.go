@@ -51,6 +51,18 @@ type ClusterControllerOption struct {
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
+	if opt == nil {
+		return nil, errors.New("cluster controller option is required")
+	}
+
+	if opt.ReleaseInfoProvider == nil {
+		return nil, errors.New("release info provider is required")
+	}
+
+	if opt.ClusterProfileComponentResolver == nil {
+		return nil, errors.New("cluster profile component resolver is required")
+	}
+
 	c := &ClusterController{
 		storage:             opt.Storage,
 		releaseInfoProvider: opt.ReleaseInfoProvider,
@@ -152,8 +164,18 @@ func (controller *ClusterController) reconcileNormal(c *v1.Cluster) error {
 }
 
 func (controller *ClusterController) validateReleaseInfoCompatibility(c *v1.Cluster) error {
-	if controller.releaseInfoProvider == nil {
+	effectiveVersion := effectiveClusterVersion(c)
+	profileAware, err := cluster.IsClusterProfileAwareVersion(effectiveVersion)
+	if err != nil {
+		return fmt.Errorf("determine cluster profile requirement for version %q: %w", effectiveVersion, err)
+	}
+
+	if !profileAware {
 		return nil
+	}
+
+	if controller.releaseInfoProvider == nil {
+		return errors.New("release info provider is required for cluster version " + effectiveVersion)
 	}
 
 	info, err := controller.releaseInfoProvider.Current()
@@ -165,7 +187,6 @@ func (controller *ClusterController) validateReleaseInfoCompatibility(c *v1.Clus
 		return fmt.Errorf("current release info metadata and spec are required")
 	}
 
-	effectiveVersion := effectiveClusterVersion(c)
 	minor, err := releaseinfo.NormalizeClusterMinor(effectiveVersion)
 
 	if err != nil {

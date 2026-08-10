@@ -706,6 +706,41 @@ func TestClusterControllerFailsIncompatibleReleaseInfoWithoutWorkloadReconcile(t
 	store.AssertExpectations(t)
 }
 
+func TestClusterControllerRejectsProfileAwareClusterWithoutReleaseInfoProvider(t *testing.T) {
+	controller := newTestClusterController(storagemocks.NewMockStorage(t), nil)
+
+	err := controller.validateReleaseInfoCompatibility(&v1.Cluster{
+		Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+	})
+
+	require.ErrorContains(t, err, "release info provider is required")
+}
+
+func TestClusterControllerAllowsLegacyClusterWithoutReleaseInfoProvider(t *testing.T) {
+	controller := newTestClusterController(storagemocks.NewMockStorage(t), nil)
+
+	err := controller.validateReleaseInfoCompatibility(&v1.Cluster{
+		Spec: &v1.ClusterSpec{Version: "v1.0.3"},
+	})
+
+	require.NoError(t, err)
+}
+
+func TestNewClusterControllerRequiresReleaseInfoAndClusterProfileResolvers(t *testing.T) {
+	resolver := testClusterProfileComponentResolver{}
+	provider := &testClusterReleaseInfoProvider{}
+
+	_, err := NewClusterController(&ClusterControllerOption{
+		ClusterProfileComponentResolver: resolver,
+	})
+	require.ErrorContains(t, err, "release info provider is required")
+
+	_, err = NewClusterController(&ClusterControllerOption{
+		ReleaseInfoProvider: provider,
+	})
+	require.ErrorContains(t, err, "cluster profile component resolver is required")
+}
+
 func TestClusterControllerReconcilesAnIncompatibleClusterUpgradingToCompatibleTarget(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	reconciler := new(clustermocks.MockClusterReconcile)
@@ -772,4 +807,10 @@ type testClusterReleaseInfoProvider struct {
 
 func (provider *testClusterReleaseInfoProvider) Current() (*v1.ReleaseInfo, error) {
 	return provider.info, provider.err
+}
+
+type testClusterProfileComponentResolver struct{}
+
+func (testClusterProfileComponentResolver) ComponentsFor(string) (v1.ClusterProfileComponents, error) {
+	return v1.ClusterProfileComponents{}, nil
 }

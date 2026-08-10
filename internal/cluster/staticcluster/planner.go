@@ -187,8 +187,12 @@ func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents
 		return v1.ClusterProfileComponents{}, false, err
 	}
 
-	if !profileAware || r == nil || r.ClusterProfileComponentsResolver == nil {
+	if !profileAware {
 		return v1.ClusterProfileComponents{}, false, nil
+	}
+
+	if r == nil || r.ClusterProfileComponentsResolver == nil {
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("cluster profile component resolver is required for static node cluster version %s", version)
 	}
 
 	components, err := r.ClusterProfileComponentsResolver.ComponentsFor(version)

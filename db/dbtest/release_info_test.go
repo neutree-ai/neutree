@@ -3,7 +3,6 @@ package dbtest
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -138,12 +137,12 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 }
 
 func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
-	upMigration, err := os.ReadFile("../migrations/083_release_info_cluster_profiles.up.sql")
+	upMigration, err := os.ReadFile("../migrations/084_release_info_cluster_profiles.up.sql")
 	if err != nil {
 		t.Fatalf("read forward migration: %v", err)
 	}
 
-	downMigration, err := os.ReadFile("../migrations/083_release_info_cluster_profiles.down.sql")
+	downMigration, err := os.ReadFile("../migrations/084_release_info_cluster_profiles.down.sql")
 	if err != nil {
 		t.Fatalf("read rollback migration: %v", err)
 	}
@@ -163,6 +162,23 @@ func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
 	}
 	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
 		t.Fatalf("apply final release-profile migration: %v", err)
+	}
+
+	var engineCapabilitiesExist bool
+	if err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_attribute
+			WHERE attrelid = 'api.engine_version'::regclass
+				AND attname = 'capabilities'
+				AND attnum > 0
+				AND NOT attisdropped
+		)
+	`).Scan(&engineCapabilitiesExist); err != nil {
+		t.Fatalf("check engine_version.capabilities: %v", err)
+	}
+	if !engineCapabilitiesExist {
+		t.Fatal("mainline engine capabilities must remain after release-profile migration")
 	}
 
 	const releaseName = "v1.2.0"
@@ -201,36 +217,5 @@ func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
 		if exists {
 			t.Fatalf("rollback must remove %s", tableName)
 		}
-	}
-}
-
-func TestReleaseInfoMigrationKeepsPreviewCompatibilityVersions(t *testing.T) {
-	for _, version := range []string{
-		"084_release_profile_compatibility",
-		"085_release_profile_compatibility",
-		"086_release_profile_compatibility",
-		"087_release_profile_compatibility",
-		"088_release_profile_compatibility",
-	} {
-		for _, direction := range []string{"up", "down"} {
-			path := "../migrations/" + version + "." + direction + ".sql"
-			contents, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			if !strings.Contains(string(contents), "compatibility no-op") {
-				t.Fatalf("%s must remain a compatibility no-op", path)
-			}
-		}
-	}
-}
-
-func TestReleaseInfoMigrationCleansPreviewRollbackBackup(t *testing.T) {
-	contents, err := os.ReadFile("../migrations/089_release_profile_legacy_cleanup.up.sql")
-	if err != nil {
-		t.Fatalf("read preview cleanup migration: %v", err)
-	}
-	if !strings.Contains(string(contents), "DROP TABLE IF EXISTS api.release_info_086_legacy_backup") {
-		t.Fatal("preview cleanup migration must remove the obsolete rollback backup table")
 	}
 }
