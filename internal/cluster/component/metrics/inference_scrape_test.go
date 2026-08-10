@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -175,11 +174,11 @@ func TestInferenceScrapeRules_ExclusionRegex(t *testing.T) {
 	assert.Equal(t, `vllm;v0\.24\.0|mineru;v1\.0\.0`, rules.ExclusionRegex())
 }
 
-// renderInferenceJob renders the full vmagent config and returns the
-// neutree-inference scrape job, parsed as YAML. Parsing rather than string
-// matching is the point: a template that emits subtly malformed YAML would
-// leave vmagent scraping nothing, and a string assertion would not notice.
-func renderInferenceJob(t *testing.T, rules InferenceScrapeRules) map[string]interface{} {
+// renderJob renders the full vmagent config and returns one scrape job, parsed
+// as YAML. Parsing rather than string matching is the point: a template that
+// emits subtly malformed YAML would leave vmagent scraping nothing, and a
+// string assertion would not notice.
+func renderJob(t *testing.T, rules InferenceScrapeRules, jobName string) map[string]interface{} {
 	t.Helper()
 
 	rendered, err := renderKubernetesVMAgentConfig(MetricsManifestVariables{
@@ -198,14 +197,20 @@ func renderInferenceJob(t *testing.T, rules InferenceScrapeRules) map[string]int
 	require.NoError(t, yaml.Unmarshal([]byte(rendered), &config), "rendered config is not valid YAML:\n%s", rendered)
 
 	for _, job := range config.ScrapeConfigs {
-		if job["job_name"] == "neutree-inference" {
+		if job["job_name"] == jobName {
 			return job
 		}
 	}
 
-	t.Fatalf("neutree-inference job not found in rendered config:\n%s", rendered)
+	t.Fatalf("%s job not found in rendered config:\n%s", jobName, rendered)
 
 	return nil
+}
+
+func renderInferenceJob(t *testing.T, rules InferenceScrapeRules) map[string]interface{} {
+	t.Helper()
+
+	return renderJob(t, rules, "neutree-inference")
 }
 
 func relabelConfigs(t *testing.T, job map[string]interface{}) []map[string]interface{} {
@@ -312,18 +317,14 @@ func TestRenderInferenceJob_Overrides(t *testing.T) {
 // router job shares the inference job's shape, and an over-broad template edit
 // would silently change it too.
 func TestRenderInferenceJob_OtherJobsUnaffected(t *testing.T) {
-	rendered, err := renderKubernetesVMAgentConfig(MetricsManifestVariables{
-		ClusterName:          "test-cluster",
-		Workspace:            "default",
-		Namespace:            "neutree",
-		InferenceDefaultPort: v1.DefaultMetricsExportPort,
-		InferenceScrapeRules: InferenceScrapeRules{
-			Exclusions: []InferenceScrapeExclusion{{Engine: "mineru", Version: "v1.0.0"}},
-		},
-	})
-	require.NoError(t, err)
+	routerJob := renderJob(t, InferenceScrapeRules{
+		Exclusions: []InferenceScrapeExclusion{{Engine: "mineru", Version: "v1.0.0"}},
+	}, "neutree-router")
 
-	routerJob := rendered[strings.Index(rendered, "job_name: 'neutree-router'"):strings.Index(rendered, "job_name: 'neutree-inference'")]
-	assert.NotContains(t, routerJob, "action: drop")
-	assert.Contains(t, routerJob, "replacement: $1:8000")
+	for _, cfg := range relabelConfigs(t, routerJob) {
+		assert.NotEqual(t, "drop", cfg["action"], "the router job must not inherit inference drop rules")
+	}
+
+	assert.Contains(t, relabelReplacements(t, routerJob), "$1:8000",
+		"the router job keeps its own fixed address rule")
 }
