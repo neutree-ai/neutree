@@ -95,6 +95,181 @@ func TestValidateClusterDeletion(t *testing.T) {
 			mockStorage.AssertExpectations(t)
 		})
 	}
+
+}
+
+func TestValidateClusterSoftDelete(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name            string
+		path            string
+		body            string
+		endpointCount   int
+		countError      error
+		expectCount     bool
+		expectProxy     bool
+		expectPoweredBy bool
+		expectedStatus  int
+		expectedCode    string
+		expectedHint    string
+	}{
+		{
+			name: "allows incomplete identity",
+			path: "/clusters",
+			body: `{
+				"metadata": {"deletion_timestamp": "2026-08-10T00:00:00Z"}
+			}`,
+			expectProxy:    true,
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name: "bypasses malformed guarded configuration",
+			path: "/clusters?id=eq.1",
+			body: `{
+				"metadata": {
+					"workspace": "default",
+					"name": "cluster",
+					"deletion_timestamp": "2026-08-10T00:00:00Z"
+				},
+				"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+			}`,
+			endpointCount:  0,
+			expectCount:    true,
+			expectProxy:    true,
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name: "rejects referenced cluster",
+			path: "/clusters",
+			body: `{
+				"metadata": {
+					"workspace": "default",
+					"name": "cluster",
+					"deletion_timestamp": "2026-08-10T00:00:00Z"
+				}
+			}`,
+			endpointCount:   1,
+			expectCount:     true,
+			expectedStatus:  http.StatusBadRequest,
+			expectedCode:    "10126",
+			expectedHint:    "1 endpoint(s) still reference this cluster",
+			expectPoweredBy: true,
+		},
+		{
+			name: "returns internal error when dependency lookup fails",
+			path: "/clusters",
+			body: `{
+				"metadata": {
+					"workspace": "default",
+					"name": "cluster",
+					"deletion_timestamp": "2026-08-10T00:00:00Z"
+				}
+			}`,
+			countError:     errors.New("count endpoints failed"),
+			expectCount:    true,
+			expectedStatus: http.StatusInternalServerError,
+			expectedCode:   "500",
+			expectedHint:   "Failed to validate deletion",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storageMocks.NewMockStorage(t)
+			if tt.expectCount {
+				mockStorage.On(
+					"Count",
+					storage.ENDPOINT_TABLE,
+					clusterEndpointReferenceFilters("default", "cluster"),
+				).Return(tt.endpointCount, tt.countError).Once()
+			}
+
+			proxyCalled := false
+			router := gin.New()
+			router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+				proxyCalled = true
+
+				forwardedBody, err := io.ReadAll(c.Request.Body)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.body, string(forwardedBody))
+				assert.Equal(t, int64(len(tt.body)), c.Request.ContentLength)
+				assert.Equal(t, strconv.Itoa(len(tt.body)), c.Request.Header.Get("Content-Length"))
+				c.Status(http.StatusNoContent)
+			})
+
+			originalBody := &trackingReadCloser{Reader: strings.NewReader(tt.body)}
+			req := httptest.NewRequest(http.MethodPatch, tt.path, nil)
+			req.Body = originalBody
+			req.ContentLength = 0
+			req.Header.Set("Content-Length", "0")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, req)
+
+			assert.Equal(t, tt.expectProxy, proxyCalled)
+			assert.True(t, originalBody.closed)
+			assert.Equal(t, tt.expectedStatus, recorder.Code)
+			if tt.expectPoweredBy {
+				assert.Equal(t, "Neutree", recorder.Header().Get("X-Powered-By"))
+			}
+			if tt.expectedCode != "" {
+				assert.Contains(t, recorder.Body.String(), `"code":"`+tt.expectedCode+`"`)
+			}
+			if tt.expectedHint != "" {
+				assert.Contains(t, recorder.Body.String(), tt.expectedHint)
+			}
+			mockStorage.AssertExpectations(t)
+			if !tt.expectCount {
+				mockStorage.AssertNotCalled(t, "Count", mock.Anything)
+			}
+			mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+			mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+		})
+	}
+
+	t.Run("forwards malformed guarded configuration through registered route", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On(
+			"Count",
+			storage.ENDPOINT_TABLE,
+			clusterEndpointReferenceFilters("default", "cluster"),
+		).Return(0, nil).Once()
+
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPatch, r.Method)
+			assert.Equal(t, "/clusters", r.URL.Path)
+
+			body, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			assert.JSONEq(t, `{
+				"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
+				"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+			}`, string(body))
+
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer upstream.Close()
+
+		router := gin.New()
+		RegisterClusterRoutes(router.Group("/api/v1"), nil, &Dependencies{
+			Storage:          mockStorage,
+			StorageAccessURL: upstream.URL,
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/clusters?id=eq.1", strings.NewReader(`{
+			"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
+			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := newCloseNotifyRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
+		mockStorage.AssertExpectations(t)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
 }
 
 func TestValidateClusterRequestMiddleware(t *testing.T) {
@@ -183,29 +358,6 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10208"`)
-		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
-	})
-
-	t.Run("allows soft delete without a complete identity", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
-			"metadata": {"deletion_timestamp": "2026-08-10T00:00:00Z"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
 		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
@@ -355,120 +507,6 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.True(t, proxyCalled)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
 		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("dispatches soft delete to deletion validation and restores the body", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		mockStorage.On(
-			"Count",
-			storage.ENDPOINT_TABLE,
-			clusterEndpointReferenceFilters("default", "cluster"),
-		).Return(0, nil).Once()
-
-		body := `{
-			"metadata": {
-				"workspace": "default",
-				"name": "cluster",
-				"deletion_timestamp": "2026-08-10T00:00:00Z"
-			},
-			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
-		}`
-		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-
-			restoredBody, err := io.ReadAll(c.Request.Body)
-			assert.NoError(t, err)
-			assert.Equal(t, body, string(restoredBody))
-			assert.Equal(t, int64(len(body)), c.Request.ContentLength)
-			assert.Equal(t, strconv.Itoa(len(body)), c.Request.Header.Get("Content-Length"))
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", nil)
-		req.Body = originalBody
-		req.ContentLength = 0
-		req.Header.Set("Content-Length", "0")
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.True(t, originalBody.closed)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertExpectations(t)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
-	})
-
-	t.Run("writes deletion dependency validation errors", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		mockStorage.On(
-			"Count",
-			storage.ENDPOINT_TABLE,
-			clusterEndpointReferenceFilters("default", "cluster"),
-		).Return(1, nil).Once()
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
-			"metadata": {
-				"workspace": "default",
-				"name": "cluster",
-				"deletion_timestamp": "2026-08-10T00:00:00Z"
-			}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Equal(t, "Neutree", recorder.Header().Get("X-Powered-By"))
-		assert.Contains(t, recorder.Body.String(), `"code":"10126"`)
-		mockStorage.AssertExpectations(t)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-	})
-
-	t.Run("writes deletion storage errors", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		mockStorage.On(
-			"Count",
-			storage.ENDPOINT_TABLE,
-			clusterEndpointReferenceFilters("default", "cluster"),
-		).Return(0, errors.New("count endpoints failed")).Once()
-
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
-			"metadata": {
-				"workspace": "default",
-				"name": "cluster",
-				"deletion_timestamp": "2026-08-10T00:00:00Z"
-			}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
-		assert.Contains(t, recorder.Body.String(), "Failed to validate deletion")
-		mockStorage.AssertExpectations(t)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
 	t.Run("preserves the version resolution error when PATCH has no identity", func(t *testing.T) {
@@ -736,7 +774,14 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 	})
 }
 
-func TestValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T) {
+func TestValidateClusterAcceleratorVirtualization(t *testing.T) {
+	t.Run("body", testValidateClusterAcceleratorVirtualizationBody)
+	t.Run("disable for current", testValidateClusterAcceleratorVirtualizationDisableForCurrent)
+	t.Run("disable", testValidateClusterAcceleratorVirtualizationDisable)
+	t.Run("middleware", testValidateClusterAcceleratorVirtualizationMiddleware)
+}
+
+func testValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T) {
 	mockStorage := storageMocks.NewMockStorage(t)
 	current := &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"}}
 	patch := v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}}
@@ -750,7 +795,7 @@ func TestValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T)
 	mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 }
 
-func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
+func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 	tests := []struct {
 		name        string
 		body        string
@@ -850,7 +895,7 @@ func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 	}
 }
 
-func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
+func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 	vGPUEndpoint := v1.Endpoint{
 		Spec: &v1.EndpointSpec{
 			Resources: &v1.ResourceSpec{
@@ -987,7 +1032,12 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 	}
 }
 
-func TestPrepareClusterValidationInput(t *testing.T) {
+func TestClusterValidationInput(t *testing.T) {
+	t.Run("prepare", testPrepareClusterValidationInput)
+	t.Run("build PostgREST PATCH New", testBuildPostgrestClusterPatchValidationNew)
+}
+
+func testPrepareClusterValidationInput(t *testing.T) {
 	prepare := func(t *testing.T, current v1.Cluster, body string) *ValidationInput[v1.Cluster] {
 		t.Helper()
 
@@ -1102,7 +1152,7 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 	}
 }
 
-func TestBuildPostgrestClusterPatchValidationNew(t *testing.T) {
+func testBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 	tests := []struct {
 		name    string
 		body    string
@@ -1148,7 +1198,7 @@ func TestBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 	}
 }
 
-func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
+func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("rejects disable patch before proxy handler when vGPU endpoint references cluster", func(t *testing.T) {
@@ -1279,7 +1329,13 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	})
 }
 
-func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
+func TestValidateClusterConfiguration(t *testing.T) {
+	t.Run("middleware", testValidateClusterConfigurationUpdateMiddleware)
+	t.Run("parse PATCH update", testParseClusterPatchConfigurationUpdate)
+	t.Run("initialized update", testValidateInitializedClusterConfigurationUpdate)
+}
+
+func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("skips configuration validation for non-PATCH requests", func(t *testing.T) {
@@ -1763,7 +1819,12 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 	})
 }
 
-func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
+func TestValidateClusterVersion(t *testing.T) {
+	t.Run("middleware", testValidateClusterVersionUpdateMiddleware)
+	t.Run("not downgrade", testValidateClusterVersionNotDowngrade)
+}
+
+func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("skips version validation for a configuration-only patch", func(t *testing.T) {
@@ -1954,47 +2015,6 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 	})
 }
 
-func TestRegisterClusterRoutesSoftDeleteBypassesMalformedGuardedConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	mockStorage := storageMocks.NewMockStorage(t)
-	mockStorage.On("Count", storage.ENDPOINT_TABLE, clusterEndpointReferenceFilters("default", "cluster")).Return(0, nil).Once()
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPatch, r.Method)
-		assert.Equal(t, "/clusters", r.URL.Path)
-
-		body, err := io.ReadAll(r.Body)
-		assert.NoError(t, err)
-		assert.JSONEq(t, `{
-			"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
-			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
-		}`, string(body))
-
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer upstream.Close()
-
-	router := gin.New()
-	RegisterClusterRoutes(router.Group("/api/v1"), nil, &Dependencies{
-		Storage:          mockStorage,
-		StorageAccessURL: upstream.URL,
-	})
-
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/clusters?id=eq.1", strings.NewReader(`{
-		"metadata": {"workspace": "default", "name": "cluster", "deletion_timestamp": "2026-08-07T00:00:00Z"},
-		"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := newCloseNotifyRecorder()
-
-	router.ServeHTTP(recorder, req)
-
-	assert.Equal(t, http.StatusNoContent, recorder.ResponseRecorder.Code)
-	mockStorage.AssertExpectations(t)
-	mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-}
-
 func testEncodedKubeconfig(server, token string) string {
 	content := fmt.Sprintf(`apiVersion: v1
 kind: Config
@@ -2017,7 +2037,7 @@ users:
 	return base64.StdEncoding.EncodeToString([]byte(content))
 }
 
-func TestParseClusterPatchConfigurationUpdate(t *testing.T) {
+func testParseClusterPatchConfigurationUpdate(t *testing.T) {
 	t.Run("tracks supported configuration fields", func(t *testing.T) {
 		update, err := parseClusterPatchConfigurationUpdate([]byte(`{
 			"spec": {
@@ -2111,7 +2131,7 @@ func TestParseClusterPatchConfigurationUpdate(t *testing.T) {
 	}
 }
 
-func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
+func testValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 	initializedKubernetesCluster := func(kubeconfig string) *v1.Cluster {
 		return &v1.Cluster{
 			Spec: &v1.ClusterSpec{
@@ -2309,7 +2329,7 @@ func (r *trackingReadCloser) Close() error {
 	return nil
 }
 
-func TestValidateClusterVersionNotDowngrade(t *testing.T) {
+func testValidateClusterVersionNotDowngrade(t *testing.T) {
 	tests := []struct {
 		name            string
 		current         *v1.Cluster
