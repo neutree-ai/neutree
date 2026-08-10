@@ -171,15 +171,7 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		configurationUpdate, err := parseClusterPatchConfigurationUpdate(body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
-			c.Abort()
-
-			return
-		}
-
-		if !hasVersion && !configurationUpdate.hasChanges() {
+		if !hasVersion {
 			c.Next()
 			return
 		}
@@ -192,17 +184,7 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		var (
-			current       *v1.Cluster
-			validationErr *validationError
-		)
-
-		if hasVersion {
-			current, validationErr = resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
-		} else {
-			current, validationErr = resolveClusterForConfigurationUpdate(s, patch, c.Request.URL.Query())
-		}
-
+		current, validationErr := resolveClusterForVersionUpdate(s, patch, c.Request.URL.Query())
 		if validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
@@ -210,20 +192,89 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if hasVersion {
-			if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
-				c.JSON(http.StatusBadRequest, &validationError{
-					Code:    "10212",
-					Message: "invalid cluster version update",
-					Hint:    err.Error(),
-				})
-				c.Abort()
+		if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    "10212",
+				Message: "invalid cluster version update",
+				Hint:    err.Error(),
+			})
+			c.Abort()
 
-				return
-			}
+			return
 		}
 
-		if err := validateClusterConfigurationUpdate(current, configurationUpdate); err != nil {
+		c.Next()
+	}
+}
+
+func validateClusterConfigurationUpdate(s storage.Storage) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPatch {
+			c.Next()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Request.Body.Close()
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+		c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		if len(bytes.TrimSpace(body)) == 0 {
+			c.Next()
+			return
+		}
+
+		isSoftDelete, err := clusterPatchIsSoftDelete(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if isSoftDelete {
+			c.Next()
+			return
+		}
+
+		configurationUpdate, err := parseClusterPatchConfigurationUpdate(body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if !configurationUpdate.hasChanges() {
+			c.Next()
+			return
+		}
+
+		var patch v1.Cluster
+		if err := json.Unmarshal(body, &patch); err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		current, validationErr := resolveClusterForConfigurationUpdate(s, patch, c.Request.URL.Query())
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
+		if err := validateInitializedClusterConfigurationUpdate(current, configurationUpdate); err != nil {
 			c.JSON(http.StatusBadRequest, clusterConfigurationUpdateError(err))
 			c.Abort()
 
@@ -365,7 +416,7 @@ func parseClusterPatchConfigurationUpdate(body []byte) (clusterPatchConfiguratio
 	return update, nil
 }
 
-func validateClusterConfigurationUpdate(current *v1.Cluster, update clusterPatchConfigurationUpdate) error {
+func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update clusterPatchConfigurationUpdate) error {
 	if current == nil || current.Spec == nil || !current.IsInitialized() {
 		return nil
 	}
@@ -848,8 +899,9 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
 	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
 	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage)
+	configurationUpdateValidation := validateClusterConfigurationUpdate(deps.Storage)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
-	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, acceleratorVirtualizationValidation, handler)
+	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, configurationUpdateValidation, acceleratorVirtualizationValidation, handler)
 }

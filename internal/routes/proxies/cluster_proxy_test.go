@@ -528,7 +528,7 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	})
 }
 
-func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
+func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("rejects image registry switch for initialized cluster before proxy handler", func(t *testing.T) {
@@ -545,7 +545,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -581,7 +581,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -615,7 +615,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -651,7 +651,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -687,7 +687,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -716,7 +716,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -747,7 +747,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -783,7 +783,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -814,7 +814,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -835,7 +835,7 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -850,6 +850,89 @@ func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		assert.True(t, proxyCalled)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("restores request body and content length", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		body := `{"metadata":{"name":"cluster"}}`
+		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+			restoredBody, err := io.ReadAll(c.Request.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, body, string(restoredBody))
+			assert.Equal(t, int64(len(body)), c.Request.ContentLength)
+			assert.Equal(t, strconv.Itoa(len(body)), c.Request.Header.Get("Content-Length"))
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", nil)
+		req.Body = originalBody
+		req.ContentLength = 0
+		req.Header.Set("Content-Length", "0")
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, originalBody.closed)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+}
+
+func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("allows configuration-only patch without storage lookup", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"config": {"kubernetes_config": {"kubeconfig": "updated-kubeconfig"}}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("rejects malformed configuration before resolving version update", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH(
+			"/clusters",
+			validateClusterVersionUpdate(mockStorage),
+			validateClusterConfigurationUpdate(mockStorage),
+			func(c *gin.Context) {
+				proxyCalled = true
+				c.Status(http.StatusNoContent)
+			},
+		)
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {
+				"version": "v1.2.0",
+				"config": {"kubernetes_config": {"kubeconfig": []}}
+			}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "invalid cluster payload")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
@@ -1146,7 +1229,7 @@ func TestParseClusterPatchConfigurationUpdate(t *testing.T) {
 	}
 }
 
-func TestValidateClusterConfigurationUpdate(t *testing.T) {
+func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 	initializedKubernetesCluster := func(kubeconfig string) *v1.Cluster {
 		return &v1.Cluster{
 			Spec: &v1.ClusterSpec{
@@ -1160,7 +1243,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 	}
 
 	t.Run("allows uninitialized clusters", func(t *testing.T) {
-		err := validateClusterConfigurationUpdate(&v1.Cluster{
+		err := validateInitializedClusterConfigurationUpdate(&v1.Cluster{
 			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
 			Status: &v1.ClusterStatus{Initialized: false},
 		}, clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true})
@@ -1169,7 +1252,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 	})
 
 	t.Run("allows an unchanged image registry", func(t *testing.T) {
-		err := validateClusterConfigurationUpdate(&v1.Cluster{
+		err := validateInitializedClusterConfigurationUpdate(&v1.Cluster{
 			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
 			Status: &v1.ClusterStatus{Initialized: true},
 		}, clusterPatchConfigurationUpdate{imageRegistry: "current", imageRegistrySet: true})
@@ -1213,7 +1296,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateClusterConfigurationUpdate(tt.current, clusterPatchConfigurationUpdate{
+				err := validateInitializedClusterConfigurationUpdate(tt.current, clusterPatchConfigurationUpdate{
 					kubeconfig:    tt.kubeconfig,
 					kubeconfigSet: true,
 				})
@@ -1224,7 +1307,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 	})
 
 	t.Run("allows same-host Kubernetes credential rotation", func(t *testing.T) {
-		err := validateClusterConfigurationUpdate(
+		err := validateInitializedClusterConfigurationUpdate(
 			initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token")),
 			clusterPatchConfigurationUpdate{
 				kubeconfig:    testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
@@ -1250,7 +1333,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 			{name: "invalid base64", key: "not-base64", hint: "SSH private key must be base64 encoded"},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
+				err := validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
 					sshPrivateKey:    tt.key,
 					sshPrivateKeySet: true,
 				})
@@ -1259,7 +1342,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 			})
 		}
 
-		err := validateClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
+		err := validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
 			sshPrivateKey:    base64.StdEncoding.EncodeToString([]byte("rotated-private-key")),
 			sshPrivateKeySet: true,
 		})
@@ -1307,7 +1390,7 @@ func TestValidateClusterConfigurationUpdate(t *testing.T) {
 			},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateClusterConfigurationUpdate(tt.cluster, tt.update)
+				err := validateInitializedClusterConfigurationUpdate(tt.cluster, tt.update)
 
 				assert.ErrorContains(t, err, tt.hint)
 			})
