@@ -72,12 +72,39 @@ scrape_configs:
   - source_labels: [__meta_kubernetes_pod_label_workspace]
     action: keep
     regex: {{ .Workspace | quote }}
-  # Set the __address__ to pod IP and port 8000
+{{- if .InferenceScrapeRules.ExclusionRegex }}
+  # Drop engine versions that declared they do not export metrics. This is an
+  # exclusion list, not an allow list: an engine version that declares nothing
+  # is absent here and keeps being scraped, exactly as before engines could
+  # declare capabilities.
+  - source_labels: [__meta_kubernetes_pod_label_engine, __meta_kubernetes_pod_label_engine_version]
+    action: drop
+    regex: {{ .InferenceScrapeRules.ExclusionRegex | quote }}
+{{- end }}
+  # Set the __address__ to pod IP and port {{ .InferenceDefaultPort }}
   - source_labels: [__meta_kubernetes_pod_ip]
     action: replace
     target_label: __address__
     regex: (.+)
-    replacement: $1:8000
+    replacement: $1:{{ .InferenceDefaultPort }}
+{{- range .InferenceScrapeRules.Overrides }}
+  # {{ .Engine }} {{ .Version }} declared a non-default metrics endpoint. These
+  # rules come after the default above, so they win for the pods they match.
+{{- if .HasPort }}
+  - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_label_engine, __meta_kubernetes_pod_label_engine_version]
+    action: replace
+    target_label: __address__
+    regex: (.+);{{ .TargetRegex }}
+    replacement: $1:{{ .Port }}
+{{- end }}
+{{- if .HasPath }}
+  - source_labels: [__meta_kubernetes_pod_label_engine, __meta_kubernetes_pod_label_engine_version]
+    action: replace
+    target_label: __metrics_path__
+    regex: {{ .TargetRegex | quote }}
+    replacement: {{ .Path | quote }}
+{{- end }}
+{{- end }}
   # Add pod metadata as labels
   - source_labels: [__meta_kubernetes_namespace]
     action: replace
