@@ -51,10 +51,11 @@ func NewGetCmd() *cobra.Command {
 	opts := &getOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "get [model_name:version]",
-		Short: "Get detailed information about a model",
-		Long:  `Get detailed information about a specific model in the registry`,
-		Args:  cobra.ExactArgs(1),
+		Use:          "get [model_name:version]",
+		Short:        "Get detailed information about a model",
+		Long:         `Get detailed information about a specific model in the registry`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGet(opts, args[0])
 		},

@@ -141,6 +141,27 @@ func TestListSurfacesTheServersMessage(t *testing.T) {
 	require.Equal(t, message+" (HTTP 400)", err.Error())
 }
 
+// Deleting is refused by the same registries that refuse to be paged, and for
+// the same kind of reason. The message the server wrote is the answer, so it
+// reads the same way here as it does for a listing rather than arriving as a
+// JSON body quoted inside a transport error.
+func TestDeleteSurfacesTheServersMessage(t *testing.T) {
+	const message = "Failed to delete model: operation not supported for Hugging Face registry"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodDelete, r.Method)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"` + message + `"}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, WithAPIKey("api-key"))
+
+	err := c.Models.Delete("default", "registry", "gpt2", "latest")
+	require.Error(t, err)
+	require.Equal(t, message+" (HTTP 400)", err.Error())
+}
+
 // A body that carries no message still has to reach the user intact — it is all
 // there is to go on.
 func TestResponseErrorFallsBackToTheRawBody(t *testing.T) {

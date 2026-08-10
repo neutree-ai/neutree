@@ -16,10 +16,11 @@ func NewPullCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "pull [model_name:version]",
-		Short: "Pull a model from the registry",
-		Long:  `Download a model from the registry to local directory`,
-		Args:  cobra.ExactArgs(1),
+		Use:          "pull [model_name:version]",
+		Short:        "Pull a model from the registry",
+		Long:         `Download a model from the registry to local directory`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modelTag := args[0]
 

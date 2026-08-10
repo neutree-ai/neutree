@@ -73,6 +73,29 @@ func NewPushCmd() *cobra.Command {
 				labels[key] = value
 			}
 
+			clientOptions := []client.ClientOption{
+				client.WithAPIKey(global.APIKey),
+				client.WithTimeout(0),
+			}
+
+			if global.Insecure {
+				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
+			}
+
+			// Create client
+			c := client.NewClient(global.ServerURL, clientOptions...)
+			modelRegistry, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
+			if err != nil {
+				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
+			}
+
+			// Ask what kind of registry this is before archiving anything: a
+			// registry that cannot take a push refuses it either way, and doing so
+			// here costs the user nothing instead of an archive and an upload.
+			if err := cliModel.ValidateWritableRegistry(modelRegistry, cliModel.ModelWritePush); err != nil {
+				return err
+			}
+
 			// If modelPath is a directory, tar‑gz it into a temp *.bentomodel
 			if info.IsDir() {
 				// Calculate directory size for progress bar
@@ -94,22 +117,6 @@ func NewPushCmd() *cobra.Command {
 
 				modelPath = archivePath
 				defer os.Remove(archivePath)
-			}
-
-			clientOptions := []client.ClientOption{
-				client.WithAPIKey(global.APIKey),
-				client.WithTimeout(0),
-			}
-
-			if global.Insecure {
-				clientOptions = append(clientOptions, client.WithInsecureSkipVerify())
-			}
-
-			// Create client
-			c := client.NewClient(global.ServerURL, clientOptions...)
-			modelRegistry, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
-			if err != nil {
-				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
 			}
 
 			if localNFSPath != "" {
