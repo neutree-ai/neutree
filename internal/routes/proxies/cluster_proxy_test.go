@@ -598,6 +598,43 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
+	t.Run("allows empty kubeconfig for an initialized Kubernetes cluster", func(t *testing.T) {
+		for _, kubeconfig := range []string{`""`, "null"} {
+			t.Run(kubeconfig, func(t *testing.T) {
+				mockStorage := storageMocks.NewMockStorage(t)
+				query := url.Values{"id": []string{"eq.1"}}
+				mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+					return sameFilters(opt.Filters, queryParamsToFilters(query))
+				})).Return([]v1.Cluster{{
+					Spec: &v1.ClusterSpec{
+						Type: v1.KubernetesClusterType,
+						Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+							Kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "old-token"),
+						}},
+					},
+					Status: &v1.ClusterStatus{Initialized: true},
+				}}, nil).Once()
+
+				proxyCalled := false
+				router := gin.New()
+				router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+					proxyCalled = true
+					c.Status(http.StatusNoContent)
+				})
+
+				body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%s}}}}`, kubeconfig)
+				req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
+				recorder := httptest.NewRecorder()
+
+				router.ServeHTTP(recorder, req)
+
+				assert.True(t, proxyCalled)
+				assert.Equal(t, http.StatusNoContent, recorder.Code)
+				mockStorage.AssertExpectations(t)
+			})
+		}
+	})
+
 	t.Run("rejects kubeconfig rotation for a different Kubernetes API server", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -670,6 +707,42 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
+	t.Run("rejects clearing Kubernetes config on an initialized cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.KubernetesClusterType,
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "old-token"),
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"config": {"kubernetes_config": null}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "kubernetes_config cannot be cleared")
+		mockStorage.AssertExpectations(t)
+	})
+
 	t.Run("allows SSH private key rotation for an initialized cluster", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -704,35 +777,36 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
-	t.Run("rejects empty SSH private key for an initialized cluster", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		query := url.Values{"id": []string{"eq.1"}}
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{{
-			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
-			Status: &v1.ClusterStatus{Initialized: true},
-		}}, nil)
+	t.Run("allows empty SSH private key for an initialized cluster", func(t *testing.T) {
+		for _, sshPrivateKey := range []string{`""`, "null"} {
+			t.Run(sshPrivateKey, func(t *testing.T) {
+				mockStorage := storageMocks.NewMockStorage(t)
+				query := url.Values{"id": []string{"eq.1"}}
+				mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+					return sameFilters(opt.Filters, queryParamsToFilters(query))
+				})).Return([]v1.Cluster{{
+					Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
+					Status: &v1.ClusterStatus{Initialized: true},
+				}}, nil).Once()
 
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
+				proxyCalled := false
+				router := gin.New()
+				router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+					proxyCalled = true
+					c.Status(http.StatusNoContent)
+				})
 
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": " "}}}}
-		}`))
-		recorder := httptest.NewRecorder()
+				body := fmt.Sprintf(`{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":%s}}}}}`, sshPrivateKey)
+				req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
+				recorder := httptest.NewRecorder()
 
-		router.ServeHTTP(recorder, req)
+				router.ServeHTTP(recorder, req)
 
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "SSH private key cannot be empty")
-		mockStorage.AssertExpectations(t)
+				assert.True(t, proxyCalled)
+				assert.Equal(t, http.StatusNoContent, recorder.Code)
+				mockStorage.AssertExpectations(t)
+			})
+		}
 	})
 
 	t.Run("rejects malformed SSH private key for an initialized cluster", func(t *testing.T) {
@@ -799,6 +873,42 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
 		assert.Contains(t, recorder.Body.String(), "SSH auth cannot be cleared")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects clearing SSH config on an initialized cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.SSHClusterType,
+				Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Auth: v1.Auth{SSHPrivateKey: "old-private-key"},
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"config": {"ssh_config": null}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "ssh_config cannot be cleared")
 		mockStorage.AssertExpectations(t)
 	})
 
@@ -1269,10 +1379,10 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 			hint       string
 		}{
 			{
-				name:       "empty updated kubeconfig",
+				name:       "blank updated kubeconfig",
 				current:    initializedKubernetesCluster(validCurrent),
 				kubeconfig: " ",
-				hint:       "kubeconfig cannot be empty",
+				hint:       "failed to parse updated kubeconfig",
 			},
 			{
 				name:       "missing current Kubernetes config",
@@ -1318,6 +1428,15 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("allows empty Kubernetes credential backfill", func(t *testing.T) {
+		err := validateInitializedClusterConfigurationUpdate(
+			initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token")),
+			clusterPatchConfigurationUpdate{kubeconfigSet: true},
+		)
+
+		assert.NoError(t, err)
+	})
+
 	t.Run("validates SSH private-key rotations", func(t *testing.T) {
 		cluster := &v1.Cluster{
 			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
@@ -1329,7 +1448,7 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 			key  string
 			hint string
 		}{
-			{name: "empty private key", key: " ", hint: "SSH private key cannot be empty"},
+			{name: "blank private key", key: " ", hint: "SSH private key must be base64 encoded"},
 			{name: "invalid base64", key: "not-base64", hint: "SSH private key must be base64 encoded"},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
@@ -1344,6 +1463,11 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 
 		err := validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
 			sshPrivateKey:    base64.StdEncoding.EncodeToString([]byte("rotated-private-key")),
+			sshPrivateKeySet: true,
+		})
+		assert.NoError(t, err)
+
+		err = validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
 			sshPrivateKeySet: true,
 		})
 		assert.NoError(t, err)

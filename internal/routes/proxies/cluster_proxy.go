@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -434,11 +433,7 @@ func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update c
 			return errors.New("kubernetes_config cannot be cleared for an initialized cluster")
 		}
 
-		if update.kubeconfigSet {
-			if strings.TrimSpace(update.kubeconfig) == "" {
-				return errors.New("kubeconfig cannot be empty for an initialized cluster")
-			}
-
+		if update.kubeconfigSet && update.kubeconfig != "" {
 			currentKubeconfig, err := util.GetKubeConfigFromCluster(current)
 			if err != nil {
 				return fmt.Errorf("failed to read current kubeconfig: %w", err)
@@ -470,10 +465,6 @@ func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update c
 		}
 
 		if update.sshPrivateKeySet {
-			if strings.TrimSpace(update.sshPrivateKey) == "" {
-				return errors.New("SSH private key cannot be empty for an initialized cluster")
-			}
-
 			if _, err := base64.StdEncoding.DecodeString(update.sshPrivateKey); err != nil {
 				return fmt.Errorf("SSH private key must be base64 encoded: %w", err)
 			}

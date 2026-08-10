@@ -824,24 +824,34 @@ func Test_mergeExcludedFields(t *testing.T) {
 		assert.Equal(t, "updated", target["spec"].(map[string]interface{})["type"])
 	})
 
-	t.Run("handle empty string as missing", func(t *testing.T) {
-		target := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "",
-			},
-		}
-		source := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "should_be_merged",
-			},
-		}
-		excludeFields := map[string]struct{}{
-			"spec.credentials": {},
-		}
+	t.Run("handle empty values as missing", func(t *testing.T) {
+		for _, tt := range []struct {
+			name       string
+			credential interface{}
+		}{
+			{name: "empty string", credential: ""},
+			{name: "nil", credential: nil},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				target := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": tt.credential,
+					},
+				}
+				source := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": "should_be_merged",
+					},
+				}
+				excludeFields := map[string]struct{}{
+					"spec.credentials": {},
+				}
 
-		mergeExcludedFields(target, source, excludeFields, nil)
+				mergeExcludedFields(target, source, excludeFields, nil)
 
-		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+				assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+			})
+		}
 	})
 
 	t.Run("merge excluded field inside array elements", func(t *testing.T) {
