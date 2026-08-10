@@ -19,10 +19,11 @@ type StaticNodeClusterController struct {
 }
 
 type StaticNodeClusterControllerOption struct {
-	Storage                    storage.Storage
-	Planner                    *staticcluster.Planner
-	AcceleratorProfileProvider staticcluster.AcceleratorProfileProvider
-	MetricsRemoteWriteURL      string
+	Storage                          storage.Storage
+	Planner                          *staticcluster.Planner
+	ClusterProfileComponentsResolver staticcluster.ClusterProfileComponentsResolver
+	AcceleratorProfileProvider       staticcluster.AcceleratorProfileProvider
+	MetricsRemoteWriteURL            string
 }
 
 func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (*StaticNodeClusterController, error) {
@@ -36,10 +37,17 @@ func NewStaticNodeClusterController(option *StaticNodeClusterControllerOption) (
 
 	planner := option.Planner
 	if planner == nil {
-		planner = &staticcluster.Planner{
-			AcceleratorProfileProvider: option.AcceleratorProfileProvider,
-			MetricsRemoteWriteURL:      option.MetricsRemoteWriteURL,
+		if option.ClusterProfileComponentsResolver == nil {
+			return nil, errors.New("cluster profile component resolver is required")
 		}
+
+		planner = &staticcluster.Planner{
+			ClusterProfileComponentsResolver: option.ClusterProfileComponentsResolver,
+			AcceleratorProfileProvider:       option.AcceleratorProfileProvider,
+			MetricsRemoteWriteURL:            option.MetricsRemoteWriteURL,
+		}
+	} else if planner.ClusterProfileComponentsResolver == nil {
+		return nil, errors.New("cluster profile component resolver is required")
 	}
 
 	return &StaticNodeClusterController{

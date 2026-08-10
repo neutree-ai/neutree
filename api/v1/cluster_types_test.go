@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,4 +55,12 @@ func TestClusterAcceleratorVirtualizationDisabledWhenMissing(t *testing.T) {
 
 	spec.AcceleratorVirtualization = &AcceleratorVirtualizationSpec{}
 	assert.False(t, spec.AcceleratorVirtualizationEnabled())
+}
+
+func TestClusterStatusAPIShapeOmitsLegacyReleaseState(t *testing.T) {
+	statusType := reflect.TypeOf(ClusterStatus{})
+	for _, field := range []string{"ReleaseInfo", "ReleaseCompatibility"} {
+		_, found := statusType.FieldByName(field)
+		assert.False(t, found, "Cluster.status must not expose legacy %s", field)
+	}
 }

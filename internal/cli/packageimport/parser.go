@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 )
 
 const (
@@ -108,14 +111,18 @@ func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
 		return nil, errors.New("manifest_version is required")
 	}
 
-	if len(manifest.Engines) == 0 {
-		return nil, errors.New("at least one engine entry is required in manifest")
+	if len(manifest.Engines) == 0 && manifest.ClusterProfile == nil {
+		return nil, errors.New("at least one engine entry is required when cluster_profile is not set")
 	}
 
 	for idx := range manifest.Engines {
 		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
 			return nil, errors.Wrap(err, "invalid engine configuration in manifest")
 		}
+	}
+
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return nil, errors.Wrap(err, "invalid cluster profile in manifest")
 	}
 
 	return manifest, nil
@@ -149,6 +156,43 @@ func (p *Parser) validateManifest(manifest *PackageManifest, extractedPath strin
 	for idx := range manifest.Engines {
 		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
 			return errors.Wrap(err, "invalid engine configuration in manifest")
+		}
+	}
+
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return errors.Wrap(err, "invalid cluster profile in manifest")
+	}
+
+	return nil
+}
+
+func (p *Parser) validateClusterProfile(profile *ClusterProfile) error {
+	if profile == nil {
+		return nil
+	}
+
+	if _, err := releaseinfo.NormalizeClusterMinor(profile.Version); err != nil {
+		return err
+	}
+
+	components := []struct {
+		name string
+		ref  ClusterImageRef
+	}{
+		{name: "ray_runtime", ref: profile.Components.RayRuntime},
+		{name: "router", ref: profile.Components.Router},
+		{name: "node_agent", ref: profile.Components.NodeAgent},
+		{name: "node_exporter", ref: profile.Components.NodeExporter},
+		{name: "vmagent", ref: profile.Components.VMAgent},
+		{name: "kube_state_metrics", ref: profile.Components.KubeStateMetrics},
+	}
+	for _, component := range components {
+		if strings.TrimSpace(component.ref.Image) == "" {
+			return errors.Errorf("cluster_profile.components.%s.image is required", component.name)
+		}
+
+		if strings.TrimSpace(component.ref.Tag) == "" {
+			return errors.Errorf("cluster_profile.components.%s.tag is required", component.name)
 		}
 	}
 

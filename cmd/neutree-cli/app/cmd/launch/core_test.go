@@ -75,7 +75,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 
 			// Verify flags
 			for flag, expectedValue := range tt.expectedFields {
-				flagValue, err := cmd.PersistentFlags().GetString(flag)
+				flagValue, err := cmd.Flags().GetString(flag)
 				require.NoError(t, err)
 				assert.Equal(t, expectedValue, flagValue)
 			}
@@ -242,95 +242,6 @@ func TestPrepareNeutreeCoreDeployConfig_PreservesVRLOperators(t *testing.T) {
 	require.NoError(t, err)
 	// The NEU-539 chunking threshold must survive rendering verbatim.
 	assert.Contains(t, string(vector), "<= 1572864")
-}
-
-func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
-	tests := []struct {
-		name          string
-		cliVersion    string
-		targetVersion string
-		wantErr       string
-	}{
-		{
-			name:          "allows target version in same v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.2.0-nightly-20260730",
-		},
-		{
-			name:          "allows enterprise version in same v1.2 release line",
-			cliVersion:    "v1.2.0-enterprise",
-			targetVersion: "v1.2.0-enterprise",
-		},
-		{
-			name:          "allows v1.2 release target",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.2.0",
-		},
-		{
-			name:          "allows git describe prerelease version in same release line",
-			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
-			targetVersion: "v1.2.0-nightly-20260730",
-		},
-		{
-			name:          "git describe CLI keeps development build flexibility",
-			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
-			targetVersion: fallbackNeutreeCoreVersion,
-		},
-		{
-			name:          "rejects target version below v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.1.0-nightly-20260728",
-			wantErr:       "not compatible",
-		},
-		{
-			name:          "rejects target version at v1.3 release-line boundary",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.3.0-0",
-			wantErr:       "not compatible",
-		},
-		{
-			name:          "rejects target version above v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.3.0-nightly-20260730",
-			wantErr:       "not compatible",
-		},
-		{
-			name:          "rejects previous release line because only current release policy is configured",
-			cliVersion:    "v1.1.0-enterprise",
-			targetVersion: "v1.1.0-enterprise",
-			wantErr:       "no configured",
-		},
-		{
-			name:          "rejects invalid target version",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "not-a-version",
-			wantErr:       "invalid target version",
-		},
-		{
-			name:          "development CLI still validates target version format",
-			cliVersion:    "dev",
-			targetVersion: "v1.1.0",
-		},
-		{
-			name:          "development CLI rejects invalid target version",
-			cliVersion:    "dev",
-			targetVersion: "not-a-version",
-			wantErr:       "invalid target version",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateNeutreeCoreVersionCompatibility(tt.cliVersion, tt.targetVersion)
-			if tt.wantErr == "" {
-				require.NoError(t, err)
-				return
-			}
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.wantErr)
-		})
-	}
 }
 
 func TestDefaultNeutreeCoreVersion(t *testing.T) {
@@ -502,80 +413,36 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 	mockExecutor.AssertExpectations(t)
 }
 
-func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMutation(t *testing.T) {
-	tempDir := t.TempDir()
-	composeDir := filepath.Join(tempDir, "neutree-core")
-	require.NoError(t, os.MkdirAll(composeDir, 0755))
-
-	composeFile := filepath.Join(composeDir, "docker-compose.yml")
-	const sentinel = "sentinel: keep-this-file\n"
-	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
-
-	oldGetCLIAppVersion := getCLIAppVersion
-	getCLIAppVersion = func() string {
-		return "v1.2.0-nightly-20260729"
-	}
-	t.Cleanup(func() {
-		getCLIAppVersion = oldGetCLIAppVersion
-	})
-
-	mockExecutor := &mocks.MockExecutor{}
-	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+func TestInstallNeutreeCoreSingleNodeByDockerDryRunAcceptsReleaseArtifactTag(t *testing.T) {
+	err := installNeutreeCoreSingleNodeByDocker(nil, neutreeCoreInstallOptions{
 		commonOptions: &commonOptions{
-			workDir:    tempDir,
+			workDir:    t.TempDir(),
 			nodeIP:     "192.168.1.1",
 			deployType: constants.DeployTypeLocal,
 			deployMode: constants.DeployModeSingle,
+			dryRun:     true,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.1.0-nightly-20260728",
+		version:   "6776e1f",
 	})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not compatible")
-	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
-
-	got, readErr := os.ReadFile(composeFile)
-	require.NoError(t, readErr)
-	assert.Equal(t, sentinel, string(got))
+	require.NoError(t, err)
 }
 
-func TestInstallNeutreeCoreSingleNodeByDockerRejectsEmptyVersionBeforeMutation(t *testing.T) {
-	tempDir := t.TempDir()
-	composeDir := filepath.Join(tempDir, "neutree-core")
-	require.NoError(t, os.MkdirAll(composeDir, 0755))
-
-	composeFile := filepath.Join(composeDir, "docker-compose.yml")
-	const sentinel = "sentinel: keep-this-file\n"
-	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
-
-	oldGetCLIAppVersion := getCLIAppVersion
-	getCLIAppVersion = func() string {
-		return "dev"
-	}
-	t.Cleanup(func() {
-		getCLIAppVersion = oldGetCLIAppVersion
-	})
-
-	mockExecutor := &mocks.MockExecutor{}
-	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+func TestInstallNeutreeCoreSingleNodeByDockerDryRunRejectsBlankImageTag(t *testing.T) {
+	err := installNeutreeCoreSingleNodeByDocker(nil, neutreeCoreInstallOptions{
 		commonOptions: &commonOptions{
-			workDir:    tempDir,
+			workDir:    t.TempDir(),
 			nodeIP:     "192.168.1.1",
 			deployType: constants.DeployTypeLocal,
 			deployMode: constants.DeployModeSingle,
+			dryRun:     true,
 		},
 		jwtSecret: "test-secret",
-		version:   "",
+		version:   " \t ",
 	})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid target version")
-	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
-
-	got, readErr := os.ReadFile(composeFile)
-	require.NoError(t, readErr)
-	assert.Equal(t, sentinel, string(got))
+	require.EqualError(t, err, "neutree core image tag is required")
 }
 
 func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompose(t *testing.T) {

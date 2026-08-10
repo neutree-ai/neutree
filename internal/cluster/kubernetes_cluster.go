@@ -27,16 +27,51 @@ type NativeKubernetesClusterReconciler struct {
 	storage               storage.Storage
 	acceleratorMgr        accelerator.Manager
 	metricsRemoteWriteURL string
+	profileComponents     v1.ClusterProfileComponents
+	profileSelected       bool
 }
 
 func NewNativeKubernetesClusterReconciler(
 	storage storage.Storage,
 	acceleratorMgr accelerator.Manager,
 	metricsRemoteWriteURL string) *NativeKubernetesClusterReconciler {
+	return newNativeKubernetesClusterReconciler(
+		storage,
+		acceleratorMgr,
+		metricsRemoteWriteURL,
+		v1.ClusterProfileComponents{},
+		false,
+	)
+}
+
+func NewNativeKubernetesClusterReconcilerWithClusterProfileComponents(
+	storage storage.Storage,
+	acceleratorMgr accelerator.Manager,
+	metricsRemoteWriteURL string,
+	profileComponents v1.ClusterProfileComponents,
+) *NativeKubernetesClusterReconciler {
+	return newNativeKubernetesClusterReconciler(
+		storage,
+		acceleratorMgr,
+		metricsRemoteWriteURL,
+		profileComponents,
+		true,
+	)
+}
+
+func newNativeKubernetesClusterReconciler(
+	storage storage.Storage,
+	acceleratorMgr accelerator.Manager,
+	metricsRemoteWriteURL string,
+	profileComponents v1.ClusterProfileComponents,
+	profileSelected bool,
+) *NativeKubernetesClusterReconciler {
 	c := &NativeKubernetesClusterReconciler{
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		storage:               storage,
 		acceleratorMgr:        acceleratorMgr,
+		profileComponents:     profileComponents,
+		profileSelected:       profileSelected,
 	}
 
 	return c
@@ -46,8 +81,10 @@ func (c *NativeKubernetesClusterReconciler) Reconcile(ctx context.Context, clust
 	WriteEarlyStatus(cluster, c.storage)
 
 	reconcileCtx := &ReconcileContext{
-		Cluster: cluster,
-		Ctx:     ctx,
+		Cluster:           cluster,
+		Ctx:               ctx,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 		logger:           klog.LoggerWithValues(klog.Background(), "cluster", cluster.Metadata.WorkspaceName()),
@@ -161,9 +198,35 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
+	var routerComp *router.RouterComponent
+
+	if reconcileCtx.ProfileSelected {
+		routerImage, err := profileImage("router", reconcileCtx.ProfileComponents.Router)
+		if err != nil {
+			return err
+		}
+
+		routerComp = router.NewRouterComponentWithImage(
+			reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace,
+			imagePrefix,
+			ImagePullSecretName,
+			routerImage,
+			*reconcileCtx.kubernetesClusterConfig,
+			reconcileCtx.ctrClient,
+		)
+	} else {
+		routerComp = router.NewRouterComponent(
+			reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace,
+			imagePrefix,
+			ImagePullSecretName,
+			*reconcileCtx.kubernetesClusterConfig,
+			reconcileCtx.ctrClient,
+		)
+	}
+
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
-	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
 	reconcileComps = append(reconcileComps, routerComp)
 
 	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
@@ -210,9 +273,32 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	reconcileDeleteComps := []component.Component{}
 
 	// Only install metrics component when metrics remote write url is valid.
-	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
+	var metricsComp *metrics.MetricsComponent
+	if reconcileCtx.ProfileSelected {
+		metricsComp = metrics.NewMetricsComponentWithClusterProfileComponents(
+			reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace,
+			imagePrefix,
+			ImagePullSecretName,
+			c.metricsRemoteWriteURL,
+			*reconcileCtx.kubernetesClusterConfig,
+			reconcileCtx.ctrClient,
+			c.acceleratorMgr,
+			reconcileCtx.ProfileComponents,
+		)
+	} else {
+		metricsComp = metrics.NewMetricsComponent(
+			reconcileCtx.Cluster,
+			reconcileCtx.clusterNamespace,
+			imagePrefix,
+			ImagePullSecretName,
+			c.metricsRemoteWriteURL,
+			*reconcileCtx.kubernetesClusterConfig,
+			reconcileCtx.ctrClient,
+			c.acceleratorMgr,
+		)
+	}
+
 	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
 		reconcileComps = append(reconcileComps, metricsComp)
 	} else {
@@ -235,8 +321,10 @@ func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context,
 	WriteEarlyDeleting(cluster, c.storage)
 
 	reconcileCtx := &ReconcileContext{
-		Cluster: cluster,
-		Ctx:     ctx,
+		Cluster:           cluster,
+		Ctx:               ctx,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 	}

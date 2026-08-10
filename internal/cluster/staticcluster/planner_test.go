@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
-				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Image: "example.com/accelerator/dcgm-exporter:test",
 				Args:  []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 				Env: map[string]string{
 					"NVIDIA_VISIBLE_DEVICES": "all",
@@ -115,7 +116,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
-		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+		acceleratorExporterComponentName: "registry.example.com/neutree/accelerator/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 	assertNodeComponentNames(t, head.Spec.Components, []string{
@@ -134,7 +135,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, 19100, nodeExporter.HealthCheck.Port)
 	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
 	require.NotNil(t, exporter)
-	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
+	assert.Equal(t, "registry.example.com/neutree/accelerator/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
 	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
@@ -254,6 +255,141 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 
 	cluster.Spec.Version = "mutated"
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
+}
+
+func TestPlannerPlanRendersExactClusterProfileRayRuntime(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		tag     string
+	}{
+		{name: "stable", version: "v1.2.0", tag: "v1.1.1"},
+		{name: "minimum alpha", version: "v1.1.0-alpha.1", tag: "v1.1.0-alpha.1"},
+		{name: "minimum release candidate", version: "v1.1.0-rc.1", tag: "v1.1.0-rc.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster := testStaticNodeCluster()
+			cluster.Spec.Version = tt.version
+			resolvedVersion := ""
+			planner := &Planner{
+				ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+					resolvedVersion = version
+
+					return v1.ClusterProfileComponents{
+						RayRuntime:   v1.ImageRef{Image: "neutree/neutree-serve", Tag: tt.tag},
+						NodeExporter: v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "node-exporter-" + tt.tag},
+						NodeAgent:    v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "node-agent-" + tt.tag},
+						VMAgent:      v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "vmagent-" + tt.tag},
+					}, nil
+				}),
+				MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
+			}
+			currentNodes := []*v1.StaticNode{
+				staticNodeStatusWithAccelerator(
+					"head-0",
+					v1.StaticNodeRoleHead,
+					v1.StaticNodePhaseReady,
+					true,
+					cpuAcceleratorStatus(),
+					nil,
+				),
+			}
+
+			nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+
+			assert.Equal(t, tt.version, resolvedVersion)
+			head := findStaticNode(nodes, "head-0")
+			require.NotNil(t, head)
+			rayHead := findComponent(head.Spec.Components, rayHeadComponentName)
+			nodeExporter := findComponent(head.Spec.Components, nodeExporterComponentName)
+			nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+			vmagent := findComponent(head.Spec.Components, vmagentComponentName)
+			require.NotNil(t, rayHead)
+			require.NotNil(t, nodeExporter)
+			require.NotNil(t, nodeAgent)
+			require.NotNil(t, vmagent)
+			assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:"+tt.tag, rayHead.Image)
+			assert.Equal(t, "registry.example.com/neutree/prometheus/node-exporter:node-exporter-"+tt.tag, nodeExporter.Image)
+			assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:node-agent-"+tt.tag, nodeAgent.Image)
+			assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:vmagent-"+tt.tag, vmagent.Image)
+		})
+	}
+}
+
+func TestPlannerPlanLegacyVersionSkipsClusterProfileResolver(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.0.3"
+	resolverCalls := 0
+	planner := &Planner{
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(string) (v1.ClusterProfileComponents, error) {
+			resolverCalls++
+
+			return v1.ClusterProfileComponents{}, fmt.Errorf("profile is unavailable")
+		}),
+	}
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+
+	assert.Zero(t, resolverCalls)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	rayHead := findComponent(head.Spec.Components, rayHeadComponentName)
+	require.NotNil(t, rayHead)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.0.3", rayHead.Image)
+}
+
+func TestPlannerRejectsProfileAwareVersionWithoutClusterProfileResolver(t *testing.T) {
+	components, selected, err := (&Planner{}).profileComponents("v1.2.0")
+
+	require.ErrorContains(t, err, "cluster profile component resolver is required")
+	assert.False(t, selected)
+	assert.Empty(t, components)
+}
+
+func TestPlannerRejectsSelectedProfileMissingRayRuntimeTag(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+			assert.Equal(t, cluster.Spec.Version, version)
+			return v1.ClusterProfileComponents{
+				RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve"},
+			}, nil
+		}),
+	}
+
+	_, err := planner.Plan(context.Background(), cluster, currentNodes)
+
+	require.ErrorContains(t, err, "cluster profile component ray_runtime requires image and tag")
 }
 
 func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
@@ -493,32 +629,16 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 
 			head := findStaticNode(nodes, "head-0")
 			require.NotNil(t, head)
-			assertNodeComponentNames(t, head.Spec.Components, []string{
-				"ray-head",
-				nodeExporterComponentName,
-				acceleratorExporterComponentName,
-				nodeAgentComponentName,
-			})
-			assert.Nil(t, findComponent(head.Spec.Components, vmagentComponentName))
+			assertNodeComponentNames(t, head.Spec.Components, []string{"ray-head"})
 			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
-				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
-				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
+				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 			})
 
 			worker := findStaticNode(nodes, "worker-0")
 			require.NotNil(t, worker)
-			assertNodeComponentNames(t, worker.Spec.Components, []string{
-				"ray-worker",
-				nodeExporterComponentName,
-				nodeAgentComponentName,
-			})
-			assert.Nil(t, findComponent(worker.Spec.Components, vmagentComponentName))
+			assertNodeComponentNames(t, worker.Spec.Components, []string{"ray-worker"})
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
-				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
-				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				"ray-runtime": "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 			})
 		})
 	}
@@ -630,7 +750,7 @@ func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-rc.1", defaultNodeAgentImage(cluster))
 }
 
-func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
+func TestPlannerUsesClusterProfileRuntimeImage(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
 		staticNodeStatusWithAccelerator(
@@ -652,14 +772,20 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	}
 
 	nodes := plannedStaticNodes(t, &Planner{
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+			assert.Equal(t, cluster.Spec.Version, version)
+			return v1.ClusterProfileComponents{
+				RayRuntime:   v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+				NodeExporter: v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+				NodeAgent:    v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0-rc.1"},
+				VMAgent:      v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
+			}, nil
+		}),
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-					ClusterRuntime: &v1.RuntimeConfig{
-						ImageSuffix: "cuda",
-						Runtime:     "nvidia",
-					},
+					ClusterRuntime:  &v1.RuntimeConfig{Runtime: "nvidia"},
 				},
 			},
 		},
@@ -670,9 +796,9 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	require.NotNil(t, head)
 	rayHead := findComponent(head.Spec.Components, "ray-head")
 	require.NotNil(t, rayHead)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda", rayHead.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.1.1", rayHead.Image)
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
-		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
+		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.1.1",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
 		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
@@ -745,7 +871,7 @@ func TestPlannerPlanValidation(t *testing.T) {
 			cluster := testStaticNodeCluster()
 			tt.mutate(cluster)
 
-			_, err := (&Planner{}).Plan(context.Background(), cluster, nil)
+			_, err := testPlanner().Plan(context.Background(), cluster, nil)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
@@ -800,7 +926,7 @@ func TestPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 		},
 	}
 
-	desiredNodePlans, err := (&Planner{
+	desiredNodePlans, err := withTestClusterProfileResolver(&Planner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
@@ -870,7 +996,7 @@ func TestPlannerPlansRayRecreateUpgradeOrder(t *testing.T) {
 				tt.mutate(currentNodes)
 			}
 
-			desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+			desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
 			status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -931,7 +1057,7 @@ func TestPlannerKeepsTargetWorkerSpecDuringRayRecreateUpgrade(t *testing.T) {
 			currentNodes := staticNodeUpgradeCurrentNodes()
 			markUpgradeHeadTargetRunning(currentNodes)
 
-			targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+			targetPlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 			require.NoError(t, err)
 			targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
 			require.NotNil(t, targetWorker)
@@ -946,7 +1072,7 @@ func TestPlannerKeepsTargetWorkerSpecDuringRayRecreateUpgrade(t *testing.T) {
 				Reason: "transitional state",
 			}}
 
-			desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+			desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
 			status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -970,7 +1096,7 @@ func TestPlannerKeepsTargetWorkerSpecWhenHeadTemporarilyLeavesTarget(t *testing.
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	markUpgradeHeadTargetRunning(currentNodes)
 
-	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	targetPlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 	require.NoError(t, err)
 	targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
 	require.NotNil(t, targetWorker)
@@ -996,7 +1122,7 @@ func TestPlannerKeepsTargetWorkerSpecWhenHeadTemporarilyLeavesTarget(t *testing.
 		ObservedImage: "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 	}}
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1043,7 +1169,7 @@ func TestPlannerContinuesStartingWorkersForPartiallyIssuedWorkerSpecs(t *testing
 		Phase: v1.NodeComponentPhaseStopped,
 	}}
 
-	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	targetPlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 	require.NoError(t, err)
 	targetWorkerZero := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
 	require.NotNil(t, targetWorkerZero)
@@ -1054,7 +1180,7 @@ func TestPlannerContinuesStartingWorkersForPartiallyIssuedWorkerSpecs(t *testing
 		Phase: v1.NodeComponentPhaseStarting,
 	}}
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1079,7 +1205,7 @@ func TestPlannerDoesNotTreatDifferentWorkerSpecAsTarget(t *testing.T) {
 	currentNodes := staticNodeUpgradeCurrentNodes()
 	markUpgradeHeadTargetRunning(currentNodes)
 
-	targetPlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	targetPlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 	require.NoError(t, err)
 	targetWorker := findStaticNode(staticNodesFromPlans(targetPlans), "worker-0")
 	require.NotNil(t, targetWorker)
@@ -1099,7 +1225,7 @@ func TestPlannerDoesNotTreatDifferentWorkerSpecAsTarget(t *testing.T) {
 		Phase: v1.NodeComponentPhaseStarting,
 	}}
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1172,7 +1298,7 @@ func TestPlannerAdvancesRayRecreateUpgradeStep(t *testing.T) {
 				tt.mutate(currentNodes)
 			}
 
-			desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+			desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 			require.NoError(t, err)
 			status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1194,7 +1320,7 @@ func TestPlannerCompletesRayRecreateUpgradeWhenTargetReady(t *testing.T) {
 	targetImage := "registry.example.com/neutree/neutree/neutree-serve:v1.2.1"
 	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, targetImage)
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1203,7 +1329,7 @@ func TestPlannerCompletesRayRecreateUpgradeWhenTargetReady(t *testing.T) {
 	assert.Empty(t, status.ErrorMessage)
 }
 
-func TestPlannerCompletesRayRecreateUpgradeWithImageSuffix(t *testing.T) {
+func TestPlannerCompletesRayRecreateUpgradeWithTargetProfileImage(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v1.2.1"
 	cluster.Status = &v1.StaticNodeClusterStatus{
@@ -1222,12 +1348,23 @@ func TestPlannerCompletesRayRecreateUpgradeWithImageSuffix(t *testing.T) {
 			profiles: map[string]*v1.AcceleratorProfile{
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-					ClusterRuntime:  &v1.RuntimeConfig{ImageSuffix: "cuda"},
+					ClusterRuntime:  &v1.RuntimeConfig{},
 				},
 			},
 		},
+		ClusterProfileComponentsResolver: clusterProfileComponentsResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+			assert.Equal(t, "v1.2.1", version)
+			return v1.ClusterProfileComponents{
+				RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+			}, nil
+		}),
 	}
-	markStaticNodeUpgradeReady(t, planner, cluster, currentNodes, buildRayRuntimeImage(cluster, "cuda"))
+	targetImage, err := buildRayRuntimeImage(cluster, v1.ImageRef{
+		Image: "neutree/neutree-serve",
+		Tag:   "v1.1.1",
+	}, true)
+	require.NoError(t, err)
+	markStaticNodeUpgradeReady(t, planner, cluster, currentNodes, targetImage)
 
 	desiredNodePlans, err := planner.Plan(context.Background(), cluster, currentNodes)
 
@@ -1252,7 +1389,7 @@ func TestPlannerFailsUpgradeWhenNodeFails(t *testing.T) {
 	head.Status.Phase = v1.StaticNodePhaseFailed
 	head.Status.ErrorMessage = "ssh connection failed"
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1270,9 +1407,11 @@ func TestPlannerKeepsReadyWhenObservedVersionMatchesSpec(t *testing.T) {
 		Version: "v1.2.1",
 	}
 	currentNodes := staticNodeUpgradeCurrentNodes()
-	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, buildRayRuntimeImage(cluster))
+	targetImage, err := buildRayRuntimeImage(cluster, v1.ImageRef{}, false)
+	require.NoError(t, err)
+	markStaticNodeUpgradeReady(t, nil, cluster, currentNodes, targetImage)
 
-	desiredNodePlans, err := (&Planner{}).Plan(context.Background(), cluster, currentNodes)
+	desiredNodePlans, err := testPlanner().Plan(context.Background(), cluster, currentNodes)
 
 	require.NoError(t, err)
 	status := (StatusAggregator{}).Aggregate(cluster, currentNodes, desiredNodePlans)
@@ -1288,7 +1427,7 @@ func TestPlannerReturnsErrorWhenAcceleratorProfileMissing(t *testing.T) {
 		staticNodeWithAcceleratorStatus("worker-0", v1.StaticNodeRoleWorker, nvidiaAcceleratorStatus()),
 	}
 
-	desiredNodePlans, err := (&Planner{
+	desiredNodePlans, err := withTestClusterProfileResolver(&Planner{
 		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: map[string]*v1.AcceleratorProfile{}},
 	}).Plan(context.Background(), cluster, currentNodes)
 
@@ -1469,6 +1608,12 @@ func testStaticNodeCluster() *v1.StaticNodeCluster {
 			},
 		},
 	}
+}
+
+type clusterProfileComponentsResolverFunc func(string) (v1.ClusterProfileComponents, error)
+
+func (resolver clusterProfileComponentsResolverFunc) ComponentsFor(version string) (v1.ClusterProfileComponents, error) {
+	return resolver(version)
 }
 
 func staticNodeStatus(
@@ -1705,11 +1850,39 @@ func plannedStaticNodes(
 	currentNodes []*v1.StaticNode,
 ) []*v1.StaticNode {
 	t.Helper()
+	planner = withTestClusterProfileResolver(planner)
 
 	desiredNodePlans, err := planner.Plan(context.Background(), cluster, currentNodes)
 	require.NoError(t, err)
 
 	return staticNodesFromPlans(desiredNodePlans)
+}
+
+func testPlanner() *Planner {
+	return withTestClusterProfileResolver(&Planner{})
+}
+
+func withTestClusterProfileResolver(planner *Planner) *Planner {
+	if planner == nil {
+		planner = &Planner{}
+	}
+
+	if planner.ClusterProfileComponentsResolver == nil {
+		planner.ClusterProfileComponentsResolver = clusterProfileComponentsResolverFunc(
+			func(version string) (v1.ClusterProfileComponents, error) {
+				return v1.ClusterProfileComponents{
+					RayRuntime:       v1.ImageRef{Image: "neutree/neutree-serve", Tag: version},
+					Router:           v1.ImageRef{Image: "neutree/router", Tag: version},
+					NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: componentversion.NeutreeNodeAgent},
+					NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: componentversion.NodeExporter},
+					VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: componentversion.VictoriaMetrics},
+					KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: componentversion.KubeStateMetrics},
+				}, nil
+			},
+		)
+	}
+
+	return planner
 }
 
 func staticNodesFromPlans(plans []DesiredNodePlan) []*v1.StaticNode {
@@ -1833,7 +2006,7 @@ func markStaticNodeUpgradeReady(
 ) {
 	t.Helper()
 	if planner == nil {
-		planner = &Planner{}
+		planner = testPlanner()
 	}
 
 	for _, node := range nodes {

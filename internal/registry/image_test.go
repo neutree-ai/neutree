@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,6 +14,12 @@ import (
 )
 
 const testImageConfig = `{"architecture":"amd64","os":"linux","config":{"Labels":{"neutree.ai/cluster-version":"v1.2.0"}},"rootfs":{"type":"layers","diff_ids":[]}}`
+
+func TestImageServiceDoesNotExposeReleaseProfileAvailabilityCheck(t *testing.T) {
+	serviceType := reflect.TypeOf((*ImageService)(nil)).Elem()
+	_, exists := serviceType.MethodByName("CheckImageExists")
+	require.False(t, exists, "release-profile availability checks must not call the registry")
+}
 
 func TestImageService_CheckPullPermissionUsesConfiguredScheme(t *testing.T) {
 	tests := []struct {

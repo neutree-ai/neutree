@@ -14,11 +14,64 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+type ReleaseInfoProvider interface {
+	Current() (*v1.ReleaseInfo, error)
+}
+
+func validateClusterVersionCreate(s storage.Storage, provider ReleaseInfoProvider) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Request.Body.Close()
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+		c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		var cluster v1.Cluster
+		if err := json.Unmarshal(body, &cluster); err != nil {
+			c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+			c.Abort()
+
+			return
+		}
+
+		if provider == nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(errors.New("release info provider is required")))
+			c.Abort()
+
+			return
+		}
+
+		info, err := provider.Current()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(err))
+			c.Abort()
+
+			return
+		}
+
+		if err := validateClusterVersionCreateTarget(s, info, cluster.GetVersion()); err != nil {
+			c.JSON(http.StatusBadRequest, releaseInfoCreateValidationError(err))
+			c.Abort()
+
+			return
+		}
+
+		c.Next()
+	}
+}
 
 func validateClusterDeletion(s storage.Storage) middleware.DeletionValidatorFunc {
 	return func(workspace, name string) error {
@@ -107,7 +160,12 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 	}
 }
 
-func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
+func validateClusterVersionUpdate(s storage.Storage, providers ...ReleaseInfoProvider) gin.HandlerFunc {
+	var provider ReleaseInfoProvider
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
+
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -166,7 +224,22 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
+		if provider == nil {
+			c.JSON(http.StatusBadRequest, releaseInfoValidationError(errors.New("release info provider is required")))
+			c.Abort()
+
+			return
+		}
+
+		info, err := provider.Current()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, releaseInfoValidationError(err))
+			c.Abort()
+
+			return
+		}
+
+		if err := validateClusterVersionUpdateTarget(s, info, effectiveClusterVersionForUpdate(current), desiredVersion); err != nil {
 			c.JSON(http.StatusBadRequest, &validationError{
 				Code:    "10212",
 				Message: "invalid cluster version update",
@@ -179,6 +252,150 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func effectiveClusterVersionForUpdate(cluster *v1.Cluster) string {
+	if cluster != nil && cluster.Status != nil && cluster.Status.Version != "" {
+		return cluster.Status.Version
+	}
+
+	return cluster.GetVersion()
+}
+
+func releaseInfoValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version update",
+		Hint:    err.Error(),
+	}
+}
+
+func releaseInfoCreateValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version create",
+		Hint:    err.Error(),
+	}
+}
+
+func validateClusterVersionCreateTarget(s storage.Storage, info *v1.ReleaseInfo, version string) error {
+	if version == "" {
+		return errors.New("spec.version is required")
+	}
+
+	minor, err := validateCompatibleClusterVersion(info, version)
+	if err != nil {
+		return err
+	}
+
+	currentBaseline, err := releaseinfo.NormalizeClusterMinor(info.Metadata.Name)
+	if err != nil {
+		return fmt.Errorf("invalid current control-plane baseline: %w", err)
+	}
+
+	if !clusterMinorAtLeast(minor, currentBaseline) {
+		return fmt.Errorf("cluster version %s is below current control-plane baseline %s", version, info.Metadata.Name)
+	}
+
+	return requireExactClusterProfile(s, version)
+}
+
+func validateClusterVersionUpdateTarget(
+	s storage.Storage,
+	info *v1.ReleaseInfo,
+	currentVersion string,
+	desiredVersion string,
+) error {
+	if err := validateStrictClusterVersionIncrease(currentVersion, desiredVersion); err != nil {
+		return err
+	}
+
+	if _, err := validateCompatibleClusterVersion(info, desiredVersion); err != nil {
+		return err
+	}
+
+	return requireExactClusterProfile(s, desiredVersion)
+}
+
+func validateCompatibleClusterVersion(info *v1.ReleaseInfo, version string) (string, error) {
+	if info == nil || info.Metadata == nil || info.Spec == nil {
+		return "", errors.New("release info metadata and spec are required")
+	}
+
+	minor, err := releaseinfo.NormalizeClusterMinor(version)
+	if err != nil {
+		return "", err
+	}
+
+	for _, compatibleMinor := range info.Spec.CompatibleClusterBaselines {
+		if minor == compatibleMinor {
+			return minor, nil
+		}
+	}
+
+	return "", fmt.Errorf("cluster version %s is not compatible with current release info", version)
+}
+
+func requireExactClusterProfile(s storage.Storage, version string) error {
+	if s == nil {
+		return errors.New("storage is required")
+	}
+
+	profiles, err := s.ListClusterProfile(storage.ListOption{})
+	if err != nil {
+		return fmt.Errorf("list cluster profiles: %w", err)
+	}
+
+	for _, profile := range profiles {
+		if profile.GetName() == version {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cluster profile %s not found", version)
+}
+
+func validateStrictClusterVersionIncrease(currentVersion, desiredVersion string) error {
+	current, err := parseStrictClusterVersion(currentVersion)
+	if err != nil {
+		return fmt.Errorf("invalid effective current cluster version %q: %w", currentVersion, err)
+	}
+
+	desired, err := parseStrictClusterVersion(desiredVersion)
+	if err != nil {
+		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
+	}
+
+	if !desired.GreaterThan(current) {
+		return fmt.Errorf(
+			"cluster version update must be strictly greater than effective current version %s",
+			currentVersion,
+		)
+	}
+
+	return nil
+}
+
+func parseStrictClusterVersion(version string) (*mastermindssemver.Version, error) {
+	if len(version) < 2 || version[0] != 'v' {
+		return nil, errors.New("must use v-prefixed semantic version")
+	}
+
+	return mastermindssemver.StrictNewVersion(version[1:])
+}
+
+func clusterMinorAtLeast(candidate, current string) bool {
+	candidateVersion, err := mastermindssemver.StrictNewVersion(candidate[1:] + ".0")
+	if err != nil {
+		return false
+	}
+
+	currentVersion, err := mastermindssemver.StrictNewVersion(current[1:] + ".0")
+	if err != nil {
+		return false
+	}
+
+	return !candidateVersion.LessThan(currentVersion)
 }
 
 func clusterPatchDesiredVersion(body []byte) (string, bool, error) {
@@ -256,61 +473,6 @@ func resolveClusterForVersionUpdate(
 	}
 
 	return current, nil
-}
-
-func validateClusterVersionNotDowngrade(current *v1.Cluster, desiredVersion string) error {
-	baseline, err := currentClusterSpecVersionBaseline(current)
-	if err != nil {
-		return err
-	}
-
-	if baseline == "" {
-		if err := validateDesiredClusterVersion(desiredVersion); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	desiredIsOlder, err := semver.LessThan(desiredVersion, baseline)
-	if err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	if desiredIsOlder {
-		return fmt.Errorf(
-			"cluster version downgrade is not supported: current version is %s, desired version is %s",
-			baseline,
-			desiredVersion,
-		)
-	}
-
-	return nil
-}
-
-func validateDesiredClusterVersion(desiredVersion string) error {
-	if _, err := mastermindssemver.NewVersion(desiredVersion); err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	return nil
-}
-
-func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
-	if current == nil || current.Spec == nil {
-		return "", fmt.Errorf("current cluster spec is required")
-	}
-
-	baseline := current.GetVersion()
-	if baseline == "" {
-		return "", nil
-	}
-
-	if _, err := mastermindssemver.NewVersion(baseline); err != nil {
-		return "", nil
-	}
-
-	return baseline, nil
 }
 
 func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {
@@ -558,9 +720,10 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	)
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
 	acceleratorVirtualizationValidation := validateClusterAcceleratorVirtualization(deps.Storage)
-	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage)
+	versionCreateValidation := validateClusterVersionCreate(deps.Storage, deps.ReleaseInfoProvider)
+	versionUpdateValidation := validateClusterVersionUpdate(deps.Storage, deps.ReleaseInfoProvider)
 
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", acceleratorVirtualizationValidation, handler)
+	proxyGroup.POST("", versionCreateValidation, acceleratorVirtualizationValidation, handler)
 	proxyGroup.PATCH("", deletionValidation, versionUpdateValidation, acceleratorVirtualizationValidation, handler)
 }

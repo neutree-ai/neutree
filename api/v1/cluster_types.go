@@ -45,7 +45,7 @@ type ClusterSpec struct {
 	Config                    *ClusterConfig                 `json:"config"`
 	ImageRegistry             string                         `json:"image_registry"`
 	AcceleratorVirtualization *AcceleratorVirtualizationSpec `json:"accelerator_virtualization,omitempty" yaml:"accelerator_virtualization,omitempty"`
-	// the neutree serving version, if not specified, the default version will be used
+	// Version is the explicitly selected Neutree serving release for this cluster.
 	Version string `json:"version"`
 }
 
@@ -127,7 +127,6 @@ type KubernetesClusterConfig struct {
 }
 
 type RouterSpec struct {
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 	// access mode for router service, currently support LoadBalancer, NodePort.
 	AccessMode KubernetesAccessMode `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
 	Replicas   int                  `json:"replicas,omitempty" yaml:"replicas,omitempty"`

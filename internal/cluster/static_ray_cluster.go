@@ -27,6 +27,7 @@ type staticRayReconciler struct {
 	storage            storage.Storage
 	acceleratorManager accelerator.Manager
 	legacy             ClusterReconcile
+	profileComponents  v1.ClusterProfileComponents
 }
 
 func (r *staticRayReconciler) Reconcile(_ context.Context, c *v1.Cluster) error {

@@ -320,7 +320,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
-	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
+	assert.Equal(t, "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless", profile.MetricsExporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, profile.MetricsExporter.Env)
 	assert.Equal(t,

@@ -19,6 +19,8 @@ type MetricsComponent struct {
 	metricsRemoteWriteURL string
 	imagePullSecret       string
 	acceleratorMgr        accelerator.Manager
+	profileComponents     v1.ClusterProfileComponents
+	profileSelected       bool
 
 	config     v1.KubernetesClusterConfig
 	ctrlClient client.Client
@@ -28,6 +30,51 @@ type MetricsComponent struct {
 func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client,
 	acceleratorMgr accelerator.Manager) *MetricsComponent {
+	return newMetricsComponent(
+		cluster,
+		namespace,
+		imagePrefix,
+		imagePullSecret,
+		metricsRemoteWriteURL,
+		config,
+		ctrlClient,
+		acceleratorMgr,
+		v1.ClusterProfileComponents{},
+		false,
+	)
+}
+
+func NewMetricsComponentWithClusterProfileComponents(
+	cluster *v1.Cluster,
+	namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
+	config v1.KubernetesClusterConfig,
+	ctrlClient client.Client,
+	acceleratorMgr accelerator.Manager,
+	profileComponents v1.ClusterProfileComponents,
+) *MetricsComponent {
+	return newMetricsComponent(
+		cluster,
+		namespace,
+		imagePrefix,
+		imagePullSecret,
+		metricsRemoteWriteURL,
+		config,
+		ctrlClient,
+		acceleratorMgr,
+		profileComponents,
+		true,
+	)
+}
+
+func newMetricsComponent(
+	cluster *v1.Cluster,
+	namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
+	config v1.KubernetesClusterConfig,
+	ctrlClient client.Client,
+	acceleratorMgr accelerator.Manager,
+	profileComponents v1.ClusterProfileComponents,
+	profileSelected bool,
+) *MetricsComponent {
 	logger := klog.LoggerWithValues(klog.Background(),
 		"cluster", cluster.Metadata.WorkspaceName(),
 		"component", "metrics",
@@ -40,6 +87,8 @@ func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullS
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		imagePullSecret:       imagePullSecret,
 		acceleratorMgr:        acceleratorMgr,
+		profileComponents:     profileComponents,
+		profileSelected:       profileSelected,
 		config:                config,
 		ctrlClient:            ctrlClient,
 		logger:                logger,

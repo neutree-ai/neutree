@@ -208,6 +208,32 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	}
 }
 
+func assertStaticNodeClusterProfileImages(clusterName string) {
+	nodes := getStaticNodesForCluster(clusterName)
+	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
+
+	for _, node := range nodes {
+		rayComponentName := "ray-worker"
+		if node.Spec != nil && node.Spec.Role == v1.StaticNodeRoleHead {
+			rayComponentName = "ray-head"
+		}
+
+		assertStaticNodeComponentImageSuffix(node, rayComponentName, "neutree/neutree-serve:v1.1.1")
+		assertStaticNodeComponentImageSuffix(node, "node-exporter", "prometheus/node-exporter:v1.8.2")
+		assertStaticNodeComponentImageSuffix(node, "neutree-node-agent", "neutree/neutree-node-agent:v1.1.0-rc.1")
+
+		if node.Spec != nil && node.Spec.Role == v1.StaticNodeRoleHead {
+			assertStaticNodeComponentImageSuffix(node, "vmagent", "victoriametrics/vmagent:v1.115.0")
+		}
+	}
+}
+
+func assertStaticNodeComponentImageSuffix(node v1.StaticNode, componentName, expectedSuffix string) {
+	component := requireStaticNodeComponent(node, componentName)
+	ExpectWithOffset(1, component.Image).To(HaveSuffix(expectedSuffix),
+		"static node component %s should use ClusterProfile image suffix %s", componentName, expectedSuffix)
+}
+
 func assertStaticNodeAgentDeviceSnapshotAPI(
 	node v1.StaticNode,
 	sshUser string,
