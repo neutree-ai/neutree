@@ -233,7 +233,7 @@ func (m *ManifestApply) ApplyManifests(
 		m.logger.Info("Deleting resource",
 			"kind", obj.GetKind(),
 			"name", obj.GetName(),
-			"namespace", m.namespace)
+			"namespace", obj.GetNamespace())
 
 		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -242,7 +242,8 @@ func (m *ManifestApply) ApplyManifests(
 					"name", obj.GetName())
 
 				if deleteErr == nil {
-					deleteErr = errors.Wrapf(err, "failed to delete object %s/%s", obj.GetKind(), obj.GetName())
+					deleteErr = errors.Wrapf(err, "failed to delete object %s/%s/%s",
+						obj.GetKind(), obj.GetNamespace(), obj.GetName())
 				}
 			}
 		}

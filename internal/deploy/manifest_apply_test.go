@@ -395,6 +395,7 @@ func TestApplyManifests_ReturnsDeletionFailure(t *testing.T) {
 	_, err = ma.ApplyManifests(context.Background())
 
 	assert.ErrorContains(t, err, "vmagent deletion failed")
+	assert.ErrorContains(t, err, "failed to delete object Deployment/test-ns/vmagent")
 }
 
 func TestApplyManifests_IgnoresLiveDeploymentDefaultedSpecFields(t *testing.T) {
