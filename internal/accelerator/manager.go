@@ -51,6 +51,10 @@ type Manager interface {
 	// (e.g. "rocm" for amd_gpu). Returns empty string for default variant or if
 	// the accelerator type is not registered.
 	GetImageSuffix(acceleratorType string) string
+
+	// AddInternalPlugins registers internal accelerator plugins on an existing
+	// manager without re-registering manager-owned routes.
+	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
 }
 
 type registerPlugin struct {
@@ -91,10 +95,8 @@ func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.P
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
-	for _, p := range injectedPlugins {
-		if err := manager.addInternalPlugin(p); err != nil {
-			return nil, err
-		}
+	if err := manager.AddInternalPlugins(injectedPlugins...); err != nil {
+		return nil, err
 	}
 
 	// register plugin register handler
@@ -104,25 +106,40 @@ func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.P
 	return manager, nil
 }
 
-func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
-	if isNilPlugin(p) {
-		return fmt.Errorf("accelerator plugin is nil")
+// AddInternalPlugins registers internal accelerator plugins on an existing
+// manager. All plugins are validated before any is stored, so an invalid
+// input fails atomically without leaving partially registered plugins.
+func (a *manager) AddInternalPlugins(plugins ...publicaccelerator.Plugin) error {
+	seen := make(map[string]struct{}, len(plugins))
+
+	for _, p := range plugins {
+		if isNilPlugin(p) {
+			return fmt.Errorf("accelerator plugin is nil")
+		}
+
+		if p.Resource() == "" {
+			return fmt.Errorf("accelerator plugin resource is required")
+		}
+
+		if _, exists := seen[p.Resource()]; exists {
+			return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+		}
+
+		if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
+			return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+		}
+
+		seen[p.Resource()] = struct{}{}
 	}
 
-	if p.Resource() == "" {
-		return fmt.Errorf("accelerator plugin resource is required")
+	for _, p := range plugins {
+		a.acceleratorsMap.Store(p.Resource(), registerPlugin{
+			resource:         p.Resource(),
+			plugin:           p,
+			lastRegisterTime: time.Now(),
+		})
+		klog.Infof("Register internal accelerator plugin: %s", p.Resource())
 	}
-
-	if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
-		return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
-	}
-
-	a.acceleratorsMap.Store(p.Resource(), registerPlugin{
-		resource:         p.Resource(),
-		plugin:           p,
-		lastRegisterTime: time.Now(),
-	})
-	klog.Infof("Register internal accelerator plugin: %s", p.Resource())
 
 	return nil
 }
