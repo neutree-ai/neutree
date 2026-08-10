@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"k8s.io/klog/v2"
 
@@ -10,6 +13,11 @@ import (
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cron"
 )
+
+// serverShutdownTimeout bounds how long Run waits for in-flight requests to
+// drain after context cancellation before returning; the OS reclaims the
+// listener once the server is shut down.
+const serverShutdownTimeout = 5 * time.Second
 
 // App represents the main application
 type App struct {
@@ -45,19 +53,38 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	// Start core server
-	coreServerLinstenAddr := fmt.Sprintf("%s:%d",
+	coreServerListenAddr := fmt.Sprintf("%s:%d",
 		a.config.ServerConfig.Host,
 		a.config.ServerConfig.Port)
-	klog.Infof("Starting core server on %s", coreServerLinstenAddr)
+	klog.Infof("Starting core server on %s", coreServerListenAddr)
 
+	server := &http.Server{
+		Addr:              coreServerListenAddr,
+		Handler:           a.config.GinEngine,
+		ReadHeaderTimeout: serverShutdownTimeout,
+	}
+
+	errCh := make(chan error, 1)
 	go func() {
-		if err := a.config.GinEngine.Run(coreServerLinstenAddr); err != nil {
-			klog.Fatalf("failed to start core server: %s", err.Error())
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
 		}
+
+		errCh <- nil
 	}()
 
-	// Wait for context cancellation
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		defer cancel()
 
-	return nil
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+
+		return <-errCh
+	case err := <-errCh:
+		return err
+	}
 }
