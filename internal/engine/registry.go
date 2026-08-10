@@ -95,6 +95,19 @@ func (r *registry) Register(engine *v1.Engine) error {
 		return errors.New("engine spec is required")
 	}
 
+	// Reject unusable capability declarations here rather than letting them
+	// reach the consumers, which would silently ignore them.
+	for _, version := range engine.Spec.Versions {
+		if version == nil {
+			continue
+		}
+
+		if err := version.Capabilities.Validate(); err != nil {
+			return errors.Wrapf(err, "engine %s version %s declares invalid capabilities",
+				engine.Metadata.Name, version.Version)
+		}
+	}
+
 	if _, existed := r.engines[engine.Metadata.Name]; !existed {
 		r.engines[engine.Metadata.Name] = engine
 		return nil

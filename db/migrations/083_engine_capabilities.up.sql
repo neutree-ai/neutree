@@ -1,0 +1,12 @@
+-- Engine capability protocol: let an engine version declare what it can do
+-- (metrics export, console Playground) instead of having Neutree infer it from
+-- the engine name or its model tasks.
+--
+-- Stored as json rather than a composite type so that adding a capability later
+-- does not require another ALTER TYPE on api.engine_version, which would cascade
+-- to every table embedding it.
+--
+-- NULL means "this engine version predates the protocol". Readers must treat
+-- NULL as the pre-protocol behaviour, not as "no capabilities"; see
+-- EngineVersion.Resolve* in api/v1/engine_types.go.
+ALTER TYPE api.engine_version ADD ATTRIBUTE capabilities json;

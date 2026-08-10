@@ -449,3 +449,238 @@ func TestKnownModelTasks(t *testing.T) {
 		assert.True(t, IsKnownModelTask(task), "KnownModelTasks must list a known task: %q", task)
 	}
 }
+
+func TestIsKnownPlaygroundMode(t *testing.T) {
+	tests := []struct {
+		mode string
+		want bool
+	}{
+		{PlaygroundModeChat, true},
+		{PlaygroundModeEmbedding, true},
+		{PlaygroundModeRerank, true},
+		// A mode is not a model task: the two vocabularies are deliberately
+		// separate, so task identifiers must not validate as modes.
+		{TextGenerationModelTask, false},
+		{"", false},
+		{"Chat", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsKnownPlaygroundMode(tt.mode))
+		})
+	}
+}
+
+func TestKnownPlaygroundModes(t *testing.T) {
+	got := KnownPlaygroundModes()
+
+	// Stable sorted order, same contract as KnownModelTasks.
+	assert.Equal(t, []string{
+		PlaygroundModeChat,
+		PlaygroundModeEmbedding,
+		PlaygroundModeRerank,
+	}, got)
+
+	for _, mode := range got {
+		assert.True(t, IsKnownPlaygroundMode(mode), "KnownPlaygroundModes must list a known mode: %q", mode)
+	}
+}
+
+// TestEngineVersion_ResolveMetricsExport_Undeclared pins the forward-compat
+// contract: an engine version carrying no capability declaration -- which is
+// every engine registered before this protocol shipped -- must resolve to the
+// behaviour Neutree had then, i.e. scraped on :8000/metrics.
+func TestEngineVersion_ResolveMetricsExport_Undeclared(t *testing.T) {
+	legacy := ResolvedMetricsExport{
+		Enabled: true,
+		Port:    DefaultMetricsExportPort,
+		Path:    DefaultMetricsExportPath,
+	}
+
+	tests := []struct {
+		name          string
+		engineVersion *EngineVersion
+	}{
+		{name: "nil engine version", engineVersion: nil},
+		{name: "no capabilities at all", engineVersion: &EngineVersion{Version: "v1"}},
+		{
+			name:          "capabilities present but metrics undeclared",
+			engineVersion: &EngineVersion{Version: "v1", Capabilities: &EngineCapabilities{}},
+		},
+		{
+			name: "another capability declared, metrics still undeclared",
+			engineVersion: &EngineVersion{Version: "v1", Capabilities: &EngineCapabilities{
+				Playground: &PlaygroundCapability{Enabled: false},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, legacy, tt.engineVersion.ResolveMetricsExport())
+		})
+	}
+}
+
+func TestEngineVersion_ResolveMetricsExport_Declared(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared *MetricsExportCapability
+		want     ResolvedMetricsExport
+	}{
+		{
+			name:     "explicitly disabled",
+			declared: &MetricsExportCapability{Enabled: false},
+			want:     ResolvedMetricsExport{Enabled: false, Port: DefaultMetricsExportPort, Path: DefaultMetricsExportPath},
+		},
+		{
+			name:     "enabled, port and path defaulted",
+			declared: &MetricsExportCapability{Enabled: true},
+			want:     ResolvedMetricsExport{Enabled: true, Port: DefaultMetricsExportPort, Path: DefaultMetricsExportPath},
+		},
+		{
+			name:     "enabled on a custom port and path",
+			declared: &MetricsExportCapability{Enabled: true, Port: 9100, Path: "/internal/metrics"},
+			want:     ResolvedMetricsExport{Enabled: true, Port: 9100, Path: "/internal/metrics"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := &EngineVersion{Version: "v1", Capabilities: &EngineCapabilities{MetricsExport: tt.declared}}
+			assert.Equal(t, tt.want, ev.ResolveMetricsExport())
+		})
+	}
+}
+
+// TestEngineVersion_ResolvePlayground_Undeclared is the Playground half of the
+// same contract: before this protocol the console showed the tab
+// unconditionally, so an undeclared engine version must keep showing it, with no
+// mode restriction (nil Modes => infer from the endpoint's model task).
+func TestEngineVersion_ResolvePlayground_Undeclared(t *testing.T) {
+	tests := []struct {
+		name          string
+		engineVersion *EngineVersion
+	}{
+		{name: "nil engine version", engineVersion: nil},
+		{name: "no capabilities at all", engineVersion: &EngineVersion{Version: "v1"}},
+		{
+			name:          "capabilities present but playground undeclared",
+			engineVersion: &EngineVersion{Version: "v1", Capabilities: &EngineCapabilities{}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.engineVersion.ResolvePlayground()
+			assert.True(t, got.Enabled)
+			assert.Nil(t, got.Modes)
+		})
+	}
+}
+
+func TestEngineVersion_ResolvePlayground_Declared(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared *PlaygroundCapability
+		want     ResolvedPlayground
+	}{
+		{
+			name:     "explicitly disabled",
+			declared: &PlaygroundCapability{Enabled: false},
+			want:     ResolvedPlayground{Enabled: false},
+		},
+		{
+			name:     "enabled with no mode restriction",
+			declared: &PlaygroundCapability{Enabled: true},
+			want:     ResolvedPlayground{Enabled: true},
+		},
+		{
+			name:     "enabled, narrowed to chat",
+			declared: &PlaygroundCapability{Enabled: true, Modes: []string{PlaygroundModeChat}},
+			want:     ResolvedPlayground{Enabled: true, Modes: []string{PlaygroundModeChat}},
+		},
+		{
+			// Disabled wins over any declared modes: consumers must gate on
+			// Enabled before looking at Modes.
+			name:     "disabled but modes listed",
+			declared: &PlaygroundCapability{Enabled: false, Modes: []string{PlaygroundModeChat}},
+			want:     ResolvedPlayground{Enabled: false, Modes: []string{PlaygroundModeChat}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := &EngineVersion{Version: "v1", Capabilities: &EngineCapabilities{Playground: tt.declared}}
+			assert.Equal(t, tt.want, ev.ResolvePlayground())
+		})
+	}
+}
+
+func TestEngineCapabilities_Validate(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities *EngineCapabilities
+		wantErr      string
+	}{
+		{name: "nil declaration is valid", capabilities: nil},
+		{name: "empty declaration is valid", capabilities: &EngineCapabilities{}},
+		{
+			name: "fully specified declaration",
+			capabilities: &EngineCapabilities{
+				MetricsExport: &MetricsExportCapability{Enabled: true, Port: 9100, Path: "/metrics"},
+				Playground:    &PlaygroundCapability{Enabled: true, Modes: []string{PlaygroundModeChat}},
+			},
+		},
+		{
+			// Zero means "use the default", not an invalid port.
+			name:         "zero port is valid",
+			capabilities: &EngineCapabilities{MetricsExport: &MetricsExportCapability{Enabled: true}},
+		},
+		{
+			name:         "port above the valid range",
+			capabilities: &EngineCapabilities{MetricsExport: &MetricsExportCapability{Enabled: true, Port: 70000}},
+			wantErr:      "out of range",
+		},
+		{
+			name:         "negative port",
+			capabilities: &EngineCapabilities{MetricsExport: &MetricsExportCapability{Enabled: true, Port: -1}},
+			wantErr:      "out of range",
+		},
+		{
+			name:         "path without a leading slash",
+			capabilities: &EngineCapabilities{MetricsExport: &MetricsExportCapability{Enabled: true, Path: "metrics"}},
+			wantErr:      "must start with",
+		},
+		{
+			name: "unknown playground mode",
+			capabilities: &EngineCapabilities{
+				Playground: &PlaygroundCapability{Enabled: true, Modes: []string{PlaygroundModeChat, "vision"}},
+			},
+			wantErr: "unknown mode",
+		},
+		{
+			// Model tasks and playground modes are separate vocabularies; using
+			// one where the other belongs must be caught at registration.
+			name: "model task used as a playground mode",
+			capabilities: &EngineCapabilities{
+				Playground: &PlaygroundCapability{Enabled: true, Modes: []string{TextGenerationModelTask}},
+			},
+			wantErr: "unknown mode",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.capabilities.Validate()
+
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
