@@ -751,190 +751,103 @@ func TestValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T)
 }
 
 func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
-	t.Run("allows Kubernetes cluster to enable accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {
-					"enabled": true,
-					"config_patch": {"devicePlugin": {"nvidiaDriverRoot": "/run/nvidia/driver"}}
-				}
+	tests := []struct {
+		name        string
+		body        string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name: "allows Kubernetes cluster to enable accelerator virtualization",
+			body: `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+		},
+		{
+			name: "allows Kubernetes nightly cluster with minimum base version to enable accelerator virtualization",
+			body: `{"spec":{"type":"kubernetes","version":"v1.1.0-nightly-20260603","accelerator_virtualization":{"enabled":true}}}`,
+		},
+		{
+			name:        "rejects Kubernetes cluster below minimum version enabling accelerator virtualization",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.0.9","accelerator_virtualization":{"enabled":true}}}`,
+			wantCode:    "10208",
+			wantMessage: "requires cluster version >= v1.1.0",
+		},
+		{
+			name:        "rejects Kubernetes cluster missing version enabling accelerator virtualization",
+			body:        `{"spec":{"type":"kubernetes","accelerator_virtualization":{"enabled":true}}}`,
+			wantCode:    "10208",
+			wantMessage: "requires cluster version >= v1.1.0",
+		},
+		{
+			name:        "rejects invalid cluster version enabling accelerator virtualization",
+			body:        `{"spec":{"type":"kubernetes","version":"nightly","accelerator_virtualization":{"enabled":true}}}`,
+			wantCode:    "10209",
+			wantMessage: "invalid cluster version",
+		},
+		{
+			name:     "rejects SSH cluster enabling accelerator virtualization",
+			body:     `{"spec":{"type":"ssh","accelerator_virtualization":{"enabled":true}}}`,
+			wantCode: "10208",
+		},
+		{
+			name:        "rejects non-bool enabled",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":"true"}}}`,
+			wantCode:    "10209",
+			wantMessage: "invalid cluster payload",
+		},
+		{
+			name:        "rejects non-object config_patch",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":["invalid"]}}}`,
+			wantCode:    "10209",
+			wantMessage: "invalid cluster payload",
+		},
+		{
+			name: "skips accelerator virtualization validation for soft delete patch",
+			body: `{"metadata":{"name":"cluster","workspace":"default","deletion_timestamp":"2026-06-10T00:00:00Z"},"spec":{"type":"ssh","accelerator_virtualization":{"enabled":true}}}`,
+		},
+		{
+			name:        "rejects unsupported config patch key",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"dra":{"enabled":true}}}}}`,
+			wantCode:    "10210",
+			wantMessage: "unsupported",
+		},
+		{
+			name:        "rejects MIG virtualization config patch",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"migStrategy":"mixed"}}}}}`,
+			wantCode:    "10210",
+			wantMessage: "MIG",
+		},
+		{
+			name:        "rejects partial patch missing cluster type and version",
+			body:        `{"metadata":{"name":"cluster","workspace":"default"},"spec":{"accelerator_virtualization":{"enabled":true}}}`,
+			wantCode:    "10208",
+			wantMessage: "only supported for Kubernetes",
+		},
+		{
+			name:        "rejects partial patch missing cluster version",
+			body:        `{"metadata":{"name":"cluster","workspace":"default"},"spec":{"type":"kubernetes","accelerator_virtualization":{"enabled":true}}}`,
+			wantCode:    "10208",
+			wantMessage: "requires cluster version >= v1.1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateClusterAcceleratorVirtualizationBody([]byte(tt.body))
+			if tt.wantCode == "" {
+				assert.Nil(t, err)
+
+				return
 			}
-		}`))
 
-		assert.Nil(t, err)
-	})
-
-	t.Run("allows Kubernetes nightly cluster with minimum base version to enable accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0-nightly-20260603",
-				"accelerator_virtualization": {"enabled": true}
+			if !assert.NotNil(t, err) {
+				return
 			}
-		}`))
-
-		assert.Nil(t, err)
-	})
-
-	t.Run("rejects Kubernetes cluster below minimum version enabling accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.0.9",
-				"accelerator_virtualization": {"enabled": true}
+			assert.Equal(t, tt.wantCode, err.Code)
+			if tt.wantMessage != "" {
+				assert.Contains(t, err.Message, tt.wantMessage)
 			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10208", err.Code)
-		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
-	})
-
-	t.Run("rejects Kubernetes cluster missing version enabling accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10208", err.Code)
-		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
-	})
-
-	t.Run("rejects invalid cluster version enabling accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "nightly",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10209", err.Code)
-		assert.Equal(t, "invalid cluster version", err.Message)
-	})
-
-	t.Run("rejects SSH cluster enabling accelerator virtualization", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "ssh",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10208", err.Code)
-	})
-
-	t.Run("rejects non-bool enabled", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {"enabled": "true"}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10209", err.Code)
-		assert.Equal(t, "invalid cluster payload", err.Message)
-	})
-
-	t.Run("rejects non-object config_patch", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {"enabled": true, "config_patch": ["invalid"]}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10209", err.Code)
-		assert.Equal(t, "invalid cluster payload", err.Message)
-	})
-
-	t.Run("skips accelerator virtualization validation for soft delete patch", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {
-				"name": "cluster",
-				"workspace": "default",
-				"deletion_timestamp": "2026-06-10T00:00:00Z"
-			},
-			"spec": {
-				"type": "ssh",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.Nil(t, err)
-	})
-
-	t.Run("rejects unsupported config patch key", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {
-					"enabled": true,
-					"config_patch": {"dra": {"enabled": true}}
-				}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10210", err.Code)
-		assert.Contains(t, err.Message, "unsupported")
-	})
-
-	t.Run("rejects MIG virtualization config patch", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"spec": {
-				"type": "kubernetes",
-				"version": "v1.1.0",
-				"accelerator_virtualization": {
-					"enabled": true,
-					"config_patch": {"devicePlugin": {"migStrategy": "mixed"}}
-				}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10210", err.Code)
-		assert.Contains(t, err.Message, "MIG")
-	})
-
-	t.Run("rejects partial patch missing cluster type and version", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "cluster", "workspace": "default"},
-			"spec": {
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10208", err.Code)
-		assert.Contains(t, err.Message, "only supported for Kubernetes")
-	})
-
-	t.Run("rejects partial patch missing cluster version", func(t *testing.T) {
-		err := validateClusterAcceleratorVirtualizationBody([]byte(`{
-			"metadata": {"name": "cluster", "workspace": "default"},
-			"spec": {
-				"type": "kubernetes",
-				"accelerator_virtualization": {"enabled": true}
-			}
-		}`))
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10208", err.Code)
-		assert.Contains(t, err.Message, "requires cluster version >= v1.1.0")
-	})
+		})
+	}
 }
 
 func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
@@ -957,144 +870,121 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 		},
 	}
 
-	t.Run("rejects disabling when vGPU endpoint references cluster", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		cluster := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
-			Spec: &v1.ClusterSpec{
+	cluster := func(name string, acceleratorVirtualization *v1.AcceleratorVirtualizationSpec) v1.Cluster {
+		return v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: name},
+			Spec:     &v1.ClusterSpec{AcceleratorVirtualization: acceleratorVirtualization},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		patch           v1.Cluster
+		query           url.Values
+		resolved        *v1.Cluster
+		endpoints       []v1.Endpoint
+		endpointErr     error
+		lookupEndpoints bool
+		wantCode        string
+		wantMessage     string
+		wantHint        string
+	}{
+		{
+			name:            "rejects disabling when vGPU endpoint references cluster",
+			patch:           cluster("gpu-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
+			endpoints:       []v1.Endpoint{vGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10211",
+			wantMessage:     "cannot disable accelerator virtualization",
+			wantHint:        "1 vGPU endpoint(s) still reference this cluster",
+		},
+		{
+			name:            "allows disabling when only non-vGPU endpoint references cluster",
+			patch:           cluster("gpu-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
+			endpoints:       []v1.Endpoint{nonVGPUEndpoint},
+			lookupEndpoints: true,
+		},
+		{
+			name: "resolves cluster identity from patch query filters",
+			patch: v1.Cluster{Spec: &v1.ClusterSpec{
 				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			}},
+			query: url.Values{
+				"metadata->>workspace": {"eq.default"},
+				"metadata->>name":      {"eq.gpu-cluster"},
 			},
-		}
-		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
-
-		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
-			Return([]v1.Endpoint{vGPUEndpoint}, nil)
-
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10211", err.Code)
-		assert.Contains(t, err.Message, "cannot disable accelerator virtualization")
-		assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("allows disabling when only non-vGPU endpoint references cluster", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		cluster := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
-			Spec: &v1.ClusterSpec{
-				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
+			resolved:        &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"}},
+			endpoints:       []v1.Endpoint{vGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10211",
+			wantHint:        "1 vGPU endpoint(s) still reference this cluster",
+		},
+		{
+			name:  "rejects mismatched patch body identity and query target",
+			patch: cluster("body-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
+			query: url.Values{
+				"id": {"eq.1"},
 			},
-		}
-		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
+			resolved: &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "query-cluster"}},
+			wantCode: "10209",
+			wantHint: "does not match patch target",
+		},
+		{
+			name:            "returns validation error when endpoint lookup fails",
+			patch:           cluster("gpu-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
+			endpointErr:     errors.New("database error"),
+			lookupEndpoints: true,
+			wantCode:        "10209",
+			wantHint:        "database error",
+		},
+		{
+			name:            "rejects clearing accelerator virtualization with null while vGPU endpoint references cluster",
+			patch:           cluster("gpu-cluster", nil),
+			endpoints:       []v1.Endpoint{vGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10211",
+			wantHint:        "1 vGPU endpoint(s) still reference this cluster",
+		},
+	}
 
-		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
-			Return([]v1.Endpoint{nonVGPUEndpoint}, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storageMocks.NewMockStorage(t)
+			if tt.resolved != nil {
+				mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+					return sameFilters(opt.Filters, queryParamsToFilters(tt.query))
+				})).Return([]v1.Cluster{*tt.resolved}, nil).Once()
+			}
 
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
+			if tt.lookupEndpoints {
+				identity := tt.patch.Metadata
+				if tt.resolved != nil {
+					identity = tt.resolved.Metadata
+				}
+				mockStorage.On("ListEndpoint", storage.ListOption{
+					Filters: clusterEndpointReferenceFilters(identity.Workspace, identity.Name),
+				}).Return(tt.endpoints, tt.endpointErr).Once()
+			}
 
-		assert.Nil(t, err)
-		mockStorage.AssertExpectations(t)
-	})
+			err := validateClusterAcceleratorVirtualizationDisable(mockStorage, tt.patch, tt.query)
+			if tt.wantCode == "" {
+				assert.Nil(t, err)
+			} else if assert.NotNil(t, err) {
+				assert.Equal(t, tt.wantCode, err.Code)
+				if tt.wantMessage != "" {
+					assert.Contains(t, err.Message, tt.wantMessage)
+				}
+				if tt.wantHint != "" {
+					assert.Contains(t, err.Hint, tt.wantHint)
+				}
+			}
 
-	t.Run("resolves cluster identity from patch query filters", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		clusterPatch := v1.Cluster{
-			Spec: &v1.ClusterSpec{
-				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
-			},
-		}
-		query := url.Values{
-			"metadata->>workspace": []string{"eq.default"},
-			"metadata->>name":      []string{"eq.gpu-cluster"},
-		}
-		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
-
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{
-			{Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"}},
-		}, nil)
-		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
-			Return([]v1.Endpoint{vGPUEndpoint}, nil)
-
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, clusterPatch, query)
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10211", err.Code)
-		assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("rejects mismatched patch body identity and query target", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		clusterPatch := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "body-cluster"},
-			Spec: &v1.ClusterSpec{
-				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
-			},
-		}
-		query := url.Values{
-			"id": []string{"eq.1"},
-		}
-
-		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
-			return sameFilters(opt.Filters, queryParamsToFilters(query))
-		})).Return([]v1.Cluster{
-			{Metadata: &v1.Metadata{Workspace: "default", Name: "query-cluster"}},
-		}, nil)
-
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, clusterPatch, query)
-
-		if assert.NotNil(t, err) {
-			assert.Equal(t, "10209", err.Code)
-			assert.Contains(t, err.Hint, "does not match patch target")
-		}
-		mockStorage.AssertExpectations(t)
-		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
-	})
-
-	t.Run("returns validation error when endpoint lookup fails", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		cluster := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
-			Spec: &v1.ClusterSpec{
-				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: false},
-			},
-		}
-		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
-
-		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
-			Return(nil, errors.New("database error"))
-
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10209", err.Code)
-		assert.Contains(t, err.Hint, "database error")
-		mockStorage.AssertExpectations(t)
-	})
-
-	t.Run("rejects clearing accelerator virtualization with null while vGPU endpoint references cluster", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		cluster := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
-			Spec:     &v1.ClusterSpec{AcceleratorVirtualization: nil},
-		}
-		expectedEndpointFilters := clusterEndpointReferenceFilters("default", "gpu-cluster")
-
-		mockStorage.On("ListEndpoint", storage.ListOption{Filters: expectedEndpointFilters}).
-			Return([]v1.Endpoint{vGPUEndpoint}, nil)
-
-		err := validateClusterAcceleratorVirtualizationDisable(mockStorage, cluster, nil)
-
-		if assert.NotNil(t, err) {
-			assert.Equal(t, "10211", err.Code)
-			assert.Contains(t, err.Hint, "1 vGPU endpoint(s) still reference this cluster")
-		}
-		mockStorage.AssertExpectations(t)
-	})
+			mockStorage.AssertExpectations(t)
+			if !tt.lookupEndpoints {
+				mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+			}
+		})
+	}
 }
 
 func TestPrepareClusterValidationInput(t *testing.T) {
@@ -1128,100 +1018,134 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 		return input
 	}
 
-	t.Run("creates a separate New cluster from a whole spec replacement and preserves an empty kubeconfig", func(t *testing.T) {
-		current := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
+	sshCluster := func() v1.Cluster {
+		return v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "ssh"},
 			Spec: &v1.ClusterSpec{
-				Type:          v1.KubernetesClusterType,
-				ImageRegistry: "current-registry",
-				Version:       "v1.0.0",
-				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
-					Kubeconfig: "current-kubeconfig",
+				Type: v1.SSHClusterType,
+				Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Auth: v1.Auth{SSHPrivateKey: "current-private-key"},
 				}},
 			},
 		}
-
-		input := prepare(t, current, `{
-			"spec": {
-				"version": "v1.1.0",
-				"config": {"kubernetes_config": {"kubeconfig": ""}}
-			}
-		}`)
-
-		assert.Equal(t, &current, input.Current)
-		assert.NotSame(t, input.Current, input.New)
-		assert.Equal(t, "v1.0.0", input.Current.Spec.Version)
-		assert.Equal(t, "current-kubeconfig", input.Current.Spec.Config.KubernetesConfig.Kubeconfig)
-		assert.Empty(t, input.New.Spec.Type)
-		assert.Empty(t, input.New.Spec.ImageRegistry)
-		assert.Equal(t, "v1.1.0", input.New.Spec.Version)
-		assert.Equal(t, "current-kubeconfig", input.New.Spec.Config.KubernetesConfig.Kubeconfig)
-	})
-
-	for _, tt := range []struct {
-		name string
-		raw  string
-	}{
-		{name: "empty", raw: `""`},
-		{name: "null", raw: "null"},
-	} {
-		t.Run("preserves SSH private key "+tt.name, func(t *testing.T) {
-			current := v1.Cluster{
-				Metadata: &v1.Metadata{Workspace: "default", Name: "ssh"},
-				Spec: &v1.ClusterSpec{
-					Type: v1.SSHClusterType,
-					Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
-						Auth: v1.Auth{SSHPrivateKey: "current-private-key"},
-					}},
-				},
-			}
-
-			input := prepare(t, current, `{
-				"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": `+tt.raw+`}}}}
-			}`)
-
-			assert.Equal(t, "current-private-key", input.Current.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-			assert.Equal(t, "current-private-key", input.New.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-		})
 	}
 
-	t.Run("retains an explicit config null in the raw update for configuration validation", func(t *testing.T) {
-		current := v1.Cluster{
-			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
-			Spec: &v1.ClusterSpec{
-				Type:   v1.KubernetesClusterType,
-				Config: &v1.ClusterConfig{},
+	tests := []struct {
+		name    string
+		current v1.Cluster
+		body    string
+		assert  func(*testing.T, *ValidationInput[v1.Cluster])
+	}{
+		{
+			name: "creates a separate New cluster from a whole spec replacement and preserves an empty kubeconfig",
+			current: v1.Cluster{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
+				Spec: &v1.ClusterSpec{
+					Type:          v1.KubernetesClusterType,
+					ImageRegistry: "current-registry",
+					Version:       "v1.0.0",
+					Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+						Kubeconfig: "current-kubeconfig",
+					}},
+				},
 			},
-		}
-		input := prepare(t, current, `{"spec": {"config": null}}`)
-
-		update, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
-		assert.NoError(t, err)
-		assert.True(t, update.configCleared)
-	})
-}
-
-func TestBuildPostgrestClusterPatchValidationNew(t *testing.T) {
-	current := &v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Type:          v1.KubernetesClusterType,
-			ImageRegistry: "current-registry",
-			Version:       "v1.0.0",
+			body: `{"spec":{"version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":""}}}}`,
+			assert: func(t *testing.T, input *ValidationInput[v1.Cluster]) {
+				assert.NotSame(t, input.Current, input.New)
+				assert.Equal(t, "v1.0.0", input.Current.Spec.Version)
+				assert.Equal(t, "current-kubeconfig", input.Current.Spec.Config.KubernetesConfig.Kubeconfig)
+				assert.Empty(t, input.New.Spec.Type)
+				assert.Empty(t, input.New.Spec.ImageRegistry)
+				assert.Equal(t, "v1.1.0", input.New.Spec.Version)
+				assert.Equal(t, "current-kubeconfig", input.New.Spec.Config.KubernetesConfig.Kubeconfig)
+			},
+		},
+		{
+			name:    "preserves an empty SSH private key",
+			current: sshCluster(),
+			body:    `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":""}}}}}`,
+			assert: func(t *testing.T, input *ValidationInput[v1.Cluster]) {
+				assert.Equal(t, "current-private-key", input.Current.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+				assert.Equal(t, "current-private-key", input.New.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			},
+		},
+		{
+			name:    "preserves a null SSH private key",
+			current: sshCluster(),
+			body:    `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":null}}}}}`,
+			assert: func(t *testing.T, input *ValidationInput[v1.Cluster]) {
+				assert.Equal(t, "current-private-key", input.Current.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+				assert.Equal(t, "current-private-key", input.New.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			},
+		},
+		{
+			name: "retains an explicit config null in the raw update for configuration validation",
+			current: v1.Cluster{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Config: &v1.ClusterConfig{}},
+			},
+			body: `{"spec":{"config":null}}`,
+			assert: func(t *testing.T, input *ValidationInput[v1.Cluster]) {
+				update, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
+				assert.NoError(t, err)
+				assert.True(t, update.configCleared)
+			},
 		},
 	}
 
-	next, err := buildPostgrestClusterPatchValidationNew(current, []byte(`{
-		"spec": {"version": "v1.1.0"}
-	}`))
-	assert.NoError(t, err)
-	assert.NotSame(t, current, next)
-	assert.Equal(t, "v1.0.0", current.Spec.Version)
-	assert.Equal(t, "v1.1.0", next.Spec.Version)
-	assert.Empty(t, next.Spec.Type)
-	assert.Empty(t, next.Spec.ImageRegistry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := prepare(t, tt.current, tt.body)
+			assert.Equal(t, &tt.current, input.Current)
+			tt.assert(t, input)
+		})
+	}
+}
 
-	_, err = buildPostgrestClusterPatchValidationNew(current, []byte(`[`))
-	assert.Error(t, err)
+func TestBuildPostgrestClusterPatchValidationNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+		assert  func(*testing.T, *v1.Cluster, *v1.Cluster)
+	}{
+		{
+			name: "replaces a supplied spec composite without mutating Current",
+			body: `{"spec":{"version":"v1.1.0"}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.NotSame(t, current, next)
+				assert.Equal(t, "v1.0.0", current.Spec.Version)
+				assert.Equal(t, "v1.1.0", next.Spec.Version)
+				assert.Empty(t, next.Spec.Type)
+				assert.Empty(t, next.Spec.ImageRegistry)
+			},
+		},
+		{
+			name:    "rejects malformed PATCH payloads",
+			body:    `[`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := &v1.Cluster{Spec: &v1.ClusterSpec{
+				Type:          v1.KubernetesClusterType,
+				ImageRegistry: "current-registry",
+				Version:       "v1.0.0",
+			}}
+
+			next, err := buildPostgrestClusterPatchValidationNew(current, []byte(tt.body))
+			if tt.wantErr {
+				assert.Error(t, err)
+
+				return
+			}
+
+			assert.NoError(t, err)
+			tt.assert(t, current, next)
+		})
+	}
 }
 
 func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
@@ -2238,204 +2162,140 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 		return &next
 	}
 
-	t.Run("allows uninitialized clusters", func(t *testing.T) {
-		current := &v1.Cluster{
-			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
-			Status: &v1.ClusterStatus{Initialized: false},
-		}
-		update := clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true}
-		err := validateInitializedClusterConfigurationUpdate(current, updatedCluster(t, current, update), update)
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("allows an unchanged image registry", func(t *testing.T) {
-		current := &v1.Cluster{
-			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
-			Status: &v1.ClusterStatus{Initialized: true},
-		}
-		update := clusterPatchConfigurationUpdate{imageRegistry: "current", imageRegistrySet: true}
-		err := validateInitializedClusterConfigurationUpdate(current, updatedCluster(t, current, update), update)
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("rejects unusable Kubernetes credential rotations", func(t *testing.T) {
-		validCurrent := testEncodedKubeconfig("https://api.example.test:6443", "old-token")
-		tests := []struct {
-			name       string
-			current    *v1.Cluster
-			kubeconfig string
-			hint       string
-		}{
-			{
-				name:       "blank updated kubeconfig",
-				current:    initializedKubernetesCluster(validCurrent),
-				kubeconfig: " ",
-				hint:       "failed to parse updated kubeconfig",
-			},
-			{
-				name:       "missing current Kubernetes config",
-				current:    &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{Initialized: true}},
-				kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
-				hint:       "failed to read current kubeconfig",
-			},
-			{
-				name:       "invalid current Kubernetes config",
-				current:    initializedKubernetesCluster(base64.StdEncoding.EncodeToString([]byte("not a kubeconfig"))),
-				kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
-				hint:       "failed to parse current kubeconfig",
-			},
-			{
-				name:       "invalid updated kubeconfig",
-				current:    initializedKubernetesCluster(validCurrent),
-				kubeconfig: "not-base64",
-				hint:       "failed to parse updated kubeconfig",
-			},
-			{
-				name:       "different Kubernetes API server",
-				current:    initializedKubernetesCluster(validCurrent),
-				kubeconfig: testEncodedKubeconfig("https://other-api.example.test:6443", "new-token"),
-				hint:       "current Kubernetes API server",
-			},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				update := clusterPatchConfigurationUpdate{
-					kubeconfig:    tt.kubeconfig,
-					kubeconfigSet: true,
-				}
-				err := validateInitializedClusterConfigurationUpdate(
-					tt.current,
-					updatedCluster(t, tt.current, update),
-					update,
-				)
-
-				assert.ErrorContains(t, err, tt.hint)
-			})
-		}
-	})
-
-	t.Run("allows same-host Kubernetes credential rotation", func(t *testing.T) {
-		current := initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token"))
-		update := clusterPatchConfigurationUpdate{
-			kubeconfig:    testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
-			kubeconfigSet: true,
-		}
-		err := validateInitializedClusterConfigurationUpdate(
-			current,
-			updatedCluster(t, current, update),
-			update,
-		)
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("allows empty Kubernetes credential backfill", func(t *testing.T) {
-		current := initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token"))
-		update := clusterPatchConfigurationUpdate{kubeconfigSet: true}
-		err := validateInitializedClusterConfigurationUpdate(
-			current,
-			updatedCluster(t, current, update),
-			update,
-		)
-
-		assert.NoError(t, err)
-	})
-
-	t.Run("validates SSH private-key rotations", func(t *testing.T) {
-		cluster := &v1.Cluster{
+	validKubeconfig := testEncodedKubeconfig("https://api.example.test:6443", "old-token")
+	initializedSSHCluster := func() *v1.Cluster {
+		return &v1.Cluster{
 			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
 			Status: &v1.ClusterStatus{Initialized: true},
 		}
+	}
 
-		for _, tt := range []struct {
-			name string
-			key  string
-			hint string
-		}{
-			{name: "blank private key", key: " ", hint: "SSH private key must be base64 encoded"},
-			{name: "invalid base64", key: "not-base64", hint: "SSH private key must be base64 encoded"},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				update := clusterPatchConfigurationUpdate{
-					sshPrivateKey:    tt.key,
-					sshPrivateKeySet: true,
-				}
-				err := validateInitializedClusterConfigurationUpdate(
-					cluster,
-					updatedCluster(t, cluster, update),
-					update,
-				)
+	tests := []struct {
+		name            string
+		current         *v1.Cluster
+		update          clusterPatchConfigurationUpdate
+		wantErrContains string
+	}{
+		{
+			name:    "allows image registry changes before initialization",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{ImageRegistry: "current"}, Status: &v1.ClusterStatus{Initialized: false}},
+			update:  clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true},
+		},
+		{
+			name:    "allows an unchanged image registry",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{ImageRegistry: "current"}, Status: &v1.ClusterStatus{Initialized: true}},
+			update:  clusterPatchConfigurationUpdate{imageRegistry: "current", imageRegistrySet: true},
+		},
+		{
+			name:            "rejects image registry changes after initialization",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{ImageRegistry: "current"}, Status: &v1.ClusterStatus{Initialized: true}},
+			update:          clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true},
+			wantErrContains: "image registry cannot be changed",
+		},
+		{
+			name:            "rejects a blank updated kubeconfig",
+			current:         initializedKubernetesCluster(validKubeconfig),
+			update:          clusterPatchConfigurationUpdate{kubeconfig: " ", kubeconfigSet: true},
+			wantErrContains: "failed to parse updated kubeconfig",
+		},
+		{
+			name:            "rejects a missing current Kubernetes config",
+			current:         &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{Initialized: true}},
+			update:          clusterPatchConfigurationUpdate{kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"), kubeconfigSet: true},
+			wantErrContains: "failed to read current kubeconfig",
+		},
+		{
+			name:            "rejects an invalid current kubeconfig",
+			current:         initializedKubernetesCluster(base64.StdEncoding.EncodeToString([]byte("not a kubeconfig"))),
+			update:          clusterPatchConfigurationUpdate{kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"), kubeconfigSet: true},
+			wantErrContains: "failed to parse current kubeconfig",
+		},
+		{
+			name:            "rejects an invalid updated kubeconfig",
+			current:         initializedKubernetesCluster(validKubeconfig),
+			update:          clusterPatchConfigurationUpdate{kubeconfig: "not-base64", kubeconfigSet: true},
+			wantErrContains: "failed to parse updated kubeconfig",
+		},
+		{
+			name:            "rejects a kubeconfig for a different Kubernetes API server",
+			current:         initializedKubernetesCluster(validKubeconfig),
+			update:          clusterPatchConfigurationUpdate{kubeconfig: testEncodedKubeconfig("https://other-api.example.test:6443", "new-token"), kubeconfigSet: true},
+			wantErrContains: "current Kubernetes API server",
+		},
+		{
+			name:    "allows same-host Kubernetes credential rotation",
+			current: initializedKubernetesCluster(validKubeconfig),
+			update:  clusterPatchConfigurationUpdate{kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"), kubeconfigSet: true},
+		},
+		{
+			name:    "allows empty Kubernetes credential backfill",
+			current: initializedKubernetesCluster(validKubeconfig),
+			update:  clusterPatchConfigurationUpdate{kubeconfigSet: true},
+		},
+		{
+			name:            "rejects a blank SSH private key",
+			current:         initializedSSHCluster(),
+			update:          clusterPatchConfigurationUpdate{sshPrivateKey: " ", sshPrivateKeySet: true},
+			wantErrContains: "SSH private key must be base64 encoded",
+		},
+		{
+			name:            "rejects an invalid SSH private key",
+			current:         initializedSSHCluster(),
+			update:          clusterPatchConfigurationUpdate{sshPrivateKey: "not-base64", sshPrivateKeySet: true},
+			wantErrContains: "SSH private key must be base64 encoded",
+		},
+		{
+			name:    "allows an SSH private key rotation",
+			current: initializedSSHCluster(),
+			update:  clusterPatchConfigurationUpdate{sshPrivateKey: base64.StdEncoding.EncodeToString([]byte("rotated-private-key")), sshPrivateKeySet: true},
+		},
+		{
+			name:    "allows an empty SSH private key backfill",
+			current: initializedSSHCluster(),
+			update:  clusterPatchConfigurationUpdate{sshPrivateKeySet: true},
+		},
+		{
+			name:            "rejects clearing the entire config",
+			current:         initializedKubernetesCluster(validKubeconfig),
+			update:          clusterPatchConfigurationUpdate{configCleared: true},
+			wantErrContains: "config cannot be cleared",
+		},
+		{
+			name:            "rejects clearing Kubernetes config",
+			current:         initializedKubernetesCluster(validKubeconfig),
+			update:          clusterPatchConfigurationUpdate{kubernetesConfigCleared: true},
+			wantErrContains: "kubernetes_config cannot be cleared",
+		},
+		{
+			name:            "rejects clearing SSH config",
+			current:         initializedSSHCluster(),
+			update:          clusterPatchConfigurationUpdate{sshConfigCleared: true},
+			wantErrContains: "ssh_config cannot be cleared",
+		},
+		{
+			name:            "rejects clearing SSH auth",
+			current:         initializedSSHCluster(),
+			update:          clusterPatchConfigurationUpdate{sshAuthCleared: true},
+			wantErrContains: "SSH auth cannot be cleared",
+		},
+	}
 
-				assert.ErrorContains(t, err, tt.hint)
-			})
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateInitializedClusterConfigurationUpdate(
+				tt.current,
+				updatedCluster(t, tt.current, tt.update),
+				tt.update,
+			)
 
-		update := clusterPatchConfigurationUpdate{
-			sshPrivateKey:    base64.StdEncoding.EncodeToString([]byte("rotated-private-key")),
-			sshPrivateKeySet: true,
-		}
-		err := validateInitializedClusterConfigurationUpdate(cluster, updatedCluster(t, cluster, update), update)
-		assert.NoError(t, err)
+			if tt.wantErrContains == "" {
+				assert.NoError(t, err)
 
-		update = clusterPatchConfigurationUpdate{sshPrivateKeySet: true}
-		err = validateInitializedClusterConfigurationUpdate(cluster, updatedCluster(t, cluster, update), update)
-		assert.NoError(t, err)
-	})
-
-	t.Run("rejects cleared initialized configurations", func(t *testing.T) {
-		kubernetesCluster := initializedKubernetesCluster(
-			testEncodedKubeconfig("https://api.example.test:6443", "old-token"),
-		)
-		sshCluster := &v1.Cluster{
-			Spec:   &v1.ClusterSpec{Type: v1.SSHClusterType},
-			Status: &v1.ClusterStatus{Initialized: true},
-		}
-
-		for _, tt := range []struct {
-			name    string
-			cluster *v1.Cluster
-			update  clusterPatchConfigurationUpdate
-			hint    string
-		}{
-			{
-				name:    "entire config",
-				cluster: kubernetesCluster,
-				update:  clusterPatchConfigurationUpdate{configCleared: true},
-				hint:    "config cannot be cleared",
-			},
-			{
-				name:    "Kubernetes config",
-				cluster: kubernetesCluster,
-				update:  clusterPatchConfigurationUpdate{kubernetesConfigCleared: true},
-				hint:    "kubernetes_config cannot be cleared",
-			},
-			{
-				name:    "SSH config",
-				cluster: sshCluster,
-				update:  clusterPatchConfigurationUpdate{sshConfigCleared: true},
-				hint:    "ssh_config cannot be cleared",
-			},
-			{
-				name:    "SSH auth",
-				cluster: sshCluster,
-				update:  clusterPatchConfigurationUpdate{sshAuthCleared: true},
-				hint:    "SSH auth cannot be cleared",
-			},
-		} {
-			t.Run(tt.name, func(t *testing.T) {
-				err := validateInitializedClusterConfigurationUpdate(
-					tt.cluster,
-					updatedCluster(t, tt.cluster, tt.update),
-					tt.update,
-				)
-
-				assert.ErrorContains(t, err, tt.hint)
-			})
-		}
-	})
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErrContains)
+		})
+	}
 }
 
 type trackingReadCloser struct {
