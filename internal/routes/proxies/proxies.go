@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -25,6 +26,7 @@ type Dependencies struct {
 	AuthEndpoint     string
 	AuthConfig       middleware.AuthConfig
 	ImageService     registry.ImageService
+	Admission        *admission.Registry
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {

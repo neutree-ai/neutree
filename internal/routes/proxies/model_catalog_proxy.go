@@ -3,13 +3,13 @@ package proxies
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/recipe"
+	"github.com/neutree-ai/neutree/pkg/admission"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // RegisterModelCatalogRoutes registers model catalog routes
@@ -22,105 +22,125 @@ import (
 //
 // Recipe catalogs are imported client-side (the UI parses YAML / fetches URLs
 // in the browser and creates each document through the normal POST path), so
-// there is no server-side import endpoint. The recipe validation middleware
-// below is the single server-side gate that rejects structurally invalid
-// recipe specs before they reach storage.
-func RegisterModelCatalogRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
+// there is no server-side import endpoint. The admission hooks below are the
+// single server-side gate that rejects structurally invalid recipe specs
+// before they reach storage.
+var modelCatalogAdmissionResource = admission.NewResource[v1.ModelCatalog](storage.MODEL_CATALOG_TABLE)
+
+var modelCatalogCreateAdmissionRunnerOptions = CreateAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, cause error) *admission.Error {
+		if admissionErr := modelCatalogPatchAdmissionRunnerOptions.InvalidRequestError(body, cause); admissionErr != nil {
+			return admissionErr
+		}
+		return modelCatalogInvalidPayloadAdmissionError(cause)
+	},
+	ReadBodyError: func(cause error) *admission.Error {
+		return &admission.Error{
+			Code:    10223,
+			Message: "failed to read request body: " + cause.Error(),
+			Hint:    "Retry the request",
+		}
+	},
+	AllowEmptyBody:       true,
+	PermissiveCandidates: true,
+}
+
+var modelCatalogPatchAdmissionRunnerOptions = PatchAdmissionRunnerOptions{
+	InvalidRequestError: func(body []byte, _ error) *admission.Error {
+		trimmed := bytes.TrimSpace(body)
+		if len(trimmed) == 0 {
+			return &admission.Error{Code: 10223, Message: "invalid model_catalog payload", Hint: "Check the model catalog spec fields and types"}
+		}
+		if trimmed[0] == '[' {
+			var catalogs []v1.ModelCatalog
+			if err := json.Unmarshal(trimmed, &catalogs); err != nil {
+				return modelCatalogInvalidPayloadAdmissionError(err)
+			}
+			return nil
+		}
+		var catalog v1.ModelCatalog
+		if err := json.Unmarshal(trimmed, &catalog); err != nil {
+			return modelCatalogInvalidPayloadAdmissionError(err)
+		}
+		return nil
+	},
+	BodyError: func(cause error) *admission.Error {
+		return &admission.Error{
+			Code:    10223,
+			Message: "failed to read request body: " + cause.Error(),
+			Hint:    "Retry the request",
+		}
+	},
+	PermissiveCandidates: true,
+}
+
+func RegisterModelCatalogRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) error {
 	proxyGroup := group.Group("/model_catalogs")
 	proxyGroup.Use(middlewares...)
 
+	if err := registerModelCatalogAdmission(deps); err != nil {
+		return err
+	}
+
+	var createRunner, patchRunner gin.HandlerFunc
+	if deps != nil && deps.Admission != nil {
+		createRunner = CreateAdmissionRunnerWithOptions(deps.Admission, modelCatalogAdmissionResource, modelCatalogCreateAdmissionRunnerOptions)
+		patchRunner = CreatePatchAdmissionRunnerWithOptions(deps, storage.MODEL_CATALOG_TABLE, modelCatalogAdmissionResource, modelCatalogPatchAdmissionRunnerOptions)
+	}
+
 	handler := CreateStructProxyHandler[v1.ModelCatalog](deps, "model_catalogs")
-	recipeValidation := validateModelCatalogRecipe()
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", recipeValidation, handler)
-	proxyGroup.PATCH("", recipeValidation, handler)
+	proxyGroup.POST("", withAdmissionRunner(createRunner, handler)...)
+	proxyGroup.PATCH("", withAdmissionRunner(patchRunner, handler)...)
+
+	return nil
 }
 
-// validateModelCatalogRecipe rejects structurally invalid recipe catalogs at
-// the data-entry boundary. Writes go through PostgREST (RLS-scoped to the
-// caller's JWT), which never runs recipe validation on its own, so this
-// middleware is where the recipe invariants in recipe.ValidateModelCatalogSpec
-// are actually enforced — otherwise an invalid recipe persists and only fails
-// later inside the endpoint controller at deploy time.
-func validateModelCatalogRecipe() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
-			c.Next()
-			return
-		}
-
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, &validationError{
-				Code:    "10223",
-				Message: "failed to read request body: " + err.Error(),
-				Hint:    "Retry the request",
-			})
-			c.Abort()
-
-			return
-		}
-
-		// Restore the body so the downstream proxy handler can re-read it.
-		c.Request.Body = io.NopCloser(bytes.NewReader(body))
-
-		trimmed := bytes.TrimSpace(body)
-		if len(trimmed) == 0 {
-			c.Next()
-			return
-		}
-
-		// PostgREST accepts both a single object and an array (bulk insert).
-		var catalogs []v1.ModelCatalog
-
-		if trimmed[0] == '[' {
-			if err := json.Unmarshal(trimmed, &catalogs); err != nil {
-				c.JSON(http.StatusBadRequest, &validationError{
-					Code:    "10223",
-					Message: "invalid model_catalog payload: " + err.Error(),
-					Hint:    "Check the model catalog spec fields and types",
-				})
-				c.Abort()
-
-				return
-			}
-		} else {
-			var one v1.ModelCatalog
-			if err := json.Unmarshal(trimmed, &one); err != nil {
-				c.JSON(http.StatusBadRequest, &validationError{
-					Code:    "10223",
-					Message: "invalid model_catalog payload: " + err.Error(),
-					Hint:    "Check the model catalog spec fields and types",
-				})
-				c.Abort()
-
-				return
-			}
-
-			catalogs = []v1.ModelCatalog{one}
-		}
-
-		for _, catalog := range catalogs {
-			// A metadata-only PATCH carries no spec — nothing recipe-related to
-			// validate.
-			if catalog.Spec == nil {
-				continue
-			}
-
-			if err := recipe.ValidateModelCatalogSpec(catalog.Spec); err != nil {
-				c.JSON(http.StatusBadRequest, &validationError{
-					Code:    "10224",
-					Message: err.Error(),
-					Hint:    "Fix the recipe definition and retry",
-				})
-				c.Abort()
-
-				return
-			}
-		}
-
-		c.Next()
+func registerModelCatalogAdmission(deps *Dependencies) error {
+	if deps == nil || deps.Admission == nil {
+		return nil
 	}
+
+	if err := deps.Admission.RegisterResource(modelCatalogAdmissionResource); err != nil {
+		return err
+	}
+
+	if err := deps.Admission.RegisterHook(modelCatalogAdmissionResource, admission.ValidateCreate(
+		admission.HookMeta{Name: "community.model-catalog.recipe.create", Order: 10}, 10223,
+		func(_ admission.RequestContext, candidate v1.ModelCatalog) error {
+			return validateModelCatalogRecipeCandidate(candidate)
+		},
+	)); err != nil {
+		return err
+	}
+
+	return deps.Admission.RegisterHook(modelCatalogAdmissionResource, admission.ValidateUpdate(
+		admission.HookMeta{Name: "community.model-catalog.recipe.update", Order: 10}, 10224,
+		func(_ admission.RequestContext, _, candidate v1.ModelCatalog) error {
+			return validateModelCatalogRecipeCandidate(candidate)
+		},
+	))
+}
+
+func validateModelCatalogRecipeCandidate(candidate v1.ModelCatalog) error {
+	if candidate.Spec == nil {
+		return nil
+	}
+
+	if err := recipe.ValidateModelCatalogSpec(candidate.Spec); err != nil {
+		return &admission.Error{Code: 10224, Message: err.Error(), Hint: "Fix the recipe definition and retry"}
+	}
+
+	return nil
+}
+
+func modelCatalogInvalidPayloadAdmissionError(cause error) *admission.Error {
+	message := "invalid model_catalog payload"
+	if cause != nil {
+		message += ": " + cause.Error()
+	}
+
+	return &admission.Error{Code: 10223, Message: message, Hint: "Check the model catalog spec fields and types"}
 }

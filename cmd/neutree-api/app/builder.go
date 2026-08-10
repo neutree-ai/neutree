@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
+	"github.com/neutree-ai/neutree/pkg/admission"
 )
 
 // Builder is the API application builder
@@ -25,6 +26,18 @@ type Builder struct {
 	routesToMiddlewares    map[string][]string
 	config                 *config.APIConfig
 	globalMiddlewaresInits []MiddlewareFactory
+	admissionConfigurers   []admissionConfigurer
+	buildAttempted         bool
+}
+
+type admissionConfigurer struct {
+	name      string
+	configure func(*AdmissionOptions) error
+}
+
+// AdmissionOptions exposes the admission registry to builder configurers.
+type AdmissionOptions struct {
+	Registry *admission.Registry
 }
 
 // NewBuilder creates a new API builder
@@ -34,6 +47,7 @@ func NewBuilder() *Builder {
 		routeInits:             make(map[string]RouteFactory),
 		routesToMiddlewares:    make(map[string][]string),
 		globalMiddlewaresInits: []MiddlewareFactory{},
+		admissionConfigurers:   []admissionConfigurer{},
 	}
 
 	// Register default route handlers
@@ -53,23 +67,23 @@ func NewBuilder() *Builder {
 		// Auth middleware is applied to:
 		// - Validate and pass-through JWT tokens to PostgREST
 		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
-		"rest/api-keys":             ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
-		"rest/workspaces":           ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
-		"rest/roles":                ProxiesRouteFactory(proxies.RegisterRoleRoutes),
-		"rest/role-assignments":     ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),
-		"rest/user-profiles":        ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
-		"rest/clusters":             ProxiesRouteFactory(proxies.RegisterClusterRoutes),
+		"rest/api-keys":             ProxiesRouteFactoryWithError(proxies.RegisterAPIKeyRoutes),
+		"rest/workspaces":           ProxiesRouteFactoryWithError(proxies.RegisterWorkspaceRoutes),
+		"rest/roles":                ProxiesRouteFactoryWithError(proxies.RegisterRoleRoutes),
+		"rest/role-assignments":     ProxiesRouteFactoryWithError(proxies.RegisterRoleAssignmentRoutes),
+		"rest/user-profiles":        ProxiesRouteFactoryWithError(proxies.RegisterUserProfileRoutes),
+		"rest/clusters":             ProxiesRouteFactoryWithError(proxies.RegisterClusterRoutes),
 		"clusters":                  ClustersRouteFactory(clusters.RegisterClusterRoutes),
 		"rest/static-node-clusters": ProxiesRouteFactory(proxies.RegisterStaticNodeClusterRoutes),
 		"rest/static-nodes":         ProxiesRouteFactory(proxies.RegisterStaticNodeRoutes),
-		"rest/image-registries":     ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
-		"rest/model-registries":     ProxiesRouteFactory(proxies.RegisterModelRegistryRoutes),
-		"rest/endpoints":            ProxiesRouteFactory(proxies.RegisterEndpointRoutes),
-		"rest/engines":              ProxiesRouteFactory(proxies.RegisterEngineRoutes),
-		"rest/model-catalogs":       ProxiesRouteFactory(proxies.RegisterModelCatalogRoutes),
-		"rest/oem-configs":          ProxiesRouteFactory(proxies.RegisterOEMConfigRoutes),
+		"rest/image-registries":     ProxiesRouteFactoryWithError(proxies.RegisterImageRegistryRoutes),
+		"rest/model-registries":     ProxiesRouteFactoryWithError(proxies.RegisterModelRegistryRoutes),
+		"rest/endpoints":            ProxiesRouteFactoryWithError(proxies.RegisterEndpointRoutes),
+		"rest/engines":              ProxiesRouteFactoryWithError(proxies.RegisterEngineRoutes),
+		"rest/model-catalogs":       ProxiesRouteFactoryWithError(proxies.RegisterModelCatalogRoutes),
+		"rest/oem-configs":          ProxiesRouteFactoryWithError(proxies.RegisterOEMConfigRoutes),
 		"rest/rpc":                  ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
-		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
+		"rest/external-endpoints":   ProxiesRouteFactoryWithError(proxies.RegisterExternalEndpointRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -172,11 +186,33 @@ func (b *Builder) WithGlobalMiddleware(middlewareInit MiddlewareFactory) *Builde
 	return b
 }
 
+// WithAdmissionConfigurer registers a function that configures admission hooks.
+func (b *Builder) WithAdmissionConfigurer(name string, configure func(*AdmissionOptions) error) *Builder {
+	b.admissionConfigurers = append(b.admissionConfigurers, admissionConfigurer{
+		name:      name,
+		configure: configure,
+	})
+
+	return b
+}
+
 // Build creates and initializes all components
 func (b *Builder) Build() (*App, error) {
 	if b.config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+
+	if err := b.validateAdmissionConfigurers(); err != nil {
+		return nil, err
+	}
+
+	if b.buildAttempted {
+		return nil, fmt.Errorf("build has already been attempted")
+	}
+
+	b.buildAttempted = true
+
+	admissionRegistry := admission.NewRegistry()
 
 	middlewareOptions := &MiddlewareOptions{
 		Config: b.config,
@@ -221,6 +257,7 @@ func (b *Builder) Build() (*App, error) {
 			Config:      b.config,
 			Group:       apiV1,
 			Middlewares: middlewares,
+			Admission:   admissionRegistry,
 		}
 
 		klog.Info("Initializing route:", name)
@@ -231,5 +268,38 @@ func (b *Builder) Build() (*App, error) {
 		}
 	}
 
+	admissionOptions := &AdmissionOptions{Registry: admissionRegistry}
+	for _, configurer := range b.admissionConfigurers {
+		if err := configurer.configure(admissionOptions); err != nil {
+			return nil, fmt.Errorf("failed to configure admission %q: %w", configurer.name, err)
+		}
+	}
+
+	if err := admissionRegistry.Seal(); err != nil {
+		return nil, fmt.Errorf("failed to seal admission registry: %w", err)
+	}
+
 	return NewApp(b.config), nil
+}
+
+func (b *Builder) validateAdmissionConfigurers() error {
+	names := make(map[string]struct{}, len(b.admissionConfigurers))
+
+	for _, configurer := range b.admissionConfigurers {
+		if configurer.name == "" {
+			return fmt.Errorf("admission configurer name is required")
+		}
+
+		if configurer.configure == nil {
+			return fmt.Errorf("admission configurer %q is nil", configurer.name)
+		}
+
+		if _, exists := names[configurer.name]; exists {
+			return fmt.Errorf("duplicate admission configurer %q", configurer.name)
+		}
+
+		names[configurer.name] = struct{}{}
+	}
+
+	return nil
 }

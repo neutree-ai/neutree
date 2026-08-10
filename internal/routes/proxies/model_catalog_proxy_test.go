@@ -4,19 +4,27 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/neutree-ai/neutree/pkg/admission"
 )
 
 // newRecipeValidationRouter mounts the middleware in front of a stub handler so
 // tests can observe both the rejection responses and the pass-through path.
-func newRecipeValidationRouter() *gin.Engine {
+func newRecipeValidationRouter(t *testing.T) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
+	registry := admission.NewRegistry()
+	require.NoError(t, registerModelCatalogAdmission(&Dependencies{Admission: registry}))
+	require.NoError(t, registry.Seal())
 	r := gin.New()
-	r.POST("/model_catalogs", validateModelCatalogRecipe(), func(c *gin.Context) {
+	r.POST("/model_catalogs", CreateAdmissionRunnerWithOptions(registry, modelCatalogAdmissionResource, modelCatalogCreateAdmissionRunnerOptions), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"proxied": true})
 	})
 
@@ -83,7 +91,7 @@ func TestValidateModelCatalogRecipe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router := newRecipeValidationRouter()
+			router := newRecipeValidationRouter(t)
 			req := httptest.NewRequest(http.MethodPost, "/model_catalogs", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
@@ -98,9 +106,9 @@ func TestValidateModelCatalogRecipe(t *testing.T) {
 
 			// Rejections use the PostgREST error shape the SPA's data provider
 			// parses: {code, message, hint}.
-			var resp validationError
+			var resp admission.Error
 			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-			assert.Equal(t, tt.expectCode, resp.Code)
+			assert.Equal(t, tt.expectCode, strconv.Itoa(resp.Code))
 			assert.Contains(t, resp.Message, tt.expectMessagePart)
 			assert.NotEmpty(t, resp.Hint)
 		})

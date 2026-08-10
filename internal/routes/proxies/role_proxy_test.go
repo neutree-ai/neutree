@@ -6,7 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/neutree-ai/neutree/internal/middleware"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/admission"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -19,7 +20,7 @@ func TestValidateRoleDeletion(t *testing.T) {
 		roleAssignmentCount int
 		queryError          error
 		expectError         bool
-		expectedCode        string
+		expectedCode        int
 		expectedHint        string
 		expectedMessagePart string
 	}{
@@ -46,7 +47,7 @@ func TestValidateRoleDeletion(t *testing.T) {
 			roleAssignmentCount: 3,
 			queryError:          nil,
 			expectError:         true,
-			expectedCode:        "10129",
+			expectedCode:        10129,
 			expectedHint:        "3 role assignment(s) still reference this role",
 			expectedMessagePart: "default/developer",
 		},
@@ -57,7 +58,7 @@ func TestValidateRoleDeletion(t *testing.T) {
 			roleAssignmentCount: 5,
 			queryError:          nil,
 			expectError:         true,
-			expectedCode:        "10129",
+			expectedCode:        10129,
 			expectedHint:        "5 role assignment(s) still reference this role",
 			expectedMessagePart: "global/admin",
 		},
@@ -97,15 +98,15 @@ func TestValidateRoleDeletion(t *testing.T) {
 				expectedFilters,
 			).Return(tt.roleAssignmentCount, tt.queryError)
 
-			validator := validateRoleDeletion(mockStorage)
-			err := validator(tt.workspace, tt.roleName)
+			err := validateRoleDeleteDependencies(mockStorage, v1.Role{Metadata: &v1.Metadata{Workspace: tt.workspace, Name: tt.roleName}})
 
 			if tt.expectError {
 				assert.Error(t, err)
 
 				if tt.queryError == nil {
-					deletionErr, ok := err.(*middleware.DeletionError)
-					assert.True(t, ok, "error should be DeletionError")
+					var deletionErr *admission.Error
+					ok := errors.As(err, &deletionErr)
+					assert.True(t, ok, "error should be admission.Error")
 					if ok {
 						assert.Equal(t, tt.expectedCode, deletionErr.Code)
 						assert.Contains(t, deletionErr.Hint, tt.expectedHint)
