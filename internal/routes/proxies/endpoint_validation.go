@@ -3,10 +3,12 @@ package proxies
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -186,20 +188,19 @@ func prepareEndpointValidationInput(
 		return validationErr
 	}
 
-	merged := mergeEndpointPatch(current, &input.Patch)
+	newEndpoint, err := buildPostgrestEndpointPatchValidationNew(current, input.Body)
+	if err != nil {
+		return invalidEndpointPayloadError(err)
+	}
+
 	input.Current = current
-	input.New = &merged
+	input.New = newEndpoint
 
 	return nil
 }
 
 func endpointPatchRequiresCurrent(input *endpointValidationInput) (bool, *validationError) {
-	clusterPresent, validationErr := endpointPatchIncludesCluster(input.RawPayload)
-	if validationErr != nil {
-		return false, validationErr
-	}
-
-	return clusterPresent || endpointPatchMayAffectVGPUValidation(&input.Patch), nil
+	return endpointPatchIncludesSpec(input.RawPayload), nil
 }
 
 func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error) {
@@ -237,40 +238,21 @@ func validateEndpointPatchVGPU(store storage.Storage, input *endpointValidationI
 }
 
 func validateEndpointClusterImmutable(input *endpointValidationInput) *validationError {
-	clusterPresent, validationErr := endpointPatchIncludesCluster(input.RawPayload)
-	if validationErr != nil {
-		return validationErr
-	}
-
-	if !clusterPresent {
+	if !endpointPatchIncludesSpec(input.RawPayload) {
 		return nil
 	}
 
-	if endpointClusterChanged(input.Current, &input.Patch) {
+	if endpointClusterChanged(input.Current, input.New) {
 		return endpointClusterImmutableError()
 	}
 
 	return nil
 }
 
-func endpointPatchIncludesCluster(payload map[string]json.RawMessage) (bool, *validationError) {
-	specRaw, ok := payload["spec"]
-	if !ok {
-		return false, nil
-	}
+func endpointPatchIncludesSpec(payload map[string]json.RawMessage) bool {
+	_, ok := payload["spec"]
 
-	if bytes.Equal(bytes.TrimSpace(specRaw), []byte("null")) {
-		return true, nil
-	}
-
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return false, invalidEndpointPayloadError(err)
-	}
-
-	_, ok = spec["cluster"]
-
-	return ok, nil
+	return ok
 }
 
 func endpointClusterChanged(existing *v1.Endpoint, patch *v1.Endpoint) bool {
@@ -294,42 +276,60 @@ func parseEndpointBody(body []byte) (*v1.Endpoint, *validationError) {
 	return &endpoint, nil
 }
 
-func validateEndpointVGPUPreflight(
-	store storage.Storage,
-	method string,
-	queryParams url.Values,
-	endpoint *v1.Endpoint,
-) *validationError {
-	return validateEndpointVGPUPreflightWithResolvedPatch(store, method, queryParams, endpoint, nil)
-}
-
-func validateEndpointVGPUPreflightWithResolvedPatch(
-	store storage.Storage,
-	method string,
-	queryParams url.Values,
-	endpoint *v1.Endpoint,
-	resolvedPatch *v1.Endpoint,
-) *validationError {
-	if endpoint == nil || endpoint.GetDeletionTimestamp() != "" {
-		return nil
+// buildPostgrestEndpointPatchValidationNew mirrors the resource proxy before
+// it forwards a PATCH: supplied top-level columns replace their current
+// values. A supplied spec therefore replaces the complete PostgreSQL
+// composite rather than recursively merging its attributes.
+func buildPostgrestEndpointPatchValidationNew(current *v1.Endpoint, body []byte) (*v1.Endpoint, error) {
+	if current == nil {
+		return nil, errors.New("current endpoint is required")
 	}
 
-	if endpoint.Spec == nil {
-		return nil
+	currentBody, err := json.Marshal(current)
+	if err != nil {
+		return nil, fmt.Errorf("marshal current endpoint: %w", err)
 	}
 
-	if method == http.MethodPatch {
-		if !endpointPatchMayAffectVGPUValidation(endpoint) {
-			return nil
-		}
+	var currentPayload map[string]interface{}
+	if err := json.Unmarshal(currentBody, &currentPayload); err != nil {
+		return nil, fmt.Errorf("decode current endpoint: %w", err)
 	}
 
-	targetEndpoint, validationErr := endpointVGPUValidationTarget(store, method, queryParams, endpoint, resolvedPatch)
-	if validationErr != nil {
-		return validationErr
+	if len(bytes.TrimSpace(body)) == 0 {
+		body = []byte(`{}`)
 	}
 
-	return validateEndpointVGPUEffective(store, targetEndpoint)
+	filteredBody, err := filterPayloadToTopLevelFields(
+		body,
+		extractTopLevelJSONFields(reflect.TypeOf(v1.Endpoint{})),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("filter endpoint patch payload: %w", err)
+	}
+
+	var patchPayload map[string]interface{}
+	if err := json.Unmarshal(filteredBody, &patchPayload); err != nil {
+		return nil, fmt.Errorf("decode endpoint patch payload: %w", err)
+	}
+
+	tagConfig := extractStructTagConfig(reflect.TypeOf(v1.Endpoint{}))
+	mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
+
+	for field, value := range patchPayload {
+		currentPayload[field] = value
+	}
+
+	nextBody, err := json.Marshal(currentPayload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal patched endpoint: %w", err)
+	}
+
+	var next v1.Endpoint
+	if err := json.Unmarshal(nextBody, &next); err != nil {
+		return nil, fmt.Errorf("decode patched endpoint: %w", err)
+	}
+
+	return &next, nil
 }
 
 func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint) *validationError {
@@ -369,31 +369,6 @@ func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint)
 	// Capacity is intentionally left to scheduling/runtime status. Cluster
 	// resource snapshots can be stale and should not be used as admission gates.
 	return nil
-}
-
-func endpointVGPUValidationTarget(
-	store storage.Storage,
-	method string,
-	queryParams url.Values,
-	endpoint *v1.Endpoint,
-	resolvedPatch *v1.Endpoint,
-) (*v1.Endpoint, *validationError) {
-	if method != http.MethodPatch {
-		return endpoint, nil
-	}
-
-	if resolvedPatch == nil {
-		var validationErr *validationError
-		resolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
-
-		if validationErr != nil {
-			return nil, validationErr
-		}
-	}
-
-	merged := mergeEndpointPatch(resolvedPatch, endpoint)
-
-	return &merged, nil
 }
 
 func resolveEndpointPatch(
@@ -456,149 +431,6 @@ func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*
 	}
 
 	return &clusters[0], nil
-}
-
-func mergeEndpointPatch(existing *v1.Endpoint, patch *v1.Endpoint) v1.Endpoint {
-	if existing == nil {
-		if patch == nil {
-			return v1.Endpoint{}
-		}
-
-		return *patch
-	}
-
-	merged := *existing
-
-	if existing.Metadata != nil {
-		metadata := *existing.Metadata
-		merged.Metadata = &metadata
-	}
-
-	if existing.Spec != nil {
-		spec := *existing.Spec
-		if existing.Spec.Resources != nil {
-			spec.Resources = copyEndpointResourceSpec(existing.Spec.Resources)
-		}
-
-		merged.Spec = &spec
-	}
-
-	if patch == nil {
-		return merged
-	}
-
-	if patch.Metadata != nil {
-		if merged.Metadata == nil {
-			merged.Metadata = &v1.Metadata{}
-		}
-
-		if patch.Metadata.Name != "" {
-			merged.Metadata.Name = patch.Metadata.Name
-		}
-
-		if patch.Metadata.Workspace != "" {
-			merged.Metadata.Workspace = patch.Metadata.Workspace
-		}
-	}
-
-	if patch.Spec != nil {
-		if merged.Spec == nil {
-			merged.Spec = &v1.EndpointSpec{}
-		}
-
-		if patch.Spec.Cluster != "" {
-			merged.Spec.Cluster = patch.Spec.Cluster
-		}
-
-		if patch.Spec.Replicas.Num != nil {
-			merged.Spec.Replicas.Num = patch.Spec.Replicas.Num
-		}
-
-		if patch.Spec.Resources != nil {
-			merged.Spec.Resources = mergeEndpointResourceSpec(merged.Spec.Resources, patch.Spec.Resources)
-		}
-	}
-
-	return merged
-}
-
-func mergeEndpointResourceSpec(existing *v1.ResourceSpec, patch *v1.ResourceSpec) *v1.ResourceSpec {
-	if existing == nil {
-		return copyEndpointResourceSpec(patch)
-	}
-
-	merged := copyEndpointResourceSpec(existing)
-
-	if patch.CPU != nil {
-		merged.CPU = patch.CPU
-	}
-
-	if patch.GPU != nil {
-		merged.GPU = patch.GPU
-	}
-
-	if patch.Memory != nil {
-		merged.Memory = patch.Memory
-	}
-
-	if patch.Accelerator != nil {
-		if merged.Accelerator == nil {
-			merged.Accelerator = make(map[string]string, len(patch.Accelerator))
-		}
-
-		for key, value := range patch.Accelerator {
-			merged.Accelerator[key] = value
-		}
-
-		if acceleratorPatchClearsVirtualization(patch.Accelerator) {
-			clearAcceleratorVirtualization(merged.Accelerator)
-		}
-	}
-
-	return merged
-}
-
-func acceleratorPatchClearsVirtualization(accelerator map[string]string) bool {
-	if accelerator == nil {
-		return false
-	}
-
-	_, hasType := accelerator[v1.AcceleratorTypeKey]
-	_, hasProduct := accelerator[v1.AcceleratorProductKey]
-
-	return hasType && hasProduct && !acceleratorHasVirtualization(accelerator)
-}
-
-func clearAcceleratorVirtualization(accelerator map[string]string) {
-	delete(accelerator, v1.AcceleratorVirtualizationMemoryMiBKey)
-	delete(accelerator, v1.AcceleratorVirtualizationMemoryPercentKey)
-	delete(accelerator, v1.AcceleratorVirtualizationCorePercentKey)
-}
-
-func acceleratorHasVirtualization(accelerator map[string]string) bool {
-	for key := range accelerator {
-		if v1.IsAcceleratorVirtualizationKey(key) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func copyEndpointResourceSpec(resources *v1.ResourceSpec) *v1.ResourceSpec {
-	if resources == nil {
-		return nil
-	}
-
-	copied := *resources
-	if resources.Accelerator != nil {
-		copied.Accelerator = make(map[string]string, len(resources.Accelerator))
-		for key, value := range resources.Accelerator {
-			copied.Accelerator[key] = value
-		}
-	}
-
-	return &copied
 }
 
 func endpointPatchMayAffectVGPUValidation(endpoint *v1.Endpoint) bool {
