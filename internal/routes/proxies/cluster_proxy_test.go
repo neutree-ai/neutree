@@ -531,6 +531,27 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	t.Run("skips configuration validation for non-PATCH requests", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.POST("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(`{
+			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
 	t.Run("rejects image registry switch for initialized cluster before proxy handler", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -1389,6 +1410,12 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 				current:    &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{Initialized: true}},
 				kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
 				hint:       "failed to read current kubeconfig",
+			},
+			{
+				name:       "invalid current Kubernetes config",
+				current:    initializedKubernetesCluster(base64.StdEncoding.EncodeToString([]byte("not a kubeconfig"))),
+				kubeconfig: testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
+				hint:       "failed to parse current kubeconfig",
 			},
 			{
 				name:       "invalid updated kubeconfig",
