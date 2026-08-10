@@ -55,6 +55,8 @@ type ValidationInput[T any] struct {
 	Body        []byte
 	RawPayload  map[string]json.RawMessage
 	Patch       T
+	Current     *T
+	New         *T
 	QueryParams url.Values
 	Operation   clusterValidationOperation
 }
@@ -87,15 +89,22 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
+		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
 		if input.Operation == clusterValidationPatch {
-			if validationErr := validateClusterVersionUpdateInput(s, input); validationErr != nil {
+			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
 				c.JSON(http.StatusBadRequest, validationErr)
 				c.Abort()
 
 				return
 			}
 
-			if validationErr := validateClusterConfigurationUpdateInput(s, input); validationErr != nil {
+			if validationErr := validateClusterConfigurationUpdateInput(input); validationErr != nil {
 				c.JSON(http.StatusBadRequest, validationErr)
 				c.Abort()
 
@@ -171,6 +180,214 @@ func readClusterValidationInput(c *gin.Context) (*ValidationInput[v1.Cluster], *
 	return input, nil
 }
 
+func prepareClusterValidationInput(
+	s storage.Storage, input *ValidationInput[v1.Cluster],
+) *validationError {
+	if input.Operation == clusterValidationSoftDelete {
+		return nil
+	}
+
+	if input.Operation == clusterValidationCreate {
+		input.New = &input.Patch
+
+		return nil
+	}
+
+	filters := clusterPatchUpdateFilters(input.Patch, input.QueryParams)
+	if len(filters) == 0 {
+		return clusterPatchValidationIdentityError(input)
+	}
+
+	current, err := resolveClusterForPatchUpdate(s, filters)
+	if err != nil {
+		return clusterPatchValidationPreparationError(input, err)
+	}
+
+	newCluster, err := mergeClusterPatchForValidation(current, input.Body)
+	if err != nil {
+		return invalidClusterPayloadError(err)
+	}
+
+	preserveMaskedClusterPatchCredentials(current, newCluster, input.RawPayload)
+	input.Current = current
+	input.New = newCluster
+
+	return nil
+}
+
+func clusterPatchValidationPreparationError(
+	input *ValidationInput[v1.Cluster], err error,
+) *validationError {
+	hasVersion, versionErr := clusterPatchDesiredVersionPayload(input.RawPayload)
+	if versionErr != nil {
+		return invalidClusterPayloadError(versionErr)
+	}
+
+	if hasVersion {
+		return clusterVersionUpdateResolutionError(err)
+	}
+
+	configurationUpdate, configurationErr := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
+	if configurationErr != nil {
+		return invalidClusterPayloadError(configurationErr)
+	}
+
+	if configurationUpdate.hasChanges() {
+		return clusterConfigurationUpdateResolutionError(err)
+	}
+
+	disableRequested, acceleratorErr := clusterAcceleratorVirtualizationDisableRequestedPayload(input.RawPayload)
+	if acceleratorErr != nil {
+		return invalidClusterPayloadError(acceleratorErr)
+	}
+
+	if disableRequested {
+		return clusterAcceleratorVirtualizationResolutionError(err)
+	}
+
+	return clusterPatchValidationResolutionError(err)
+}
+
+func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *validationError {
+	hasVersion, versionErr := clusterPatchDesiredVersionPayload(input.RawPayload)
+	if versionErr != nil {
+		return invalidClusterPayloadError(versionErr)
+	}
+
+	if hasVersion {
+		return clusterVersionUpdateResolutionError(
+			errors.New("cluster identity is required when updating spec.version"))
+	}
+
+	configurationUpdate, configurationErr := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
+	if configurationErr != nil {
+		return invalidClusterPayloadError(configurationErr)
+	}
+
+	if configurationUpdate.hasChanges() {
+		return clusterConfigurationUpdateResolutionError(
+			errors.New("cluster identity is required when updating cluster configuration"))
+	}
+
+	disableRequested, acceleratorErr := clusterAcceleratorVirtualizationDisableRequestedPayload(input.RawPayload)
+	if acceleratorErr != nil {
+		return invalidClusterPayloadError(acceleratorErr)
+	}
+
+	if disableRequested {
+		return clusterAcceleratorVirtualizationResolutionError(
+			errors.New("cluster identity is required when disabling accelerator virtualization"))
+	}
+
+	return clusterPatchValidationResolutionError(
+		errors.New("cluster identity is required when patching a cluster"))
+}
+
+func mergeClusterPatchForValidation(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
+	patch := json.RawMessage(body)
+	if len(bytes.TrimSpace(patch)) == 0 {
+		patch = json.RawMessage(`{}`)
+	}
+
+	var next v1.Cluster
+	if err := util.JsonMerge(current, patch, &next); err != nil {
+		return nil, fmt.Errorf("merge cluster patch for validation: %w", err)
+	}
+
+	return &next, nil
+}
+
+func preserveMaskedClusterPatchCredentials(
+	current, next *v1.Cluster, payload map[string]json.RawMessage,
+) {
+	if current == nil || current.Spec == nil || next == nil || next.Spec == nil {
+		return
+	}
+
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return
+	}
+
+	configRaw, ok := spec["config"]
+	if !ok || isJSONNull(configRaw) {
+		return
+	}
+
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(configRaw, &config); err != nil {
+		return
+	}
+
+	preserveMaskedKubeconfig(current, next, config)
+	preserveMaskedSSHPrivateKey(current, next, config)
+}
+
+func preserveMaskedKubeconfig(current, next *v1.Cluster, config map[string]json.RawMessage) {
+	kubernetesConfigRaw, ok := config["kubernetes_config"]
+	if !ok || isJSONNull(kubernetesConfigRaw) {
+		return
+	}
+
+	var kubernetesConfig map[string]json.RawMessage
+	if err := json.Unmarshal(kubernetesConfigRaw, &kubernetesConfig); err != nil {
+		return
+	}
+
+	kubeconfigRaw, ok := kubernetesConfig["kubeconfig"]
+	if !ok || !isJSONEmptyOrNullString(kubeconfigRaw) || current.Spec.Config == nil ||
+		current.Spec.Config.KubernetesConfig == nil || next.Spec.Config == nil || next.Spec.Config.KubernetesConfig == nil {
+		return
+	}
+
+	next.Spec.Config.KubernetesConfig.Kubeconfig = current.Spec.Config.KubernetesConfig.Kubeconfig
+}
+
+func preserveMaskedSSHPrivateKey(current, next *v1.Cluster, config map[string]json.RawMessage) {
+	sshConfigRaw, ok := config["ssh_config"]
+	if !ok || isJSONNull(sshConfigRaw) {
+		return
+	}
+
+	var sshConfig map[string]json.RawMessage
+	if err := json.Unmarshal(sshConfigRaw, &sshConfig); err != nil {
+		return
+	}
+
+	authRaw, ok := sshConfig["auth"]
+	if !ok || isJSONNull(authRaw) {
+		return
+	}
+
+	var auth map[string]json.RawMessage
+	if err := json.Unmarshal(authRaw, &auth); err != nil {
+		return
+	}
+
+	privateKeyRaw, ok := auth["ssh_private_key"]
+	if !ok || !isJSONEmptyOrNullString(privateKeyRaw) || current.Spec.Config == nil ||
+		current.Spec.Config.SSHConfig == nil || next.Spec.Config == nil || next.Spec.Config.SSHConfig == nil {
+		return
+	}
+
+	next.Spec.Config.SSHConfig.Auth.SSHPrivateKey = current.Spec.Config.SSHConfig.Auth.SSHPrivateKey
+}
+
+func isJSONEmptyOrNullString(raw json.RawMessage) bool {
+	if isJSONNull(raw) {
+		return true
+	}
+
+	var value string
+
+	return json.Unmarshal(raw, &value) == nil && value == ""
+}
+
 func validateClusterSoftDelete(s storage.Storage, input *ValidationInput[v1.Cluster]) error {
 	if input.Patch.Metadata == nil || input.Patch.Metadata.Name == "" {
 		return nil
@@ -221,6 +438,29 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 			return
 		}
 
+		if input.Operation == clusterValidationPatch {
+			updated, err := clusterAcceleratorVirtualizationUpdatedPayload(input.RawPayload)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if !updated {
+				c.Next()
+
+				return
+			}
+		}
+
+		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
 		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
@@ -248,7 +488,28 @@ func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if input.Operation != clusterValidationSoftDelete {
-			if validationErr := validateClusterVersionUpdateInput(s, input); validationErr != nil {
+			hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if !hasVersion {
+				c.Next()
+
+				return
+			}
+
+			if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+				c.JSON(http.StatusBadRequest, validationErr)
+				c.Abort()
+
+				return
+			}
+
+			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
 				c.JSON(http.StatusBadRequest, validationErr)
 				c.Abort()
 
@@ -276,7 +537,28 @@ func validateClusterConfigurationUpdate(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if input.Operation != clusterValidationSoftDelete {
-			if validationErr := validateClusterConfigurationUpdateInput(s, input); validationErr != nil {
+			configurationUpdate, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
+				c.Abort()
+
+				return
+			}
+
+			if !configurationUpdate.hasChanges() {
+				c.Next()
+
+				return
+			}
+
+			if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+				c.JSON(http.StatusBadRequest, validationErr)
+				c.Abort()
+
+				return
+			}
+
+			if validationErr := validateClusterConfigurationUpdateInput(input); validationErr != nil {
 				c.JSON(http.StatusBadRequest, validationErr)
 				c.Abort()
 
@@ -425,8 +707,10 @@ func parseClusterPatchConfigurationUpdatePayload(payload map[string]json.RawMess
 	return update, nil
 }
 
-func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update clusterPatchConfigurationUpdate) error {
-	if current == nil || current.Spec == nil || !current.IsInitialized() {
+func validateInitializedClusterConfigurationUpdate(
+	current, next *v1.Cluster, update clusterPatchConfigurationUpdate,
+) error {
+	if current == nil || current.Spec == nil || next == nil || next.Spec == nil || !current.IsInitialized() {
 		return nil
 	}
 
@@ -434,7 +718,7 @@ func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update c
 		return errors.New("config cannot be cleared after cluster initialization")
 	}
 
-	if update.imageRegistrySet && update.imageRegistry != current.Spec.ImageRegistry {
+	if update.imageRegistrySet && next.Spec.ImageRegistry != current.Spec.ImageRegistry {
 		return errors.New("image registry cannot be changed after cluster initialization")
 	}
 
@@ -454,7 +738,13 @@ func validateInitializedClusterConfigurationUpdate(current *v1.Cluster, update c
 				return fmt.Errorf("failed to parse current kubeconfig: %w", err)
 			}
 
-			updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(update.kubeconfig)
+			if next.Spec.Config == nil || next.Spec.Config.KubernetesConfig == nil {
+				return errors.New("updated Kubernetes config is required")
+			}
+
+			updatedKubeconfig := next.Spec.Config.KubernetesConfig.Kubeconfig
+
+			updatedAPIServer, err := util.GetApiServerUrlFromKubeConfig(updatedKubeconfig)
 			if err != nil {
 				return fmt.Errorf("failed to parse updated kubeconfig: %w", err)
 			}
@@ -496,10 +786,8 @@ func clusterConfigurationUpdateError(err error) *validationError {
 	}
 }
 
-func validateClusterVersionUpdateInput(
-	s storage.Storage, input *ValidationInput[v1.Cluster],
-) *validationError {
-	desiredVersion, hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
+func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
+	hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
 	if err != nil {
 		return invalidClusterPayloadError(err)
 	}
@@ -508,21 +796,18 @@ func validateClusterVersionUpdateInput(
 		return nil
 	}
 
-	current, validationErr := resolveClusterForVersionUpdate(s, input.Patch, input.QueryParams)
-	if validationErr != nil {
-		return validationErr
+	if input.Current == nil || input.New == nil {
+		return clusterPatchValidationResolutionError(errors.New("cluster validation objects are required"))
 	}
 
-	if err := validateClusterVersionNotDowngrade(current, desiredVersion); err != nil {
+	if err := validateClusterVersionNotDowngrade(input.Current, input.New.GetVersion()); err != nil {
 		return clusterVersionUpdateError(err)
 	}
 
 	return nil
 }
 
-func validateClusterConfigurationUpdateInput(
-	s storage.Storage, input *ValidationInput[v1.Cluster],
-) *validationError {
+func validateClusterConfigurationUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
 	configurationUpdate, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
 	if err != nil {
 		return invalidClusterPayloadError(err)
@@ -532,74 +817,39 @@ func validateClusterConfigurationUpdateInput(
 		return nil
 	}
 
-	current, validationErr := resolveClusterForConfigurationUpdate(s, input.Patch, input.QueryParams)
-	if validationErr != nil {
-		return validationErr
+	if input.Current == nil || input.New == nil {
+		return clusterPatchValidationResolutionError(errors.New("cluster validation objects are required"))
 	}
 
-	if err := validateInitializedClusterConfigurationUpdate(current, configurationUpdate); err != nil {
+	if err := validateInitializedClusterConfigurationUpdate(input.Current, input.New, configurationUpdate); err != nil {
 		return clusterConfigurationUpdateError(err)
 	}
 
 	return nil
 }
 
-func clusterPatchDesiredVersionPayload(payload map[string]json.RawMessage) (string, bool, error) {
+func clusterPatchDesiredVersionPayload(payload map[string]json.RawMessage) (bool, error) {
 	specRaw, ok := payload["spec"]
 	if !ok {
-		return "", false, nil
+		return false, nil
 	}
 
 	var spec map[string]json.RawMessage
 	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return "", false, err
+		return false, err
 	}
 
 	versionRaw, ok := spec["version"]
 	if !ok {
-		return "", false, nil
+		return false, nil
 	}
 
 	var version string
 	if err := json.Unmarshal(versionRaw, &version); err != nil {
-		return "", false, err
+		return false, err
 	}
 
-	return version, true, nil
-}
-
-func resolveClusterForVersionUpdate(
-	s storage.Storage, patch v1.Cluster, queryParams url.Values,
-) (*v1.Cluster, *validationError) {
-	filters := clusterPatchUpdateFilters(patch, queryParams)
-	if len(filters) == 0 {
-		return nil, clusterVersionUpdateResolutionError(
-			errors.New("cluster identity is required when updating spec.version"))
-	}
-
-	current, err := resolveClusterForPatchUpdate(s, filters)
-	if err != nil {
-		return nil, clusterVersionUpdateResolutionError(err)
-	}
-
-	return current, nil
-}
-
-func resolveClusterForConfigurationUpdate(
-	s storage.Storage, patch v1.Cluster, queryParams url.Values,
-) (*v1.Cluster, *validationError) {
-	filters := clusterPatchUpdateFilters(patch, queryParams)
-	if len(filters) == 0 {
-		return nil, clusterConfigurationUpdateResolutionError(
-			errors.New("cluster identity is required when updating cluster configuration"))
-	}
-
-	current, err := resolveClusterForPatchUpdate(s, filters)
-	if err != nil {
-		return nil, clusterConfigurationUpdateResolutionError(err)
-	}
-
-	return current, nil
+	return true, nil
 }
 
 func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) []storage.Filter {
@@ -636,6 +886,14 @@ func clusterVersionUpdateError(err error) *validationError {
 	return &validationError{
 		Code:    "10212",
 		Message: "invalid cluster version update",
+		Hint:    err.Error(),
+	}
+}
+
+func clusterPatchValidationResolutionError(err error) *validationError {
+	return &validationError{
+		Code:    "10209",
+		Message: "failed to prepare cluster patch validation",
 		Hint:    err.Error(),
 	}
 }
@@ -757,6 +1015,22 @@ func clusterAcceleratorVirtualizationDisableRequestedPayload(payload map[string]
 	return !enabled, nil
 }
 
+func clusterAcceleratorVirtualizationUpdatedPayload(payload map[string]json.RawMessage) (bool, error) {
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return false, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return false, err
+	}
+
+	_, updated := spec["accelerator_virtualization"]
+
+	return updated, nil
+}
+
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
 	return []storage.Filter{
 		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
@@ -777,6 +1051,12 @@ func validateClusterAcceleratorVirtualizationDisable(
 		return validationErr
 	}
 
+	return validateClusterAcceleratorVirtualizationDisableForIdentity(s, workspace, name)
+}
+
+func validateClusterAcceleratorVirtualizationDisableForIdentity(
+	s storage.Storage, workspace, name string,
+) *validationError {
 	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
 	if err != nil {
 		return &validationError{
@@ -808,6 +1088,39 @@ func validateClusterAcceleratorVirtualizationDisable(
 	}
 
 	return nil
+}
+
+func validateClusterAcceleratorVirtualizationDisableForCurrent(
+	s storage.Storage, current *v1.Cluster, patch v1.Cluster,
+) *validationError {
+	if current == nil || current.Metadata == nil || current.Metadata.Workspace == "" || current.Metadata.Name == "" {
+		return &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    "cluster identity is required when disabling accelerator virtualization",
+		}
+	}
+
+	if patch.Metadata != nil &&
+		((patch.Metadata.Workspace != "" && patch.Metadata.Workspace != current.Metadata.Workspace) ||
+			(patch.Metadata.Name != "" && patch.Metadata.Name != current.Metadata.Name)) {
+		return &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    "cluster metadata in patch body does not match patch target",
+		}
+	}
+
+	return validateClusterAcceleratorVirtualizationDisableForIdentity(
+		s, current.Metadata.Workspace, current.Metadata.Name)
+}
+
+func clusterAcceleratorVirtualizationResolutionError(err error) *validationError {
+	return &validationError{
+		Code:    "10209",
+		Message: "failed to validate cluster accelerator virtualization",
+		Hint:    err.Error(),
+	}
 }
 
 func resolveClusterIdentityForAcceleratorVirtualizationDisable(
@@ -877,7 +1190,12 @@ func resolveClusterIdentityFromPatchFilters(s storage.Storage, filters []storage
 func validateClusterAcceleratorVirtualizationInput(
 	s storage.Storage, input *ValidationInput[v1.Cluster],
 ) *validationError {
-	if validationErr := validateClusterAcceleratorVirtualizationCluster(input.Patch); validationErr != nil {
+	cluster := input.Patch
+	if input.New != nil {
+		cluster = *input.New
+	}
+
+	if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
 		return validationErr
 	}
 
@@ -892,6 +1210,10 @@ func validateClusterAcceleratorVirtualizationInput(
 
 	if !disableRequested {
 		return nil
+	}
+
+	if input.Current != nil {
+		return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
 	}
 
 	return validateClusterAcceleratorVirtualizationDisable(s, input.Patch, input.QueryParams)

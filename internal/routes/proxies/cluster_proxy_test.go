@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -243,6 +244,77 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
+	t.Run("resolves the current cluster once for all normal PATCH validators", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				ImageRegistry: "current-registry",
+				Version:       "v1.0.0",
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			body, err := io.ReadAll(c.Request.Body)
+			assert.NoError(t, err)
+			assert.JSONEq(t, `{
+				"spec": {"version": "v1.1.0", "image_registry": "current-registry"}
+			}`, string(body))
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"version": "v1.1.0", "image_registry": "current-registry"}
+		}`)))
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+	})
+
+	t.Run("keeps a masked kubeconfig null in the forwarded PATCH body", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Spec: &v1.ClusterSpec{
+				Type: v1.KubernetesClusterType,
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: "current-kubeconfig",
+				}},
+			},
+			Status: &v1.ClusterStatus{Initialized: true},
+		}}, nil).Once()
+
+		body := `{"spec":{"config":{"kubernetes_config":{"kubeconfig":null}}}}`
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			forwardedBody, err := io.ReadAll(c.Request.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, body, string(forwardedBody))
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body)))
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
+
 	t.Run("dispatches soft delete to deletion validation and restores the body", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		mockStorage.On(
@@ -357,7 +429,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("reports a fixed version resolution error when PATCH has no identity", func(t *testing.T) {
+	t.Run("preserves the version resolution error when PATCH has no identity", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -377,11 +449,11 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
 		assert.Contains(t, recorder.Body.String(), "failed to validate cluster version update")
-		assert.Contains(t, recorder.Body.String(), "cluster identity is required")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when updating spec.version")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("reports a fixed version resolution error when the current cluster lookup fails", func(t *testing.T) {
+	t.Run("preserves the version resolution error when the current cluster lookup fails", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -405,11 +477,12 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
+		assert.Contains(t, recorder.Body.String(), "failed to validate cluster version update")
 		assert.Contains(t, recorder.Body.String(), "read cluster failed")
 		mockStorage.AssertExpectations(t)
 	})
 
-	t.Run("reports a fixed configuration resolution error when PATCH has no identity", func(t *testing.T) {
+	t.Run("preserves the configuration resolution error when PATCH has no identity", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -429,8 +502,79 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
 		assert.Contains(t, recorder.Body.String(), "failed to validate cluster configuration update")
-		assert.Contains(t, recorder.Body.String(), "cluster identity is required")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when updating cluster configuration")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("uses the generic preparation error for an unrelated PATCH without identity", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
+			"metadata": {"name": "cluster"}
+		}`)))
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when patching a cluster")
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("preserves the accelerator virtualization identity error when PATCH has no identity", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
+			"spec": {"accelerator_virtualization": {}}
+		}`)))
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "failed to validate cluster accelerator virtualization")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when disabling accelerator virtualization")
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
+	t.Run("preserves the accelerator virtualization resolution error when the current cluster lookup fails", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return(nil, errors.New("read cluster failed")).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"accelerator_virtualization": {}}
+		}`)))
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "failed to validate cluster accelerator virtualization")
+		assert.Contains(t, recorder.Body.String(), "read cluster failed")
+		mockStorage.AssertExpectations(t)
 	})
 
 	t.Run("reports a fixed configuration resolution error when the target is ambiguous", func(t *testing.T) {
@@ -468,6 +612,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 			return sameFilters(opt.Filters, queryParamsToFilters(query))
 		})).Return([]v1.Cluster{{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
+			Spec:     &v1.ClusterSpec{},
 		}}, nil).Once()
 		mockStorage.On(
 			"ListEndpoint",
@@ -523,6 +668,20 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
+}
+
+func TestValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"}}
+	patch := v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}}
+
+	validationErr := validateClusterAcceleratorVirtualizationDisableForCurrent(mockStorage, current, patch)
+
+	assert.NotNil(t, validationErr)
+	assert.Equal(t, "10209", validationErr.Code)
+	assert.Equal(t, "failed to validate cluster accelerator virtualization", validationErr.Message)
+	assert.Equal(t, "cluster metadata in patch body does not match patch target", validationErr.Hint)
+	mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 }
 
 func TestValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
@@ -872,11 +1031,135 @@ func TestValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 	})
 }
 
+func TestPrepareClusterValidationInput(t *testing.T) {
+	prepare := func(t *testing.T, current v1.Cluster, body string) *ValidationInput[v1.Cluster] {
+		t.Helper()
+
+		var payload map[string]json.RawMessage
+		assert.NoError(t, json.Unmarshal([]byte(body), &payload))
+
+		var patch v1.Cluster
+		assert.NoError(t, json.Unmarshal([]byte(body), &patch))
+
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(url.Values{"id": []string{"eq.1"}}))
+		})).Return([]v1.Cluster{current}, nil).Once()
+
+		input := &ValidationInput[v1.Cluster]{
+			Method:      http.MethodPatch,
+			Body:        []byte(body),
+			RawPayload:  payload,
+			Patch:       patch,
+			QueryParams: url.Values{"id": []string{"eq.1"}},
+			Operation:   clusterValidationPatch,
+		}
+
+		validationErr := prepareClusterValidationInput(mockStorage, input)
+		assert.Nil(t, validationErr)
+		mockStorage.AssertExpectations(t)
+
+		return input
+	}
+
+	t.Run("creates a separate New cluster and preserves an empty kubeconfig", func(t *testing.T) {
+		current := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
+			Spec: &v1.ClusterSpec{
+				Type:    v1.KubernetesClusterType,
+				Version: "v1.0.0",
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: "current-kubeconfig",
+				}},
+			},
+		}
+
+		input := prepare(t, current, `{
+			"spec": {
+				"version": "v1.1.0",
+				"config": {"kubernetes_config": {"kubeconfig": ""}}
+			}
+		}`)
+
+		assert.Equal(t, &current, input.Current)
+		assert.NotSame(t, input.Current, input.New)
+		assert.Equal(t, "v1.0.0", input.Current.Spec.Version)
+		assert.Equal(t, "current-kubeconfig", input.Current.Spec.Config.KubernetesConfig.Kubeconfig)
+		assert.Equal(t, "v1.1.0", input.New.Spec.Version)
+		assert.Equal(t, "current-kubeconfig", input.New.Spec.Config.KubernetesConfig.Kubeconfig)
+	})
+
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "empty", raw: `""`},
+		{name: "null", raw: "null"},
+	} {
+		t.Run("preserves SSH private key "+tt.name, func(t *testing.T) {
+			current := v1.Cluster{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "ssh"},
+				Spec: &v1.ClusterSpec{
+					Type: v1.SSHClusterType,
+					Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
+						Auth: v1.Auth{SSHPrivateKey: "current-private-key"},
+					}},
+				},
+			}
+
+			input := prepare(t, current, `{
+				"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": `+tt.raw+`}}}}
+			}`)
+
+			assert.Equal(t, "current-private-key", input.Current.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			assert.Equal(t, "current-private-key", input.New.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+		})
+	}
+
+	t.Run("retains an explicit config null in New for configuration validation", func(t *testing.T) {
+		current := v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
+			Spec: &v1.ClusterSpec{
+				Type:   v1.KubernetesClusterType,
+				Config: &v1.ClusterConfig{},
+			},
+		}
+		input := prepare(t, current, `{"spec": {"config": null}}`)
+
+		assert.Nil(t, input.New.Spec.Config)
+		update, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
+		assert.NoError(t, err)
+		assert.True(t, update.configCleared)
+	})
+}
+
+func TestMergeClusterPatchForValidation(t *testing.T) {
+	current := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			Type:          v1.KubernetesClusterType,
+			ImageRegistry: "current-registry",
+			Version:       "v1.0.0",
+		},
+	}
+
+	next, err := mergeClusterPatchForValidation(current, nil)
+	assert.NoError(t, err)
+	assert.NotSame(t, current, next)
+	assert.Equal(t, current, next)
+
+	_, err = mergeClusterPatchForValidation(current, []byte(`[`))
+	assert.Error(t, err)
+}
+
 func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("rejects disable patch before proxy handler when vGPU endpoint references cluster", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec:     &v1.ClusterSpec{},
+		}}, nil).Once()
 		mockStorage.On("ListEndpoint", storage.ListOption{
 			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
 		}).Return([]v1.Endpoint{
@@ -931,6 +1214,7 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		assert.True(t, proxyCalled)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
@@ -1444,7 +1728,7 @@ func TestValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 func TestValidateClusterVersionUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("allows configuration-only patch without storage lookup", func(t *testing.T) {
+	t.Run("skips version validation for a configuration-only patch", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -1801,21 +2085,63 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 			Status: &v1.ClusterStatus{Initialized: true},
 		}
 	}
+	updatedCluster := func(t *testing.T, current *v1.Cluster, update clusterPatchConfigurationUpdate) *v1.Cluster {
+		t.Helper()
+
+		data, err := json.Marshal(current)
+		assert.NoError(t, err)
+
+		var next v1.Cluster
+		assert.NoError(t, json.Unmarshal(data, &next))
+		if next.Spec == nil {
+			next.Spec = &v1.ClusterSpec{}
+		}
+
+		if update.imageRegistrySet {
+			next.Spec.ImageRegistry = update.imageRegistry
+		}
+
+		if update.kubeconfigSet {
+			if next.Spec.Config == nil {
+				next.Spec.Config = &v1.ClusterConfig{}
+			}
+			if next.Spec.Config.KubernetesConfig == nil {
+				next.Spec.Config.KubernetesConfig = &v1.KubernetesClusterConfig{}
+			}
+			next.Spec.Config.KubernetesConfig.Kubeconfig = update.kubeconfig
+		}
+
+		if update.sshPrivateKeySet {
+			if next.Spec.Config == nil {
+				next.Spec.Config = &v1.ClusterConfig{}
+			}
+			if next.Spec.Config.SSHConfig == nil {
+				next.Spec.Config.SSHConfig = &v1.RaySSHProvisionClusterConfig{}
+			}
+			next.Spec.Config.SSHConfig.Auth.SSHPrivateKey = update.sshPrivateKey
+		}
+
+		return &next
+	}
 
 	t.Run("allows uninitialized clusters", func(t *testing.T) {
-		err := validateInitializedClusterConfigurationUpdate(&v1.Cluster{
+		current := &v1.Cluster{
 			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
 			Status: &v1.ClusterStatus{Initialized: false},
-		}, clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true})
+		}
+		update := clusterPatchConfigurationUpdate{imageRegistry: "replacement", imageRegistrySet: true}
+		err := validateInitializedClusterConfigurationUpdate(current, updatedCluster(t, current, update), update)
 
 		assert.NoError(t, err)
 	})
 
 	t.Run("allows an unchanged image registry", func(t *testing.T) {
-		err := validateInitializedClusterConfigurationUpdate(&v1.Cluster{
+		current := &v1.Cluster{
 			Spec:   &v1.ClusterSpec{ImageRegistry: "current"},
 			Status: &v1.ClusterStatus{Initialized: true},
-		}, clusterPatchConfigurationUpdate{imageRegistry: "current", imageRegistrySet: true})
+		}
+		update := clusterPatchConfigurationUpdate{imageRegistry: "current", imageRegistrySet: true}
+		err := validateInitializedClusterConfigurationUpdate(current, updatedCluster(t, current, update), update)
 
 		assert.NoError(t, err)
 	})
@@ -1862,10 +2188,15 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateInitializedClusterConfigurationUpdate(tt.current, clusterPatchConfigurationUpdate{
+				update := clusterPatchConfigurationUpdate{
 					kubeconfig:    tt.kubeconfig,
 					kubeconfigSet: true,
-				})
+				}
+				err := validateInitializedClusterConfigurationUpdate(
+					tt.current,
+					updatedCluster(t, tt.current, update),
+					update,
+				)
 
 				assert.ErrorContains(t, err, tt.hint)
 			})
@@ -1873,21 +2204,27 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 	})
 
 	t.Run("allows same-host Kubernetes credential rotation", func(t *testing.T) {
+		current := initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token"))
+		update := clusterPatchConfigurationUpdate{
+			kubeconfig:    testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
+			kubeconfigSet: true,
+		}
 		err := validateInitializedClusterConfigurationUpdate(
-			initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token")),
-			clusterPatchConfigurationUpdate{
-				kubeconfig:    testEncodedKubeconfig("https://api.example.test:6443", "new-token"),
-				kubeconfigSet: true,
-			},
+			current,
+			updatedCluster(t, current, update),
+			update,
 		)
 
 		assert.NoError(t, err)
 	})
 
 	t.Run("allows empty Kubernetes credential backfill", func(t *testing.T) {
+		current := initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token"))
+		update := clusterPatchConfigurationUpdate{kubeconfigSet: true}
 		err := validateInitializedClusterConfigurationUpdate(
-			initializedKubernetesCluster(testEncodedKubeconfig("https://api.example.test:6443", "old-token")),
-			clusterPatchConfigurationUpdate{kubeconfigSet: true},
+			current,
+			updatedCluster(t, current, update),
+			update,
 		)
 
 		assert.NoError(t, err)
@@ -1908,24 +2245,29 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 			{name: "invalid base64", key: "not-base64", hint: "SSH private key must be base64 encoded"},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
+				update := clusterPatchConfigurationUpdate{
 					sshPrivateKey:    tt.key,
 					sshPrivateKeySet: true,
-				})
+				}
+				err := validateInitializedClusterConfigurationUpdate(
+					cluster,
+					updatedCluster(t, cluster, update),
+					update,
+				)
 
 				assert.ErrorContains(t, err, tt.hint)
 			})
 		}
 
-		err := validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
+		update := clusterPatchConfigurationUpdate{
 			sshPrivateKey:    base64.StdEncoding.EncodeToString([]byte("rotated-private-key")),
 			sshPrivateKeySet: true,
-		})
+		}
+		err := validateInitializedClusterConfigurationUpdate(cluster, updatedCluster(t, cluster, update), update)
 		assert.NoError(t, err)
 
-		err = validateInitializedClusterConfigurationUpdate(cluster, clusterPatchConfigurationUpdate{
-			sshPrivateKeySet: true,
-		})
+		update = clusterPatchConfigurationUpdate{sshPrivateKeySet: true}
+		err = validateInitializedClusterConfigurationUpdate(cluster, updatedCluster(t, cluster, update), update)
 		assert.NoError(t, err)
 	})
 
@@ -1970,7 +2312,11 @@ func TestValidateInitializedClusterConfigurationUpdate(t *testing.T) {
 			},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				err := validateInitializedClusterConfigurationUpdate(tt.cluster, tt.update)
+				err := validateInitializedClusterConfigurationUpdate(
+					tt.cluster,
+					updatedCluster(t, tt.cluster, tt.update),
+					tt.update,
+				)
 
 				assert.ErrorContains(t, err, tt.hint)
 			})
