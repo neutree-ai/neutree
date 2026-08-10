@@ -26,6 +26,25 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 		return nil, err
 	}
 
+	// Every built-in engine serves Prometheus metrics on the port its Kubernetes
+	// deploy template exposes, and can back the console Playground. Declaring it
+	// explicitly -- rather than relying on the undeclared-means-legacy fallback --
+	// keeps the built-ins working if the protocol ever flips to opt-in, and makes
+	// them the reference example for externally registered engines.
+	builtinCapabilities := func(modes ...string) *v1.EngineCapabilities {
+		return &v1.EngineCapabilities{
+			MetricsExport: &v1.MetricsExportCapability{
+				Enabled: true,
+				Port:    v1.DefaultMetricsExportPort,
+				Path:    v1.DefaultMetricsExportPath,
+			},
+			Playground: &v1.PlaygroundCapability{
+				Enabled: true,
+				Modes:   modes,
+			},
+		}
+	}
+
 	engines := []*v1.Engine{
 		{
 			APIVersion: "v1",
@@ -53,6 +72,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 								"default": GetLlamaCppDefaultDeployTemplate(),
 							},
 						},
+						Capabilities: builtinCapabilities(v1.PlaygroundModeChat, v1.PlaygroundModeEmbedding),
 					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask},
@@ -80,6 +100,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 								"default": GetVLLMV0_17_1DeployTemplate(),
 							},
 						},
+						Capabilities: builtinCapabilities(v1.PlaygroundModeChat, v1.PlaygroundModeEmbedding, v1.PlaygroundModeRerank),
 					},
 					{
 						Version:      "v0.24.0",
@@ -95,6 +116,7 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 								"default": GetVLLMV0_24_0DeployTemplate(),
 							},
 						},
+						Capabilities: builtinCapabilities(v1.PlaygroundModeChat, v1.PlaygroundModeEmbedding, v1.PlaygroundModeRerank),
 					},
 				},
 				SupportedTasks: []string{v1.TextGenerationModelTask, v1.TextEmbeddingModelTask, v1.TextRerankModelTask},
@@ -122,6 +144,10 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 								"default": GetSGLangV0_5_10DeployTemplate(),
 							},
 						},
+						// No rerank mode: SGLang's /v1/rerank does not match the
+						// shape Neutree clients expect, same reason it is left out
+						// of SupportedTasks below.
+						Capabilities: builtinCapabilities(v1.PlaygroundModeChat, v1.PlaygroundModeEmbedding),
 					},
 				},
 				// SGLang's /v1/rerank does not match the Cohere/Jina shape

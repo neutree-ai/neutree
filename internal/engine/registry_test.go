@@ -150,3 +150,158 @@ func TestRegistryListAll(t *testing.T) {
 		t.Errorf("ListAll returned unexpected engine names: %v", engineNames)
 	}
 }
+
+// TestRegistryRegisterCapabilities makes registration the enforcement point for
+// the capability protocol: a declaration no consumer could act on is rejected
+// here rather than silently ignored downstream.
+func TestRegistryRegisterCapabilities(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities *v1.EngineCapabilities
+		expectedErr  bool
+	}{
+		{
+			// Engines registered before the protocol existed carry no
+			// declaration and must still register.
+			name:         "no declaration",
+			capabilities: nil,
+		},
+		{
+			name: "valid declaration",
+			capabilities: &v1.EngineCapabilities{
+				MetricsExport: &v1.MetricsExportCapability{Enabled: true, Port: 9100, Path: "/metrics"},
+				Playground:    &v1.PlaygroundCapability{Enabled: true, Modes: []string{v1.PlaygroundModeChat}},
+			},
+		},
+		{
+			name: "unknown playground mode",
+			capabilities: &v1.EngineCapabilities{
+				Playground: &v1.PlaygroundCapability{Enabled: true, Modes: []string{"vision"}},
+			},
+			expectedErr: true,
+		},
+		{
+			name: "metrics port out of range",
+			capabilities: &v1.EngineCapabilities{
+				MetricsExport: &v1.MetricsExportCapability{Enabled: true, Port: 70000},
+			},
+			expectedErr: true,
+		},
+		{
+			name: "metrics path without a leading slash",
+			capabilities: &v1.EngineCapabilities{
+				MetricsExport: &v1.MetricsExportCapability{Enabled: true, Path: "metrics"},
+			},
+			expectedErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &registry{engines: make(map[string]*v1.Engine)}
+
+			err := r.Register(&v1.Engine{
+				Metadata: &v1.Metadata{Name: "engine1"},
+				Spec: &v1.EngineSpec{
+					Versions: []*v1.EngineVersion{
+						{Version: "v1", Capabilities: tt.capabilities},
+					},
+				},
+			})
+
+			if (err != nil) != tt.expectedErr {
+				t.Fatalf("expected error: %v, got: %v", tt.expectedErr, err)
+			}
+
+			// A rejected declaration must not be half-applied.
+			if tt.expectedErr {
+				if _, registered := r.engines["engine1"]; registered {
+					t.Errorf("engine must not be registered when its capabilities are invalid")
+				}
+			}
+		})
+	}
+}
+
+// TestBuiltinEnginesDeclareCapabilities guards the built-ins against silently
+// losing their declarations, which would leave them relying on the
+// undeclared-means-legacy fallback.
+func TestBuiltinEnginesDeclareCapabilities(t *testing.T) {
+	engines, err := GetBuiltinEngines()
+	if err != nil {
+		t.Fatalf("failed to load built-in engines: %v", err)
+	}
+
+	if len(engines) == 0 {
+		t.Fatal("expected at least one built-in engine")
+	}
+
+	for _, e := range engines {
+		for _, version := range e.Spec.Versions {
+			name := e.Metadata.Name + "/" + version.Version
+
+			if err := version.Capabilities.Validate(); err != nil {
+				t.Errorf("%s declares invalid capabilities: %v", name, err)
+				continue
+			}
+
+			if version.Capabilities == nil {
+				t.Errorf("%s declares no capabilities", name)
+				continue
+			}
+
+			// The built-ins are all scraped on the port their Kubernetes deploy
+			// template exposes, and all back the Playground.
+			metrics := version.ResolveMetricsExport()
+			if !metrics.Enabled || metrics.Port != v1.DefaultMetricsExportPort {
+				t.Errorf("%s: unexpected metrics export %+v", name, metrics)
+			}
+
+			playground := version.ResolvePlayground()
+			if !playground.Enabled || len(playground.Modes) == 0 {
+				t.Errorf("%s: unexpected playground %+v", name, playground)
+			}
+		}
+	}
+}
+
+// TestRegistryRegisterNilVersion pins that a nil version entry is rejected
+// rather than stored. Storing one is not merely untidy: util.MergeEngine
+// dereferences every version, so the next registration of the same engine would
+// panic the /v1/engine/register handler.
+func TestRegistryRegisterNilVersion(t *testing.T) {
+	r := &registry{engines: make(map[string]*v1.Engine)}
+
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "engine1"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{Version: "v1"},
+				nil,
+			},
+		},
+	}
+
+	if err := r.Register(engine); err == nil {
+		t.Fatal("expected a nil version entry to be rejected")
+	}
+
+	if _, registered := r.engines["engine1"]; registered {
+		t.Error("engine must not be registered when a version entry is nil")
+	}
+
+	// The guard has to hold on the merge path too, which is the one that would
+	// actually panic.
+	valid := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "engine1"},
+		Spec:     &v1.EngineSpec{Versions: []*v1.EngineVersion{{Version: "v1"}}},
+	}
+
+	if err := r.Register(valid); err != nil {
+		t.Fatalf("failed to register a valid engine: %v", err)
+	}
+
+	if err := r.Register(engine); err == nil {
+		t.Fatal("expected a nil version entry to be rejected on re-registration")
+	}
+}

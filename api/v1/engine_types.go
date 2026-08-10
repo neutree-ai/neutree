@@ -65,6 +65,210 @@ func KnownModelTasks() []string {
 	return tasks
 }
 
+// Playground interaction modes. A mode names the interaction surface an engine
+// can serve, which is deliberately not the same axis as a model task: several
+// engines expose a chat-shaped playground without advertising
+// TextGenerationModelTask (document-extraction engines such as MinerU, for
+// example), so the UI must not derive the playground from the task.
+const (
+	PlaygroundModeChat      = "chat"
+	PlaygroundModeEmbedding = "embedding"
+	PlaygroundModeRerank    = "rerank"
+)
+
+// knownPlaygroundModes is the canonical set of interaction modes the console
+// knows how to render. Mirrors knownModelTasks: values outside this set have no
+// UI implementation, so they are rejected at registration time rather than
+// silently ignored.
+var knownPlaygroundModes = map[string]struct{}{
+	PlaygroundModeChat:      {},
+	PlaygroundModeEmbedding: {},
+	PlaygroundModeRerank:    {},
+}
+
+// IsKnownPlaygroundMode reports whether mode is one of the interaction modes the
+// console can render.
+func IsKnownPlaygroundMode(mode string) bool {
+	_, ok := knownPlaygroundModes[mode]
+	return ok
+}
+
+// KnownPlaygroundModes returns the canonical set of interaction modes in a
+// stable sorted order. Single source of truth shared by IsKnownPlaygroundMode
+// and any caller that needs to render the accepted set (e.g. error messages).
+func KnownPlaygroundModes() []string {
+	modes := make([]string, 0, len(knownPlaygroundModes))
+	for m := range knownPlaygroundModes {
+		modes = append(modes, m)
+	}
+
+	sort.Strings(modes)
+
+	return modes
+}
+
+// Defaults applied when a capability is declared but leaves a field unset, and
+// when an engine version declares no capabilities at all. They encode the
+// behaviour Neutree had before the capability protocol existed: the Kubernetes
+// vmagent `neutree-inference` job scraped every `app=inference` pod on a fixed
+// :8000, and the console showed the Playground tab unconditionally.
+const (
+	DefaultMetricsExportPort = 8000
+	DefaultMetricsExportPath = "/metrics"
+)
+
+// MetricsExportCapability declares whether an engine version exposes Prometheus
+// metrics, and where.
+//
+// Enabled is a non-pointer bool on purpose: a declared capability always states
+// its answer, so `{"enabled": false}` is how an engine opts out. "Not declared"
+// is expressed one level up, by leaving EngineCapabilities.MetricsExport nil.
+type MetricsExportCapability struct {
+	// Enabled reports whether this engine version serves a metrics endpoint
+	// worth scraping.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// Port is the container port serving metrics. Zero means DefaultMetricsExportPort.
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
+
+	// Path is the HTTP path serving metrics. Empty means DefaultMetricsExportPath.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+}
+
+// PlaygroundCapability declares whether an engine version can back the console's
+// Playground, and which interaction surfaces it supports.
+type PlaygroundCapability struct {
+	// Enabled reports whether the Playground tab should be offered at all.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// Modes lists the interaction surfaces this engine version can serve, from
+	// KnownPlaygroundModes. Empty means "the engine does not narrow it down":
+	// consumers then fall back to inferring the surface from the endpoint's
+	// model task, which is what the console did before this protocol existed.
+	Modes []string `json:"modes,omitempty" yaml:"modes,omitempty"`
+}
+
+// EngineCapabilities declares what an engine version can do, so that Neutree
+// stops inferring behaviour from the engine's name or its model tasks.
+//
+// Every field is a pointer, and nil means "this engine version did not declare
+// the capability". Consumers must then fall back to the pre-protocol behaviour
+// rather than to the zero value -- an engine registered by an older Neutree, or
+// a package built before this protocol shipped, carries no declaration at all
+// and must keep working exactly as it did. Resolve* on EngineVersion is the only
+// supported way to read a capability; it applies that fallback for you.
+type EngineCapabilities struct {
+	// MetricsExport declares Prometheus metrics support. Nil means undeclared:
+	// treated as enabled on the legacy port/path, matching the old behaviour of
+	// scraping every inference pod.
+	MetricsExport *MetricsExportCapability `json:"metrics_export,omitempty" yaml:"metrics_export,omitempty"`
+
+	// Playground declares console Playground support. Nil means undeclared:
+	// treated as enabled with no mode restriction, matching the old behaviour of
+	// always showing the tab.
+	Playground *PlaygroundCapability `json:"playground,omitempty" yaml:"playground,omitempty"`
+}
+
+// Validate checks a capability declaration at ingestion time (engine
+// registration, package import). It rejects values no consumer can act on,
+// rather than letting them through to be silently ignored later.
+func (c *EngineCapabilities) Validate() error {
+	if c == nil {
+		return nil
+	}
+
+	if m := c.MetricsExport; m != nil {
+		if m.Port < 0 || m.Port > 65535 {
+			return fmt.Errorf("metrics_export.port %d is out of range, expected 1-65535 or 0 to use the default (%d)",
+				m.Port, DefaultMetricsExportPort)
+		}
+
+		if m.Path != "" && !strings.HasPrefix(m.Path, "/") {
+			return fmt.Errorf("metrics_export.path %q must start with %q", m.Path, "/")
+		}
+	}
+
+	if p := c.Playground; p != nil {
+		for _, mode := range p.Modes {
+			if !IsKnownPlaygroundMode(mode) {
+				return fmt.Errorf("playground.modes contains unknown mode %q, accepted values are %v",
+					mode, KnownPlaygroundModes())
+			}
+		}
+	}
+
+	return nil
+}
+
+// ResolvedMetricsExport is a MetricsExportCapability with defaults applied, as
+// returned by EngineVersion.ResolveMetricsExport. Consumers read this, never the
+// raw declaration, so the undeclared-means-legacy rule lives in exactly one place.
+type ResolvedMetricsExport struct {
+	Enabled bool
+	Port    int
+	Path    string
+}
+
+// ResolvedPlayground is a PlaygroundCapability with defaults applied, as returned
+// by EngineVersion.ResolvePlayground.
+type ResolvedPlayground struct {
+	Enabled bool
+
+	// Modes is nil when the engine version did not narrow the interaction
+	// surface down; the consumer should then infer it from the endpoint's model
+	// task, as the console did before this protocol existed.
+	Modes []string
+}
+
+// ResolveMetricsExport returns the effective metrics-export configuration for
+// this engine version, applying the undeclared-means-legacy fallback.
+func (ev *EngineVersion) ResolveMetricsExport() ResolvedMetricsExport {
+	resolved := ResolvedMetricsExport{
+		Enabled: true,
+		Port:    DefaultMetricsExportPort,
+		Path:    DefaultMetricsExportPath,
+	}
+
+	if ev == nil || ev.Capabilities == nil || ev.Capabilities.MetricsExport == nil {
+		return resolved
+	}
+
+	declared := ev.Capabilities.MetricsExport
+	resolved.Enabled = declared.Enabled
+
+	if declared.Port != 0 {
+		resolved.Port = declared.Port
+	}
+
+	if declared.Path != "" {
+		resolved.Path = declared.Path
+	}
+
+	return resolved
+}
+
+// ResolvePlayground returns the effective Playground configuration for this
+// engine version, applying the undeclared-means-legacy fallback.
+func (ev *EngineVersion) ResolvePlayground() ResolvedPlayground {
+	if ev == nil || ev.Capabilities == nil || ev.Capabilities.Playground == nil {
+		return ResolvedPlayground{Enabled: true}
+	}
+
+	declared := ev.Capabilities.Playground
+
+	resolved := ResolvedPlayground{Enabled: declared.Enabled}
+
+	// An explicit `modes: []` normalizes to nil so that "did not narrow it down"
+	// has exactly one representation in the resolved form. Without this a
+	// consumer could read an empty non-nil slice as "supports no mode at all"
+	// and hide a Playground the engine declared as enabled.
+	if len(declared.Modes) > 0 {
+		resolved.Modes = declared.Modes
+	}
+
+	return resolved
+}
+
 // EngineVersion represents a specific version of an engine with its configuration schema,
 // deployment templates, and supported accelerators.
 //
@@ -168,6 +372,23 @@ type EngineVersion struct {
 	//    "text-embedding",
 	//  },
 	SupportedTasks []string `json:"supported_tasks,omitempty" yaml:"supported_tasks,omitempty"`
+
+	// Capabilities declares what this engine version can do beyond serving the
+	// tasks in SupportedTasks -- whether it exports metrics, whether it can back
+	// the console Playground, and so on. Capabilities are declared per version
+	// because they change across releases of the same engine.
+	//
+	// Nil, and any nil field within, means "undeclared" and must be read through
+	// the Resolve* helpers, which fall back to the pre-protocol behaviour. Never
+	// read the raw struct: its zero value says "disabled", which would silently
+	// break every engine registered before this protocol existed.
+	//
+	// Example:
+	//  Capabilities: &EngineCapabilities{
+	//      MetricsExport: &MetricsExportCapability{Enabled: true, Port: 8000},
+	//      Playground:    &PlaygroundCapability{Enabled: true, Modes: []string{"chat"}},
+	//  }
+	Capabilities *EngineCapabilities `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 }
 
 // EngineImage describes the container image information for a specific accelerator type
