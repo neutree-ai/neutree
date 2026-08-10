@@ -15,34 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-const endpointResolvedPatchContextKey = "endpoint.resolvedPatch"
-
-type endpointRequestValidator func(*gin.Context, string, url.Values, []byte) *validationError
-
-func validateEndpointClusterImmutable(store storage.Storage) gin.HandlerFunc {
-	return validateEndpointRequest(func(c *gin.Context, method string, queryParams url.Values, body []byte) *validationError {
-		resolvedPatch, validationErr := validateEndpointClusterImmutableRequest(store, method, queryParams, body)
-		if resolvedPatch != nil {
-			c.Set(endpointResolvedPatchContextKey, resolvedPatch)
-		}
-
-		return validationErr
-	})
-}
-
-func validateEndpointVGPU(store storage.Storage) gin.HandlerFunc {
-	return validateEndpointRequest(func(c *gin.Context, method string, queryParams url.Values, body []byte) *validationError {
-		return validateEndpointVGPURequest(
-			store,
-			method,
-			queryParams,
-			body,
-			endpointResolvedPatch(c),
-		)
-	})
-}
-
-func validateEndpointRequest(validator endpointRequestValidator) gin.HandlerFunc {
+func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -68,8 +41,8 @@ func validateEndpointRequest(validator endpointRequestValidator) gin.HandlerFunc
 			return
 		}
 
-		validationErr := validator(
-			c,
+		validationErr := validateEndpointRequest(
+			store,
 			c.Request.Method,
 			c.Request.URL.Query(),
 			body,
@@ -85,69 +58,59 @@ func validateEndpointRequest(validator endpointRequestValidator) gin.HandlerFunc
 	}
 }
 
-func validateEndpointClusterImmutableRequest(
+func validateEndpointRequest(
 	store storage.Storage,
 	method string,
 	queryParams url.Values,
 	body []byte,
-) (*v1.Endpoint, *validationError) {
-	if method != http.MethodPatch {
-		return nil, nil
-	}
-
-	clusterPresent, validationErr := endpointPatchIncludesCluster(body)
-	if validationErr != nil {
-		return nil, validationErr
-	}
-
-	if !clusterPresent {
-		return nil, nil
-	}
-
-	endpoint, validationErr := parseEndpointBody(body)
-	if validationErr != nil {
-		return nil, validationErr
-	}
-
-	resolvedPatch, validationErr := resolveEndpointPatch(store, queryParams)
-	if validationErr != nil {
-		return nil, validationErr
-	}
-
-	if endpointClusterChanged(resolvedPatch, endpoint) {
-		return nil, endpointClusterImmutableError()
-	}
-
-	return resolvedPatch, nil
-}
-
-func validateEndpointVGPURequest(
-	store storage.Storage,
-	method string,
-	queryParams url.Values,
-	body []byte,
-	resolvedPatch *v1.Endpoint,
 ) *validationError {
 	endpoint, validationErr := parseEndpointBody(body)
 	if validationErr != nil {
 		return validationErr
 	}
 
+	var resolvedPatch *v1.Endpoint
+
+	if method == http.MethodPatch {
+		clusterPresent, validationErr := endpointPatchIncludesCluster(body)
+		if validationErr != nil {
+			return validationErr
+		}
+
+		if clusterPresent || endpointPatchMayAffectVGPUValidation(endpoint) {
+			resolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
+			if validationErr != nil {
+				return validationErr
+			}
+		}
+
+		if validationErr := validateEndpointClusterImmutable(body, endpoint, resolvedPatch); validationErr != nil {
+			return validationErr
+		}
+	}
+
 	return validateEndpointVGPUPreflightWithResolvedPatch(store, method, queryParams, endpoint, resolvedPatch)
 }
 
-func endpointResolvedPatch(c *gin.Context) *v1.Endpoint {
-	resolvedPatch, ok := c.Get(endpointResolvedPatchContextKey)
-	if !ok {
+func validateEndpointClusterImmutable(
+	body []byte,
+	endpoint *v1.Endpoint,
+	resolvedPatch *v1.Endpoint,
+) *validationError {
+	clusterPresent, validationErr := endpointPatchIncludesCluster(body)
+	if validationErr != nil {
+		return validationErr
+	}
+
+	if !clusterPresent {
 		return nil
 	}
 
-	endpoint, ok := resolvedPatch.(*v1.Endpoint)
-	if !ok {
-		return nil
+	if endpointClusterChanged(resolvedPatch, endpoint) {
+		return endpointClusterImmutableError()
 	}
 
-	return endpoint
+	return nil
 }
 
 func endpointPatchIncludesCluster(body []byte) (bool, *validationError) {
