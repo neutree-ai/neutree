@@ -1000,9 +1000,15 @@ func TestEndpointClusterValidationRejectsPatchThatChangesCluster(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			endpoint, validationErr := parseEndpointBody([]byte(tt.body))
+			var rawPayload map[string]json.RawMessage
 
 			assert.Nil(t, validationErr)
-			validationErr = validateEndpointClusterImmutable([]byte(tt.body), endpoint, existing)
+			assert.NoError(t, json.Unmarshal([]byte(tt.body), &rawPayload))
+			validationErr = validateEndpointClusterImmutable(&endpointValidationInput{
+				RawPayload: rawPayload,
+				Patch:      *endpoint,
+				Current:    existing,
+			})
 			assert.NotNil(t, validationErr)
 			assert.Equal(t, "10225", validationErr.Code)
 		})
@@ -1068,6 +1074,29 @@ func TestEndpointValidationSkipsPatchValidatorsForSoftDelete(t *testing.T) {
 	body := `{
 		"metadata": {"deletion_timestamp": "2026-08-10T08:30:00Z"},
 		"spec": {"cluster": "cluster-b"}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+	assert.Zero(t, clusterStorage.endpointListCalls)
+}
+
+func TestEndpointValidationSoftDeleteBypassesMalformedPatchPayload(t *testing.T) {
+	existing := v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+	clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+	body := `{
+		"metadata": {"deletion_timestamp": "2026-08-10T08:30:00Z"},
+		"spec": {"resources": []}
 	}`
 
 	recorder, handlerCalled := runEndpointVGPUValidationWithPath(

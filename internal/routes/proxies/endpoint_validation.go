@@ -24,19 +24,22 @@ const (
 )
 
 type endpointValidationInput struct {
-	Body              []byte
-	QueryParams       url.Values
-	Patch             *v1.Endpoint
-	ResolvedPatch     *v1.Endpoint
-	EffectiveEndpoint *v1.Endpoint
+	Method      string
+	Body        []byte
+	RawPayload  map[string]json.RawMessage
+	Patch       v1.Endpoint
+	Current     *v1.Endpoint
+	New         *v1.Endpoint
+	QueryParams url.Values
+	Operation   endpointValidationOperation
 }
 
-type endpointValidator func(storage.Storage, endpointValidationInput) *validationError
-type endpointResolvedPatchRequirement func(endpointValidationInput) (bool, *validationError)
+type endpointValidator func(storage.Storage, *endpointValidationInput) *validationError
+type endpointPreparationRequirement func(*endpointValidationInput) (bool, *validationError)
 
 type endpointValidationConfig struct {
-	RequiresResolvedPatch endpointResolvedPatchRequirement
-	Validators            []endpointValidator
+	RequiresCurrent endpointPreparationRequirement
+	Validators      []endpointValidator
 }
 
 var endpointValidationConfigs = map[endpointValidationOperation]endpointValidationConfig{
@@ -46,7 +49,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 		},
 	},
 	endpointValidationPatch: {
-		RequiresResolvedPatch: endpointPatchRequiresResolvedPatch,
+		RequiresCurrent: endpointPatchRequiresCurrent,
 		Validators: []endpointValidator{
 			validateEndpointPatchClusterImmutable,
 			validateEndpointPatchVGPU,
@@ -62,31 +65,7 @@ func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, &validationError{
-				Code:    "10214",
-				Message: "invalid endpoint payload",
-				Hint:    err.Error(),
-			})
-			c.Abort()
-
-			return
-		}
-
-		c.Request.Body = io.NopCloser(bytes.NewReader(body))
-
-		if len(bytes.TrimSpace(body)) == 0 {
-			c.Next()
-			return
-		}
-
-		validationErr := validateEndpointRequest(
-			store,
-			c.Request.Method,
-			c.Request.URL.Query(),
-			body,
-		)
+		input, validationErr := readEndpointValidationInput(c)
 		if validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
@@ -94,61 +73,28 @@ func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 			return
 		}
 
+		config := endpointValidationConfigs[input.Operation]
+		if validationErr := prepareEndpointValidationInput(store, input, config); validationErr != nil {
+			c.JSON(validationErrStatus(validationErr), validationErr)
+			c.Abort()
+
+			return
+		}
+
+		for _, validator := range config.Validators {
+			if validationErr := validator(store, input); validationErr != nil {
+				c.JSON(validationErrStatus(validationErr), validationErr)
+				c.Abort()
+
+				return
+			}
+		}
+
 		c.Next()
 	}
 }
 
-func validateEndpointRequest(
-	store storage.Storage,
-	method string,
-	queryParams url.Values,
-	body []byte,
-) *validationError {
-	patch, validationErr := parseEndpointBody(body)
-	if validationErr != nil {
-		return validationErr
-	}
-
-	operation := endpointValidationOperationFor(method, patch)
-	config := endpointValidationConfigs[operation]
-	input := endpointValidationInput{
-		Body:              body,
-		QueryParams:       queryParams,
-		Patch:             patch,
-		EffectiveEndpoint: patch,
-	}
-
-	if config.RequiresResolvedPatch != nil {
-		needsResolvedPatch, validationErr := config.RequiresResolvedPatch(input)
-		if validationErr != nil {
-			return validationErr
-		}
-
-		if needsResolvedPatch {
-			input.ResolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
-			if validationErr != nil {
-				return validationErr
-			}
-
-			merged := mergeEndpointPatch(input.ResolvedPatch, input.Patch)
-			input.EffectiveEndpoint = &merged
-		}
-	}
-
-	for _, validator := range config.Validators {
-		if validationErr := validator(store, input); validationErr != nil {
-			return validationErr
-		}
-	}
-
-	return nil
-}
-
-func endpointValidationOperationFor(method string, endpoint *v1.Endpoint) endpointValidationOperation {
-	if method == http.MethodPatch && endpoint.GetDeletionTimestamp() != "" {
-		return endpointValidationSoftDelete
-	}
-
+func endpointValidationOperationFor(method string) endpointValidationOperation {
 	if method == http.MethodPatch {
 		return endpointValidationPatch
 	}
@@ -156,41 +102,142 @@ func endpointValidationOperationFor(method string, endpoint *v1.Endpoint) endpoi
 	return endpointValidationCreate
 }
 
-func endpointPatchRequiresResolvedPatch(input endpointValidationInput) (bool, *validationError) {
-	clusterPresent, validationErr := endpointPatchIncludesCluster(input.Body)
+func readEndpointValidationInput(c *gin.Context) (*endpointValidationInput, *validationError) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, invalidEndpointPayloadError(err)
+	}
+
+	if err := c.Request.Body.Close(); err != nil {
+		return nil, invalidEndpointPayloadError(err)
+	}
+
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+	input := &endpointValidationInput{
+		Method:      c.Request.Method,
+		Body:        body,
+		QueryParams: c.Request.URL.Query(),
+		Operation:   endpointValidationOperationFor(c.Request.Method),
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return input, nil
+	}
+
+	if err := json.Unmarshal(body, &input.RawPayload); err != nil {
+		return nil, invalidEndpointPayloadError(err)
+	}
+
+	if input.Operation == endpointValidationPatch {
+		isSoftDelete, err := endpointPatchIsSoftDelete(input.RawPayload)
+		if err != nil {
+			return nil, invalidEndpointPayloadError(err)
+		}
+
+		if isSoftDelete {
+			input.Operation = endpointValidationSoftDelete
+			if metadataRaw, ok := input.RawPayload["metadata"]; ok {
+				if err := json.Unmarshal(metadataRaw, &input.Patch.Metadata); err != nil {
+					return nil, invalidEndpointPayloadError(err)
+				}
+			}
+
+			return input, nil
+		}
+	}
+
+	patch, validationErr := parseEndpointBody(body)
+	if validationErr != nil {
+		return nil, validationErr
+	}
+
+	input.Patch = *patch
+
+	return input, nil
+}
+
+func prepareEndpointValidationInput(
+	store storage.Storage,
+	input *endpointValidationInput,
+	config endpointValidationConfig,
+) *validationError {
+	if input.Operation == endpointValidationSoftDelete {
+		return nil
+	}
+
+	input.New = &input.Patch
+	if input.Operation != endpointValidationPatch || config.RequiresCurrent == nil {
+		return nil
+	}
+
+	requiresCurrent, validationErr := config.RequiresCurrent(input)
+	if validationErr != nil {
+		return validationErr
+	}
+
+	if !requiresCurrent {
+		return nil
+	}
+
+	current, validationErr := resolveEndpointPatch(store, input.QueryParams)
+	if validationErr != nil {
+		return validationErr
+	}
+
+	merged := mergeEndpointPatch(current, &input.Patch)
+	input.Current = current
+	input.New = &merged
+
+	return nil
+}
+
+func endpointPatchRequiresCurrent(input *endpointValidationInput) (bool, *validationError) {
+	clusterPresent, validationErr := endpointPatchIncludesCluster(input.RawPayload)
 	if validationErr != nil {
 		return false, validationErr
 	}
 
-	return clusterPresent || endpointPatchMayAffectVGPUValidation(input.Patch), nil
+	return clusterPresent || endpointPatchMayAffectVGPUValidation(&input.Patch), nil
 }
 
-func validateEndpointCreateVGPU(store storage.Storage, input endpointValidationInput) *validationError {
+func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error) {
+	metadataRaw, ok := payload["metadata"]
+	if !ok {
+		return false, nil
+	}
+
+	var metadata v1.Metadata
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		return false, err
+	}
+
+	return metadata.DeletionTimestamp != "", nil
+}
+
+func validateEndpointCreateVGPU(store storage.Storage, input *endpointValidationInput) *validationError {
 	if input.Patch.GetDeletionTimestamp() != "" {
 		return nil
 	}
 
-	return validateEndpointVGPUEffective(store, input.EffectiveEndpoint)
+	return validateEndpointVGPUEffective(store, input.New)
 }
 
-func validateEndpointPatchClusterImmutable(_ storage.Storage, input endpointValidationInput) *validationError {
-	return validateEndpointClusterImmutable(input.Body, input.Patch, input.ResolvedPatch)
+func validateEndpointPatchClusterImmutable(_ storage.Storage, input *endpointValidationInput) *validationError {
+	return validateEndpointClusterImmutable(input)
 }
 
-func validateEndpointPatchVGPU(store storage.Storage, input endpointValidationInput) *validationError {
-	if !endpointPatchMayAffectVGPUValidation(input.Patch) {
+func validateEndpointPatchVGPU(store storage.Storage, input *endpointValidationInput) *validationError {
+	if !endpointPatchMayAffectVGPUValidation(&input.Patch) {
 		return nil
 	}
 
-	return validateEndpointVGPUEffective(store, input.EffectiveEndpoint)
+	return validateEndpointVGPUEffective(store, input.New)
 }
 
-func validateEndpointClusterImmutable(
-	body []byte,
-	endpoint *v1.Endpoint,
-	resolvedPatch *v1.Endpoint,
-) *validationError {
-	clusterPresent, validationErr := endpointPatchIncludesCluster(body)
+func validateEndpointClusterImmutable(input *endpointValidationInput) *validationError {
+	clusterPresent, validationErr := endpointPatchIncludesCluster(input.RawPayload)
 	if validationErr != nil {
 		return validationErr
 	}
@@ -199,36 +246,29 @@ func validateEndpointClusterImmutable(
 		return nil
 	}
 
-	if endpointClusterChanged(resolvedPatch, endpoint) {
+	if endpointClusterChanged(input.Current, &input.Patch) {
 		return endpointClusterImmutableError()
 	}
 
 	return nil
 }
 
-func endpointPatchIncludesCluster(body []byte) (bool, *validationError) {
-	var payload struct {
-		Spec json.RawMessage `json:"spec"`
-	}
-
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false, invalidEndpointPayloadError(err)
-	}
-
-	if len(payload.Spec) == 0 {
+func endpointPatchIncludesCluster(payload map[string]json.RawMessage) (bool, *validationError) {
+	specRaw, ok := payload["spec"]
+	if !ok {
 		return false, nil
 	}
 
-	if bytes.Equal(bytes.TrimSpace(payload.Spec), []byte("null")) {
+	if bytes.Equal(bytes.TrimSpace(specRaw), []byte("null")) {
 		return true, nil
 	}
 
 	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(payload.Spec, &spec); err != nil {
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
 		return false, invalidEndpointPayloadError(err)
 	}
 
-	_, ok := spec["cluster"]
+	_, ok = spec["cluster"]
 
 	return ok, nil
 }
