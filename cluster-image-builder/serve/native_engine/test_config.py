@@ -62,3 +62,40 @@ def test_build_engine_args_coerces_boolean_strings_from_ssh_variables() -> None:
     assert "--enforce-eager" in args
     assert "--enable-prefix-caching" not in args
     assert "false" not in args
+
+
+def test_build_engine_args_expands_vllm_multi_value_flags_and_model_aliases() -> None:
+    args = build_engine_args(
+        runtime={"command": ["vllm", "serve"]},
+        model={"path": "/models/demo", "serve_name": "chat-model"},
+        engine_args={
+            "allowed_media_domains": ["media.example", "assets.example"],
+            "logits_processors": ["pkg.First", "pkg.Second"],
+            "override_generation_config": {"temperature": 0.2},
+            "served_model_name": ["chat-model", "chat-alias"],
+            "cudagraph_capture_sizes": [],
+        },
+        port=30000,
+    )
+
+    assert args == [
+        "vllm",
+        "serve",
+        "--model",
+        "/models/demo",
+        "--served-model-name",
+        "chat-model",
+        "chat-alias",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "30000",
+        "--allowed-media-domains",
+        "media.example",
+        "assets.example",
+        "--logits-processors",
+        "pkg.First",
+        "pkg.Second",
+        "--override-generation-config",
+        '{"temperature":0.2}',
+    ]
