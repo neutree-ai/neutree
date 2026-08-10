@@ -194,6 +194,91 @@ func TestAppRunServesRequestsBeforeCancel(t *testing.T) {
 	waitPortRebindable(t, addr, 5*time.Second)
 }
 
+func TestAppRunShutdownTimeoutReleasesListenerWithInFlightRequest(t *testing.T) {
+	port := freePort(t)
+	addr := net.JoinHostPort(testHost, strconv.Itoa(port))
+	app := newTestCoreApp(t, port)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	app.config.GinEngine.GET("/slow", func(c *gin.Context) {
+		close(started)
+		<-release
+		c.String(http.StatusOK, "done")
+	})
+
+	cancel, done := startTestApp(t, app, addr)
+
+	go func() {
+		resp, err := http.Get("http://" + addr + "/slow")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	<-started // the request is now in-flight inside the handler
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("App.Run() error = nil, want shutdown timeout error")
+		}
+	case <-time.After(testShutdownTimeout + 2*time.Second):
+		t.Fatalf("App.Run() did not return within %v", testShutdownTimeout+2*time.Second)
+	}
+
+	close(release)
+	waitPortRebindable(t, addr, 5*time.Second)
+}
+
+func TestAppRunReturnsErrorWhenPortOccupied(t *testing.T) {
+	port := freePort(t)
+	addr := net.JoinHostPort(testHost, strconv.Itoa(port))
+	app := newTestCoreApp(t, port)
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("occupy port: %v", err)
+	}
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("App.Run() error = nil, want bind error")
+		}
+	case <-time.After(testStartTimeout):
+		t.Fatalf("App.Run() did not return the bind error within %v", testStartTimeout)
+	}
+}
+
+func TestAppRunPreCancelledContextReleasesListener(t *testing.T) {
+	port := freePort(t)
+	addr := net.JoinHostPort(testHost, strconv.Itoa(port))
+	app := newTestCoreApp(t, port)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Run(ctx)
+	}()
+
+	waitRunReturned(t, done, testShutdownTimeout)
+	waitPortRebindable(t, addr, 5*time.Second)
+}
+
 func TestAppRunWithInjectedPluginShutsDownOnCancel(t *testing.T) {
 	port := freePort(t)
 	addr := net.JoinHostPort(testHost, strconv.Itoa(port))

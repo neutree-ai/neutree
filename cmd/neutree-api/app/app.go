@@ -12,10 +12,18 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 )
 
-// serverShutdownTimeout bounds how long Run waits for in-flight requests to
-// drain after context cancellation before returning; the OS reclaims the
-// listener once the server is shut down.
-const serverShutdownTimeout = 5 * time.Second
+const (
+	// serverShutdownTimeout bounds how long Run waits for in-flight requests
+	// to drain after context cancellation before returning; the OS reclaims
+	// the listener once the server is shut down.
+	serverShutdownTimeout = 5 * time.Second
+
+	// readHeaderTimeout bounds how long the server waits for a request header
+	// before dropping the connection, guarding against slowloris-style
+	// clients. Kept independent of the shutdown budget so that raising one
+	// never silently weakens the other.
+	readHeaderTimeout = 5 * time.Second
+)
 
 // App represents the main API application
 type App struct {
@@ -40,7 +48,7 @@ func (a *App) Run(ctx context.Context) error {
 	server := &http.Server{
 		Addr:              serverAddr,
 		Handler:           a.config.GinEngine,
-		ReadHeaderTimeout: serverShutdownTimeout,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	errCh := make(chan error, 1)
@@ -59,7 +67,7 @@ func (a *App) Run(ctx context.Context) error {
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return err
+			return fmt.Errorf("shutdown API server: %w", err)
 		}
 
 		return <-errCh
