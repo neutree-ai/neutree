@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
@@ -203,12 +204,11 @@ func prepareClusterValidationInput(
 		return clusterPatchValidationPreparationError(input, err)
 	}
 
-	newCluster, err := mergeClusterPatchForValidation(current, input.Body)
+	newCluster, err := buildPostgrestClusterPatchValidationNew(current, input.Body)
 	if err != nil {
 		return invalidClusterPayloadError(err)
 	}
 
-	preserveMaskedClusterPatchCredentials(current, newCluster, input.RawPayload)
 	input.Current = current
 	input.New = newCluster
 
@@ -236,12 +236,12 @@ func clusterPatchValidationPreparationError(
 		return clusterConfigurationUpdateResolutionError(err)
 	}
 
-	disableRequested, acceleratorErr := clusterAcceleratorVirtualizationDisableRequestedPayload(input.RawPayload)
+	acceleratorVirtualizationMayDisable, acceleratorErr := clusterAcceleratorVirtualizationMayDisablePayload(input.RawPayload)
 	if acceleratorErr != nil {
 		return invalidClusterPayloadError(acceleratorErr)
 	}
 
-	if disableRequested {
+	if acceleratorVirtualizationMayDisable {
 		return clusterAcceleratorVirtualizationResolutionError(err)
 	}
 
@@ -269,12 +269,12 @@ func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *va
 			errors.New("cluster identity is required when updating cluster configuration"))
 	}
 
-	disableRequested, acceleratorErr := clusterAcceleratorVirtualizationDisableRequestedPayload(input.RawPayload)
+	acceleratorVirtualizationMayDisable, acceleratorErr := clusterAcceleratorVirtualizationMayDisablePayload(input.RawPayload)
 	if acceleratorErr != nil {
 		return invalidClusterPayloadError(acceleratorErr)
 	}
 
-	if disableRequested {
+	if acceleratorVirtualizationMayDisable {
 		return clusterAcceleratorVirtualizationResolutionError(
 			errors.New("cluster identity is required when disabling accelerator virtualization"))
 	}
@@ -283,109 +283,60 @@ func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *va
 		errors.New("cluster identity is required when patching a cluster"))
 }
 
-func mergeClusterPatchForValidation(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
-	patch := json.RawMessage(body)
-	if len(bytes.TrimSpace(patch)) == 0 {
-		patch = json.RawMessage(`{}`)
+// buildPostgrestClusterPatchValidationNew mirrors the resource proxy before it
+// forwards a PATCH: masked leaves are backfilled, then supplied row columns
+// replace their current values. A supplied spec therefore replaces the whole
+// PostgreSQL composite rather than recursively merging its attributes.
+func buildPostgrestClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
+	if current == nil {
+		return nil, errors.New("current cluster is required")
+	}
+
+	currentBody, err := json.Marshal(current)
+	if err != nil {
+		return nil, fmt.Errorf("marshal current cluster: %w", err)
+	}
+
+	var currentPayload map[string]interface{}
+	if err := json.Unmarshal(currentBody, &currentPayload); err != nil {
+		return nil, fmt.Errorf("decode current cluster: %w", err)
+	}
+
+	if len(bytes.TrimSpace(body)) == 0 {
+		body = []byte(`{}`)
+	}
+
+	filteredBody, err := filterPayloadToTopLevelFields(
+		body,
+		extractTopLevelJSONFields(reflect.TypeOf(v1.Cluster{})),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("filter cluster patch payload: %w", err)
+	}
+
+	var patchPayload map[string]interface{}
+	if err := json.Unmarshal(filteredBody, &patchPayload); err != nil {
+		return nil, fmt.Errorf("decode cluster patch payload: %w", err)
+	}
+
+	tagConfig := extractStructTagConfig(reflect.TypeOf(v1.Cluster{}))
+	mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
+
+	for field, value := range patchPayload {
+		currentPayload[field] = value
+	}
+
+	nextBody, err := json.Marshal(currentPayload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal patched cluster: %w", err)
 	}
 
 	var next v1.Cluster
-	if err := util.JsonMerge(current, patch, &next); err != nil {
-		return nil, fmt.Errorf("merge cluster patch for validation: %w", err)
+	if err := json.Unmarshal(nextBody, &next); err != nil {
+		return nil, fmt.Errorf("decode patched cluster: %w", err)
 	}
 
 	return &next, nil
-}
-
-func preserveMaskedClusterPatchCredentials(
-	current, next *v1.Cluster, payload map[string]json.RawMessage,
-) {
-	if current == nil || current.Spec == nil || next == nil || next.Spec == nil {
-		return
-	}
-
-	specRaw, ok := payload["spec"]
-	if !ok {
-		return
-	}
-
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return
-	}
-
-	configRaw, ok := spec["config"]
-	if !ok || isJSONNull(configRaw) {
-		return
-	}
-
-	var config map[string]json.RawMessage
-	if err := json.Unmarshal(configRaw, &config); err != nil {
-		return
-	}
-
-	preserveMaskedKubeconfig(current, next, config)
-	preserveMaskedSSHPrivateKey(current, next, config)
-}
-
-func preserveMaskedKubeconfig(current, next *v1.Cluster, config map[string]json.RawMessage) {
-	kubernetesConfigRaw, ok := config["kubernetes_config"]
-	if !ok || isJSONNull(kubernetesConfigRaw) {
-		return
-	}
-
-	var kubernetesConfig map[string]json.RawMessage
-	if err := json.Unmarshal(kubernetesConfigRaw, &kubernetesConfig); err != nil {
-		return
-	}
-
-	kubeconfigRaw, ok := kubernetesConfig["kubeconfig"]
-	if !ok || !isJSONEmptyOrNullString(kubeconfigRaw) || current.Spec.Config == nil ||
-		current.Spec.Config.KubernetesConfig == nil || next.Spec.Config == nil || next.Spec.Config.KubernetesConfig == nil {
-		return
-	}
-
-	next.Spec.Config.KubernetesConfig.Kubeconfig = current.Spec.Config.KubernetesConfig.Kubeconfig
-}
-
-func preserveMaskedSSHPrivateKey(current, next *v1.Cluster, config map[string]json.RawMessage) {
-	sshConfigRaw, ok := config["ssh_config"]
-	if !ok || isJSONNull(sshConfigRaw) {
-		return
-	}
-
-	var sshConfig map[string]json.RawMessage
-	if err := json.Unmarshal(sshConfigRaw, &sshConfig); err != nil {
-		return
-	}
-
-	authRaw, ok := sshConfig["auth"]
-	if !ok || isJSONNull(authRaw) {
-		return
-	}
-
-	var auth map[string]json.RawMessage
-	if err := json.Unmarshal(authRaw, &auth); err != nil {
-		return
-	}
-
-	privateKeyRaw, ok := auth["ssh_private_key"]
-	if !ok || !isJSONEmptyOrNullString(privateKeyRaw) || current.Spec.Config == nil ||
-		current.Spec.Config.SSHConfig == nil || next.Spec.Config == nil || next.Spec.Config.SSHConfig == nil {
-		return
-	}
-
-	next.Spec.Config.SSHConfig.Auth.SSHPrivateKey = current.Spec.Config.SSHConfig.Auth.SSHPrivateKey
-}
-
-func isJSONEmptyOrNullString(raw json.RawMessage) bool {
-	if isJSONNull(raw) {
-		return true
-	}
-
-	var value string
-
-	return json.Unmarshal(raw, &value) == nil && value == ""
 }
 
 func validateClusterSoftDelete(s storage.Storage, input *ValidationInput[v1.Cluster]) error {
@@ -439,15 +390,7 @@ func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc
 		}
 
 		if input.Operation == clusterValidationPatch {
-			updated, err := clusterAcceleratorVirtualizationUpdatedPayload(input.RawPayload)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
-				c.Abort()
-
-				return
-			}
-
-			if !updated {
+			if _, updatesSpec := input.RawPayload["spec"]; !updatesSpec {
 				c.Next()
 
 				return
@@ -969,16 +912,9 @@ func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
 	return baseline, nil
 }
 
-func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false, err
-	}
-
-	return clusterAcceleratorVirtualizationDisableRequestedPayload(payload)
-}
-
-func clusterAcceleratorVirtualizationDisableRequestedPayload(payload map[string]json.RawMessage) (bool, error) {
+// clusterAcceleratorVirtualizationMayDisablePayload preserves the legacy error
+// contract when Current/New cannot be built because the PATCH target is unknown.
+func clusterAcceleratorVirtualizationMayDisablePayload(payload map[string]json.RawMessage) (bool, error) {
 	specRaw, ok := payload["spec"]
 	if !ok {
 		return false, nil
@@ -1001,9 +937,6 @@ func clusterAcceleratorVirtualizationDisableRequestedPayload(payload map[string]
 
 	enabledRaw, ok := acceleratorVirtualization["enabled"]
 	if !ok {
-		// The CLI decodes YAML into Cluster and re-marshals JSON before PATCH.
-		// enabled:false is omitted by the API struct tag, yielding
-		// "accelerator_virtualization": {}, which still clears the enabled flag.
 		return true, nil
 	}
 
@@ -1013,22 +946,6 @@ func clusterAcceleratorVirtualizationDisableRequestedPayload(payload map[string]
 	}
 
 	return !enabled, nil
-}
-
-func clusterAcceleratorVirtualizationUpdatedPayload(payload map[string]json.RawMessage) (bool, error) {
-	specRaw, ok := payload["spec"]
-	if !ok {
-		return false, nil
-	}
-
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return false, err
-	}
-
-	_, updated := spec["accelerator_virtualization"]
-
-	return updated, nil
 }
 
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
@@ -1203,20 +1120,13 @@ func validateClusterAcceleratorVirtualizationInput(
 		return nil
 	}
 
-	disableRequested, err := clusterAcceleratorVirtualizationDisableRequestedPayload(input.RawPayload)
-	if err != nil {
-		return invalidClusterPayloadError(err)
-	}
-
-	if !disableRequested {
+	if input.Current == nil || input.New == nil ||
+		!input.Current.Spec.AcceleratorVirtualizationEnabled() ||
+		input.New.Spec.AcceleratorVirtualizationEnabled() {
 		return nil
 	}
 
-	if input.Current != nil {
-		return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
-	}
-
-	return validateClusterAcceleratorVirtualizationDisable(s, input.Patch, input.QueryParams)
+	return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
 }
 
 func validateClusterAcceleratorVirtualizationBody(body []byte) *validationError {

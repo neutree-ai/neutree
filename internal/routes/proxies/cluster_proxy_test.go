@@ -244,6 +244,48 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
+	t.Run("rejects a spec replacement that disables accelerator virtualization with vGPU endpoints", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				Type:    v1.KubernetesClusterType,
+				Version: "v1.0.0",
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+					Enabled: true,
+				},
+			},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return([]v1.Endpoint{{
+			Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{Accelerator: map[string]string{
+				v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+			}}},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+				"spec": {"version": "v1.1.0"}
+			}`)))
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10211"`)
+		assert.Contains(t, recorder.Body.String(), "vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
 	t.Run("resolves the current cluster once for all normal PATCH validators", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -550,6 +592,28 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
+	t.Run("uses the generic identity error for an accelerator virtualization enable PATCH", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(`{
+			"spec": {"accelerator_virtualization": {"enabled": true}}
+		}`)))
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when patching a cluster")
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+	})
+
 	t.Run("preserves the accelerator virtualization resolution error when the current cluster lookup fails", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
@@ -612,7 +676,9 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 			return sameFilters(opt.Filters, queryParamsToFilters(query))
 		})).Return([]v1.Cluster{{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
-			Spec:     &v1.ClusterSpec{},
+			Spec: &v1.ClusterSpec{AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			}},
 		}}, nil).Once()
 		mockStorage.On(
 			"ListEndpoint",
@@ -1062,12 +1128,13 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 		return input
 	}
 
-	t.Run("creates a separate New cluster and preserves an empty kubeconfig", func(t *testing.T) {
+	t.Run("creates a separate New cluster from a whole spec replacement and preserves an empty kubeconfig", func(t *testing.T) {
 		current := v1.Cluster{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
 			Spec: &v1.ClusterSpec{
-				Type:    v1.KubernetesClusterType,
-				Version: "v1.0.0",
+				Type:          v1.KubernetesClusterType,
+				ImageRegistry: "current-registry",
+				Version:       "v1.0.0",
 				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
 					Kubeconfig: "current-kubeconfig",
 				}},
@@ -1085,6 +1152,8 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 		assert.NotSame(t, input.Current, input.New)
 		assert.Equal(t, "v1.0.0", input.Current.Spec.Version)
 		assert.Equal(t, "current-kubeconfig", input.Current.Spec.Config.KubernetesConfig.Kubeconfig)
+		assert.Empty(t, input.New.Spec.Type)
+		assert.Empty(t, input.New.Spec.ImageRegistry)
 		assert.Equal(t, "v1.1.0", input.New.Spec.Version)
 		assert.Equal(t, "current-kubeconfig", input.New.Spec.Config.KubernetesConfig.Kubeconfig)
 	})
@@ -1116,7 +1185,7 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 		})
 	}
 
-	t.Run("retains an explicit config null in New for configuration validation", func(t *testing.T) {
+	t.Run("retains an explicit config null in the raw update for configuration validation", func(t *testing.T) {
 		current := v1.Cluster{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "kubernetes"},
 			Spec: &v1.ClusterSpec{
@@ -1126,14 +1195,13 @@ func TestPrepareClusterValidationInput(t *testing.T) {
 		}
 		input := prepare(t, current, `{"spec": {"config": null}}`)
 
-		assert.Nil(t, input.New.Spec.Config)
 		update, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
 		assert.NoError(t, err)
 		assert.True(t, update.configCleared)
 	})
 }
 
-func TestMergeClusterPatchForValidation(t *testing.T) {
+func TestBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 	current := &v1.Cluster{
 		Spec: &v1.ClusterSpec{
 			Type:          v1.KubernetesClusterType,
@@ -1142,12 +1210,17 @@ func TestMergeClusterPatchForValidation(t *testing.T) {
 		},
 	}
 
-	next, err := mergeClusterPatchForValidation(current, nil)
+	next, err := buildPostgrestClusterPatchValidationNew(current, []byte(`{
+		"spec": {"version": "v1.1.0"}
+	}`))
 	assert.NoError(t, err)
 	assert.NotSame(t, current, next)
-	assert.Equal(t, current, next)
+	assert.Equal(t, "v1.0.0", current.Spec.Version)
+	assert.Equal(t, "v1.1.0", next.Spec.Version)
+	assert.Empty(t, next.Spec.Type)
+	assert.Empty(t, next.Spec.ImageRegistry)
 
-	_, err = mergeClusterPatchForValidation(current, []byte(`[`))
+	_, err = buildPostgrestClusterPatchValidationNew(current, []byte(`[`))
 	assert.Error(t, err)
 }
 
@@ -1158,7 +1231,9 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
-			Spec:     &v1.ClusterSpec{},
+			Spec: &v1.ClusterSpec{AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			}},
 		}}, nil).Once()
 		mockStorage.On("ListEndpoint", storage.ListOption{
 			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
@@ -1189,6 +1264,45 @@ func TestValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		recorder := httptest.NewRecorder()
 
 		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10211"`)
+		assert.Contains(t, recorder.Body.String(), "vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("rejects a spec replacement that disables accelerator virtualization with vGPU endpoints", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				Type:    v1.KubernetesClusterType,
+				Version: "v1.0.0",
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+					Enabled: true,
+				},
+			},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return([]v1.Endpoint{{
+			Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{Accelerator: map[string]string{
+				v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+			}}},
+		}}, nil).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
+			"spec": {"version": "v1.1.0"}
+		}`)))
 
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -2449,52 +2563,6 @@ func TestValidateClusterVersionNotDowngrade(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErrContains)
 		})
 	}
-}
-
-func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
-	t.Run("true when payload explicitly sets enabled false", func(t *testing.T) {
-		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
-			"spec": {
-				"accelerator_virtualization": {"enabled": false}
-			}
-		}`))
-
-		assert.NoError(t, err)
-		assert.True(t, requested)
-	})
-
-	t.Run("true when enabled is omitted from accelerator virtualization patch", func(t *testing.T) {
-		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
-			"spec": {
-				"accelerator_virtualization": {"config_patch": {"devicePlugin": {}}}
-			}
-		}`))
-
-		assert.NoError(t, err)
-		assert.True(t, requested)
-	})
-
-	t.Run("true when accelerator virtualization patch is empty after omitempty marshal", func(t *testing.T) {
-		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
-			"spec": {
-				"accelerator_virtualization": {}
-			}
-		}`))
-
-		assert.NoError(t, err)
-		assert.True(t, requested)
-	})
-
-	t.Run("true when accelerator virtualization patch is null", func(t *testing.T) {
-		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
-			"spec": {
-				"accelerator_virtualization": null
-			}
-		}`))
-
-		assert.NoError(t, err)
-		assert.True(t, requested)
-	})
 }
 
 func sameFilters(actual, expected []storage.Filter) bool {
