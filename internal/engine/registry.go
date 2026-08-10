@@ -95,11 +95,14 @@ func (r *registry) Register(engine *v1.Engine) error {
 		return errors.New("engine spec is required")
 	}
 
-	// Reject unusable capability declarations here rather than letting them
-	// reach the consumers, which would silently ignore them.
-	for _, version := range engine.Spec.Versions {
+	// Reject unusable declarations here rather than letting them reach the
+	// consumers, which would silently ignore them.
+	for i, version := range engine.Spec.Versions {
+		// A nil entry cannot merely be skipped: it would be stored, and the
+		// next registration of the same engine dereferences every version in
+		// util.MergeEngine, panicking the /v1/engine/register handler.
 		if version == nil {
-			continue
+			return errors.Errorf("engine %s version entry %d must not be nil", engine.Metadata.Name, i)
 		}
 
 		if err := version.Capabilities.Validate(); err != nil {

@@ -179,7 +179,8 @@ func (c *EngineCapabilities) Validate() error {
 
 	if m := c.MetricsExport; m != nil {
 		if m.Port < 0 || m.Port > 65535 {
-			return fmt.Errorf("metrics_export.port %d is out of range (1-65535)", m.Port)
+			return fmt.Errorf("metrics_export.port %d is out of range, expected 1-65535 or 0 to use the default (%d)",
+				m.Port, DefaultMetricsExportPort)
 		}
 
 		if m.Path != "" && !strings.HasPrefix(m.Path, "/") {
@@ -255,10 +256,17 @@ func (ev *EngineVersion) ResolvePlayground() ResolvedPlayground {
 
 	declared := ev.Capabilities.Playground
 
-	return ResolvedPlayground{
-		Enabled: declared.Enabled,
-		Modes:   declared.Modes,
+	resolved := ResolvedPlayground{Enabled: declared.Enabled}
+
+	// An explicit `modes: []` normalizes to nil so that "did not narrow it down"
+	// has exactly one representation in the resolved form. Without this a
+	// consumer could read an empty non-nil slice as "supports no mode at all"
+	// and hide a Playground the engine declared as enabled.
+	if len(declared.Modes) > 0 {
+		resolved.Modes = declared.Modes
 	}
+
+	return resolved
 }
 
 // EngineVersion represents a specific version of an engine with its configuration schema,

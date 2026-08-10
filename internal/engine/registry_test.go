@@ -264,3 +264,44 @@ func TestBuiltinEnginesDeclareCapabilities(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistryRegisterNilVersion pins that a nil version entry is rejected
+// rather than stored. Storing one is not merely untidy: util.MergeEngine
+// dereferences every version, so the next registration of the same engine would
+// panic the /v1/engine/register handler.
+func TestRegistryRegisterNilVersion(t *testing.T) {
+	r := &registry{engines: make(map[string]*v1.Engine)}
+
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "engine1"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{
+				{Version: "v1"},
+				nil,
+			},
+		},
+	}
+
+	if err := r.Register(engine); err == nil {
+		t.Fatal("expected a nil version entry to be rejected")
+	}
+
+	if _, registered := r.engines["engine1"]; registered {
+		t.Error("engine must not be registered when a version entry is nil")
+	}
+
+	// The guard has to hold on the merge path too, which is the one that would
+	// actually panic.
+	valid := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "engine1"},
+		Spec:     &v1.EngineSpec{Versions: []*v1.EngineVersion{{Version: "v1"}}},
+	}
+
+	if err := r.Register(valid); err != nil {
+		t.Fatalf("failed to register a valid engine: %v", err)
+	}
+
+	if err := r.Register(engine); err == nil {
+		t.Fatal("expected a nil version entry to be rejected on re-registration")
+	}
+}

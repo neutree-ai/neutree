@@ -100,6 +100,15 @@ func mergeEngineCapabilities(existing, new *v1.EngineVersion) {
 		return
 	}
 
+	// An incoming declaration that sets no capability at all leaves `existing`
+	// untouched, including its nil-ness. Allocating here would turn an
+	// undeclared engine version into a declared-but-empty one, which survives
+	// `omitempty` serialization and makes "undeclared" indistinguishable from
+	// "declared nothing" for anyone reading the stored spec.
+	if new.Capabilities.MetricsExport == nil && new.Capabilities.Playground == nil {
+		return
+	}
+
 	if existing.Capabilities == nil {
 		existing.Capabilities = &v1.EngineCapabilities{}
 	}

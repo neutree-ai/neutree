@@ -287,6 +287,26 @@ func TestMergeEngineVersion_Capabilities(t *testing.T) {
 			expected: nil,
 		},
 		{
+			// Declaring the container without any capability inside it must not
+			// promote an undeclared version to declared-but-empty: the two are
+			// distinguishable in the stored spec and only the former means
+			// "fall back to legacy behaviour".
+			name:     "empty declaration leaves undeclared alone",
+			existing: &v1.EngineVersion{Version: "v1"},
+			new:      &v1.EngineVersion{Version: "v1", Capabilities: &v1.EngineCapabilities{}},
+			expected: nil,
+		},
+		{
+			name: "empty declaration preserves an existing one",
+			existing: &v1.EngineVersion{Version: "v1", Capabilities: &v1.EngineCapabilities{
+				MetricsExport: &v1.MetricsExportCapability{Enabled: true},
+			}},
+			new: &v1.EngineVersion{Version: "v1", Capabilities: &v1.EngineCapabilities{}},
+			expected: &v1.EngineCapabilities{
+				MetricsExport: &v1.MetricsExportCapability{Enabled: true},
+			},
+		},
+		{
 			name:     "first declaration is adopted",
 			existing: &v1.EngineVersion{Version: "v1"},
 			new: &v1.EngineVersion{Version: "v1", Capabilities: &v1.EngineCapabilities{

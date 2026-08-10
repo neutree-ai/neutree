@@ -597,6 +597,14 @@ func TestEngineVersion_ResolvePlayground_Declared(t *testing.T) {
 			want:     ResolvedPlayground{Enabled: true},
 		},
 		{
+			// An explicit `modes: []` from JSON/YAML means the same thing as an
+			// omitted one, and must resolve identically -- a non-nil empty slice
+			// could be read as "supports no mode at all".
+			name:     "enabled with an explicitly empty mode list",
+			declared: &PlaygroundCapability{Enabled: true, Modes: []string{}},
+			want:     ResolvedPlayground{Enabled: true},
+		},
+		{
 			name:     "enabled, narrowed to chat",
 			declared: &PlaygroundCapability{Enabled: true, Modes: []string{PlaygroundModeChat}},
 			want:     ResolvedPlayground{Enabled: true, Modes: []string{PlaygroundModeChat}},
