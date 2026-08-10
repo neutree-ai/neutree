@@ -15,6 +15,46 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+type endpointValidationOperation string
+
+const (
+	endpointValidationCreate     endpointValidationOperation = "create"
+	endpointValidationPatch      endpointValidationOperation = "patch"
+	endpointValidationSoftDelete endpointValidationOperation = "soft-delete"
+)
+
+type endpointValidationInput struct {
+	Body              []byte
+	QueryParams       url.Values
+	Patch             *v1.Endpoint
+	ResolvedPatch     *v1.Endpoint
+	EffectiveEndpoint *v1.Endpoint
+}
+
+type endpointValidator func(storage.Storage, endpointValidationInput) *validationError
+type endpointResolvedPatchRequirement func(endpointValidationInput) (bool, *validationError)
+
+type endpointValidationConfig struct {
+	RequiresResolvedPatch endpointResolvedPatchRequirement
+	Validators            []endpointValidator
+}
+
+var endpointValidationConfigs = map[endpointValidationOperation]endpointValidationConfig{
+	endpointValidationCreate: {
+		Validators: []endpointValidator{
+			validateEndpointCreateVGPU,
+		},
+	},
+	endpointValidationPatch: {
+		RequiresResolvedPatch: endpointPatchRequiresResolvedPatch,
+		Validators: []endpointValidator{
+			validateEndpointPatchClusterImmutable,
+			validateEndpointPatchVGPU,
+		},
+	},
+	endpointValidationSoftDelete: {},
+}
+
 func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
@@ -64,32 +104,85 @@ func validateEndpointRequest(
 	queryParams url.Values,
 	body []byte,
 ) *validationError {
-	endpoint, validationErr := parseEndpointBody(body)
+	patch, validationErr := parseEndpointBody(body)
 	if validationErr != nil {
 		return validationErr
 	}
 
-	var resolvedPatch *v1.Endpoint
+	operation := endpointValidationOperationFor(method, patch)
+	config := endpointValidationConfigs[operation]
+	input := endpointValidationInput{
+		Body:              body,
+		QueryParams:       queryParams,
+		Patch:             patch,
+		EffectiveEndpoint: patch,
+	}
 
-	if method == http.MethodPatch {
-		clusterPresent, validationErr := endpointPatchIncludesCluster(body)
+	if config.RequiresResolvedPatch != nil {
+		needsResolvedPatch, validationErr := config.RequiresResolvedPatch(input)
 		if validationErr != nil {
 			return validationErr
 		}
 
-		if clusterPresent || endpointPatchMayAffectVGPUValidation(endpoint) {
-			resolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
+		if needsResolvedPatch {
+			input.ResolvedPatch, validationErr = resolveEndpointPatch(store, queryParams)
 			if validationErr != nil {
 				return validationErr
 			}
-		}
 
-		if validationErr := validateEndpointClusterImmutable(body, endpoint, resolvedPatch); validationErr != nil {
+			merged := mergeEndpointPatch(input.ResolvedPatch, input.Patch)
+			input.EffectiveEndpoint = &merged
+		}
+	}
+
+	for _, validator := range config.Validators {
+		if validationErr := validator(store, input); validationErr != nil {
 			return validationErr
 		}
 	}
 
-	return validateEndpointVGPUPreflightWithResolvedPatch(store, method, queryParams, endpoint, resolvedPatch)
+	return nil
+}
+
+func endpointValidationOperationFor(method string, endpoint *v1.Endpoint) endpointValidationOperation {
+	if method == http.MethodPatch && endpoint.GetDeletionTimestamp() != "" {
+		return endpointValidationSoftDelete
+	}
+
+	if method == http.MethodPatch {
+		return endpointValidationPatch
+	}
+
+	return endpointValidationCreate
+}
+
+func endpointPatchRequiresResolvedPatch(input endpointValidationInput) (bool, *validationError) {
+	clusterPresent, validationErr := endpointPatchIncludesCluster(input.Body)
+	if validationErr != nil {
+		return false, validationErr
+	}
+
+	return clusterPresent || endpointPatchMayAffectVGPUValidation(input.Patch), nil
+}
+
+func validateEndpointCreateVGPU(store storage.Storage, input endpointValidationInput) *validationError {
+	if input.Patch.GetDeletionTimestamp() != "" {
+		return nil
+	}
+
+	return validateEndpointVGPUEffective(store, input.EffectiveEndpoint)
+}
+
+func validateEndpointPatchClusterImmutable(_ storage.Storage, input endpointValidationInput) *validationError {
+	return validateEndpointClusterImmutable(input.Body, input.Patch, input.ResolvedPatch)
+}
+
+func validateEndpointPatchVGPU(store storage.Storage, input endpointValidationInput) *validationError {
+	if !endpointPatchMayAffectVGPUValidation(input.Patch) {
+		return nil
+	}
+
+	return validateEndpointVGPUEffective(store, input.EffectiveEndpoint)
 }
 
 func validateEndpointClusterImmutable(
@@ -196,23 +289,27 @@ func validateEndpointVGPUPreflightWithResolvedPatch(
 		return validationErr
 	}
 
-	if targetEndpoint == nil || targetEndpoint.Spec == nil {
+	return validateEndpointVGPUEffective(store, targetEndpoint)
+}
+
+func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil {
 		return nil
 	}
 
-	if validationErr := validateEndpointReplicaCount(targetEndpoint.Spec); validationErr != nil {
+	if validationErr := validateEndpointReplicaCount(endpoint.Spec); validationErr != nil {
 		return validationErr
 	}
 
-	if targetEndpoint.Spec.Resources == nil || !targetEndpoint.Spec.Resources.HasAcceleratorVirtualization() {
+	if endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
 		return nil
 	}
 
-	if endpointReplicaCount(targetEndpoint.Spec) == 0 {
+	if endpointReplicaCount(endpoint.Spec) == 0 {
 		return nil
 	}
 
-	cluster, validationErr := resolveEndpointVGPUCluster(store, targetEndpoint)
+	cluster, validationErr := resolveEndpointVGPUCluster(store, endpoint)
 	if validationErr != nil {
 		return validationErr
 	}
@@ -221,11 +318,11 @@ func validateEndpointVGPUPreflightWithResolvedPatch(
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUResourceShape(targetEndpoint.Spec.Resources); validationErr != nil {
+	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUMemorySpec(targetEndpoint.Spec.Resources, cluster); validationErr != nil {
+	if validationErr := validateEndpointVGPUMemorySpec(endpoint.Spec.Resources, cluster); validationErr != nil {
 		return validationErr
 	}
 

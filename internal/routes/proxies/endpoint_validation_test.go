@@ -1059,6 +1059,52 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 	}
 }
 
+func TestEndpointValidationSkipsPatchValidatorsForSoftDelete(t *testing.T) {
+	existing := v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+	clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+	body := `{
+		"metadata": {"deletion_timestamp": "2026-08-10T08:30:00Z"},
+		"spec": {"cluster": "cluster-b"}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+	assert.Zero(t, clusterStorage.endpointListCalls)
+}
+
+func TestEndpointValidationSkipsVGPUValidationForDeletedPost(t *testing.T) {
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a", "deletion_timestamp": "2026-08-10T08:30:00Z"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, nil)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+}
+
 func endpointWithVGPU(cluster string, workspace string) *v1.Endpoint {
 	return &v1.Endpoint{
 		Metadata: &v1.Metadata{
