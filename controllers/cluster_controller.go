@@ -251,6 +251,7 @@ func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.Clus
 		newStatus.AcceleratorType = obj.Status.AcceleratorType
 		newStatus.ObservedSpecHash = obj.Status.ObservedSpecHash
 		newStatus.ComponentStatus = obj.Status.ComponentStatus
+		newStatus.AcceleratorVirtualization = obj.Status.AcceleratorVirtualization
 	}
 
 	if err != nil {
