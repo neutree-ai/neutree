@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
+	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 )
@@ -52,6 +53,29 @@ func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
 	}
 	if _, ok := config.AcceleratorManager.GetPlugin("injected-test"); !ok {
 		t.Fatal("Build() did not register the injected accelerator plugin")
+	}
+}
+
+func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
+	engine := gin.New()
+	existingManager, err := accelerator.NewManagerWithPlugins(engine)
+	if err != nil {
+		t.Fatalf("NewManagerWithPlugins() error = %v", err)
+	}
+
+	config := &config.CoreConfig{GinEngine: engine, AcceleratorManager: existingManager}
+	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if config.AcceleratorManager != existingManager {
+		t.Fatal("Build() replaced the configured AcceleratorManager with injected plugins")
+	}
+	if _, ok := config.AcceleratorManager.GetPlugin("injected-test"); !ok {
+		t.Fatal("Build() did not register the injected accelerator plugin into the existing manager")
 	}
 }
 

@@ -257,6 +257,49 @@ func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
 	}
 }
 
+func TestManagerAddInternalPluginsRegistersPluginsOnExistingManager(t *testing.T) {
+	manager, err := NewManagerWithPlugins(gin.New())
+	require.NoError(t, err)
+
+	injected := &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: "injected_gpu"}
+
+	err = manager.AddInternalPlugins(injected)
+
+	require.NoError(t, err)
+	assert.Contains(t, manager.SupportPlugins(), "injected_gpu")
+	assert.Contains(t, manager.SupportPlugins(), v1.AcceleratorTypeNVIDIAGPU.String())
+}
+
+func TestManagerAddInternalPluginsFailsAtomically(t *testing.T) {
+	valid := &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: "injected_gpu"}
+	emptyResource := &fakeStaticNodeAcceleratorPlugin{resourceSet: true}
+	var typedNil *fakeStaticNodeAcceleratorPlugin
+
+	tests := []struct {
+		name    string
+		plugins []plugin.AcceleratorPlugin
+		message string
+	}{
+		{name: "batch with duplicate of manager-registered resource", plugins: []plugin.AcceleratorPlugin{valid, &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: v1.AcceleratorTypeNVIDIAGPU.String()}}, message: "already registered"},
+		{name: "batch with duplicate resource within batch", plugins: []plugin.AcceleratorPlugin{valid, valid}, message: "already registered"},
+		{name: "batch with empty resource", plugins: []plugin.AcceleratorPlugin{valid, emptyResource}, message: "resource is required"},
+		{name: "batch with typed nil", plugins: []plugin.AcceleratorPlugin{valid, typedNil}, message: "accelerator plugin is nil"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, err := NewManagerWithPlugins(gin.New())
+			require.NoError(t, err)
+
+			err = manager.AddInternalPlugins(tt.plugins...)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.message)
+			assert.NotContains(t, manager.SupportPlugins(), "injected_gpu")
+		})
+	}
+}
+
 func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
