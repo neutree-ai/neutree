@@ -336,7 +336,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
-	t.Run("dispatches POST to accelerator virtualization validation", func(t *testing.T) {
+	t.Run("does not apply Kubernetes vGPU validation to an SSH POST", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -355,9 +355,8 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10208"`)
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
 		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
@@ -381,7 +380,11 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"image_registry": "replacement-registry"}
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"image_registry": "replacement-registry"
+			}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -578,7 +581,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 			Status: &v1.ClusterStatus{Initialized: true},
 		}}, nil).Once()
 
-		body := `{"spec":{"config":{"kubernetes_config":{"kubeconfig":null}}}}`
+		body := `{"spec":{"type":"kubernetes","version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":null}}}}`
 		proxyCalled := false
 		router := gin.New()
 		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
@@ -822,7 +825,11 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"accelerator_virtualization": {}}
+			"spec": {
+				"type": "kubernetes",
+				"version": "v1.1.0",
+				"accelerator_virtualization": {}
+			}
 		}`))
 		recorder := httptest.NewRecorder()
 
