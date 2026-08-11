@@ -339,10 +339,12 @@ func mergeExcludedFieldsRecursive(
 
 		// Recursively merge nested objects
 		if sourceMap, ok := sourceValue.(map[string]interface{}); ok {
-			if targetMap, ok := target[key].(map[string]interface{}); ok {
+			targetValue, exists := target[key]
+			if targetMap, ok := targetValue.(map[string]interface{}); ok {
 				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
-			} else if !ok && target[key] == nil {
-				// Target has this key but it's nil, create a new map and merge
+			} else if !exists {
+				// Only a missing parent can receive a backfilled child. An explicit
+				// JSON null is an intentional clear and must remain null.
 				target[key] = make(map[string]interface{})
 				if targetMap, ok := target[key].(map[string]interface{}); ok {
 					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)

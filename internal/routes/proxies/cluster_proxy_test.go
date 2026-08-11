@@ -1139,6 +1139,7 @@ func testPrepareClusterValidationInput(t *testing.T) {
 func testBuildClusterPatchValidationNew(t *testing.T) {
 	tests := []struct {
 		name    string
+		current *v1.Cluster
 		body    string
 		wantErr bool
 		assert  func(*testing.T, *v1.Cluster, *v1.Cluster)
@@ -1155,6 +1156,64 @@ func testBuildClusterPatchValidationNew(t *testing.T) {
 			},
 		},
 		{
+			name: "recursively merges sparse configuration and accelerator virtualization",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{
+				Type:          v1.KubernetesClusterType,
+				ImageRegistry: "current-registry",
+				Version:       "v1.0.0",
+				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: "current-kubeconfig",
+					Router:     v1.RouterSpec{AccessMode: v1.KubernetesAccessModeLoadBalancer, Replicas: 1},
+				}},
+				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+					Enabled:     true,
+					ConfigPatch: map[string]interface{}{"devicePlugin": map[string]interface{}{"enabled": true}},
+				},
+			}},
+			body: `{"spec":{"config":{"kubernetes_config":{"router":{"replicas":3}}},"accelerator_virtualization":{"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
+				assert.Equal(t, v1.KubernetesAccessModeLoadBalancer, next.Spec.Config.KubernetesConfig.Router.AccessMode)
+				assert.Equal(t, 3, next.Spec.Config.KubernetesConfig.Router.Replicas)
+				assert.True(t, next.Spec.AcceleratorVirtualization.Enabled)
+				assert.Equal(t, true, next.Spec.AcceleratorVirtualization.ConfigPatch["devicePlugin"].(map[string]interface{})["enabled"])
+				assert.Equal(t, "/run/nvidia/driver", next.Spec.AcceleratorVirtualization.ConfigPatch["devicePlugin"].(map[string]interface{})["nvidiaDriverRoot"])
+				assert.Equal(t, 1, current.Spec.Config.KubernetesConfig.Router.Replicas)
+			},
+		},
+		{
+			name: "backfills a null masked kubeconfig",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
+			}}},
+			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":null}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
+			},
+		},
+		{
+			name: "applies null to a non-masked configuration object",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
+			}}},
+			body: `{"spec":{"config":null}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Nil(t, next.Spec.Config)
+				assert.NotNil(t, current.Spec.Config)
+			},
+		},
+		{
+			name: "replaces model cache arrays atomically",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				ModelCaches: []v1.ModelCache{{Name: "current-cache"}},
+			}}},
+			body: `{"spec":{"config":{"model_caches":[{"name":"replacement-cache"}]}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, []v1.ModelCache{{Name: "replacement-cache"}}, next.Spec.Config.ModelCaches)
+				assert.Equal(t, []v1.ModelCache{{Name: "current-cache"}}, current.Spec.Config.ModelCaches)
+			},
+		},
+		{
 			name:    "rejects malformed PATCH payloads",
 			body:    `[`,
 			wantErr: true,
@@ -1163,11 +1222,14 @@ func testBuildClusterPatchValidationNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			current := &v1.Cluster{Spec: &v1.ClusterSpec{
-				Type:          v1.KubernetesClusterType,
-				ImageRegistry: "current-registry",
-				Version:       "v1.0.0",
-			}}
+			current := tt.current
+			if current == nil {
+				current = &v1.Cluster{Spec: &v1.ClusterSpec{
+					Type:          v1.KubernetesClusterType,
+					ImageRegistry: "current-registry",
+					Version:       "v1.0.0",
+				}}
+			}
 
 			next, err := buildClusterPatchValidationNew(current, []byte(tt.body))
 			if tt.wantErr {
