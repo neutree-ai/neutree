@@ -1,16 +1,19 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 func TestNewBuilder(t *testing.T) {
@@ -142,9 +145,7 @@ func TestBuilderBuildRequiresGinEngineWithConfiguredAcceleratorManager(t *testin
 	}
 }
 
-type internalTestPlugin struct {
-	plugin.AcceleratorPluginHandle
-}
+type internalTestPlugin struct{}
 
 func (internalTestPlugin) Resource() string {
 	return "injected-test"
@@ -156,6 +157,34 @@ func (internalTestPlugin) Type() string {
 
 func (internalTestPlugin) Handle() plugin.AcceleratorPluginHandle {
 	return internalTestPlugin{}
+}
+
+func (internalTestPlugin) GetNodeAccelerator(context.Context, *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) DetectStaticNodeAccelerator(context.Context, *v1.DetectStaticNodeAcceleratorRequest) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{}, nil
+}
+
+func (internalTestPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetResourceConverter() plugin.ResourceConverter {
+	return nil
+}
+
+func (internalTestPlugin) GetResourceParser() resourceparser.ResourceParser {
+	return nil
 }
 
 func TestBuilderWithController(t *testing.T) {
