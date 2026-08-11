@@ -417,12 +417,13 @@ func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) 
 
 func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 	tests := []struct {
-		name              string
-		path              string
-		clusterStorage    *fakeClusterStorage
-		expectedStatus    int
-		expectedHint      string
-		expectedListCalls int
+		name               string
+		path               string
+		clusterStorage     *fakeClusterStorage
+		expectedStatus     int
+		expectedHint       string
+		expectedHintSuffix string
+		expectedListCalls  int
 	}{
 		{
 			name:              "without endpoint filters",
@@ -446,9 +447,10 @@ func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 			clusterStorage: &fakeClusterStorage{
 				endpointListError: errors.New("database is down"),
 			},
-			expectedStatus:    http.StatusServiceUnavailable,
-			expectedHint:      "failed to look up endpoint",
-			expectedListCalls: 1,
+			expectedStatus:     http.StatusServiceUnavailable,
+			expectedHint:       "failed to look up endpoint",
+			expectedHintSuffix: "database is down",
+			expectedListCalls:  1,
 		},
 		{
 			name: "when multiple endpoints match",
@@ -477,6 +479,9 @@ func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 			assert.Equal(t, "10221", response.Code)
 			assert.Equal(t, "invalid endpoint patch target", response.Message)
 			assert.Contains(t, response.Hint, tt.expectedHint)
+			if tt.expectedHintSuffix != "" {
+				assert.Contains(t, response.Hint, tt.expectedHintSuffix)
+			}
 			assert.NotContains(t, response.Hint, "vGPU")
 			assert.False(t, handlerCalled)
 			assert.Equal(t, tt.expectedListCalls, tt.clusterStorage.endpointListCalls)
