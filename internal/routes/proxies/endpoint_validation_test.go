@@ -3,8 +3,10 @@ package proxies
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -152,39 +154,6 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("skips patch that does not touch resources", func(t *testing.T) {
-		endpoint, err := parseEndpointBody([]byte(`{
-			"spec": {
-				"variables": {"foo": "bar"}
-			}
-		}`))
-
-		assert.Nil(t, err)
-		assert.NotNil(t, endpoint)
-		assert.Nil(t, validateEndpointVGPUPreflight(nil, http.MethodPatch, nil, endpoint))
-	})
-}
-
-func TestMergeEndpointResourceSpec(t *testing.T) {
-	t.Run("clears virtualization keys and preserves custom keys when switching to whole GPU", func(t *testing.T) {
-		existing := vgpuResources("1", "Tesla-T4", map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
-			v1.AcceleratorVirtualizationCorePercentKey: "50",
-			"nvidia.com/gpucores":                      "50",
-		})
-		patch := &v1.ResourceSpec{
-			Accelerator: map[string]string{
-				v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
-				v1.AcceleratorProductKey: "Tesla-T4",
-			},
-		}
-
-		merged := mergeEndpointResourceSpec(existing, patch)
-
-		assert.Equal(t, "50", merged.Accelerator["nvidia.com/gpucores"])
-		assert.Empty(t, merged.Accelerator[v1.AcceleratorVirtualizationMemoryMiBKey])
-		assert.Empty(t, merged.Accelerator[v1.AcceleratorVirtualizationCorePercentKey])
-	})
 }
 
 func TestEndpointVGPUValidationAllowsPostWithoutCapacityPrecheck(t *testing.T) {
@@ -440,8 +409,79 @@ func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "10221", response.Code)
+	assert.Equal(t, "invalid endpoint patch target", response.Message)
 	assert.Contains(t, response.Hint, "endpoint lookup filters")
+	assert.NotContains(t, response.Hint, "vGPU")
 	assert.False(t, handlerCalled)
+}
+
+func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
+	tests := []struct {
+		name              string
+		path              string
+		clusterStorage    *fakeClusterStorage
+		expectedStatus    int
+		expectedHint      string
+		expectedListCalls int
+	}{
+		{
+			name:              "without endpoint filters",
+			path:              "/endpoints",
+			clusterStorage:    &fakeClusterStorage{},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "endpoint lookup filters",
+			expectedListCalls: 0,
+		},
+		{
+			name:              "when endpoint is not found",
+			path:              "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage:    &fakeClusterStorage{},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "endpoint not found",
+			expectedListCalls: 1,
+		},
+		{
+			name: "when endpoint lookup fails",
+			path: "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage: &fakeClusterStorage{
+				endpointListError: errors.New("database is down"),
+			},
+			expectedStatus:    http.StatusServiceUnavailable,
+			expectedHint:      "failed to look up endpoint",
+			expectedListCalls: 1,
+		},
+		{
+			name: "when multiple endpoints match",
+			path: "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage: &fakeClusterStorage{
+				endpoints: []v1.Endpoint{{}, {}},
+			},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "multiple endpoints matched",
+			expectedListCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				http.MethodPatch,
+				tt.path,
+				`{}`,
+				tt.clusterStorage,
+			)
+
+			var response validationError
+			assert.Equal(t, tt.expectedStatus, recorder.Code)
+			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, "10221", response.Code)
+			assert.Equal(t, "invalid endpoint patch target", response.Message)
+			assert.Contains(t, response.Hint, tt.expectedHint)
+			assert.NotContains(t, response.Hint, "vGPU")
+			assert.False(t, handlerCalled)
+			assert.Equal(t, tt.expectedListCalls, tt.clusterStorage.endpointListCalls)
+		})
+	}
 }
 
 func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrecheck(t *testing.T) {
@@ -457,6 +497,7 @@ func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrec
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -494,6 +535,7 @@ func TestEndpointVGPUValidationAllowsMergedPatchWhenOnlyGPUChanges(t *testing.T)
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
 				"gpu": "2"
 			}
@@ -525,6 +567,7 @@ func TestEndpointVGPUValidationAllowsMergedPatchWhenOnlyReplicasChange(t *testin
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"replicas": {"num": 3}
 		}
 	}`
@@ -553,6 +596,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWhenVirtualizationNotReady(t *tes
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"replicas": {"num": 0}
 		}
 	}`
@@ -568,7 +612,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWhenVirtualizationNotReady(t *tes
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsPausePatchWithMissingCluster(t *testing.T) {
+func TestEndpointVGPUValidationRejectsPausePatchThatChangesCluster(t *testing.T) {
 	clusterStorage := &fakeClusterStorage{
 		endpoints: []v1.Endpoint{
 			*endpointWithVGPU("cluster-a", "team-a"),
@@ -588,8 +632,11 @@ func TestEndpointVGPUValidationAllowsPausePatchWithMissingCluster(t *testing.T) 
 		clusterStorage,
 	)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, handlerCalled)
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10225", response.Code)
+	assert.False(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationAllowsPausePatchWithInvalidVGPUResourceShape(t *testing.T) {
@@ -600,6 +647,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWithInvalidVGPUResourceShape(t *t
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"replicas": {"num": 0},
 			"resources": {
 				"accelerator": {
@@ -629,6 +677,7 @@ func TestEndpointVGPUValidationRejectsNegativeReplicaPatch(t *testing.T) {
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"replicas": {"num": -1}
 		}
 	}`
@@ -663,6 +712,7 @@ func TestEndpointVGPUValidationAllowsNonVGPUPatchWhenReplicasChange(t *testing.T
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"replicas": {"num": 3}
 		}
 	}`
@@ -686,6 +736,7 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -722,9 +773,14 @@ func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChangesToMissing
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
+				"gpu": "1",
 				"accelerator": {
-					"product": "L4"
+					"type": "nvidia_gpu",
+					"product": "L4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
 				}
 			}
 		}
@@ -776,6 +832,7 @@ func TestEndpointVGPUValidationAllowsPatchWhenCurrentAvailableCapacityIsZero(t *
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -837,6 +894,7 @@ func TestEndpointVGPUValidationAllowsWholeGPUToVGPUPatchWhenCurrentAvailableCapa
 	}
 	body := `{
 		"spec": {
+			"cluster": "cluster-a",
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -910,6 +968,268 @@ func TestEndpointVGPUValidationAllowsPatchWhenTargetDeviceCannotPhysicallyFitVGP
 		clusterStorage,
 	)
 
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10225", response.Code)
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointValidationRejectsPatchThatChangesCluster(t *testing.T) {
+	existing := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "different cluster",
+			body: `{"spec":{"cluster":"cluster-b"}}`,
+		},
+		{
+			name: "empty cluster",
+			body: `{"spec":{"cluster":""}}`,
+		},
+		{
+			name: "null cluster",
+			body: `{"spec":{"cluster":null}}`,
+		},
+		{
+			name: "null spec",
+			body: `{"spec":null}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{*existing}}
+
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				http.MethodPatch,
+				"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+				tt.body,
+				clusterStorage,
+			)
+
+			var response validationError
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, "10225", response.Code)
+			assert.False(t, handlerCalled)
+			assert.Equal(t, 1, clusterStorage.endpointListCalls)
+		})
+	}
+}
+
+func TestBuildPostgrestEndpointPatchValidationNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+		assert  func(*testing.T, *v1.Endpoint, *v1.Endpoint)
+	}{
+		{
+			name: "replaces a supplied spec composite without mutating Current",
+			body: `{"spec":{"replicas":{"num":0}}}`,
+			assert: func(t *testing.T, current, next *v1.Endpoint) {
+				assert.NotSame(t, current, next)
+				assert.Equal(t, "cluster-a", current.Spec.Cluster)
+				assert.Equal(t, "1", *current.Spec.Resources.GPU)
+				assert.Empty(t, next.Spec.Cluster)
+				assert.Empty(t, next.Spec.Resources)
+				assert.Equal(t, 0, *next.Spec.Replicas.Num)
+			},
+		},
+		{
+			name:    "rejects malformed patch payloads",
+			body:    `[`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gpu := "1"
+			current := &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Cluster:   "cluster-a",
+				Resources: &v1.ResourceSpec{GPU: &gpu},
+			}}
+
+			next, err := buildPostgrestEndpointPatchValidationNew(current, []byte(tt.body))
+			if tt.wantErr {
+				assert.Error(t, err)
+
+				return
+			}
+
+			assert.NoError(t, err)
+			tt.assert(t, current, next)
+		})
+	}
+}
+
+func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
+	existing := v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+	}
+
+	tests := []struct {
+		name              string
+		method            string
+		body              string
+		expectedStatus    int
+		expectedCode      string
+		expectedHandler   bool
+		expectedListCalls int
+	}{
+		{
+			name:              "same cluster patch",
+			method:            http.MethodPatch,
+			body:              `{"spec":{"cluster":"cluster-a"}}`,
+			expectedStatus:    http.StatusNoContent,
+			expectedHandler:   true,
+			expectedListCalls: 1,
+		},
+		{
+			name:              "patch without spec resolves current endpoint",
+			method:            http.MethodPatch,
+			body:              `{}`,
+			expectedStatus:    http.StatusNoContent,
+			expectedHandler:   true,
+			expectedListCalls: 1,
+		},
+		{
+			name:              "patch spec without cluster clears persisted cluster",
+			method:            http.MethodPatch,
+			body:              `{"spec":{"variables":{"foo":"bar"}}}`,
+			expectedStatus:    http.StatusBadRequest,
+			expectedCode:      "10225",
+			expectedListCalls: 1,
+		},
+		{
+			name:              "post remains allowed",
+			method:            http.MethodPost,
+			body:              `{"metadata":{"name":"new","workspace":"team-a"},"spec":{"cluster":"cluster-b"}}`,
+			expectedStatus:    http.StatusNoContent,
+			expectedHandler:   true,
+			expectedListCalls: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				tt.method,
+				"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+				tt.body,
+				clusterStorage,
+			)
+
+			assert.Equal(t, tt.expectedStatus, recorder.Code)
+			assert.Equal(t, tt.expectedHandler, handlerCalled)
+			assert.Equal(t, tt.expectedListCalls, clusterStorage.endpointListCalls)
+			if tt.expectedCode != "" {
+				var response validationError
+				assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, tt.expectedCode, response.Code)
+			}
+		})
+	}
+}
+
+func TestValidateEndpointSoftDelete(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "skips ordinary patch validators",
+			body: `{
+				"metadata": {"deletion_timestamp": "2026-08-10T08:30:00Z"},
+				"spec": {"cluster": "cluster-b"}
+			}`,
+		},
+		{
+			name: "bypasses malformed patch payload",
+			body: `{
+				"metadata": {"deletion_timestamp": "2026-08-10T08:30:00Z"},
+				"spec": {"resources": []}
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+				Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+			}
+			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+			originalBody := &trackingReadCloser{Reader: strings.NewReader(tt.body)}
+			handlerCalled := false
+			router := gin.New()
+			router.PATCH(
+				"/endpoints",
+				validateEndpoint(clusterStorage),
+				func(c *gin.Context) {
+					handlerCalled = true
+
+					forwardedBody, err := io.ReadAll(c.Request.Body)
+					assert.NoError(t, err)
+					assert.Equal(t, tt.body, string(forwardedBody))
+					assert.Equal(t, int64(len(tt.body)), c.Request.ContentLength)
+					assert.Equal(t, strconv.Itoa(len(tt.body)), c.Request.Header.Get("Content-Length"))
+					c.Status(http.StatusNoContent)
+				},
+			)
+
+			req := httptest.NewRequest(
+				http.MethodPatch,
+				"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+				nil,
+			)
+			req.Body = originalBody
+			req.ContentLength = 0
+			req.Header.Set("Content-Length", "0")
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, req)
+
+			assert.True(t, handlerCalled)
+			assert.True(t, originalBody.closed)
+			assert.Equal(t, http.StatusNoContent, recorder.Code)
+			assert.Zero(t, clusterStorage.endpointListCalls)
+		})
+	}
+}
+
+func TestEndpointValidationSkipsVGPUValidationForDeletedPost(t *testing.T) {
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a", "deletion_timestamp": "2026-08-10T08:30:00Z"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, nil)
+
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.True(t, handlerCalled)
 }
@@ -957,10 +1277,15 @@ func runEndpointVGPUValidationWithHandlerAndPath(
 
 	router := gin.New()
 	handlerCalled := false
-	router.Handle(method, "/endpoints", validateEndpointVGPU(clusterStorage), func(c *gin.Context) {
-		handlerCalled = true
-		c.Status(http.StatusNoContent)
-	})
+	router.Handle(
+		method,
+		"/endpoints",
+		validateEndpoint(clusterStorage),
+		func(c *gin.Context) {
+			handlerCalled = true
+			c.Status(http.StatusNoContent)
+		},
+	)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
