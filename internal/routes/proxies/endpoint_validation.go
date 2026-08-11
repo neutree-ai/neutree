@@ -37,11 +37,9 @@ type endpointValidationInput struct {
 }
 
 type endpointValidator func(storage.Storage, *endpointValidationInput) *validationError
-type endpointPreparationRequirement func(*endpointValidationInput) (bool, *validationError)
 
 type endpointValidationConfig struct {
-	RequiresCurrent endpointPreparationRequirement
-	Validators      []endpointValidator
+	Validators []endpointValidator
 }
 
 var endpointValidationConfigs = map[endpointValidationOperation]endpointValidationConfig{
@@ -51,7 +49,6 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 		},
 	},
 	endpointValidationPatch: {
-		RequiresCurrent: endpointPatchRequiresCurrent,
 		Validators: []endpointValidator{
 			validateEndpointPatchClusterImmutable,
 			validateEndpointPatchVGPU,
@@ -76,7 +73,8 @@ func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 		}
 
 		config := endpointValidationConfigs[input.Operation]
-		if validationErr := prepareEndpointValidationInput(store, input, config); validationErr != nil {
+
+		if validationErr := prepareEndpointValidationInput(store, input); validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
@@ -163,23 +161,13 @@ func readEndpointValidationInput(c *gin.Context) (*endpointValidationInput, *val
 func prepareEndpointValidationInput(
 	store storage.Storage,
 	input *endpointValidationInput,
-	config endpointValidationConfig,
 ) *validationError {
 	if input.Operation == endpointValidationSoftDelete {
 		return nil
 	}
 
 	input.New = &input.Patch
-	if input.Operation != endpointValidationPatch || config.RequiresCurrent == nil {
-		return nil
-	}
-
-	requiresCurrent, validationErr := config.RequiresCurrent(input)
-	if validationErr != nil {
-		return validationErr
-	}
-
-	if !requiresCurrent {
+	if input.Operation != endpointValidationPatch {
 		return nil
 	}
 
@@ -197,10 +185,6 @@ func prepareEndpointValidationInput(
 	input.New = newEndpoint
 
 	return nil
-}
-
-func endpointPatchRequiresCurrent(input *endpointValidationInput) (bool, *validationError) {
-	return endpointPatchIncludesSpec(input.RawPayload), nil
 }
 
 func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error) {
@@ -376,25 +360,25 @@ func resolveEndpointPatch(
 	queryParams url.Values,
 ) (*v1.Endpoint, *validationError) {
 	if store == nil {
-		return nil, endpointVGPULookupError("storage is required to validate endpoint accelerator virtualization")
+		return nil, endpointPatchLookupError("storage is required to resolve endpoint PATCH target")
 	}
 
 	filters := queryParamsToFilters(queryParams)
 	if len(filters) == 0 {
-		return nil, endpointVGPUTargetError("endpoint lookup filters are required for vGPU resource PATCH")
+		return nil, endpointPatchTargetError("endpoint lookup filters are required for endpoint PATCH")
 	}
 
 	endpoints, err := store.ListEndpoint(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, endpointVGPULookupError("failed to look up endpoint for vGPU resource PATCH")
+		return nil, endpointPatchLookupError("failed to look up endpoint for endpoint PATCH")
 	}
 
 	if len(endpoints) == 0 {
-		return nil, endpointVGPUTargetError("endpoint not found for vGPU resource PATCH")
+		return nil, endpointPatchTargetError("endpoint not found for endpoint PATCH")
 	}
 
 	if len(endpoints) > 1 {
-		return nil, endpointVGPUTargetError("multiple endpoints matched vGPU resource PATCH filters")
+		return nil, endpointPatchTargetError("multiple endpoints matched endpoint PATCH filters")
 	}
 
 	return &endpoints[0], nil
@@ -689,8 +673,23 @@ func endpointVGPUTargetError(hint string) *validationError {
 	}
 }
 
+func endpointPatchTargetError(hint string) *validationError {
+	return &validationError{
+		Code:    "10221",
+		Message: "invalid endpoint patch target",
+		Hint:    hint,
+	}
+}
+
 func endpointVGPULookupError(hint string) *validationError {
 	err := endpointVGPUTargetError(hint)
+	err.HTTPStatus = http.StatusServiceUnavailable
+
+	return err
+}
+
+func endpointPatchLookupError(hint string) *validationError {
+	err := endpointPatchTargetError(hint)
 	err.HTTPStatus = http.StatusServiceUnavailable
 
 	return err

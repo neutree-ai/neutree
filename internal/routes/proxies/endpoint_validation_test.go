@@ -409,8 +409,79 @@ func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "10221", response.Code)
+	assert.Equal(t, "invalid endpoint patch target", response.Message)
 	assert.Contains(t, response.Hint, "endpoint lookup filters")
+	assert.NotContains(t, response.Hint, "vGPU")
 	assert.False(t, handlerCalled)
+}
+
+func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
+	tests := []struct {
+		name              string
+		path              string
+		clusterStorage    *fakeClusterStorage
+		expectedStatus    int
+		expectedHint      string
+		expectedListCalls int
+	}{
+		{
+			name:              "without endpoint filters",
+			path:              "/endpoints",
+			clusterStorage:    &fakeClusterStorage{},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "endpoint lookup filters",
+			expectedListCalls: 0,
+		},
+		{
+			name:              "when endpoint is not found",
+			path:              "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage:    &fakeClusterStorage{},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "endpoint not found",
+			expectedListCalls: 1,
+		},
+		{
+			name: "when endpoint lookup fails",
+			path: "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage: &fakeClusterStorage{
+				endpointListError: errors.New("database is down"),
+			},
+			expectedStatus:    http.StatusServiceUnavailable,
+			expectedHint:      "failed to look up endpoint",
+			expectedListCalls: 1,
+		},
+		{
+			name: "when multiple endpoints match",
+			path: "/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+			clusterStorage: &fakeClusterStorage{
+				endpoints: []v1.Endpoint{{}, {}},
+			},
+			expectedStatus:    http.StatusBadRequest,
+			expectedHint:      "multiple endpoints matched",
+			expectedListCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+				http.MethodPatch,
+				tt.path,
+				`{}`,
+				tt.clusterStorage,
+			)
+
+			var response validationError
+			assert.Equal(t, tt.expectedStatus, recorder.Code)
+			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, "10221", response.Code)
+			assert.Equal(t, "invalid endpoint patch target", response.Message)
+			assert.Contains(t, response.Hint, tt.expectedHint)
+			assert.NotContains(t, response.Hint, "vGPU")
+			assert.False(t, handlerCalled)
+			assert.Equal(t, tt.expectedListCalls, tt.clusterStorage.endpointListCalls)
+		})
+	}
 }
 
 func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrecheck(t *testing.T) {
@@ -1019,6 +1090,14 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 			name:              "same cluster patch",
 			method:            http.MethodPatch,
 			body:              `{"spec":{"cluster":"cluster-a"}}`,
+			expectedStatus:    http.StatusNoContent,
+			expectedHandler:   true,
+			expectedListCalls: 1,
+		},
+		{
+			name:              "patch without spec resolves current endpoint",
+			method:            http.MethodPatch,
+			body:              `{}`,
 			expectedStatus:    http.StatusNoContent,
 			expectedHandler:   true,
 			expectedListCalls: 1,
