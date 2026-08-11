@@ -568,6 +568,42 @@ func TestCreateStructProxyHandlerFiltersUnknownTopLevelFieldsAndInfersColumns(t 
 	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
 }
 
+func TestCreateStructProxyHandlerMasksClusterCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/clusters", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{
+				"metadata": {"name": "cluster", "workspace": "default"},
+				"spec": {
+					"config": {
+						"kubernetes_config": {"kubeconfig": "synthetic-kubeconfig"},
+						"ssh_config": {"auth": {"ssh_private_key": "synthetic-private-key"}}
+					}
+				}
+			}
+		]`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	router.GET("/api/v1/clusters", CreateStructProxyHandler[v1.Cluster](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.CLUSTERS_TABLE))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters?select=*", nil)
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
+	assert.NotContains(t, recorder.Body.String(), "synthetic-kubeconfig")
+	assert.NotContains(t, recorder.Body.String(), "synthetic-private-key")
+}
+
 func TestCreateStructProxyHandlerFiltersSoftDeletePayloadAndInfersColumns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -788,24 +824,34 @@ func Test_mergeExcludedFields(t *testing.T) {
 		assert.Equal(t, "updated", target["spec"].(map[string]interface{})["type"])
 	})
 
-	t.Run("handle empty string as missing", func(t *testing.T) {
-		target := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "",
-			},
-		}
-		source := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "should_be_merged",
-			},
-		}
-		excludeFields := map[string]struct{}{
-			"spec.credentials": {},
-		}
+	t.Run("handle empty values as missing", func(t *testing.T) {
+		for _, tt := range []struct {
+			name       string
+			credential interface{}
+		}{
+			{name: "empty string", credential: ""},
+			{name: "nil", credential: nil},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				target := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": tt.credential,
+					},
+				}
+				source := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": "should_be_merged",
+					},
+				}
+				excludeFields := map[string]struct{}{
+					"spec.credentials": {},
+				}
 
-		mergeExcludedFields(target, source, excludeFields, nil)
+				mergeExcludedFields(target, source, excludeFields, nil)
 
-		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+				assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+			})
+		}
 	})
 
 	t.Run("merge excluded field inside array elements", func(t *testing.T) {
