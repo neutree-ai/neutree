@@ -58,22 +58,26 @@ func resolveExternalAccessUrl(client kubernetes.Interface, namespace, externalHo
 		if port == "" {
 			return "", fmt.Errorf("nodeport service %s requires an explicit port in the URL", s.Name)
 		}
+
 		if externalHost == "" {
 			return "", errors.New("nodeport external host not set, configure nodePort.externalHost in the chart")
 		}
 
 		var nodePort int32
+
 		for _, p := range s.Spec.Ports {
 			if strconv.Itoa(int(p.Port)) == port {
 				nodePort = p.NodePort
 				break
 			}
 		}
+
 		if nodePort == 0 {
 			return "", fmt.Errorf("no nodePort assigned for service %s port %s", s.Name, port)
 		}
 
 		parse.Host = net.JoinHostPort(externalHost, strconv.Itoa(int(nodePort)))
+
 		return parse.String(), nil
 	}
 
