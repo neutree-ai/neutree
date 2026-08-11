@@ -104,9 +104,6 @@ func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
 	}
 }
 
-	}
-}
-
 func TestBuilderBuildRequiresGinEngine(t *testing.T) {
 	builder := NewBuilder().WithConfig(&config.CoreConfig{})
 	builder.controllerInits = map[string]ControllerFactory{}

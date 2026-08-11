@@ -11,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	mockstorage "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -283,9 +282,7 @@ func TestAppRunWithInjectedPluginShutsDownOnCancel(t *testing.T) {
 	port := freePort(t)
 	addr := net.JoinHostPort(testHost, strconv.Itoa(port))
 	cfg := newTestCoreConfig(t, port)
-	injected := internalTestPlugin{
-		AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example"),
-	}
+	injected := internalTestPlugin{}
 	builder := NewBuilder().WithConfig(cfg).WithAcceleratorPlugins(injected)
 	builder.controllerInits = map[string]ControllerFactory{}
 
