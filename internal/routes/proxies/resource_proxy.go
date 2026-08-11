@@ -341,11 +341,14 @@ func mergeExcludedFieldsRecursive(
 		if sourceMap, ok := sourceValue.(map[string]interface{}); ok {
 			if targetMap, ok := target[key].(map[string]interface{}); ok {
 				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
-			} else if !ok && target[key] == nil && subtreeHasExcludedField(excludeFields, fieldPath) {
-				// Target is missing this key: create the intermediate map only
-				// when the subtree can contain an excluded field. Otherwise a
-				// PATCH omitting a config object would resurrect it as an
-				// empty map (e.g. spec.config.metrics) in storage.
+			} else if !ok && target[key] == nil && currentPath != "" && subtreeHasExcludedField(excludeFields, fieldPath) {
+				// The PATCH omits (or nulls) this key under a subtree it does
+				// replace. Create the intermediate map only when it leads to
+				// an excluded field; otherwise an omitted config object would
+				// be resurrected as an empty map (e.g. spec.config.metrics)
+				// in storage. Top-level keys are never fabricated: columns the
+				// PATCH does not provide are left untouched by the storage
+				// layer, so masked fields under them survive without backfill.
 				target[key] = make(map[string]interface{})
 				if targetMap, ok := target[key].(map[string]interface{}); ok {
 					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
