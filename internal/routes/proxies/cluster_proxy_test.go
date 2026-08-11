@@ -294,7 +294,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
-	t.Run("allows an empty create body", func(t *testing.T) {
+	t.Run("rejects an empty create body without a version", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -306,8 +306,10 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/clusters", nil))
 
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "spec.version is required")
 		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
@@ -336,6 +338,31 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
+	t.Run("requires version for POST before accelerator virtualization validation", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		proxyCalled := false
+		router := gin.New()
+		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(`{
+			"spec": {"type": "ssh", "accelerator_virtualization": {"enabled": true}}
+		}`))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "spec.version is required")
+		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
+		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+	})
+
 	t.Run("does not apply Kubernetes vGPU validation to an SSH POST", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
@@ -348,6 +375,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(`{
 			"spec": {
 				"type": "ssh",
+				"version": "v1.1.0",
 				"accelerator_virtualization": {"enabled": true}
 			}
 		}`))
@@ -428,7 +456,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "spec.version is required for cluster PATCH")
+		assert.Contains(t, recorder.Body.String(), "spec.version is required")
 		mockStorage.AssertExpectations(t)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
@@ -458,7 +486,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "spec.version is required for cluster PATCH")
+		assert.Contains(t, recorder.Body.String(), "spec.version is required")
 		mockStorage.AssertExpectations(t)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})

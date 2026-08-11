@@ -98,6 +98,13 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 			return
 		}
 
+		if validationErr := validateClusterVersionInput(input); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
 		if input.Operation == clusterValidationPatch {
 			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
 				c.JSON(http.StatusBadRequest, validationErr)
@@ -729,7 +736,11 @@ func clusterConfigurationUpdateError(err error) *validationError {
 	}
 }
 
-func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
+func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validationError {
+	if input.Operation == clusterValidationSoftDelete {
+		return nil
+	}
+
 	if input.New == nil {
 		return clusterPatchValidationResolutionError(errors.New("updated cluster is required"))
 	}
@@ -737,11 +748,15 @@ func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *vali
 	if strings.TrimSpace(input.New.GetVersion()) == "" {
 		return &validationError{
 			Code:    "10209",
-			Message: "spec.version is required for cluster PATCH",
-			Hint:    "Provide a non-empty spec.version when patching a cluster",
+			Message: "spec.version is required",
+			Hint:    "Provide a non-empty spec.version",
 		}
 	}
 
+	return nil
+}
+
+func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
 	hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
 	if err != nil {
 		return invalidClusterPayloadError(err)
