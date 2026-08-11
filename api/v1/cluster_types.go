@@ -67,9 +67,9 @@ const (
 )
 
 type AcceleratorVirtualizationSpec struct {
-	Enabled     bool                         `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Enabled     bool                          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Mode        AcceleratorVirtualizationMode `json:"mode,omitempty" yaml:"mode,omitempty"`
-	ConfigPatch map[string]interface{}       `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
+	ConfigPatch map[string]interface{}        `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
 }
 
 // AcceleratorVirtualizationStatus reports the effective virtualization mode and
