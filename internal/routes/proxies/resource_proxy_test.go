@@ -1114,6 +1114,110 @@ func Test_mergeExcludedFields(t *testing.T) {
 		// credentials should be merged
 		assert.Equal(t, "token", target["spec"].(map[string]interface{})["credentials"])
 	})
+
+	t.Run("do not backfill non-excluded nested empty map", func(t *testing.T) {
+		// The stored resource carries spec.config.metrics: {}; a PATCH omitting
+		// metrics must not resurrect it as an empty map.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "old-type",
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		spec := target["spec"].(map[string]interface{})
+		assert.NotContains(t, spec, "config")
+	})
+
+	t.Run("do not backfill non-excluded non-empty config subtree", func(t *testing.T) {
+		// Even a non-empty config subtree with no excluded fields must not be
+		// re-created when the PATCH omits it.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "old-type",
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		spec := target["spec"].(map[string]interface{})
+		assert.NotContains(t, spec, "config")
+	})
+
+	t.Run("backfill excluded field through omitted intermediate maps", func(t *testing.T) {
+		// spec.credentials.kubeconfig is excluded; even when the PATCH omits
+		// the whole spec subtree, the intermediate maps must be created to
+		// reach it, while non-excluded siblings stay absent.
+		target := map[string]interface{}{}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{},
+				},
+				"credentials": map[string]interface{}{
+					"kubeconfig": "kubeconfig-content",
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials.kubeconfig": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		assert.Equal(t, map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": map[string]interface{}{
+					"kubeconfig": "kubeconfig-content",
+				},
+			},
+		}, target)
+	})
+
+	t.Run("backfill top-level omitted sensitive field", func(t *testing.T) {
+		target := map[string]interface{}{}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": "hf_secret_token",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		assert.Equal(t, map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": "hf_secret_token",
+			},
+		}, target)
+	})
 }
 
 func Test_extractStructTagConfig_arrayMergeKeys(t *testing.T) {
