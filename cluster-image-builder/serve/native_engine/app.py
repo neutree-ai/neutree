@@ -16,7 +16,7 @@ from starlette.responses import Response, StreamingResponse
 from downloader import build_request_from_model_args, download_with_markers, get_downloader
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.vllm_task_translate import task_kwargs
-from serve.native_engine.config import build_engine_args
+from serve.native_engine.config import build_engine_args, startup_timeout_s
 from serve.native_engine.port_allocator import LocalPortAllocator, is_port_available_on_loopback
 from serve.native_engine.process_runner import DirectEngineRunner, EngineExitedBeforeReady
 from serve.native_engine.prometheus_ray_bridge import HttpPrometheusToRayBridge
@@ -107,6 +107,7 @@ class NativeEngineRunner:
                     port=lease.port,
                 ),
                 health_url=base_url + str(self._runtime.get("health_path", "/health")),
+                startup_timeout_s=startup_timeout_s(self._runtime),
             )
             try:
                 runner.start()

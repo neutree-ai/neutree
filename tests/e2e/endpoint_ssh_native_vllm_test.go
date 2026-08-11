@@ -54,7 +54,7 @@ var _ = Describe("SSH Native vLLM Endpoint", Ordered, Label("endpoint", "ssh", "
 		appConfig, err := rayHelper.GetApplicationConfig(applicationName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(appConfig).NotTo(BeNil())
-		Expect(appConfig.ImportPath).To(Equal("serve.native_engine.app:app_builder"))
+		Expect(appConfig.ImportPath).To(Equal("serve.vllm.v0_24_0.app:app_builder"))
 		Expect(appConfig.RuntimeEnv).To(HaveKey("container"))
 		Expect(appConfig.Args).To(HaveKey("backend_container"))
 

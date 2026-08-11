@@ -7,6 +7,19 @@ from collections.abc import Mapping
 from typing import Any
 
 _RUNNER_OWNED_ARGS = {"model", "host", "port"}
+_DEFAULT_STARTUP_TIMEOUT_S = 1200.0
+
+
+def startup_timeout_s(runtime: Mapping[str, Any]) -> float:
+    """Use the Kubernetes-equivalent startup window unless CP overrides it."""
+    value = runtime.get("startup_timeout_seconds", _DEFAULT_STARTUP_TIMEOUT_S)
+    try:
+        timeout_s = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("native engine startup_timeout_seconds must be a number") from exc
+    if timeout_s <= 0:
+        raise ValueError("native engine startup_timeout_seconds must be positive")
+    return timeout_s
 
 
 def build_engine_args(

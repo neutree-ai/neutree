@@ -47,9 +47,6 @@ var clusterLocks sync.Map
 const (
 	modelDownloadLogTailLines = 200
 
-	nativeEnginePortHostPath  = "/tmp/neutree/ports"
-	nativeEnginePortMountPath = "/var/run/neutree/ports"
-
 	modelDownloadStartMarker  = "NEUTREE_MODEL_DOWNLOAD_START"
 	modelDownloadDoneMarker   = "NEUTREE_MODEL_DOWNLOAD_DONE"
 	modelDownloadFailedMarker = "NEUTREE_MODEL_DOWNLOAD_FAILED"
@@ -1006,35 +1003,6 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv["ENGINE_VERSION"] = endpoint.Spec.Engine.Version
 		}
 
-		targetEngineVersion, err := findEngineVersion(endpoint, engine)
-		if err != nil {
-			return dashboard.RayServeApplication{}, err
-		}
-
-		if targetEngineVersion.NativeRuntime != nil {
-			if len(targetEngineVersion.NativeRuntime.Command) == 0 {
-				return dashboard.RayServeApplication{}, errors.Errorf(
-					"native engine runtime command is required for endpoint %s",
-					endpoint.Metadata.WorkspaceName())
-			}
-			baseConfig, backendConfig, err := buildNativeEngineContainerConfigs(
-				endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry, targetEngineVersion.NativeRuntime)
-			if err != nil {
-				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build native engine container configs for endpoint %s", endpoint.Metadata.WorkspaceName())
-			}
-
-			app.ImportPath = "serve.native_engine.app:app_builder"
-			app.RuntimeEnv["container"] = baseConfig
-			app.Args["native_runtime"] = nativeRuntimeConfig(targetEngineVersion.NativeRuntime)
-			app.Args["backend_container"] = backendConfig
-			app.Args["engine_identity"] = map[string]string{
-				"name":    endpoint.Spec.Engine.Engine,
-				"version": endpoint.Spec.Engine.Version,
-			}
-
-			return app, nil
-		}
-
 		baseConfig, backendConfig, err := buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to build engine container config for endpoint %s", endpoint.Metadata.WorkspaceName())
@@ -1120,32 +1088,6 @@ func buildEngineContainerConfigs(endpoint *v1.Endpoint,
 		func(version *v1.EngineVersion, acceleratorType string) *v1.EngineImage {
 			return version.GetImageForSSHAccelerator(acceleratorType)
 		})
-}
-
-// buildNativeEngineContainerConfigs builds runtime-env containers for a direct
-// engine child process. The backend shares the node-local port allocator state
-// with all engine containers on the same host.
-func buildNativeEngineContainerConfigs(endpoint *v1.Endpoint,
-	engine *v1.Engine, imageRegistry *v1.ImageRegistry,
-	acceleratorMgr accelerator.Manager,
-	modelCaches []v1.ModelCache, modelRegistry *v1.ModelRegistry,
-	runtime *v1.NativeEngineRuntime) (baseConfig, backendConfig map[string]interface{}, err error) {
-	baseConfig, backendConfig, err = buildEngineContainerConfigs(endpoint, engine, imageRegistry, acceleratorMgr, modelCaches, modelRegistry)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	runOptions, ok := backendConfig["run_options"].([]string)
-	if !ok {
-		return nil, nil, errors.New("native engine backend container has invalid run_options")
-	}
-	runOptions = append(runOptions, runtime.RunOptions...)
-	// Static Ray workers use host networking. Every engine runtime-env container
-	// on one node must therefore see this same host directory so the per-port
-	// flock allocation protects the shared TCP namespace.
-	runOptions = append(runOptions, fmt.Sprintf("-v %s:%s", nativeEnginePortHostPath, nativeEnginePortMountPath))
-	backendConfig["run_options"] = runOptions
-	return baseConfig, backendConfig, nil
 }
 
 func buildEngineContainerConfigsForImage(endpoint *v1.Endpoint,
@@ -1288,15 +1230,6 @@ func findEngineVersion(endpoint *v1.Endpoint, engine *v1.Engine) (*v1.EngineVers
 	}
 
 	return nil, errors.Errorf("engine version %s not found in engine %s", endpoint.Spec.Engine.Version, engine.Metadata.Name)
-}
-
-func nativeRuntimeConfig(runtime *v1.NativeEngineRuntime) map[string]interface{} {
-	return map[string]interface{}{
-		"command":      runtime.Command,
-		"run_options":  runtime.RunOptions,
-		"health_path":  runtime.HealthPath,
-		"metrics_path": runtime.MetricsPath,
-	}
 }
 
 func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, applicationEnv map[string]string) {

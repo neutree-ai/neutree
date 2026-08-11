@@ -15,13 +15,14 @@ on:
         required: true
         type: string
       engine_flavor:
-        description: "legacy keeps the request-compatible app; native runs vLLM directly in the Ray Actor"
+        description: "auto uses Makefile defaults; legacy keeps the request-compatible app; native runs vLLM directly in the Ray Actor"
         required: true
         type: choice
         options:
+          - auto
           - legacy
           - native
-        default: legacy
+        default: auto
       base_image_tag_override:
         description: "optional override for the upstream vLLM base image tag (default: <engine_version>); must be a tag of the same upstream version as engine_version because the Neutree serve-layer code is still selected by engine_version via ENGINE_VLLM_DIR_VERSION (e.g. dev/preview tags of v0.11.2 are fine, a v0.12.0 tag is not)"
         required: false
@@ -48,7 +49,7 @@ jobs:
     runs-on: ["serve-builder","X64"]
     name: build amd64 vllm engine image
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Validate engine_patch_suffix
         if: ${{ github.event.inputs.engine_patch_suffix != '' }}
         run: |
@@ -71,13 +72,16 @@ jobs:
       - name: build and push engine image
         run: |
           cd cluster-image-builder
-          make docker-build-engine-vllm${{ steps.target.outputs.suffix }} docker-push-engine-vllm${{ steps.target.outputs.suffix }}
+          if [ "${{ github.event.inputs.engine_flavor }}" = "auto" ]; then
+            make docker-build-engine-vllm${{ steps.target.outputs.suffix }} docker-push-engine-vllm${{ steps.target.outputs.suffix }}
+          else
+            ENGINE_VLLM_FLAVOR="${{ github.event.inputs.engine_flavor }}" make docker-build-engine-vllm${{ steps.target.outputs.suffix }} docker-push-engine-vllm${{ steps.target.outputs.suffix }}
+          fi
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_VLLM_FLAVOR: ${{ github.event.inputs.engine_flavor }}
           ENGINE_VLLM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           ENGINE_VLLM_ROCM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           ENGINE_RAY_VERSION: ${{ github.event.inputs.ray_version }}
@@ -89,7 +93,7 @@ jobs:
     needs:
       - build-amd64-image
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -107,13 +111,16 @@ jobs:
       - name: push manifests
         run: |
           cd cluster-image-builder
-          make docker-push-manifest-engine-vllm${{ steps.target.outputs.suffix }}
+          if [ "${{ github.event.inputs.engine_flavor }}" = "auto" ]; then
+            make docker-push-manifest-engine-vllm${{ steps.target.outputs.suffix }}
+          else
+            ENGINE_VLLM_FLAVOR="${{ github.event.inputs.engine_flavor }}" make docker-push-manifest-engine-vllm${{ steps.target.outputs.suffix }}
+          fi
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ALL_ARCH: amd64
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
-          ENGINE_VLLM_FLAVOR: ${{ github.event.inputs.engine_flavor }}
           ENGINE_VLLM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           ENGINE_VLLM_ROCM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from serve.native_engine.config import build_engine_args
+from serve.native_engine.config import build_engine_args, startup_timeout_s
 
 
 def test_build_engine_args_keeps_native_image_entrypoint_and_owns_network_flags() -> None:
@@ -99,3 +99,8 @@ def test_build_engine_args_expands_vllm_multi_value_flags_and_model_aliases() ->
         "--override-generation-config",
         '{"temperature":0.2}',
     ]
+
+
+def test_startup_timeout_defaults_without_a_control_plane_field() -> None:
+    assert startup_timeout_s({}) == 1200.0
+    assert startup_timeout_s({"startup_timeout_seconds": "90"}) == 90.0

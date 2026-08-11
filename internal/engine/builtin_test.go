@@ -82,17 +82,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 				continue
 			}
 
-			if version.NativeRuntime == nil {
-				t.Fatal("vllm v0.24.0 must opt into the native engine runner")
-			}
-
-			if got, want := version.NativeRuntime.Command, []string{"vllm", "serve"}; !equalStringSlices(got, want) {
-				t.Fatalf("native vllm direct server command: got %v, want %v", got, want)
-			}
-			if got, want := version.NativeRuntime.RunOptions, []string{"--ipc=host"}; !equalStringSlices(got, want) {
-				t.Fatalf("native vllm run options: got %v, want %v", got, want)
-			}
-			if image := version.GetImageForSSHAccelerator(string(v1.AcceleratorTypeNVIDIAGPU)); image == nil || image.ImageName != "neutree/engine-vllm" {
+			if image := version.GetImageForSSHAccelerator(string(v1.AcceleratorTypeNVIDIAGPU)); image == nil || image.ImageName != "neutree/engine-vllm" || image.Tag != "v0.24.0-native-ray2.53.0" {
 				t.Fatalf("native vllm must use the Ray-injected SSH engine image, got %#v", image)
 			}
 		}

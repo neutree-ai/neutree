@@ -2041,7 +2041,7 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 	}
 }
 
-func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) {
+func TestEndpointToApplication_NativeVLLMUsesV1_1_1ApplicationContract(t *testing.T) {
 	nvidiaGPU := string(v1.AcceleratorTypeNVIDIAGPU)
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{Workspace: "default", Name: "native-vllm"},
@@ -2076,10 +2076,6 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 		Metadata: &v1.Metadata{Name: v1.EngineNameVLLM},
 		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{{
 			Version: "v0.24.0",
-			NativeRuntime: &v1.NativeEngineRuntime{
-				Command: []string{"vllm", "serve"}, HealthPath: "/health", MetricsPath: "/metrics",
-				RunOptions: []string{"--ipc=host"},
-			},
 			Images: map[string]*v1.EngineImage{
 				"nvidia_gpu":     {ImageName: "vllm/vllm-openai", Tag: "v0.24.0"},
 				"ssh_nvidia_gpu": {ImageName: "neutree/engine-vllm", Tag: "v0.24.0-native-ray2.53.0"},
@@ -2093,7 +2089,7 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 	app, err := EndpointToApplication(endpoint, cluster, modelRegistry, engine, nil, mgr)
 	require.NoError(t, err)
 
-	assert.Equal(t, "serve.native_engine.app:app_builder", app.ImportPath)
+	assert.Equal(t, "serve.vllm.v0_24_0.app:app_builder", app.ImportPath)
 	assert.Equal(t, map[string]interface{}{
 		"image":       "neutree/engine-vllm:v0.24.0-native-ray2.53.0",
 		"run_options": []string{"--rm"},
@@ -2103,19 +2099,10 @@ func TestEndpointToApplication_NativeVLLMUsesEngineContainerActor(t *testing.T) 
 		"run_options": []string{
 			"--runtime=nvidia", "--gpus all",
 			"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
-			"--rm", "--ipc=host", "-v /tmp/neutree/ports:/var/run/neutree/ports",
+			"--rm",
 		},
 	}, app.Args["backend_container"])
-
-	runtime, ok := app.Args["native_runtime"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "/health", runtime["health_path"])
-	assert.Equal(t, "/metrics", runtime["metrics_path"])
-	assert.Equal(t, []string{"--ipc=host"}, runtime["run_options"])
-
-	engine.Spec.Versions[0].NativeRuntime.Command = nil
-	_, err = EndpointToApplication(endpoint, cluster, modelRegistry, engine, nil, mgr)
-	assert.EqualError(t, err, "native engine runtime command is required for endpoint default/native-vllm")
+	assert.NotContains(t, app.Args, "native_runtime")
 }
 
 func TestEndpointToApplication_TensorParallelSize(t *testing.T) {

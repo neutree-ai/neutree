@@ -76,6 +76,10 @@ CMD ["/bin/bash"]
 FROM engine-base AS native
 
 # The direct runner starts `vllm serve` as a child of the Ray Actor. There is
-# deliberately no versioned serve/vllm app in this target.
+# deliberately no versioned request-compatible serve/vllm app in this target.
+# v1.1.1 derives this import path from the engine version, so install only a
+# shim there; it delegates immediately to serve.native_engine.
+RUN mkdir -p ./serve/vllm/v0_24_0
+COPY serve/native_engine/vllm_v0_24_0_compat_app.py ./serve/vllm/v0_24_0/app.py
 ENTRYPOINT []
 CMD ["/bin/bash"]
