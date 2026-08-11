@@ -626,7 +626,8 @@ var _ = Describe("Model", Ordered, func() {
 	// needs a live cluster and lives beside the SSH endpoint fixture.
 	Describe("Alias", Label("model", "alias"), func() {
 
-		// TestRail: pending — 模型管理 - 别名 - 设置/重命名/清除别名后 model list 与 model get 同步变化
+		// TestRail: pending — Model management / alias / setting, renaming and clearing an
+		// alias is reflected in model list and model get
 		It("should show an alias change in model list and model get", Label(needsTestRailID), func() {
 			name := "e2e-alias-show-" + Cfg.RunID
 			version := "v1.0"
@@ -666,7 +667,8 @@ var _ = Describe("Model", Ordered, func() {
 			Expect(aliasFromListJSON(Model.ListJSON(), name, version)).To(BeEmpty())
 		})
 
-		// TestRail: pending — 模型管理 - 别名 - 别名撞别名返回 409 并指出冲突对象，被拒的写不留副作用
+		// TestRail: pending — Model management / alias / an alias already held by another
+		// version is refused with 409 naming the holder, leaving no side effect
 		It("should reject an alias already used by another version", Label(needsTestRailID), func() {
 			holder := "e2e-alias-holder-" + Cfg.RunID
 			claimant := "e2e-alias-claimant-" + Cfg.RunID
@@ -704,7 +706,8 @@ var _ = Describe("Model", Ordered, func() {
 				"a refused alias write must not disturb the holder")
 		})
 
-		// TestRail: pending — 模型管理 - 别名 - 别名撞物理模型名返回 409 并指出冲突对象，被拒的写不留副作用
+		// TestRail: pending — Model management / alias / an alias that shadows a physical
+		// model name is refused with 409 naming it, leaving no side effect
 		It("should reject an alias that shadows a physical model name", Label(needsTestRailID), func() {
 			shadowed := "e2e-alias-shadowed-" + Cfg.RunID
 			claimant := "e2e-alias-shadower-" + Cfg.RunID
