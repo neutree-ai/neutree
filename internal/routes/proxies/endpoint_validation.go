@@ -339,6 +339,10 @@ func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
+	if validationErr := validateEndpointVGPUModeCorePercent(endpoint.Spec.Resources, cluster); validationErr != nil {
+		return validationErr
+	}
+
 	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
 		return validationErr
 	}
@@ -461,16 +465,51 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 	return nil
 }
 
+// validateEndpointVGPUModeCorePercent rejects virtualization.core_percent on
+// endpoints when the cluster's effective accelerator virtualization mode is
+// template, where compute-core shaping is not supported. "0" is the unset
+// representation and does not count. A missing capability block (stale
+// cluster) falls back to shape-only validation.
+func validateEndpointVGPUModeCorePercent(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
+	if resources == nil || !resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	corePercent := resources.GetAcceleratorVirtualizationCorePercent()
+	if corePercent == "" {
+		return nil
+	}
+
+	parsed, err := strconv.ParseInt(corePercent, 10, 64)
+	if err != nil || parsed <= 0 {
+		return nil
+	}
+
+	if cluster == nil || cluster.Status == nil || cluster.Status.AcceleratorVirtualization == nil {
+		return nil
+	}
+
+	if cluster.Status.AcceleratorVirtualization.Mode != v1.AcceleratorVirtualizationModeTemplate {
+		return nil
+	}
+
+	return &validationError{
+		Code:    "10227",
+		Message: "virtualization.core_percent is not supported by accelerator virtualization mode template",
+		Hint:    "virtualization.core_percent is not allowed under mode template; switch the cluster mode to core, or remove the setting",
+	}
+}
+
 func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationError {
 	if !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
 
-	if resources.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) {
+	if resources.GetAcceleratorType() == "" {
 		return &validationError{
 			Code:    "10217",
-			Message: "accelerator virtualization is only supported for NVIDIA GPU endpoints",
-			Hint:    "Set spec.resources.accelerator.type to nvidia_gpu",
+			Message: "endpoint accelerator virtualization requires accelerator type",
+			Hint:    "Set spec.resources.accelerator.type to a non-empty accelerator type",
 		}
 	}
 
@@ -478,7 +517,7 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return &validationError{
 			Code:    "10218",
 			Message: "endpoint accelerator virtualization requires accelerator product",
-			Hint:    "Set spec.resources.accelerator.product to the target GPU product",
+			Hint:    "Set spec.resources.accelerator.product to the target accelerator product",
 		}
 	}
 
@@ -518,19 +557,17 @@ func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Clus
 		return endpointResourceValueError(err)
 	}
 
+	acceleratorType := resources.GetAcceleratorType()
 	product := resources.GetAcceleratorProduct()
-	maxMemoryMiB, ok := clusterProductMaxMemoryMiB(cluster, product)
+	maxMemoryMiB, ok := clusterProductMaxMemoryMiB(cluster, acceleratorType, product)
 
 	if !ok {
-		return endpointResourceValueError(fmt.Errorf(
-			"unable to determine physical GPU memory_mib for accelerator product %s",
-			product,
-		))
+		return nil
 	}
 
 	if requestedMemoryMiB > maxMemoryMiB {
 		return endpointResourceValueError(fmt.Errorf(
-			"virtualization.memory_mib must be less than or equal to physical GPU memory_mib %d for accelerator product %s",
+			"virtualization.memory_mib must be less than or equal to physical accelerator memory_mib %d for accelerator product %s",
 			maxMemoryMiB,
 			product,
 		))
@@ -539,20 +576,20 @@ func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Clus
 	return nil
 }
 
-func clusterProductMaxMemoryMiB(cluster *v1.Cluster, product string) (int64, bool) {
+func clusterProductMaxMemoryMiB(cluster *v1.Cluster, acceleratorType string, product string) (int64, bool) {
 	resourceInfo := clusterResourceInfo(cluster)
 	if resourceInfo == nil {
 		return 0, false
 	}
 
-	if memoryMiB, ok := clusterProductMetadataMemoryMiB(resourceInfo, product); ok {
+	if memoryMiB, ok := clusterProductMetadataMemoryMiB(resourceInfo, acceleratorType, product); ok {
 		return memoryMiB, true
 	}
 
 	var maxMemoryMiB int64
 
 	for _, node := range resourceInfo.NodeResources {
-		if node == nil {
+		if !nodeProductUniquelyMatchesAcceleratorType(node, acceleratorType, product) {
 			continue
 		}
 
@@ -570,12 +607,55 @@ func clusterProductMaxMemoryMiB(cluster *v1.Cluster, product string) (int64, boo
 	return maxMemoryMiB, maxMemoryMiB > 0
 }
 
-func clusterProductMetadataMemoryMiB(resourceInfo *v1.ClusterResources, product string) (int64, bool) {
+func nodeProductUniquelyMatchesAcceleratorType(
+	node *v1.NodeResourceStatus,
+	acceleratorType string,
+	product string,
+) bool {
+	if node == nil || node.Allocatable == nil {
+		return false
+	}
+
+	matchingTypes := 0
+	requestedTypeMatches := false
+
+	for currentType, group := range node.Allocatable.AcceleratorGroups {
+		if !acceleratorGroupContainsProduct(group, product) {
+			continue
+		}
+
+		matchingTypes++
+		requestedTypeMatches = string(currentType) == acceleratorType
+	}
+
+	return matchingTypes == 1 && requestedTypeMatches
+}
+
+func acceleratorGroupContainsProduct(group *v1.AcceleratorGroup, product string) bool {
+	if group == nil {
+		return false
+	}
+
+	productKey := v1.AcceleratorProduct(product)
+	if _, ok := group.ProductGroups[productKey]; ok {
+		return true
+	}
+
+	_, ok := group.Products[productKey]
+
+	return ok
+}
+
+func clusterProductMetadataMemoryMiB(
+	resourceInfo *v1.ClusterResources,
+	acceleratorType string,
+	product string,
+) (int64, bool) {
 	if resourceInfo.AcceleratorMetadata == nil {
 		return 0, false
 	}
 
-	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorType(acceleratorType)]
 	if metadata == nil || metadata.Products == nil {
 		return 0, false
 	}

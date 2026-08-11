@@ -3,7 +3,9 @@ package hami
 import (
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type NodeScopeLabel struct {
@@ -13,13 +15,18 @@ type NodeScopeLabel struct {
 }
 
 type NodeScopePlan struct {
-	EnabledNodes      []string
-	DisabledNodes     []string
-	StaleEnabledNodes []string
-	PatchedNodes      []string
-	Patches           map[string]map[string]string
-	NodeScopeLabel    NodeScopeLabel
-	ConfigPatch       map[string]interface{}
+	EnabledNodes         []string
+	DisabledNodes        []string
+	StaleEnabledNodes    []string
+	PatchedNodes         []string
+	Patches              map[string]map[string]string
+	NodeScopeLabel       NodeScopeLabel
+	ConfigPatch          map[string]interface{}
+	DevicePluginTemplate *accelerator.DevicePluginTemplate
+	// Mode is the effective virtualization mode resolved from the owning plugin.
+	Mode v1.AcceleratorVirtualizationMode
+	// SupportedResources are the virtualization.* keys legal under the mode.
+	SupportedResources []string
 }
 
 // PlanNodeScope decides which candidate nodes need the virtualization label.

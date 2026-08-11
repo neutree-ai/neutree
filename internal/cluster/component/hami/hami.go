@@ -100,6 +100,7 @@ func (h *HAMiComponent) Reconcile() error {
 	}
 
 	h.writeStatus(status.ComponentStatus())
+	h.writeVirtualizationStatus(status)
 
 	return nil
 }
@@ -143,6 +144,7 @@ func (h *HAMiComponent) UpdateStatus(ctx context.Context) error {
 	}
 
 	h.writeStatus(status.ComponentStatus())
+	h.writeVirtualizationStatus(status)
 
 	return nil
 }
@@ -196,8 +198,32 @@ func (h *HAMiComponent) ownsNodeScope() bool {
 	return h.hasStatus() || (h.cluster.Spec != nil && h.cluster.Spec.AcceleratorVirtualizationEnabled())
 }
 
+func (h *HAMiComponent) writeVirtualizationStatus(status *HAMiStatus) {
+	if status == nil || status.VirtualizationMode == "" {
+		// An empty effective mode means the owner config was not resolved (for
+		// example on a CheckResourcesStatus error path); leave the last known
+		// capability block in place instead of publishing an empty one.
+		return
+	}
+
+	if h.cluster.Status == nil {
+		h.cluster.Status = &v1.ClusterStatus{}
+	}
+
+	h.cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode:               status.VirtualizationMode,
+		SupportedResources: status.SupportedResources,
+	}
+}
+
 func (h *HAMiComponent) clearStatus() {
-	if h.cluster.Status == nil || h.cluster.Status.ComponentStatus == nil {
+	if h.cluster.Status == nil {
+		return
+	}
+
+	h.cluster.Status.AcceleratorVirtualization = nil
+
+	if h.cluster.Status.ComponentStatus == nil {
 		return
 	}
 

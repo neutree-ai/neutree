@@ -24,7 +24,7 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 	}
 
 	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(
-		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch); err != nil {
+		userVirtualizationConfigPatch(h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)); err != nil {
 		return err
 	}
 
@@ -36,14 +36,9 @@ func (h *HAMiComponent) Preflight(ctx context.Context) error {
 }
 
 func (h *HAMiComponent) validateUnmanagedHAMi(ctx context.Context) error {
-	// Avoid adopting a pre-existing HAMi installation. Neutree relies on labels
-	// and lifecycle ownership to render, update, and delete the component safely.
-	checks, err := h.unmanagedHAMiResourceChecks()
-	if err != nil {
-		return err
-	}
-
-	for _, check := range checks {
+	// The admission webhook is cluster-scoped and is the singleton that prevents
+	// two Neutree clusters from owning HAMi on the same Kubernetes cluster.
+	for _, check := range h.unmanagedHAMiResourceChecks() {
 		if err := h.validateManagedObject(ctx, check.object, check.key); err != nil {
 			return err
 		}
@@ -57,36 +52,15 @@ type managedObjectCheck struct {
 	key    types.NamespacedName
 }
 
-func (h *HAMiComponent) unmanagedHAMiResourceChecks() ([]managedObjectCheck, error) {
-	rendered, err := h.renderResources(NodeScopePlan{
-		NodeScopeLabel: defaultNodeScopeLabel(),
-	})
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to render HAMi manifests for unmanaged resource validation")
-	}
+func (h *HAMiComponent) unmanagedHAMiResourceChecks() []managedObjectCheck {
+	webhook := &unstructured.Unstructured{}
+	webhook.SetAPIVersion("admissionregistration.k8s.io/v1")
+	webhook.SetKind("MutatingWebhookConfiguration")
 
-	checks := make([]managedObjectCheck, 0, len(rendered.Items))
-
-	for i := range rendered.Items {
-		item := &rendered.Items[i]
-		if item.GetAPIVersion() == "" || item.GetKind() == "" || item.GetName() == "" {
-			continue
-		}
-
-		object := &unstructured.Unstructured{}
-		object.SetAPIVersion(item.GetAPIVersion())
-		object.SetKind(item.GetKind())
-
-		checks = append(checks, managedObjectCheck{
-			object: object,
-			key: types.NamespacedName{
-				Namespace: item.GetNamespace(),
-				Name:      item.GetName(),
-			},
-		})
-	}
-
-	return checks, nil
+	return []managedObjectCheck{{
+		object: webhook,
+		key:    types.NamespacedName{Name: WebhookName},
+	}}
 }
 
 func (h *HAMiComponent) validateManagedObject(ctx context.Context, obj client.Object, key types.NamespacedName) error {

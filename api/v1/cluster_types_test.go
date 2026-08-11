@@ -55,3 +55,38 @@ func TestClusterAcceleratorVirtualizationDisabledWhenMissing(t *testing.T) {
 	spec.AcceleratorVirtualization = &AcceleratorVirtualizationSpec{}
 	assert.False(t, spec.AcceleratorVirtualizationEnabled())
 }
+
+func TestAcceleratorVirtualizationModeConstants(t *testing.T) {
+	assert.Equal(t, AcceleratorVirtualizationMode("template"), AcceleratorVirtualizationModeTemplate)
+	assert.Equal(t, AcceleratorVirtualizationMode("core"), AcceleratorVirtualizationModeCore)
+}
+
+func TestClusterAcceleratorVirtualizationModeSerialization(t *testing.T) {
+	cluster := &Cluster{
+		Metadata: &Metadata{Name: "test", Workspace: "default"},
+		Spec: &ClusterSpec{
+			Type: KubernetesClusterType,
+			AcceleratorVirtualization: &AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    AcceleratorVirtualizationModeTemplate,
+			},
+		},
+		Status: &ClusterStatus{
+			AcceleratorVirtualization: &AcceleratorVirtualizationStatus{
+				Mode:               AcceleratorVirtualizationModeTemplate,
+				SupportedResources: []string{"virtualization.memory_mib"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(cluster)
+	require.NoError(t, err)
+
+	var got Cluster
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.NotNil(t, got.Spec.AcceleratorVirtualization)
+	assert.Equal(t, AcceleratorVirtualizationModeTemplate, got.Spec.AcceleratorVirtualization.Mode)
+	require.NotNil(t, got.Status.AcceleratorVirtualization)
+	assert.Equal(t, AcceleratorVirtualizationModeTemplate, got.Status.AcceleratorVirtualization.Mode)
+	assert.Equal(t, []string{"virtualization.memory_mib"}, got.Status.AcceleratorVirtualization.SupportedResources)
+}

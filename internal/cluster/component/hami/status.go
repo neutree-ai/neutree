@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -37,6 +36,8 @@ func (h *HAMiComponent) CheckResourcesStatus(ctx context.Context) (*HAMiStatus, 
 	status.PatchedNodes = append([]string{}, plan.PatchedNodes...)
 	status.ReadyNodes = len(plan.EnabledNodes)
 	status.DesiredNodes = len(plan.EnabledNodes) + len(plan.PatchedNodes)
+	status.VirtualizationMode = plan.Mode
+	status.SupportedResources = plan.SupportedResources
 
 	schedulerReady, schedulerReadyReplicas, schedulerReplicas, err := h.deploymentReady(ctx, SchedulerName)
 	status.SchedulerReady = schedulerReady
@@ -50,25 +51,11 @@ func (h *HAMiComponent) CheckResourcesStatus(ctx context.Context) (*HAMiStatus, 
 		return status, nil
 	}
 
-	devicePluginReady, devicePluginReadyPods, devicePluginPods, err := h.daemonSetReady(ctx, DevicePluginDaemonSetName)
-	status.DevicePluginReady = devicePluginReady
-	status.DevicePluginReadyPods = devicePluginReadyPods
-	status.DevicePluginPods = devicePluginPods
+	deviceConfigReady, err := h.deviceConfigReady(ctx)
+	status.DeviceConfigReady = deviceConfigReady
 
 	if err != nil {
-		status.Reason = "DaemonSetNotReady"
-		status.Message = err.Error()
-
-		return status, nil
-	}
-
-	monitorReady, err := h.monitorReady(ctx, plan, devicePluginReady)
-	status.MonitorReady = monitorReady
-	status.MonitorReadyPods = devicePluginReadyPods
-	status.MonitorPods = devicePluginPods
-
-	if err != nil {
-		status.Reason = "MonitorNotReady"
+		status.Reason = "DeviceConfigNotReady"
 		status.Message = err.Error()
 
 		return status, nil
@@ -94,13 +81,25 @@ func (h *HAMiComponent) CheckResourcesStatus(ctx context.Context) (*HAMiStatus, 
 		return status, nil
 	}
 
-	status.Ready = status.SchedulerReady && status.DevicePluginReady && status.MonitorReady && status.TLSReady && status.WebhookReady
+	status.Ready = status.SchedulerReady && status.DeviceConfigReady && status.TLSReady && status.WebhookReady
 	if status.Ready {
 		status.Reason = "Ready"
 		status.Message = "accelerator virtualization component is ready"
 	}
 
 	return status, nil
+}
+
+func (h *HAMiComponent) deviceConfigReady(ctx context.Context) (bool, error) {
+	configMap := &corev1.ConfigMap{}
+	if err := h.ctrlClient.Get(ctx, types.NamespacedName{
+		Name:      SchedulerName + "-device",
+		Namespace: h.namespace,
+	}, configMap); err != nil {
+		return false, errors.Wrap(err, "failed to get scheduler device config")
+	}
+
+	return true, nil
 }
 
 func (h *HAMiComponent) deploymentReady(ctx context.Context, name string) (bool, int, int, error) {
@@ -112,49 +111,6 @@ func (h *HAMiComponent) deploymentReady(ctx context.Context, name string) (bool,
 	ready := util.IsDeploymentUpdatedAndReady(deployment)
 
 	return ready, int(deployment.Status.ReadyReplicas), int(deployment.Status.Replicas), nil
-}
-
-func (h *HAMiComponent) daemonSetReady(ctx context.Context, name string) (bool, int, int, error) {
-	ds := &appsv1.DaemonSet{}
-	if err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: name, Namespace: h.namespace}, ds); err != nil {
-		if name == DevicePluginDaemonSetName && apierrors.IsNotFound(err) {
-			nodeList := &corev1.NodeList{}
-			if listErr := h.ctrlClient.List(ctx, nodeList); listErr == nil {
-				plan, planErr := h.planNodeScope(ctx, nodeList.Items, true)
-				if planErr == nil && (allCandidateNodesExplicitlyDisabled(plan) ||
-					len(plan.EnabledNodes)+len(plan.PatchedNodes)+len(plan.DisabledNodes) == 0) {
-					return true, 0, 0, nil
-				}
-			}
-		}
-
-		return false, 0, 0, errors.Wrapf(err, "failed to get daemonset %s", name)
-	}
-
-	desired := ds.Status.DesiredNumberScheduled
-	readyScheduled := desired == ds.Status.NumberReady
-	updatedScheduled := desired == ds.Status.UpdatedNumberScheduled
-	availableScheduled := desired == ds.Status.NumberAvailable
-	ready := readyScheduled && updatedScheduled && availableScheduled
-
-	return ready, int(ds.Status.NumberReady), int(ds.Status.DesiredNumberScheduled), nil
-}
-
-func (h *HAMiComponent) monitorReady(ctx context.Context, plan NodeScopePlan, devicePluginReady bool) (bool, error) {
-	if !shouldDeployDevicePlugin(plan) {
-		return true, nil
-	}
-
-	if !devicePluginReady {
-		return false, errors.New("HAMi device plugin daemonset is not ready")
-	}
-
-	service := &corev1.Service{}
-	if err := h.ctrlClient.Get(ctx, types.NamespacedName{Name: MonitorServiceName, Namespace: h.namespace}, service); err != nil {
-		return false, errors.Wrapf(err, "failed to get service %s", MonitorServiceName)
-	}
-
-	return true, nil
 }
 
 func (h *HAMiComponent) tlsReady(ctx context.Context) (bool, error) {

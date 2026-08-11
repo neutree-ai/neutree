@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestSupportsVirtualizationClusterVersion(t *testing.T) {
@@ -122,10 +124,16 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 		{
 			name: "allows supported config patch",
 			configPatch: map[string]interface{}{
-				"devicePlugin": map[string]interface{}{"nvidiaDriverRoot": "/run/nvidia/driver"},
-				"scheduler":    map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
-				"global":       map[string]interface{}{"imageRegistry": "registry.example.com"},
+				"scheduler": map[string]interface{}{"defaultSchedulerPolicy": map[string]interface{}{}},
+				"global":    map[string]interface{}{"imageRegistry": "registry.example.com"},
 			},
+		},
+		{
+			name: "rejects device plugin config patch",
+			configPatch: map[string]interface{}{
+				"devicePlugin": map[string]interface{}{"nvidiaDriverRoot": "/run/nvidia/driver"},
+			},
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 		{
 			name:        "rejects unsupported top-level key",
@@ -147,11 +155,11 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedCertManagerReason,
 		},
 		{
-			name: "rejects MIG mode",
+			name: "rejects MIG config as device plugin config",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},
 			},
-			reason: AcceleratorVirtualizationUnsupportedMIGReason,
+			reason: AcceleratorVirtualizationUnsupportedConfigReason,
 		},
 	}
 
@@ -168,6 +176,33 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			var validationErr *AcceleratorVirtualizationError
 			require.ErrorAs(t, err, &validationErr)
 			assert.Equal(t, tt.reason, validationErr.Reason)
+		})
+	}
+}
+
+func TestValidateAcceleratorVirtualizationMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    v1.AcceleratorVirtualizationMode
+		wantErr bool
+	}{
+		{name: "empty mode is allowed", mode: ""},
+		{name: "template is allowed", mode: v1.AcceleratorVirtualizationModeTemplate},
+		{name: "core is allowed", mode: v1.AcceleratorVirtualizationModeCore},
+		{name: "unknown mode is rejected", mode: "mig", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAcceleratorVirtualizationMode(tt.mode)
+			if tt.wantErr {
+				require.Error(t, err)
+				var validationErr *AcceleratorVirtualizationError
+				require.ErrorAs(t, err, &validationErr)
+				assert.Equal(t, AcceleratorVirtualizationUnsupportedConfigReason, validationErr.Reason)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

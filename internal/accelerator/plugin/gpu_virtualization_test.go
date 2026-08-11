@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
@@ -56,14 +59,21 @@ func TestNVIDIAGPU_ResolveVirtualizationConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, config.Supported)
 	assert.Equal(t, []string{"gpu-label", "mig-node"}, config.CandidateNodes)
-	assert.Equal(t, VirtualizationNodeScopeLabel{
+	assert.Equal(t, accelerator.VirtualizationNodeScopeLabel{
 		Key:           NvidiaGPUVirtualizationLabelKey,
 		EnabledValue:  "true",
 		DisabledValue: "false",
 	}, config.NodeScopeLabel)
 	assert.Equal(t, map[string]interface{}{
 		"devicePlugin": map[string]interface{}{
+			"enabled":          true,
+			"migStrategy":      "none",
+			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
 			"nvidiaDriverRoot": NvidiaGPUOperatorDriverRoot,
+			"nvidiaNodeSelector": map[string]interface{}{
+				"gpu":                           nil,
+				NvidiaGPUVirtualizationLabelKey: "true",
+			},
 		},
 	}, config.ConfigPatch)
 	assert.Contains(t, config.BlockingReasons[0], "NVIDIA GPU Operator devicePlugin is enabled")
@@ -127,4 +137,38 @@ func TestNVIDIAGPU_ResolveVirtualizationConfigIgnoresGlobalMIGStrategy(t *testin
 	require.True(t, config.Supported)
 	assert.Empty(t, config.BlockingReasons)
 	assert.Equal(t, []string{"gpu-node"}, config.CandidateNodes)
+}
+
+func TestResolveVirtualizationConfigDeclaresCoreMode(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	config, err := p.ResolveVirtualizationConfig(context.Background(), VirtualizationConfigInput{})
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	assert.Equal(t, v1.AcceleratorVirtualizationModeCore, config.Mode)
+	assert.Equal(t, v1.AcceleratorVirtualizationModeCore, config.DefaultMode)
+	assert.Equal(t, []v1.AcceleratorVirtualizationMode{v1.AcceleratorVirtualizationModeCore}, config.SupportedModes)
+	assert.Equal(t, []string{
+		v1.AcceleratorVirtualizationMemoryMiBKey,
+		v1.AcceleratorVirtualizationCorePercentKey,
+	}, config.SupportedResources)
+}
+
+func TestResolveClusterVirtualizationConfigRejectsTemplateMode(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+	cluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+	}
+
+	config, err := p.ResolveClusterVirtualizationConfig(context.Background(), cluster)
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	assert.False(t, config.Supported)
+	assert.NotEmpty(t, config.BlockingReasons)
 }

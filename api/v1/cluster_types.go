@@ -59,9 +59,25 @@ const (
 	ClusterUpgradeStrategyTypeRecreate ClusterUpgradeStrategyType = "Recreate"
 )
 
+type AcceleratorVirtualizationMode string
+
+const (
+	AcceleratorVirtualizationModeTemplate AcceleratorVirtualizationMode = "template"
+	AcceleratorVirtualizationModeCore     AcceleratorVirtualizationMode = "core"
+)
+
 type AcceleratorVirtualizationSpec struct {
-	Enabled     bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	ConfigPatch map[string]interface{} `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
+	Enabled     bool                         `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Mode        AcceleratorVirtualizationMode `json:"mode,omitempty" yaml:"mode,omitempty"`
+	ConfigPatch map[string]interface{}       `json:"config_patch,omitempty" yaml:"config_patch,omitempty"`
+}
+
+// AcceleratorVirtualizationStatus reports the effective virtualization mode and
+// the resource keys legal under it. It is written by the HAMi component and
+// consumed by the UI and by endpoint admission.
+type AcceleratorVirtualizationStatus struct {
+	Mode               AcceleratorVirtualizationMode `json:"mode,omitempty"`
+	SupportedResources []string                      `json:"supported_resources,omitempty"`
 }
 
 func (s *ClusterSpec) AcceleratorVirtualizationEnabled() bool {
@@ -199,6 +215,10 @@ type ClusterStatus struct {
 	ObservedSpecHash string `json:"observed_spec_hash,omitempty"`
 
 	ComponentStatus map[string]*ComponentStatus `json:"component_status,omitempty"`
+
+	// AcceleratorVirtualization reports the effective HAMi virtualization mode
+	// and the virtualization resource keys legal under it.
+	AcceleratorVirtualization *AcceleratorVirtualizationStatus `json:"accelerator_virtualization,omitempty"`
 }
 
 const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"

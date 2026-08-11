@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -12,12 +13,39 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
+
+// nvidiaSupportedVirtualizationModes is the single source of truth for the
+// modes this accelerator supports: the config declaration and the
+// cluster-level mode rejection both read from it. NVIDIA has no template
+// (hard-slice) form — gpumem/gpucores are always free parameters.
+var nvidiaSupportedVirtualizationModes = []v1.AcceleratorVirtualizationMode{
+	v1.AcceleratorVirtualizationModeCore,
+}
 
 func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 	ctx context.Context,
 	cluster *v1.Cluster,
-) (*VirtualizationConfig, error) {
+) (*accelerator.VirtualizationConfig, error) {
+	if cluster.Spec != nil &&
+		cluster.Spec.AcceleratorVirtualization != nil &&
+		cluster.Spec.AcceleratorVirtualization.Mode != "" {
+		if _, ok := accelerator.ResolveEffectiveMode(
+			cluster.Spec.AcceleratorVirtualization.Mode,
+			v1.AcceleratorVirtualizationModeCore,
+			nvidiaSupportedVirtualizationModes,
+		); !ok {
+			return &accelerator.VirtualizationConfig{
+				Supported: false,
+				BlockingReasons: []string{
+					fmt.Sprintf("mode %s is not supported by nvidia_gpu accelerator virtualization (supported modes: %s)",
+						cluster.Spec.AcceleratorVirtualization.Mode, v1.AcceleratorVirtualizationModeCore),
+				},
+			}, nil
+		}
+	}
+
 	ctrlClient, err := kubernetesClientForVirtualizationConfig(cluster)
 	if err != nil {
 		return nil, err
@@ -42,8 +70,18 @@ func (p *GPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 	_ context.Context,
 	input VirtualizationConfigInput,
-) (*VirtualizationConfig, error) {
-	configPatch := map[string]interface{}{}
+) (*accelerator.VirtualizationConfig, error) {
+	configPatch := map[string]interface{}{
+		"devicePlugin": map[string]interface{}{
+			"enabled":          true,
+			"migStrategy":      "none",
+			"deviceSplitCount": NvidiaGPUDefaultDeviceSplitCount,
+			"nvidiaNodeSelector": map[string]interface{}{
+				"gpu":                           nil,
+				NvidiaGPUVirtualizationLabelKey: "true",
+			},
+		},
+	}
 	blockingReasons := make([]string, 0)
 
 	for _, policy := range input.GPUOperatorClusterPolicies {
@@ -78,16 +116,23 @@ func (p *GPUAcceleratorPlugin) ResolveVirtualizationConfig(
 			"No NVIDIA GPU nodes available for vGPU virtualization")
 	}
 
-	return &VirtualizationConfig{
+	return &accelerator.VirtualizationConfig{
 		Supported:       true,
 		BlockingReasons: blockingReasons,
 		CandidateNodes:  candidateNodes,
-		NodeScopeLabel: VirtualizationNodeScopeLabel{
+		NodeScopeLabel: accelerator.VirtualizationNodeScopeLabel{
 			Key:           NvidiaGPUVirtualizationLabelKey,
 			EnabledValue:  "true",
 			DisabledValue: "false",
 		},
-		ConfigPatch: configPatch,
+		ConfigPatch:        configPatch,
+		Mode:               v1.AcceleratorVirtualizationModeCore,
+		DefaultMode:        v1.AcceleratorVirtualizationModeCore,
+		SupportedModes:     nvidiaSupportedVirtualizationModes,
+		SupportedResources: []string{
+			v1.AcceleratorVirtualizationMemoryMiBKey,
+			v1.AcceleratorVirtualizationCorePercentKey,
+		},
 	}, nil
 }
 
