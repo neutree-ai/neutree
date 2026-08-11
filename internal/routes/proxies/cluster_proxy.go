@@ -753,6 +753,10 @@ func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validation
 		}
 	}
 
+	if err := validateDesiredClusterVersion(input.New.GetVersion()); err != nil {
+		return clusterVersionValidationError(err)
+	}
+
 	return nil
 }
 
@@ -856,6 +860,14 @@ func clusterVersionUpdateError(err error) *validationError {
 	return &validationError{
 		Code:    "10212",
 		Message: "invalid cluster version update",
+		Hint:    err.Error(),
+	}
+}
+
+func clusterVersionValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version",
 		Hint:    err.Error(),
 	}
 }
