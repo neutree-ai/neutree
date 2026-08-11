@@ -92,7 +92,7 @@ func NewPushCmd() *cobra.Command {
 			// Ask what kind of registry this is before archiving anything: a
 			// registry that cannot take a push refuses it either way, and doing so
 			// here costs the user nothing instead of an archive and an upload.
-			if err := cliModel.ValidateWritableRegistry(modelRegistry, cliModel.ModelWritePush); err != nil {
+			if err := cliModel.ValidateWritableRegistry(modelRegistry, registry, cliModel.ModelWritePush); err != nil {
 				return err
 			}
 

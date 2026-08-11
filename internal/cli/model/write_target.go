@@ -28,7 +28,16 @@ const (
 // This mirrors the server rather than replacing it: a registry kind added later
 // still falls through to whatever the server answers, so the check can only be
 // too permissive, never too strict.
-func ValidateWritableRegistry(registry *v1.ModelRegistry, write ModelWrite) error {
+//
+// Reading the kind is the temporary part. The server is growing a `visibility`
+// field that states public-or-private itself, so that no client has to know
+// which kinds are catalogues; once it lands, switch the condition below to it
+// (v1.VisibilityForModelRegistryType is the same judgement in Go, and the
+// registry object carries `visibility` when the request selects it — PostgREST
+// omits computed columns from `select=*`). Doing so is what makes the next
+// read-only provider — ModelScope is the one already coming — refused here
+// without anyone remembering to extend a list of kinds.
+func ValidateWritableRegistry(registry *v1.ModelRegistry, name string, write ModelWrite) error {
 	if registry == nil || registry.Spec == nil {
 		return nil
 	}
@@ -38,15 +47,17 @@ func ValidateWritableRegistry(registry *v1.ModelRegistry, write ModelWrite) erro
 	}
 
 	return fmt.Errorf("cannot %s model registry %q: it is a %s registry, which neutree reads from but never writes to",
-		write, registryName(registry), registry.Spec.Type)
+		write, registryName(registry, name), registry.Spec.Type)
 }
 
-// registryName is the name the user typed, recovered from the fetched object so
-// the message names the registry rather than describing it.
-func registryName(registry *v1.ModelRegistry) string {
-	if registry.Metadata == nil {
-		return ""
+// registryName is what to call the registry in the refusal. It prefers the
+// fetched object's own name and falls back to the name the caller asked for,
+// because a sentence with empty quotes in it reads as a broken tool rather than
+// as a refusal, and the caller always knows what the user typed.
+func registryName(registry *v1.ModelRegistry, requested string) string {
+	if registry.Metadata != nil && registry.Metadata.Name != "" {
+		return registry.Metadata.Name
 	}
 
-	return registry.Metadata.Name
+	return requested
 }

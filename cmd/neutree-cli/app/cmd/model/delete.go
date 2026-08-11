@@ -45,7 +45,7 @@ func NewDeleteCmd() *cobra.Command {
 
 			// Refuse before the confirmation prompt: asking someone to confirm a
 			// deletion that cannot happen is asking the wrong question.
-			if err := cliModel.ValidateWritableRegistry(modelRegistry, cliModel.ModelWriteDelete); err != nil {
+			if err := cliModel.ValidateWritableRegistry(modelRegistry, registry, cliModel.ModelWriteDelete); err != nil {
 				return err
 			}
 
