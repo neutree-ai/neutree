@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,18 @@ func newFakeClient(objs ...client.Object) client.Client {
 
 type fakeApplyClient struct {
 	client.Client
+}
+
+type failingDeleteClient struct {
+	client.Client
+}
+
+func (c *failingDeleteClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if obj.GetName() == "vmagent" {
+		return errors.New("vmagent deletion failed")
+	}
+
+	return c.Client.Delete(ctx, obj, opts...)
 }
 
 func (c *fakeApplyClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
@@ -338,6 +351,51 @@ func TestApplyManifests_NoChanges(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 0, count)
+}
+
+func TestApplyManifests_RemovesVMAgentObjectsAndKeepsLocalMetricsObjects(t *testing.T) {
+	vmagent := createTestDeployment("vmagent", "test-ns", 1)
+	kubeStateMetrics := createTestDeployment("neutree-kube-state-metrics", "test-ns", 1)
+	nodeExporter := createTestService("neutree-node-exporter", "test-ns")
+
+	lastApplied := []unstructured.Unstructured{*vmagent, *kubeStateMetrics, *nodeExporter}
+	lastAppliedJSON, err := json.Marshal(lastApplied)
+	assert.NoError(t, err)
+
+	newObjects := &unstructured.UnstructuredList{
+		Items: []unstructured.Unstructured{*kubeStateMetrics, *nodeExporter},
+	}
+
+	fakeClient := newFakeClient(vmagent, kubeStateMetrics, nodeExporter)
+	ma := NewManifestApply(fakeClient, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(newObjects).
+		WithLogger(klog.NewKlogr())
+
+	count, err := ma.ApplyManifests(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.True(t, apierrors.IsNotFound(fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "test-ns", Name: "vmagent"}, createTestDeployment("vmagent", "test-ns", 1))))
+	assert.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "test-ns", Name: "neutree-kube-state-metrics"}, createTestDeployment("neutree-kube-state-metrics", "test-ns", 1)))
+	assert.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Namespace: "test-ns", Name: "neutree-node-exporter"}, createTestService("neutree-node-exporter", "test-ns")))
+}
+
+func TestApplyManifests_ReturnsDeletionFailure(t *testing.T) {
+	vmagent := createTestDeployment("vmagent", "test-ns", 1)
+	kubeStateMetrics := createTestDeployment("neutree-kube-state-metrics", "test-ns", 1)
+	lastAppliedJSON, err := json.Marshal([]unstructured.Unstructured{*vmagent, *kubeStateMetrics})
+	assert.NoError(t, err)
+
+	ma := NewManifestApply(&failingDeleteClient{Client: newFakeClient(vmagent, kubeStateMetrics)}, "test-ns").
+		WithLastAppliedConfig(string(lastAppliedJSON)).
+		WithNewObjects(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{*kubeStateMetrics}}).
+		WithLogger(klog.NewKlogr())
+
+	_, err = ma.ApplyManifests(context.Background())
+
+	assert.ErrorContains(t, err, "vmagent deletion failed")
+	assert.ErrorContains(t, err, "failed to delete object Deployment/test-ns/vmagent")
 }
 
 func TestApplyManifests_IgnoresLiveDeploymentDefaultedSpecFields(t *testing.T) {

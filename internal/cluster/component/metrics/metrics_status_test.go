@@ -185,8 +185,9 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient: fakeClient,
-		namespace:  "default",
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
@@ -207,6 +208,38 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
 
+func TestCheckResourcesStatusDoesNotRequireVMAgentWithoutValidRemoteWrite(t *testing.T) {
+	for _, remoteWriteURL := range []string{"", "invalid-url"} {
+		t.Run("remote write URL="+remoteWriteURL, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().
+				WithObjects(
+					readyMetricsDeployment("neutree-kube-state-metrics"),
+					readyMetricsDaemonSet("neutree-node-exporter", 2),
+					readyMetricsDaemonSet("neutree-node-agent", 2),
+				).
+				Build()
+
+			metricsCmpt := &MetricsComponent{
+				ctrlClient:            fakeClient,
+				namespace:             "default",
+				metricsRemoteWriteURL: remoteWriteURL,
+				cluster: &v1.Cluster{
+					Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+					Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+				},
+			}
+
+			status, err := metricsCmpt.CheckResourcesStatus(context.Background())
+
+			assert.NoError(t, err)
+			assert.True(t, status.Ready())
+			assert.False(t, status.VMAgentRequired)
+			assert.False(t, status.DeploymentReady)
+			assert.Empty(t, status.Errors)
+		})
+	}
+}
+
 func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
 		WithObjects(
@@ -216,8 +249,9 @@ func TestCheckResourcesStatusSkipsKubeStateMetricsBeforeV110(t *testing.T) {
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient: fakeClient,
-		namespace:  "default",
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
@@ -256,9 +290,10 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient:     fakeClient,
-		namespace:      "default",
-		acceleratorMgr: accelerator.NewManager(gin.New()),
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
@@ -295,9 +330,10 @@ func TestCheckResourcesStatusDoesNotRequireManagedAcceleratorExporterInExternalM
 		Build()
 
 	metricsCmpt := &MetricsComponent{
-		ctrlClient:     fakeClient,
-		namespace:      "default",
-		acceleratorMgr: accelerator.NewManager(gin.New()),
+		ctrlClient:            fakeClient,
+		namespace:             "default",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		acceleratorMgr:        accelerator.NewManager(gin.New()),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec: &v1.ClusterSpec{

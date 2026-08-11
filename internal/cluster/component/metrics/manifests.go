@@ -17,6 +17,7 @@ const (
 )
 
 var metricsManifestTemplate = `
+{{ if .EnableVMAgent }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -103,6 +104,7 @@ roleRef:
   kind: ClusterRole
   name: vmagent-node-reader-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
+{{ end }}
 {{ if .EnableKubeStateMetrics }}
 ---
 apiVersion: v1
@@ -465,6 +467,7 @@ spec:
 {{ .Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ end }}
+{{ if .EnableVMAgent }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -527,6 +530,7 @@ spec:
       - name: vmagent-config
         configMap:
           name: vmagent-config
+{{ end }}
 `
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
@@ -559,6 +563,7 @@ type MetricsManifestVariables struct {
 	EnableNodeExporter               bool
 	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
+	EnableVMAgent                    bool
 	VMAgentConfig                    string
 }
 

@@ -209,15 +209,10 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
-	// Only install metrics component when metrics remote write url is valid.
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
-	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
-		reconcileComps = append(reconcileComps, metricsComp)
-	} else {
-		reconcileDeleteComps = append(reconcileDeleteComps, metricsComp)
-	}
+	reconcileComps = append(reconcileComps, metricsComp)
 
 	hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
