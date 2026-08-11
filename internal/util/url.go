@@ -18,6 +18,8 @@ import (
 
 // GetExternalAccessUrl attempts to resolve the external access URL by detecting if it is running
 // inside a Kubernetes cluster; if resolution via the cluster Service fails, the original URL is returned.
+// If the Service is found but is misconfigured (e.g. a NodePort without NODEPORT_EXTERNAL_HOST set),
+// an error is returned because the resolved address would be unreachable from the outside.
 func GetExternalAccessUrl(accessUrl string) (string, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err == nil {
@@ -60,13 +62,18 @@ func resolveExternalAccessUrl(client kubernetes.Interface, namespace, externalHo
 		}
 
 		if externalHost == "" {
-			return "", errors.New("nodeport external host not set, configure nodePort.externalHost in the chart")
+			return "", errors.New("nodeport external host not set, set the NODEPORT_EXTERNAL_HOST environment variable")
+		}
+
+		urlPort, err := strconv.Atoi(port)
+		if err != nil {
+			return "", fmt.Errorf("invalid port %q in URL for nodeport service %s", port, s.Name)
 		}
 
 		var nodePort int32
 
 		for _, p := range s.Spec.Ports {
-			if strconv.Itoa(int(p.Port)) == port {
+			if p.Port == int32(urlPort) {
 				nodePort = p.NodePort
 				break
 			}

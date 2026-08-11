@@ -56,8 +56,8 @@ metrics:
 nodePort:
   # External host (DNS name, VIP, or load balancer) used to build externally
   # reachable URLs when any exposed Service uses type: NodePort. Required when
-  # kong.proxyService.type / api.service.type /
-  # victoria-metrics-cluster.vminsert.service.type is set to NodePort.
+  # kong.proxyService.type / victoria-metrics-cluster.vminsert.service.type /
+  # grafana.service.type is set to NodePort.
   # Must be routable outside the cluster; never derive it from a Pod hostIP.
   externalHost: ""
 
