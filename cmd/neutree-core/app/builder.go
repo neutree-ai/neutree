@@ -118,8 +118,13 @@ func (b *Builder) Build() (*App, error) {
 		return nil, fmt.Errorf("gin engine is required")
 	}
 
+<<<<<<< HEAD
 	if b.config.AcceleratorManager == nil {
 		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
+=======
+	if b.config.AcceleratorManager == nil || len(b.acceleratorPlugins) > 0 {
+		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.acceleratorPlugins...)
+>>>>>>> 1a5c60f2 (refactor: remove external REST accelerator plugin registration and health check (NEU-672))
 		if err != nil {
 			return nil, fmt.Errorf("create accelerator manager: %w", err)
 		}

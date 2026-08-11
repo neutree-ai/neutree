@@ -5,31 +5,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-const (
-	GetNodeAcceleratorPath          = "/v1/node/accelerator"
-	GetNodeRuntimeConfigPath        = "/v1/node/runtime-config"
-	GetContainerAcceleratorPath     = "/v1/container/accelerator"
-	GetContainerRuntimeConfigPath   = "/v1/container/runtime-config"
-	GetAcceleratorProfilePath       = "/v1/profile"
-	DetectStaticNodeAcceleratorPath = "/v1/static-node/accelerator"
-	GetSupportEnginesPath           = "/v1/support-engines"
-	GetClusterResourcesPath         = "/v1/cluster/resources"
-	PingPath                        = "/v1/ping"
-
-	// Resource conversion API paths
-	ConvertToRayPath        = "/v1/resource/convert-to-ray"
-	ConvertToKubernetesPath = "/v1/resource/convert-to-kubernetes"
-
-	// Resource Parse API paths
-	ParseFromRayPath        = "/v1/resource/parse-from-ray"
-	ParseFromKubernetesPath = "/v1/resource/parse-from-kubernetes"
-
-	// Virtualization API paths
-	ResolveVirtualizationConfigPath = "/v1/virtualization/resolve-config"
-
-	PluginAPIGroupPath = "/v1/plugin"
-	RegisterPath       = PluginAPIGroupPath + "/register"
-)
 
 type AcceleratorType string
 
@@ -180,12 +155,6 @@ type AcceleratorExporterCapabilities struct {
 
 type GetSupportEnginesResponse struct {
 	Engines []*Engine `json:"engines"`
-}
-
-type RegisterRequest struct {
-	ResourceName string `json:"resource_name"` // Accelerator resource type (e.g., "nvidia_gpu", "amd_gpu")
-	Endpoint     string `json:"endpoint"`
-	Version      string `json:"version"`
 }
 
 type RegisterEngineRequest struct {

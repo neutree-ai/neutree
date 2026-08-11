@@ -1,6 +1,9 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -39,7 +42,7 @@ func TestBuilderWithConfig(t *testing.T) {
 
 func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
 	config := &config.CoreConfig{GinEngine: gin.New()}
-	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	injected := internalTestPlugin{}
 	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
 	builder.controllerInits = map[string]ControllerFactory{}
 
@@ -56,15 +59,34 @@ func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
 	}
 }
 
-func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
+func TestBuilderBuildDoesNotRegisterExternalPluginEndpoint(t *testing.T) {
 	engine := gin.New()
-	existingManager, err := accelerator.NewManagerWithPlugins(engine)
+	config := &config.CoreConfig{GinEngine: engine}
+	builder := NewBuilder().WithConfig(config)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
 	if err != nil {
-		t.Fatalf("NewManagerWithPlugins() error = %v", err)
+		t.Fatalf("Build() error = %v", err)
 	}
 
-	config := &config.CoreConfig{GinEngine: engine, AcceleratorManager: existingManager}
-	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	// The external REST accelerator plugin registration endpoint was removed:
+	// POST /v1/plugin/register must no longer be served (stable 404, no panic).
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugin/register", strings.NewReader(`{"resource_name":"external_gpu","endpoint":"http://plugin.example"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("POST /v1/plugin/register status = %d, want 404", recorder.Code)
+	}
+}
+
+func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
+	existingManager := accelerator.NewManager()
+	config := &config.CoreConfig{GinEngine: gin.New(), AcceleratorManager: existingManager}
+	injected := internalTestPlugin{}
 	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
 	builder.controllerInits = map[string]ControllerFactory{}
 
@@ -76,6 +98,9 @@ func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
 	}
 	if _, ok := config.AcceleratorManager.GetPlugin("injected-test"); !ok {
 		t.Fatal("Build() did not register the injected accelerator plugin into the existing manager")
+	}
+}
+
 	}
 }
 
@@ -118,11 +143,19 @@ func TestBuilderBuildRequiresGinEngineWithConfiguredAcceleratorManager(t *testin
 }
 
 type internalTestPlugin struct {
-	plugin.AcceleratorPlugin
+	plugin.AcceleratorPluginHandle
+}
+
+func (internalTestPlugin) Resource() string {
+	return "injected-test"
 }
 
 func (internalTestPlugin) Type() string {
 	return plugin.InternalPluginType
+}
+
+func (internalTestPlugin) Handle() plugin.AcceleratorPluginHandle {
+	return internalTestPlugin{}
 }
 
 func TestBuilderWithController(t *testing.T) {

@@ -286,10 +286,6 @@ func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 	}
 }
 
-func (p *GPUAcceleratorPlugin) Ping(ctx context.Context) error {
-	return nil
-}
-
 func (p *GPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
 }

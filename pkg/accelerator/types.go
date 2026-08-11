@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	ExternalPluginType = "external"
 	InternalPluginType = "internal"
 )
 
@@ -29,7 +28,6 @@ type PluginHandle interface {
 	GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error)
 	GetResourceConverter() ResourceConverter
 	GetResourceParser() ResourceParser
-	Ping(context.Context) error
 }
 
 // StaticNodeRuntimeConfigResolver optionally resolves a cluster runtime

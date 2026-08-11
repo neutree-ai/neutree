@@ -2,14 +2,9 @@ package accelerator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
@@ -20,9 +15,8 @@ import (
 func TestManagerGetAcceleratorProfile(t *testing.T) {
 	m := &manager{}
 	m.acceleratorsMap.Store(v1.AcceleratorTypeNVIDIAGPU.String(), registerPlugin{
-		resource:         v1.AcceleratorTypeNVIDIAGPU.String(),
-		plugin:           &plugin.GPUAcceleratorPlugin{},
-		lastRegisterTime: time.Now(),
+		resource: v1.AcceleratorTypeNVIDIAGPU.String(),
+		plugin:   &plugin.GPUAcceleratorPlugin{},
 	})
 
 	profile, err := m.GetAcceleratorProfile(context.Background(), v1.AcceleratorTypeNVIDIAGPU.String())
@@ -74,9 +68,8 @@ func TestManagerGetStaticNodeRuntimeConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &manager{}
 			m.acceleratorsMap.Store(tt.plugin.Resource(), registerPlugin{
-				resource:         tt.plugin.Resource(),
-				plugin:           tt.plugin,
-				lastRegisterTime: time.Now(),
+				resource: tt.plugin.Resource(),
+				plugin:   tt.plugin,
 			})
 
 			config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "custom_gpu"})
@@ -106,9 +99,8 @@ func TestManagerGetStaticNodeRuntimeConfigRequiresOwningPlugin(t *testing.T) {
 	}
 	m := &manager{}
 	m.acceleratorsMap.Store(fallback.Resource(), registerPlugin{
-		resource:         fallback.Resource(),
-		plugin:           fallback,
-		lastRegisterTime: time.Now(),
+		resource: fallback.Resource(),
+		plugin:   fallback,
 	})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "legacy_gpu"})
@@ -128,14 +120,12 @@ func TestManagerGetStaticNodeRuntimeConfigDoesNotUseFallbackWhenOwnerHasNoResolv
 	}
 	m := &manager{}
 	m.acceleratorsMap.Store("owner_gpu", registerPlugin{
-		resource:         "owner_gpu",
-		plugin:           &plugin.GPUAcceleratorPlugin{},
-		lastRegisterTime: time.Now(),
+		resource: "owner_gpu",
+		plugin:   &plugin.GPUAcceleratorPlugin{},
 	})
 	m.acceleratorsMap.Store(fallback.Resource(), registerPlugin{
-		resource:         fallback.Resource(),
-		plugin:           fallback,
-		lastRegisterTime: time.Now(),
+		resource: fallback.Resource(),
+		plugin:   fallback,
 	})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
@@ -154,14 +144,12 @@ func TestManagerGetStaticNodeRuntimeConfigDoesNotCallUnrelatedResolver(t *testin
 	}
 	m := &manager{}
 	m.acceleratorsMap.Store("owner_gpu", registerPlugin{
-		resource:         "owner_gpu",
-		plugin:           &plugin.GPUAcceleratorPlugin{},
-		lastRegisterTime: time.Now(),
+		resource: "owner_gpu",
+		plugin:   &plugin.GPUAcceleratorPlugin{},
 	})
 	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{
-		resource:         unrelated.Resource(),
-		plugin:           unrelated,
-		lastRegisterTime: time.Now(),
+		resource: unrelated.Resource(),
+		plugin:   unrelated,
 	})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
@@ -179,9 +167,8 @@ func TestManagerGetStaticNodeRuntimeConfigRejectsNilOwnerConfig(t *testing.T) {
 	}
 	m := &manager{}
 	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{
-		resource:         owner.Resource(),
-		plugin:           owner,
-		lastRegisterTime: time.Now(),
+		resource: owner.Resource(),
+		plugin:   owner,
 	})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: "owner_gpu"})
@@ -204,8 +191,8 @@ func TestManagerGetStaticNodeRuntimeConfigPrioritizesOwningPlugin(t *testing.T) 
 		staticRuntimeErr: errors.New("must not resolve unrelated accelerator"),
 	}
 	m := &manager{}
-	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{resource: owner.Resource(), plugin: owner, lastRegisterTime: time.Now()})
-	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{resource: unrelated.Resource(), plugin: unrelated, lastRegisterTime: time.Now()})
+	m.acceleratorsMap.Store(owner.Resource(), registerPlugin{resource: owner.Resource(), plugin: owner})
+	m.acceleratorsMap.Store(unrelated.Resource(), registerPlugin{resource: unrelated.Resource(), plugin: unrelated})
 
 	config, err := m.GetStaticNodeRuntimeConfig(context.Background(), &v1.StaticNodeAcceleratorStatus{Type: owner.Resource()})
 
@@ -217,18 +204,11 @@ func TestManagerGetStaticNodeRuntimeConfigPrioritizesOwningPlugin(t *testing.T) 
 func TestNewManagerWithPluginsRegistersInjectedPlugin(t *testing.T) {
 	injected := &fakeStaticNodeAcceleratorPlugin{}
 
-	manager, err := NewManagerWithPlugins(gin.New(), injected)
+	manager, err := NewManagerWithPlugins(injected)
 
 	require.NoError(t, err)
 	assert.Contains(t, manager.SupportPlugins(), injected.Resource())
 	assert.Contains(t, manager.SupportPlugins(), v1.AcceleratorTypeNVIDIAGPU.String())
-}
-
-func TestNewManagerWithPluginsRequiresGinEngine(t *testing.T) {
-	_, err := NewManagerWithPlugins(nil)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "gin engine is required")
 }
 
 func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
@@ -249,7 +229,7 @@ func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewManagerWithPlugins(gin.New(), tt.plugins...)
+			_, err := NewManagerWithPlugins(tt.plugins...)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.message)
@@ -258,7 +238,7 @@ func TestNewManagerWithPluginsRejectsInvalidPlugins(t *testing.T) {
 }
 
 func TestManagerAddInternalPluginsRegistersPluginsOnExistingManager(t *testing.T) {
-	manager, err := NewManagerWithPlugins(gin.New())
+	manager, err := NewManagerWithPlugins()
 	require.NoError(t, err)
 
 	injected := &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: "injected_gpu"}
@@ -288,7 +268,7 @@ func TestManagerAddInternalPluginsFailsAtomically(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager, err := NewManagerWithPlugins(gin.New())
+			manager, err := NewManagerWithPlugins()
 			require.NoError(t, err)
 
 			err = manager.AddInternalPlugins(tt.plugins...)
@@ -298,62 +278,6 @@ func TestManagerAddInternalPluginsFailsAtomically(t *testing.T) {
 			assert.NotContains(t, manager.SupportPlugins(), "injected_gpu")
 		})
 	}
-}
-
-func TestManagerGetAcceleratorProfileFromExternalPlugin(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, v1.GetAcceleratorProfilePath, r.URL.Path)
-
-		err := json.NewEncoder(w).Encode(v1.GetAcceleratorProfileResponse{
-			Profile: v1.AcceleratorProfile{
-				AcceleratorType: "external_gpu",
-				ClusterRuntime: &v1.RuntimeConfig{
-					Runtime: "custom-cluster",
-				},
-				EngineRuntime: &v1.RuntimeConfig{
-					Runtime: "custom-engine",
-				},
-			},
-		})
-		require.NoError(t, err)
-	}))
-	defer server.Close()
-
-	m := &manager{}
-	m.acceleratorsMap.Store("external_gpu", registerPlugin{
-		resource:         "external_gpu",
-		plugin:           plugin.NewAcceleratorRestPlugin("external_gpu", server.URL),
-		lastRegisterTime: time.Now(),
-	})
-
-	profile, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
-
-	require.NoError(t, err)
-	require.NotNil(t, profile)
-	assert.Equal(t, "external_gpu", profile.AcceleratorType)
-	require.NotNil(t, profile.ClusterRuntime)
-	assert.Equal(t, "custom-cluster", profile.ClusterRuntime.Runtime)
-	require.NotNil(t, profile.EngineRuntime)
-	assert.Equal(t, "custom-engine", profile.EngineRuntime.Runtime)
-}
-
-func TestManagerGetAcceleratorProfileNotFoundReturnsError(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
-
-	m := &manager{}
-	m.acceleratorsMap.Store("external_gpu", registerPlugin{
-		resource:         "external_gpu",
-		plugin:           plugin.NewAcceleratorRestPlugin("external_gpu", server.URL),
-		lastRegisterTime: time.Now(),
-	})
-
-	profile, err := m.GetAcceleratorProfile(context.Background(), "external_gpu")
-
-	assert.Nil(t, profile)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "get accelerator profile from plugin external_gpu failed")
 }
 
 func TestManagerGetAcceleratorProfileMissingPlugin(t *testing.T) {
@@ -376,9 +300,8 @@ func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing
 	}}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           detector,
-		lastRegisterTime: time.Now(),
+		resource: "custom_gpu",
+		plugin:   detector,
 	})
 
 	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
@@ -394,41 +317,12 @@ func TestManagerDetectAcceleratorPreservesStaticNodeAcceleratorStatus(t *testing
 	assert.Zero(t, detector.getCalls)
 }
 
-func TestManagerDetectAcceleratorRequiresStaticDetectEndpoint(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == v1.DetectStaticNodeAcceleratorPath {
-			http.NotFound(w, r)
-			return
-		}
-
-		t.Fatalf("unexpected legacy detection request: %s", r.URL.Path)
-	}))
-	defer server.Close()
-
-	m := &manager{}
-	m.acceleratorsMap.Store("external_gpu", registerPlugin{
-		resource:         "external_gpu",
-		plugin:           plugin.NewAcceleratorRestPlugin("external_gpu", server.URL),
-		lastRegisterTime: time.Now(),
-	})
-
-	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
-		SSHUser:       "root",
-		SSHPrivateKey: "key",
-	})
-
-	require.Error(t, err)
-	assert.Nil(t, status)
-	assert.Contains(t, err.Error(), "detect static node accelerator from plugin external_gpu failed")
-}
-
 func TestManagerDetectAcceleratorFallsBackToCPUWhenDetectorDoesNotMatch(t *testing.T) {
 	detector := &fakeStaticNodeAcceleratorPlugin{}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           detector,
-		lastRegisterTime: time.Now(),
+		resource: "custom_gpu",
+		plugin:   detector,
 	})
 
 	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
@@ -446,9 +340,8 @@ func TestManagerDetectAcceleratorReturnsDetectorErrorWhenNothingMatches(t *testi
 	detector := &fakeStaticNodeAcceleratorPlugin{staticDetectErr: errors.New("lspci unavailable")}
 	m := &manager{}
 	m.acceleratorsMap.Store("custom_gpu", registerPlugin{
-		resource:         "custom_gpu",
-		plugin:           detector,
-		lastRegisterTime: time.Now(),
+		resource: "custom_gpu",
+		plugin:   detector,
 	})
 
 	status, err := m.DetectAccelerator(context.Background(), "10.0.0.10", v1.Auth{
@@ -529,10 +422,6 @@ func (p *fakeStaticNodeAcceleratorPlugin) GetNodeRuntimeConfig(
 	request *v1.GetNodeRuntimeConfigRequest,
 ) (*v1.GetNodeRuntimeConfigResponse, error) {
 	return nil, nil
-}
-
-func (p *fakeStaticNodeAcceleratorPlugin) Ping(ctx context.Context) error {
-	return nil
 }
 
 func (p *fakeStaticNodeAcceleratorPlugin) GetResourceConverter() plugin.ResourceConverter {

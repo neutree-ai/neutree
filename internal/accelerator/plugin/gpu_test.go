@@ -36,7 +36,6 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), plugin.Resource())
 	assert.Equal(t, plugin, plugin.Handle())
 	assert.Equal(t, InternalPluginType, plugin.Type())
-	assert.NoError(t, plugin.Ping(context.Background()))
 }
 
 func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
