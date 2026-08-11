@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -204,7 +205,7 @@ func prepareClusterValidationInput(
 		return clusterPatchValidationPreparationError(input, err)
 	}
 
-	newCluster, err := buildClusterPatchValidationNew(current, input.Body)
+	newCluster, err := buildPostgrestClusterPatchValidationNew(current, input.Body)
 	if err != nil {
 		return invalidClusterPayloadError(err)
 	}
@@ -283,10 +284,10 @@ func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *va
 		errors.New("cluster identity is required when patching a cluster"))
 }
 
-// buildClusterPatchValidationNew constructs the complete desired Cluster state
-// for validation. It preserves fields omitted from the PATCH, including masked
-// credentials, while applying explicit PATCH values and nulls.
-func buildClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
+// buildPostgrestClusterPatchValidationNew constructs the Cluster state that
+// PostgREST will persist. A PATCH replaces each supplied top-level column;
+// masked credentials are backfilled first because the proxy forwards them.
+func buildPostgrestClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
 	if current == nil {
 		return nil, errors.New("current cluster is required")
 	}
@@ -321,12 +322,11 @@ func buildClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Clust
 	tagConfig := extractStructTagConfig(reflect.TypeOf(v1.Cluster{}))
 	mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
 
-	var nextPayload map[string]interface{}
-	if err := util.JsonMerge(currentPayload, patchPayload, &nextPayload); err != nil {
-		return nil, fmt.Errorf("merge cluster patch payload: %w", err)
+	for field, value := range patchPayload {
+		currentPayload[field] = value
 	}
 
-	nextBody, err := json.Marshal(nextPayload)
+	nextBody, err := json.Marshal(currentPayload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal patched cluster: %w", err)
 	}
@@ -730,6 +730,18 @@ func clusterConfigurationUpdateError(err error) *validationError {
 }
 
 func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
+	if input.New == nil {
+		return clusterPatchValidationResolutionError(errors.New("updated cluster is required"))
+	}
+
+	if strings.TrimSpace(input.New.GetVersion()) == "" {
+		return &validationError{
+			Code:    "10209",
+			Message: "spec.version is required for cluster PATCH",
+			Hint:    "Provide a non-empty spec.version when patching a cluster",
+		}
+	}
+
 	hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
 	if err != nil {
 		return invalidClusterPayloadError(err)
@@ -1112,8 +1124,10 @@ func validateClusterAcceleratorVirtualizationInput(
 		cluster = *input.New
 	}
 
-	if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
-		return validationErr
+	if cluster.Spec != nil && cluster.Spec.Type == v1.KubernetesClusterType {
+		if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	if input.Operation != clusterValidationPatch {
