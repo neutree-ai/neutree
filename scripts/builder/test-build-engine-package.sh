@@ -17,6 +17,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 STUB_BIN="$TEST_ROOT/bin"
 RUN_DIR="$TEST_ROOT/run"
 OUTPUT_DIR="$TEST_ROOT/output"
+DOCKER_LOG="$TEST_ROOT/docker.log"
 mkdir -p "$STUB_BIN" "$RUN_DIR"
 
 cat > "$STUB_BIN/docker" <<'EOF'
@@ -35,6 +36,11 @@ case "${1:-}" in
         fi
         ;;
     pull)
+        [[ -n "${DOCKER_LOG:-}" ]] || {
+            printf 'DOCKER_LOG is required for pull assertions\n' >&2
+            exit 64
+        }
+        printf '%s\n' "$*" >> "$DOCKER_LOG"
         ;;
     save)
         output_file=""
@@ -130,11 +136,12 @@ printf 'stub engine package archive\n' > "$output_file"
 EOF
 
 chmod +x "$STUB_BIN/docker" "$STUB_BIN/tar"
+: > "$DOCKER_LOG"
 
 MISSING_PLATFORM_LOG="$TEST_ROOT/missing-platform.log"
 if (
     cd "$RUN_DIR"
-    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$OUTPUT_DIR" bash "$BUILD_SCRIPT" \
+    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$OUTPUT_DIR" DOCKER_LOG="$DOCKER_LOG" bash "$BUILD_SCRIPT" \
         --name test-engine \
         --version v1.0.0 \
         --images cpu:example/test-engine:v1.0.0 \
@@ -149,16 +156,23 @@ grep -Fq -- "--platform requires a value" "$MISSING_PLATFORM_LOG" || \
 BUILD_LOG="$TEST_ROOT/build.log"
 if ! (
     cd "$RUN_DIR"
-    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$OUTPUT_DIR" bash "$BUILD_SCRIPT" \
+    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$OUTPUT_DIR" DOCKER_LOG="$DOCKER_LOG" bash "$BUILD_SCRIPT" \
         --name test-engine \
         --version v1.0.0 \
-        --images cpu:example/test-engine:v1.0.0 \
+        --images cpu:example/test-engine:v1.0.0,nvidia_gpu:example/test-engine-gpu:v1.0.0 \
         --supported-tasks generate \
         --platform linux/arm64
 ) > "$BUILD_LOG" 2>&1; then
     sed 's/^/build-engine-package: /' "$BUILD_LOG" >&2
     fail "package build failed"
 fi
+
+EXPECTED_PULL_LOG=$(printf '%s\n' \
+    "pull --platform linux/arm64 example/test-engine:v1.0.0" \
+    "pull --platform linux/arm64 example/test-engine-gpu:v1.0.0")
+ACTUAL_PULL_LOG=$(cat "$DOCKER_LOG")
+[[ "$ACTUAL_PULL_LOG" == "$EXPECTED_PULL_LOG" ]] || \
+    fail "package pull log does not match expected platform-aware pulls"
 
 ARCHIVE="$OUTPUT_DIR/test-engine-v1.0.0.tar.gz"
 MANIFEST="$OUTPUT_DIR/test-engine-v1.0.0-manifest.yaml"
@@ -190,13 +204,14 @@ fi
 
 MANIFEST_ONLY_OUTPUT_DIR="$TEST_ROOT/manifest-only-output"
 MANIFEST_ONLY_LOG="$TEST_ROOT/manifest-only.log"
+: > "$DOCKER_LOG"
 if ! (
     cd "$RUN_DIR"
-    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$MANIFEST_ONLY_OUTPUT_DIR" bash "$BUILD_SCRIPT" \
+    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$MANIFEST_ONLY_OUTPUT_DIR" DOCKER_LOG="$DOCKER_LOG" bash "$BUILD_SCRIPT" \
         --manifest-only \
         --name test-engine \
         --version v1.0.0 \
-        --images cpu:example/test-engine:v1.0.0 \
+        --images cpu:example/test-engine:v1.0.0,nvidia_gpu:example/test-engine-gpu:v1.0.0 \
         --supported-tasks generate \
         --platform linux/arm64
 ) > "$MANIFEST_ONLY_LOG" 2>&1; then
@@ -212,5 +227,6 @@ grep -Eq '^[[:space:]]*platform:[[:space:]]*"linux/arm64"[[:space:]]*$' "$MANIFE
 if grep -Eq '^[[:space:]]*platform:[[:space:]]*"linux/amd64"[[:space:]]*$' "$MANIFEST_ONLY_MANIFEST"; then
     fail "manifest-only output still contains platform linux/amd64"
 fi
+[[ ! -s "$DOCKER_LOG" ]] || fail "manifest-only build unexpectedly pulled an image"
 
-printf 'PASS: package and manifest-only artifacts use platform linux/arm64 and SHA-256 only\n'
+printf 'PASS: package pull and artifacts use platform linux/arm64 and SHA-256 only\n'

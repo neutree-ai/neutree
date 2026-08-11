@@ -156,7 +156,7 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
-    -p, --platform PLATFORM   Image platform (default: linux/amd64)
+    -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -328,7 +328,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
 
-    # Collect all full image references and ensure they exist locally
+    # Pull the selected platform before collecting images for export
     ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
         IFS=':' read -ra PARTS <<< "$spec"
@@ -338,15 +338,12 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        # Check if image exists, if not, pull it
-        if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
-            print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
-            if ! docker pull "$FULL_IMAGE"; then
-                print_error "Failed to pull image $FULL_IMAGE"
-                exit 1
-            fi
-            print_info "Successfully pulled $FULL_IMAGE"
+        print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
+        if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
+            print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
+            exit 1
         fi
+        print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
 
         ALL_IMAGES+=("$FULL_IMAGE")
     done
