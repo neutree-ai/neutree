@@ -54,6 +54,7 @@ func NewBuilder() *Builder {
 		// - Validate and pass-through JWT tokens to PostgREST
 		// - Convert API keys (sk_*) to PostgREST-compatible JWT tokens
 		"rest/api-keys":           ProxiesRouteFactory(proxies.RegisterAPIKeyRoutes),
+		"rest/projects":           ProxiesRouteFactory(proxies.RegisterProjectRoutes),
 		"rest/workspaces":         ProxiesRouteFactory(proxies.RegisterWorkspaceRoutes),
 		"rest/roles":              ProxiesRouteFactory(proxies.RegisterRoleRoutes),
 		"rest/role-assignments":   ProxiesRouteFactory(proxies.RegisterRoleAssignmentRoutes),

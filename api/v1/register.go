@@ -14,6 +14,8 @@ func init() { //nolint:gochecknoinits
 	SchemeBuilder.Register(
 		&ApiKey{},
 		&ApiKeyList{},
+		&Project{},
+		&ProjectList{},
 		&Cluster{},
 		&ClusterList{},
 		&Endpoint{},
@@ -43,6 +45,7 @@ func init() { //nolint:gochecknoinits
 	SchemeBuilder.RegisterTable(
 		map[string]string{
 			"api_keys":           "ApiKey",
+			"projects":           "Project",
 			"clusters":           "Cluster",
 			"endpoints":          "Endpoint",
 			"engines":            "Engine",

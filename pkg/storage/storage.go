@@ -25,6 +25,7 @@ const (
 	ROLE_ASSIGNMENT_TABLE   = "role_assignments"
 	WORKSPACE_TABLE         = "workspaces"
 	API_KEY_TABLE           = "api_keys"
+	PROJECT_TABLE           = "projects"
 	USER_PROFILE_TABLE      = "user_profiles"
 	EXTERNAL_ENDPOINT_TABLE = "external_endpoints"
 )
