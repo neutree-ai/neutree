@@ -131,6 +131,21 @@ EOF
 
 chmod +x "$STUB_BIN/docker" "$STUB_BIN/tar"
 
+MISSING_PLATFORM_LOG="$TEST_ROOT/missing-platform.log"
+if (
+    cd "$RUN_DIR"
+    PATH="$STUB_BIN:$PATH" OUTPUT_DIR="$OUTPUT_DIR" bash "$BUILD_SCRIPT" \
+        --name test-engine \
+        --version v1.0.0 \
+        --images cpu:example/test-engine:v1.0.0 \
+        --supported-tasks generate \
+        --platform --manifest-only
+) > "$MISSING_PLATFORM_LOG" 2>&1; then
+    fail "--platform accepted another flag as its value"
+fi
+grep -Fq -- "--platform requires a value" "$MISSING_PLATFORM_LOG" || \
+    fail "missing --platform value did not produce a clear error"
+
 BUILD_LOG="$TEST_ROOT/build.log"
 if ! (
     cd "$RUN_DIR"

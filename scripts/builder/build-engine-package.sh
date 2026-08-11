@@ -261,6 +261,10 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -p|--platform)
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                print_error "$1 requires a value"
+                exit 1
+            fi
             PLATFORM="$2"
             shift 2
             ;;
