@@ -146,6 +146,42 @@ func TestJsonMerge(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "merge recursively applies nested objects and removes explicit null fields",
+			base: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"type":    "kubernetes",
+					"version": "v1.0.0",
+					"config": map[string]interface{}{
+						"kubernetes_config": map[string]interface{}{
+							"kubeconfig": "current-secret",
+							"context":    "current-context",
+						},
+					},
+				},
+			},
+			patch: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"version": "v1.1.0",
+					"config": map[string]interface{}{
+						"kubernetes_config": map[string]interface{}{
+							"kubeconfig": nil,
+						},
+					},
+				},
+			},
+			expected: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"type":    "kubernetes",
+					"version": "v1.1.0",
+					"config": map[string]interface{}{
+						"kubernetes_config": map[string]interface{}{
+							"context": "current-context",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

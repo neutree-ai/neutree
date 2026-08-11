@@ -204,7 +204,7 @@ func prepareClusterValidationInput(
 		return clusterPatchValidationPreparationError(input, err)
 	}
 
-	newCluster, err := buildPostgrestClusterPatchValidationNew(current, input.Body)
+	newCluster, err := buildClusterPatchValidationNew(current, input.Body)
 	if err != nil {
 		return invalidClusterPayloadError(err)
 	}
@@ -283,11 +283,10 @@ func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *va
 		errors.New("cluster identity is required when patching a cluster"))
 }
 
-// buildPostgrestClusterPatchValidationNew mirrors the resource proxy before it
-// forwards a PATCH: masked leaves are backfilled, then supplied row columns
-// replace their current values. A supplied spec therefore replaces the whole
-// PostgreSQL composite rather than recursively merging its attributes.
-func buildPostgrestClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
+// buildClusterPatchValidationNew constructs the complete desired Cluster state
+// for validation. It preserves fields omitted from the PATCH, including masked
+// credentials, while applying explicit PATCH values and nulls.
+func buildClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
 	if current == nil {
 		return nil, errors.New("current cluster is required")
 	}
@@ -322,11 +321,12 @@ func buildPostgrestClusterPatchValidationNew(current *v1.Cluster, body []byte) (
 	tagConfig := extractStructTagConfig(reflect.TypeOf(v1.Cluster{}))
 	mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
 
-	for field, value := range patchPayload {
-		currentPayload[field] = value
+	var nextPayload map[string]interface{}
+	if err := util.JsonMerge(currentPayload, patchPayload, &nextPayload); err != nil {
+		return nil, fmt.Errorf("merge cluster patch payload: %w", err)
 	}
 
-	nextBody, err := json.Marshal(currentPayload)
+	nextBody, err := json.Marshal(nextPayload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal patched cluster: %w", err)
 	}
