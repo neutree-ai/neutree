@@ -65,7 +65,7 @@ func resolveExternalAccessUrl(client kubernetes.Interface, namespace, externalHo
 			return "", errors.New("nodeport external host not set, set the NODEPORT_EXTERNAL_HOST environment variable")
 		}
 
-		urlPort, err := strconv.Atoi(port)
+		urlPort, err := strconv.ParseInt(port, 10, 32)
 		if err != nil {
 			return "", fmt.Errorf("invalid port %q in URL for nodeport service %s", port, s.Name)
 		}
@@ -73,7 +73,7 @@ func resolveExternalAccessUrl(client kubernetes.Interface, namespace, externalHo
 		var nodePort int32
 
 		for _, p := range s.Spec.Ports {
-			if p.Port == int32(urlPort) {
+			if int64(p.Port) == urlPort {
 				nodePort = p.NodePort
 				break
 			}
