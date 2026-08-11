@@ -5,7 +5,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-
 type AcceleratorType string
 
 func (at AcceleratorType) String() string {
