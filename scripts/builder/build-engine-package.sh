@@ -6,7 +6,7 @@
 set -e
 
 VERSION=$(git describe --tags --always --dirty)
-OUTPUT_DIR="./dist"
+OUTPUT_DIR="${OUTPUT_DIR:-./dist}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -156,6 +156,7 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    -p, --platform PLATFORM   Image platform (default: linux/amd64)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -218,6 +219,7 @@ TEMPLATE_DIR=""
 SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
+PLATFORM="linux/amd64"
 MANIFEST_ONLY=""
 
 while [[ $# -gt 0 ]]; do
@@ -256,6 +258,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -d|--description)
             DESCRIPTION="$2"
+            shift 2
+            ;;
+        -p|--platform)
+            PLATFORM="$2"
             shift 2
             ;;
         --manifest-only)
@@ -374,7 +380,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\"
+      platform: \"$PLATFORM\"
       size: $INSPECT_SIZE"
     done
 else
@@ -392,7 +398,7 @@ else
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\""
+      platform: \"$PLATFORM\""
     done
 fi
 
@@ -539,6 +545,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     cd - > /dev/null
 
     # Move to final location
+    mkdir -p "$OUTPUT_DIR"
     mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 
     # Copy standalone manifest.yaml for release
