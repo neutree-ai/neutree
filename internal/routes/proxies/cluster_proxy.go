@@ -1151,7 +1151,7 @@ func validateClusterAcceleratorVirtualizationInput(
 		cluster = *input.New
 	}
 
-	if cluster.Spec != nil && cluster.Spec.Type == v1.KubernetesClusterType {
+	if cluster.Spec != nil && cluster.Spec.Type != "" {
 		if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
 			return validationErr
 		}

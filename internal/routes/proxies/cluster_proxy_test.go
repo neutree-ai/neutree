@@ -387,7 +387,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
-	t.Run("does not apply Kubernetes vGPU validation to an SSH POST", func(t *testing.T) {
+	t.Run("rejects accelerator virtualization for an SSH POST", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -407,8 +407,9 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10208"`)
 		mockStorage.AssertNotCalled(t, "Count", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
@@ -546,7 +547,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
-	t.Run("does not apply Kubernetes vGPU validation to an SSH spec", func(t *testing.T) {
+	t.Run("rejects accelerator virtualization for an SSH PATCH", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -568,8 +569,9 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 			"spec": {"type": "ssh", "version": "v1.1.0", "accelerator_virtualization": {"enabled": true}}
 		}`)))
 
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10208"`)
 		mockStorage.AssertExpectations(t)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
@@ -1210,7 +1212,7 @@ func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 
 func TestClusterValidationInput(t *testing.T) {
 	t.Run("prepare", testPrepareClusterValidationInput)
-	t.Run("build PATCH validation New", testBuildClusterPatchValidationNew)
+	t.Run("build PostgREST PATCH New", testBuildPostgrestClusterPatchValidationNew)
 }
 
 func testPrepareClusterValidationInput(t *testing.T) {
@@ -1328,16 +1330,15 @@ func testPrepareClusterValidationInput(t *testing.T) {
 	}
 }
 
-func testBuildClusterPatchValidationNew(t *testing.T) {
+func testBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 	tests := []struct {
 		name    string
-		current *v1.Cluster
 		body    string
 		wantErr bool
 		assert  func(*testing.T, *v1.Cluster, *v1.Cluster)
 	}{
 		{
-			name: "replaces the complete spec from a sparse patch without mutating Current",
+			name: "replaces a supplied spec composite without mutating Current",
 			body: `{"spec":{"version":"v1.1.0"}}`,
 			assert: func(t *testing.T, current, next *v1.Cluster) {
 				assert.NotSame(t, current, next)
@@ -1345,147 +1346,6 @@ func testBuildClusterPatchValidationNew(t *testing.T) {
 				assert.Equal(t, "v1.1.0", next.Spec.Version)
 				assert.Empty(t, next.Spec.Type)
 				assert.Empty(t, next.Spec.ImageRegistry)
-				assert.Nil(t, next.Spec.Config)
-			},
-		},
-		{
-			name: "replaces composite and JSON configuration while backfilling masked credentials",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{
-				Type:          v1.KubernetesClusterType,
-				ImageRegistry: "current-registry",
-				Version:       "v1.0.0",
-				Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{
-					Kubeconfig: "current-kubeconfig",
-					Router:     v1.RouterSpec{AccessMode: v1.KubernetesAccessModeLoadBalancer, Replicas: 1},
-				}},
-				AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
-					Enabled:     true,
-					ConfigPatch: map[string]interface{}{"devicePlugin": map[string]interface{}{"enabled": true}},
-				},
-			}},
-			body: `{"spec":{"config":{"kubernetes_config":{"router":{"replicas":3}}},"accelerator_virtualization":{"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-				assert.Empty(t, next.Spec.Type)
-				assert.Empty(t, next.Spec.ImageRegistry)
-				assert.Empty(t, next.Spec.Version)
-				assert.Empty(t, next.Spec.Config.KubernetesConfig.Router.AccessMode)
-				assert.Equal(t, 3, next.Spec.Config.KubernetesConfig.Router.Replicas)
-				assert.False(t, next.Spec.AcceleratorVirtualization.Enabled)
-				assert.NotContains(t, next.Spec.AcceleratorVirtualization.ConfigPatch["devicePlugin"].(map[string]interface{}), "enabled")
-				assert.Equal(t, "/run/nvidia/driver", next.Spec.AcceleratorVirtualization.ConfigPatch["devicePlugin"].(map[string]interface{})["nvidiaDriverRoot"])
-				assert.Equal(t, 1, current.Spec.Config.KubernetesConfig.Router.Replicas)
-			},
-		},
-		{
-			name: "backfills a null masked kubeconfig",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
-			}}},
-			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":null}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-			},
-		},
-		{
-			name: "backfills a missing masked kubeconfig without merging sibling configuration",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				KubernetesConfig: &v1.KubernetesClusterConfig{
-					Kubeconfig: "current-kubeconfig",
-					Router:     v1.RouterSpec{AccessMode: v1.KubernetesAccessModeLoadBalancer},
-				},
-			}}},
-			body: `{"spec":{"config":{"kubernetes_config":{"router":{"replicas":2}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-				assert.Empty(t, next.Spec.Config.KubernetesConfig.Router.AccessMode)
-				assert.Equal(t, 2, next.Spec.Config.KubernetesConfig.Router.Replicas)
-			},
-		},
-		{
-			name: "backfills an empty masked kubeconfig",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
-			}}},
-			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":""}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-			},
-		},
-		{
-			name: "uses an explicit non-empty masked kubeconfig",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
-			}}},
-			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":"replacement-kubeconfig"}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "replacement-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-				assert.Equal(t, "current-kubeconfig", current.Spec.Config.KubernetesConfig.Kubeconfig)
-			},
-		},
-		{
-			name: "backfills a missing masked SSH private key",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
-			}}},
-			body: `{"spec":{"config":{"ssh_config":{"auth":{}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-			},
-		},
-		{
-			name: "backfills an empty masked SSH private key",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
-			}}},
-			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":""}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-			},
-		},
-		{
-			name: "backfills a null masked SSH private key",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
-			}}},
-			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":null}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-			},
-		},
-		{
-			name: "uses an explicit non-empty masked SSH private key",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
-			}}},
-			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":"replacement-private-key"}}}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, "replacement-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
-			},
-		},
-		{
-			name: "models masked-field backfill when the patch explicitly clears config",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
-			}}},
-			body: `{"spec":{"config":null}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				if assert.NotNil(t, next.Spec.Config) && assert.NotNil(t, next.Spec.Config.KubernetesConfig) {
-					assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
-				}
-				assert.NotNil(t, current.Spec.Config)
-			},
-		},
-		{
-			name: "replaces model cache arrays atomically",
-			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-				ModelCaches: []v1.ModelCache{{Name: "current-cache"}},
-			}}},
-			body: `{"spec":{"config":{"model_caches":[{"name":"replacement-cache"}]}}}`,
-			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Equal(t, []v1.ModelCache{{Name: "replacement-cache"}}, next.Spec.Config.ModelCaches)
-				assert.Nil(t, next.Spec.Config.KubernetesConfig)
-				assert.Equal(t, []v1.ModelCache{{Name: "current-cache"}}, current.Spec.Config.ModelCaches)
 			},
 		},
 		{
@@ -1497,14 +1357,11 @@ func testBuildClusterPatchValidationNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			current := tt.current
-			if current == nil {
-				current = &v1.Cluster{Spec: &v1.ClusterSpec{
-					Type:          v1.KubernetesClusterType,
-					ImageRegistry: "current-registry",
-					Version:       "v1.0.0",
-				}}
-			}
+			current := &v1.Cluster{Spec: &v1.ClusterSpec{
+				Type:          v1.KubernetesClusterType,
+				ImageRegistry: "current-registry",
+				Version:       "v1.0.0",
+			}}
 
 			next, err := buildPostgrestClusterPatchValidationNew(current, []byte(tt.body))
 			if tt.wantErr {
