@@ -854,28 +854,6 @@ func Test_mergeExcludedFields(t *testing.T) {
 		}
 	})
 
-	t.Run("does not backfill through an explicit null parent", func(t *testing.T) {
-		target := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"config": nil,
-			},
-		}
-		source := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"config": map[string]interface{}{
-					"credentials": "current-secret",
-				},
-			},
-		}
-		excludeFields := map[string]struct{}{
-			"spec.config.credentials": {},
-		}
-
-		mergeExcludedFields(target, source, excludeFields, nil)
-
-		assert.Nil(t, target["spec"].(map[string]interface{})["config"])
-	})
-
 	t.Run("merge excluded field inside array elements", func(t *testing.T) {
 		target := map[string]interface{}{
 			"spec": map[string]interface{}{

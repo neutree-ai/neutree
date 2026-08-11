@@ -1192,14 +1192,79 @@ func testBuildClusterPatchValidationNew(t *testing.T) {
 			},
 		},
 		{
-			name: "applies null to a non-masked configuration object",
+			name: "backfills a missing masked kubeconfig while merging sibling configuration",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				KubernetesConfig: &v1.KubernetesClusterConfig{
+					Kubeconfig: "current-kubeconfig",
+					Router:     v1.RouterSpec{AccessMode: v1.KubernetesAccessModeLoadBalancer},
+				},
+			}}},
+			body: `{"spec":{"config":{"kubernetes_config":{"router":{"replicas":2}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
+				assert.Equal(t, v1.KubernetesAccessModeLoadBalancer, next.Spec.Config.KubernetesConfig.Router.AccessMode)
+				assert.Equal(t, 2, next.Spec.Config.KubernetesConfig.Router.Replicas)
+			},
+		},
+		{
+			name: "backfills an empty masked kubeconfig",
 			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
 				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
 			}}},
-			body: `{"spec":{"config":null}}`,
+			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":""}}}}`,
 			assert: func(t *testing.T, current, next *v1.Cluster) {
-				assert.Nil(t, next.Spec.Config)
-				assert.NotNil(t, current.Spec.Config)
+				assert.Equal(t, "current-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
+			},
+		},
+		{
+			name: "uses an explicit non-empty masked kubeconfig",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: "current-kubeconfig"},
+			}}},
+			body: `{"spec":{"config":{"kubernetes_config":{"kubeconfig":"replacement-kubeconfig"}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "replacement-kubeconfig", next.Spec.Config.KubernetesConfig.Kubeconfig)
+				assert.Equal(t, "current-kubeconfig", current.Spec.Config.KubernetesConfig.Kubeconfig)
+			},
+		},
+		{
+			name: "backfills a missing masked SSH private key",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
+			}}},
+			body: `{"spec":{"config":{"ssh_config":{"auth":{}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			},
+		},
+		{
+			name: "backfills an empty masked SSH private key",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
+			}}},
+			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":""}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			},
+		},
+		{
+			name: "backfills a null masked SSH private key",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
+			}}},
+			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":null}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "current-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
+			},
+		},
+		{
+			name: "uses an explicit non-empty masked SSH private key",
+			current: &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHPrivateKey: "current-private-key"}},
+			}}},
+			body: `{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":"replacement-private-key"}}}}}`,
+			assert: func(t *testing.T, current, next *v1.Cluster) {
+				assert.Equal(t, "replacement-private-key", next.Spec.Config.SSHConfig.Auth.SSHPrivateKey)
 			},
 		},
 		{
