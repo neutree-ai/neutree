@@ -73,7 +73,7 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 
 		input, validationErr := readClusterValidationInput(c)
 		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -92,14 +92,14 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
 		}
 
 		if validationErr := validateClusterVersionInput(input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -107,14 +107,14 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 
 		if input.Operation == clusterValidationPatch {
 			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
+				c.JSON(validationErrStatus(validationErr), validationErr)
 				c.Abort()
 
 				return
 			}
 
 			if validationErr := validateClusterConfigurationUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
+				c.JSON(validationErrStatus(validationErr), validationErr)
 				c.Abort()
 
 				return
@@ -122,7 +122,7 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -204,12 +204,17 @@ func prepareClusterValidationInput(
 
 	filters := clusterPatchUpdateFilters(input.Patch, input.QueryParams)
 	if len(filters) == 0 {
-		return clusterPatchValidationIdentityError(input)
+		return clusterPatchValidationResolutionError(
+			errors.New("cluster identity is required when patching a cluster"))
 	}
 
 	current, err := resolveClusterForPatchUpdate(s, filters)
 	if err != nil {
-		return clusterPatchValidationPreparationError(input, err)
+		if errors.Is(err, errClusterStorageUnavailable) {
+			return internalServerValidationError()
+		}
+
+		return clusterPatchValidationResolutionError(err)
 	}
 
 	newCluster, err := buildPostgrestClusterPatchValidationNew(current, input.Body)
@@ -221,74 +226,6 @@ func prepareClusterValidationInput(
 	input.New = newCluster
 
 	return nil
-}
-
-func clusterPatchValidationPreparationError(
-	input *ValidationInput[v1.Cluster], err error,
-) *validationError {
-	hasVersion, versionErr := clusterPatchDesiredVersionPayload(input.RawPayload)
-	if versionErr != nil {
-		return invalidClusterPayloadError(versionErr)
-	}
-
-	if hasVersion {
-		return clusterVersionUpdateResolutionError(err)
-	}
-
-	configurationUpdate, configurationErr := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
-	if configurationErr != nil {
-		return invalidClusterPayloadError(configurationErr)
-	}
-
-	if configurationUpdate.hasChanges() {
-		return clusterConfigurationUpdateResolutionError(err)
-	}
-
-	acceleratorVirtualizationMayDisable, acceleratorErr := clusterAcceleratorVirtualizationMayDisablePayload(input.RawPayload)
-	if acceleratorErr != nil {
-		return invalidClusterPayloadError(acceleratorErr)
-	}
-
-	if acceleratorVirtualizationMayDisable {
-		return clusterAcceleratorVirtualizationResolutionError(err)
-	}
-
-	return clusterPatchValidationResolutionError(err)
-}
-
-func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *validationError {
-	hasVersion, versionErr := clusterPatchDesiredVersionPayload(input.RawPayload)
-	if versionErr != nil {
-		return invalidClusterPayloadError(versionErr)
-	}
-
-	if hasVersion {
-		return clusterVersionUpdateResolutionError(
-			errors.New("cluster identity is required when updating spec.version"))
-	}
-
-	configurationUpdate, configurationErr := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
-	if configurationErr != nil {
-		return invalidClusterPayloadError(configurationErr)
-	}
-
-	if configurationUpdate.hasChanges() {
-		return clusterConfigurationUpdateResolutionError(
-			errors.New("cluster identity is required when updating cluster configuration"))
-	}
-
-	acceleratorVirtualizationMayDisable, acceleratorErr := clusterAcceleratorVirtualizationMayDisablePayload(input.RawPayload)
-	if acceleratorErr != nil {
-		return invalidClusterPayloadError(acceleratorErr)
-	}
-
-	if acceleratorVirtualizationMayDisable {
-		return clusterAcceleratorVirtualizationResolutionError(
-			errors.New("cluster identity is required when disabling accelerator virtualization"))
-	}
-
-	return clusterPatchValidationResolutionError(
-		errors.New("cluster identity is required when patching a cluster"))
 }
 
 // buildPostgrestClusterPatchValidationNew constructs the Cluster state that
@@ -373,151 +310,6 @@ func writeClusterDeletionError(c *gin.Context, err error) {
 		"hint":    deletionErr.Hint,
 	})
 	c.Abort()
-}
-
-func validateClusterAcceleratorVirtualization(s storage.Storage) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
-			c.Next()
-			return
-		}
-
-		input, validationErr := readClusterValidationInput(c)
-		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
-			c.Abort()
-
-			return
-		}
-
-		if input.Operation == clusterValidationSoftDelete {
-			c.Next()
-
-			return
-		}
-
-		if input.Operation == clusterValidationPatch {
-			if _, updatesSpec := input.RawPayload["spec"]; !updatesSpec {
-				c.Next()
-
-				return
-			}
-		}
-
-		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
-			c.Abort()
-
-			return
-		}
-
-		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
-			c.Abort()
-
-			return
-		}
-
-		c.Next()
-	}
-}
-
-func validateClusterVersionUpdate(s storage.Storage) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPatch {
-			c.Next()
-			return
-		}
-
-		input, validationErr := readClusterValidationInput(c)
-		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
-			c.Abort()
-
-			return
-		}
-
-		if input.Operation != clusterValidationSoftDelete {
-			hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
-				c.Abort()
-
-				return
-			}
-
-			if !hasVersion {
-				c.Next()
-
-				return
-			}
-
-			if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
-				c.Abort()
-
-				return
-			}
-
-			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
-				c.Abort()
-
-				return
-			}
-		}
-
-		c.Next()
-	}
-}
-
-func validateClusterConfigurationUpdate(s storage.Storage) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPatch {
-			c.Next()
-			return
-		}
-
-		input, validationErr := readClusterValidationInput(c)
-		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
-			c.Abort()
-
-			return
-		}
-
-		if input.Operation != clusterValidationSoftDelete {
-			configurationUpdate, err := parseClusterPatchConfigurationUpdatePayload(input.RawPayload)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, invalidClusterPayloadError(err))
-				c.Abort()
-
-				return
-			}
-
-			if !configurationUpdate.hasChanges() {
-				c.Next()
-
-				return
-			}
-
-			if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
-				c.Abort()
-
-				return
-			}
-
-			if validationErr := validateClusterConfigurationUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
-				c.Abort()
-
-				return
-			}
-		}
-
-		c.Next()
-	}
 }
 
 func clusterPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error) {
@@ -761,17 +553,12 @@ func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validation
 }
 
 func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
-	hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
-	if err != nil {
-		return invalidClusterPayloadError(err)
-	}
-
-	if !hasVersion {
-		return nil
-	}
-
 	if input.Current == nil || input.New == nil {
 		return clusterPatchValidationResolutionError(errors.New("cluster validation objects are required"))
+	}
+
+	if input.New.GetVersion() == input.Current.GetVersion() {
+		return nil
 	}
 
 	if err := validateClusterVersionNotDowngrade(input.Current, input.New.GetVersion()); err != nil {
@@ -802,30 +589,6 @@ func validateClusterConfigurationUpdateInput(input *ValidationInput[v1.Cluster])
 	return nil
 }
 
-func clusterPatchDesiredVersionPayload(payload map[string]json.RawMessage) (bool, error) {
-	specRaw, ok := payload["spec"]
-	if !ok {
-		return false, nil
-	}
-
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return false, err
-	}
-
-	versionRaw, ok := spec["version"]
-	if !ok {
-		return false, nil
-	}
-
-	var version string
-	if err := json.Unmarshal(versionRaw, &version); err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
 func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) []storage.Filter {
 	filters := queryParamsToFilters(queryParams)
 	if len(filters) == 0 && patch.Metadata != nil && patch.Metadata.Workspace != "" && patch.Metadata.Name != "" {
@@ -838,10 +601,15 @@ func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) []stora
 	return filters
 }
 
+// errClusterStorageUnavailable marks storage-layer failures (e.g. a database
+// outage) so they surface as internal server error responses instead of
+// client validation errors.
+var errClusterStorageUnavailable = errors.New("cluster storage unavailable")
+
 func resolveClusterForPatchUpdate(s storage.Storage, filters []storage.Filter) (*v1.Cluster, error) {
 	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errClusterStorageUnavailable, err)
 	}
 
 	if len(clusters) != 1 {
@@ -876,22 +644,6 @@ func clusterPatchValidationResolutionError(err error) *validationError {
 	return &validationError{
 		Code:    "10209",
 		Message: "failed to prepare cluster patch validation",
-		Hint:    err.Error(),
-	}
-}
-
-func clusterVersionUpdateResolutionError(err error) *validationError {
-	return &validationError{
-		Code:    "10212",
-		Message: "failed to validate cluster version update",
-		Hint:    err.Error(),
-	}
-}
-
-func clusterConfigurationUpdateResolutionError(err error) *validationError {
-	return &validationError{
-		Code:    "10209",
-		Message: "failed to validate cluster configuration update",
 		Hint:    err.Error(),
 	}
 }
@@ -951,42 +703,6 @@ func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
 	return baseline, nil
 }
 
-// clusterAcceleratorVirtualizationMayDisablePayload preserves the legacy error
-// contract when Current/New cannot be built because the PATCH target is unknown.
-func clusterAcceleratorVirtualizationMayDisablePayload(payload map[string]json.RawMessage) (bool, error) {
-	specRaw, ok := payload["spec"]
-	if !ok {
-		return false, nil
-	}
-
-	var spec map[string]json.RawMessage
-	if err := json.Unmarshal(specRaw, &spec); err != nil {
-		return false, err
-	}
-
-	acceleratorVirtualizationRaw, ok := spec["accelerator_virtualization"]
-	if !ok {
-		return false, nil
-	}
-
-	var acceleratorVirtualization map[string]json.RawMessage
-	if err := json.Unmarshal(acceleratorVirtualizationRaw, &acceleratorVirtualization); err != nil {
-		return false, err
-	}
-
-	enabledRaw, ok := acceleratorVirtualization["enabled"]
-	if !ok {
-		return true, nil
-	}
-
-	var enabled bool
-	if err := json.Unmarshal(enabledRaw, &enabled); err != nil {
-		return false, err
-	}
-
-	return !enabled, nil
-}
-
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
 	return []storage.Filter{
 		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
@@ -1015,11 +731,7 @@ func validateClusterAcceleratorVirtualizationDisableForIdentity(
 ) *validationError {
 	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
 	if err != nil {
-		return &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    err.Error(),
-		}
+		return internalServerValidationError()
 	}
 
 	vGPUEndpointCount := 0
@@ -1069,14 +781,6 @@ func validateClusterAcceleratorVirtualizationDisableForCurrent(
 
 	return validateClusterAcceleratorVirtualizationDisableForIdentity(
 		s, current.Metadata.Workspace, current.Metadata.Name)
-}
-
-func clusterAcceleratorVirtualizationResolutionError(err error) *validationError {
-	return &validationError{
-		Code:    "10209",
-		Message: "failed to validate cluster accelerator virtualization",
-		Hint:    err.Error(),
-	}
 }
 
 func resolveClusterIdentityForAcceleratorVirtualizationDisable(
@@ -1168,21 +872,6 @@ func validateClusterAcceleratorVirtualizationInput(
 	}
 
 	return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
-}
-
-func validateClusterAcceleratorVirtualizationBody(body []byte) *validationError {
-	var cluster v1.Cluster
-	decoder := json.NewDecoder(bytes.NewReader(body))
-
-	if err := decoder.Decode(&cluster); err != nil {
-		return invalidClusterPayloadError(err)
-	}
-
-	if cluster.GetDeletionTimestamp() != "" {
-		return nil
-	}
-
-	return validateClusterAcceleratorVirtualizationCluster(cluster)
 }
 
 func validateClusterAcceleratorVirtualizationCluster(cluster v1.Cluster) *validationError {

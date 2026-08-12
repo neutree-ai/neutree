@@ -222,21 +222,11 @@ func validateEndpointPatchVGPU(store storage.Storage, input *endpointValidationI
 }
 
 func validateEndpointClusterImmutable(input *endpointValidationInput) *validationError {
-	if !endpointPatchIncludesSpec(input.RawPayload) {
-		return nil
-	}
-
 	if endpointClusterChanged(input.Current, input.New) {
 		return endpointClusterImmutableError()
 	}
 
 	return nil
-}
-
-func endpointPatchIncludesSpec(payload map[string]json.RawMessage) bool {
-	_, ok := payload["spec"]
-
-	return ok
 }
 
 func endpointClusterChanged(existing *v1.Endpoint, patch *v1.Endpoint) bool {
@@ -264,6 +254,11 @@ func parseEndpointBody(body []byte) (*v1.Endpoint, *validationError) {
 // it forwards a PATCH: supplied top-level columns replace their current
 // values. A supplied spec therefore replaces the complete PostgreSQL
 // composite rather than recursively merging its attributes.
+//
+// Masked-column backfill only runs when the resource declares api:"-" masked
+// fields (mirroring the proxy's len(excludeFields) > 0 guard). Endpoints have
+// no masked fields; running the merge anyway would inject empty skeleton maps
+// for every omitted sibling key and replace the current values with them.
 func buildPostgrestEndpointPatchValidationNew(current *v1.Endpoint, body []byte) (*v1.Endpoint, error) {
 	if current == nil {
 		return nil, errors.New("current endpoint is required")
@@ -297,7 +292,9 @@ func buildPostgrestEndpointPatchValidationNew(current *v1.Endpoint, body []byte)
 	}
 
 	tagConfig := extractStructTagConfig(reflect.TypeOf(v1.Endpoint{}))
-	mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
+	if len(tagConfig.excludeFields) > 0 {
+		mergeExcludedFields(patchPayload, currentPayload, tagConfig.excludeFields, tagConfig.arrayMergeKeys)
+	}
 
 	for field, value := range patchPayload {
 		currentPayload[field] = value
@@ -360,7 +357,7 @@ func resolveEndpointPatch(
 	queryParams url.Values,
 ) (*v1.Endpoint, *validationError) {
 	if store == nil {
-		return nil, endpointPatchLookupError("storage is required to resolve endpoint PATCH target")
+		return nil, internalServerValidationError()
 	}
 
 	filters := queryParamsToFilters(queryParams)
@@ -370,7 +367,7 @@ func resolveEndpointPatch(
 
 	endpoints, err := store.ListEndpoint(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, endpointPatchLookupError("failed to look up endpoint for endpoint PATCH")
+		return nil, internalServerValidationError()
 	}
 
 	if len(endpoints) == 0 {
@@ -386,7 +383,7 @@ func resolveEndpointPatch(
 
 func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
 	if store == nil {
-		return nil, endpointVGPULookupError("storage is required to validate endpoint accelerator virtualization")
+		return nil, internalServerValidationError()
 	}
 
 	clusterName := endpoint.Spec.Cluster
@@ -403,7 +400,7 @@ func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*
 		Filters: endpointClusterLookupFilters(clusterName, workspace),
 	})
 	if err != nil {
-		return nil, endpointVGPULookupError("failed to look up cluster for endpoint accelerator virtualization")
+		return nil, internalServerValidationError()
 	}
 
 	if len(clusters) == 0 {
@@ -679,20 +676,6 @@ func endpointPatchTargetError(hint string) *validationError {
 		Message: "invalid endpoint patch target",
 		Hint:    hint,
 	}
-}
-
-func endpointVGPULookupError(hint string) *validationError {
-	err := endpointVGPUTargetError(hint)
-	err.HTTPStatus = http.StatusServiceUnavailable
-
-	return err
-}
-
-func endpointPatchLookupError(hint string) *validationError {
-	err := endpointPatchTargetError(hint)
-	err.HTTPStatus = http.StatusServiceUnavailable
-
-	return err
 }
 
 func validationErrStatus(err *validationError) int {

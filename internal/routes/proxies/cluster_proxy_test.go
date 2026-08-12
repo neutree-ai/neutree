@@ -685,7 +685,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
-	t.Run("preserves the version resolution error when PATCH has no identity", func(t *testing.T) {
+	t.Run("reports the generic resolution error for a version PATCH without identity", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -703,13 +703,13 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
-		assert.Contains(t, recorder.Body.String(), "failed to validate cluster version update")
-		assert.Contains(t, recorder.Body.String(), "cluster identity is required when updating spec.version")
+		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
+		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when patching a cluster")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("preserves the version resolution error when the current cluster lookup fails", func(t *testing.T) {
+	t.Run("reports storage lookup failure as internal server error when the current cluster lookup fails", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -731,14 +731,14 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10212"`)
-		assert.Contains(t, recorder.Body.String(), "failed to validate cluster version update")
-		assert.Contains(t, recorder.Body.String(), "read cluster failed")
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read cluster failed")
 		mockStorage.AssertExpectations(t)
 	})
 
-	t.Run("preserves the configuration resolution error when PATCH has no identity", func(t *testing.T) {
+	t.Run("reports the generic resolution error for a configuration PATCH without identity", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -757,8 +757,8 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "failed to validate cluster configuration update")
-		assert.Contains(t, recorder.Body.String(), "cluster identity is required when updating cluster configuration")
+		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when patching a cluster")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
@@ -784,7 +784,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("preserves the accelerator virtualization identity error when PATCH has no identity", func(t *testing.T) {
+	t.Run("reports the generic resolution error for an accelerator virtualization PATCH without identity", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
@@ -801,8 +801,8 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "failed to validate cluster accelerator virtualization")
-		assert.Contains(t, recorder.Body.String(), "cluster identity is required when disabling accelerator virtualization")
+		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
+		assert.Contains(t, recorder.Body.String(), "cluster identity is required when patching a cluster")
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
@@ -828,7 +828,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("preserves the accelerator virtualization resolution error when the current cluster lookup fails", func(t *testing.T) {
+	t.Run("reports storage lookup failure as internal server error when the current cluster lookup fails for an accelerator virtualization PATCH", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -848,10 +848,10 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		}`)))
 
 		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "failed to validate cluster accelerator virtualization")
-		assert.Contains(t, recorder.Body.String(), "read cluster failed")
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read cluster failed")
 		mockStorage.AssertExpectations(t)
 	})
 
@@ -870,7 +870,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"image_registry": "replacement-registry"}
+			"spec": {"version": "v1.1.0", "image_registry": "replacement-registry"}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -975,10 +975,12 @@ func testValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T)
 
 func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		wantCode    string
-		wantMessage string
+		name           string
+		method         string
+		body           string
+		wantCode       string
+		wantMessage    string
+		countEndpoints bool
 	}{
 		{
 			name: "allows Kubernetes cluster to enable accelerator virtualization",
@@ -997,19 +999,19 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		{
 			name:        "rejects Kubernetes cluster missing version enabling accelerator virtualization",
 			body:        `{"spec":{"type":"kubernetes","accelerator_virtualization":{"enabled":true}}}`,
-			wantCode:    "10208",
-			wantMessage: "requires cluster version >= v1.1.0",
+			wantCode:    "10209",
+			wantMessage: "spec.version is required",
 		},
 		{
 			name:        "rejects invalid cluster version enabling accelerator virtualization",
 			body:        `{"spec":{"type":"kubernetes","version":"nightly","accelerator_virtualization":{"enabled":true}}}`,
-			wantCode:    "10209",
+			wantCode:    "10212",
 			wantMessage: "invalid cluster version",
 		},
 		{
 			name:     "rejects SSH cluster enabling accelerator virtualization",
 			body:     `{"spec":{"type":"ssh","accelerator_virtualization":{"enabled":true}}}`,
-			wantCode: "10208",
+			wantCode: "10209",
 		},
 		{
 			name:        "rejects non-bool enabled",
@@ -1024,8 +1026,10 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 			wantMessage: "invalid cluster payload",
 		},
 		{
-			name: "skips accelerator virtualization validation for soft delete patch",
-			body: `{"metadata":{"name":"cluster","workspace":"default","deletion_timestamp":"2026-06-10T00:00:00Z"},"spec":{"type":"ssh","accelerator_virtualization":{"enabled":true}}}`,
+			name:           "skips accelerator virtualization validation for soft delete patch",
+			method:         http.MethodPatch,
+			body:           `{"metadata":{"name":"cluster","workspace":"default","deletion_timestamp":"2026-06-10T00:00:00Z"},"spec":{"type":"ssh","accelerator_virtualization":{"enabled":true}}}`,
+			countEndpoints: true,
 		},
 		{
 			name:        "rejects unsupported config patch key",
@@ -1042,32 +1046,55 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		{
 			name:        "rejects partial patch missing cluster type and version",
 			body:        `{"metadata":{"name":"cluster","workspace":"default"},"spec":{"accelerator_virtualization":{"enabled":true}}}`,
-			wantCode:    "10208",
-			wantMessage: "only supported for Kubernetes",
+			wantCode:    "10209",
+			wantMessage: "spec.version is required",
 		},
 		{
 			name:        "rejects partial patch missing cluster version",
 			body:        `{"metadata":{"name":"cluster","workspace":"default"},"spec":{"type":"kubernetes","accelerator_virtualization":{"enabled":true}}}`,
-			wantCode:    "10208",
-			wantMessage: "requires cluster version >= v1.1.0",
+			wantCode:    "10209",
+			wantMessage: "spec.version is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateClusterAcceleratorVirtualizationBody([]byte(tt.body))
+			method := tt.method
+			if method == "" {
+				method = http.MethodPost
+			}
+
+			mockStorage := storageMocks.NewMockStorage(t)
+			if tt.countEndpoints {
+				mockStorage.On("Count", storage.ENDPOINT_TABLE, mock.Anything).Return(0, nil).Once()
+			}
+
+			proxyCalled := false
+			router := gin.New()
+			router.Handle(method, "/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+				proxyCalled = true
+				c.Status(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(method, "/clusters", strings.NewReader(tt.body))
+			recorder := httptest.NewRecorder()
+
+			router.ServeHTTP(recorder, req)
+
 			if tt.wantCode == "" {
-				assert.Nil(t, err)
+				assert.True(t, proxyCalled)
+				assert.Equal(t, http.StatusNoContent, recorder.Code)
 
 				return
 			}
 
-			if !assert.NotNil(t, err) {
-				return
-			}
-			assert.Equal(t, tt.wantCode, err.Code)
+			var response validationError
+			assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.False(t, proxyCalled)
+			assert.Equal(t, tt.wantCode, response.Code)
 			if tt.wantMessage != "" {
-				assert.Contains(t, err.Message, tt.wantMessage)
+				assert.Contains(t, response.Message, tt.wantMessage)
 			}
 		})
 	}
@@ -1153,12 +1180,12 @@ func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 			wantHint: "does not match patch target",
 		},
 		{
-			name:            "returns validation error when endpoint lookup fails",
+			name:            "returns internal server error when endpoint lookup fails",
 			patch:           cluster("gpu-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
 			endpointErr:     errors.New("database error"),
 			lookupEndpoints: true,
-			wantCode:        "10209",
-			wantHint:        "database error",
+			wantCode:        "500",
+			wantMessage:     "internal server error",
 		},
 		{
 			name:            "rejects clearing accelerator virtualization with null while vGPU endpoint references cluster",
@@ -1403,14 +1430,14 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		body := `{
 			"metadata": {"workspace": "default", "name": "gpu-cluster"},
-			"spec": {"accelerator_virtualization": {"enabled": false}}
+			"spec": {"version": "v1.1.0", "accelerator_virtualization": {"enabled": false}}
 		}`
 		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
 		recorder := httptest.NewRecorder()
@@ -1421,6 +1448,42 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10211"`)
 		assert.Contains(t, recorder.Body.String(), "vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("reports storage lookup failure as internal server error when disabling accelerator virtualization", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			}},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return(nil, errors.New("read endpoints failed")).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{
+			"metadata": {"workspace": "default", "name": "gpu-cluster"},
+			"spec": {"version": "v1.1.0", "accelerator_virtualization": {"enabled": false}}
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read endpoints failed")
 		mockStorage.AssertExpectations(t)
 	})
 
@@ -1443,7 +1506,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		}}}}, nil).Once()
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -1461,14 +1524,18 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 	t.Run("allows non-disable patch to continue to proxy handler", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec:     &v1.ClusterSpec{},
+		}}, nil).Once()
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
-		body := `{"metadata": {"workspace": "default", "name": "gpu-cluster"}}`
+		body := `{"metadata": {"workspace": "default", "name": "gpu-cluster"}, "spec": {"version": "v1.1.0"}}`
 		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
 		recorder := httptest.NewRecorder()
 
@@ -1476,7 +1543,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		assert.True(t, proxyCalled)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+		mockStorage.AssertExpectations(t)
 		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
 	})
 
@@ -1484,7 +1551,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterAcceleratorVirtualization(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -1516,13 +1583,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPost, "/clusters", strings.NewReader(`{
-			"spec": {"config": {"kubernetes_config": {"kubeconfig": []}}}
+			"spec": {"version": "v1.1.0", "config": {"kubernetes_config": null}}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1547,13 +1614,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"image_registry": "replacement-registry"}
+			"spec": {"version": "v1.1.0", "image_registry": "replacement-registry"}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1583,12 +1650,12 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
-		body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
+		body := fmt.Sprintf(`{"spec":{"version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
 			testEncodedKubeconfig("https://api.example.test:6443", "rotated-token"))
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
 		recorder := httptest.NewRecorder()
@@ -1619,12 +1686,12 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 				proxyCalled := false
 				router := gin.New()
-				router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+				router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 					proxyCalled = true
 					c.Status(http.StatusNoContent)
 				})
 
-				body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%s}}}}`, kubeconfig)
+				body := fmt.Sprintf(`{"spec":{"version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":%s}}}}`, kubeconfig)
 				req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
 				recorder := httptest.NewRecorder()
 
@@ -1654,12 +1721,12 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
-		body := fmt.Sprintf(`{"spec":{"config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
+		body := fmt.Sprintf(`{"spec":{"version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":%q}}}}`,
 			testEncodedKubeconfig("https://other-api.example.test:6443", "rotated-token"))
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
 		recorder := httptest.NewRecorder()
@@ -1690,13 +1757,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": null}
+			"spec": {"version": "v1.1.0", "config": null}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1726,13 +1793,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"kubernetes_config": null}}
+			"spec": {"version": "v1.1.0", "config": {"kubernetes_config": null}}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1762,12 +1829,12 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
-		body := fmt.Sprintf(`{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":%q}}}}}`,
+		body := fmt.Sprintf(`{"spec":{"version":"v1.1.0","config":{"ssh_config":{"auth":{"ssh_private_key":%q}}}}}`,
 			base64.StdEncoding.EncodeToString([]byte("rotated-private-key")))
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
 		recorder := httptest.NewRecorder()
@@ -1793,12 +1860,12 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 				proxyCalled := false
 				router := gin.New()
-				router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+				router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 					proxyCalled = true
 					c.Status(http.StatusNoContent)
 				})
 
-				body := fmt.Sprintf(`{"spec":{"config":{"ssh_config":{"auth":{"ssh_private_key":%s}}}}}`, sshPrivateKey)
+				body := fmt.Sprintf(`{"spec":{"version":"v1.1.0","config":{"ssh_config":{"auth":{"ssh_private_key":%s}}}}}`, sshPrivateKey)
 				req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(body))
 				recorder := httptest.NewRecorder()
 
@@ -1823,13 +1890,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"ssh_config": {"auth": {"ssh_private_key": "invalid-base64"}}}}
+			"spec": {"version": "v1.1.0", "config": {"ssh_config": {"auth": {"ssh_private_key": "invalid-base64"}}}}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1859,13 +1926,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"ssh_config": {"auth": null}}}
+			"spec": {"version": "v1.1.0", "config": {"ssh_config": {"auth": null}}}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1895,13 +1962,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"ssh_config": null}}
+			"spec": {"version": "v1.1.0", "config": {"ssh_config": null}}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1926,13 +1993,13 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"image_registry": "replacement-registry"}
+			"spec": {"version": "v1.1.0", "image_registry": "replacement-registry"}
 		}`))
 		recorder := httptest.NewRecorder()
 
@@ -1947,7 +2014,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -1967,10 +2034,18 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 	t.Run("restores request body and content length", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
-		body := `{"metadata":{"name":"cluster"}}`
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
+			Spec:     &v1.ClusterSpec{},
+		}}, nil).Once()
+
+		body := `{"metadata":{"name":"cluster"},"spec":{"version":"v1.1.0"}}`
 		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterConfigurationUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			restoredBody, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
 			assert.Equal(t, body, string(restoredBody))
@@ -1989,7 +2064,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		assert.True(t, originalBody.closed)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+		mockStorage.AssertExpectations(t)
 	})
 }
 
@@ -2001,40 +2076,14 @@ func TestValidateClusterVersion(t *testing.T) {
 func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("skips version validation for a configuration-only patch", func(t *testing.T) {
+	t.Run("rejects malformed configuration before any storage lookup", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"spec": {"config": {"kubernetes_config": {"kubeconfig": "updated-kubeconfig"}}}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-	})
-
-	t.Run("rejects malformed configuration before resolving version update", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH(
-			"/clusters",
-			validateClusterVersionUpdate(mockStorage),
-			validateClusterConfigurationUpdate(mockStorage),
-			func(c *gin.Context) {
-				proxyCalled = true
-				c.Status(http.StatusNoContent)
-			},
-		)
 
 		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
 			"spec": {
@@ -2064,7 +2113,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2094,7 +2143,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2122,7 +2171,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2140,33 +2189,20 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		mockStorage.AssertExpectations(t)
 	})
 
-	t.Run("skips storage lookup when patch does not update version", func(t *testing.T) {
-		mockStorage := storageMocks.NewMockStorage(t)
-		proxyCalled := false
-		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
-			proxyCalled = true
-			c.Status(http.StatusNoContent)
-		})
-
-		req := httptest.NewRequest(http.MethodPatch, "/clusters?id=eq.1", strings.NewReader(`{
-			"metadata": {"name": "cluster"}
-		}`))
-		recorder := httptest.NewRecorder()
-
-		router.ServeHTTP(recorder, req)
-
-		assert.True(t, proxyCalled)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
-	})
-
 	t.Run("restores request body and content length", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
-		body := `{"metadata":{"name":"cluster"}}`
+		query := url.Values{"id": []string{"eq.1"}}
+		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
+			return sameFilters(opt.Filters, queryParamsToFilters(query))
+		})).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
+			Spec:     &v1.ClusterSpec{},
+		}}, nil).Once()
+
+		body := `{"metadata":{"name":"cluster"},"spec":{"version":"v1.1.0"}}`
 		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterVersionUpdate(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
 			restoredBody, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
 			assert.Equal(t, body, string(restoredBody))
@@ -2185,7 +2221,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		assert.True(t, originalBody.closed)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
+		mockStorage.AssertExpectations(t)
 	})
 }
 
