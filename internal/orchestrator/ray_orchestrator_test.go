@@ -21,6 +21,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -32,13 +33,13 @@ func stringPtr(v string) *string { return &v }
 // custom resources instead of Ray's built-in num_gpus field.
 type customRayResourceConverter struct{}
 
-func (customRayResourceConverter) ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+func (customRayResourceConverter) ConvertToRay(accelerator.ConvertInput) (*v1.RayResourceSpec, error) {
 	return &v1.RayResourceSpec{
 		Resources: map[string]float64{"custom_accelerator": 2},
 	}, nil
 }
 
-func (customRayResourceConverter) ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+func (customRayResourceConverter) ConvertToKubernetes(accelerator.ConvertInput) (*v1.KubernetesResourceSpec, error) {
 	return &v1.KubernetesResourceSpec{}, nil
 }
 

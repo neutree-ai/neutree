@@ -38,9 +38,20 @@ type StaticNodeRuntimeConfigResolver interface {
 	GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, bool, error)
 }
 
+// ConvertInput carries the context a resource converter needs to translate an
+// endpoint's resource spec into Ray or Kubernetes resource terms. The Spec is
+// the endpoint's resource request; the Cluster and Endpoint objects provide
+// accelerator virtualization context (for example the cluster's effective
+// virtualization mode) that a converter may branch on.
+type ConvertInput struct {
+	Cluster  *v1.Cluster
+	Endpoint *v1.Endpoint
+	Spec     *v1.ResourceSpec
+}
+
 type ResourceConverter interface {
-	ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error)
-	ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error)
+	ConvertToRay(ConvertInput) (*v1.RayResourceSpec, error)
+	ConvertToKubernetes(ConvertInput) (*v1.KubernetesResourceSpec, error)
 }
 
 type ResourceParser interface {

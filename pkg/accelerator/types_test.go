@@ -45,10 +45,10 @@ func (contractPlugin) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNode
 }
 func (p contractPlugin) GetResourceConverter() ResourceConverter { return p }
 func (p contractPlugin) GetResourceParser() ResourceParser       { return p }
-func (contractPlugin) ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+func (contractPlugin) ConvertToRay(ConvertInput) (*v1.RayResourceSpec, error) {
 	return nil, nil
 }
-func (contractPlugin) ConvertToKubernetes(*v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+func (contractPlugin) ConvertToKubernetes(ConvertInput) (*v1.KubernetesResourceSpec, error) {
 	return nil, nil
 }
 func (contractPlugin) ParseFromRay(map[string]float64) (*v1.ResourceInfo, error) {

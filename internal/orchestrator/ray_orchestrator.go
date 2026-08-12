@@ -20,6 +20,7 @@ import (
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
+	accpkg "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -877,7 +878,11 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		}
 	}
 
-	rayResource, err := convertToRay(acceleratorMgr, endpoint.Spec.Resources)
+	rayResource, err := convertToRay(acceleratorMgr, accpkg.ConvertInput{
+		Cluster:  deployedCluster,
+		Endpoint: endpoint,
+		Spec:     endpoint.Spec.Resources,
+	})
 	if err != nil {
 		klog.Errorf("Failed to convert endpoint %s resources to Ray format: %v", endpoint.Metadata.WorkspaceName(), err)
 		return dashboard.RayServeApplication{}, err

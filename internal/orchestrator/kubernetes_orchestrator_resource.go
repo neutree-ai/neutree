@@ -17,6 +17,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type DeploymentManifestVariables struct {
@@ -288,8 +289,12 @@ func escapeForYAMLDoubleQuote(s string) string {
 }
 
 // setResourceVariables sets resource specifications and node selector
-func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) error {
-	resourceSpec, err := convertToKubernetes(k.acceleratorMgr, endpoint.Spec.Resources)
+func (k *kubernetesOrchestrator) setResourceVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint, deployedCluster *v1.Cluster) error {
+	resourceSpec, err := convertToKubernetes(k.acceleratorMgr, accelerator.ConvertInput{
+		Cluster:  deployedCluster,
+		Endpoint: endpoint,
+		Spec:     endpoint.Spec.Resources,
+	})
 	if err != nil {
 		return errors.Wrapf(err, "failed to convert resources for endpoint %s", endpoint.Metadata.Name)
 	}
@@ -467,7 +472,7 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.setEngineArgs(&data, endpoint, engine)
 
 	// Set resource variables
-	if err := k.setResourceVariables(&data, endpoint); err != nil {
+	if err := k.setResourceVariables(&data, endpoint, deployedCluster); err != nil {
 		return DeploymentManifestVariables{}, err
 	}
 
