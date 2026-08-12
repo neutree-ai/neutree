@@ -422,6 +422,6 @@ BEGIN
     GROUP BY p.id
     ORDER BY p.is_default DESC, p.created_at ASC, p.name ASC;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 ALTER TABLE api.projects FORCE ROW LEVEL SECURITY;
