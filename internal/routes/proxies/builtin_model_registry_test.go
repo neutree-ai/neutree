@@ -37,6 +37,15 @@ func builtinRegistryRow(builtin bool) v1.ModelRegistry {
 	}
 }
 
+func builtinModelScopeRegistryRow() v1.ModelRegistry {
+	row := builtinRegistryRow(true)
+	row.Metadata.Name = "public-model-scope"
+	row.Spec.Type = v1.ModelScopeModelRegistryType
+	row.Spec.Url = "https://www.modelscope.cn"
+
+	return row
+}
+
 // runGuard drives the middleware over one PATCH body and reports whether the
 // request was allowed through.
 func runGuard(t *testing.T, storage *storagemocks.MockStorage, body map[string]interface{},
@@ -124,6 +133,88 @@ func TestBuiltinModelRegistryGuard_RefusesAddressChange(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "hugging-face-endpoint")
 	// Refused for everyone, so it is not a permission question and none is asked.
 	storage.AssertNotCalled(t, "CallDatabaseFunction", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// The refusal has to name the setting that governs the registry in front of the
+// operator. Each hub has its own, so a single hard-coded flag would send anyone
+// with a ModelScope registry to edit a value that has no effect on it.
+func TestBuiltinModelRegistryGuard_AddressRefusalNamesThisRegistrysSetting(t *testing.T) {
+	tests := []struct {
+		name     string
+		row      v1.ModelRegistry
+		wantFlag string
+	}{
+		{"hugging face", builtinRegistryRow(true), "--hugging-face-endpoint"},
+		{"model scope", builtinModelScopeRegistryRow(), "--model-scope-endpoint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := &storagemocks.MockStorage{}
+			storage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{tt.row}, nil)
+
+			w, passed := runGuard(t, storage, patchBody(map[string]interface{}{
+				"url": "https://mirror.example",
+			}, ""), "admin")
+
+			assert.False(t, passed)
+			assert.Contains(t, w.Body.String(), tt.wantFlag)
+		})
+	}
+}
+
+// The guard keys on the built-in annotation, not on the registry kind, so it
+// covers a provisioned ModelScope registry exactly as it covers the Hugging Face
+// one. Asserted rather than assumed: a second built-in kind was added in this
+// change, and "it is annotation-driven" is a claim about code that nothing was
+// checking.
+func TestBuiltinModelRegistryGuard_CoversEveryBuiltinKind(t *testing.T) {
+	refusals := []struct {
+		name string
+		body map[string]interface{}
+		want string
+	}{
+		{"delete", patchBody(nil, "2026-08-12T00:00:00Z"), "cannot be deleted"},
+		{"type change", patchBody(map[string]interface{}{
+			"type": string(v1.BentoMLModelRegistryType),
+		}, ""), "type cannot be changed"},
+		{"address change", patchBody(map[string]interface{}{
+			"url": "https://mirror.example",
+		}, ""), "deployment's configuration"},
+	}
+
+	for _, refusal := range refusals {
+		t.Run(refusal.name, func(t *testing.T) {
+			storage := &storagemocks.MockStorage{}
+			storage.On("ListModelRegistry", mock.Anything).
+				Return([]v1.ModelRegistry{builtinModelScopeRegistryRow()}, nil)
+
+			w, passed := runGuard(t, storage, refusal.body, "admin")
+
+			assert.False(t, passed)
+			assert.Contains(t, w.Body.String(), refusal.want)
+		})
+	}
+}
+
+// Removing the marker from a provisioned ModelScope registry is refused the same
+// way it is for the Hugging Face one: the annotation is an identity, and it is
+// not self-service in either direction.
+func TestBuiltinModelRegistryGuard_ModelScopeAnnotationIsNotSelfService(t *testing.T) {
+	storage := &storagemocks.MockStorage{}
+	storage.On("ListModelRegistry", mock.Anything).
+		Return([]v1.ModelRegistry{builtinModelScopeRegistryRow()}, nil)
+
+	w, passed := runGuard(t, storage, map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"workspace":   "default",
+			"name":        "public-model-scope",
+			"annotations": map[string]interface{}{},
+		},
+	}, "admin")
+
+	assert.False(t, passed)
+	assert.Contains(t, w.Body.String(), v1.BuiltinAnnotationKey)
 }
 
 // Credentials are the user's, so they stay editable — by someone trusted with

@@ -35,6 +35,7 @@ type neutreeCoreInstallOptions struct {
 	// registry it can never reach.
 	enablePublicModelRegistries bool
 	huggingFaceEndpoint         string
+	modelScopeEndpoint          string
 }
 
 // defaultVictoriaLogsRetentionPeriod is the default VictoriaLogs log retention
@@ -65,6 +66,7 @@ Configuration Options:
   --victorialogs-retention-period VictoriaLogs log retention period (default: 30d; e.g. 30d, 90d, 1y)
   --enable-public-model-registries Provision built-in read-only public model registries (default: false)
   --hugging-face-endpoint  Address the built-in Hugging Face registry points at, e.g. an in-network mirror
+  --model-scope-endpoint   Address the built-in ModelScope registry points at, e.g. an in-network mirror
 
 Examples:
   # Basic installation
@@ -101,6 +103,9 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.huggingFaceEndpoint, "hugging-face-endpoint",
 		model_registry.DefaultHuggingFaceEndpoint,
 		"address the built-in Hugging Face registry points at, e.g. an in-network mirror")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.modelScopeEndpoint, "model-scope-endpoint",
+		model_registry.DefaultModelScopeEndpoint,
+		"address the built-in ModelScope registry points at, e.g. an in-network mirror")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
@@ -226,6 +231,11 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		huggingFaceEndpoint = model_registry.DefaultHuggingFaceEndpoint
 	}
 
+	modelScopeEndpoint := options.modelScopeEndpoint
+	if modelScopeEndpoint == "" {
+		modelScopeEndpoint = model_registry.DefaultModelScopeEndpoint
+	}
+
 	templateParams := map[string]string{
 		"NeutreeCoreWorkDir":           coreWorkDir,
 		"JwtSecret":                    options.jwtSecret,
@@ -246,6 +256,7 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		"AdminPassword":                options.adminPassword,
 		"BuiltinPublicModelRegistries": builtinPublicModelRegistries,
 		"HuggingFaceEndpoint":          huggingFaceEndpoint,
+		"ModelScopeEndpoint":           modelScopeEndpoint,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

@@ -175,6 +175,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		Builtin: model_registry.BuiltinConfig{
 			Enabled:             o.ModelRegistry.EnableBuiltinPublicRegistries,
 			HuggingFaceEndpoint: o.ModelRegistry.HuggingFaceEndpoint,
+			ModelScopeEndpoint:  o.ModelRegistry.ModelScopeEndpoint,
 		},
 	}
 

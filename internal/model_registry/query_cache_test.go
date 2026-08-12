@@ -295,3 +295,23 @@ func TestQueryCache_TTLIsConfigurable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, client.calls, "an entry past the configured TTL must not be served")
 }
+
+// The cache keys on visibility, not on the registry kind, so a new public hub is
+// supposed to be cached without touching this file. That is a claim, and it is
+// only worth anything if something checks it.
+func TestQueryCache_CachesEveryPublicKind(t *testing.T) {
+	for _, registry := range BuiltinModelRegistries(BuiltinConfig{Enabled: true}, "default") {
+		t.Run(string(registry.Spec.Type), func(t *testing.T) {
+			cache := NewQueryCache(0)
+			client := &countingRegistry{page: onePage("qwen/qwen3")}
+
+			for i := 0; i < 2; i++ {
+				_, meta, err := cache.ListModels(registry, client, ListOption{Search: "qwen", Limit: 2})
+				require.NoError(t, err)
+				assert.Equal(t, i > 0, meta.Cached)
+			}
+
+			assert.Equal(t, 1, client.calls, "the second identical query must not reach the hub")
+		})
+	}
+}

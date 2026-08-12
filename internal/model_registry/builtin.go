@@ -13,6 +13,12 @@ const (
 	// DefaultHuggingFaceEndpoint is the Hub itself, used when the built-in
 	// registry is enabled without naming a mirror.
 	DefaultHuggingFaceEndpoint = "https://huggingface.co"
+	// BuiltinModelScopeRegistryName is the ModelScope counterpart of
+	// BuiltinHuggingFaceRegistryName.
+	BuiltinModelScopeRegistryName = "public-model-scope"
+	// DefaultModelScopeEndpoint is the hub itself, used when the built-in
+	// registry is enabled without naming a mirror.
+	DefaultModelScopeEndpoint = "https://www.modelscope.cn"
 )
 
 // BuiltinConfig says whether this installation offers public model registries,
@@ -24,15 +30,44 @@ type BuiltinConfig struct {
 	// HuggingFaceEndpoint is the Hub address to use — a mirror inside the network,
 	// or the Hub itself. Empty means DefaultHuggingFaceEndpoint.
 	HuggingFaceEndpoint string
+	// ModelScopeEndpoint is the ModelScope address to use. Empty means
+	// DefaultModelScopeEndpoint.
+	ModelScopeEndpoint string
 }
 
 func (c BuiltinConfig) huggingFaceEndpoint() string {
-	endpoint := strings.TrimSpace(c.HuggingFaceEndpoint)
+	return endpointOrDefault(c.HuggingFaceEndpoint, DefaultHuggingFaceEndpoint)
+}
+
+func (c BuiltinConfig) modelScopeEndpoint() string {
+	return endpointOrDefault(c.ModelScopeEndpoint, DefaultModelScopeEndpoint)
+}
+
+func endpointOrDefault(configured, fallback string) string {
+	endpoint := strings.TrimSpace(configured)
 	if endpoint == "" {
-		return DefaultHuggingFaceEndpoint
+		return fallback
 	}
 
 	return strings.TrimSuffix(endpoint, "/")
+}
+
+// EndpointFlagForModelRegistryType names the neutree-core setting that owns the
+// address of a built-in registry of this kind, or "" for a kind that has no
+// built-in form.
+//
+// It exists so that a refusal to edit that address can send the operator to the
+// setting which actually governs the registry in front of them; naming one hub's
+// flag for every hub would send them to edit a value with no effect on it.
+func EndpointFlagForModelRegistryType(registryType v1.ModelRegistryType) string {
+	switch registryType {
+	case v1.HuggingFaceModelRegistryType:
+		return "--hugging-face-endpoint"
+	case v1.ModelScopeModelRegistryType:
+		return "--model-scope-endpoint"
+	default:
+		return ""
+	}
 }
 
 // BuiltinModelRegistries returns the registries this deployment provisions for a
@@ -59,6 +94,19 @@ func BuiltinModelRegistries(config BuiltinConfig, workspace string) []*v1.ModelR
 			Spec: &v1.ModelRegistrySpec{
 				Type: v1.HuggingFaceModelRegistryType,
 				Url:  config.huggingFaceEndpoint(),
+			},
+		},
+		{
+			APIVersion: "v1",
+			Kind:       "ModelRegistry",
+			Metadata: &v1.Metadata{
+				Name:        BuiltinModelScopeRegistryName,
+				Workspace:   workspace,
+				Annotations: v1.WithBuiltinAnnotation(nil),
+			},
+			Spec: &v1.ModelRegistrySpec{
+				Type: v1.ModelScopeModelRegistryType,
+				Url:  config.modelScopeEndpoint(),
 			},
 		},
 	}

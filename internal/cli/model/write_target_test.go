@@ -65,6 +65,7 @@ func TestValidateWritableRegistryDefersWhenItCannotTell(t *testing.T) {
 func TestValidateWritableRegistryRefusesWhateverTheMappingCallsPublic(t *testing.T) {
 	for _, registryType := range []v1.ModelRegistryType{
 		v1.HuggingFaceModelRegistryType,
+		v1.ModelScopeModelRegistryType,
 		v1.BentoMLModelRegistryType,
 		"some-future-kind",
 	} {
@@ -104,4 +105,33 @@ func TestValidateWritableRegistryFallsBackToTheRequestedName(t *testing.T) {
 	require.EqualError(t, err,
 		`cannot push models to model registry "public-hugging-face": `+
 			`it is a hugging-face registry, which neutree reads from but never writes to`)
+}
+
+// NEU-627's whole shape rests on this being true: ModelScope became writable-
+// refusable in the CLI without a line of CLI code, because NEU-625 moved the
+// judgement to v1.VisibilityForModelRegistryType and NEU-627 taught that one
+// mapping about the kind.
+//
+// Asserted on the exact sentence rather than on "an error happened", because
+// the claim is that the CLI names the new kind correctly without knowing it
+// exists — a refusal reading "hugging-face" would mean something is still
+// hard-coded, and a bare require.Error would not catch that.
+func TestValidateWritableRegistryRefusesModelScopeWithNoCLIChange(t *testing.T) {
+	modelScope := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "public-model-scope"},
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.ModelScopeModelRegistryType,
+			Url:  "https://www.modelscope.cn",
+		},
+	}
+
+	require.EqualError(t,
+		ValidateWritableRegistry(modelScope, "public-model-scope", ModelWritePush),
+		`cannot push models to model registry "public-model-scope": `+
+			`it is a model-scope registry, which neutree reads from but never writes to`)
+
+	require.EqualError(t,
+		ValidateWritableRegistry(modelScope, "public-model-scope", ModelWriteDelete),
+		`cannot delete models from model registry "public-model-scope": `+
+			`it is a model-scope registry, which neutree reads from but never writes to`)
 }

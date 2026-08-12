@@ -134,6 +134,8 @@ func new(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	switch registry.Spec.Type {
 	case v1.HuggingFaceModelRegistryType:
 		return newHuggingFace(registry)
+	case v1.ModelScopeModelRegistryType:
+		return newModelScope(registry)
 	case v1.BentoMLModelRegistryType:
 		return newFileBased(registry)
 	default:

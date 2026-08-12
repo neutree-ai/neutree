@@ -429,6 +429,9 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
 		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+	case v1.ModelScopeModelRegistryType:
+		// Removed by NEU-689, which wires the downloader. See the error's own comment.
+		return errModelScopeDeployNotWiredYet
 	}
 
 	return nil

@@ -49,6 +49,7 @@ spec:
             {{- if .Values.publicModelRegistries.enabled }}
             - --enable-builtin-public-model-registries
             - --hugging-face-endpoint={{ .Values.publicModelRegistries.huggingFace.url }}
+            - --model-scope-endpoint={{ .Values.publicModelRegistries.modelScope.url }}
             {{- end }}
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.core.image.registry "repository" .Values.core.image.repository "tag" .Values.core.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}

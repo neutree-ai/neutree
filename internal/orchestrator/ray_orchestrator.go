@@ -965,6 +965,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		modelArgs["version"] = modelRealVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
 		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+	case v1.ModelScopeModelRegistryType:
+		// Removed by NEU-689, which wires the downloader. See the error's own comment.
+		return dashboard.RayServeApplication{}, errModelScopeDeployNotWiredYet
 	}
 
 	app.Args["model"] = modelArgs
