@@ -16,9 +16,11 @@ import (
 func newRecipeValidationRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.POST("/model_catalogs", validateModelCatalogRecipe(), func(c *gin.Context) {
+	stub := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"proxied": true})
-	})
+	}
+	r.POST("/model_catalogs", validateModelCatalogRecipe(), stub)
+	r.PATCH("/model_catalogs", validateModelCatalogRecipe(), stub)
 
 	return r
 }
@@ -38,6 +40,7 @@ func TestValidateModelCatalogRecipe(t *testing.T) {
 
 	tests := []struct {
 		name              string
+		method            string
 		body              string
 		expectStatus      int
 		expectCode        string
@@ -79,12 +82,65 @@ func TestValidateModelCatalogRecipe(t *testing.T) {
 			expectCode:        "10224",
 			expectMessagePart: "lists itself in conflicts_with",
 		},
+		// NEU-654: a PATCH replaces the whole composite spec column, so every
+		// payload below asks to blank the stored catalog rather than to leave
+		// it alone. None of them may reach the proxy.
+		{
+			name:              "empty spec object is rejected",
+			method:            http.MethodPatch,
+			body:              `{"spec": {}}`,
+			expectStatus:      http.StatusBadRequest,
+			expectCode:        "10224",
+			expectMessagePart: "must declare a model or variants",
+		},
+		{
+			name:              "explicit null spec is rejected",
+			method:            http.MethodPatch,
+			body:              `{"spec": null}`,
+			expectStatus:      http.StatusBadRequest,
+			expectCode:        "10224",
+			expectMessagePart: "must declare a model or variants",
+		},
+		{
+			name:              "spec of only unknown fields is rejected",
+			method:            http.MethodPatch,
+			body:              `{"spec": {"spec": null}}`,
+			expectStatus:      http.StatusBadRequest,
+			expectCode:        "10224",
+			expectMessagePart: "must declare a model or variants",
+		},
+		{
+			name:              "empty spec inside a bulk array is rejected",
+			method:            http.MethodPost,
+			body:              "[" + validRecipe + `, {"spec": {}}]`,
+			expectStatus:      http.StatusBadRequest,
+			expectCode:        "10224",
+			expectMessagePart: "must declare a model or variants",
+		},
+		{
+			name:         "metadata-only patch passes through",
+			method:       http.MethodPatch,
+			body:         `{"metadata": {"name": "mc", "workspace": "default"}}`,
+			expectStatus: http.StatusOK,
+		},
+		{
+			name:         "spec-only patch with a model passes through",
+			method:       http.MethodPatch,
+			body:         `{"spec": {"model": {"registry": "hf", "name": "org/model"}}}`,
+			expectStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			router := newRecipeValidationRouter()
-			req := httptest.NewRequest(http.MethodPost, "/model_catalogs", strings.NewReader(tt.body))
+
+			method := tt.method
+			if method == "" {
+				method = http.MethodPost
+			}
+
+			req := httptest.NewRequest(method, "/model_catalogs", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
