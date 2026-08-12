@@ -1,0 +1,2 @@
+-- PostgreSQL cannot remove enum values safely. Keep the values for downgrade
+-- compatibility; the following migration removes the policies and grants.
