@@ -1,6 +1,8 @@
 DROP FUNCTION IF EXISTS api.migrate_api_keys(UUID[], UUID);
 DROP TRIGGER IF EXISTS api_keys_project_validation ON api.api_keys;
 DROP FUNCTION IF EXISTS api.validate_api_key_project();
+DROP TRIGGER IF EXISTS workspaces_ensure_default_project ON api.workspaces;
+DROP FUNCTION IF EXISTS api.ensure_default_project();
 DROP TRIGGER IF EXISTS projects_updated_at ON api.projects;
 DROP FUNCTION IF EXISTS api.validate_project_write();
 DROP FUNCTION IF EXISTS api.create_project(TEXT, TEXT, TEXT);

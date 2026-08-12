@@ -19,7 +19,7 @@ CREATE INDEX projects_workspace_idx ON api.projects (workspace);
 INSERT INTO api.projects (workspace, name, is_default)
 SELECT DISTINCT workspace, 'Default', TRUE
 FROM (
-    SELECT (metadata).workspace AS workspace FROM api.workspaces
+    SELECT (metadata).name AS workspace FROM api.workspaces
     UNION
     SELECT (metadata).workspace AS workspace FROM api.api_keys
 ) workspaces
@@ -67,6 +67,24 @@ CREATE POLICY "Project update policy" ON api.projects FOR UPDATE USING (
 CREATE POLICY "Project delete policy" ON api.projects FOR DELETE USING (
     NOT is_default AND api.has_permission(auth.uid(), 'workspace:delete', workspace)
 );
+
+-- Every workspace gets a Default Project so existing clients that omit
+-- project_id keep working; the workspace seed (and any later workspace
+-- creation) is covered because the trigger fires on workspace INSERT.
+CREATE OR REPLACE FUNCTION api.ensure_default_project()
+RETURNS TRIGGER
+SECURITY DEFINER AS $$
+BEGIN
+    INSERT INTO api.projects (workspace, name, is_default)
+    VALUES ((NEW.metadata).name, 'Default', TRUE)
+    ON CONFLICT (workspace, name) DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER workspaces_ensure_default_project
+    AFTER INSERT ON api.workspaces
+    FOR EACH ROW EXECUTE FUNCTION api.ensure_default_project();
 
 -- Project status is deliberately independent of the key status. Existing keys
 -- remain valid for gateway calls when their project is disabled.
@@ -216,7 +234,7 @@ BEGIN
     v_key_value := api.generate_api_key(p_user_id, v_key_id, p_expires_in);
     INSERT INTO api.api_keys (id, api_version, kind, metadata, spec, status, user_id, project_id, description)
     VALUES (v_key_id, 'v1', 'ApiKey',
-        ROW(p_name, p_display_name, p_workspace, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json)::api.metadata,
+        ROW(p_name, p_display_name, p_workspace, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
         ROW(v_quota, p_expires_in, p_limits)::api.api_key_spec,
         ROW('Pending', CURRENT_TIMESTAMP, NULL, v_key_value, 0, CURRENT_TIMESTAMP, NULL)::api.api_key_status,
         p_user_id, v_project.id, p_description)
