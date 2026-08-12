@@ -220,6 +220,19 @@ func TestSSHCommandRunner_getSSHOptions_NoControlPath(t *testing.T) {
 }
 
 func TestSSHCommandRunner_getSSHOptions_WithControlPath(t *testing.T) {
+	controlPath := "/tmp/neutree-test-mux"
+	runner := NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
+		SSHPrivateKey: testSSHPrivateKey,
+		SSHUser:       testSSHUser,
+	}, controlPath, nil)
+
+	options := runner.getSSHOptions("")
+	assert.Contains(t, options, "ControlMaster=auto")
+	assert.Contains(t, options, "ControlPath="+controlPath+"/%C")
+	assert.Contains(t, options, "ControlPersist="+SSHControlPersist)
+}
+
+func TestSSHCommandRunner_CloseControlMaster(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	controlPath := "/tmp/neutree-test-mux"
 	runner := NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
@@ -227,10 +240,28 @@ func TestSSHCommandRunner_getSSHOptions_WithControlPath(t *testing.T) {
 		SSHUser:       testSSHUser,
 	}, controlPath, mockExec.Execute)
 
-	options := runner.getSSHOptions("")
-	assert.Contains(t, options, "ControlMaster=auto")
-	assert.Contains(t, options, "ControlPath="+controlPath+"/%C")
-	assert.Contains(t, options, "ControlPersist=600s")
+	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
+		cmd := args.Get(2).([]string)
+		assert.Contains(t, strings.Join(cmd, " "), "-O")
+		assert.Contains(t, strings.Join(cmd, " "), "exit")
+		assert.Contains(t, strings.Join(cmd, " "), "ControlPath="+controlPath+"/%C")
+	}).Return([]byte(""), nil).Once()
+
+	err := runner.CloseControlMaster(context.Background())
+	assert.NoError(t, err)
+	mockExec.AssertExpectations(t)
+}
+
+func TestSSHCommandRunner_CloseControlMaster_NoControlPath(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	runner := NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
+		SSHPrivateKey: testSSHPrivateKey,
+		SSHUser:       testSSHUser,
+	}, "", mockExec.Execute)
+
+	err := runner.CloseControlMaster(context.Background())
+	assert.NoError(t, err)
+	mockExec.AssertNotCalled(t, "Execute", mock.Anything, "ssh", mock.Anything)
 }
 
 func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFailed(t *testing.T) {

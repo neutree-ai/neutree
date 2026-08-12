@@ -146,9 +146,22 @@ func TestStaticNodeRunnerControlPathScopedToRunnerKeyDir(t *testing.T) {
 
 	// Master options must be present so commands reuse the connection.
 	assert.Contains(t, calls[0].args, "ControlMaster=auto")
-	assert.Contains(t, calls[0].args, "ControlPersist=600s")
+	assert.Contains(t, calls[0].args, "ControlPersist="+commandrunner.SSHControlPersist)
 
+	// The real command must multiplex onto the same control path as the precheck,
+	// so the precheck becomes the master and the command rides it.
+	require.Len(t, calls, 2)
+	realControlPath := sshControlPath(calls[1].args)
+	assert.Equal(t, controlPath, realControlPath,
+		"real command should reuse the precheck's ControlPath")
+
+	// Close() must terminate the lingering multiplexed master (not just unlink
+	// the socket) so it cannot hold an authenticated connection past the cycle.
 	require.NoError(t, runner.Close())
+	require.Len(t, calls, 3)
+	require.Equal(t, "ssh", calls[2].name)
+	assert.Contains(t, calls[2].args, "-O")
+	assert.Contains(t, calls[2].args, "exit")
 }
 
 func TestSSHRunnerFactoryControlPathOverride(t *testing.T) {
@@ -184,7 +197,7 @@ func TestSSHRunnerFactoryControlPathOverride(t *testing.T) {
 
 	controlPath := sshControlPath(calls[0].args)
 	require.NotEmpty(t, controlPath)
-	assert.True(t, strings.HasPrefix(controlPath, override),
+	assert.Equal(t, override+"/%C", controlPath,
 		"explicit SSHControlPath %q should take precedence; got %q", override, controlPath)
 
 	require.NoError(t, runner.Close())

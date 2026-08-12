@@ -79,6 +79,10 @@ func (f *SSHRunnerFactory) NewStaticNodeRunner(
 		sshControlPath = cleanupDir
 	}
 
+	// Keyless (agent-auth) nodes have no temp key dir, so cleanupDir is empty and
+	// ControlMaster reuse stays off for them — each command opens a fresh
+	// connection, matching the pre-existing behavior.
+
 	return &staticNodeSSHRunner{
 		runner: commandrunner.NewSSHCommandRunner(
 			staticNodeRunnerID(node),
@@ -105,7 +109,19 @@ func (r *staticNodeSSHRunner) Files() commandrunner.FileClient {
 }
 
 func (r *staticNodeSSHRunner) Close() error {
-	if r == nil || r.cleanupDir == "" {
+	if r == nil {
+		return nil
+	}
+
+	// Reap the multiplexed master (if any) before unlinking its socket dir, so a
+	// ControlMaster=auto background daemon can't keep an authenticated connection
+	// to the node alive for ControlPersist after the cycle ends. Best-effort: a
+	// missing/stale socket is normal, and the real cleanup below is RemoveAll.
+	if r.runner != nil {
+		_ = r.runner.CloseControlMaster(context.Background())
+	}
+
+	if r.cleanupDir == "" {
 		return nil
 	}
 

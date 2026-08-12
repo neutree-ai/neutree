@@ -13,6 +13,13 @@ import (
 
 var (
 	ErrConnectionFailed = errors.New("connection failed")
+
+	// SSHControlPersist is the ControlPersist duration for the multiplexed SSH
+	// master. It must comfortably exceed the gap between commands within a single
+	// static node reconcile cycle (config writes, docker inspect/pull/run, health
+	// checks), which can be separated by minutes. The master is terminated
+	// explicitly on runner Close, so the generous ceiling is safe.
+	SSHControlPersist = "600s"
 )
 
 // staticClusterConnectionHint is appended to SSH connection-failure errors so
@@ -187,12 +194,7 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 		sshOptions = append(sshOptions,
 			"-o", "ControlMaster=auto",
 			"-o", fmt.Sprintf("ControlPath=%s/%%C", s.sshControlPath),
-			// Keep the multiplexed master alive across an entire reconcile cycle:
-			// component config writes, docker inspect/pull/run, and health checks
-			// can be separated by more than the old 10s, which would let the master
-			// exit and break reuse mid-cycle. 600s comfortably exceeds a full static
-			// node reconcile; the per-runner socket is removed on Close regardless.
-			"-o", "ControlPersist=600s",
+			"-o", "ControlPersist="+SSHControlPersist,
 		)
 	}
 
@@ -201,4 +203,23 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 	}
 
 	return sshOptions
+}
+
+// CloseControlMaster asks the multiplexed master (if any) to shut down. A
+// ControlMaster=auto connection daemonizes a background master that outlives the
+// originating command, so merely unlinking the socket (e.g. RemoveAll on the
+// ControlPath dir) leaves that master holding an authenticated connection until
+// ControlPersist expires. Closing it explicitly reaps it at the runner boundary.
+// A missing/stale socket (no master started this cycle) surfaces as an error,
+// which callers treat as best-effort cleanup.
+func (s *SSHCommandRunner) CloseControlMaster(ctx context.Context) error {
+	if s.sshControlPath == "" {
+		return nil
+	}
+
+	sshOptions := append(s.getSSHOptions(""), "-O", "exit", fmt.Sprintf("%s@%s", s.sshUser, s.sshIP))
+
+	_, err := s.processExecute(ctx, "ssh", sshOptions)
+
+	return err
 }
