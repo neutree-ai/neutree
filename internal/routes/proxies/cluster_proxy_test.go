@@ -709,7 +709,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("reports the generic resolution error when the current cluster lookup fails", func(t *testing.T) {
+	t.Run("reports storage lookup failure as internal server error when the current cluster lookup fails", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -731,10 +731,10 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 
 		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
-		assert.Contains(t, recorder.Body.String(), "read cluster failed")
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read cluster failed")
 		mockStorage.AssertExpectations(t)
 	})
 
@@ -828,7 +828,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage.AssertNotCalled(t, "ListCluster", mock.Anything)
 	})
 
-	t.Run("reports the generic resolution error when the current cluster lookup fails for an accelerator virtualization PATCH", func(t *testing.T) {
+	t.Run("reports storage lookup failure as internal server error when the current cluster lookup fails for an accelerator virtualization PATCH", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		query := url.Values{"id": []string{"eq.1"}}
 		mockStorage.On("ListCluster", mock.MatchedBy(func(opt storage.ListOption) bool {
@@ -848,10 +848,10 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		}`)))
 
 		assert.False(t, proxyCalled)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10209"`)
-		assert.Contains(t, recorder.Body.String(), "failed to prepare cluster patch validation")
-		assert.Contains(t, recorder.Body.String(), "read cluster failed")
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read cluster failed")
 		mockStorage.AssertExpectations(t)
 	})
 
@@ -1180,12 +1180,12 @@ func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 			wantHint: "does not match patch target",
 		},
 		{
-			name:            "returns validation error when endpoint lookup fails",
+			name:            "returns internal server error when endpoint lookup fails",
 			patch:           cluster("gpu-cluster", &v1.AcceleratorVirtualizationSpec{Enabled: false}),
 			endpointErr:     errors.New("database error"),
 			lookupEndpoints: true,
-			wantCode:        "10209",
-			wantHint:        "database error",
+			wantCode:        "500",
+			wantMessage:     "internal server error",
 		},
 		{
 			name:            "rejects clearing accelerator virtualization with null while vGPU endpoint references cluster",
@@ -1448,6 +1448,42 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.Contains(t, recorder.Body.String(), `"code":"10211"`)
 		assert.Contains(t, recorder.Body.String(), "vGPU endpoint(s) still reference this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("reports storage lookup failure as internal server error when disabling accelerator virtualization", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+			}},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return(nil, errors.New("read endpoints failed")).Once()
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{
+			"metadata": {"workspace": "default", "name": "gpu-cluster"},
+			"spec": {"version": "v1.1.0", "accelerator_virtualization": {"enabled": false}}
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"500"`)
+		assert.Contains(t, recorder.Body.String(), "internal server error")
+		assert.NotContains(t, recorder.Body.String(), "read endpoints failed")
 		mockStorage.AssertExpectations(t)
 	})
 

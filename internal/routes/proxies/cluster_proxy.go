@@ -73,7 +73,7 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 
 		input, validationErr := readClusterValidationInput(c)
 		if validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -92,14 +92,14 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
 		}
 
 		if validationErr := validateClusterVersionInput(input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -107,14 +107,14 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 
 		if input.Operation == clusterValidationPatch {
 			if validationErr := validateClusterVersionUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
+				c.JSON(validationErrStatus(validationErr), validationErr)
 				c.Abort()
 
 				return
 			}
 
 			if validationErr := validateClusterConfigurationUpdateInput(input); validationErr != nil {
-				c.JSON(http.StatusBadRequest, validationErr)
+				c.JSON(validationErrStatus(validationErr), validationErr)
 				c.Abort()
 
 				return
@@ -122,7 +122,7 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if validationErr := validateClusterAcceleratorVirtualizationInput(s, input); validationErr != nil {
-			c.JSON(http.StatusBadRequest, validationErr)
+			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
 			return
@@ -210,6 +210,10 @@ func prepareClusterValidationInput(
 
 	current, err := resolveClusterForPatchUpdate(s, filters)
 	if err != nil {
+		if errors.Is(err, errClusterStorageUnavailable) {
+			return internalServerValidationError()
+		}
+
 		return clusterPatchValidationResolutionError(err)
 	}
 
@@ -597,10 +601,15 @@ func clusterPatchUpdateFilters(patch v1.Cluster, queryParams url.Values) []stora
 	return filters
 }
 
+// errClusterStorageUnavailable marks storage-layer failures (e.g. a database
+// outage) so they surface as internal server error responses instead of
+// client validation errors.
+var errClusterStorageUnavailable = errors.New("cluster storage unavailable")
+
 func resolveClusterForPatchUpdate(s storage.Storage, filters []storage.Filter) (*v1.Cluster, error) {
 	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errClusterStorageUnavailable, err)
 	}
 
 	if len(clusters) != 1 {
@@ -722,11 +731,7 @@ func validateClusterAcceleratorVirtualizationDisableForIdentity(
 ) *validationError {
 	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
 	if err != nil {
-		return &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    err.Error(),
-		}
+		return internalServerValidationError()
 	}
 
 	vGPUEndpointCount := 0

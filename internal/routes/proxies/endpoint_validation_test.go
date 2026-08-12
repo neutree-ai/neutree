@@ -252,7 +252,7 @@ func TestEndpointVGPUValidationRejectsPostWhenMemoryMIBExceedsPhysicalCardSpec(t
 	assert.False(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationReturnsServiceUnavailableOnClusterLookupError(t *testing.T) {
+func TestEndpointVGPUValidationReturnsInternalServerErrorOnClusterLookupError(t *testing.T) {
 	clusterStorage := &fakeClusterStorage{
 		listError: errors.New("database is down"),
 	}
@@ -275,10 +275,10 @@ func TestEndpointVGPUValidationReturnsServiceUnavailableOnClusterLookupError(t *
 	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
 	var response validationError
-	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10221", response.Code)
-	assert.Contains(t, response.Hint, "failed to look up cluster")
+	assert.Equal(t, "500", response.Code)
+	assert.Equal(t, "internal server error", response.Message)
 	assert.NotContains(t, response.Hint, "database is down")
 	assert.False(t, handlerCalled)
 }
@@ -421,6 +421,8 @@ func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 		path               string
 		clusterStorage     *fakeClusterStorage
 		expectedStatus     int
+		expectedCode       string
+		expectedMessage    string
 		expectedHint       string
 		expectedHintSuffix string
 		expectedListCalls  int
@@ -447,10 +449,11 @@ func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 			clusterStorage: &fakeClusterStorage{
 				endpointListError: errors.New("database is down"),
 			},
-			expectedStatus:     http.StatusServiceUnavailable,
-			expectedHint:       "failed to look up endpoint",
-			expectedHintSuffix: "database is down",
-			expectedListCalls:  1,
+			expectedStatus:    http.StatusInternalServerError,
+			expectedCode:      "500",
+			expectedMessage:   "internal server error",
+			expectedHint:      "",
+			expectedListCalls: 1,
 		},
 		{
 			name: "when multiple endpoints match",
@@ -476,8 +479,16 @@ func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 			var response validationError
 			assert.Equal(t, tt.expectedStatus, recorder.Code)
 			assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-			assert.Equal(t, "10221", response.Code)
-			assert.Equal(t, "invalid endpoint patch target", response.Message)
+			expectedCode := tt.expectedCode
+			if expectedCode == "" {
+				expectedCode = "10221"
+			}
+			expectedMessage := tt.expectedMessage
+			if expectedMessage == "" {
+				expectedMessage = "invalid endpoint patch target"
+			}
+			assert.Equal(t, expectedCode, response.Code)
+			assert.Equal(t, expectedMessage, response.Message)
 			assert.Contains(t, response.Hint, tt.expectedHint)
 			if tt.expectedHintSuffix != "" {
 				assert.Contains(t, response.Hint, tt.expectedHintSuffix)

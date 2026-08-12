@@ -357,7 +357,7 @@ func resolveEndpointPatch(
 	queryParams url.Values,
 ) (*v1.Endpoint, *validationError) {
 	if store == nil {
-		return nil, endpointPatchLookupError("storage is required to resolve endpoint PATCH target")
+		return nil, internalServerValidationError()
 	}
 
 	filters := queryParamsToFilters(queryParams)
@@ -367,8 +367,7 @@ func resolveEndpointPatch(
 
 	endpoints, err := store.ListEndpoint(storage.ListOption{Filters: filters})
 	if err != nil {
-		return nil, endpointPatchLookupError(
-			fmt.Sprintf("failed to look up endpoint for endpoint PATCH: %v", err))
+		return nil, internalServerValidationError()
 	}
 
 	if len(endpoints) == 0 {
@@ -384,7 +383,7 @@ func resolveEndpointPatch(
 
 func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
 	if store == nil {
-		return nil, endpointVGPULookupError("storage is required to validate endpoint accelerator virtualization")
+		return nil, internalServerValidationError()
 	}
 
 	clusterName := endpoint.Spec.Cluster
@@ -401,7 +400,7 @@ func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*
 		Filters: endpointClusterLookupFilters(clusterName, workspace),
 	})
 	if err != nil {
-		return nil, endpointVGPULookupError("failed to look up cluster for endpoint accelerator virtualization")
+		return nil, internalServerValidationError()
 	}
 
 	if len(clusters) == 0 {
@@ -677,20 +676,6 @@ func endpointPatchTargetError(hint string) *validationError {
 		Message: "invalid endpoint patch target",
 		Hint:    hint,
 	}
-}
-
-func endpointVGPULookupError(hint string) *validationError {
-	err := endpointVGPUTargetError(hint)
-	err.HTTPStatus = http.StatusServiceUnavailable
-
-	return err
-}
-
-func endpointPatchLookupError(hint string) *validationError {
-	err := endpointPatchTargetError(hint)
-	err.HTTPStatus = http.StatusServiceUnavailable
-
-	return err
 }
 
 func validationErrStatus(err *validationError) int {
