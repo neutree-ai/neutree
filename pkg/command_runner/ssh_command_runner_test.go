@@ -219,6 +219,20 @@ func TestSSHCommandRunner_getSSHOptions_NoControlPath(t *testing.T) {
 	assert.NotContains(t, options, "ControlPersist=10s")
 }
 
+func TestSSHCommandRunner_getSSHOptions_WithControlPath(t *testing.T) {
+	mockExec := new(commandmocks.MockExecutor)
+	controlPath := "/tmp/neutree-test-mux"
+	runner := NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
+		SSHPrivateKey: testSSHPrivateKey,
+		SSHUser:       testSSHUser,
+	}, controlPath, mockExec.Execute)
+
+	options := runner.getSSHOptions("")
+	assert.Contains(t, options, "ControlMaster=auto")
+	assert.Contains(t, options, "ControlPath="+controlPath+"/%C")
+	assert.Contains(t, options, "ControlPersist=600s")
+}
+
 func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFailed(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)

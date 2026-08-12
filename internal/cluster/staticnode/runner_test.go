@@ -3,6 +3,8 @@ package staticnode
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -90,4 +92,100 @@ func sshArgValue(args []string, flag string) string {
 	}
 
 	return ""
+}
+
+func sshControlPath(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-o" && i+1 < len(args) && strings.HasPrefix(args[i+1], "ControlPath=") {
+			return strings.TrimPrefix(args[i+1], "ControlPath=")
+		}
+	}
+
+	return ""
+}
+
+func TestStaticNodeRunnerControlPathScopedToRunnerKeyDir(t *testing.T) {
+	var calls []processCall
+	factory := &SSHRunnerFactory{
+		ProcessExecute: func(_ context.Context, name string, args []string) ([]byte, error) {
+			calls = append(calls, processCall{name: name, args: args})
+			return []byte("up\n"), nil
+		},
+	}
+
+	runner, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "head-0",
+		},
+		Spec: &v1.StaticNodeSpec{
+			IP: "10.0.0.10",
+			SSHAuth: &v1.Auth{
+				SSHUser:       "ray",
+				SSHPrivateKey: "cmF5LXBlbQo=",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = runner.Run(context.Background(), "docker ps")
+	require.NoError(t, err)
+	require.Len(t, calls, 2)
+	require.Equal(t, "ssh", calls[0].name)
+
+	// ControlPath must be set (ControlMaster reuse active) and scoped inside the
+	// per-runner temp key dir, not a shared global path.
+	controlPath := sshControlPath(calls[0].args)
+	require.NotEmpty(t, controlPath, "ControlPath option must be present when reuse is enabled")
+	assert.True(t, strings.HasSuffix(controlPath, "/%C"),
+		"ControlPath %q should use the OpenSSH %%C hashed per-target filename", controlPath)
+
+	keyDir := filepath.Dir(sshArgValue(calls[0].args, "-i"))
+	assert.True(t, strings.HasPrefix(controlPath, keyDir),
+		"ControlPath %q should be scoped to the per-runner key dir %q", controlPath, keyDir)
+
+	// Master options must be present so commands reuse the connection.
+	assert.Contains(t, calls[0].args, "ControlMaster=auto")
+	assert.Contains(t, calls[0].args, "ControlPersist=600s")
+
+	require.NoError(t, runner.Close())
+}
+
+func TestSSHRunnerFactoryControlPathOverride(t *testing.T) {
+	var calls []processCall
+	override := "/var/run/neutree-ssh-mux"
+	factory := &SSHRunnerFactory{
+		ProcessExecute: func(_ context.Context, name string, args []string) ([]byte, error) {
+			calls = append(calls, processCall{name: name, args: args})
+			return []byte("up\n"), nil
+		},
+		SSHControlPath: override,
+	}
+
+	runner, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
+		Metadata: &v1.Metadata{
+			Workspace: "default",
+			Name:      "head-0",
+		},
+		Spec: &v1.StaticNodeSpec{
+			IP: "10.0.0.10",
+			SSHAuth: &v1.Auth{
+				SSHUser:       "ray",
+				SSHPrivateKey: "cmF5LXBlbQo=",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = runner.Run(context.Background(), "docker ps")
+	require.NoError(t, err)
+	require.Len(t, calls, 2)
+	require.Equal(t, "ssh", calls[0].name)
+
+	controlPath := sshControlPath(calls[0].args)
+	require.NotEmpty(t, controlPath)
+	assert.True(t, strings.HasPrefix(controlPath, override),
+		"explicit SSHControlPath %q should take precedence; got %q", override, controlPath)
+
+	require.NoError(t, runner.Close())
 }

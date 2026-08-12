@@ -70,6 +70,15 @@ func (f *SSHRunnerFactory) NewStaticNodeRunner(
 		processExecute = executor.Execute
 	}
 
+	// Default the ControlPath to the per-runner temporary key directory. Scoping
+	// the multiplexed socket to the runner's own key dir keeps every reconcile
+	// cycle on a fresh ControlMaster (credential rotation takes effect
+	// immediately) while collapsing dozens of per-command SSH connections into
+	// one within the cycle. An explicit SSHControlPath override wins when set.
+	if sshControlPath == "" {
+		sshControlPath = cleanupDir
+	}
+
 	return &staticNodeSSHRunner{
 		runner: commandrunner.NewSSHCommandRunner(
 			staticNodeRunnerID(node),

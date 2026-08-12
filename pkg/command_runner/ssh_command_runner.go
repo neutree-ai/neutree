@@ -187,7 +187,12 @@ func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []stri
 		sshOptions = append(sshOptions,
 			"-o", "ControlMaster=auto",
 			"-o", fmt.Sprintf("ControlPath=%s/%%C", s.sshControlPath),
-			"-o", "ControlPersist=10s",
+			// Keep the multiplexed master alive across an entire reconcile cycle:
+			// component config writes, docker inspect/pull/run, and health checks
+			// can be separated by more than the old 10s, which would let the master
+			// exit and break reuse mid-cycle. 600s comfortably exceeds a full static
+			// node reconcile; the per-runner socket is removed on Close regardless.
+			"-o", "ControlPersist=600s",
 		)
 	}
 
