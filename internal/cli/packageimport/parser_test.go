@@ -232,6 +232,124 @@ engines:
 		assert.Equal(t, "v0.10.2", manifest.Engines[0].EngineVersions[0].Version)
 	})
 
+	// The capability block below is byte-for-byte what
+	// scripts/builder/build-engine-package.sh emits for
+	// `--metrics-export true --metrics-export-port 9100
+	//  --metrics-export-path /internal/metrics --playground true
+	//  --playground-modes "chat,embedding"`. Keeping the two in the same shape is
+	// the point of the test: the script writes this file and the importer reads
+	// it, with no schema shared between them beyond the yaml tags.
+	t.Run("manifest with declared capabilities", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+
+engines:
+- name: my-engine
+  engine_versions:
+  - version: "v1.0.0"
+    supported_tasks:
+      - "text-generation"
+
+    capabilities:
+      metrics_export:
+        enabled: true
+        port: 9100
+        path: "/internal/metrics"
+      playground:
+        enabled: true
+        modes:
+        - "chat"
+        - "embedding"
+
+    images:
+      nvidia_gpu:
+        image_name: "my-engine"
+        tag: "v1.0.0"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(content), 0644))
+
+		manifest, err := parser.ParseManifestFile(manifestPath)
+		require.NoError(t, err)
+		require.Len(t, manifest.Engines, 1)
+		require.Len(t, manifest.Engines[0].EngineVersions, 1)
+
+		version := manifest.Engines[0].EngineVersions[0]
+		require.NotNil(t, version.Capabilities)
+
+		assert.Equal(t, v1.ResolvedMetricsExport{Enabled: true, Port: 9100, Path: "/internal/metrics"},
+			version.ResolveMetricsExport())
+		assert.Equal(t, v1.ResolvedPlayground{Enabled: true, Modes: []string{"chat", "embedding"}},
+			version.ResolvePlayground())
+		assert.NoError(t, version.Capabilities.Validate())
+	})
+
+	t.Run("manifest declaring capabilities off", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+
+engines:
+- name: my-engine
+  engine_versions:
+  - version: "v1.0.0"
+
+    capabilities:
+      metrics_export:
+        enabled: false
+      playground:
+        enabled: false
+
+    images:
+      nvidia_gpu:
+        image_name: "my-engine"
+        tag: "v1.0.0"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(content), 0644))
+
+		manifest, err := parser.ParseManifestFile(manifestPath)
+		require.NoError(t, err)
+
+		version := manifest.Engines[0].EngineVersions[0]
+		assert.False(t, version.ResolveMetricsExport().Enabled)
+		assert.False(t, version.ResolvePlayground().Enabled)
+	})
+
+	// A package built before the protocol -- or by a run of the build script with
+	// no capability flags -- carries no block at all, and must keep the behaviour
+	// Neutree had before engines could declare anything.
+	t.Run("manifest without capabilities keeps legacy behaviour", func(t *testing.T) {
+		content := `
+manifest_version: "1.0"
+
+engines:
+- name: my-engine
+  engine_versions:
+  - version: "v1.0.0"
+    images:
+      nvidia_gpu:
+        image_name: "my-engine"
+        tag: "v1.0.0"
+`
+		dir := t.TempDir()
+		manifestPath := dir + "/manifest.yaml"
+		require.NoError(t, os.WriteFile(manifestPath, []byte(content), 0644))
+
+		manifest, err := parser.ParseManifestFile(manifestPath)
+		require.NoError(t, err)
+
+		version := manifest.Engines[0].EngineVersions[0]
+		assert.Nil(t, version.Capabilities)
+		assert.Equal(t, v1.ResolvedMetricsExport{
+			Enabled: true,
+			Port:    v1.DefaultMetricsExportPort,
+			Path:    v1.DefaultMetricsExportPath,
+		}, version.ResolveMetricsExport())
+		assert.True(t, version.ResolvePlayground().Enabled)
+	})
+
 	t.Run("valid manifest with package_url", func(t *testing.T) {
 		content := `
 manifest_version: "1.0"
