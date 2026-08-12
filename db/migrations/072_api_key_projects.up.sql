@@ -335,6 +335,10 @@ BEGIN
     IF v_key_count > 0 THEN
         RAISE EXCEPTION 'Project has % API key(s); migrate or delete them first', v_key_count;
     END IF;
+    -- Drop migration-history rows that reference the Project (from/to), else
+    -- the FK on api_key_project_history blocks the delete.
+    DELETE FROM api.api_key_project_history
+    WHERE from_project_id = p_project_id OR to_project_id = p_project_id;
     DELETE FROM api.projects WHERE id = p_project_id;
 END;
 $$ LANGUAGE plpgsql;
