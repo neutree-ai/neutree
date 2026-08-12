@@ -2,6 +2,11 @@ package v1
 
 import "github.com/neutree-ai/neutree/pkg/scheme"
 
+const (
+	ProjectStatusEnabled  = "enabled"
+	ProjectStatusDisabled = "disabled"
+)
+
 // Project groups API keys within a workspace.
 type Project struct {
 	ID          string `json:"id,omitempty"`

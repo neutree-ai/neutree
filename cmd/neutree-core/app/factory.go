@@ -200,6 +200,27 @@ func NewApiKeyControllerFactory() ControllerFactory {
 	}
 }
 
+func NewProjectControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		projectController, err := controllers.NewProjectController(&controllers.ProjectControllerOption{
+			Storage: opts.storage,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create project controller")
+		}
+
+		return controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(projectController),
+			controllers.WithObject(&v1.Project{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		), nil
+	}
+}
+
 func NewImageRegistryControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{

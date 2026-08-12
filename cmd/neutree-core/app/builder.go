@@ -41,6 +41,7 @@ func NewBuilder() *Builder {
 		"role-assignment":     NewRoleAssignmentControllerFactory(),
 		"workspace":           NewWorkspaceControllerFactory(),
 		"api-key":             NewApiKeyControllerFactory(),
+		"project":             NewProjectControllerFactory(),
 		"image-registry":      NewImageRegistryControllerFactory(),
 		"model-catalog":       NewModelCatalogControllerFactory(),
 		"model-registry":      NewModelRegistryControllerFactory(),
