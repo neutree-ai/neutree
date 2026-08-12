@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
@@ -91,6 +92,13 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		}
 
 		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
+			c.JSON(http.StatusBadRequest, validationErr)
+			c.Abort()
+
+			return
+		}
+
+		if validationErr := validateClusterVersionInput(input); validationErr != nil {
 			c.JSON(http.StatusBadRequest, validationErr)
 			c.Abort()
 
@@ -283,10 +291,9 @@ func clusterPatchValidationIdentityError(input *ValidationInput[v1.Cluster]) *va
 		errors.New("cluster identity is required when patching a cluster"))
 }
 
-// buildPostgrestClusterPatchValidationNew mirrors the resource proxy before it
-// forwards a PATCH: masked leaves are backfilled, then supplied row columns
-// replace their current values. A supplied spec therefore replaces the whole
-// PostgreSQL composite rather than recursively merging its attributes.
+// buildPostgrestClusterPatchValidationNew constructs the Cluster state that
+// PostgREST will persist. A PATCH replaces each supplied top-level column;
+// masked credentials are backfilled first because the proxy forwards them.
 func buildPostgrestClusterPatchValidationNew(current *v1.Cluster, body []byte) (*v1.Cluster, error) {
 	if current == nil {
 		return nil, errors.New("current cluster is required")
@@ -729,6 +736,30 @@ func clusterConfigurationUpdateError(err error) *validationError {
 	}
 }
 
+func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validationError {
+	if input.Operation == clusterValidationSoftDelete {
+		return nil
+	}
+
+	if input.New == nil {
+		return clusterPatchValidationResolutionError(errors.New("updated cluster is required"))
+	}
+
+	if strings.TrimSpace(input.New.GetVersion()) == "" {
+		return &validationError{
+			Code:    "10209",
+			Message: "spec.version is required",
+			Hint:    "Provide a non-empty spec.version",
+		}
+	}
+
+	if err := validateDesiredClusterVersion(input.New.GetVersion()); err != nil {
+		return clusterVersionValidationError(err)
+	}
+
+	return nil
+}
+
 func validateClusterVersionUpdateInput(input *ValidationInput[v1.Cluster]) *validationError {
 	hasVersion, err := clusterPatchDesiredVersionPayload(input.RawPayload)
 	if err != nil {
@@ -829,6 +860,14 @@ func clusterVersionUpdateError(err error) *validationError {
 	return &validationError{
 		Code:    "10212",
 		Message: "invalid cluster version update",
+		Hint:    err.Error(),
+	}
+}
+
+func clusterVersionValidationError(err error) *validationError {
+	return &validationError{
+		Code:    "10212",
+		Message: "invalid cluster version",
 		Hint:    err.Error(),
 	}
 }
@@ -1112,8 +1151,10 @@ func validateClusterAcceleratorVirtualizationInput(
 		cluster = *input.New
 	}
 
-	if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
-		return validationErr
+	if cluster.Spec != nil && cluster.Spec.Type != "" {
+		if validationErr := validateClusterAcceleratorVirtualizationCluster(cluster); validationErr != nil {
+			return validationErr
+		}
 	}
 
 	if input.Operation != clusterValidationPatch {
