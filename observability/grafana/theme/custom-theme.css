@@ -2,31 +2,85 @@
    Grafana Custom Theme
    ============================================================ */
 
+/* ---------- Typography ---------- */
+body,
+button,
+input,
+select,
+textarea,
+table,
+[class*="panel-title"],
+[class*="panel-content"] {
+  font-family: Inter, "Noto Sans", "Helvetica Neue", Arial, sans-serif !important;
+}
+
 /* ---------- Dark Mode ---------- */
 body[class*="theme-dark"],
 body:not([class*="theme-light"]) {
-  --ui-bg: hsl(217.5, 9.09%, 17.25%);
-  --ui-card: hsl(210, 9.09%, 12.94%);
-  --ui-border: hsl(0, 0%, 18.46%);
-  --ui-input: hsl(214.29, 5.04%, 27.25%);
-  --ui-primary: hsl(226.73, 58.43%, 65.1%);
-  --ui-fg: hsl(334, 34%, 98%);
-  --ui-muted-fg: hsl(0, 0%, 60.77%);
-  --ui-destructive: hsl(358.16, 68.78%, 53.53%);
-  --ui-radius: 0.5rem;
+  --ui-bg: #0b1824;
+  --ui-card: #0f1d2a;
+  --ui-border: rgba(198, 219, 234, 0.14);
+  --ui-input: #20324b;
+  --ui-primary: #268dff;
+  --ui-fg: #e6edf7;
+  --ui-muted-fg: rgba(182, 199, 224, 0.58);
+  --ui-destructive: #f0685f;
+  --ui-radius: 2px;
+  --ui-radius-button: 6px;
+  --ui-radius-input: 2px;
+  --ui-radius-menu: 2px;
+  --ui-radius-menu-item: 4px;
+  --ui-radius-panel: 10px;
+  --ui-radius-select: 6px;
+  --ui-table-hover: rgba(198, 219, 234, 0.04);
+  --ui-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 20px 0 rgba(2, 7, 12, 0.42);
+  --ui-select-fill: #0f1d2a;
+  --ui-select-border: rgba(198, 219, 234, 0.2);
+  --ui-select-hover-border: rgba(173, 192, 224, 0.42);
+  --ui-select-outstanding: #268dff;
+  --ui-select-hover-fill: rgba(158, 179, 214, 0.18);
+  --ui-select-selected-fill: rgba(38, 141, 255, 0.06);
+  --ui-select-focus-ring: 0 0 0 4px rgba(38, 141, 255, 0.18);
+  --ui-select-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.32);
+  --ui-menu-fill: #0f1d2a;
+  --ui-menu-border: rgba(198, 219, 234, 0.14);
+  --ui-menu-shadow: 0px 18px 42px 0px rgba(0, 0, 0, 0.48), 0px 0px 0px 1px rgba(173, 192, 224, 0.12);
+  --ui-select-text: #e6edf7;
+  --ui-select-text-strong: #f6f9fe;
 }
 
 /* ---------- Light Mode ---------- */
 body[class*="theme-light"] {
-  --ui-bg: hsl(0, 0%, 97.69%);
-  --ui-card: hsl(0, 0%, 100%);
-  --ui-border: hsl(0, 0%, 80.78%);
-  --ui-input: hsl(0, 0%, 80.78%);
-  --ui-primary: hsl(211.29, 100%, 50%);
-  --ui-fg: hsl(334, 55%, 1%);
-  --ui-muted-fg: hsl(206.04, 0%, 50.77%);
-  --ui-destructive: hsl(3.19, 100%, 59.41%);
-  --ui-radius: 0.5rem;
+  --ui-bg: #edf0f7;
+  --ui-card: #ffffff;
+  --ui-border: rgba(12, 40, 73, 0.12);
+  --ui-input: #edf1f4;
+  --ui-primary: #0080ff;
+  --ui-fg: #00122e;
+  --ui-muted-fg: rgba(44, 56, 82, 0.6);
+  --ui-destructive: #f0483e;
+  --ui-radius: 2px;
+  --ui-radius-button: 6px;
+  --ui-radius-input: 2px;
+  --ui-radius-menu: 2px;
+  --ui-radius-menu-item: 4px;
+  --ui-radius-panel: 10px;
+  --ui-radius-select: 6px;
+  --ui-table-hover: rgba(36, 41, 46, 0.04);
+  --ui-card-shadow: 0 4px 14px 0 rgba(12, 40, 73, 0.06);
+  --ui-select-fill: #ffffff;
+  --ui-select-border: rgba(12, 40, 73, 0.24);
+  --ui-select-hover-border: rgba(107, 128, 167, 0.6);
+  --ui-select-outstanding: #0080ff;
+  --ui-select-hover-fill: rgba(211, 218, 235, 0.6);
+  --ui-select-selected-fill: rgba(0, 136, 255, 0.04);
+  --ui-select-focus-ring: 0 0 0 4px rgba(0, 136, 255, 0.16);
+  --ui-select-shadow: 0px 1px 2px -1px rgba(44, 56, 82, 0.18);
+  --ui-menu-fill: #ffffff;
+  --ui-menu-border: rgba(211, 218, 235, 0.6);
+  --ui-menu-shadow: 0px 12px 40px 0px rgba(45, 58, 86, 0.3), 0px 0px 10px 0px rgba(107, 125, 153, 0.18);
+  --ui-select-text: #00122e;
+  --ui-select-text-strong: #1d326c;
 }
 
 /* ---------- Global Background ---------- */
@@ -37,10 +91,13 @@ body,
 }
 
 /* ---------- Panel Container ---------- */
-section[class*="panel-container"] {
+section[class*="panel-container"]:not([class*="transparent"]) {
   background-color: var(--ui-card) !important;
   border: 1px solid var(--ui-border) !important;
-  border-radius: var(--ui-radius) !important;
+  border-radius: var(--ui-radius-panel) !important;
+  background-clip: padding-box !important;
+  overflow: hidden !important;
+  box-shadow: var(--ui-card-shadow) !important;
 }
 
 /* ---------- Panel Title ---------- */
@@ -52,7 +109,7 @@ section[class*="panel-container"] {
 
 /* ---------- Padding ---------- */
 [data-testid="data-testid dashboard controls"] {
-  padding: 0 0 8px 0 !important;
+  padding: 4px 0 8px 0 !important;
 }
 
 [class*="-canvas-wrapper-old"] [class*="-body"] {
@@ -74,51 +131,66 @@ section[class*="panel-container"] {
 [data-testid="data-testid template variable"] {
   display: flex !important;
   align-items: center !important;
+  gap: 0 !important;
 }
 
 /* Variable Label */
 [data-testid="data-testid template variable"]>label {
-  background-color: var(--ui-input) !important;
-  color: var(--ui-fg) !important;
-  border: 1px solid var(--ui-border) !important;
-  border-right: none !important;
-  border-radius: var(--ui-radius) 0 0 var(--ui-radius) !important;
+  background-color: transparent !important;
+  color: var(--ui-muted-fg) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
   font-size: 13px !important;
-  padding: 5px 12px !important;
-  line-height: 1.4 !important;
+  padding: 0 8px 0 0 !important;
+  line-height: 1 !important;
   white-space: nowrap !important;
 }
 
 /* Variable Dropdown - Outer Wrapper */
 [data-testid="data-testid template variable"] [class*="-input-wrapper"] {
-  background-color: var(--ui-card) !important;
-  border: 1px solid var(--ui-border) !important;
-  border-left: none !important;
-  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+  background-color: var(--ui-select-fill) !important;
+  border: 1px solid var(--ui-select-border) !important;
+  border-radius: var(--ui-radius-select) !important;
+  box-shadow: var(--ui-select-shadow) !important;
+  min-height: 32px !important;
+  transition: border-color 140ms ease, box-shadow 140ms ease !important;
+}
+
+[data-testid="data-testid template variable"] [class*="-input-wrapper"]:hover {
+  border-color: var(--ui-select-hover-border) !important;
+}
+
+[data-testid="data-testid template variable"] [class*="-input-wrapper"]:focus-within {
+  border-color: var(--ui-select-outstanding) !important;
+  box-shadow: var(--ui-select-focus-ring) !important;
+  outline: none !important;
 }
 
 /* Variable Dropdown - Inner Container */
 [data-testid="data-testid template variable"] [class*="-input-wrapper"]>div:not([class*="input-suffix"]):not([class*="a11yText"]) {
-  background-color: var(--ui-card) !important;
+  background-color: transparent !important;
   border: none !important;
-  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+  border-radius: inherit !important;
 }
 
 /* Variable Value Container */
 [data-testid="data-testid template variable"] [class*="select-value-container"] {
   background-color: transparent !important;
+  padding: 0 8px !important;
 }
 
 /* Variable Selected Value */
 div[class*="singleValue"],
 div[class*="grafana-select-value-container"] {
-  color: var(--ui-fg) !important;
-  font-size: 13px !important;
+  color: var(--ui-select-text) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
 }
 
 /* Variable Dropdown Arrow */
 div[class*="input-suffix"] {
   color: var(--ui-muted-fg) !important;
+  padding-right: 8px !important;
 }
 
 div[class*="input-suffix"] svg {
@@ -129,36 +201,206 @@ div[class*="input-suffix"] svg {
 div[class*="menu"],
 [class*="options-group"] {
   z-index: 1050 !important;
-  background-color: var(--ui-card) !important;
-  border: 1px solid var(--ui-border) !important;
-  border-radius: var(--ui-radius) !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  background-color: var(--ui-menu-fill) !important;
+  border: 1px solid var(--ui-menu-border) !important;
+  border-radius: var(--ui-radius-select) !important;
+  box-shadow: var(--ui-menu-shadow) !important;
+  padding: 4px !important;
 }
 
 /* Dropdown Options */
-div[class*="option"] {
-  color: var(--ui-fg) !important;
-  font-size: 13px !important;
+[data-testid="data-testid Select option"] {
+  color: var(--ui-select-text) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  border-radius: 0 !important;
+  padding: 6px 8px !important;
+  box-sizing: border-box !important;
+  border-left: 2px solid transparent !important;
+  outline: none !important;
+  overflow: hidden !important;
 }
 
-div[class*="option"]:hover,
-div[class*="option"][class*="focused"] {
-  background-color: var(--ui-input) !important;
+[data-testid="data-testid Select option"]:hover {
+  background-color: var(--ui-select-hover-fill) !important;
+  color: var(--ui-select-text-strong) !important;
 }
 
-div[class*="option"][class*="selected"] {
-  background-color: var(--ui-primary) !important;
-  color: #fff !important;
+[data-testid="data-testid Select option"][class*="focused"] {
+  color: var(--ui-select-text-strong) !important;
+  background-color: transparent !important;
+  border-left-color: transparent !important;
+}
+
+[data-testid="data-testid Select option"][aria-selected="true"] {
+  color: var(--ui-primary) !important;
+  background-color: var(--ui-select-selected-fill) !important;
+  border-left: 2px solid var(--ui-primary) !important;
+}
+
+[data-testid="data-testid Select option"][aria-selected="true"][class*="focused"] {
+  color: var(--ui-primary) !important;
+  background-color: var(--ui-select-selected-fill) !important;
+  border-left: 2px solid var(--ui-primary) !important;
+}
+
+[data-testid="data-testid Select option"] [class*="option-body"] {
+  padding: 0 !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  line-height: 20px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+[data-testid="data-testid Select option"]::before,
+[data-testid="data-testid Select option"]::after {
+  background-image: none !important;
+  background-color: transparent !important;
+}
+
+/* ---------- Legacy Select ---------- */
+.gf-form-select-box__control,
+div[class*="gf-form-select-box__control"] {
+  background-color: var(--ui-select-fill) !important;
+  border: 1px solid var(--ui-select-border) !important;
+  border-radius: var(--ui-radius-select) !important;
+  box-shadow: var(--ui-select-shadow) !important;
+  min-height: 32px !important;
+  transition: border-color 140ms ease, box-shadow 140ms ease !important;
+}
+
+.gf-form-select-box__control:hover,
+div[class*="gf-form-select-box__control"]:hover {
+  border-color: var(--ui-select-hover-border) !important;
+}
+
+.gf-form-select-box__control--is-focused,
+div[class*="gf-form-select-box__control--is-focused"] {
+  border-color: var(--ui-select-outstanding) !important;
+  box-shadow: var(--ui-select-focus-ring) !important;
+  outline: none !important;
+}
+
+.gf-form-select-box__menu {
+  background-color: var(--ui-menu-fill) !important;
+  border: 1px solid var(--ui-menu-border) !important;
+  border-radius: var(--ui-radius-select) !important;
+  box-shadow: var(--ui-menu-shadow) !important;
+  padding: 4px !important;
+}
+
+.gf-form-select-box__option {
+  color: var(--ui-select-text) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-left: 2px solid transparent !important;
+  border-image: none !important;
+  border-radius: 0 !important;
+  padding: 6px 8px !important;
+}
+
+div.gf-form-select-box__option.gf-form-select-box__option--is-focused,
+div.gf-form-select-box__option.gf-form-select-box__option--is-selected {
+  color: var(--ui-primary) !important;
+  background-color: var(--ui-select-selected-fill) !important;
+  border-left: 2px solid var(--ui-primary) !important;
+  border-image: none !important;
+}
+
+.gf-form-select-box__option--is-selected .fa {
+  color: var(--ui-primary) !important;
+}
+
+[data-testid="data-testid Select option"] *,
+.gf-form-select-box__option * {
+  border-radius: 0 !important;
+}
+
+/* ---------- Native Grafana Menus ---------- */
+[role="menu"] [role="menuitem"],
+[role="menu"] [role="menuitemradio"],
+[role="menu"] [role="menuitemcheckbox"],
+button[data-role="menuitem"] {
+  box-sizing: border-box !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  border-radius: var(--ui-radius-menu-item) !important;
+  box-shadow: none !important;
+  color: var(--ui-select-text) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 6px 8px !important;
+  outline: none !important;
+  transition: background-color 120ms ease, color 120ms ease !important;
+}
+
+[role="menu"] [role="menuitem"]:hover,
+[role="menu"] [role="menuitemradio"]:hover,
+[role="menu"] [role="menuitemcheckbox"]:hover,
+button[data-role="menuitem"]:hover,
+[role="menu"] [role="menuitem"]:focus-visible,
+[role="menu"] [role="menuitemradio"]:focus-visible,
+[role="menu"] [role="menuitemcheckbox"]:focus-visible,
+button[data-role="menuitem"]:focus-visible {
+  background-color: var(--ui-select-hover-fill) !important;
+  color: var(--ui-select-text-strong) !important;
+  outline: none !important;
+}
+
+[role="menu"] [role="menuitem"][aria-checked="true"],
+[role="menu"] [role="menuitemradio"][aria-checked="true"],
+[role="menu"] [role="menuitemcheckbox"][aria-checked="true"],
+button[data-role="menuitem"][aria-checked="true"] {
+  background-color: var(--ui-select-selected-fill) !important;
+  color: var(--ui-primary) !important;
+}
+
+/* ---------- Time Picker Menu ---------- */
+[aria-roledescription="Time range selection"] li {
+  height: 32px !important;
+  line-height: 20px !important;
+}
+
+[aria-roledescription="Time range selection"] label {
+  box-sizing: border-box !important;
+  background-color: transparent !important;
+  border-radius: var(--ui-radius-menu-item) !important;
+  color: var(--ui-select-text) !important;
+  font-size: 14px !important;
+  height: 32px !important;
+  line-height: 20px !important;
+  padding: 6px 8px !important;
+  transition: background-color 120ms ease, color 120ms ease !important;
+}
+
+[aria-roledescription="Time range selection"] li:hover label,
+[aria-roledescription="Time range selection"] li:focus-within label {
+  background-color: var(--ui-select-hover-fill) !important;
+  color: var(--ui-select-text-strong) !important;
+}
+
+[aria-roledescription="Time range selection"] input:checked + label {
+  background-color: var(--ui-select-selected-fill) !important;
+  color: var(--ui-primary) !important;
 }
 
 /* ---------- Time Picker / Toolbar Buttons ---------- */
 button[class*="toolbar-button"],
 button[data-testid="data-testid TimePicker Open Button"],
-.button-group button {
+.button-group > button {
   background-color: var(--ui-card) !important;
   color: var(--ui-fg) !important;
   border: 1px solid var(--ui-border) !important;
-  border-radius: var(--ui-radius) !important;
+  border-radius: var(--ui-radius-button) !important;
 }
 
 /* Button Group Connectors */
@@ -166,21 +408,26 @@ button[data-testid="data-testid TimePicker Open Button"],
   gap: 0 !important;
 }
 
-.button-group button:first-child {
-  border-radius: var(--ui-radius) 0 0 var(--ui-radius) !important;
+.button-group > button:first-child {
+  border-radius: var(--ui-radius-button) 0 0 var(--ui-radius-button) !important;
   border-right: none !important;
 }
 
-.button-group button:last-child {
-  border-radius: 0 var(--ui-radius) var(--ui-radius) 0 !important;
+.button-group > button:last-child {
+  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;
 }
 
 /* ---------- Refresh Picker ---------- */
-[class*="refresh-picker"] button,
-[class*="RefreshPicker"] button {
+[class*="refresh-picker"] > button,
+[class*="RefreshPicker"] > button {
   background-color: var(--ui-card) !important;
   color: var(--ui-fg) !important;
   border: 1px solid var(--ui-border) !important;
+}
+
+[class*="refresh-picker"] > div:last-child > button,
+[class*="RefreshPicker"] > div:last-child > button {
+  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;
 }
 
 /* ---------- Top Navigation ---------- */
@@ -195,7 +442,7 @@ input:not([type="checkbox"]):not([type="radio"]),
 select,
 [class*="gf-form-input"] {
   border-color: var(--ui-border) !important;
-  border-radius: var(--ui-radius) !important;
+  border-radius: var(--ui-radius-input) !important;
   color: var(--ui-fg) !important;
 }
 
@@ -205,7 +452,13 @@ table tbody tr:nth-child(odd) {
 }
 
 table tbody tr:hover {
-  background-color: color-mix(in srgb, var(--ui-primary) 8%, transparent) !important;
+  background-color: var(--ui-table-hover) !important;
+}
+
+[class*="tableContentWrapper"] div[class*="row"]:hover,
+[class*="tablePanel"] div[class*="row"]:hover {
+  background-color: var(--ui-table-hover) !important;
+  transition: background-color 120ms ease !important;
 }
 
 table th {
