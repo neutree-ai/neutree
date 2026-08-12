@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -465,23 +466,15 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 	return nil
 }
 
-// validateEndpointVGPUModeCorePercent rejects virtualization.core_percent on
-// endpoints when the cluster's effective accelerator virtualization mode is
-// template, where compute-core shaping is not supported. "0" is the unset
-// representation and does not count. A missing capability block (stale
-// cluster) falls back to shape-only validation.
+// validateEndpointVGPUModeCorePercent rejects virtualization resource keys on
+// endpoints when the cluster's effective accelerator virtualization mode does
+// not support them. The cluster status block lists the supported resources
+// (supported_resources) for the active mode; any virtualization.* key the
+// endpoint requests that is not in that list is rejected. "0" is the unset
+// representation for core_percent and does not count. A missing capability
+// block (stale cluster) falls back to shape-only validation.
 func validateEndpointVGPUModeCorePercent(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
 	if resources == nil || !resources.HasAcceleratorVirtualization() {
-		return nil
-	}
-
-	corePercent := resources.GetAcceleratorVirtualizationCorePercent()
-	if corePercent == "" {
-		return nil
-	}
-
-	parsed, err := strconv.ParseInt(corePercent, 10, 64)
-	if err != nil || parsed <= 0 {
 		return nil
 	}
 
@@ -489,15 +482,36 @@ func validateEndpointVGPUModeCorePercent(resources *v1.ResourceSpec, cluster *v1
 		return nil
 	}
 
-	if cluster.Status.AcceleratorVirtualization.Mode != v1.AcceleratorVirtualizationModeTemplate {
-		return nil
+	supported := cluster.Status.AcceleratorVirtualization.SupportedResources
+
+	for key, value := range resources.Accelerator {
+		if !v1.IsAcceleratorVirtualizationKey(key) {
+			continue
+		}
+
+		if key == v1.AcceleratorVirtualizationCorePercentKey {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				// "0" (and empty) is the unset representation; it does not
+				// request compute-core shaping and is always allowed.
+				continue
+			}
+		}
+
+		if value == "" {
+			continue
+		}
+
+		if !slices.Contains(supported, key) {
+			return &validationError{
+				Code:    "10227",
+				Message: fmt.Sprintf("virtualization key %q is not supported by the cluster accelerator virtualization mode", key),
+				Hint:    fmt.Sprintf("virtualization.%s is not allowed under the active cluster virtualization mode; switch the cluster mode, or remove the setting", key),
+			}
+		}
 	}
 
-	return &validationError{
-		Code:    "10227",
-		Message: "virtualization.core_percent is not supported by accelerator virtualization mode template",
-		Hint:    "virtualization.core_percent is not allowed under mode template; switch the cluster mode to core, or remove the setting",
-	}
+	return nil
 }
 
 func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationError {

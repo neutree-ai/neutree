@@ -448,6 +448,8 @@ func TestEndpointVGPUValidationRejectsCorePercentUnderTemplateMode(t *testing.T)
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
 		Mode: v1.AcceleratorVirtualizationModeTemplate,
+		// template mode does not support compute-core shaping.
+		SupportedResources: []string{v1.AcceleratorVirtualizationMemoryMiBKey},
 	}
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
@@ -474,7 +476,45 @@ func TestEndpointVGPUValidationRejectsCorePercentUnderTemplateMode(t *testing.T)
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "10227", response.Code)
-	assert.Contains(t, response.Hint, "mode template")
+	assert.Contains(t, response.Message, "virtualization.core_percent")
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsMemoryMiBWhenNotSupported(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode: v1.AcceleratorVirtualizationModeCore,
+		// core mode that (for whatever reason) does not expose memory_mib
+		// in its supported resources must still reject it.
+		SupportedResources: []string{v1.AcceleratorVirtualizationCorePercentKey},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10227", response.Code)
+	assert.Contains(t, response.Message, "virtualization.memory_mib")
 	assert.False(t, handlerCalled)
 }
 
@@ -483,6 +523,11 @@ func TestEndpointVGPUValidationAllowsCorePercentUnderCoreMode(t *testing.T) {
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
 		Mode: v1.AcceleratorVirtualizationModeCore,
+		// core mode supports both memory and compute-core shaping.
+		SupportedResources: []string{
+			v1.AcceleratorVirtualizationMemoryMiBKey,
+			v1.AcceleratorVirtualizationCorePercentKey,
+		},
 	}
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
@@ -514,6 +559,9 @@ func TestEndpointVGPUValidationAllowsZeroCorePercentUnderTemplateMode(t *testing
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
 		Mode: v1.AcceleratorVirtualizationModeTemplate,
+		// template mode does not support compute-core shaping; core_percent=0
+		// is the unset representation and must still be allowed.
+		SupportedResources: []string{v1.AcceleratorVirtualizationMemoryMiBKey},
 	}
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
