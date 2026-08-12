@@ -81,6 +81,8 @@ type ApiKey struct {
 	Spec       *ApiKeySpec   `json:"spec,omitempty"`
 	Status     *ApiKeyStatus `json:"status,omitempty"`
 	UserID     string        `json:"user_id,omitempty"`
+	ProjectID  string        `json:"project_id,omitempty"`
+	Description string       `json:"description,omitempty"`
 }
 
 func (obj *ApiKey) GetName() string {
