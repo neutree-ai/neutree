@@ -786,10 +786,9 @@ func validateClusterAcceleratorVirtualizationDisableForCurrent(
 // validateClusterAcceleratorVirtualizationModeSwitch blocks switching the
 // cluster accelerator virtualization mode while any endpoint still uses
 // accelerator virtualization. The gate applies to any mode change (e.g.
-// core -> template and template -> core alike) once virtualization is enabled;
-// the effective current mode is taken from the stored status, falling back to
-// the spec. When the mode is unchanged, or virtualization is not enabled on
-// the target cluster, the gate is skipped.
+// core -> template and template -> core alike) once virtualization is enabled.
+// When the mode is unchanged, or virtualization is not enabled on the target
+// cluster, the gate is skipped.
 func validateClusterAcceleratorVirtualizationModeSwitch(
 	s storage.Storage, current, next *v1.Cluster,
 ) *validationError {
@@ -797,7 +796,7 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		return nil
 	}
 
-	if clusterEffectiveVirtualizationMode(current) == next.Spec.AcceleratorVirtualization.Mode {
+	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
 		return nil
 	}
 
@@ -838,18 +837,11 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 	return nil
 }
 
-// clusterEffectiveVirtualizationMode returns the effective virtualization mode
-// for a cluster: the status block when present (it reflects the resolved
-// config), otherwise the spec field.
-func clusterEffectiveVirtualizationMode(cluster *v1.Cluster) v1.AcceleratorVirtualizationMode {
+// currentSpecMode returns the virtualization mode currently set on the
+// cluster spec, or the empty string when virtualization is not configured.
+func currentSpecMode(cluster *v1.Cluster) v1.AcceleratorVirtualizationMode {
 	if cluster == nil || cluster.Spec == nil || cluster.Spec.AcceleratorVirtualization == nil {
 		return ""
-	}
-
-	if cluster.Status != nil &&
-		cluster.Status.AcceleratorVirtualization != nil &&
-		cluster.Status.AcceleratorVirtualization.Mode != "" {
-		return cluster.Status.AcceleratorVirtualization.Mode
 	}
 
 	return cluster.Spec.AcceleratorVirtualization.Mode

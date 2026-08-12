@@ -983,8 +983,10 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		countEndpoints bool
 	}{
 		{
-			name: "allows Kubernetes cluster to enable accelerator virtualization",
-			body: `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+			name:        "rejects devicePlugin config_patch key",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+			wantCode:    "10210",
+			wantMessage: "devicePlugin",
 		},
 		{
 			name: "allows Kubernetes nightly cluster with minimum base version to enable accelerator virtualization",
@@ -1041,7 +1043,7 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 			name:        "rejects MIG virtualization config patch",
 			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"migStrategy":"mixed"}}}}}`,
 			wantCode:    "10210",
-			wantMessage: "MIG",
+			wantMessage: "devicePlugin",
 		},
 		{
 			name:        "rejects partial patch missing cluster type and version",
@@ -1277,7 +1279,7 @@ func TestValidateClusterModeSwitchToTemplateBlockedByVGPUEndpoints(t *testing.T)
 
 	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
-	require.NotNil(t, err)
+	assert.NotNil(t, err)
 	assert.Equal(t, "10228", err.Code)
 	assert.Contains(t, err.Message, "cannot switch cluster accelerator virtualization mode")
 	mockStorage.AssertExpectations(t)
@@ -1323,7 +1325,7 @@ func TestValidateClusterModeSwitchFromTemplateToCoreBlockedByVGPUEndpoints(t *te
 
 	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
-	require.NotNil(t, err)
+	assert.NotNil(t, err)
 	assert.Equal(t, "10228", err.Code)
 	assert.Contains(t, err.Message, "cannot switch cluster accelerator virtualization mode")
 	mockStorage.AssertExpectations(t)
