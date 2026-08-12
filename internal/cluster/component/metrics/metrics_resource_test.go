@@ -509,7 +509,7 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 				imagePrefix:           tt.imagePrefix,
 				imagePullSecret:       "test-image-pull-secret",
 				metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-				acceleratorMgr:        accelerator.NewManager(gin.New()),
+				acceleratorMgr:        accelerator.NewManager(),
 				ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 					"nvidia.com/gpu.present": "true",
 				})).Build(),
@@ -650,7 +650,7 @@ func TestBuildMetricsResourcesDoesNotSupportManagedExportersBeforeV110(t *testin
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(gin.New()),
+		acceleratorMgr:        accelerator.NewManager(),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),
@@ -698,7 +698,7 @@ func TestBuildMetricsResourcesUsesExternalDCGMScrapeWhenConfigured(t *testing.T)
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(gin.New()),
+		acceleratorMgr:        accelerator.NewManager(),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),
@@ -928,7 +928,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(gin.New()),
+		acceleratorMgr:        accelerator.NewManager(),
 		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 			"nvidia.com/gpu.present": "true",
 		})).Build(),

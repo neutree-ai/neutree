@@ -1,13 +1,19 @@
 package app
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 )
 
 func TestNewBuilder(t *testing.T) {
@@ -39,7 +45,7 @@ func TestBuilderWithConfig(t *testing.T) {
 
 func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
 	config := &config.CoreConfig{GinEngine: gin.New()}
-	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	injected := internalTestPlugin{}
 	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
 	builder.controllerInits = map[string]ControllerFactory{}
 
@@ -56,15 +62,34 @@ func TestBuilderBuildInjectsAcceleratorPlugins(t *testing.T) {
 	}
 }
 
-func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
+func TestBuilderBuildDoesNotRegisterExternalPluginEndpoint(t *testing.T) {
 	engine := gin.New()
-	existingManager, err := accelerator.NewManagerWithPlugins(engine)
+	config := &config.CoreConfig{GinEngine: engine}
+	builder := NewBuilder().WithConfig(config)
+	builder.controllerInits = map[string]ControllerFactory{}
+
+	_, err := builder.Build()
+
 	if err != nil {
-		t.Fatalf("NewManagerWithPlugins() error = %v", err)
+		t.Fatalf("Build() error = %v", err)
 	}
 
-	config := &config.CoreConfig{GinEngine: engine, AcceleratorManager: existingManager}
-	injected := internalTestPlugin{AcceleratorPlugin: plugin.NewAcceleratorRestPlugin("injected-test", "http://plugin.example")}
+	// The external REST accelerator plugin registration endpoint was removed:
+	// POST /v1/plugin/register must no longer be served (stable 404, no panic).
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugin/register", strings.NewReader(`{"resource_name":"external_gpu","endpoint":"http://plugin.example"}`))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("POST /v1/plugin/register status = %d, want 404", recorder.Code)
+	}
+}
+
+func TestBuilderBuildRegistersInjectedPluginsOnExistingManager(t *testing.T) {
+	existingManager := accelerator.NewManager()
+	config := &config.CoreConfig{GinEngine: gin.New(), AcceleratorManager: existingManager}
+	injected := internalTestPlugin{}
 	builder := NewBuilder().WithConfig(config).WithAcceleratorPlugins(injected)
 	builder.controllerInits = map[string]ControllerFactory{}
 
@@ -117,12 +142,46 @@ func TestBuilderBuildRequiresGinEngineWithConfiguredAcceleratorManager(t *testin
 	}
 }
 
-type internalTestPlugin struct {
-	plugin.AcceleratorPlugin
+type internalTestPlugin struct{}
+
+func (internalTestPlugin) Resource() string {
+	return "injected-test"
 }
 
 func (internalTestPlugin) Type() string {
 	return plugin.InternalPluginType
+}
+
+func (internalTestPlugin) Handle() plugin.AcceleratorPluginHandle {
+	return internalTestPlugin{}
+}
+
+func (internalTestPlugin) GetNodeAccelerator(context.Context, *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) DetectStaticNodeAccelerator(context.Context, *v1.DetectStaticNodeAcceleratorRequest) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{}, nil
+}
+
+func (internalTestPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+	return nil, nil
+}
+
+func (internalTestPlugin) GetResourceConverter() plugin.ResourceConverter {
+	return nil
+}
+
+func (internalTestPlugin) GetResourceParser() resourceparser.ResourceParser {
+	return nil
 }
 
 func TestBuilderWithController(t *testing.T) {

@@ -293,7 +293,7 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 		ctrlClient:            fakeClient,
 		namespace:             "default",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(gin.New()),
+		acceleratorMgr:        accelerator.NewManager(),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
@@ -333,7 +333,7 @@ func TestCheckResourcesStatusDoesNotRequireManagedAcceleratorExporterInExternalM
 		ctrlClient:            fakeClient,
 		namespace:             "default",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(gin.New()),
+		acceleratorMgr:        accelerator.NewManager(),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec: &v1.ClusterSpec{

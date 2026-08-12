@@ -119,7 +119,7 @@ func (b *Builder) Build() (*App, error) {
 	}
 
 	if b.config.AcceleratorManager == nil {
-		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
+		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.acceleratorPlugins...)
 		if err != nil {
 			return nil, fmt.Errorf("create accelerator manager: %w", err)
 		}
