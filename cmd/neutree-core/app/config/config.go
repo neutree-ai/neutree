@@ -7,6 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -20,6 +21,12 @@ type ControllerConfig struct {
 type ClusterControllerConfig struct {
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
+}
+
+// ModelRegistryConfig is what this deployment provisions and offers in the way
+// of model registries.
+type ModelRegistryConfig struct {
+	Builtin model_registry.BuiltinConfig
 }
 
 type ServerConfig struct {
@@ -46,6 +53,9 @@ type CoreConfig struct {
 
 	// core server config
 	ServerConfig *ServerConfig
+
+	// model registry provisioning config
+	ModelRegistryConfig *ModelRegistryConfig
 
 	Scheme *scheme.Scheme
 }

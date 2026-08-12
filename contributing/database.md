@@ -12,7 +12,7 @@
 
 - Location: `db/migrations/`.
 - Naming: `NNN_<description>.up.sql` + `NNN_<description>.down.sql`.
-- Current highest number: **083** — start new migrations at 084.
+- Current highest number: **084** — start new migrations at 085.
 - Any migration that touches RLS or permissions must ship with an integration test under `db/dbtest/`.
 - **Redefining an existing function**: `CREATE OR REPLACE` replaces the whole body, so base it on the *latest* migration that defines the function, not the first one you find. `grep -l 'FUNCTION api.<name>' db/migrations/*.up.sql` lists them all — copying an older body silently reverts every change made in between.
 

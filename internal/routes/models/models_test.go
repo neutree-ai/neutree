@@ -719,6 +719,17 @@ func TestUploadModel_InvalidName(t *testing.T) {
 		},
 	}
 
+	// The handler now reads the registry before the body, so that a push to a
+	// read-only registry is refused without uploading anything. The model name
+	// arrives *in* the body, so that check necessarily comes first and this test
+	// has to let it through. A writable registry keeps the name validation below
+	// as the thing under test.
+	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
+		ID:       7,
+		Metadata: &v1.Metadata{Name: "test-registry", Workspace: "default"},
+		Spec:     &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType},
+	}}, nil)
+
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	assert.NoError(t, writer.WriteField("name", "Invalid_Name"))
@@ -749,7 +760,15 @@ func TestUploadModel_InvalidName(t *testing.T) {
 	assert.Contains(t, response["message"], "Invalid model name")
 	assert.Contains(t, response["message"], "model name must be lowercase")
 
-	mockStorage.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
+	// This used to assert that storage was never consulted for a bad name. That
+	// property and "a read-only registry is refused before its body is read"
+	// cannot both hold: the name arrives in the body, so whichever check is meant
+	// to happen without reading the body has to come first. The registry check
+	// wins — it is the one that decides whether gigabytes get uploaded — and it
+	// costs one indexed lookup on a request that was going to make one anyway.
+	//
+	// What still holds, and is what this test is for, is that an invalid name is
+	// answered with its own 400 and never reaches the import.
 	mockModelRegistry.AssertNotCalled(t, "ImportModel", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
 	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -28,6 +29,12 @@ type neutreeCoreInstallOptions struct {
 	adminPassword         string
 
 	victorialogsRetentionPeriod string
+
+	// enablePublicModelRegistries provisions the built-in public model
+	// registries. Off by default so an air-gapped install does not ship a
+	// registry it can never reach.
+	enablePublicModelRegistries bool
+	huggingFaceEndpoint         string
 }
 
 // defaultVictoriaLogsRetentionPeriod is the default VictoriaLogs log retention
@@ -56,6 +63,8 @@ Configuration Options:
   --grafana-url            Grafana dashboard URL for system info API
   --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
   --victorialogs-retention-period VictoriaLogs log retention period (default: 30d; e.g. 30d, 90d, 1y)
+  --enable-public-model-registries Provision built-in read-only public model registries (default: false)
+  --hugging-face-endpoint  Address the built-in Hugging Face registry points at, e.g. an in-network mirror
 
 Examples:
   # Basic installation
@@ -87,6 +96,11 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
 		defaultVictoriaLogsRetentionPeriod, "VictoriaLogs log retention period (e.g. 30d, 90d, 1y)")
+	neutreeCoreInstallCmd.PersistentFlags().BoolVar(&options.enablePublicModelRegistries, "enable-public-model-registries", false,
+		"provision built-in read-only model registries for the supported public hubs")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.huggingFaceEndpoint, "hugging-face-endpoint",
+		model_registry.DefaultHuggingFaceEndpoint,
+		"address the built-in Hugging Face registry points at, e.g. an in-network mirror")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
@@ -199,6 +213,19 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		options.victorialogsRetentionPeriod = defaultVictoriaLogsRetentionPeriod
 	}
 
+	// The compose template renders the two model-registry flags only when the
+	// feature is on, so the "off" case emits no argument at all rather than an
+	// explicit false — same shape as the optional URLs next to it.
+	builtinPublicModelRegistries := ""
+	if options.enablePublicModelRegistries {
+		builtinPublicModelRegistries = "true"
+	}
+
+	huggingFaceEndpoint := options.huggingFaceEndpoint
+	if huggingFaceEndpoint == "" {
+		huggingFaceEndpoint = model_registry.DefaultHuggingFaceEndpoint
+	}
+
 	templateParams := map[string]string{
 		"NeutreeCoreWorkDir":           coreWorkDir,
 		"JwtSecret":                    options.jwtSecret,
@@ -217,6 +244,8 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		"KongPluginQuotaChecksum":      pluginChecksums["neutree-ai-quota"],
 		"NodeIP":                       options.nodeIP,
 		"AdminPassword":                options.adminPassword,
+		"BuiltinPublicModelRegistries": builtinPublicModelRegistries,
+		"HuggingFaceEndpoint":          huggingFaceEndpoint,
 	}
 
 	err = util.BatchParseTemplateFiles(tempplateFiles, templateParams)

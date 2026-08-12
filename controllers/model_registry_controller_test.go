@@ -601,9 +601,24 @@ func TestModelRegistryController_Sync_PublicRegistryHasNoStats(t *testing.T) {
 		Metadata: &v1.Metadata{Name: "public", Workspace: "default"},
 		Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
 	}
+	var written *v1.ModelRegistryStatus
+
+	// The phase did not change and nothing was measured, but the check still
+	// happened, and recording when a registry was last checked is the one thing
+	// that has to be written even when the answer is the same as last time.
+	mockStorage.On("UpdateModelRegistry", "1", mock.Anything).Run(func(args mock.Arguments) {
+		obj := args.Get(1).(*v1.ModelRegistry) //nolint:errcheck
+		written = obj.Status
+	}).Return(nil)
+
 	assert.NoError(t, c.sync(obj))
 
-	// Nothing measured, nothing to write: the phase did not change either.
-	mockStorage.AssertNotCalled(t, "UpdateModelRegistry", mock.Anything, mock.Anything)
 	assert.Nil(t, obj.Status.Stats)
+
+	if assert.NotNil(t, written) {
+		assert.Equal(t, v1.ModelRegistryPhaseCONNECTED, written.Phase)
+		assert.NotEmpty(t, written.LastCheckedAt)
+		// Still no counters: a public registry's storage is not ours to measure.
+		assert.Nil(t, written.Stats)
+	}
 }

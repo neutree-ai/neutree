@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -28,6 +30,10 @@ type APIConfig struct {
 	// Server configuration
 	ServerConfig *ServerConfig
 	StaticConfig *StaticConfig
+
+	// PublicRegistryQueryCacheTTL is how long a public model registry's query
+	// results are reused. Zero uses the model registry package's default.
+	PublicRegistryQueryCacheTTL time.Duration
 
 	// External services
 	StorageAccessURL string
