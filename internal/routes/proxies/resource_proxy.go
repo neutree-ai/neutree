@@ -341,8 +341,14 @@ func mergeExcludedFieldsRecursive(
 		if sourceMap, ok := sourceValue.(map[string]interface{}); ok {
 			if targetMap, ok := target[key].(map[string]interface{}); ok {
 				mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
-			} else if !ok && target[key] == nil {
-				// Target has this key but it's nil, create a new map and merge
+			} else if !ok && target[key] == nil && currentPath != "" && subtreeHasExcludedField(excludeFields, fieldPath) {
+				// The PATCH omits (or nulls) this key under a subtree it does
+				// replace. Create the intermediate map only when it leads to
+				// an excluded field; otherwise an omitted config object would
+				// be resurrected as an empty map (e.g. spec.config.metrics)
+				// in storage. Top-level keys are never fabricated: columns the
+				// PATCH does not provide are left untouched by the storage
+				// layer, so masked fields under them survive without backfill.
 				target[key] = make(map[string]interface{})
 				if targetMap, ok := target[key].(map[string]interface{}); ok {
 					mergeExcludedFieldsRecursive(targetMap, sourceMap, excludeFields, arrayMergeKeys, fieldPath)
@@ -372,6 +378,20 @@ func mergeExcludedFieldsRecursive(
 			}
 		}
 	}
+}
+
+// subtreeHasExcludedField reports whether any excluded field path is nested
+// below currentPath. Recursing into a subtree with no excluded fields can only
+// re-create empty maps, so the intermediate map must not be created.
+func subtreeHasExcludedField(excludeFields map[string]struct{}, currentPath string) bool {
+	prefix := currentPath + "."
+	for path := range excludeFields {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // mergeArrayByIdentity merges excluded fields between array elements paired by
