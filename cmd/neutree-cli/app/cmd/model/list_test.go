@@ -72,6 +72,64 @@ func TestRenderModelTableWritesOneLinePerModel(t *testing.T) {
 	require.True(t, strings.HasPrefix(lines[2], "b"))
 }
 
+func TestValidatePagination(t *testing.T) {
+	tests := []struct {
+		name      string
+		limit     int
+		offset    int
+		wantError string
+	}{
+		{name: "defaults", limit: 0, offset: 0},
+		{name: "positive values", limit: 10, offset: 20},
+		{name: "negative limit", limit: -1, offset: 0, wantError: "--limit must be a non-negative integer, got -1"},
+		{name: "negative offset", limit: 0, offset: -2, wantError: "--offset must be a non-negative integer, got -2"},
+		{
+			name:      "both negative reports limit first",
+			limit:     -3,
+			offset:    -4,
+			wantError: "--limit must be a non-negative integer, got -3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePagination(tt.limit, tt.offset)
+			if tt.wantError == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tt.wantError)
+		})
+	}
+}
+
+func TestRunListRejectsInvalidPaginationBeforeClientWork(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      listOptions
+		wantError string
+	}{
+		{
+			name:      "negative limit",
+			opts:      listOptions{limit: -1},
+			wantError: "--limit must be a non-negative integer, got -1",
+		},
+		{
+			name:      "negative offset",
+			opts:      listOptions{offset: -2},
+			wantError: "--offset must be a non-negative integer, got -2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.EqualError(t, runList(&tt.opts), tt.wantError)
+		})
+	}
+}
+
 func TestSummarisePageReportsTheServersTotal(t *testing.T) {
 	models := []v1.GeneralModel{{Name: "a"}, {Name: "b"}}
 	total := 42
