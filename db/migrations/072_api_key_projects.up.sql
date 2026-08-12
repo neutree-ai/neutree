@@ -376,7 +376,7 @@ BEGIN
         p.is_default,
         count(k.id)::bigint AS api_key_count,
         COALESCE(sum(u.used), 0)::bigint AS usage_used,
-        COALESCE(sum(u.token_limit), 0)::bigint AS usage_limit,
+        COALESCE(sum(lim.token_limit), 0)::bigint AS usage_limit,
         p.created_at,
         p.updated_at
     FROM api.projects p
