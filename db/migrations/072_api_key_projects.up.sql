@@ -142,16 +142,25 @@ BEGIN
         RAISE EXCEPTION 'permission denied';
     END IF;
 
-    IF EXISTS (
-        SELECT 1
+    -- Reject the whole migration when any selected key collides with an
+    -- existing key in the target Project, and name every conflicting key so
+    -- the UI can show exactly what must be renamed first.
+    DECLARE
+        v_conflicts TEXT;
+    BEGIN
+        SELECT string_agg(DISTINCT (existing.metadata).name, ', '
+                          ORDER BY (existing.metadata).name)
+        INTO v_conflicts
         FROM api.api_keys k
         JOIN api.api_keys existing ON existing.project_id = p_project_id
             AND (existing.metadata).name = (k.metadata).name
             AND existing.id <> k.id
-        WHERE k.id = ANY(p_api_key_ids)
-    ) THEN
-        RAISE EXCEPTION 'API key name already exists in target Project';
-    END IF;
+        WHERE k.id = ANY(p_api_key_ids);
+
+        IF v_conflicts IS NOT NULL THEN
+            RAISE EXCEPTION 'API key name conflict in target Project: %', v_conflicts;
+        END IF;
+    END;
 
     FOR v_key IN
         SELECT k.* FROM api.api_keys k
@@ -259,5 +268,160 @@ DROP POLICY IF EXISTS "Users can delete their own API keys" ON api.api_keys;
 CREATE POLICY "Users can delete their own API keys" ON api.api_keys FOR DELETE USING (
     api.has_permission(auth.uid(), 'workspace:delete', (metadata).workspace)
 );
+
+CREATE OR REPLACE FUNCTION api.update_project(
+    p_project_id UUID,
+    p_name TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT NULL
+) RETURNS api.projects
+SECURITY DEFINER AS $$
+DECLARE
+    v_project api.projects;
+BEGIN
+    SELECT * INTO v_project FROM api.projects WHERE id = p_project_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Project not found';
+    END IF;
+    IF NOT api.has_permission(auth.uid(), 'workspace:update', v_project.workspace) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
+    IF v_project.is_default AND (p_name IS NOT NULL OR p_status IS NOT NULL) THEN
+        RAISE EXCEPTION 'Default Project cannot be renamed or disabled';
+    END IF;
+    IF p_name IS NOT NULL THEN
+        IF btrim(p_name) = '' THEN
+            RAISE EXCEPTION 'Project name is required';
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM api.projects
+            WHERE workspace = v_project.workspace AND name = btrim(p_name) AND id <> p_project_id
+        ) THEN
+            RAISE EXCEPTION 'Project name already exists';
+        END IF;
+    END IF;
+    IF p_status IS NOT NULL AND p_status NOT IN ('enabled', 'disabled') THEN
+        RAISE EXCEPTION 'Invalid project status';
+    END IF;
+    UPDATE api.projects
+    SET name = COALESCE(btrim(p_name), name),
+        description = CASE WHEN p_description IS NOT NULL THEN p_description ELSE description END,
+        status = COALESCE(p_status, status)
+    WHERE id = p_project_id
+    RETURNING * INTO v_project;
+    RETURN v_project;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION api.delete_project(
+    p_project_id UUID
+) RETURNS VOID
+SECURITY DEFINER AS $$
+DECLARE
+    v_project api.projects;
+    v_key_count BIGINT;
+BEGIN
+    SELECT * INTO v_project FROM api.projects WHERE id = p_project_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Project not found';
+    END IF;
+    IF NOT api.has_permission(auth.uid(), 'workspace:delete', v_project.workspace) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
+    IF v_project.is_default THEN
+        RAISE EXCEPTION 'Default Project cannot be deleted';
+    END IF;
+    SELECT count(*) INTO v_key_count FROM api.api_keys WHERE project_id = p_project_id;
+    IF v_key_count > 0 THEN
+        RAISE EXCEPTION 'Project has % API key(s); migrate or delete them first', v_key_count;
+    END IF;
+    DELETE FROM api.projects WHERE id = p_project_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- Project rows with their API key count and current-cycle usage, returned in
+-- one batched call (no per-project queries). p_search / p_status keep the
+-- payload small when the UI already narrowed the scope; usage follows the same
+-- ledger/period rules as get_api_keys_usage_summary.
+CREATE OR REPLACE FUNCTION api.group_projects(
+    p_workspace TEXT,
+    p_search TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT NULL
+) RETURNS TABLE (
+    id UUID,
+    name TEXT,
+    description TEXT,
+    status TEXT,
+    is_default BOOLEAN,
+    api_key_count BIGINT,
+    usage_used BIGINT,
+    usage_limit BIGINT,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+BEGIN
+    IF NOT api.has_permission(auth.uid(), 'workspace:read', p_workspace) THEN
+        RAISE EXCEPTION 'permission denied';
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        p.id,
+        p.name,
+        p.description,
+        p.status,
+        p.is_default,
+        count(k.id)::bigint AS api_key_count,
+        COALESCE(sum(u.used), 0)::bigint AS usage_used,
+        COALESCE(sum(u.token_limit), 0)::bigint AS usage_limit,
+        p.created_at,
+        p.updated_at
+    FROM api.projects p
+    LEFT JOIN api.api_keys k
+        ON k.project_id = p.id
+       AND (k.metadata).deletion_timestamp IS NULL
+    LEFT JOIN LATERAL (
+        SELECT
+            ((k.spec).limits #>> '{token_quota,limit}')::bigint AS token_limit,
+            CASE COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly')
+                WHEN 'daily'   THEN CURRENT_DATE
+                WHEN 'weekly'  THEN date_trunc('week',  CURRENT_DATE)::date
+                WHEN 'monthly' THEN date_trunc('month', CURRENT_DATE)::date
+                WHEN 'yearly'  THEN date_trunc('year',  CURRENT_DATE)::date
+                ELSE date_trunc('month', CURRENT_DATE)::date
+            END AS period_start
+    ) lim ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM((d.spec).total_usage), 0)::bigint AS used
+        FROM api.api_daily_usage d
+        WHERE (d.spec).api_key_id = k.id
+          AND (d.spec).usage_date >= lim.period_start
+          AND (d.spec).usage_date <= CURRENT_DATE
+    ) u ON TRUE
+    WHERE p.workspace = p_workspace
+      AND (p_status IS NULL OR p.status = p_status)
+      AND (
+          p_search IS NULL
+          OR btrim(p_search) = ''
+          OR p.name ILIKE '%' || p_search || '%'
+          OR COALESCE(p.description, '') ILIKE '%' || p_search || '%'
+          OR EXISTS (
+              SELECT 1 FROM api.api_keys k2
+              WHERE k2.project_id = p.id
+                AND (k2.metadata).deletion_timestamp IS NULL
+                AND (
+                    (k2.metadata).name ILIKE '%' || p_search || '%'
+                    OR COALESCE(k2.description, '') ILIKE '%' || p_search || '%'
+                    OR (k2.metadata).workspace ILIKE '%' || p_search || '%'
+                )
+          )
+      )
+    GROUP BY p.id
+    ORDER BY p.is_default DESC, p.created_at ASC, p.name ASC;
+END;
+$$ LANGUAGE plpgsql;
 
 ALTER TABLE api.projects FORCE ROW LEVEL SECURITY;

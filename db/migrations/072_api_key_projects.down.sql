@@ -6,6 +6,9 @@ DROP FUNCTION IF EXISTS api.ensure_default_project();
 DROP TRIGGER IF EXISTS projects_updated_at ON api.projects;
 DROP FUNCTION IF EXISTS api.validate_project_write();
 DROP FUNCTION IF EXISTS api.create_project(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.update_project(UUID, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.delete_project(UUID);
+DROP FUNCTION IF EXISTS api.group_projects(TEXT, TEXT, TEXT);
 
 DROP TABLE IF EXISTS api.api_key_project_history;
 DROP POLICY IF EXISTS "Project delete policy" ON api.projects;
