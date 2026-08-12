@@ -6,7 +6,7 @@
 set -e
 
 VERSION=$(git describe --tags --always --dirty)
-OUTPUT_DIR="./dist"
+OUTPUT_DIR="${OUTPUT_DIR:-./dist}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -172,6 +172,7 @@ Options:
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -253,6 +254,7 @@ TEMPLATE_DIR=""
 SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
+PLATFORM="linux/amd64"
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
 # declaring false: an engine version with no capabilities block keeps the
@@ -322,6 +324,14 @@ while [[ $# -gt 0 ]]; do
             DESCRIPTION="$2"
             shift 2
             ;;
+        -p|--platform)
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                print_error "$1 requires a value"
+                exit 1
+            fi
+            PLATFORM="$2"
+            shift 2
+            ;;
         --manifest-only)
             MANIFEST_ONLY="true"
             shift
@@ -382,7 +392,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
 
-    # Collect all full image references and ensure they exist locally
+    # Pull the selected platform before collecting images for export
     ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
         IFS=':' read -ra PARTS <<< "$spec"
@@ -392,15 +402,12 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        # Check if image exists, if not, pull it
-        if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
-            print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
-            if ! docker pull "$FULL_IMAGE"; then
-                print_error "Failed to pull image $FULL_IMAGE"
-                exit 1
-            fi
-            print_info "Successfully pulled $FULL_IMAGE"
+        print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
+        if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
+            print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
+            exit 1
         fi
+        print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
 
         ALL_IMAGES+=("$FULL_IMAGE")
     done
@@ -438,7 +445,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\"
+      platform: \"$PLATFORM\"
       size: $INSPECT_SIZE"
     done
 else
@@ -456,7 +463,7 @@ else
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\""
+      platform: \"$PLATFORM\""
     done
 fi
 
@@ -702,6 +709,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     cd - > /dev/null
 
     # Move to final location
+    mkdir -p "$OUTPUT_DIR"
     mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 
     # Copy standalone manifest.yaml for release
