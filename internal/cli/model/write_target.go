@@ -15,34 +15,39 @@ const (
 	ModelWriteDelete ModelWrite = "delete models from"
 )
 
-// ValidateWritableRegistry refuses a write against a registry kind that holds
-// no models of ours.
+// ValidateWritableRegistry refuses a write against a public registry.
 //
-// A hugging-face registry is a catalogue the control plane reads; every write
-// against it is answered with "operation not supported", and for a push the
-// answer only arrives after the whole model has been archived and uploaded.
-// Deciding from the registry the command has already fetched turns minutes of
-// wasted transfer into an immediate refusal, and turns a transport-level error
-// into a sentence naming the registry and what is wrong with it.
+// A public registry is a catalogue someone else operates: the control plane
+// reads it and holds none of its models, so every write against it is answered
+// with "operation not supported", and for a push that answer only arrives after
+// the whole model has been archived and uploaded. Deciding from the registry the
+// command has already fetched turns minutes of wasted transfer into an immediate
+// refusal, and turns a transport-level error into a sentence naming the registry
+// and what is wrong with it.
 //
-// This mirrors the server rather than replacing it: a registry kind added later
-// still falls through to whatever the server answers, so the check can only be
-// too permissive, never too strict.
+// Public-or-private is asked of v1.VisibilityForModelRegistryType rather than
+// derived here, so that no client carries its own list of which kinds are
+// catalogues — the same reason the server asks it in query_cache.go and
+// errors.go instead of testing for hugging-face. The next read-only provider is
+// refused here as soon as that one mapping learns about it.
 //
-// Reading the kind is the temporary part. The server is growing a `visibility`
-// field that states public-or-private itself, so that no client has to know
-// which kinds are catalogues; once it lands, switch the condition below to it
-// (v1.VisibilityForModelRegistryType is the same judgement in Go, and the
-// registry object carries `visibility` when the request selects it — PostgREST
-// omits computed columns from `select=*`). Doing so is what makes the next
-// read-only provider — ModelScope is the one already coming — refused here
-// without anyone remembering to extend a list of kinds.
+// The registry object also carries the server's own `visibility`, which is the
+// authoritative form of the same answer, but PostgREST omits computed columns
+// from `select=*` and so it is absent from what ModelRegistries.Get fetches.
+// Reading it would mean teaching that call to select it, which is a pkg/client
+// change felt by every caller of it, for an answer the exported mapping already
+// gives from one place. Not worth it here; worth revisiting if a caller ever
+// needs a visibility the client cannot derive.
+//
+// This mirrors the server rather than replacing it: a kind the mapping does not
+// know is treated as private and falls through to whatever the server answers,
+// so the check can only be too permissive, never too strict.
 func ValidateWritableRegistry(registry *v1.ModelRegistry, name string, write ModelWrite) error {
 	if registry == nil || registry.Spec == nil {
 		return nil
 	}
 
-	if registry.Spec.Type != v1.HuggingFaceModelRegistryType {
+	if v1.VisibilityForModelRegistryType(registry.Spec.Type) != v1.ModelRegistryVisibilityPublic {
 		return nil
 	}
 

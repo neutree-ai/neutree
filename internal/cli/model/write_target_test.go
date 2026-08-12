@@ -48,13 +48,39 @@ func TestValidateWritableRegistryAllowsRegistriesWeStore(t *testing.T) {
 
 // The check reads a registry the command fetched, so an unusable one means the
 // fetch is what went wrong. Refusing here would report the wrong problem, and a
-// registry kind this build does not know about is the server's to judge.
+// registry kind the visibility mapping does not know is private by that
+// mapping's own rule — so it is the server's to judge, not this function's.
 func TestValidateWritableRegistryDefersWhenItCannotTell(t *testing.T) {
 	require.NoError(t, ValidateWritableRegistry(nil, "whatever", ModelWritePush))
 	require.NoError(t, ValidateWritableRegistry(&v1.ModelRegistry{}, "whatever", ModelWritePush))
 	require.NoError(t, ValidateWritableRegistry(&v1.ModelRegistry{
 		Spec: &v1.ModelRegistrySpec{Type: "some-future-kind"},
 	}, "whatever", ModelWritePush))
+}
+
+// What is refused is "public", not "hugging-face". Asserting it against the
+// mapping rather than against the one kind that is public today is what makes
+// the next read-only provider covered by this test the moment the mapping
+// learns about it — which is the whole reason the judgement was moved there.
+func TestValidateWritableRegistryRefusesWhateverTheMappingCallsPublic(t *testing.T) {
+	for _, registryType := range []v1.ModelRegistryType{
+		v1.HuggingFaceModelRegistryType,
+		v1.BentoMLModelRegistryType,
+		"some-future-kind",
+	} {
+		err := ValidateWritableRegistry(&v1.ModelRegistry{
+			Metadata: &v1.Metadata{Name: "a-registry"},
+			Spec:     &v1.ModelRegistrySpec{Type: registryType},
+		}, "a-registry", ModelWritePush)
+
+		public := v1.VisibilityForModelRegistryType(registryType) == v1.ModelRegistryVisibilityPublic
+		if public {
+			require.Error(t, err, "kind %q is public and must be refused", registryType)
+			continue
+		}
+
+		require.NoError(t, err, "kind %q is private and must be left to the server", registryType)
+	}
 }
 
 // The name comes off the fetched object, which is not guaranteed to carry
