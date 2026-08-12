@@ -1,0 +1,51 @@
+# HAMi Chart Modifications
+
+This chart is a repackaged `hami-2.9.0` with a cherry-picked upstream extension
+that lets the scheduler device-config be supplied through chart values.
+
+## Deviation from upstream hami-2.9.0
+
+### `device-config.content` values override
+
+Upstream `Project-HAMi/HAMi` master added the ability to provide the full
+`device-config.yaml` payload through `values.device-config.content` instead of
+shipping a `files/device-config.yaml` inside the chart or editing the hardcoded
+defaults. This repackaged chart carries that change on top of 2.9.0.
+
+**`values.yaml`** adds:
+
+```yaml
+# Device config overrides
+# If content is set under device-config.content, it will be used as the device-config.yaml
+# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
+device-config:
+  content: ""
+```
+
+**`templates/scheduler/device-configmap.yaml`** renders the ConfigMap payload
+with this precedence:
+
+```yaml
+data:
+  device-config.yaml: |-
+  {{- if and (index .Values "device-config") (index .Values "device-config" "content") }}
+  {{- (index .Values "device-config" "content") | nindent 4 }}
+  {{- else if .Files.Glob "files/device-config.yaml" }}
+  {{- .Files.Get "files/device-config.yaml" | nindent 4}}
+  {{- else }}
+  ...default hardcoded config...
+```
+
+So the precedence is: `device-config.content` > `files/device-config.yaml` >
+the hardcoded default. This lets a cluster supply its own `vnpus`/device-config
+templates (for example Ascend hard-slice templates) through chart values without
+rebuilding the chart.
+
+## Verification
+
+- `helm template` renders `device-config.content` into the
+  `hami-scheduler-device` ConfigMap when set, and falls back to the default
+  config when empty.
+- The chart is loaded in-process via `loader.LoadArchive` (see
+  `internal/cluster/component/hami/chart.go`), which does not require the
+  optional `hami-dra` dependency to be vendored.
