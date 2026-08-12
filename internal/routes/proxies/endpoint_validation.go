@@ -340,7 +340,7 @@ func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUModeCorePercent(endpoint.Spec.Resources, cluster); validationErr != nil {
+	if validationErr := validateEndpointVGPUResourcesSupported(endpoint.Spec.Resources, cluster); validationErr != nil {
 		return validationErr
 	}
 
@@ -466,14 +466,14 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 	return nil
 }
 
-// validateEndpointVGPUModeCorePercent rejects virtualization resource keys on
+// validateEndpointVGPUResourcesSupported rejects virtualization resource keys on
 // endpoints when the cluster's effective accelerator virtualization mode does
 // not support them. The cluster status block lists the supported resources
 // (supported_resources) for the active mode; any virtualization.* key the
 // endpoint requests that is not in that list is rejected. "0" is the unset
 // representation for core_percent and does not count. A missing capability
 // block (stale cluster) falls back to shape-only validation.
-func validateEndpointVGPUModeCorePercent(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
+func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
 	if resources == nil || !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
