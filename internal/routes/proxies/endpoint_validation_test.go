@@ -590,8 +590,8 @@ func TestEndpointVGPUValidationRejectsZeroCorePercentUnderTemplateMode(t *testin
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Message, "invalid endpoint accelerator virtualization resources")
+	assert.Equal(t, "10227", response.Code)
+	assert.Contains(t, response.Message, "virtualization.core_percent")
 	assert.False(t, handlerCalled)
 }
 

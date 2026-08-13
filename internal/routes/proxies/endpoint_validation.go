@@ -470,10 +470,10 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 // endpoints when the cluster's effective accelerator virtualization mode does
 // not support them. The cluster status block lists the supported resources
 // (supported_resources) for the active mode; any virtualization.* key the
-// endpoint requests that is not in that list is rejected. Non-positive
-// core_percent is not gated here — its value range is enforced by the shape
-// validator. A missing capability block (stale cluster) falls back to
-// shape-only validation.
+// endpoint requests that is not in that list is rejected. The value of each
+// key is not inspected here — value range is enforced by the shape validator.
+// A missing capability block (stale cluster) falls back to shape-only
+// validation.
 func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
 	if resources == nil || !resources.HasAcceleratorVirtualization() {
 		return nil
@@ -485,21 +485,8 @@ func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster 
 
 	supported := cluster.Status.AcceleratorVirtualization.SupportedResources
 
-	for key, value := range resources.Accelerator {
+	for key := range resources.Accelerator {
 		if !v1.IsAcceleratorVirtualizationKey(key) {
-			continue
-		}
-
-		if key == v1.AcceleratorVirtualizationCorePercentKey {
-			parsed, err := strconv.ParseInt(value, 10, 64)
-			if err != nil || parsed <= 0 {
-				// Non-positive core_percent is not a compute-core shaping request;
-				// its value range is enforced by validateOneToHundredPercentResource.
-				continue
-			}
-		}
-
-		if value == "" {
 			continue
 		}
 
