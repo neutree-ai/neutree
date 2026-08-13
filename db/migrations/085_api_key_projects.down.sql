@@ -1,6 +1,7 @@
 BEGIN;
 DROP FUNCTION IF EXISTS api.move_api_keys_to_project(UUID[], UUID);
 DROP FUNCTION IF EXISTS api.delete_api_key_project(UUID);
+DROP FUNCTION IF EXISTS api.update_api_key_project(UUID, TEXT, TEXT, BOOLEAN);
 DROP FUNCTION IF EXISTS api.create_api_key_project(TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER, JSONB, UUID, TEXT);
 DROP TABLE api.api_key_project_history;
