@@ -284,8 +284,8 @@ func (s *ModelsService) Delete(workspace, registry, modelName, version string) e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server returned non-200/204 status: %d, body: %s", resp.StatusCode, string(bodyBytes))
+		body, _ := io.ReadAll(resp.Body)
+		return responseError(resp.StatusCode, body)
 	}
 
 	return nil

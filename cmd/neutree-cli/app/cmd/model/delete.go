@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
+	cliModel "github.com/neutree-ai/neutree/internal/cli/model"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
@@ -13,10 +14,11 @@ func NewDeleteCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "delete [model_name:version]",
-		Short: "Delete a model from the registry",
-		Long:  `Delete a specific model from the registry`,
-		Args:  cobra.ExactArgs(1),
+		Use:          "delete [model_name:version]",
+		Short:        "Delete a model from the registry",
+		Long:         `Delete a specific model from the registry`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modelTag := args[0]
 
@@ -36,9 +38,15 @@ func NewDeleteCmd() *cobra.Command {
 
 			// Create client
 			c := client.NewClient(global.ServerURL, clientOptions...)
-			_, err = c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
+			modelRegistry, err := c.ModelRegistries.Get(workspace, registry) // Ensure registry exists
 			if err != nil {
 				return fmt.Errorf("failed to get model registry %s: %w", registry, err)
+			}
+
+			// Refuse before the confirmation prompt: asking someone to confirm a
+			// deletion that cannot happen is asking the wrong question.
+			if err := cliModel.ValidateWritableRegistry(modelRegistry, registry, cliModel.ModelWriteDelete); err != nil {
+				return err
 			}
 
 			if !force {

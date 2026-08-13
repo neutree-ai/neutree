@@ -76,6 +76,10 @@ func NewListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all models in the registry",
 		Long:  `List all models in the registry with their basic information`,
+		// A registry stating a limit — "this one cannot be paged from an offset" —
+		// is the answer, not a sign the command was typed wrong. Printing the
+		// usage block under it buries the one line worth reading.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(opts)
 		},
