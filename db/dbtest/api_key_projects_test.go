@@ -34,5 +34,9 @@ func TestAPIKeyProjects(t *testing.T) {
 		if moved != 1 { t.Fatalf("moved=%d want 1", moved) }
 		var history int
 		if err := tx.QueryRow(`SELECT count(*) FROM api.api_key_project_history WHERE api_key_id=$1`, key1).Scan(&history); err != nil || history != 1 { t.Fatalf("history=%d err=%v", history, err) }
+
+		var count, total int
+		if err := tx.QueryRow(`SELECT api_key_count, total_projects FROM api.get_api_key_project_groups('ws-a',NULL,NULL,NULL,1,1) LIMIT 1`).Scan(&count, &total); err != nil { t.Fatal(err) }
+		if total != 3 { t.Fatalf("total projects=%d want 3", total) }
 	})
 }
