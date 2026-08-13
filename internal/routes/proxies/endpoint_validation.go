@@ -470,9 +470,10 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 // endpoints when the cluster's effective accelerator virtualization mode does
 // not support them. The cluster status block lists the supported resources
 // (supported_resources) for the active mode; any virtualization.* key the
-// endpoint requests that is not in that list is rejected. "0" is the unset
-// representation for core_percent and does not count. A missing capability
-// block (stale cluster) falls back to shape-only validation.
+// endpoint requests that is not in that list is rejected. Non-positive
+// core_percent is not gated here — its value range is enforced by the shape
+// validator. A missing capability block (stale cluster) falls back to
+// shape-only validation.
 func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
 	if resources == nil || !resources.HasAcceleratorVirtualization() {
 		return nil
@@ -492,8 +493,8 @@ func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster 
 		if key == v1.AcceleratorVirtualizationCorePercentKey {
 			parsed, err := strconv.ParseInt(value, 10, 64)
 			if err != nil || parsed <= 0 {
-				// "0" (and empty) is the unset representation; it does not
-				// request compute-core shaping and is always allowed.
+				// Non-positive core_percent is not a compute-core shaping request;
+				// its value range is enforced by validateOneToHundredPercentResource.
 				continue
 			}
 		}
@@ -551,7 +552,7 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return endpointResourceValueError(err)
 	}
 
-	if err := validateZeroToHundredPercentResource(resources.GetAcceleratorVirtualizationCorePercent(), "virtualization.core_percent"); err != nil {
+	if err := validateOneToHundredPercentResource(resources.GetAcceleratorVirtualizationCorePercent(), "virtualization.core_percent"); err != nil {
 		return endpointResourceValueError(err)
 	}
 
@@ -727,14 +728,14 @@ func parseRequiredPositiveInteger(value string, field string) (int64, error) {
 	return parsed, nil
 }
 
-func validateZeroToHundredPercentResource(value string, field string) error {
+func validateOneToHundredPercentResource(value string, field string) error {
 	if value == "" {
 		return nil
 	}
 
 	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed < 0 || parsed > 100 {
-		return fmt.Errorf("%s must be between 0 and 100", field)
+	if err != nil || parsed < 1 || parsed > 100 {
+		return fmt.Errorf("%s must be between 1 and 100", field)
 	}
 
 	return nil

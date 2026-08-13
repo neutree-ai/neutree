@@ -151,7 +151,7 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
 		assert.Contains(t, err.Hint, "virtualization.core_percent")
-		assert.Contains(t, err.Hint, "between 0 and 100")
+		assert.Contains(t, err.Hint, "between 1 and 100")
 	})
 
 	t.Run("rejects negative vGPU core resource", func(t *testing.T) {
@@ -165,11 +165,11 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		if assert.NotNil(t, err) {
 			assert.Equal(t, "10216", err.Code)
 			assert.Contains(t, err.Hint, "virtualization.core_percent")
-			assert.Contains(t, err.Hint, "between 0 and 100")
+			assert.Contains(t, err.Hint, "between 1 and 100")
 		}
 	})
 
-	t.Run("allows zero vGPU core resource as unconfigured", func(t *testing.T) {
+	t.Run("rejects zero vGPU core resource", func(t *testing.T) {
 		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
 			v1.AcceleratorVirtualizationCorePercentKey: "0",
@@ -177,7 +177,11 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 
 		err := validateEndpointVGPUResourceShape(resources)
 
-		assert.Nil(t, err)
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10216", err.Code)
+			assert.Contains(t, err.Hint, "virtualization.core_percent")
+			assert.Contains(t, err.Hint, "between 1 and 100")
+		}
 	})
 
 	for _, corePercent := range []string{"1", "100"} {
@@ -415,7 +419,7 @@ func TestEndpointVGPUValidationAllowsPostWhenProductMemorySpecIsMissing(t *testi
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsPostWithZeroCorePercent(t *testing.T) {
+func TestEndpointVGPUValidationRejectsPostWithZeroCorePercent(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
@@ -439,8 +443,8 @@ func TestEndpointVGPUValidationAllowsPostWithZeroCorePercent(t *testing.T) {
 
 	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.False(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationRejectsCorePercentUnderTemplateMode(t *testing.T) {
@@ -554,13 +558,12 @@ func TestEndpointVGPUValidationAllowsCorePercentUnderCoreMode(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsZeroCorePercentUnderTemplateMode(t *testing.T) {
+func TestEndpointVGPUValidationRejectsZeroCorePercentUnderTemplateMode(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
 		Mode: v1.AcceleratorVirtualizationModeTemplate,
-		// template mode does not support compute-core shaping; core_percent=0
-		// is the unset representation and must still be allowed.
+		// template mode does not support compute-core shaping.
 		SupportedResources: []string{v1.AcceleratorVirtualizationMemoryMiBKey},
 	}
 	clusterStorage := &fakeClusterStorage{
@@ -584,8 +587,12 @@ func TestEndpointVGPUValidationAllowsZeroCorePercentUnderTemplateMode(t *testing
 
 	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.True(t, handlerCalled)
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10216", response.Code)
+	assert.Contains(t, response.Message, "invalid endpoint accelerator virtualization resources")
+	assert.False(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationAllowsCorePercentWhenModeStatusMissing(t *testing.T) {
@@ -1216,7 +1223,7 @@ func TestEndpointVGPUValidationAllowsPatchWhenReplacementProductMemoryIsUnknown(
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsPatchWithZeroCorePercent(t *testing.T) {
+func TestEndpointVGPUValidationRejectsPatchWithZeroCorePercent(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
@@ -1247,9 +1254,8 @@ func TestEndpointVGPUValidationAllowsPatchWithZeroCorePercent(t *testing.T) {
 		clusterStorage,
 	)
 
-	assert.Equal(t, http.StatusNoContent, recorder.Code)
-	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.False(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationAllowsPatchWhenCurrentAvailableCapacityIsZero(t *testing.T) {
