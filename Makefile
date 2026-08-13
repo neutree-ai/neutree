@@ -223,7 +223,7 @@ GATEWAY_LUA_TEST_IMAGE ?= neutree-gateway-lua-test:latest
 
 .PHONY: gateway-lua-test
 gateway-lua-test: ## Run neutree-ai-gateway Lua unit tests (LuaJIT + busted, in Docker)
-	docker build -q -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec >/dev/null
+	docker build --progress=plain -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec
 	docker run --rm -v $(CURDIR)/$(GATEWAY_PLUGIN_DIR):/plugin -w /plugin $(GATEWAY_LUA_TEST_IMAGE) sh spec/run.sh
 
 ##@ Database Testing
