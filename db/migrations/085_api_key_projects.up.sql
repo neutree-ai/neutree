@@ -105,6 +105,28 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION api.update_api_key_project(
+    p_project_id UUID, p_name TEXT DEFAULT NULL, p_description TEXT DEFAULT NULL,
+    p_enabled BOOLEAN DEFAULT NULL
+) RETURNS api.api_key_projects LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE v_result api.api_key_projects;
+BEGIN
+    IF p_name IS NOT NULL AND length(trim(p_name)) = 0 THEN
+        RAISE EXCEPTION 'project name is required' USING ERRCODE = '22023';
+    END IF;
+    UPDATE api.api_key_projects SET
+        name = COALESCE(trim(p_name), name),
+        description = COALESCE(p_description, description),
+        enabled = COALESCE(p_enabled, enabled)
+    WHERE id = p_project_id AND user_id = auth.uid()
+    RETURNING * INTO v_result;
+    IF NOT FOUND THEN RAISE EXCEPTION 'project not found or permission denied' USING ERRCODE = '42501'; END IF;
+    RETURN v_result;
+EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'Project name already exists' USING ERRCODE = '23505';
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION api.move_api_keys_to_project(p_api_key_ids UUID[], p_project_id UUID)
 RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_target api.api_key_projects; v_conflicts TEXT; v_count INTEGER;
