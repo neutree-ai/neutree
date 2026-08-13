@@ -212,7 +212,7 @@ $$;
 
 -- Replace the latest create RPC, adding project and description while preserving limits.
 DROP FUNCTION api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER, JSONB);
-CREATE FUNCTION api.create_api_key(
+CREATE OR REPLACE FUNCTION api.create_api_key(
     p_workspace TEXT, p_name TEXT, p_quota INTEGER, p_display_name TEXT DEFAULT NULL,
     p_expires_in INTEGER DEFAULT NULL, p_limits JSONB DEFAULT NULL,
     p_project_id UUID DEFAULT NULL, p_description TEXT DEFAULT ''
@@ -231,7 +231,7 @@ BEGIN
     v_quota:=COALESCE((p_limits #>> '{token_quota,limit}')::bigint,0);
     v_key_id:=gen_random_uuid(); v_key_value:=api.generate_api_key(p_user_id,v_key_id,p_expires_in);
     INSERT INTO api.api_keys (id,api_version,kind,metadata,spec,status,user_id,project_id,description)
-    VALUES (v_key_id,'v1','ApiKey',ROW(p_name,p_display_name,p_workspace,NULL,now(),now(),'{}'::json)::api.metadata,
+    VALUES (v_key_id,'v1','ApiKey',ROW(p_name,p_display_name,p_workspace,NULL,now(),now(),'{}'::json,'{}'::json)::api.metadata,
       ROW(v_quota,p_expires_in,p_limits)::api.api_key_spec,
       ROW('Pending',now(),NULL,v_key_value,0,now(),NULL)::api.api_key_status,p_user_id,p_project_id,COALESCE(p_description,''))
     RETURNING * INTO v_result;
