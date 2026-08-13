@@ -1,0 +1,13 @@
+BEGIN;
+DROP FUNCTION IF EXISTS api.move_api_keys_to_project(UUID[], UUID);
+DROP FUNCTION IF EXISTS api.delete_api_key_project(UUID);
+DROP FUNCTION IF EXISTS api.create_api_key_project(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER, JSONB, UUID, TEXT);
+DROP TABLE api.api_key_project_history;
+DROP TRIGGER touch_api_key_project ON api.api_key_projects;
+DROP FUNCTION api.touch_api_key_project();
+DROP INDEX api.api_key_name_project_unique_idx;
+ALTER TABLE api.api_keys DROP COLUMN description, DROP COLUMN project_id;
+CREATE UNIQUE INDEX api_key_name_workspace_unique_idx ON api.api_keys (((metadata).workspace), ((metadata).name));
+DROP TABLE api.api_key_projects;
+COMMIT;
