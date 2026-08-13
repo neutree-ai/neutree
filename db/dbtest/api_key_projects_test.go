@@ -38,5 +38,15 @@ func TestAPIKeyProjects(t *testing.T) {
 		var count, total int
 		if err := tx.QueryRow(`SELECT api_key_count, total_projects FROM api.get_api_key_project_groups('ws-a',NULL,NULL,NULL,1,1) LIMIT 1`).Scan(&count, &total); err != nil { t.Fatal(err) }
 		if total != 3 { t.Fatalf("total projects=%d want 3", total) }
+
+		if _, err := tx.Exec(`SELECT api.create_api_key_project('ws-b', 'Other workspace', '')`); err != nil { t.Fatal(err) }
+		if err := tx.QueryRow(`SELECT max(total_projects) FROM api.get_api_key_project_groups(NULL,NULL,NULL,NULL,1,20)`).Scan(&total); err != nil { t.Fatal(err) }
+		if total != 4 { t.Fatalf("all-workspace total=%d want 4", total) }
+
+		var keysJSON string
+		if err := tx.QueryRow(`SELECT api_keys::text FROM api.get_api_key_project_groups('ws-a','Target',NULL,NULL,1,20) WHERE (project).id=$1`, target).Scan(&keysJSON); err != nil { t.Fatal(err) }
+		if !strings.Contains(keysJSON, `"name": "same"`) { t.Fatalf("project match must return all keys: %s", keysJSON) }
+		if err := tx.QueryRow(`SELECT api_keys::text FROM api.get_api_key_project_groups('ws-a','first',NULL,NULL,1,20) WHERE (project).id=$1`, target).Scan(&keysJSON); err != nil { t.Fatal(err) }
+		if !strings.Contains(keysJSON, `"description": "first"`) { t.Fatalf("key search did not return match: %s", keysJSON) }
 	})
 }
