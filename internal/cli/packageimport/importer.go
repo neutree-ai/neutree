@@ -188,6 +188,11 @@ func (i *Importer) registerEngines(ctx context.Context, opts *ImportOptions, man
 				result.Errors = append(result.Errors, err)
 				return result, err
 			}
+
+			if err := validateCapabilities(engine); err != nil {
+				result.Errors = append(result.Errors, err)
+				return result, err
+			}
 		}
 
 		for _, engine := range manifest.Engines {
@@ -324,6 +329,38 @@ func validateModelTasks(em *EngineMetadata) error {
 	return fmt.Errorf("unknown model task value(s) — only %v are accepted: %s",
 		v1.KnownModelTasks(),
 		strings.Join(parts, "; "))
+}
+
+// validateCapabilities rejects an EngineMetadata whose any per-version
+// capabilities declaration is unusable (unknown playground mode, out-of-range
+// metrics port, metrics path without a leading slash).
+//
+// Import is a boundary that ingests hand-written manifests, so it is where a bad
+// declaration has to be caught: past this point the value is stored and every
+// consumer silently ignores what it cannot act on. Like validateModelTasks, all
+// offending versions are collected so one run reports every problem.
+func validateCapabilities(em *EngineMetadata) error {
+	if em == nil {
+		return nil
+	}
+
+	var bads []string
+
+	for _, v := range em.EngineVersions {
+		if v == nil {
+			continue
+		}
+
+		if err := v.Capabilities.Validate(); err != nil {
+			bads = append(bads, "engines["+em.Name+"].engine_versions["+v.Version+"].capabilities: "+err.Error())
+		}
+	}
+
+	if len(bads) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("invalid engine capability declaration(s): %s", strings.Join(bads, "; "))
 }
 
 // aggregateSupportedTasks unions the manifest top-level supported_tasks with each

@@ -204,10 +204,6 @@ func amdGPUContainerRuntimeConfig() v1.RuntimeConfig {
 	}
 }
 
-func (p *AMDGPUAcceleratorPlugin) Ping(ctx context.Context) error {
-	return nil
-}
-
 func (p *AMDGPUAcceleratorPlugin) GetResourceConverter() ResourceConverter {
 	return NewAMDGPUConverter()
 }

@@ -3,15 +3,11 @@ package accelerator
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"reflect"
 	"sort"
 	"sync"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -23,7 +19,6 @@ import (
 type Manager interface {
 	plugin.AcceleratorPluginProvider
 
-	Start(ctx context.Context)
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
 	GetStaticNodeRuntimeConfig(ctx context.Context, accelerator *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)
@@ -51,20 +46,25 @@ type Manager interface {
 	// (e.g. "rocm" for amd_gpu). Returns empty string for default variant or if
 	// the accelerator type is not registered.
 	GetImageSuffix(acceleratorType string) string
+
+	// AddInternalPlugins registers internal accelerator plugins on an existing
+	// manager without re-registering manager-owned routes. All plugins must be
+	// internal type: the health sync loop removes any plugin whose Type() is
+	// not InternalPluginType. The batch is validated atomically.
+	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
 }
 
 type registerPlugin struct {
-	resource         string
-	plugin           plugin.AcceleratorPlugin
-	lastRegisterTime time.Time
+	resource string
+	plugin   plugin.AcceleratorPlugin
 }
 
 type manager struct {
 	acceleratorsMap sync.Map
 }
 
-func NewManager(e *gin.Engine) *manager {
-	manager, err := NewManagerWithPlugins(e)
+func NewManager() *manager {
+	manager, err := NewManagerWithPlugins()
 	if err != nil {
 		panic(err)
 	}
@@ -72,57 +72,61 @@ func NewManager(e *gin.Engine) *manager {
 	return manager
 }
 
-func NewManagerWithPlugins(e *gin.Engine, injectedPlugins ...publicaccelerator.Plugin) (*manager, error) {
-	if e == nil {
-		return nil, fmt.Errorf("gin engine is required")
-	}
-
+func NewManagerWithPlugins(injectedPlugins ...publicaccelerator.Plugin) (*manager, error) {
 	manager := &manager{
 		acceleratorsMap: sync.Map{},
 	}
 
 	for _, p := range plugin.GetLocalAcceleratorPlugins() {
 		manager.acceleratorsMap.Store(p.Resource(), registerPlugin{
-			resource:         p.Resource(),
-			plugin:           p,
-			lastRegisterTime: time.Now(),
+			resource: p.Resource(),
+			plugin:   p,
 		})
 
 		klog.Infof("Register local accelerator plugin: %s", p.Resource())
 	}
 
-	for _, p := range injectedPlugins {
-		if err := manager.addInternalPlugin(p); err != nil {
-			return nil, err
-		}
+	if err := manager.AddInternalPlugins(injectedPlugins...); err != nil {
+		return nil, err
 	}
-
-	// register plugin register handler
-	pluginGroup := e.Group(v1.PluginAPIGroupPath)
-	pluginGroup.POST("/register", manager.registerHandler)
 
 	return manager, nil
 }
 
-func (a *manager) addInternalPlugin(p publicaccelerator.Plugin) error {
-	if isNilPlugin(p) {
-		return fmt.Errorf("accelerator plugin is nil")
+// AddInternalPlugins registers internal accelerator plugins on an existing
+// manager. All plugins are validated before any is stored, so an invalid
+// input fails atomically without leaving partially registered plugins.
+// Validation is per invocation: concurrent calls are not serialized.
+func (a *manager) AddInternalPlugins(plugins ...publicaccelerator.Plugin) error {
+	seen := make(map[string]struct{}, len(plugins))
+
+	for _, p := range plugins {
+		if isNilPlugin(p) {
+			return fmt.Errorf("accelerator plugin is nil")
+		}
+
+		if p.Resource() == "" {
+			return fmt.Errorf("accelerator plugin resource is required")
+		}
+
+		if _, exists := seen[p.Resource()]; exists {
+			return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+		}
+
+		if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
+			return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
+		}
+
+		seen[p.Resource()] = struct{}{}
 	}
 
-	if p.Resource() == "" {
-		return fmt.Errorf("accelerator plugin resource is required")
+	for _, p := range plugins {
+		a.acceleratorsMap.Store(p.Resource(), registerPlugin{
+			resource: p.Resource(),
+			plugin:   p,
+		})
+		klog.Infof("Register internal accelerator plugin: %s", p.Resource())
 	}
-
-	if _, exists := a.acceleratorsMap.Load(p.Resource()); exists {
-		return fmt.Errorf("accelerator plugin resource %q is already registered", p.Resource())
-	}
-
-	a.acceleratorsMap.Store(p.Resource(), registerPlugin{
-		resource:         p.Resource(),
-		plugin:           p,
-		lastRegisterTime: time.Now(),
-	})
-	klog.Infof("Register internal accelerator plugin: %s", p.Resource())
 
 	return nil
 }
@@ -139,105 +143,6 @@ func isNilPlugin(p publicaccelerator.Plugin) bool {
 	default:
 		return false
 	}
-}
-
-func (a *manager) registerHandler(c *gin.Context) {
-	var req v1.RegisterRequest
-
-	err := c.ShouldBindBodyWithJSON(&req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	a.registerAcceleratorPlugin(req)
-
-	c.JSON(http.StatusOK, "ok")
-}
-
-func (a *manager) registerAcceleratorPlugin(req v1.RegisterRequest) {
-	value, ok := a.acceleratorsMap.Load(req.ResourceName)
-	if ok {
-		klog.Infof("Accelerator plugin %s already registered, update register time", req.ResourceName)
-
-		p, ok := value.(registerPlugin)
-		if !ok {
-			klog.Warning("assert register plugin type failed")
-			return
-		}
-
-		updatedPlugin := registerPlugin{
-			resource:         p.resource,
-			plugin:           p.plugin,
-			lastRegisterTime: time.Now(),
-		}
-
-		a.acceleratorsMap.Store(req.ResourceName, updatedPlugin)
-	} else {
-		p := registerPlugin{
-			resource:         req.ResourceName,
-			plugin:           plugin.NewAcceleratorRestPlugin(req.ResourceName, req.Endpoint),
-			lastRegisterTime: time.Now(),
-		}
-		a.acceleratorsMap.Store(req.ResourceName, p)
-
-		klog.Infof("Register accelerator plugin: %s", req.ResourceName)
-	}
-}
-
-// syncPlugins sync all register plugin status and will remove unhealthy plugin.
-// return removed plugin resource name list.
-func (a *manager) syncPlugins() []string {
-	needRemovedPlugins := a.getUnhealthyPlugins()
-
-	for _, resource := range needRemovedPlugins {
-		a.acceleratorsMap.Delete(resource)
-	}
-
-	if len(needRemovedPlugins) > 0 {
-		klog.Infof("Accelerator plugin %s removed", needRemovedPlugins)
-	}
-
-	return needRemovedPlugins
-}
-
-func (a *manager) getUnhealthyPlugins() []string {
-	var removedPlugins []string
-
-	a.acceleratorsMap.Range(func(key, value any) bool {
-		p, ok := value.(registerPlugin)
-		if !ok {
-			klog.Warning("assert register plugin type failed")
-			return true
-		}
-
-		if p.plugin.Type() == plugin.InternalPluginType {
-			return true
-		}
-
-		if time.Since(p.lastRegisterTime) > time.Minute*2 {
-			if err := p.plugin.Handle().Ping(context.Background()); err != nil {
-				klog.Warningf("Accelerator plugin %s ping failed, err: %s", p.resource, err.Error())
-				removedPlugins = append(removedPlugins, p.resource)
-			}
-		}
-
-		return true
-	})
-
-	return removedPlugins
-}
-
-func (a *manager) Start(ctx context.Context) {
-	go wait.UntilWithContext(ctx, func(ctx context.Context) {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		a.syncPlugins()
-	}, time.Minute)
 }
 
 func (a *manager) DetectAccelerator(

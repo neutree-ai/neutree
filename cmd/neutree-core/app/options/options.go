@@ -10,6 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -25,6 +26,7 @@ type NeutreeCoreOptions struct {
 	Observability *ObservabilityOptions
 	Cluster       *ClusterOptions
 	Auth          *AuthOptions
+	ModelRegistry *ModelRegistryOptions
 }
 
 func NewOptions() *NeutreeCoreOptions {
@@ -36,6 +38,7 @@ func NewOptions() *NeutreeCoreOptions {
 		Observability: NewObservabilityOptions(),
 		Cluster:       NewClusterOptions(),
 		Auth:          NewAuthOptions(),
+		ModelRegistry: NewModelRegistryOptions(),
 	}
 }
 
@@ -47,6 +50,7 @@ func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Observability.AddFlags(fs)
 	o.Cluster.AddFlags(fs)
 	o.Auth.AddFlags(fs)
+	o.ModelRegistry.AddFlags(fs)
 }
 
 func (o *NeutreeCoreOptions) Validate() error {
@@ -166,6 +170,12 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	c.ServerConfig = &config.ServerConfig{
 		Port: o.Server.Port,
 		Host: o.Server.Host,
+	}
+	c.ModelRegistryConfig = &config.ModelRegistryConfig{
+		Builtin: model_registry.BuiltinConfig{
+			Enabled:             o.ModelRegistry.EnableBuiltinPublicRegistries,
+			HuggingFaceEndpoint: o.ModelRegistry.HuggingFaceEndpoint,
+		},
 	}
 
 	jwtToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)

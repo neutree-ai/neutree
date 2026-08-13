@@ -1,139 +1,87 @@
 package proxies
 
 import (
-	"errors"
 	"testing"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
-	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
-func TestValidateWorkspaceDeletion(t *testing.T) {
+func registryIn(workspace, name string, builtin bool, deletionTimestamp string) v1.ModelRegistry {
+	annotations := map[string]string{}
+	if builtin {
+		annotations = v1.WithBuiltinAnnotation(nil)
+	}
+
+	return v1.ModelRegistry{
+		ID: 1,
+		Metadata: &v1.Metadata{
+			Name:              name,
+			Workspace:         workspace,
+			Annotations:       annotations,
+			DeletionTimestamp: deletionTimestamp,
+		},
+		Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
+	}
+}
+
+// A workspace with nothing but the registry the control plane put there must
+// still be deletable. Counting that registry would make every workspace
+// permanently undeletable once the built-in option is on, because the API also
+// refuses to delete it.
+func TestUserModelRegistryCount_IgnoresControlPlaneOwnedRegistries(t *testing.T) {
 	tests := []struct {
-		name          string
-		workspace     string
-		workspaceName string
-		counts        map[string]int
-		queryError    error
-		expectError   bool
-		expectedCode  string
-		expectedHints []string
+		name       string
+		registries []v1.ModelRegistry
+		want       int
 	}{
 		{
-			name:          "no dependencies - deletion allowed",
-			workspace:     "",
-			workspaceName: "default",
-			counts: map[string]int{
-				storage.ENDPOINT_TABLE:        0,
-				storage.CLUSTERS_TABLE:        0,
-				storage.MODEL_REGISTRY_TABLE:  0,
-				storage.IMAGE_REGISTRY_TABLE:  0,
-				storage.MODEL_CATALOG_TABLE:   0,
-				storage.ROLE_TABLE:            0,
-				storage.API_KEY_TABLE:         0,
-				storage.ROLE_ASSIGNMENT_TABLE: 0,
-			},
-			queryError:  nil,
-			expectError: false,
+			name:       "only the built-in one",
+			registries: []v1.ModelRegistry{registryIn("default", "public-hugging-face", true, "")},
+			want:       0,
 		},
 		{
-			name:          "has dependencies - deletion blocked",
-			workspace:     "",
-			workspaceName: "default",
-			counts: map[string]int{
-				storage.ENDPOINT_TABLE:        2,
-				storage.CLUSTERS_TABLE:        1,
-				storage.MODEL_REGISTRY_TABLE:  0,
-				storage.IMAGE_REGISTRY_TABLE:  0,
-				storage.MODEL_CATALOG_TABLE:   0,
-				storage.ROLE_TABLE:            3,
-				storage.API_KEY_TABLE:         0,
-				storage.ROLE_ASSIGNMENT_TABLE: 0,
+			name: "a user registry blocks",
+			registries: []v1.ModelRegistry{
+				registryIn("default", "public-hugging-face", true, ""),
+				registryIn("default", "mine", false, ""),
 			},
-			queryError:   nil,
-			expectError:  true,
-			expectedCode: "10125",
-			expectedHints: []string{
-				storage.ENDPOINT_TABLE + ": 2",
-				storage.CLUSTERS_TABLE + ": 1",
-				storage.ROLE_TABLE + ": 3",
-			},
+			want: 1,
 		},
 		{
-			name:          "query error",
-			workspace:     "",
-			workspaceName: "default",
-			counts:        map[string]int{},
-			queryError:    errors.New("database error"),
-			expectError:   true,
+			// On its way out already; it must not block the deletion that releases it.
+			name:       "a soft-deleted user registry does not block",
+			registries: []v1.ModelRegistry{registryIn("default", "mine", false, "2026-08-11T00:00:00Z")},
+			want:       0,
+		},
+		{
+			name:       "nothing at all",
+			registries: []v1.ModelRegistry{},
+			want:       0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := storageMocks.NewMockStorage(t)
+			storage := &storagemocks.MockStorage{}
+			storage.On("ListModelRegistry", mock.Anything).Return(tt.registries, nil)
 
-			// Mock Count calls for all tables
-			tables := []string{
-				storage.ENDPOINT_TABLE,
-				storage.CLUSTERS_TABLE,
-				storage.MODEL_REGISTRY_TABLE,
-				storage.IMAGE_REGISTRY_TABLE,
-				storage.MODEL_CATALOG_TABLE,
-				storage.ROLE_TABLE,
-				storage.API_KEY_TABLE,
-			}
-
-			for _, table := range tables {
-				count := tt.counts[table]
-				mockStorage.On("Count",
-					table,
-					[]storage.Filter{
-						{Column: "metadata->>workspace", Operator: "eq", Value: tt.workspaceName},
-					},
-				).Return(count, tt.queryError).Maybe()
-
-				// If there's a query error, we might not get to all tables
-				if tt.queryError != nil {
-					break
-				}
-			}
-
-			// Mock Count call for role_assignment_table (different filter)
-			if tt.queryError == nil {
-				count := tt.counts[storage.ROLE_ASSIGNMENT_TABLE]
-				mockStorage.On("Count",
-					storage.ROLE_ASSIGNMENT_TABLE,
-					[]storage.Filter{
-						{Column: "spec->>workspace", Operator: "eq", Value: tt.workspaceName},
-					},
-				).Return(count, tt.queryError)
-			}
-
-			validator := validateWorkspaceDeletion(mockStorage)
-			err := validator(tt.workspace, tt.workspaceName)
-
-			if tt.expectError {
-				assert.Error(t, err)
-
-				if tt.queryError == nil {
-					deletionErr, ok := err.(*middleware.DeletionError)
-					assert.True(t, ok, "error should be DeletionError")
-					if ok {
-						assert.Equal(t, tt.expectedCode, deletionErr.Code)
-						for _, hint := range tt.expectedHints {
-							assert.Contains(t, deletionErr.Hint, hint)
-						}
-					}
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-
-			mockStorage.AssertExpectations(t)
+			count, err := userModelRegistryCount(storage, "default")
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, count)
 		})
 	}
+}
+
+func TestUserModelRegistryCount_ReportsStorageFailures(t *testing.T) {
+	storage := &storagemocks.MockStorage{}
+	storage.On("ListModelRegistry", mock.Anything).Return(nil, errors.New("boom"))
+
+	_, err := userModelRegistryCount(storage, "default")
+	assert.Error(t, err)
 }

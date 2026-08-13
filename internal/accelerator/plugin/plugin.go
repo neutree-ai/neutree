@@ -13,7 +13,6 @@ const (
 )
 
 const (
-	ExternalPluginType = accelerator.ExternalPluginType
 	InternalPluginType = accelerator.InternalPluginType
 )
 
@@ -33,8 +32,6 @@ type AcceleratorPluginHandle = accelerator.PluginHandle
 // ResourceConverter is the interface for resource converters
 // Converts Neutree's unified resource specifications to resource configurations for different cluster types (Ray, Kubernetes)
 type ResourceConverter = accelerator.ResourceConverter
-
-type RegisterHandle func(plugin AcceleratorPlugin)
 
 var (
 	plugins  = make(map[string]AcceleratorPlugin)

@@ -458,3 +458,106 @@ engines:
 		assert.Contains(t, err.Error(), "engine name is empty")
 	})
 }
+
+func TestValidateCapabilities(t *testing.T) {
+	tests := []struct {
+		name        string
+		em          *EngineMetadata
+		expectError bool
+		errorParts  []string
+	}{
+		{
+			name: "nil metadata → ok",
+			em:   nil,
+		},
+		{
+			// A package built before the protocol declares nothing, and must
+			// still import.
+			name: "no declaration → ok",
+			em: &EngineMetadata{
+				Name:           "my-engine",
+				EngineVersions: []*v1.EngineVersion{{Version: "v1"}},
+			},
+		},
+		{
+			name: "valid declaration → ok",
+			em: &EngineMetadata{
+				Name: "my-engine",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", Capabilities: &v1.EngineCapabilities{
+						MetricsExport: &v1.MetricsExportCapability{Enabled: true, Port: 9100, Path: "/internal/metrics"},
+						Playground:    &v1.PlaygroundCapability{Enabled: true, Modes: []string{v1.PlaygroundModeChat}},
+					}},
+				},
+			},
+		},
+		{
+			name: "nil version entry is skipped",
+			em: &EngineMetadata{
+				Name:           "my-engine",
+				EngineVersions: []*v1.EngineVersion{nil},
+			},
+		},
+		{
+			name: "unknown playground mode → error names the version",
+			em: &EngineMetadata{
+				Name: "my-engine",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v2", Capabilities: &v1.EngineCapabilities{
+						Playground: &v1.PlaygroundCapability{Enabled: true, Modes: []string{"vision"}},
+					}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"my-engine", "v2", "vision"},
+		},
+		{
+			name: "metrics port out of range → error",
+			em: &EngineMetadata{
+				Name: "my-engine",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", Capabilities: &v1.EngineCapabilities{
+						MetricsExport: &v1.MetricsExportCapability{Enabled: true, Port: 70000},
+					}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"out of range"},
+		},
+		{
+			// Same contract as validateModelTasks: one run reports every bad
+			// version rather than making the user fix them one at a time.
+			name: "every offending version is reported",
+			em: &EngineMetadata{
+				Name: "my-engine",
+				EngineVersions: []*v1.EngineVersion{
+					{Version: "v1", Capabilities: &v1.EngineCapabilities{
+						Playground: &v1.PlaygroundCapability{Enabled: true, Modes: []string{"vision"}},
+					}},
+					{Version: "v2", Capabilities: &v1.EngineCapabilities{
+						MetricsExport: &v1.MetricsExportCapability{Enabled: true, Path: "metrics"},
+					}},
+				},
+			},
+			expectError: true,
+			errorParts:  []string{"v1", "v2", "vision", "must start with"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCapabilities(tt.em)
+
+			if !tt.expectError {
+				assert.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+
+			for _, part := range tt.errorParts {
+				assert.Contains(t, err.Error(), part)
+			}
+		})
+	}
+}

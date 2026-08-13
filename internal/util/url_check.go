@@ -10,12 +10,12 @@ const (
 	SchemeHTTPS = "https"
 )
 
-// IsHTTPOrHTTPSURL returns true if s is a valid URL with scheme "http" or "https" and a non-empty host.
+// IsHTTPOrHTTPSURL returns true if s is a valid URL with scheme "http" or "https" and a non-empty hostname.
 func IsHTTPOrHTTPSURL(s string) bool {
 	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil {
 		return false
 	}
 
-	return (u.Scheme == SchemeHTTP || u.Scheme == SchemeHTTPS) && u.Host != ""
+	return (u.Scheme == SchemeHTTP || u.Scheme == SchemeHTTPS) && u.Hostname() != ""
 }

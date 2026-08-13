@@ -9,6 +9,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/routes"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/internal/version"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -79,6 +80,11 @@ func (o *Options) Config() (*config.APIConfig, error) {
 	// Create gin engine
 	engine := gin.Default()
 
+	// A public model registry names its models "org/model", so the router has to
+	// match on the escaped path. See routes.ConfigureEngine for what that changes
+	// across the whole API and what it does not.
+	routes.ConfigureEngine(engine)
+
 	// Configure JWT authentication
 	authConfig := middleware.AuthConfig{
 		JwtSecret: o.Storage.JwtSecret,
@@ -105,6 +111,8 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		StaticConfig: &config.StaticConfig{
 			Dir: o.API.StaticDir,
 		},
+
+		PublicRegistryQueryCacheTTL: o.API.PublicRegistryQueryCacheTTL,
 
 		StorageAccessURL: o.Storage.AccessURL,
 		AuthEndpoint:     o.External.AuthEndpoint,

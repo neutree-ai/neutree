@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -26,6 +27,9 @@ type Dependencies struct {
 	Storage     storage.Storage
 	TempDirFunc func() (string, error) // Function to get a temporary directory
 	AuthConfig  middleware.AuthConfig
+	// QueryCache holds recent listings from public registries. Nil disables
+	// caching.
+	QueryCache *model_registry.QueryCache
 }
 
 const modelReferencedByEndpointCode = "10131"
@@ -103,6 +107,12 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	{
 		modelRegistries := workspaces.Group("/model_registries/:registry")
 		{
+			// Rewrites the registry's status, so it takes the registry's own update
+			// permission rather than a model-level one.
+			modelRegistries.POST("/retry_connection",
+				middleware.RequireWorkspacePermission("model_registry:update", permissionDeps),
+				retryConnection(deps))
+
 			models := modelRegistries.Group("/models")
 			{
 				// List all models in a registry
@@ -115,10 +125,8 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 					middleware.RequireWorkspacePermission("model:read", permissionDeps),
 					getModel(deps))
 
-				// Update a model's display metadata: its alias and the model info
-				// fields a user fills in by hand. Both are annotations on an
-				// existing model, so they reuse model:push rather than introducing
-				// a permission action of their own.
+				// Alias and hand-filled model info are annotations on an existing model, so
+				// they reuse model:push rather than adding a permission action.
 				models.PATCH("/:model",
 					middleware.RequireWorkspacePermission("model:push", permissionDeps),
 					patchModel(deps))
@@ -132,6 +140,11 @@ func RegisterModelsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 				models.POST("/:model/finalize",
 					middleware.RequireWorkspacePermission("model:push", permissionDeps),
 					finalizeModel(deps))
+
+				// Read a model's card, as markdown
+				models.GET("/:model/readme",
+					middleware.RequireWorkspacePermission("model:read", permissionDeps),
+					getModelReadme(deps))
 
 				// Download a model
 				models.GET("/:model/download",
@@ -196,6 +209,14 @@ func finalizeModel(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer handle.client.Disconnect() //nolint:errcheck
 
+		// Finalizing is the tail of a push, so it is a write and is refused the same
+		// way.
+		if !registryAcceptsWrites(handle.registry) {
+			refuseReadOnlyRegistry(c, "Cannot finalize a model push")
+
+			return
+		}
+
 		modelVersion, err := handle.client.GetModelVersion(modelName, version)
 		if err != nil {
 			klog.Errorf("Failed to finalize model %s:%s: %v", modelName, version, err)
@@ -247,8 +268,9 @@ type registryHandle struct {
 	client   model_registry.ModelRegistry
 }
 
-// getModelRegistry retrieves and connects to a model registry
-func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, error) {
+// findModelRegistry reads the stored registry the request names without
+// connecting to it, for handlers that need the row before deciding anything.
+func findModelRegistry(c *gin.Context, deps *Dependencies) (*v1.ModelRegistry, error) {
 	workspace := c.Param("workspace")
 	registryName := c.Param("registry")
 
@@ -275,8 +297,18 @@ func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, erro
 		return nil, fmt.Errorf("model registry not found: %s/%s", workspace, registryName)
 	}
 
+	return &modelRegistries[0], nil
+}
+
+// getModelRegistry retrieves and connects to a model registry
+func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, error) {
+	registry, err := findModelRegistry(c, deps)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create model registry client
-	modelRegistry, err := model_registry.NewModelRegistry(&modelRegistries[0])
+	modelRegistry, err := model_registry.NewModelRegistry(registry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model registry client: %w", err)
 	}
@@ -286,7 +318,7 @@ func getModelRegistry(c *gin.Context, deps *Dependencies) (*registryHandle, erro
 		return nil, fmt.Errorf("failed to connect to model registry: %w", err)
 	}
 
-	return &registryHandle{registry: &modelRegistries[0], client: modelRegistry}, nil
+	return &registryHandle{registry: registry, client: modelRegistry}, nil
 }
 
 // listModels handles listing all models in a registry
@@ -316,18 +348,26 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 		}
 		defer handle.client.Disconnect() //nolint:errcheck
 
-		// List models
-		page, err := handle.client.ListModels(model_registry.ListOption{
+		// Public registries may answer from the cache; private ones are always read
+		// through.
+		page, meta, err := deps.QueryCache.ListModels(handle.registry, handle.client, model_registry.ListOption{
 			Search: search,
 			Offset: offset,
 			Limit:  limit,
 		})
 		if err != nil {
+			// Answered before the shared mapping to keep the wording existing callers
+			// assert on.
 			if errors.Is(err, model_registry.ErrNotSupported) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"message": fmt.Sprintf("This model registry cannot list models this way: %v", err),
+					"reason":  reasonNotSupported,
 				})
 
+				return
+			}
+
+			if respondRegistryError(c, "Failed to list models", err) {
 				return
 			}
 
@@ -355,7 +395,28 @@ func listModels(deps *Dependencies) gin.HandlerFunc {
 		// array. Wrapping the body in an envelope would break every existing
 		// caller for the sake of one number.
 		c.Header("Content-Range", contentRange(offset, len(page.Models), page.Total))
+		// How old the data is, so a client can show it.
+		setDataTimestamp(c, meta)
 		c.JSON(http.StatusOK, page.Models)
+	}
+}
+
+// Headers stating how old the data in the response is. A cached listing
+// describes the registry as of when it was fetched, not as of the request.
+const (
+	dataTimestampHeader = "X-Neutree-Data-Timestamp"
+	dataCachedHeader    = "X-Neutree-Data-Cached"
+)
+
+func setDataTimestamp(c *gin.Context, meta model_registry.QueryMeta) {
+	if meta.FetchedAt.IsZero() {
+		return
+	}
+
+	c.Header(dataTimestampHeader, meta.FetchedAt.UTC().Format(time.RFC3339))
+
+	if meta.Cached {
+		c.Header(dataCachedHeader, "true")
 	}
 }
 
@@ -379,9 +440,8 @@ func intQuery(c *gin.Context, name string) (int, bool) {
 	return value, true
 }
 
-// contentRange formats the PostgREST-style range header: "first-last/total",
-// with "*" in place of the range for an empty page and in place of the total
-// when the registry cannot count what matched.
+// contentRange formats the PostgREST-style range header "first-last/total",
+// with "*" for an empty page and for a total the registry cannot state.
 func contentRange(offset, returned int, total *int) string {
 	size := "*"
 	if total != nil {
@@ -421,6 +481,12 @@ func getModel(deps *Dependencies) gin.HandlerFunc {
 		// about itself.
 		modelVersion, err := handle.client.GetModelDetail(modelName, version)
 		if err != nil {
+			// A refusal from the registry is not a server fault; 500 would make a
+			// read-only or unauthenticated public registry look like a broken deployment.
+			if respondRegistryError(c, fmt.Sprintf("Failed to get model %s:%s", modelName, version), err) {
+				return
+			}
+
 			klog.Errorf("Failed to get model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to get model %s:%s: %v", modelName, version, err),
@@ -462,6 +528,27 @@ func attachModelAlias(deps *Dependencies, handle *registryHandle,
 // uploadModel handles uploading a new model
 func uploadModel(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// This must stay ahead of MultipartReader. The handler answers with a chunked
+		// 200 and streams import progress as its body, so once it starts reading the
+		// body the status code is fixed and a refusal can only be reported inside a
+		// 200. Nothing in the body is needed to decide: workspace and registry are
+		// path parameters.
+		registry, err := findModelRegistry(c, deps)
+		if err != nil {
+			klog.Errorf("Failed to get model registry: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": err.Error(),
+			})
+
+			return
+		}
+
+		if !registryAcceptsWrites(registry) {
+			refuseReadOnlyRegistry(c, "Cannot upload a model")
+
+			return
+		}
+
 		mr, err := c.Request.MultipartReader()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -708,6 +795,11 @@ func deleteModel(deps *Dependencies) gin.HandlerFunc {
 
 		// Delete the model
 		if err := handle.client.DeleteModel(modelName, version); err != nil {
+			// A registry with no delete operation is refusing, not failing.
+			if respondRegistryError(c, fmt.Sprintf("Failed to delete model %s:%s", modelName, version), err) {
+				return
+			}
+
 			klog.Errorf("Failed to delete model %s:%s: %v", modelName, version, err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Failed to delete model: %v", err),

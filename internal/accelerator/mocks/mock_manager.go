@@ -5,7 +5,8 @@ package mocks
 import (
 	context "context"
 
-	pkgaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
+	accelerator "github.com/neutree-ai/neutree/pkg/accelerator"
+
 	mock "github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -22,6 +23,65 @@ type MockManager_Expecter struct {
 
 func (_m *MockManager) EXPECT() *MockManager_Expecter {
 	return &MockManager_Expecter{mock: &_m.Mock}
+}
+
+// AddInternalPlugins provides a mock function with given fields: plugins
+func (_m *MockManager) AddInternalPlugins(plugins ...accelerator.Plugin) error {
+	_va := make([]interface{}, len(plugins))
+	for _i := range plugins {
+		_va[_i] = plugins[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddInternalPlugins")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(...accelerator.Plugin) error); ok {
+		r0 = rf(plugins...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockManager_AddInternalPlugins_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddInternalPlugins'
+type MockManager_AddInternalPlugins_Call struct {
+	*mock.Call
+}
+
+// AddInternalPlugins is a helper method to define mock.On call
+//   - plugins ...accelerator.Plugin
+func (_e *MockManager_Expecter) AddInternalPlugins(plugins ...interface{}) *MockManager_AddInternalPlugins_Call {
+	return &MockManager_AddInternalPlugins_Call{Call: _e.mock.On("AddInternalPlugins",
+		append([]interface{}{}, plugins...)...)}
+}
+
+func (_c *MockManager_AddInternalPlugins_Call) Run(run func(plugins ...accelerator.Plugin)) *MockManager_AddInternalPlugins_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]accelerator.Plugin, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(accelerator.Plugin)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockManager_AddInternalPlugins_Call) Return(_a0 error) *MockManager_AddInternalPlugins_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockManager_AddInternalPlugins_Call) RunAndReturn(run func(...accelerator.Plugin) error) *MockManager_AddInternalPlugins_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // DetectAccelerator provides a mock function with given fields: ctx, nodeIP, sshAuth
@@ -144,19 +204,19 @@ func (_c *MockManager_GetAcceleratorProfile_Call) RunAndReturn(run func(context.
 }
 
 // GetAllConverters provides a mock function with no fields
-func (_m *MockManager) GetAllConverters() map[string]pkgaccelerator.ResourceConverter {
+func (_m *MockManager) GetAllConverters() map[string]accelerator.ResourceConverter {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllConverters")
 	}
 
-	var r0 map[string]pkgaccelerator.ResourceConverter
-	if rf, ok := ret.Get(0).(func() map[string]pkgaccelerator.ResourceConverter); ok {
+	var r0 map[string]accelerator.ResourceConverter
+	if rf, ok := ret.Get(0).(func() map[string]accelerator.ResourceConverter); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]pkgaccelerator.ResourceConverter)
+			r0 = ret.Get(0).(map[string]accelerator.ResourceConverter)
 		}
 	}
 
@@ -180,30 +240,30 @@ func (_c *MockManager_GetAllConverters_Call) Run(run func()) *MockManager_GetAll
 	return _c
 }
 
-func (_c *MockManager_GetAllConverters_Call) Return(_a0 map[string]pkgaccelerator.ResourceConverter) *MockManager_GetAllConverters_Call {
+func (_c *MockManager_GetAllConverters_Call) Return(_a0 map[string]accelerator.ResourceConverter) *MockManager_GetAllConverters_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockManager_GetAllConverters_Call) RunAndReturn(run func() map[string]pkgaccelerator.ResourceConverter) *MockManager_GetAllConverters_Call {
+func (_c *MockManager_GetAllConverters_Call) RunAndReturn(run func() map[string]accelerator.ResourceConverter) *MockManager_GetAllConverters_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetAllParsers provides a mock function with no fields
-func (_m *MockManager) GetAllParsers() map[string]pkgaccelerator.ResourceParser {
+func (_m *MockManager) GetAllParsers() map[string]accelerator.ResourceParser {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllParsers")
 	}
 
-	var r0 map[string]pkgaccelerator.ResourceParser
-	if rf, ok := ret.Get(0).(func() map[string]pkgaccelerator.ResourceParser); ok {
+	var r0 map[string]accelerator.ResourceParser
+	if rf, ok := ret.Get(0).(func() map[string]accelerator.ResourceParser); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]pkgaccelerator.ResourceParser)
+			r0 = ret.Get(0).(map[string]accelerator.ResourceParser)
 		}
 	}
 
@@ -227,34 +287,34 @@ func (_c *MockManager_GetAllParsers_Call) Run(run func()) *MockManager_GetAllPar
 	return _c
 }
 
-func (_c *MockManager_GetAllParsers_Call) Return(_a0 map[string]pkgaccelerator.ResourceParser) *MockManager_GetAllParsers_Call {
+func (_c *MockManager_GetAllParsers_Call) Return(_a0 map[string]accelerator.ResourceParser) *MockManager_GetAllParsers_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]pkgaccelerator.ResourceParser) *MockManager_GetAllParsers_Call {
+func (_c *MockManager_GetAllParsers_Call) RunAndReturn(run func() map[string]accelerator.ResourceParser) *MockManager_GetAllParsers_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetConverter provides a mock function with given fields: acceleratorType
-func (_m *MockManager) GetConverter(acceleratorType string) (pkgaccelerator.ResourceConverter, bool) {
+func (_m *MockManager) GetConverter(acceleratorType string) (accelerator.ResourceConverter, bool) {
 	ret := _m.Called(acceleratorType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetConverter")
 	}
 
-	var r0 pkgaccelerator.ResourceConverter
+	var r0 accelerator.ResourceConverter
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(string) (pkgaccelerator.ResourceConverter, bool)); ok {
+	if rf, ok := ret.Get(0).(func(string) (accelerator.ResourceConverter, bool)); ok {
 		return rf(acceleratorType)
 	}
-	if rf, ok := ret.Get(0).(func(string) pkgaccelerator.ResourceConverter); ok {
+	if rf, ok := ret.Get(0).(func(string) accelerator.ResourceConverter); ok {
 		r0 = rf(acceleratorType)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(pkgaccelerator.ResourceConverter)
+			r0 = ret.Get(0).(accelerator.ResourceConverter)
 		}
 	}
 
@@ -285,12 +345,12 @@ func (_c *MockManager_GetConverter_Call) Run(run func(acceleratorType string)) *
 	return _c
 }
 
-func (_c *MockManager_GetConverter_Call) Return(_a0 pkgaccelerator.ResourceConverter, _a1 bool) *MockManager_GetConverter_Call {
+func (_c *MockManager_GetConverter_Call) Return(_a0 accelerator.ResourceConverter, _a1 bool) *MockManager_GetConverter_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetConverter_Call) RunAndReturn(run func(string) (pkgaccelerator.ResourceConverter, bool)) *MockManager_GetConverter_Call {
+func (_c *MockManager_GetConverter_Call) RunAndReturn(run func(string) (accelerator.ResourceConverter, bool)) *MockManager_GetConverter_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -517,23 +577,23 @@ func (_c *MockManager_GetNodeRuntimeConfig_Call) RunAndReturn(run func(context.C
 }
 
 // GetParser provides a mock function with given fields: acceleratorType
-func (_m *MockManager) GetParser(acceleratorType string) (pkgaccelerator.ResourceParser, bool) {
+func (_m *MockManager) GetParser(acceleratorType string) (accelerator.ResourceParser, bool) {
 	ret := _m.Called(acceleratorType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetParser")
 	}
 
-	var r0 pkgaccelerator.ResourceParser
+	var r0 accelerator.ResourceParser
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(string) (pkgaccelerator.ResourceParser, bool)); ok {
+	if rf, ok := ret.Get(0).(func(string) (accelerator.ResourceParser, bool)); ok {
 		return rf(acceleratorType)
 	}
-	if rf, ok := ret.Get(0).(func(string) pkgaccelerator.ResourceParser); ok {
+	if rf, ok := ret.Get(0).(func(string) accelerator.ResourceParser); ok {
 		r0 = rf(acceleratorType)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(pkgaccelerator.ResourceParser)
+			r0 = ret.Get(0).(accelerator.ResourceParser)
 		}
 	}
 
@@ -564,34 +624,34 @@ func (_c *MockManager_GetParser_Call) Run(run func(acceleratorType string)) *Moc
 	return _c
 }
 
-func (_c *MockManager_GetParser_Call) Return(_a0 pkgaccelerator.ResourceParser, _a1 bool) *MockManager_GetParser_Call {
+func (_c *MockManager_GetParser_Call) Return(_a0 accelerator.ResourceParser, _a1 bool) *MockManager_GetParser_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (pkgaccelerator.ResourceParser, bool)) *MockManager_GetParser_Call {
+func (_c *MockManager_GetParser_Call) RunAndReturn(run func(string) (accelerator.ResourceParser, bool)) *MockManager_GetParser_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetPlugin provides a mock function with given fields: acceleratorType
-func (_m *MockManager) GetPlugin(acceleratorType string) (pkgaccelerator.Plugin, bool) {
+func (_m *MockManager) GetPlugin(acceleratorType string) (accelerator.Plugin, bool) {
 	ret := _m.Called(acceleratorType)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPlugin")
 	}
 
-	var r0 pkgaccelerator.Plugin
+	var r0 accelerator.Plugin
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(string) (pkgaccelerator.Plugin, bool)); ok {
+	if rf, ok := ret.Get(0).(func(string) (accelerator.Plugin, bool)); ok {
 		return rf(acceleratorType)
 	}
-	if rf, ok := ret.Get(0).(func(string) pkgaccelerator.Plugin); ok {
+	if rf, ok := ret.Get(0).(func(string) accelerator.Plugin); ok {
 		r0 = rf(acceleratorType)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(pkgaccelerator.Plugin)
+			r0 = ret.Get(0).(accelerator.Plugin)
 		}
 	}
 
@@ -622,12 +682,12 @@ func (_c *MockManager_GetPlugin_Call) Run(run func(acceleratorType string)) *Moc
 	return _c
 }
 
-func (_c *MockManager_GetPlugin_Call) Return(_a0 pkgaccelerator.Plugin, _a1 bool) *MockManager_GetPlugin_Call {
+func (_c *MockManager_GetPlugin_Call) Return(_a0 accelerator.Plugin, _a1 bool) *MockManager_GetPlugin_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockManager_GetPlugin_Call) RunAndReturn(run func(string) (pkgaccelerator.Plugin, bool)) *MockManager_GetPlugin_Call {
+func (_c *MockManager_GetPlugin_Call) RunAndReturn(run func(string) (accelerator.Plugin, bool)) *MockManager_GetPlugin_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -688,39 +748,6 @@ func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) Return(_a0 *v1.RuntimeCon
 
 func (_c *MockManager_GetStaticNodeRuntimeConfig_Call) RunAndReturn(run func(context.Context, *v1.StaticNodeAcceleratorStatus) (*v1.RuntimeConfig, error)) *MockManager_GetStaticNodeRuntimeConfig_Call {
 	_c.Call.Return(run)
-	return _c
-}
-
-// Start provides a mock function with given fields: ctx
-func (_m *MockManager) Start(ctx context.Context) {
-	_m.Called(ctx)
-}
-
-// MockManager_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
-type MockManager_Start_Call struct {
-	*mock.Call
-}
-
-// Start is a helper method to define mock.On call
-//   - ctx context.Context
-func (_e *MockManager_Expecter) Start(ctx interface{}) *MockManager_Start_Call {
-	return &MockManager_Start_Call{Call: _e.mock.On("Start", ctx)}
-}
-
-func (_c *MockManager_Start_Call) Run(run func(ctx context.Context)) *MockManager_Start_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context))
-	})
-	return _c
-}
-
-func (_c *MockManager_Start_Call) Return() *MockManager_Start_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockManager_Start_Call) RunAndReturn(run func(context.Context)) *MockManager_Start_Call {
-	_c.Run(run)
 	return _c
 }
 

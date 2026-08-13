@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,6 +66,31 @@ func TestKubernetesDeployer_Apply(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestKubernetesDeployer_ApplyTransitionsToEmptyDesiredState(t *testing.T) {
+	scheme := runtime.NewScheme()
+	assert.NoError(t, corev1.AddToScheme(scheme))
+	ctx := context.Background()
+	fakeClient := &fakeApplyClient{Client: fake.NewClientBuilder().WithScheme(scheme).Build()}
+
+	vmagent := createTestDeployment("vmagent", "default", 1)
+	initialObjects := &unstructured.UnstructuredList{Items: []unstructured.Unstructured{*vmagent}}
+	initial := NewKubernetesDeployer(fakeClient, "default", "test-cluster", "metrics").WithNewObjects(initialObjects)
+	count, err := initial.Apply(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	emptyObjects := &unstructured.UnstructuredList{}
+	transition := NewKubernetesDeployer(fakeClient, "default", "test-cluster", "metrics").WithNewObjects(emptyObjects)
+	count, err = transition.Apply(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.True(t, apierrors.IsNotFound(fakeClient.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vmagent"}, createTestDeployment("vmagent", "default", 1))))
+
+	count, err = NewKubernetesDeployer(fakeClient, "default", "test-cluster", "metrics").WithNewObjects(emptyObjects).Apply(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
 }
 
 func TestKubernetesDeployer_Delete(t *testing.T) {

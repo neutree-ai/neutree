@@ -44,5 +44,8 @@ func RegisterModelRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", deletionValidation, handler)
+	// The built-in guard runs first: a delete aimed at a built-in registry is
+	// refused outright, rather than being told which endpoints are in the way of
+	// something that was never going to be allowed.
+	proxyGroup.PATCH("", builtinModelRegistryGuard(deps), deletionValidation, handler)
 }

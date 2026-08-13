@@ -16,6 +16,16 @@ const (
 	trStatusFailed = 5
 )
 
+// needsTestRailID marks a spec that has no TestRail case yet.
+//
+// The reporter picks a label up as a case ID when it is a C followed by a digit
+// (see the ReportAfterSuite block in e2e_suite_test.go), so this label is inert:
+// the spec runs and is simply not reported. It exists so the gap is greppable
+// and cannot be mistaken for a case ID that quietly reports nothing. Replace it
+// with the real label once the case is filed; the intended case title is in a
+// comment above each spec carrying it.
+const needsTestRailID = "needs-testrail-id"
+
 // CaseResult represents the result of a single TestRail test case.
 type CaseResult struct {
 	CaseID  string

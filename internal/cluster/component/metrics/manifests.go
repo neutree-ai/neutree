@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -17,6 +18,7 @@ const (
 )
 
 var metricsManifestTemplate = `
+{{ if .EnableVMAgent }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -103,6 +105,7 @@ roleRef:
   kind: ClusterRole
   name: vmagent-node-reader-{{ .HashSuffix }}
   apiGroup: rbac.authorization.k8s.io
+{{ end }}
 {{ if .EnableKubeStateMetrics }}
 ---
 apiVersion: v1
@@ -465,6 +468,7 @@ spec:
 {{ .Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ end }}
+{{ if .EnableVMAgent }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -527,6 +531,7 @@ spec:
       - name: vmagent-config
         configMap:
           name: vmagent-config
+{{ end }}
 `
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
@@ -559,7 +564,18 @@ type MetricsManifestVariables struct {
 	EnableNodeExporter               bool
 	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
+	EnableVMAgent                    bool
 	VMAgentConfig                    string
+
+	// InferenceDefaultPort is the port the neutree-inference job scrapes when an
+	// engine version does not declare a different one.
+	InferenceDefaultPort int
+
+	// InferenceScrapeRules carries the per-engine-version adjustments derived
+	// from engine metrics-export declarations. Zero value means no engine
+	// declared anything that differs from the defaults, and the job renders as
+	// it did before engines could declare capabilities.
+	InferenceScrapeRules InferenceScrapeRules
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
@@ -602,6 +618,8 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeNodeAgentMetricsResources: neutreeNodeAgentMetricsResources,
 		KubeStateMetricsResources:        kubeStateMetricsResources,
 		HashSuffix:                       util.HashString(m.cluster.Key()),
+		InferenceDefaultPort:             v1.DefaultMetricsExportPort,
+		InferenceScrapeRules:             m.inferenceScrapeRules,
 	}
 }
 

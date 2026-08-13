@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/engine"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -18,17 +19,23 @@ type WorkspaceController struct {
 	syncHandler func(workspace *v1.Workspace) error // Added syncHandler field
 
 	engineRegistry engine.Registry
+	// builtinRegistries is what this deployment provisions into every workspace.
+	builtinRegistries model_registry.BuiltinConfig
 }
 
 type WorkspaceControllerOption struct {
 	Storage        storage.Storage
 	EngineRegistry engine.Registry
+	// BuiltinRegistries configures the built-in model registries. The zero value
+	// provisions none, which is what an offline deployment wants.
+	BuiltinRegistries model_registry.BuiltinConfig
 }
 
 func NewWorkspaceController(option *WorkspaceControllerOption) (*WorkspaceController, error) {
 	c := &WorkspaceController{
-		storage:        option.Storage,
-		engineRegistry: option.EngineRegistry,
+		storage:           option.Storage,
+		engineRegistry:    option.EngineRegistry,
+		builtinRegistries: option.BuiltinRegistries,
 	}
 
 	c.syncHandler = c.sync
@@ -73,6 +80,9 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 		klog.Infof("Deleting workspace %s (force=%v)", obj.Metadata.Name, isForceDelete)
 
 		deleteErr := c.DeleteWorkspaceEngine(obj)
+		if deleteErr == nil {
+			deleteErr = c.DeleteWorkspaceModelRegistry(obj)
+		}
 
 		// For non-force delete, return error immediately without updating status
 		if deleteErr != nil && !isForceDelete {
@@ -108,6 +118,11 @@ func (c *WorkspaceController) sync(obj *v1.Workspace) error {
 		err = c.syncWorkspaceEngine(*obj)
 		if err != nil {
 			return errors.Wrapf(err, "failed to sync workspace %s engine", obj.Metadata.Name)
+		}
+
+		err = c.syncWorkspaceModelRegistry(*obj)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sync workspace %s model registry", obj.Metadata.Name)
 		}
 	}
 

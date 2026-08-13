@@ -89,7 +89,23 @@ func NewListCmd() *cobra.Command {
 	return cmd
 }
 
+func validatePagination(limit, offset int) error {
+	if limit < 0 {
+		return fmt.Errorf("--limit must be a non-negative integer, got %d", limit)
+	}
+
+	if offset < 0 {
+		return fmt.Errorf("--offset must be a non-negative integer, got %d", offset)
+	}
+
+	return nil
+}
+
 func runList(opts *listOptions) error {
+	if err := validatePagination(opts.limit, opts.offset); err != nil {
+		return err
+	}
+
 	clientOptions := []client.ClientOption{
 		client.WithAPIKey(global.APIKey),
 	}

@@ -67,6 +67,8 @@ func MergeEngineVersion(existing, new *v1.EngineVersion) *v1.EngineVersion {
 		existing.ValuesSchema = new.ValuesSchema
 	}
 
+	mergeEngineCapabilities(existing, new)
+
 	for idx := range new.SupportedTasks {
 		found := false
 
@@ -83,4 +85,39 @@ func MergeEngineVersion(existing, new *v1.EngineVersion) *v1.EngineVersion {
 	}
 
 	return existing
+}
+
+// mergeEngineCapabilities merges a capability declaration per capability, so a
+// re-registration that declares only one capability leaves the others alone.
+//
+// Deliberately not the union semantics used for SupportedTasks above: a union
+// can only ever add, which would make a capability impossible to switch off once
+// declared. Here a declared capability replaces the previous one wholesale, so
+// re-registering with {"enabled": false} genuinely disables it. An omitted
+// (nil) capability still means "no opinion" and preserves what was there.
+func mergeEngineCapabilities(existing, new *v1.EngineVersion) {
+	if new.Capabilities == nil {
+		return
+	}
+
+	// An incoming declaration that sets no capability at all leaves `existing`
+	// untouched, including its nil-ness. Allocating here would turn an
+	// undeclared engine version into a declared-but-empty one, which survives
+	// `omitempty` serialization and makes "undeclared" indistinguishable from
+	// "declared nothing" for anyone reading the stored spec.
+	if new.Capabilities.MetricsExport == nil && new.Capabilities.Playground == nil {
+		return
+	}
+
+	if existing.Capabilities == nil {
+		existing.Capabilities = &v1.EngineCapabilities{}
+	}
+
+	if new.Capabilities.MetricsExport != nil {
+		existing.Capabilities.MetricsExport = new.Capabilities.MetricsExport
+	}
+
+	if new.Capabilities.Playground != nil {
+		existing.Capabilities.Playground = new.Capabilities.Playground
+	}
 }

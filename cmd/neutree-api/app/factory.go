@@ -6,6 +6,7 @@ import (
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/clusters"
@@ -35,6 +36,10 @@ func ModelsRouteFactory(register ModelRegisterFunc) RouteFactory {
 		register(deps.Group, deps.Middlewares, &models.Dependencies{
 			Storage:    deps.Config.Storage,
 			AuthConfig: deps.Config.AuthConfig,
+			// One cache per process, built here so that every model route shares
+			// it: the handler that invalidates it has to be looking at the same
+			// entries as the handler that filled it.
+			QueryCache: model_registry.NewQueryCache(deps.Config.PublicRegistryQueryCacheTTL),
 		})
 
 		return nil

@@ -226,22 +226,31 @@ func (m *ManifestApply) ApplyManifests(
 	}
 
 	deleteObjects := diff.DeletedObjects
+	var deleteErr error
 
 	for i := range deleteObjects {
 		obj := &deleteObjects[i]
 		m.logger.Info("Deleting resource",
 			"kind", obj.GetKind(),
 			"name", obj.GetName(),
-			"namespace", m.namespace)
+			"namespace", obj.GetNamespace())
 
 		if err := m.ctrlClient.Delete(ctx, obj); err != nil {
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to delete resource",
 					"kind", obj.GetKind(),
 					"name", obj.GetName())
-				// Continue with other resources
+
+				if deleteErr == nil {
+					deleteErr = errors.Wrapf(err, "failed to delete object %s/%s/%s",
+						obj.GetKind(), obj.GetNamespace(), obj.GetName())
+				}
 			}
 		}
+	}
+
+	if deleteErr != nil {
+		return 0, deleteErr
 	}
 
 	return len(objects) + len(deleteObjects), nil

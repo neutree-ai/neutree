@@ -55,7 +55,7 @@ This is independent from the **CP install mode** (how `neutree-api` / `neutree-c
 `internal/accelerator/plugin/gpu.go` (NVIDIA) and `internal/accelerator/plugin/amd_gpu.go` implement the same accelerator interface with vendor-specific details. The orchestrators consume this interface to discover and request GPU resources during reconcile. A change to one vendor implementation must be evaluated against:
 
 - The other vendor implementation.
-- `internal/accelerator/plugin/client.go` and `plugin.go` — the shared interface layer that frequently needs updates when vendor-specific logic changes.
+- `internal/accelerator/plugin/plugin.go` — the shared interface layer that frequently needs updates when vendor-specific logic changes.
 
 ## Adding a New Controller
 

@@ -118,13 +118,17 @@ func (b *Builder) Build() (*App, error) {
 		return nil, fmt.Errorf("gin engine is required")
 	}
 
-	if b.config.AcceleratorManager == nil || len(b.acceleratorPlugins) > 0 {
-		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.config.GinEngine, b.acceleratorPlugins...)
+	if b.config.AcceleratorManager == nil {
+		acceleratorManager, err := accelerator.NewManagerWithPlugins(b.acceleratorPlugins...)
 		if err != nil {
 			return nil, fmt.Errorf("create accelerator manager: %w", err)
 		}
 
 		b.config.AcceleratorManager = acceleratorManager
+	} else if len(b.acceleratorPlugins) > 0 {
+		if err := b.config.AcceleratorManager.AddInternalPlugins(b.acceleratorPlugins...); err != nil {
+			return nil, fmt.Errorf("register injected accelerator plugins: %w", err)
+		}
 	}
 
 	registerControllers := make(map[string]controllers.Controller)

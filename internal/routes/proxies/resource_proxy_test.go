@@ -568,6 +568,42 @@ func TestCreateStructProxyHandlerFiltersUnknownTopLevelFieldsAndInfersColumns(t 
 	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
 }
 
+func TestCreateStructProxyHandlerMasksClusterCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/clusters", r.URL.Path)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{
+				"metadata": {"name": "cluster", "workspace": "default"},
+				"spec": {
+					"config": {
+						"kubernetes_config": {"kubeconfig": "synthetic-kubeconfig"},
+						"ssh_config": {"auth": {"ssh_private_key": "synthetic-private-key"}}
+					}
+				}
+			}
+		]`))
+	}))
+	defer upstream.Close()
+
+	router := gin.New()
+	router.GET("/api/v1/clusters", CreateStructProxyHandler[v1.Cluster](&Dependencies{
+		StorageAccessURL: upstream.URL,
+	}, storage.CLUSTERS_TABLE))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters?select=*", nil)
+	recorder := newCloseNotifyRecorder()
+	router.ServeHTTP(recorder, req)
+
+	assert.Equal(t, http.StatusOK, recorder.ResponseRecorder.Code)
+	assert.NotContains(t, recorder.Body.String(), "synthetic-kubeconfig")
+	assert.NotContains(t, recorder.Body.String(), "synthetic-private-key")
+}
+
 func TestCreateStructProxyHandlerFiltersSoftDeletePayloadAndInfersColumns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -788,24 +824,34 @@ func Test_mergeExcludedFields(t *testing.T) {
 		assert.Equal(t, "updated", target["spec"].(map[string]interface{})["type"])
 	})
 
-	t.Run("handle empty string as missing", func(t *testing.T) {
-		target := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "",
-			},
-		}
-		source := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"credentials": "should_be_merged",
-			},
-		}
-		excludeFields := map[string]struct{}{
-			"spec.credentials": {},
-		}
+	t.Run("handle empty values as missing", func(t *testing.T) {
+		for _, tt := range []struct {
+			name       string
+			credential interface{}
+		}{
+			{name: "empty string", credential: ""},
+			{name: "nil", credential: nil},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				target := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": tt.credential,
+					},
+				}
+				source := map[string]interface{}{
+					"spec": map[string]interface{}{
+						"credentials": "should_be_merged",
+					},
+				}
+				excludeFields := map[string]struct{}{
+					"spec.credentials": {},
+				}
 
-		mergeExcludedFields(target, source, excludeFields, nil)
+				mergeExcludedFields(target, source, excludeFields, nil)
 
-		assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+				assert.Equal(t, "should_be_merged", target["spec"].(map[string]interface{})["credentials"])
+			})
+		}
 	})
 
 	t.Run("merge excluded field inside array elements", func(t *testing.T) {
@@ -1067,6 +1113,143 @@ func Test_mergeExcludedFields(t *testing.T) {
 		assert.Equal(t, "new-type", target["spec"].(map[string]interface{})["type"])
 		// credentials should be merged
 		assert.Equal(t, "token", target["spec"].(map[string]interface{})["credentials"])
+	})
+
+	t.Run("do not backfill non-excluded nested empty map", func(t *testing.T) {
+		// The stored resource carries spec.config.metrics: {}; a PATCH omitting
+		// metrics must not resurrect it as an empty map.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "old-type",
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		spec := target["spec"].(map[string]interface{})
+		assert.NotContains(t, spec, "config")
+	})
+
+	t.Run("do not backfill non-excluded non-empty config subtree", func(t *testing.T) {
+		// Even a non-empty config subtree with no excluded fields must not be
+		// re-created when the PATCH omits it.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "old-type",
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{
+						"enabled": true,
+					},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		spec := target["spec"].(map[string]interface{})
+		assert.NotContains(t, spec, "config")
+	})
+
+	t.Run("backfill excluded field through omitted intermediate maps", func(t *testing.T) {
+		// The PATCH replaces spec wholesale; spec.credentials.kubeconfig is
+		// excluded, so the intermediate maps must be created to reach it,
+		// while the non-excluded spec.config sibling stays absent.
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "old-type",
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{},
+				},
+				"credentials": map[string]interface{}{
+					"kubeconfig": "kubeconfig-content",
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials.kubeconfig": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		assert.Equal(t, map[string]interface{}{
+			"spec": map[string]interface{}{
+				"type": "new-type",
+				"credentials": map[string]interface{}{
+					"kubeconfig": "kubeconfig-content",
+				},
+			},
+		}, target)
+	})
+
+	t.Run("do not fabricate top-level subtree the PATCH omits", func(t *testing.T) {
+		// A PATCH that never mentions spec must not gain a fabricated spec:
+		// the storage layer only updates columns the PATCH provides, so the
+		// stored excluded fields survive on their own.
+		target := map[string]interface{}{
+			"metadata": map[string]interface{}{"name": "c1"},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"credentials": "hf_secret_token",
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		assert.Equal(t, map[string]interface{}{
+			"metadata": map[string]interface{}{"name": "c1"},
+		}, target)
+	})
+
+	t.Run("do not replace explicit null subtree without excluded fields", func(t *testing.T) {
+		target := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"config": nil,
+			},
+		}
+		source := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"config": map[string]interface{}{
+					"metrics": map[string]interface{}{},
+				},
+			},
+		}
+		excludeFields := map[string]struct{}{
+			"spec.credentials": {},
+		}
+
+		mergeExcludedFields(target, source, excludeFields, nil)
+
+		// config stays null; the non-excluded empty metrics map is not
+		// resurrected inside it.
+		assert.Nil(t, target["spec"].(map[string]interface{})["config"])
 	})
 }
 

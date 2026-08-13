@@ -23,6 +23,18 @@ type MetricsComponent struct {
 	config     v1.KubernetesClusterConfig
 	ctrlClient client.Client
 	logger     klog.Logger
+
+	inferenceScrapeRules InferenceScrapeRules
+}
+
+// WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
+// derived from engine metrics-export declarations. Optional: the zero value
+// renders the inference job exactly as it was before engines could declare
+// capabilities, which is also what the delete path wants.
+func (m *MetricsComponent) WithInferenceScrapeRules(rules InferenceScrapeRules) *MetricsComponent {
+	m.inferenceScrapeRules = rules
+
+	return m
 }
 
 func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,

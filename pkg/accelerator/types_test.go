@@ -45,7 +45,6 @@ func (contractPlugin) GetStaticNodeRuntimeConfig(context.Context, *v1.StaticNode
 }
 func (p contractPlugin) GetResourceConverter() ResourceConverter { return p }
 func (p contractPlugin) GetResourceParser() ResourceParser       { return p }
-func (contractPlugin) Ping(context.Context) error                { return nil }
 func (contractPlugin) ConvertToRay(*v1.ResourceSpec) (*v1.RayResourceSpec, error) {
 	return nil, nil
 }

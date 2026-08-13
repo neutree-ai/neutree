@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -204,20 +205,47 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 	return nil
 }
 
+// inferenceScrapeRules derives the metrics-scrape adjustments for this cluster
+// from the engines registered in its workspace.
+//
+// A listing failure is not fatal: it yields the zero value, which renders the
+// inference job exactly as it did before engines could declare capabilities.
+// Failing the whole cluster reconcile over a capability refinement would be a
+// worse outcome than scraping one engine that asked not to be scraped.
+func (c *NativeKubernetesClusterReconciler) inferenceScrapeRules(cluster *v1.Cluster) metrics.InferenceScrapeRules {
+	if c.storage == nil {
+		return metrics.InferenceScrapeRules{}
+	}
+
+	engines, err := c.storage.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{
+				Column:   "metadata->workspace",
+				Operator: "eq",
+				Value:    strconv.Quote(cluster.Metadata.Workspace),
+			},
+		},
+	})
+	if err != nil {
+		klog.Warningf("failed to list engines for cluster %s, falling back to scraping every inference pod: %v",
+			cluster.Metadata.WorkspaceName(), err)
+
+		return metrics.InferenceScrapeRules{}
+	}
+
+	return metrics.BuildInferenceScrapeRules(engines, v1.DefaultMetricsExportPort, v1.DefaultMetricsExportPath)
+}
+
 func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcileCtx *ReconcileContext,
 	imagePrefix string) ([]component.Component, []component.Component) {
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
-	// Only install metrics component when metrics remote write url is valid.
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
-		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr)
-	if util.IsHTTPOrHTTPSURL(c.metricsRemoteWriteURL) {
-		reconcileComps = append(reconcileComps, metricsComp)
-	} else {
-		reconcileDeleteComps = append(reconcileDeleteComps, metricsComp)
-	}
+		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
+		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster))
+	reconcileComps = append(reconcileComps, metricsComp)
 
 	hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,

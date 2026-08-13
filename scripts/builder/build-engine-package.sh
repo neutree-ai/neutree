@@ -6,7 +6,7 @@
 set -e
 
 VERSION=$(git describe --tags --always --dirty)
-OUTPUT_DIR="./dist"
+OUTPUT_DIR="${OUTPUT_DIR:-./dist}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -151,11 +151,28 @@ Options:
     -s, --supported-tasks TASKS
                               Comma-separated list of supported tasks
                               Example: generate,embedding
+    --metrics-export BOOL     Declare whether this engine version exports Prometheus
+                              metrics (true|false). Omit to leave it undeclared,
+                              which keeps the legacy behaviour of scraping it.
+    --metrics-export-port PORT
+                              Metrics port, when it is not the default 8000.
+                              Only valid together with --metrics-export true.
+    --metrics-export-path PATH
+                              Metrics path, when it is not the default /metrics.
+                              Only valid together with --metrics-export true.
+    --playground BOOL         Declare whether this engine version can back the
+                              console Playground (true|false). Omit to leave it
+                              undeclared, which keeps the tab visible.
+    --playground-modes MODES  Comma-separated interaction modes the Playground can
+                              render: chat, embedding, rerank. Only valid together
+                              with --playground true. Omit to let the console infer
+                              the surface from the endpoint's model task.
     -m, --manifest FILE       Path to manifest template file (optional)
     -t, --template-dir DIR    Path to template directory containing kubernetes/default.yaml
     -c, --schema FILE         Path to engine_schema.json file (optional)
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
+    -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -205,6 +222,25 @@ Examples:
         -t ./template \\
         -d "vLLM engine manifest only"
 
+    # Declare capabilities: metrics on the default endpoint, chat-only Playground
+    $0 -n my-engine -v v1.0.0 \\
+        -i "nvidia_gpu:my-registry/my-engine:v1.0.0" \\
+        -s "text-generation" \\
+        --metrics-export true \\
+        --playground true --playground-modes "chat"
+
+    # An engine that serves no metrics endpoint, but can still back a chat
+    # Playground even though it advertises no text-generation task
+    $0 -n my-engine -v v1.0.0 \\
+        -i "nvidia_gpu:my-registry/my-engine:v1.0.0" \\
+        --metrics-export false \\
+        --playground true --playground-modes "chat"
+
+    # Metrics served somewhere other than :8000/metrics
+    $0 -n my-engine -v v1.0.0 \\
+        -i "cpu:my-registry/my-engine:v1.0.0" \\
+        --metrics-export true --metrics-export-port 9100 --metrics-export-path /internal/metrics
+
 EOF
 }
 
@@ -218,7 +254,17 @@ TEMPLATE_DIR=""
 SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
+PLATFORM="linux/amd64"
 MANIFEST_ONLY=""
+# Capability declarations. Empty means "undeclared", which is not the same as
+# declaring false: an engine version with no capabilities block keeps the
+# behaviour Neutree had before the protocol existed (scraped for metrics,
+# Playground shown). Never default these to a value.
+METRICS_EXPORT=""
+METRICS_EXPORT_PORT=""
+METRICS_EXPORT_PATH=""
+PLAYGROUND=""
+PLAYGROUND_MODES=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -236,6 +282,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         -s|--supported-tasks)
             SUPPORTED_TASKS="$2"
+            shift 2
+            ;;
+        --metrics-export)
+            METRICS_EXPORT="$2"
+            shift 2
+            ;;
+        --metrics-export-port)
+            METRICS_EXPORT_PORT="$2"
+            shift 2
+            ;;
+        --metrics-export-path)
+            METRICS_EXPORT_PATH="$2"
+            shift 2
+            ;;
+        --playground)
+            PLAYGROUND="$2"
+            shift 2
+            ;;
+        --playground-modes)
+            PLAYGROUND_MODES="$2"
             shift 2
             ;;
         -m|--manifest)
@@ -256,6 +322,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -d|--description)
             DESCRIPTION="$2"
+            shift 2
+            ;;
+        -p|--platform)
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                print_error "$1 requires a value"
+                exit 1
+            fi
+            PLATFORM="$2"
             shift 2
             ;;
         --manifest-only)
@@ -318,7 +392,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
 
-    # Collect all full image references and ensure they exist locally
+    # Pull the selected platform before collecting images for export
     ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
         IFS=':' read -ra PARTS <<< "$spec"
@@ -328,15 +402,12 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        # Check if image exists, if not, pull it
-        if ! docker image inspect "$FULL_IMAGE" > /dev/null 2>&1; then
-            print_warn "Image $FULL_IMAGE not found locally. Pulling image..."
-            if ! docker pull "$FULL_IMAGE"; then
-                print_error "Failed to pull image $FULL_IMAGE"
-                exit 1
-            fi
-            print_info "Successfully pulled $FULL_IMAGE"
+        print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
+        if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
+            print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
+            exit 1
         fi
+        print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
 
         ALL_IMAGES+=("$FULL_IMAGE")
     done
@@ -374,7 +445,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\"
+      platform: \"$PLATFORM\"
       size: $INSPECT_SIZE"
     done
 else
@@ -392,7 +463,7 @@ else
       image_name: \"$IMAGE_NAME\"
       tag: \"$IMAGE_TAG\"
       image_file: \"images/$COMBINED_TAR_BASENAME\"
-      platform: \"linux/amd64\""
+      platform: \"$PLATFORM\""
     done
 fi
 
@@ -469,6 +540,104 @@ ${DEPLOY_TEMPLATE_CONTENT}"
         SUPPORTED_TASKS_SECTION=""
     fi
 
+    # Generate capabilities section.
+    #
+    # Emitted only when something was actually declared. Omitting the block is
+    # meaningful: Neutree reads a missing capability as "undeclared" and falls
+    # back to its pre-protocol behaviour (metrics scraped on :8000/metrics,
+    # Playground shown). Writing a default here would silently change how every
+    # engine rebuilt with this script behaves.
+    CAPABILITIES_SECTION=""
+    CAPABILITIES_BODY=""
+
+    if [ -n "$METRICS_EXPORT" ]; then
+        if [ "$METRICS_EXPORT" != "true" ] && [ "$METRICS_EXPORT" != "false" ]; then
+            print_error "--metrics-export must be 'true' or 'false', got: $METRICS_EXPORT"
+            exit 1
+        fi
+
+        METRICS_BODY="        enabled: ${METRICS_EXPORT}"
+
+        if [ -n "$METRICS_EXPORT_PORT" ]; then
+            if ! [[ "$METRICS_EXPORT_PORT" =~ ^[0-9]+$ ]] || [ "$METRICS_EXPORT_PORT" -lt 1 ] || [ "$METRICS_EXPORT_PORT" -gt 65535 ]; then
+                print_error "--metrics-export-port must be an integer in 1-65535, got: $METRICS_EXPORT_PORT"
+                exit 1
+            fi
+
+            METRICS_BODY="${METRICS_BODY}
+        port: ${METRICS_EXPORT_PORT}"
+        fi
+
+        if [ -n "$METRICS_EXPORT_PATH" ]; then
+            case "$METRICS_EXPORT_PATH" in
+                /*) ;;
+                *)
+                    print_error "--metrics-export-path must start with '/', got: $METRICS_EXPORT_PATH"
+                    exit 1
+                    ;;
+            esac
+
+            METRICS_BODY="${METRICS_BODY}
+        path: \"${METRICS_EXPORT_PATH}\""
+        fi
+
+        CAPABILITIES_BODY="${CAPABILITIES_BODY}
+      metrics_export:
+${METRICS_BODY}"
+    elif [ -n "$METRICS_EXPORT_PORT" ] || [ -n "$METRICS_EXPORT_PATH" ]; then
+        # Without an enabled flag there is no capability to attach these to, and
+        # silently dropping them would ship a package that ignores what the
+        # caller asked for.
+        print_error "--metrics-export-port/--metrics-export-path require --metrics-export"
+        exit 1
+    fi
+
+    if [ -n "$PLAYGROUND" ]; then
+        if [ "$PLAYGROUND" != "true" ] && [ "$PLAYGROUND" != "false" ]; then
+            print_error "--playground must be 'true' or 'false', got: $PLAYGROUND"
+            exit 1
+        fi
+
+        PLAYGROUND_BODY="        enabled: ${PLAYGROUND}"
+
+        if [ -n "$PLAYGROUND_MODES" ]; then
+            PLAYGROUND_MODES_YAML=""
+            IFS=',' read -ra MODE_ARRAY <<< "$PLAYGROUND_MODES"
+            for mode in "${MODE_ARRAY[@]}"; do
+                mode=$(echo "$mode" | xargs)
+                [ -z "$mode" ] && continue
+
+                case "$mode" in
+                    chat|embedding|rerank) ;;
+                    *)
+                        print_error "--playground-modes accepts chat, embedding, rerank; got: $mode"
+                        exit 1
+                        ;;
+                esac
+
+                PLAYGROUND_MODES_YAML="${PLAYGROUND_MODES_YAML}
+        - \"${mode}\""
+            done
+
+            if [ -n "$PLAYGROUND_MODES_YAML" ]; then
+                PLAYGROUND_BODY="${PLAYGROUND_BODY}
+        modes:${PLAYGROUND_MODES_YAML}"
+            fi
+        fi
+
+        CAPABILITIES_BODY="${CAPABILITIES_BODY}
+      playground:
+${PLAYGROUND_BODY}"
+    elif [ -n "$PLAYGROUND_MODES" ]; then
+        print_error "--playground-modes requires --playground"
+        exit 1
+    fi
+
+    if [ -n "$CAPABILITIES_BODY" ]; then
+        CAPABILITIES_SECTION="
+    capabilities:${CAPABILITIES_BODY}"
+    fi
+
     # Generate values_schema section
     VALUES_SCHEMA_SECTION=""
     if [ -n "$SCHEMA_FILE" ]; then
@@ -526,6 +695,7 @@ ${VALUES_SCHEMA_SECTION}
 
 $DEPLOY_TEMPLATE_SECTION
 ${SUPPORTED_TASKS_SECTION}
+${CAPABILITIES_SECTION}
 
     images:$IMAGES_MAP
 EOF
@@ -539,6 +709,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     cd - > /dev/null
 
     # Move to final location
+    mkdir -p "$OUTPUT_DIR"
     mv -f "$PACKAGE_DIR/$OUTPUT_FILE" "$OUTPUT_DIR/$OUTPUT_FILE"
 
     # Copy standalone manifest.yaml for release

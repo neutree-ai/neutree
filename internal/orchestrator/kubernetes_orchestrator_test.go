@@ -3287,7 +3287,7 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 	}))
 
 	o := &kubernetesOrchestrator{
-		acceleratorMgr: accelerator.NewManager(gin.New()),
+		acceleratorMgr: accelerator.NewManager(),
 	}
 	cluster := &v1.Cluster{
 		Spec: &v1.ClusterSpec{

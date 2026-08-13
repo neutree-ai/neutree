@@ -15,6 +15,7 @@ import (
 // GetMetricsResources returns all Kubernetes resources for the metrics component.
 func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructured.UnstructuredList, error) {
 	variables := m.buildManifestVariables()
+	variables.EnableVMAgent = util.IsHTTPOrHTTPSURL(m.metricsRemoteWriteURL)
 
 	enableKubeStateMetrics, err := m.supportsKubeStateMetrics()
 	if err != nil {
@@ -46,12 +47,18 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 
-	vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
+	if variables.EnableVMAgent {
+		vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
+		}
+
+		variables.VMAgentConfig = vmagentConfig
 	}
 
-	variables.VMAgentConfig = vmagentConfig
+	if !variables.EnableVMAgent && !variables.EnableKubeStateMetrics && !variables.EnableNodeExporter && len(variables.AcceleratorExporters) == 0 {
+		return &unstructured.UnstructuredList{}, nil
+	}
 
 	objs, err := util.RenderKubernetesManifest(metricsManifestTemplate, variables)
 	if err != nil {
