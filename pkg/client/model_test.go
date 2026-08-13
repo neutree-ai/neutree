@@ -2,8 +2,11 @@ package client
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -82,6 +85,84 @@ func TestListOmitsUnsetQueryParameters(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, models.Models)
 	require.Nil(t, models.Total)
+}
+
+func TestListRejectsNegativePaginationBeforeRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      ModelListOptions
+		wantError string
+	}{
+		{
+			name:      "negative limit",
+			opts:      ModelListOptions{Limit: -1},
+			wantError: "limit must be a non-negative integer, got -1",
+		},
+		{
+			name:      "negative offset",
+			opts:      ModelListOptions{Offset: -2},
+			wantError: "offset must be a non-negative integer, got -2",
+		},
+		{
+			name:      "both negative reports limit first",
+			opts:      ModelListOptions{Limit: -3, Offset: -4},
+			wantError: "limit must be a non-negative integer, got -3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer server.Close()
+
+			c := NewClient(server.URL, WithAPIKey("api-key"))
+			models, err := c.Models.List("default", "registry", tt.opts)
+
+			require.Nil(t, models)
+			require.EqualError(t, err, tt.wantError)
+			require.Zero(t, requests.Load())
+		})
+	}
+}
+
+func TestListKeepsValidPaginationSemantics(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       ModelListOptions
+		wantLimit  string
+		wantOffset string
+	}{
+		{name: "defaults omit both parameters", opts: ModelListOptions{}},
+		{name: "zero values omit both parameters", opts: ModelListOptions{Limit: 0, Offset: 0}},
+		{name: "positive values", opts: ModelListOptions{Limit: 1, Offset: 2}, wantLimit: "1", wantOffset: "2"},
+		{
+			name:       "maximum integer values",
+			opts:       ModelListOptions{Limit: math.MaxInt, Offset: math.MaxInt},
+			wantLimit:  strconv.Itoa(math.MaxInt),
+			wantOffset: strconv.Itoa(math.MaxInt),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, tt.wantLimit, r.URL.Query().Get("limit"))
+				require.Equal(t, tt.wantOffset, r.URL.Query().Get("offset"))
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer server.Close()
+
+			c := NewClient(server.URL, WithAPIKey("api-key"))
+			models, err := c.Models.List("default", "registry", tt.opts)
+
+			require.NoError(t, err)
+			require.Empty(t, models.Models)
+		})
+	}
 }
 
 // A server that names no range must not be read as one reporting the first

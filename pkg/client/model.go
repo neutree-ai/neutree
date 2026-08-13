@@ -81,6 +81,18 @@ type ModelListOptions struct {
 	Offset int
 }
 
+func (opts ModelListOptions) validate() error {
+	if opts.Limit < 0 {
+		return fmt.Errorf("limit must be a non-negative integer, got %d", opts.Limit)
+	}
+
+	if opts.Offset < 0 {
+		return fmt.Errorf("offset must be a non-negative integer, got %d", opts.Offset)
+	}
+
+	return nil
+}
+
 // ModelList is one page of a model listing.
 //
 // Raw is the response body exactly as the server sent it. Callers that render
@@ -108,6 +120,10 @@ type ModelList struct {
 
 // List lists models in the specified registry.
 func (s *ModelsService) List(workspace, registry string, opts ModelListOptions) (*ModelList, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
+
 	endpoint := fmt.Sprintf("%s/api/v1/workspaces/%s/model_registries/%s/models", s.client.baseURL, workspace, registry)
 
 	query := url.Values{}
