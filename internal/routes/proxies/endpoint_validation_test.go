@@ -261,52 +261,6 @@ func TestValidateEndpointVGPUMemorySpec(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("does not use a node device from another accelerator type", func(t *testing.T) {
-		product := "shared-product-name"
-		cluster := clusterWithNodeDeviceProductProvenance(product, 1024, v1.AcceleratorTypeNVIDIAGPU)
-		resources := virtualizationResources("custom_accelerator", "1", product, map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey: "2048",
-		})
-
-		err := validateEndpointVGPUMemorySpec(resources, cluster)
-
-		assert.Nil(t, err)
-	})
-
-	t.Run("uses a node device uniquely attributed to the requested accelerator type", func(t *testing.T) {
-		acceleratorType := v1.AcceleratorType("custom_accelerator")
-		product := "example-product"
-		cluster := clusterWithNodeDeviceProductProvenance(product, 1024, acceleratorType)
-		resources := virtualizationResources(string(acceleratorType), "1", product, map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey: "2048",
-		})
-
-		err := validateEndpointVGPUMemorySpec(resources, cluster)
-
-		if assert.NotNil(t, err) {
-			assert.Equal(t, "10216", err.Code)
-			assert.Contains(t, err.Hint, "physical accelerator memory_mib 1024")
-		}
-	})
-
-	t.Run("does not use a node device with a product ambiguous across accelerator types", func(t *testing.T) {
-		acceleratorType := v1.AcceleratorType("custom_accelerator")
-		product := "shared-product-name"
-		cluster := clusterWithNodeDeviceProductProvenance(
-			product,
-			1024,
-			acceleratorType,
-			v1.AcceleratorTypeNVIDIAGPU,
-		)
-		resources := virtualizationResources(string(acceleratorType), "1", product, map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey: "2048",
-		})
-
-		err := validateEndpointVGPUMemorySpec(resources, cluster)
-
-		assert.Nil(t, err)
-	})
-
 	t.Run("allows an unknown physical memory maximum", func(t *testing.T) {
 		resources := virtualizationResources("custom_accelerator", "1", "unknown-product", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey: "32768",
@@ -1871,40 +1825,6 @@ func clusterWithoutNVIDIAGPUProducts() *v1.Cluster {
 	}
 }
 
-func clusterWithNodeDeviceProductProvenance(
-	product string,
-	memoryMiB int64,
-	acceleratorTypes ...v1.AcceleratorType,
-) *v1.Cluster {
-	acceleratorGroups := make(map[v1.AcceleratorType]*v1.AcceleratorGroup, len(acceleratorTypes))
-	for _, acceleratorType := range acceleratorTypes {
-		acceleratorGroups[acceleratorType] = &v1.AcceleratorGroup{
-			ProductGroups: map[v1.AcceleratorProduct]float64{
-				v1.AcceleratorProduct(product): 1,
-			},
-		}
-	}
-
-	return &v1.Cluster{
-		Status: &v1.ClusterStatus{
-			ResourceInfo: &v1.ClusterResources{
-				NodeResources: map[string]*v1.NodeResourceStatus{
-					"node-0": {
-						ResourceStatus: v1.ResourceStatus{
-							Allocatable: &v1.ResourceInfo{
-								AcceleratorGroups: acceleratorGroups,
-							},
-						},
-						Devices: []*v1.DeviceResource{
-							healthyDevice("device-0", product, memoryMiB, 100),
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
 func markClusterVGPUReady(cluster *v1.Cluster, name string, workspace string) {
 	if cluster.Metadata == nil {
 		cluster.Metadata = &v1.Metadata{}
@@ -1963,13 +1883,6 @@ func occupiedDevice(uuid string, product string, memoryMiB int64, coreUnits int6
 		},
 		Available: &v1.DeviceResourcePool{},
 	}
-}
-
-func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int64) *v1.DeviceResource {
-	device := healthyDevice(uuid, product, memoryMiB, coreUnits)
-	device.Health = false
-
-	return device
 }
 
 type fakeClusterStorage struct {

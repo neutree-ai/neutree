@@ -584,68 +584,7 @@ func clusterProductMaxMemoryMiB(cluster *v1.Cluster, acceleratorType string, pro
 		return 0, false
 	}
 
-	if memoryMiB, ok := clusterProductMetadataMemoryMiB(resourceInfo, acceleratorType, product); ok {
-		return memoryMiB, true
-	}
-
-	var maxMemoryMiB int64
-
-	for _, node := range resourceInfo.NodeResources {
-		if !nodeProductUniquelyMatchesAcceleratorType(node, acceleratorType, product) {
-			continue
-		}
-
-		for _, device := range node.Devices {
-			if device == nil || device.Product != product || device.Allocatable == nil {
-				continue
-			}
-
-			if device.Allocatable.MemoryMiB > maxMemoryMiB {
-				maxMemoryMiB = device.Allocatable.MemoryMiB
-			}
-		}
-	}
-
-	return maxMemoryMiB, maxMemoryMiB > 0
-}
-
-func nodeProductUniquelyMatchesAcceleratorType(
-	node *v1.NodeResourceStatus,
-	acceleratorType string,
-	product string,
-) bool {
-	if node == nil || node.Allocatable == nil {
-		return false
-	}
-
-	matchingTypes := 0
-	requestedTypeMatches := false
-
-	for currentType, group := range node.Allocatable.AcceleratorGroups {
-		if !acceleratorGroupContainsProduct(group, product) {
-			continue
-		}
-
-		matchingTypes++
-		requestedTypeMatches = string(currentType) == acceleratorType
-	}
-
-	return matchingTypes == 1 && requestedTypeMatches
-}
-
-func acceleratorGroupContainsProduct(group *v1.AcceleratorGroup, product string) bool {
-	if group == nil {
-		return false
-	}
-
-	productKey := v1.AcceleratorProduct(product)
-	if _, ok := group.ProductGroups[productKey]; ok {
-		return true
-	}
-
-	_, ok := group.Products[productKey]
-
-	return ok
+	return clusterProductMetadataMemoryMiB(resourceInfo, acceleratorType, product)
 }
 
 func clusterProductMetadataMemoryMiB(
