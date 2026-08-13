@@ -37,8 +37,8 @@ data:
 ```
 
 So the precedence is: `device-config.content` > `files/device-config.yaml` >
-the hardcoded default. This lets a cluster supply its own `vnpus`/device-config
-templates (for example Ascend hard-slice templates) through chart values without
+the hardcoded default. This lets a cluster supply its own device-config
+templates (for example chip hard-slice templates) through chart values without
 rebuilding the chart.
 
 ## Verification

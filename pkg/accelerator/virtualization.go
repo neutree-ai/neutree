@@ -40,9 +40,10 @@ type VirtualizationConfig struct {
 	// effective mode, e.g. ["virtualization.memory_mib", "virtualization.core_percent"].
 	// They MUST be computed from the effective mode, not fixed per provider:
 	// different modes allow different resource keys (e.g. template mode omits
-	// virtualization.core_percent because aiCore is fixed by the hard-sliced
-	// template). A provider implementing more than one mode must branch on
-	// cluster.Spec.AcceleratorVirtualization.Mode when building this list.
+	// virtualization.core_percent because compute cores are fixed by the
+	// hard-sliced template). A provider implementing more than one mode must
+	// branch on cluster.Spec.AcceleratorVirtualization.Mode when building this
+	// list.
 	SupportedResources []string
 }
 
