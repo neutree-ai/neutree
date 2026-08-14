@@ -11,9 +11,21 @@ func TestAPIKeyProjects(t *testing.T) {
 	user := CreateTestUser(t, "project-test", "project-test@example.com", "password")
 
 	WithUserContext(t, db, user.ID, func(tx *sql.Tx) {
-		var defaultCount int
-		if err := tx.QueryRow(`SELECT count(*) FROM api.list_api_key_projects('default') WHERE name='Default'`).Scan(&defaultCount); err != nil || defaultCount != 1 {
-			t.Fatalf("default project count=%d err=%v", defaultCount, err)
+		var defaultID string
+		if err := tx.QueryRow(`SELECT id FROM api.list_api_key_projects('default') WHERE name='Default'`).Scan(&defaultID); err != nil {
+			t.Fatalf("default project: %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.update_api_key_project($1, NULL, NULL, false)`, defaultID); err == nil || !strings.Contains(err.Error(), "cannot be renamed or disabled") {
+			t.Fatalf("expected protected default update, got %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.update_api_key_project($1, 'Renamed', NULL, NULL)`, defaultID); err == nil || !strings.Contains(err.Error(), "cannot be renamed or disabled") {
+			t.Fatalf("expected protected default rename, got %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.update_api_key_project($1, NULL, 'Updated description', NULL)`, defaultID); err != nil {
+			t.Fatalf("update default description: %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.delete_api_key_project($1)`, defaultID); err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
+			t.Fatalf("expected protected default delete, got %v", err)
 		}
 
 		var source, target, disabled string
