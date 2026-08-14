@@ -65,5 +65,16 @@ func TestAPIKeyProjects(t *testing.T) {
 		if !strings.Contains(keysJSON, `"name": "same"`) { t.Fatalf("project match must return all keys: %s", keysJSON) }
 		if err := tx.QueryRow(`SELECT api_keys::text FROM api.get_api_key_project_groups('ws-a','first',NULL,NULL,1,20) WHERE (project).id=$1`, target).Scan(&keysJSON); err != nil { t.Fatal(err) }
 		if !strings.Contains(keysJSON, `"description": "first"`) { t.Fatalf("key search did not return match: %s", keysJSON) }
+
+		if err := tx.QueryRow(`SELECT api.move_api_keys_to_project(ARRAY[$1::uuid],$2)`, key1, source).Scan(&moved); err != nil { t.Fatal(err) }
+		if moved != 1 { t.Fatalf("moved back=%d want 1", moved) }
+		if _, err := tx.Exec(`SELECT api.delete_api_key_project($1)`, target); err != nil {
+			t.Fatalf("delete empty project referenced by history: %v", err)
+		}
+		var historyWithDeletedProject int
+		if err := tx.QueryRow(`SELECT count(*) FROM api.api_key_project_history WHERE api_key_id=$1 AND (from_project_id IS NULL OR to_project_id IS NULL)`, key1).Scan(&historyWithDeletedProject); err != nil {
+			t.Fatal(err)
+		}
+		if historyWithDeletedProject != 2 { t.Fatalf("history rows with deleted project=%d want 2", historyWithDeletedProject) }
 	})
 }
