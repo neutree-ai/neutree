@@ -76,15 +76,15 @@ type ApiKeyStatus struct {
 }
 
 type ApiKey struct {
-	ID         string        `json:"id,omitempty"`
-	APIVersion string        `json:"api_version,omitempty"`
-	Kind       string        `json:"kind,omitempty"`
-	Metadata   *Metadata     `json:"metadata,omitempty"`
-	Spec       *ApiKeySpec   `json:"spec,omitempty"`
-	Status     *ApiKeyStatus `json:"status,omitempty"`
-	UserID     string        `json:"user_id,omitempty"`
-	ProjectID  string        `json:"project_id,omitempty"`
-	Description string       `json:"description,omitempty"`
+	ID          string        `json:"id,omitempty"`
+	APIVersion  string        `json:"api_version,omitempty"`
+	Kind        string        `json:"kind,omitempty"`
+	Metadata    *Metadata     `json:"metadata,omitempty"`
+	Spec        *ApiKeySpec   `json:"spec,omitempty"`
+	Status      *ApiKeyStatus `json:"status,omitempty"`
+	UserID      string        `json:"user_id,omitempty"`
+	ProjectID   string        `json:"project_id,omitempty"`
+	Description string        `json:"description,omitempty"`
 }
 
 func (obj *ApiKey) GetName() string {
