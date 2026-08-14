@@ -51,6 +51,16 @@ func rejectAPIKeyForceDelete() gin.HandlerFunc {
 			return
 		}
 
+		if payloadHasProjectID(body) {
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    apiKeyProjectMutationRejectedCode,
+				Message: "api_key project_id can only be changed through move_api_keys",
+				Hint:    "Use the API key migration endpoint so workspace, project state, permissions, and name conflicts are validated atomically.",
+			})
+			c.Abort()
+			return
+		}
+
 		if !payloadHasForceDeleteAnnotation(body) {
 			c.Next()
 			return
@@ -71,7 +81,31 @@ func rejectAPIKeyForceDelete() gin.HandlerFunc {
 const (
 	apiKeyInvalidPayloadCode      = "10225"
 	apiKeyForceDeleteRejectedCode = "10226"
+	apiKeyProjectMutationRejectedCode = "10227"
 )
+
+func payloadHasProjectID(body []byte) bool {
+	var payload interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return payloadContainsProjectID(payload)
+}
+
+func payloadContainsProjectID(payload interface{}) bool {
+	switch value := payload.(type) {
+	case map[string]interface{}:
+		_, found := value["project_id"]
+		return found
+	case []interface{}:
+		for _, item := range value {
+			if payloadContainsProjectID(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // payloadHasForceDeleteAnnotation reports whether the request body sets the
 // force-delete annotation. Bodies that do not parse as an api_key are passed

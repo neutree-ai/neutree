@@ -52,6 +52,20 @@ func TestRejectAPIKeyForceDelete(t *testing.T) {
 			expectStatus: http.StatusOK,
 		},
 		{
+			name:         "project mutation is rejected",
+			method:       http.MethodPatch,
+			body:         `{"project_id":"00000000-0000-0000-0000-000000000001"}`,
+			expectStatus: http.StatusBadRequest,
+			expectCode:   apiKeyProjectMutationRejectedCode,
+		},
+		{
+			name:         "bulk project mutation is rejected",
+			method:       http.MethodPatch,
+			body:         `[{"spec":{"limits":{"rps":10}}},{"project_id":"00000000-0000-0000-0000-000000000001"}]`,
+			expectStatus: http.StatusBadRequest,
+			expectCode:   apiKeyProjectMutationRejectedCode,
+		},
+		{
 			name:         "force delete is rejected",
 			method:       http.MethodPatch,
 			body:         forceSoftDelete,
@@ -124,7 +138,9 @@ func TestRejectAPIKeyForceDelete(t *testing.T) {
 			var got validationError
 			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 			assert.Equal(t, tt.expectCode, got.Code)
-			assert.Contains(t, got.Message, "force delete")
+			if tt.expectCode == apiKeyForceDeleteRejectedCode {
+				assert.Contains(t, got.Message, "force delete")
+			}
 		})
 	}
 }
