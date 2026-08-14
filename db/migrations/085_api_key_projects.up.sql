@@ -173,3 +173,23 @@ END;
 $$ LANGUAGE plpgsql;
 
 SELECT api.update_admin_permissions();
+
+-- Workspace users receive the complete Project lifecycle for the workspace
+-- they are assigned to. Keep the existing role permissions intact so this
+-- migration remains compatible with extensions that add permissions later.
+UPDATE api.roles
+SET spec = ROW(
+    (spec).preset_key,
+    ARRAY(
+        SELECT DISTINCT permission
+        FROM unnest((spec).permissions || ARRAY[
+            'project:read'::api.permission_action,
+            'project:create'::api.permission_action,
+            'project:update'::api.permission_action,
+            'project:delete'::api.permission_action,
+            'project:migrate'::api.permission_action
+        ]) AS permission
+        ORDER BY permission
+    )::api.permission_action[]
+)::api.role_spec
+WHERE (metadata).name = 'workspace-user';
