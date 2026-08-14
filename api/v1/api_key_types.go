@@ -5,8 +5,10 @@ import (
 )
 
 type ApiKeySpec struct {
-	Quota  int64         `json:"quota,omitempty"`
-	Limits *ApiKeyLimits `json:"limits,omitempty"`
+	Quota       int64         `json:"quota,omitempty"`
+	Limits      *ApiKeyLimits `json:"limits,omitempty"`
+	ProjectID   string        `json:"project_id,omitempty"`
+	Description string        `json:"description,omitempty"`
 }
 
 // ApiKeyLimits is the limit configuration carried on the API key itself. It
@@ -81,6 +83,8 @@ type ApiKey struct {
 	Spec       *ApiKeySpec   `json:"spec,omitempty"`
 	Status     *ApiKeyStatus `json:"status,omitempty"`
 	UserID     string        `json:"user_id,omitempty"`
+	ProjectID  string        `json:"project_id,omitempty"`
+	Description string       `json:"description,omitempty"`
 }
 
 func (obj *ApiKey) GetName() string {
