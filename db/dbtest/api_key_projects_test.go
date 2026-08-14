@@ -40,6 +40,12 @@ func TestAPIKeyProjects(t *testing.T) {
 		var key1, key2 string
 		if err := tx.QueryRow(`SELECT id FROM api.create_api_key('ws-a','same',0,NULL,NULL,NULL,$1,'first')`, source).Scan(&key1); err != nil { t.Fatal(err) }
 		if err := tx.QueryRow(`SELECT id FROM api.create_api_key('ws-a','same',0,NULL,NULL,NULL,$1,'second')`, target).Scan(&key2); err != nil { t.Fatal(err) }
+		if _, err := tx.Exec(`SELECT api.create_api_key('ws-a','客服机器人（生产）',0,NULL,NULL,NULL,$1,'中文名称')`, source); err != nil {
+			t.Fatalf("create API key with Chinese name and punctuation: %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.create_api_key('ws-a','   ',0,NULL,NULL,NULL,$1,'blank name')`, source); err == nil || !strings.Contains(err.Error(), "name is required") {
+			t.Fatalf("expected blank API key name rejection, got %v", err)
+		}
 
 		if _, err := tx.Exec(`SELECT api.move_api_keys_to_project(ARRAY[$1::uuid],$2)`, key1, target); err == nil || !strings.Contains(err.Error(), "conflicts") { t.Fatalf("expected conflict, got %v", err) }
 		if _, err := tx.Exec(`SELECT api.move_api_keys_to_project(ARRAY[$1::uuid],$2)`, key1, disabled); err == nil || !strings.Contains(err.Error(), "disabled") { t.Fatalf("expected disabled error, got %v", err) }

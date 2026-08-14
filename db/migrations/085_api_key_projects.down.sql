@@ -9,6 +9,11 @@ DROP TABLE api.api_key_project_history;
 DROP TRIGGER touch_api_key_project ON api.api_key_projects;
 DROP FUNCTION api.touch_api_key_project();
 DROP INDEX api.api_key_name_project_unique_idx;
+DROP TRIGGER validate_name_on_api_keys ON api.api_keys;
+DROP FUNCTION api.validate_api_key_name();
+CREATE TRIGGER validate_name_on_api_keys
+    BEFORE INSERT OR UPDATE ON api.api_keys
+    FOR EACH ROW EXECUTE FUNCTION api.validate_metadata_name();
 ALTER TABLE api.api_keys DROP COLUMN description, DROP COLUMN project_id;
 CREATE UNIQUE INDEX api_key_name_workspace_unique_idx ON api.api_keys (((metadata).workspace), ((metadata).name));
 DROP TABLE api.api_key_projects;

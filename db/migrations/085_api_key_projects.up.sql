@@ -35,6 +35,30 @@ CREATE UNIQUE INDEX api_key_name_project_unique_idx
     ON api.api_keys (project_id, ((metadata).name));
 CREATE INDEX api_keys_project_id_idx ON api.api_keys (project_id);
 
+-- API key names are business labels, not Kubernetes resource names. Keep the
+-- shared required/length guarantees while allowing Chinese, spaces and common
+-- punctuation as required by the API key product contract.
+DROP TRIGGER validate_name_on_api_keys ON api.api_keys;
+CREATE FUNCTION api.validate_api_key_name()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (NEW.metadata).name IS NULL OR length(trim((NEW.metadata).name)) = 0 THEN
+        RAISE sqlstate 'PGRST'
+            USING message = '{"code": "10001","message": "API key name is required","hint": "Provide a non-empty API key name"}',
+            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+    END IF;
+    IF length((NEW.metadata).name) > 63 THEN
+        RAISE sqlstate 'PGRST'
+            USING message = '{"code": "10004","message": "API key name is too long","hint": "Name cannot exceed 63 characters"}',
+            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER validate_name_on_api_keys
+    BEFORE INSERT OR UPDATE ON api.api_keys
+    FOR EACH ROW EXECUTE FUNCTION api.validate_api_key_name();
+
 CREATE TABLE api.api_key_project_history (
     id BIGSERIAL PRIMARY KEY,
     api_key_id UUID NOT NULL REFERENCES api.api_keys(id) ON DELETE CASCADE,
