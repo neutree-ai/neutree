@@ -76,5 +76,13 @@ func TestAPIKeyProjects(t *testing.T) {
 			t.Fatal(err)
 		}
 		if historyWithDeletedProject != 2 { t.Fatalf("history rows with deleted project=%d want 2", historyWithDeletedProject) }
+
+		var deletingKey string
+		if err := tx.QueryRow(`SELECT id FROM api.create_api_key('ws-a','deleting',0,NULL,NULL,NULL,$1,'pending deletion')`, source).Scan(&deletingKey); err != nil { t.Fatal(err) }
+		if _, err := tx.Exec(`UPDATE api.api_keys SET metadata.deletion_timestamp=now() WHERE id=$1`, deletingKey); err != nil { t.Fatal(err) }
+		if err := tx.QueryRow(`SELECT api_key_count, api_keys::text FROM api.get_api_key_project_groups('ws-a',NULL,NULL,NULL,1,20) WHERE (project).id=$1`, source).Scan(&count, &keysJSON); err != nil { t.Fatal(err) }
+		if count != 1 || strings.Contains(keysJSON, `"name": "deleting"`) {
+			t.Fatalf("deleting key must be hidden: count=%d keys=%s", count, keysJSON)
+		}
 	})
 }
