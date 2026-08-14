@@ -11,6 +11,11 @@ func TestAPIKeyProjects(t *testing.T) {
 	user := CreateTestUser(t, "project-test", "project-test@example.com", "password")
 
 	WithUserContext(t, db, user.ID, func(tx *sql.Tx) {
+		var defaultCount int
+		if err := tx.QueryRow(`SELECT count(*) FROM api.list_api_key_projects('default') WHERE name='Default'`).Scan(&defaultCount); err != nil || defaultCount != 1 {
+			t.Fatalf("default project count=%d err=%v", defaultCount, err)
+		}
+
 		var source, target, disabled string
 		for _, item := range []struct{ name string; enabled bool; dest *string }{
 			{"Source", true, &source}, {"Target", true, &target}, {"Disabled", false, &disabled},
