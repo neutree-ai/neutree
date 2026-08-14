@@ -27,6 +27,7 @@ const (
 //     ambiguous about which one wins.
 //   - Every feature's conflicts_with entry must reference a real feature key
 //     so misconfigured catalogs fail on write, not later at compose time.
+//   - Reject a spec that declares neither a model nor variants.
 func ValidateModelCatalogSpec(spec *v1.ModelCatalogSpec) error {
 	if spec == nil {
 		return nil
@@ -80,6 +81,13 @@ func ValidateModelCatalogSpec(spec *v1.ModelCatalogSpec) error {
 		if err := validateFeatureShape(feat.Name, feat); err != nil {
 			return err
 		}
+	}
+
+	// An ordinary catalog carries spec.model, a recipe catalog carries
+	// spec.variants. A spec with neither is undeployable, and a PATCH carrying
+	// one blanks the whole stored spec rather than merging into it.
+	if spec.Model == nil && len(spec.Variants) == 0 {
+		return fmt.Errorf("model_catalog: spec must declare a model or variants")
 	}
 
 	return nil

@@ -71,6 +71,19 @@ func TestValidateModelCatalogSpec(t *testing.T) {
 			},
 			wantErr: "lists itself",
 		},
+		{
+			name:    "empty spec rejected",
+			in:      &v1.ModelCatalogSpec{},
+			wantErr: "must declare a model or variants",
+		},
+		{
+			name: "spec with neither model nor variants rejected",
+			in: &v1.ModelCatalogSpec{
+				Engine:   &v1.EndpointEngineSpec{Engine: "vllm"},
+				Features: []v1.RecipeFeature{{Name: "a"}},
+			},
+			wantErr: "must declare a model or variants",
+		},
 	}
 
 	for _, tc := range cases {

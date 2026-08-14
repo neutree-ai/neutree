@@ -73,10 +73,10 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 		}
 
 		// PostgREST accepts both a single object and an array (bulk insert).
-		var catalogs []v1.ModelCatalog
+		docs := []json.RawMessage{trimmed}
 
 		if trimmed[0] == '[' {
-			if err := json.Unmarshal(trimmed, &catalogs); err != nil {
+			if err := json.Unmarshal(trimmed, &docs); err != nil {
 				c.JSON(http.StatusBadRequest, &validationError{
 					Code:    "10223",
 					Message: "invalid model_catalog payload: " + err.Error(),
@@ -86,27 +86,38 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 
 				return
 			}
-		} else {
-			var one v1.ModelCatalog
-			if err := json.Unmarshal(trimmed, &one); err != nil {
-				c.JSON(http.StatusBadRequest, &validationError{
-					Code:    "10223",
-					Message: "invalid model_catalog payload: " + err.Error(),
-					Hint:    "Check the model catalog spec fields and types",
-				})
-				c.Abort()
-
-				return
-			}
-
-			catalogs = []v1.ModelCatalog{one}
 		}
 
-		for _, catalog := range catalogs {
-			// A metadata-only PATCH carries no spec — nothing recipe-related to
-			// validate.
+		for _, doc := range docs {
+			var catalog v1.ModelCatalog
+			if err := json.Unmarshal(doc, &catalog); err != nil {
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10223",
+					Message: "invalid model_catalog payload: " + err.Error(),
+					Hint:    "Check the model catalog spec fields and types",
+				})
+				c.Abort()
+
+				return
+			}
+
+			// A nil Spec means either a metadata-only write, which carries
+			// nothing recipe-related to validate, or an explicit `spec: null`,
+			// which blanks the stored spec. Only the raw document tells the two
+			// apart.
 			if catalog.Spec == nil {
-				continue
+				if !specIsExplicitNull(doc) {
+					continue
+				}
+
+				c.JSON(http.StatusBadRequest, &validationError{
+					Code:    "10224",
+					Message: "model_catalog: spec must declare a model or variants",
+					Hint:    "Omit spec to leave it unchanged, or send a spec with a model (variants for a recipe catalog)",
+				})
+				c.Abort()
+
+				return
 			}
 
 			if err := recipe.ValidateModelCatalogSpec(catalog.Spec); err != nil {
@@ -123,4 +134,18 @@ func validateModelCatalogRecipe() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// specIsExplicitNull reports whether the document carries a `spec` key set to
+// JSON null, as opposed to omitting the key altogether.
+func specIsExplicitNull(doc json.RawMessage) bool {
+	var fields struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+
+	if err := json.Unmarshal(doc, &fields); err != nil {
+		return false
+	}
+
+	return bytes.Equal(bytes.TrimSpace(fields.Spec), []byte("null"))
 }
