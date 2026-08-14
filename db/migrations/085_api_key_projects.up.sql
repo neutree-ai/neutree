@@ -160,8 +160,14 @@ CREATE OR REPLACE FUNCTION api.create_api_key(
 DECLARE p_user_id UUID := auth.uid(); v_key_id UUID; v_key_value TEXT; v_quota BIGINT; v_result api.api_keys;
 BEGIN
   IF p_workspace IS NULL OR p_workspace = '' THEN RAISE EXCEPTION 'workspace is required to create an API key'; END IF;
-  IF NOT api.has_permission(p_user_id, 'project:read', p_workspace) THEN RAISE EXCEPTION 'permission denied'; END IF;
-  IF p_project_id IS NULL THEN p_project_id := api.ensure_default_project(p_workspace); END IF;
+  -- Preserve the historical create API key contract when no Project is
+  -- supplied: keys land in the deterministic default Project. Selecting a
+  -- non-default Project is new behavior and therefore requires Project read.
+  IF p_project_id IS NULL THEN
+    p_project_id := api.ensure_default_project(p_workspace);
+  ELSIF NOT api.has_permission(p_user_id, 'project:read', p_workspace) THEN
+    RAISE EXCEPTION 'permission denied';
+  END IF;
   PERFORM api.validate_api_key_project(p_project_id, p_workspace, TRUE);
   PERFORM api.validate_api_key_limits(p_limits);
   v_quota := COALESCE((p_limits #>> '{token_quota,limit}')::bigint, 0);
