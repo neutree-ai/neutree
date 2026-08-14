@@ -1,7 +1,5 @@
 -- API key projects. The default project is deterministic per workspace so the
 -- legacy-data backfill and a rolling upgrade can safely be repeated.
-BEGIN;
-
 ALTER TYPE api.permission_action ADD VALUE IF NOT EXISTS 'project:read';
 ALTER TYPE api.permission_action ADD VALUE IF NOT EXISTS 'project:create';
 ALTER TYPE api.permission_action ADD VALUE IF NOT EXISTS 'project:update';
@@ -175,4 +173,3 @@ END;
 $$ LANGUAGE plpgsql;
 
 SELECT api.update_admin_permissions();
-COMMIT;

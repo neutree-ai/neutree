@@ -1,4 +1,3 @@
-BEGIN;
 DROP FUNCTION IF EXISTS api.move_api_keys(UUID[], UUID);
 DROP FUNCTION IF EXISTS api.delete_project(UUID);
 DROP FUNCTION IF EXISTS api.update_project(UUID, TEXT, TEXT, BOOLEAN);
@@ -16,4 +15,3 @@ ALTER TABLE api.api_keys DROP COLUMN IF EXISTS project_id;
 ALTER TABLE api.api_keys DROP COLUMN IF EXISTS description;
 DROP TYPE IF EXISTS api.project_spec;
 DROP TYPE IF EXISTS api.project_status;
-COMMIT;
