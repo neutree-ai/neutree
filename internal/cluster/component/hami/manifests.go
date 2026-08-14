@@ -7,6 +7,7 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kubeversion "k8s.io/apimachinery/pkg/version"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	ntsemver "github.com/neutree-ai/neutree/internal/semver"
@@ -48,7 +49,7 @@ scheduler:
       pullPolicy: IfNotPresent
       tag: v2.9.0
 devicePlugin:
-  enabled: true
+  enabled: false
   image:
     repository: projecthami/hami
     pullPolicy: IfNotPresent
@@ -60,7 +61,6 @@ devicePlugin:
       tag: v2.9.0
   service:
     type: ClusterIP
-  deviceSplitCount: 100
 `
 
 const protectedChartValuesYAML = `
@@ -76,8 +76,6 @@ scheduler:
 devicePlugin:
   service:
     type: ClusterIP
-  migStrategy: none
-  deviceSplitCount: 100
 `
 
 var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, error) {
@@ -92,17 +90,39 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]interface{} {
 	values := defaultChartValues(h.normalizedImagePrefix())
 	// Merge order is intentional: chart defaults < plugin discovery patch <
-	// user config_patch < Neutree protected values. Protected values keep
-	// lifecycle, TLS, MIG, and device-split semantics under Neutree control.
+	// supported user config_patch < Neutree protected values. Protected values
+	// keep shared lifecycle, TLS, service, and image settings under Neutree control.
 	values = mergeChartValues(values, scopePlan.ConfigPatch)
 
 	if h.cluster.Spec != nil &&
 		h.cluster.Spec.AcceleratorVirtualization != nil &&
 		h.cluster.Spec.AcceleratorVirtualization.ConfigPatch != nil {
-		values = mergeChartValues(values, h.cluster.Spec.AcceleratorVirtualization.ConfigPatch)
+		configPatch := h.cluster.Spec.AcceleratorVirtualization.ConfigPatch
+		if _, found := configPatch["devicePlugin"]; found {
+			klog.Warningf("Ignoring legacy accelerator_virtualization.config_patch.devicePlugin for cluster %s",
+				h.cluster.Metadata.WorkspaceName())
+		}
+
+		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
 	}
 
-	return mergeChartValues(values, h.protectedChartValues(scopePlan))
+	return mergeChartValues(values, h.protectedChartValues())
+}
+
+func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
+	if len(configPatch) == 0 {
+		return nil
+	}
+
+	sanitized := make(map[string]interface{}, len(configPatch))
+
+	for key, value := range configPatch {
+		if key != "devicePlugin" {
+			sanitized[key] = value
+		}
+	}
+
+	return sanitized
 }
 
 func defaultChartValues(imageRegistry string) map[string]interface{} {
@@ -148,7 +168,7 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 	return values
 }
 
-func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string]interface{} {
+func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
@@ -159,8 +179,7 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"enabled": shouldDeployDevicePlugin(scopePlan),
-			"image":   chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			"monitor": map[string]interface{}{
 				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			},
@@ -174,19 +193,6 @@ func (h *HAMiComponent) protectedChartValues(scopePlan NodeScopePlan) map[string
 			},
 		})
 	}
-
-	values = mergeChartValues(values, map[string]interface{}{
-		"devicePlugin": map[string]interface{}{
-			"nvidiaNodeSelector": map[string]interface{}{
-				// The upstream HAMi chart defaults this selector to gpu=on.
-				// Neutree uses the accelerator plugin scope label as the only
-				// virtualization node selector, so clear the chart default
-				// during Helm value coalescing.
-				"gpu":                        nil,
-				scopePlan.NodeScopeLabel.Key: scopePlan.NodeScopeLabel.EnabledValue,
-			},
-		},
-	})
 
 	return values
 }
@@ -348,12 +354,31 @@ func kubeVersionNumericPrefix(value string) string {
 	return value
 }
 
-func shouldDeployDevicePlugin(plan NodeScopePlan) bool {
-	// When every candidate node is explicitly disabled, HAMi should still keep
-	// scheduler/webhook resources but skip the device-plugin DaemonSet.
-	return len(plan.DisabledNodes) == 0 || len(plan.EnabledNodes) > 0 || len(plan.PatchedNodes) > 0
-}
-
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
-	return renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+	resources, err := renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+	if err != nil {
+		return resources, err
+	}
+
+	// The accelerator plugin does not require an additional device plugin.
+	if scopePlan.DevicePluginTemplate == nil {
+		return resources, nil
+	}
+
+	templateResources, err := util.RenderKubernetesManifest(scopePlan.DevicePluginTemplate.Manifest, struct {
+		Namespace      string
+		NodeScopeLabel NodeScopeLabel
+		ImagePrefix    string
+	}{
+		Namespace:      h.namespace,
+		NodeScopeLabel: scopePlan.NodeScopeLabel,
+		ImagePrefix:    h.normalizedImagePrefix(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resources.Items = append(resources.Items, templateResources.Items...)
+
+	return resources, nil
 }

@@ -5,6 +5,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,7 @@ func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 	spec.AddCustomResource("rdma/hca", "2")
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(2), ray.NumGPUs)
@@ -57,7 +58,7 @@ func TestConverterManager_ConvertToRay_Accelerator_ZeroCount(t *testing.T) {
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 	spec.AddCustomResource("rdma/hca", "2")
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumGPUs)
@@ -83,7 +84,7 @@ func TestConverterManager_ConvertToKubernetes_NVIDIA(t *testing.T) {
 	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "1", k8s.Requests["nvidia.com/gpu"])
@@ -109,7 +110,7 @@ func TestConverterManager_ConvertToKubernetes_Accelerator_ZeroCount(t *testing.T
 	spec.SetAcceleratorType(string(v1.AcceleratorTypeNVIDIAGPU))
 	spec.SetAcceleratorProduct("NVIDIA-L20")
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "", k8s.Requests["nvidia.com/gpu"])
@@ -136,7 +137,7 @@ func TestConverterManager_ConvertToRay_AMD(t *testing.T) {
 	spec.SetAcceleratorType(string(v1.AcceleratorTypeAMDGPU))
 	spec.SetAcceleratorProduct("AMD_Instinct_MI300X_VF")
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(1), ray.NumGPUs)
@@ -161,7 +162,7 @@ func TestConverterManager_ConvertToKubernetes_AMD(t *testing.T) {
 	spec.SetAcceleratorProduct("AMD_Instinct_MI300X_VF")
 	spec.AddCustomResource("hugepages-2Mi", "1024Mi")
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "1", k8s.Requests["amd.com/gpu"])
@@ -180,14 +181,14 @@ func TestConverterManager_CPUOnly(t *testing.T) {
 		Memory: &memory,
 	}
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumGPUs)
 	assert.Equal(t, float64(4), ray.NumCPUs)
 	assert.Equal(t, float64(8*plugin.BytesPerGiB), ray.Memory)
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "4", k8s.Requests["cpu"])
@@ -199,14 +200,14 @@ func TestCPUOnly_MinimalConfig(t *testing.T) {
 
 	spec := &v1.ResourceSpec{}
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumGPUs)
 	assert.Equal(t, float64(0), ray.NumCPUs)
 	assert.Equal(t, float64(0), ray.Memory)
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Empty(t, k8s.Requests)
@@ -221,13 +222,13 @@ func TestConverterManager_CPUOnly_OnlyCPU(t *testing.T) {
 		CPU: &cpu,
 	}
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(2), ray.NumCPUs)
 	assert.Equal(t, float64(0), ray.Memory)
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "2", k8s.Requests["cpu"])
@@ -242,13 +243,13 @@ func TestCPUOnly_OnlyMemory(t *testing.T) {
 		Memory: &memory,
 	}
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumCPUs)
 	assert.Equal(t, float64(16*plugin.BytesPerGiB), ray.Memory)
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "16Gi", k8s.Requests["memory"])
@@ -267,14 +268,14 @@ func TestGPUZero_NoAcceleratorType(t *testing.T) {
 		Memory: &memory,
 	}
 
-	ray, err := convertToRay(mgr, spec)
+	ray, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, ray)
 	assert.Equal(t, float64(0), ray.NumGPUs)
 	assert.Equal(t, float64(4), ray.NumCPUs)
 	assert.Equal(t, float64(8*plugin.BytesPerGiB), ray.Memory)
 
-	k8s, err := convertToKubernetes(mgr, spec)
+	k8s, err := convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	require.NoError(t, err)
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "4", k8s.Requests["cpu"])
@@ -292,11 +293,11 @@ func TestNoConverterFound(t *testing.T) {
 	}
 	spec.SetAcceleratorType("unknown_gpu")
 
-	_, err := convertToRay(mgr, spec)
+	_, err := convertToRay(mgr, accelerator.ConvertInput{Spec: spec})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no converter found")
 
-	_, err = convertToKubernetes(mgr, spec)
+	_, err = convertToKubernetes(mgr, accelerator.ConvertInput{Spec: spec})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no converter found")
 }

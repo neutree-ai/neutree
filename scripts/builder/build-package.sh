@@ -37,7 +37,7 @@ Options:
     --version <VERSION>        Version tag (default: latest)
     --arch <ARCH>              Architecture: amd64, arm64 (default: amd64)
     --cluster-type <TYPE>      Cluster type: k8s or ssh (required if type=cluster)
-    --accelerator <ACCEL>      Accelerator type: nvidia_gpu, amd_gpu (for ssh cluster)
+    --accelerator <ACCEL>      Accelerator type: nvidia_gpu, amd_gpu (for k8s/ssh cluster; appends <ACCEL>-images.txt)
     --mirror-registry <URL>    Mirror registry URL to pull images from (e.g., registry.example.com)
     --output-dir <DIR>         Output directory (default: ./dist)
     -h, --help                 Show this help message
@@ -48,6 +48,9 @@ Examples:
 
     # Build K8s cluster package for arm64
     $0 --type cluster --cluster-type k8s --version v1.0.0 --arch arm64
+
+    # Build K8s cluster package with NVIDIA for amd64
+    $0 --type cluster --cluster-type k8s --accelerator nvidia_gpu --version v1.0.0 --arch amd64
 
     # Build SSH cluster package with NVIDIA for amd64
     $0 --type cluster --cluster-type ssh --accelerator nvidia_gpu --version v1.0.0 --arch amd64
@@ -132,8 +135,14 @@ case "$PACKAGE_TYPE" in
 
         case "$CLUSTER_TYPE" in
             k8s)
+                PACKAGE_NAME="neutree-cluster-k8s"
                 IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/images.txt")
-                PACKAGE_NAME="neutree-cluster-k8s-${VERSION}-${ARCH}"
+
+                if [[ -n "$ACCELERATOR" ]]; then
+                    IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/${ACCELERATOR}-images.txt")
+                    PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
+                fi
+                PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
                 ;;
             ssh)
                 PACKAGE_NAME="neutree-cluster-ssh"

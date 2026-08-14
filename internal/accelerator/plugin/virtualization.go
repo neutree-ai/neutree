@@ -5,13 +5,9 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-)
 
-type VirtualizationNodeScopeLabel struct {
-	Key           string
-	EnabledValue  string
-	DisabledValue string
-}
+	"github.com/neutree-ai/neutree/pkg/accelerator"
+)
 
 type GPUOperatorClusterPolicy struct {
 	Name string
@@ -23,22 +19,12 @@ type VirtualizationConfigInput struct {
 	GPUOperatorClusterPolicies []GPUOperatorClusterPolicy
 }
 
-type VirtualizationConfig struct {
-	Supported       bool
-	BlockingReasons []string
-	CandidateNodes  []string
-	NodeScopeLabel  VirtualizationNodeScopeLabel
-	// ConfigPatch contains accelerator-specific Helm values for the shared
-	// virtualization solution. The component still applies protected values last.
-	ConfigPatch map[string]interface{}
-}
-
 type VirtualizationConfigResolver interface {
-	ResolveVirtualizationConfig(ctx context.Context, input VirtualizationConfigInput) (*VirtualizationConfig, error)
+	ResolveVirtualizationConfig(ctx context.Context, input VirtualizationConfigInput) (*accelerator.VirtualizationConfig, error)
 }
 
-func NewUnsupportedVirtualizationConfig(acceleratorType string) *VirtualizationConfig {
-	return &VirtualizationConfig{
+func NewUnsupportedVirtualizationConfig(acceleratorType string) *accelerator.VirtualizationConfig {
+	return &accelerator.VirtualizationConfig{
 		Supported: false,
 		BlockingReasons: []string{
 			fmt.Sprintf("accelerator %s does not support HAMi virtualization", acceleratorType),

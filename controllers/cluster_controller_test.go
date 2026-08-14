@@ -528,6 +528,13 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 					c.Status.RayVersion = "2.53.0"
 					c.Status.DashboardURL = "http://head:8265"
 					c.Status.AcceleratorType = &accelType
+					c.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+						Mode: v1.AcceleratorVirtualizationModeCore,
+						SupportedResources: []string{
+							v1.AcceleratorVirtualizationMemoryMiBKey,
+							v1.AcceleratorVirtualizationCorePercentKey,
+						},
+					}
 				}).Return(nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
@@ -540,6 +547,12 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 					assert.NotNil(t, obj.Status.AcceleratorType)
 					assert.Equal(t, "nvidia_gpu", *obj.Status.AcceleratorType)
 					assert.Equal(t, specV2Hash, obj.Status.ObservedSpecHash)
+					require.NotNil(t, obj.Status.AcceleratorVirtualization)
+					assert.Equal(t, v1.AcceleratorVirtualizationModeCore, obj.Status.AcceleratorVirtualization.Mode)
+					assert.ElementsMatch(t, []string{
+						v1.AcceleratorVirtualizationMemoryMiBKey,
+						v1.AcceleratorVirtualizationCorePercentKey,
+					}, obj.Status.AcceleratorVirtualization.SupportedResources)
 				}).Return(nil)
 			},
 			wantErr: false,

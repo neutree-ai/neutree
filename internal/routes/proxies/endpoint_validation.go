@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -339,6 +340,10 @@ func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
+	if validationErr := validateEndpointVGPUResourcesSupported(endpoint.Spec.Resources, cluster); validationErr != nil {
+		return validationErr
+	}
+
 	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
 		return validationErr
 	}
@@ -461,16 +466,52 @@ func validateEndpointVGPUCluster(cluster *v1.Cluster) *validationError {
 	return nil
 }
 
+// validateEndpointVGPUResourcesSupported rejects virtualization resource keys on
+// endpoints when the cluster's effective accelerator virtualization mode does
+// not support them. The cluster status block lists the supported resources
+// (supported_resources) for the active mode; any virtualization.* key the
+// endpoint requests that is not in that list is rejected. The value of each
+// key is not inspected here — value range is enforced by the shape validator.
+// A missing capability block (stale cluster) falls back to shape-only
+// validation.
+func validateEndpointVGPUResourcesSupported(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {
+	if resources == nil || !resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	if cluster == nil || cluster.Status == nil || cluster.Status.AcceleratorVirtualization == nil {
+		return nil
+	}
+
+	supported := cluster.Status.AcceleratorVirtualization.SupportedResources
+
+	for key := range resources.Accelerator {
+		if !v1.IsAcceleratorVirtualizationKey(key) {
+			continue
+		}
+
+		if !slices.Contains(supported, key) {
+			return &validationError{
+				Code:    "10227",
+				Message: fmt.Sprintf("virtualization key %q is not supported by the cluster accelerator virtualization mode", key),
+				Hint:    fmt.Sprintf("virtualization.%s is not allowed under the active cluster virtualization mode; switch the cluster mode, or remove the setting", key),
+			}
+		}
+	}
+
+	return nil
+}
+
 func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationError {
 	if !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
 
-	if resources.GetAcceleratorType() != string(v1.AcceleratorTypeNVIDIAGPU) {
+	if resources.GetAcceleratorType() == "" {
 		return &validationError{
 			Code:    "10217",
-			Message: "accelerator virtualization is only supported for NVIDIA GPU endpoints",
-			Hint:    "Set spec.resources.accelerator.type to nvidia_gpu",
+			Message: "endpoint accelerator virtualization requires accelerator type",
+			Hint:    "Set spec.resources.accelerator.type to a non-empty accelerator type",
 		}
 	}
 
@@ -478,7 +519,7 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return &validationError{
 			Code:    "10218",
 			Message: "endpoint accelerator virtualization requires accelerator product",
-			Hint:    "Set spec.resources.accelerator.product to the target GPU product",
+			Hint:    "Set spec.resources.accelerator.product to the target accelerator product",
 		}
 	}
 
@@ -498,7 +539,7 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return endpointResourceValueError(err)
 	}
 
-	if err := validateZeroToHundredPercentResource(resources.GetAcceleratorVirtualizationCorePercent(), "virtualization.core_percent"); err != nil {
+	if err := validateOneToHundredPercentResource(resources.GetAcceleratorVirtualizationCorePercent(), "virtualization.core_percent"); err != nil {
 		return endpointResourceValueError(err)
 	}
 
@@ -518,19 +559,17 @@ func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Clus
 		return endpointResourceValueError(err)
 	}
 
+	acceleratorType := resources.GetAcceleratorType()
 	product := resources.GetAcceleratorProduct()
-	maxMemoryMiB, ok := clusterProductMaxMemoryMiB(cluster, product)
+	maxMemoryMiB, ok := clusterProductMaxMemoryMiB(cluster, acceleratorType, product)
 
 	if !ok {
-		return endpointResourceValueError(fmt.Errorf(
-			"unable to determine physical GPU memory_mib for accelerator product %s",
-			product,
-		))
+		return nil
 	}
 
 	if requestedMemoryMiB > maxMemoryMiB {
 		return endpointResourceValueError(fmt.Errorf(
-			"virtualization.memory_mib must be less than or equal to physical GPU memory_mib %d for accelerator product %s",
+			"virtualization.memory_mib must be less than or equal to physical accelerator memory_mib %d for accelerator product %s",
 			maxMemoryMiB,
 			product,
 		))
@@ -539,43 +578,25 @@ func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Clus
 	return nil
 }
 
-func clusterProductMaxMemoryMiB(cluster *v1.Cluster, product string) (int64, bool) {
+func clusterProductMaxMemoryMiB(cluster *v1.Cluster, acceleratorType string, product string) (int64, bool) {
 	resourceInfo := clusterResourceInfo(cluster)
 	if resourceInfo == nil {
 		return 0, false
 	}
 
-	if memoryMiB, ok := clusterProductMetadataMemoryMiB(resourceInfo, product); ok {
-		return memoryMiB, true
-	}
-
-	var maxMemoryMiB int64
-
-	for _, node := range resourceInfo.NodeResources {
-		if node == nil {
-			continue
-		}
-
-		for _, device := range node.Devices {
-			if device == nil || device.Product != product || device.Allocatable == nil {
-				continue
-			}
-
-			if device.Allocatable.MemoryMiB > maxMemoryMiB {
-				maxMemoryMiB = device.Allocatable.MemoryMiB
-			}
-		}
-	}
-
-	return maxMemoryMiB, maxMemoryMiB > 0
+	return clusterProductMetadataMemoryMiB(resourceInfo, acceleratorType, product)
 }
 
-func clusterProductMetadataMemoryMiB(resourceInfo *v1.ClusterResources, product string) (int64, bool) {
+func clusterProductMetadataMemoryMiB(
+	resourceInfo *v1.ClusterResources,
+	acceleratorType string,
+	product string,
+) (int64, bool) {
 	if resourceInfo.AcceleratorMetadata == nil {
 		return 0, false
 	}
 
-	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorType(acceleratorType)]
 	if metadata == nil || metadata.Products == nil {
 		return 0, false
 	}
@@ -633,14 +654,14 @@ func parseRequiredPositiveInteger(value string, field string) (int64, error) {
 	return parsed, nil
 }
 
-func validateZeroToHundredPercentResource(value string, field string) error {
+func validateOneToHundredPercentResource(value string, field string) error {
 	if value == "" {
 		return nil
 	}
 
 	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed < 0 || parsed > 100 {
-		return fmt.Errorf("%s must be between 0 and 100", field)
+	if err != nil || parsed < 1 || parsed > 100 {
+		return fmt.Errorf("%s must be between 1 and 100", field)
 	}
 
 	return nil

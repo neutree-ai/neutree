@@ -13,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -215,6 +216,6 @@ func (p *AMDGPUAcceleratorPlugin) GetResourceParser() resourceparser.ResourcePar
 func (p *AMDGPUAcceleratorPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*VirtualizationConfig, error) {
+) (*accelerator.VirtualizationConfig, error) {
 	return NewUnsupportedVirtualizationConfig(string(v1.AcceleratorTypeAMDGPU)), nil
 }

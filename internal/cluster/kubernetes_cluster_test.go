@@ -21,6 +21,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 func newNode(name string, schedulable bool, resources map[corev1.ResourceName]resource.Quantity, labels map[string]string) *corev1.Node {
@@ -817,10 +818,10 @@ func (testVirtualizationPlugin) Type() string {
 func (testVirtualizationPlugin) ResolveClusterVirtualizationConfig(
 	context.Context,
 	*v1.Cluster,
-) (*plugin.VirtualizationConfig, error) {
-	return &plugin.VirtualizationConfig{
+) (*accelerator.VirtualizationConfig, error) {
+	return &accelerator.VirtualizationConfig{
 		Supported: true,
-		NodeScopeLabel: plugin.VirtualizationNodeScopeLabel{
+		NodeScopeLabel: accelerator.VirtualizationNodeScopeLabel{
 			Key:           plugin.NvidiaGPUVirtualizationLabelKey,
 			EnabledValue:  "true",
 			DisabledValue: "false",

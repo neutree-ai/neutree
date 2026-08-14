@@ -43,8 +43,7 @@ type HAMiStatus struct {
 	Reason                 string
 	Message                string
 	SchedulerReady         bool
-	DevicePluginReady      bool
-	MonitorReady           bool
+	DeviceConfigReady      bool
 	WebhookReady           bool
 	TLSReady               bool
 	ReadyNodes             int
@@ -55,10 +54,10 @@ type HAMiStatus struct {
 	PatchedNodes           []string
 	SchedulerReadyReplicas int
 	SchedulerReplicas      int
-	DevicePluginReadyPods  int
-	DevicePluginPods       int
-	MonitorReadyPods       int
-	MonitorPods            int
+	// VirtualizationMode is the effective mode of the resolved owner config.
+	VirtualizationMode v1.AcceleratorVirtualizationMode
+	// SupportedResources are the virtualization.* keys legal under the mode.
+	SupportedResources []string
 }
 
 func (s HAMiStatus) ComponentStatus() *v1.ComponentStatus {

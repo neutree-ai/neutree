@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	accpkg "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -174,7 +175,8 @@ func getUsedImageRegistries(cluster *v1.Cluster, s storage.Storage) (*v1.ImageRe
 	return &imageRegistryList[0], nil
 }
 
-func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+func convertToRay(acceleratorMgr accelerator.Manager, input accpkg.ConvertInput) (*v1.RayResourceSpec, error) {
+	spec := input.Spec
 	if spec == nil {
 		return nil, fmt.Errorf("resource spec cannot be nil")
 	}
@@ -211,7 +213,7 @@ func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v
 			return nil, err
 		}
 
-		acceleratorResult, err := converter.ConvertToRay(spec)
+		acceleratorResult, err := converter.ConvertToRay(input)
 		if err != nil {
 			klog.ErrorS(err, "Converter execution failed",
 				"acceleratorType", acceleratorType,
@@ -259,7 +261,8 @@ func convertToRay(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v
 	return result, nil
 }
 
-func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+func convertToKubernetes(acceleratorMgr accelerator.Manager, input accpkg.ConvertInput) (*v1.KubernetesResourceSpec, error) {
+	spec := input.Spec
 	if spec == nil {
 		return nil, fmt.Errorf("resource spec cannot be nil")
 	}
@@ -299,7 +302,7 @@ func convertToKubernetes(acceleratorMgr accelerator.Manager, spec *v1.ResourceSp
 			return nil, err
 		}
 
-		acceleratorResult, err := converter.ConvertToKubernetes(spec)
+		acceleratorResult, err := converter.ConvertToKubernetes(input)
 		if err != nil {
 			klog.ErrorS(err, "Converter execution failed",
 				"acceleratorType", acceleratorType,

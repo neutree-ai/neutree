@@ -51,6 +51,28 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 
 		assert.NotNil(t, err)
 		assert.Equal(t, "10218", err.Code)
+		assert.Contains(t, err.Hint, "target accelerator product")
+		assert.NotContains(t, err.Hint, "GPU")
+	})
+
+	t.Run("rejects vGPU endpoint without accelerator type", func(t *testing.T) {
+		gpu := "1"
+		resources := &v1.ResourceSpec{
+			GPU: &gpu,
+			Accelerator: map[string]string{
+				v1.AcceleratorProductKey:                 "Tesla-T4",
+				v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+			},
+		}
+
+		err := validateEndpointVGPUResourceShape(resources)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10217", err.Code)
+			assert.Equal(t, "endpoint accelerator virtualization requires accelerator type", err.Message)
+			assert.Contains(t, err.Hint, "non-empty accelerator type")
+			assert.NotContains(t, err.Hint, "NVIDIA")
+		}
 	})
 
 	t.Run("rejects unsupported memory percent", func(t *testing.T) {
@@ -129,13 +151,56 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, "10216", err.Code)
 		assert.Contains(t, err.Hint, "virtualization.core_percent")
-		assert.Contains(t, err.Hint, "between 0 and 100")
+		assert.Contains(t, err.Hint, "between 1 and 100")
 	})
 
-	t.Run("allows zero vGPU core resource", func(t *testing.T) {
+	t.Run("rejects negative vGPU core resource", func(t *testing.T) {
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+			v1.AcceleratorVirtualizationCorePercentKey: "-1",
+		})
+
+		err := validateEndpointVGPUResourceShape(resources)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10216", err.Code)
+			assert.Contains(t, err.Hint, "virtualization.core_percent")
+			assert.Contains(t, err.Hint, "between 1 and 100")
+		}
+	})
+
+	t.Run("rejects zero vGPU core resource", func(t *testing.T) {
 		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
 			v1.AcceleratorVirtualizationCorePercentKey: "0",
+		})
+
+		err := validateEndpointVGPUResourceShape(resources)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10216", err.Code)
+			assert.Contains(t, err.Hint, "virtualization.core_percent")
+			assert.Contains(t, err.Hint, "between 1 and 100")
+		}
+	})
+
+	for _, corePercent := range []string{"1", "100"} {
+		corePercent := corePercent
+		t.Run("allows vGPU core resource "+corePercent, func(t *testing.T) {
+			resources := vgpuResources("1", "Tesla-T4", map[string]string{
+				v1.AcceleratorVirtualizationMemoryMiBKey:   "8192",
+				v1.AcceleratorVirtualizationCorePercentKey: corePercent,
+			})
+
+			err := validateEndpointVGPUResourceShape(resources)
+
+			assert.Nil(t, err)
+		})
+	}
+
+	t.Run("allows omitted vGPU core resource", func(t *testing.T) {
+		resources := vgpuResources("1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
 		})
 
 		err := validateEndpointVGPUResourceShape(resources)
@@ -154,6 +219,70 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("allows a custom accelerator type", func(t *testing.T) {
+		resources := virtualizationResources("custom_accelerator", "1", "example-product", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey:   "32768",
+			v1.AcceleratorVirtualizationCorePercentKey: "50",
+		})
+
+		err := validateEndpointVGPUResourceShape(resources)
+
+		assert.Nil(t, err)
+	})
+}
+
+func TestValidateEndpointVGPUMemorySpec(t *testing.T) {
+	t.Run("rejects a known maximum for the requested accelerator type", func(t *testing.T) {
+		acceleratorType := v1.AcceleratorType("custom_accelerator")
+		product := "example-product"
+		cluster := clusterWithAcceleratorProduct(acceleratorType, product, 32768, nil)
+		resources := virtualizationResources(string(acceleratorType), "1", product, map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "32769",
+		})
+
+		err := validateEndpointVGPUMemorySpec(resources, cluster)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10216", err.Code)
+			assert.Contains(t, err.Hint, "physical accelerator memory_mib 32768")
+			assert.NotContains(t, err.Hint, "physical GPU")
+		}
+	})
+
+	t.Run("does not use metadata from another accelerator type", func(t *testing.T) {
+		product := "shared-product-name"
+		cluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, product, 1024, nil)
+		resources := virtualizationResources("custom_accelerator", "1", product, map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "2048",
+		})
+
+		err := validateEndpointVGPUMemorySpec(resources, cluster)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("allows an unknown physical memory maximum", func(t *testing.T) {
+		resources := virtualizationResources("custom_accelerator", "1", "unknown-product", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "32768",
+		})
+
+		err := validateEndpointVGPUMemorySpec(resources, clusterWithoutNVIDIAGPUProducts())
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("allows a zero physical memory maximum", func(t *testing.T) {
+		acceleratorType := v1.AcceleratorType("custom_accelerator")
+		product := "example-product"
+		cluster := clusterWithAcceleratorProduct(acceleratorType, product, 0, nil)
+		resources := virtualizationResources(string(acceleratorType), "1", product, map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "32768",
+		})
+
+		err := validateEndpointVGPUMemorySpec(resources, cluster)
+
+		assert.Nil(t, err)
+	})
 }
 
 func TestEndpointVGPUValidationAllowsPostWithoutCapacityPrecheck(t *testing.T) {
@@ -186,9 +315,100 @@ func TestEndpointVGPUValidationAllowsPostWithoutCapacityPrecheck(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsPostWhenProductMemorySpecIsMissing(t *testing.T) {
+func TestEndpointVGPUValidationAllowsCustomAcceleratorPost(t *testing.T) {
+	acceleratorType := v1.AcceleratorType("custom_accelerator")
+	product := "example-product"
+	cluster := clusterWithAcceleratorProduct(acceleratorType, product, 65536, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "custom_accelerator",
+					"product": "example-product",
+					"virtualization.memory_mib": "32768",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationAllowsPostWhenProductMemorySpecIsMissing(t *testing.T) {
 	cluster := clusterWithoutNVIDIAGPUProducts()
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsPostWithZeroCorePercent(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "0"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsCorePercentUnderTemplateMode(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode: v1.AcceleratorVirtualizationModeTemplate,
+		// template mode does not support compute-core shaping.
+		SupportedResources: []string{v1.AcceleratorVirtualizationMemoryMiBKey},
+	}
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
 	}
@@ -213,9 +433,150 @@ func TestEndpointVGPUValidationRejectsPostWhenProductMemorySpecIsMissing(t *test
 	var response validationError
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Hint, "physical GPU memory_mib")
+	assert.Equal(t, "10227", response.Code)
+	assert.Contains(t, response.Message, "virtualization.core_percent")
 	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsMemoryMiBWhenNotSupported(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode: v1.AcceleratorVirtualizationModeCore,
+		// core mode that (for whatever reason) does not expose memory_mib
+		// in its supported resources must still reject it.
+		SupportedResources: []string{v1.AcceleratorVirtualizationCorePercentKey},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10227", response.Code)
+	assert.Contains(t, response.Message, "virtualization.memory_mib")
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationAllowsCorePercentUnderCoreMode(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode: v1.AcceleratorVirtualizationModeCore,
+		// core mode supports both memory and compute-core shaping.
+		SupportedResources: []string{
+			v1.AcceleratorVirtualizationMemoryMiBKey,
+			v1.AcceleratorVirtualizationCorePercentKey,
+		},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsZeroCorePercentUnderTemplateMode(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	cluster.Status.AcceleratorVirtualization = &v1.AcceleratorVirtualizationStatus{
+		Mode: v1.AcceleratorVirtualizationModeTemplate,
+		// template mode does not support compute-core shaping.
+		SupportedResources: []string{v1.AcceleratorVirtualizationMemoryMiBKey},
+	}
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "0"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	var response validationError
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "10227", response.Code)
+	assert.Contains(t, response.Message, "virtualization.core_percent")
+	assert.False(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationAllowsCorePercentWhenModeStatusMissing(t *testing.T) {
+	// The capability block is absent (stale cluster written before this
+	// feature); validation falls back to shape-only checks.
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+	body := `{
+		"metadata": {"name": "endpoint", "workspace": "team-a"},
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "50"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPost, body, clusterStorage)
+
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.True(t, handlerCalled)
 }
 
 func TestEndpointVGPUValidationRejectsPostWhenMemoryMIBExceedsPhysicalCardSpec(t *testing.T) {
@@ -248,7 +609,7 @@ func TestEndpointVGPUValidationRejectsPostWhenMemoryMIBExceedsPhysicalCardSpec(t
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Hint, "less than or equal to physical GPU memory_mib 2048")
+	assert.Contains(t, response.Hint, "less than or equal to physical accelerator memory_mib 2048")
 	assert.False(t, handlerCalled)
 }
 
@@ -538,22 +899,20 @@ func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrec
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsMergedPatchWhenOnlyGPUChanges(t *testing.T) {
-	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
-		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
-	})
-	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(t *testing.T) {
+	existing := endpointWithVGPU("cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
-		clusters: []v1.Cluster{*cluster},
-		endpoints: []v1.Endpoint{
-			*endpointWithVGPU("cluster-a", "team-a"),
-		},
+		endpoints: []v1.Endpoint{*existing},
 	}
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
 			"resources": {
-				"gpu": "2"
+				"gpu": "2",
+				"accelerator": {
+					"type": "custom_accelerator",
+					"product": "replacement-product"
+				}
 			}
 		}
 	}`
@@ -567,10 +926,14 @@ func TestEndpointVGPUValidationAllowsMergedPatchWhenOnlyGPUChanges(t *testing.T)
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.Zero(t, clusterStorage.listCalls)
+	assert.Equal(t, "cluster-a", existing.Spec.Cluster)
+	assert.Equal(t, "4096", existing.Spec.Resources.GetAcceleratorVirtualizationMemoryMiB())
+	assert.Equal(t, "50", existing.Spec.Resources.GetAcceleratorVirtualizationCorePercent())
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationAllowsMergedPatchWhenOnlyReplicasChange(t *testing.T) {
+func TestEndpointVGPUValidationAllowsSpecReplacementWhenOnlyReplicasAreSupplied(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 8192, 100),
 	})
@@ -776,7 +1139,7 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChangesToMissingMemorySpec(t *testing.T) {
+func TestEndpointVGPUValidationAllowsPatchWhenReplacementProductMemoryIsUnknown(t *testing.T) {
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
 	})
@@ -809,12 +1172,43 @@ func TestEndpointVGPUValidationRejectsMergedPatchWhenOnlyProductChangesToMissing
 		clusterStorage,
 	)
 
-	var response validationError
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10216", response.Code)
-	assert.Contains(t, response.Hint, "physical GPU memory_mib")
+	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
+	assert.True(t, handlerCalled)
+}
+
+func TestEndpointVGPUValidationRejectsPatchWithZeroCorePercent(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	markClusterVGPUReady(cluster, "cluster-a", "team-a")
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+		endpoints: []v1.Endpoint{
+			*endpointWithVGPU("cluster-a", "team-a"),
+		},
+	}
+	body := `{
+		"spec": {
+			"cluster": "cluster-a",
+			"resources": {
+				"gpu": "1",
+				"accelerator": {
+					"type": "nvidia_gpu",
+					"product": "Tesla-T4",
+					"virtualization.memory_mib": "4096",
+					"virtualization.core_percent": "0"
+				}
+			}
+		}
+	}`
+
+	recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+		http.MethodPatch,
+		"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.team-a",
+		body,
+		clusterStorage,
+	)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.False(t, handlerCalled)
 }
 
@@ -1017,6 +1411,24 @@ func TestEndpointValidationRejectsPatchThatChangesCluster(t *testing.T) {
 			name: "null spec",
 			body: `{"spec":null}`,
 		},
+		{
+			name: "cluster change wins over invalid accelerator virtualization resources",
+			body: `{
+				"spec": {
+					"cluster": "cluster-b",
+					"resources": {
+						"gpu": "1",
+						"accelerator": {
+							"type": "",
+							"product": "Tesla-T4",
+							"virtualization.memory_mib": "0",
+							"virtualization.memory_percent": "50",
+							"virtualization.core_percent": "0"
+						}
+					}
+				}
+			}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1036,6 +1448,7 @@ func TestEndpointValidationRejectsPatchThatChangesCluster(t *testing.T) {
 			assert.Equal(t, "10225", response.Code)
 			assert.False(t, handlerCalled)
 			assert.Equal(t, 1, clusterStorage.endpointListCalls)
+			assert.Zero(t, clusterStorage.listCalls)
 		})
 	}
 }
@@ -1312,8 +1725,12 @@ func runEndpointVGPUValidationWithHandlerAndPath(
 }
 
 func vgpuResources(gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
+	return virtualizationResources(string(v1.AcceleratorTypeNVIDIAGPU), gpu, product, virtualization)
+}
+
+func virtualizationResources(acceleratorType string, gpu string, product string, virtualization map[string]string) *v1.ResourceSpec {
 	accelerator := map[string]string{
-		v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+		v1.AcceleratorTypeKey:    acceleratorType,
 		v1.AcceleratorProductKey: product,
 	}
 	for key, value := range virtualization {
@@ -1327,13 +1744,22 @@ func vgpuResources(gpu string, product string, virtualization map[string]string)
 }
 
 func clusterWithNVIDIAGPUProduct(product string, productMemoryMiB float64, devices []*v1.DeviceResource) *v1.Cluster {
+	return clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, product, productMemoryMiB, devices)
+}
+
+func clusterWithAcceleratorProduct(
+	acceleratorType v1.AcceleratorType,
+	product string,
+	productMemoryMiB float64,
+	devices []*v1.DeviceResource,
+) *v1.Cluster {
 	return &v1.Cluster{
 		Status: &v1.ClusterStatus{
 			ResourceInfo: &v1.ClusterResources{
 				ResourceStatus: v1.ResourceStatus{
 					Available: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-							v1.AcceleratorTypeNVIDIAGPU: {
+							acceleratorType: {
 								Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 									v1.AcceleratorProduct(product): {
 										Quantity: 1,
@@ -1348,7 +1774,7 @@ func clusterWithNVIDIAGPUProduct(product string, productMemoryMiB float64, devic
 					},
 					Allocatable: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-							v1.AcceleratorTypeNVIDIAGPU: {
+							acceleratorType: {
 								Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
 									v1.AcceleratorProduct(product): {
 										Quantity: 1,
@@ -1363,7 +1789,7 @@ func clusterWithNVIDIAGPUProduct(product string, productMemoryMiB float64, devic
 					},
 				},
 				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{
-					v1.AcceleratorTypeNVIDIAGPU: {
+					acceleratorType: {
 						Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
 							v1.AcceleratorProduct(product): {
 								MemoryTotalMiB: productMemoryMiB,
@@ -1457,13 +1883,6 @@ func occupiedDevice(uuid string, product string, memoryMiB int64, coreUnits int6
 		},
 		Available: &v1.DeviceResourcePool{},
 	}
-}
-
-func unhealthyDevice(uuid string, product string, memoryMiB int64, coreUnits int64) *v1.DeviceResource {
-	device := healthyDevice(uuid, product, memoryMiB, coreUnits)
-	device.Health = false
-
-	return device
 }
 
 type fakeClusterStorage struct {

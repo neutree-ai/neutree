@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 // AMDGPUConverter is the AMD GPU resource converter
@@ -23,7 +24,8 @@ func NewAMDGPUConverter() *AMDGPUConverter {
 }
 
 // ConvertToRay converts to Ray resource configuration
-func (c *AMDGPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSpec, error) {
+func (c *AMDGPUConverter) ConvertToRay(input accelerator.ConvertInput) (*v1.RayResourceSpec, error) {
+	spec := input.Spec
 	if spec == nil {
 		return nil, fmt.Errorf("resource spec is nil")
 	}
@@ -52,7 +54,8 @@ func (c *AMDGPUConverter) ConvertToRay(spec *v1.ResourceSpec) (*v1.RayResourceSp
 }
 
 // ConvertToKubernetes converts to Kubernetes resource configuration
-func (c *AMDGPUConverter) ConvertToKubernetes(spec *v1.ResourceSpec) (*v1.KubernetesResourceSpec, error) {
+func (c *AMDGPUConverter) ConvertToKubernetes(input accelerator.ConvertInput) (*v1.KubernetesResourceSpec, error) {
+	spec := input.Spec
 	if spec == nil {
 		return nil, fmt.Errorf("resource spec is nil")
 	}

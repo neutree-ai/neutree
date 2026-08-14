@@ -5,6 +5,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"k8s.io/utils/pointer"
 )
 
@@ -112,7 +113,7 @@ func TestAMDGPU_ConvertToKubernetes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := NewAMDGPUConverter()
-			k8sResource, err := converter.ConvertToKubernetes(tt.resourceInfo)
+			k8sResource, err := converter.ConvertToKubernetes(accelerator.ConvertInput{Spec: tt.resourceInfo})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertToKubernetes() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -232,7 +233,7 @@ func TestAMDGPU_ConvertToRay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			converter := NewAMDGPUConverter()
-			rayResource, err := converter.ConvertToRay(tt.resourceInfo)
+			rayResource, err := converter.ConvertToRay(accelerator.ConvertInput{Spec: tt.resourceInfo})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ConvertToRay() error = %v, wantErr %v", err, tt.wantErr)
 				return

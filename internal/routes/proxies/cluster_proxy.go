@@ -783,6 +783,82 @@ func validateClusterAcceleratorVirtualizationDisableForCurrent(
 		s, current.Metadata.Workspace, current.Metadata.Name)
 }
 
+// validateClusterAcceleratorVirtualizationModeSwitch blocks switching the
+// cluster accelerator virtualization mode while any endpoint still uses
+// accelerator virtualization. The gate applies to any mode change (e.g.
+// core -> template and template -> core alike) once virtualization is enabled.
+// When the mode is unchanged, or virtualization is not enabled on the target
+// cluster, the gate is skipped.
+func validateClusterAcceleratorVirtualizationModeSwitch(
+	s storage.Storage, current, next *v1.Cluster,
+) *validationError {
+	if next == nil || next.Spec == nil || !next.Spec.AcceleratorVirtualizationEnabled() {
+		return nil
+	}
+
+	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
+		return nil
+	}
+
+	workspace, name, validationErr := resolveClusterIdentityForAcceleratorVirtualizationDisable(
+		s, *current, url.Values{})
+	if validationErr != nil {
+		return validationErr
+	}
+
+	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
+	if err != nil {
+		return &validationError{
+			Code:    "10228",
+			Message: "failed to validate cluster accelerator virtualization mode switch",
+			Hint:    err.Error(),
+		}
+	}
+
+	count := 0
+
+	for _, endpoint := range endpoints {
+		if endpointRequestsVirtualization(&endpoint) {
+			count++
+		}
+	}
+
+	if count > 0 {
+		return &validationError{
+			Code:    "10228",
+			Message: fmt.Sprintf("cannot switch cluster accelerator virtualization mode for cluster '%s/%s'", workspace, name),
+			Hint: fmt.Sprintf(
+				"%d vGPU endpoint(s) still use accelerator virtualization; disable virtualization on the endpoints before switching",
+				count,
+			),
+		}
+	}
+
+	return nil
+}
+
+// currentSpecMode returns the virtualization mode currently set on the
+// cluster spec, or the empty string when virtualization is not configured.
+func currentSpecMode(cluster *v1.Cluster) v1.AcceleratorVirtualizationMode {
+	if cluster == nil || cluster.Spec == nil || cluster.Spec.AcceleratorVirtualization == nil {
+		return ""
+	}
+
+	return cluster.Spec.AcceleratorVirtualization.Mode
+}
+
+// endpointRequestsVirtualization reports whether the endpoint has accelerator
+// virtualization enabled on any of its resources. Switching a cluster to
+// template mode while any vGPU endpoint exists is rejected regardless of the
+// exact virtualization parameters requested.
+func endpointRequestsVirtualization(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
+		return false
+	}
+
+	return endpoint.Spec.Resources.HasAcceleratorVirtualization()
+}
+
 func resolveClusterIdentityForAcceleratorVirtualizationDisable(
 	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
 ) (string, string, *validationError) {
@@ -865,8 +941,15 @@ func validateClusterAcceleratorVirtualizationInput(
 		return nil
 	}
 
-	if input.Current == nil || input.New == nil ||
-		!input.Current.Spec.AcceleratorVirtualizationEnabled() ||
+	if input.Current == nil || input.New == nil {
+		return nil
+	}
+
+	if validationErr := validateClusterAcceleratorVirtualizationModeSwitch(s, input.Current, input.New); validationErr != nil {
+		return validationErr
+	}
+
+	if !input.Current.Spec.AcceleratorVirtualizationEnabled() ||
 		input.New.Spec.AcceleratorVirtualizationEnabled() {
 		return nil
 	}
@@ -881,6 +964,11 @@ func validateClusterAcceleratorVirtualizationCluster(cluster v1.Cluster) *valida
 
 	if !cluster.Spec.AcceleratorVirtualization.Enabled {
 		return nil
+	}
+
+	if err := clustervalidation.ValidateAcceleratorVirtualizationMode(
+		cluster.Spec.AcceleratorVirtualization.Mode); err != nil {
+		return acceleratorVirtualizationValidationError(err)
 	}
 
 	if err := clustervalidation.ValidateAcceleratorVirtualizationConfigPatch(

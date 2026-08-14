@@ -983,8 +983,10 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 		countEndpoints bool
 	}{
 		{
-			name: "allows Kubernetes cluster to enable accelerator virtualization",
-			body: `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+			name:        "rejects devicePlugin config_patch key",
+			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"nvidiaDriverRoot":"/run/nvidia/driver"}}}}}`,
+			wantCode:    "10210",
+			wantMessage: "devicePlugin",
 		},
 		{
 			name: "allows Kubernetes nightly cluster with minimum base version to enable accelerator virtualization",
@@ -1041,7 +1043,7 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 			name:        "rejects MIG virtualization config patch",
 			body:        `{"spec":{"type":"kubernetes","version":"v1.1.0","accelerator_virtualization":{"enabled":true,"config_patch":{"devicePlugin":{"migStrategy":"mixed"}}}}}`,
 			wantCode:    "10210",
-			wantMessage: "MIG",
+			wantMessage: "devicePlugin",
 		},
 		{
 			name:        "rejects partial patch missing cluster type and version",
@@ -1235,6 +1237,213 @@ func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateClusterModeSwitchToTemplateBlockedByVGPUEndpoints(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationStatus{
+				Mode: v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+	next := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+	}
+	mockStorage.On("ListEndpoint", storage.ListOption{
+		Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+	}).Return([]v1.Endpoint{
+		{
+			Spec: &v1.EndpointSpec{
+				Resources: &v1.ResourceSpec{
+					Accelerator: map[string]string{
+						v1.AcceleratorVirtualizationMemoryMiBKey: "10240",
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
+
+	assert.NotNil(t, err)
+	assert.Equal(t, "10228", err.Code)
+	assert.Contains(t, err.Message, "cannot switch cluster accelerator virtualization mode")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestValidateClusterModeSwitchFromTemplateToCoreBlockedByVGPUEndpoints(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationStatus{
+				Mode: v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+	}
+	next := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+	mockStorage.On("ListEndpoint", storage.ListOption{
+		Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+	}).Return([]v1.Endpoint{
+		{
+			Spec: &v1.EndpointSpec{
+				Resources: &v1.ResourceSpec{
+					Accelerator: map[string]string{
+						v1.AcceleratorVirtualizationMemoryMiBKey: "10240",
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
+
+	assert.NotNil(t, err)
+	assert.Equal(t, "10228", err.Code)
+	assert.Contains(t, err.Message, "cannot switch cluster accelerator virtualization mode")
+	mockStorage.AssertExpectations(t)
+}
+
+func TestValidateClusterModeSwitchSkippedWhenModeUnchanged(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationStatus{
+				Mode: v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+	next := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
+
+	assert.Nil(t, err)
+	mockStorage.AssertNotCalled(t, "ListEndpoint")
+}
+
+func TestValidateClusterModeSwitchSkippedWhenVirtualizationDisabled(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationStatus{
+				Mode: v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+	next := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: false,
+				Mode:    v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+	}
+
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
+
+	assert.Nil(t, err)
+	mockStorage.AssertNotCalled(t, "ListEndpoint")
+}
+
+func TestValidateClusterModeSwitchToTemplateAllowedWithoutVGPUEndpoints(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+		Status: &v1.ClusterStatus{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationStatus{
+				Mode: v1.AcceleratorVirtualizationModeCore,
+			},
+		},
+	}
+	next := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    v1.AcceleratorVirtualizationModeTemplate,
+			},
+		},
+	}
+	mockStorage.On("ListEndpoint", storage.ListOption{
+		Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+	}).Return([]v1.Endpoint{
+		{
+			Spec: &v1.EndpointSpec{
+				Resources: &v1.ResourceSpec{
+					Accelerator: map[string]string{
+						"memory": "64Gi",
+					},
+				},
+			},
+		},
+		{
+			Spec: &v1.EndpointSpec{
+				Resources: &v1.ResourceSpec{
+					Accelerator: map[string]string{
+						"nvidia.com/gpu": "1",
+					},
+				},
+			},
+		},
+	}, nil).Once()
+
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
+
+	assert.Nil(t, err)
+	mockStorage.AssertExpectations(t)
 }
 
 func TestClusterValidationInput(t *testing.T) {
