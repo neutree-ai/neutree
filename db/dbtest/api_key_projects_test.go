@@ -124,6 +124,28 @@ func TestAPIKeyProjects(t *testing.T) {
 		if moved != 1 {
 			t.Fatalf("moved back=%d want 1", moved)
 		}
+
+		var editableKey string
+		if err := tx.QueryRow(`SELECT id FROM api.create_api_key('ws-a','editable',0,NULL,NULL,NULL,$1,'editable key')`, source).Scan(&editableKey); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(`SELECT api.update_api_key_configuration($1,$2,'{"rps": 25}'::jsonb)`, editableKey, disabled); err == nil || !strings.Contains(err.Error(), "disabled") {
+			t.Fatalf("expected disabled edit target rejection, got %v", err)
+		}
+		if _, err := tx.Exec(`SELECT api.update_api_key_configuration($1,$2,'{"rps": 25}'::jsonb)`, editableKey, target); err != nil {
+			t.Fatalf("update API key configuration: %v", err)
+		}
+		var configuredProject string
+		var configuredRPS int
+		if err := tx.QueryRow(`SELECT project_id, ((spec).limits->>'rps')::int FROM api.api_keys WHERE id=$1`, editableKey).Scan(&configuredProject, &configuredRPS); err != nil {
+			t.Fatal(err)
+		}
+		if configuredProject != target || configuredRPS != 25 {
+			t.Fatalf("configuration project=%s rps=%d", configuredProject, configuredRPS)
+		}
+		if _, err := tx.Exec(`DELETE FROM api.api_keys WHERE id=$1`, editableKey); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := tx.Exec(`SELECT api.delete_api_key_project($1)`, target); err != nil {
 			t.Fatalf("delete empty project referenced by history: %v", err)
 		}
