@@ -66,6 +66,7 @@ func TestModelRegistryController_HealthyRegistryAdvancesOnlyTheCheckTime(t *test
 	// rather than merely reported. What this test is about — which status writes
 	// that produces — is unchanged.
 	mockRegistry.On("Connect").Return(nil)
+	mockRegistry.On("Disconnect").Return(nil)
 	mockRegistry.On("HealthyCheck").Return(nil)
 
 	var written *v1.ModelRegistryStatus
@@ -107,6 +108,7 @@ func TestModelRegistryController_UnchangedResultIsNotRewrittenEveryCycle(t *test
 	mockStorage := &storagemocks.MockStorage{}
 	mockRegistry := &modelregistrymocks.MockModelRegistry{}
 	mockRegistry.On("Connect").Return(nil)
+	mockRegistry.On("Disconnect").Return(nil)
 	mockRegistry.On("HealthyCheck").Return(nil)
 
 	c := newCheckedAtController(t, mockStorage, mockRegistry, now)

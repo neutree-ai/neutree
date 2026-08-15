@@ -57,7 +57,8 @@ func registryAcceptsWrites(registry *v1.ModelRegistry) bool {
 //
 // Status codes follow what the user can do about it: 400 when the registry as
 // configured cannot serve the request (wrong kind, or rejected credentials),
-// 404 when the thing is not there, and 429 passed through as itself.
+// 404 when the thing is not there, 429 passed through as itself, and 503 when
+// the registry's storage went away and the request is worth repeating.
 func respondRegistryError(c *gin.Context, context string, err error) bool {
 	switch {
 	case stderrors.Is(err, model_registry.ErrNotFound):
@@ -74,6 +75,14 @@ func respondRegistryError(c *gin.Context, context string, err error) bool {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": fmt.Sprintf("%s: %v", context, err),
 			"reason":  reasonUnauthorized,
+		})
+	case stderrors.Is(err, model_registry.ErrStorageUnavailable):
+		// 503, not 500: the registry's storage dropped out from under the read, the
+		// request was not wrong, and coming back later is the answer.
+		klog.Warningf("%s: %v", context, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"message": fmt.Sprintf("%s: %v", context, err),
+			"reason":  reasonUnavailable,
 		})
 	case stderrors.Is(err, model_registry.ErrRateLimited):
 		klog.Warningf("%s: %v", context, err)
