@@ -1666,6 +1666,122 @@ func TestValidateClusterModeSwitchToTemplateAllowedWithoutVGPUEndpoints(t *testi
 	mockStorage.AssertExpectations(t)
 }
 
+func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T) {
+	transitionCluster := func(enabled bool, mode v1.AcceleratorVirtualizationMode) *v1.Cluster {
+		spec := &v1.ClusterSpec{}
+		if enabled {
+			spec.AcceleratorVirtualization = &v1.AcceleratorVirtualizationSpec{
+				Enabled: true,
+				Mode:    mode,
+			}
+		}
+
+		return &v1.Cluster{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec:     spec,
+		}
+	}
+
+	validationInput := func(current, next *v1.Cluster) *ValidationInput[v1.Cluster] {
+		return &ValidationInput[v1.Cluster]{
+			Current:   current,
+			New:       next,
+			Patch:     *next,
+			Operation: clusterValidationPatch,
+		}
+	}
+
+	runningGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(1)},
+			Resources: &v1.ResourceSpec{
+				GPU: pointer.String("1"),
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+				},
+			},
+		},
+	}
+	vGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{
+					v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		input        *ValidationInput[v1.Cluster]
+		endpoints    []v1.Endpoint
+		wantCode     string
+		wantListCall bool
+		wantNoGuard  bool
+	}{
+		{
+			name:         "enable transition routes to enable guard",
+			input:        validationInput(transitionCluster(false, ""), transitionCluster(true, v1.AcceleratorVirtualizationModeCore)),
+			endpoints:    []v1.Endpoint{runningGPUEndpoint},
+			wantListCall: true,
+			wantCode:     "10229",
+		},
+		{
+			name:         "disable transition routes to disable guard",
+			input:        validationInput(transitionCluster(true, v1.AcceleratorVirtualizationModeCore), transitionCluster(false, "")),
+			endpoints:    []v1.Endpoint{vGPUEndpoint},
+			wantListCall: true,
+			wantCode:     "10211",
+		},
+		{
+			name:         "mode switch routes to mode-switch guard",
+			input:        validationInput(transitionCluster(true, v1.AcceleratorVirtualizationModeCore), transitionCluster(true, v1.AcceleratorVirtualizationModeTemplate)),
+			endpoints:    []v1.Endpoint{vGPUEndpoint},
+			wantListCall: true,
+			wantCode:     "10228",
+		},
+		{
+			name:        "unchanged mode runs no guard",
+			input:       validationInput(transitionCluster(true, v1.AcceleratorVirtualizationModeCore), transitionCluster(true, v1.AcceleratorVirtualizationModeCore)),
+			endpoints:   []v1.Endpoint{runningGPUEndpoint},
+			wantNoGuard: true,
+		},
+		{
+			name:        "virtualization stays disabled runs no guard",
+			input:       validationInput(transitionCluster(false, ""), transitionCluster(false, "")),
+			endpoints:   []v1.Endpoint{runningGPUEndpoint},
+			wantNoGuard: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storageMocks.NewMockStorage(t)
+
+			if tt.wantListCall {
+				mockStorage.On("ListEndpoint", storage.ListOption{
+					Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+				}).Return(tt.endpoints, nil).Once()
+			}
+
+			validationErr := validateClusterAcceleratorVirtualizationInput(mockStorage, tt.input)
+
+			switch {
+			case tt.wantNoGuard:
+				assert.Nil(t, validationErr)
+				mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+			case tt.wantCode == "":
+				assert.Nil(t, validationErr)
+			case assert.NotNil(t, validationErr):
+				assert.Equal(t, tt.wantCode, validationErr.Code)
+			}
+
+			mockStorage.AssertExpectations(t)
+		})
+	}
+}
+
 func TestClusterValidationInput(t *testing.T) {
 	t.Run("prepare", testPrepareClusterValidationInput)
 	t.Run("build PostgREST PATCH New", testBuildPostgrestClusterPatchValidationNew)
