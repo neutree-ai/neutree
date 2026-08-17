@@ -248,6 +248,100 @@ func TestNVIDIAGPU_ConvertToKubernetesRejectsInvalidHAMiVirtualization(t *testin
 	}
 }
 
+func TestNVIDIAGPU_ConvertToKubernetesCUDADisableControl(t *testing.T) {
+	fullCard := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey: "Tesla-T4",
+		},
+	}
+
+	virtualized := &v1.ResourceSpec{
+		GPU: pointer.String("1"),
+		Accelerator: map[string]string{
+			v1.AcceleratorTypeKey:                    string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey:                 "Tesla-T4",
+			v1.AcceleratorVirtualizationMemoryMiBKey: "10240",
+		},
+	}
+
+	virtualizedCluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{
+			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{Enabled: true},
+		},
+	}
+
+	plainCluster := &v1.Cluster{
+		Spec: &v1.ClusterSpec{},
+	}
+
+	tests := []struct {
+		name             string
+		input            accelerator.ConvertInput
+		expectedEnvValue string
+		wantErr          bool
+	}{
+		{
+			name: "full-card GPU on virtualized cluster sets CUDA_DISABLE_CONTROL=true",
+			input: accelerator.ConvertInput{
+				Cluster: virtualizedCluster,
+				Spec:    fullCard,
+			},
+			expectedEnvValue: "true",
+		},
+		{
+			name: "full-card GPU on plain cluster leaves CUDA_DISABLE_CONTROL unset",
+			input: accelerator.ConvertInput{
+				Cluster: plainCluster,
+				Spec:    fullCard,
+			},
+		},
+		{
+			name: "virtualized endpoint on virtualized cluster leaves CUDA_DISABLE_CONTROL unset",
+			input: accelerator.ConvertInput{
+				Cluster: virtualizedCluster,
+				Spec:    virtualized,
+			},
+		},
+		{
+			name: "full-card GPU with nil cluster leaves CUDA_DISABLE_CONTROL unset",
+			input: accelerator.ConvertInput{
+				Cluster: nil,
+				Spec:    fullCard,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter := NewGPUConverter()
+			k8sResource, err := converter.ConvertToKubernetes(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ConvertToKubernetes() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+
+			got, found := k8sResource.Env["CUDA_DISABLE_CONTROL"]
+			if tt.expectedEnvValue == "" {
+				if found {
+					t.Errorf("ConvertToKubernetes() unexpectedly set CUDA_DISABLE_CONTROL=%q", got)
+				}
+
+				return
+			}
+
+			if !found {
+				t.Errorf("ConvertToKubernetes() did not set CUDA_DISABLE_CONTROL, want %q", tt.expectedEnvValue)
+			} else if got != tt.expectedEnvValue {
+				t.Errorf("ConvertToKubernetes() CUDA_DISABLE_CONTROL = %q, want %q", got, tt.expectedEnvValue)
+			}
+		})
+	}
+}
+
 func TestNVIDIAGPU_ConvertToRay(t *testing.T) {
 	tests := []struct {
 		name             string

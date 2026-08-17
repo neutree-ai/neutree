@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"k8s.io/utils/pointer"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
@@ -954,9 +955,127 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 func TestValidateClusterAcceleratorVirtualization(t *testing.T) {
 	t.Run("body", testValidateClusterAcceleratorVirtualizationBody)
+	t.Run("enable for current", testValidateClusterAcceleratorVirtualizationEnableForCurrent)
+	t.Run("enable", testValidateClusterAcceleratorVirtualizationEnable)
 	t.Run("disable for current", testValidateClusterAcceleratorVirtualizationDisableForCurrent)
 	t.Run("disable", testValidateClusterAcceleratorVirtualizationDisable)
 	t.Run("middleware", testValidateClusterAcceleratorVirtualizationMiddleware)
+}
+
+func testValidateClusterAcceleratorVirtualizationEnableForCurrent(t *testing.T) {
+	mockStorage := storageMocks.NewMockStorage(t)
+	current := &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"}}
+	patch := v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}}
+
+	validationErr := validateClusterAcceleratorVirtualizationEnableForCurrent(mockStorage, current, patch)
+
+	assert.NotNil(t, validationErr)
+	assert.Equal(t, "10209", validationErr.Code)
+	assert.Equal(t, "failed to validate cluster accelerator virtualization", validationErr.Message)
+	assert.Equal(t, "cluster metadata in patch body does not match patch target", validationErr.Hint)
+	mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+}
+
+func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
+	runningGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(1)},
+			Resources: &v1.ResourceSpec{
+				GPU: pointer.String("1"),
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+				},
+			},
+		},
+	}
+	pausedGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(0)},
+			Resources: &v1.ResourceSpec{
+				GPU: pointer.String("1"),
+				Accelerator: map[string]string{
+					v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+				},
+			},
+		},
+	}
+	cpuEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(2)},
+			Resources: &v1.ResourceSpec{
+				CPU: pointer.String("4"),
+			},
+		},
+	}
+
+	tests := []struct {
+		name            string
+		endpoints       []v1.Endpoint
+		endpointErr     error
+		lookupEndpoints bool
+		wantCode        string
+		wantMessage     string
+		wantHint        string
+	}{
+		{
+			name:            "rejects enabling when running GPU endpoint references cluster",
+			endpoints:       []v1.Endpoint{runningGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10229",
+			wantMessage:     "cannot enable accelerator virtualization",
+			wantHint:        "1 GPU endpoint(s) still run on this cluster",
+		},
+		{
+			name:            "allows enabling when only paused GPU endpoint references cluster",
+			endpoints:       []v1.Endpoint{pausedGPUEndpoint},
+			lookupEndpoints: true,
+		},
+		{
+			name:            "allows enabling when only CPU endpoint references cluster",
+			endpoints:       []v1.Endpoint{cpuEndpoint},
+			lookupEndpoints: true,
+		},
+		{
+			name:            "allows enabling when no endpoints reference cluster",
+			endpoints:       []v1.Endpoint{},
+			lookupEndpoints: true,
+		},
+		{
+			name:            "returns internal server error when endpoint lookup fails",
+			endpointErr:     errors.New("database error"),
+			lookupEndpoints: true,
+			wantCode:        "500",
+			wantMessage:     "internal server error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storageMocks.NewMockStorage(t)
+
+			if tt.lookupEndpoints {
+				mockStorage.On("ListEndpoint", storage.ListOption{
+					Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+				}).Return(tt.endpoints, tt.endpointErr).Once()
+			}
+
+			err := validateClusterAcceleratorVirtualizationEnableForIdentity(
+				mockStorage, "default", "gpu-cluster")
+			if tt.wantCode == "" {
+				assert.Nil(t, err)
+			} else if assert.NotNil(t, err) {
+				assert.Equal(t, tt.wantCode, err.Code)
+				if tt.wantMessage != "" {
+					assert.Contains(t, err.Message, tt.wantMessage)
+				}
+				if tt.wantHint != "" {
+					assert.Contains(t, err.Hint, tt.wantHint)
+				}
+			}
+
+			mockStorage.AssertExpectations(t)
+		})
+	}
 }
 
 func testValidateClusterAcceleratorVirtualizationDisableForCurrent(t *testing.T) {
@@ -1614,6 +1733,102 @@ func testBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 
 func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	t.Run("rejects enable patch before proxy handler when running GPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				Type:                      v1.KubernetesClusterType,
+				Version:                   "v1.1.0",
+				AcceleratorVirtualization: nil,
+			},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return([]v1.Endpoint{
+			{
+				Spec: &v1.EndpointSpec{
+					Replicas: v1.ReplicaSpec{Num: pointer.Int(1)},
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("1"),
+						Accelerator: map[string]string{
+							v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+						},
+					},
+				},
+			},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{
+			"metadata": {"workspace": "default", "name": "gpu-cluster"},
+			"spec": {"version": "v1.1.0", "accelerator_virtualization": {"enabled": true}}
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.False(t, proxyCalled)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Contains(t, recorder.Body.String(), `"code":"10229"`)
+		assert.Contains(t, recorder.Body.String(), "GPU endpoint(s) still run on this cluster")
+		mockStorage.AssertExpectations(t)
+	})
+
+	t.Run("allows enable patch when only paused GPU endpoint references cluster", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
+			Spec: &v1.ClusterSpec{
+				Type:                      v1.KubernetesClusterType,
+				Version:                   "v1.1.0",
+				AcceleratorVirtualization: nil,
+			},
+		}}, nil).Once()
+		mockStorage.On("ListEndpoint", storage.ListOption{
+			Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
+		}).Return([]v1.Endpoint{
+			{
+				Spec: &v1.EndpointSpec{
+					Replicas: v1.ReplicaSpec{Num: pointer.Int(0)},
+					Resources: &v1.ResourceSpec{
+						GPU: pointer.String("1"),
+						Accelerator: map[string]string{
+							v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+						},
+					},
+				},
+			},
+		}, nil)
+
+		proxyCalled := false
+		router := gin.New()
+		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			proxyCalled = true
+			c.Status(http.StatusNoContent)
+		})
+
+		body := `{
+			"metadata": {"workspace": "default", "name": "gpu-cluster"},
+			"spec": {"version": "v1.1.0", "accelerator_virtualization": {"enabled": true}}
+		}`
+		req := httptest.NewRequest(http.MethodPatch, "/clusters", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+
+		router.ServeHTTP(recorder, req)
+
+		assert.True(t, proxyCalled)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		mockStorage.AssertExpectations(t)
+	})
 
 	t.Run("rejects disable patch before proxy handler when vGPU endpoint references cluster", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
