@@ -406,7 +406,14 @@ func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
 }
 
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
-	renderChecksum := func(deviceConfigContent interface{}) string {
+	const deviceConfigChecksumAnnotation = "checksum/hami-scheduler-device-config"
+
+	type deviceChecksums struct {
+		scheduler    string
+		devicePlugin string
+	}
+
+	renderChecksums := func(deviceConfigContent interface{}) deviceChecksums {
 		component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 			"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
@@ -427,19 +434,36 @@ func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
 		deployment := findObject(t, objs.Items, "Deployment", SchedulerName)
 		require.NotNil(t, deployment)
 
-		checksum, found, err := unstructured.NestedString(
-			deployment.Object, "spec", "template", "metadata", "annotations", "checksum/hami-scheduler-device-config")
+		schedulerChecksum, found, err := unstructured.NestedString(
+			deployment.Object, "spec", "template", "metadata", "annotations", deviceConfigChecksumAnnotation)
 		require.NoError(t, err)
-		require.True(t, found)
+		require.True(t, found, "scheduler Deployment must carry the device-config checksum annotation")
 
-		return checksum
+		daemonSet := findObject(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName)
+		require.NotNil(t, daemonSet)
+
+		devicePluginChecksum, found, err := unstructured.NestedString(
+			daemonSet.Object, "spec", "template", "metadata", "annotations", deviceConfigChecksumAnnotation)
+		require.NoError(t, err)
+		require.True(t, found, "device plugin DaemonSet must carry the device-config checksum annotation")
+
+		return deviceChecksums{
+			scheduler:    schedulerChecksum,
+			devicePlugin: devicePluginChecksum,
+		}
 	}
 
-	baseline := renderChecksum(nil)
-	changed := renderChecksum("nvidia:\n  resourceCountName: nvidia.com/gpu\n  resourceMemoryName: nvidia.com/gpumem\n")
+	baseline := renderChecksums(nil)
+	changed := renderChecksums("nvidia:\n  resourceCountName: nvidia.com/gpu\n  resourceMemoryName: nvidia.com/gpumem\n")
 
-	assert.NotEqual(t, baseline, changed,
-		"device-config content change must rotate the scheduler-device checksum to trigger a rollout")
+	// Both the scheduler Deployment and the device plugin DaemonSet read the
+	// same hami-scheduler-device ConfigMap. A device-config content change must
+	// rotate the checksum on both so scheduler and device plugin roll out
+	// together and never run with divergent device configs.
+	assert.NotEqual(t, baseline.scheduler, changed.scheduler,
+		"device-config content change must rotate the scheduler checksum to trigger a scheduler rollout")
+	assert.NotEqual(t, baseline.devicePlugin, changed.devicePlugin,
+		"device-config content change must rotate the device plugin checksum to trigger a device plugin rollout")
 }
 
 func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
