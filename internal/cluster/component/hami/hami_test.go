@@ -322,6 +322,100 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 	}
 }
 
+func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	deployment := findObject(t, objs.Items, "Deployment", SchedulerName)
+	require.NotNil(t, deployment)
+
+	// Rollout must bring up the new scheduler before tearing down the old one so
+	// a single-node cluster never loses its only scheduler mid-update.
+	strategy, found, err := unstructured.NestedMap(deployment.Object, "spec", "strategy")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "RollingUpdate", strategy["type"])
+
+	rollingUpdate, ok := strategy["rollingUpdate"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, int64(0), rollingUpdate["maxUnavailable"])
+	assert.Equal(t, int64(1), rollingUpdate["maxSurge"])
+
+	// Scheduler anti-affinity is a soft preference, not a hard requirement, so a
+	// single-node cluster can still schedule the replacement pod during rollout.
+	affinity, found, err := unstructured.NestedMap(deployment.Object, "spec", "template", "spec", "affinity")
+	require.NoError(t, err)
+	require.True(t, found)
+
+	antiAffinity, ok := affinity["podAntiAffinity"].(map[string]interface{})
+	require.True(t, ok)
+	preferred, ok := antiAffinity["preferredDuringSchedulingIgnoredDuringExecution"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, preferred, 1)
+	_, hasRequired := antiAffinity["requiredDuringSchedulingIgnoredDuringExecution"]
+	assert.False(t, hasRequired, "scheduler anti-affinity must not be hard-required")
+}
+
+func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+	require.NotNil(t, webhook)
+
+	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, webhooks)
+
+	first, ok := webhooks[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Fail", first["failurePolicy"])
+}
+
+func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
+	renderChecksum := func(deviceConfigContent interface{}) string {
+		component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+			"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+		plan := nvidiaDevicePluginNodeScopePlan()
+		if deviceConfigContent != nil {
+			if plan.ConfigPatch == nil {
+				plan.ConfigPatch = map[string]interface{}{}
+			}
+
+			plan.ConfigPatch["device-config"] = map[string]interface{}{
+				"content": deviceConfigContent,
+			}
+		}
+
+		objs, err := component.renderResources(plan)
+		require.NoError(t, err)
+
+		deployment := findObject(t, objs.Items, "Deployment", SchedulerName)
+		require.NotNil(t, deployment)
+
+		checksum, found, err := unstructured.NestedString(
+			deployment.Object, "spec", "template", "metadata", "annotations", "checksum/hami-scheduler-device-config")
+		require.NoError(t, err)
+		require.True(t, found)
+
+		return checksum
+	}
+
+	baseline := renderChecksum(nil)
+	changed := renderChecksum("nvidia:\n  resourceCountName: nvidia.com/gpu\n  resourceMemoryName: nvidia.com/gpumem\n")
+
+	assert.NotEqual(t, baseline, changed,
+		"device-config content change must rotate the scheduler-device checksum to trigger a rollout")
+}
+
 func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))

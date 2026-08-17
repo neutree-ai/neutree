@@ -73,6 +73,11 @@ scheduler:
     enabled: false
   service:
     type: ClusterIP
+  admissionWebhook:
+    # Reject pod admission when the HAMi scheduler webhook is unavailable
+    # instead of letting GPU pods fall through to the default scheduler and
+    # bypass the HAMi global device view.
+    failurePolicy: Fail
 devicePlugin:
   service:
     type: ClusterIP
