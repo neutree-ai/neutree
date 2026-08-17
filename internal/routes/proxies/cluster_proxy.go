@@ -796,6 +796,15 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		return nil
 	}
 
+	// A first-time enable (virtualization currently off) is not a mode switch:
+	// the enable guard owns that transition and reports running-endpoint
+	// blockers with its own message. Skipping here keeps a disable->enable
+	// patch that also sets a mode from surfacing the misleading "cannot
+	// switch mode" error when a paused vGPU endpoint still exists.
+	if current == nil || current.Spec == nil || !current.Spec.AcceleratorVirtualizationEnabled() {
+		return nil
+	}
+
 	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
 		return nil
 	}
