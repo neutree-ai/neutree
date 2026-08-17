@@ -9,21 +9,21 @@ BEGIN
             USING message = '{"code": "10001","message": "metadata.name is required for the resource","hint": "Please provide a valid name in the metadata object"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     -- Validate name format (Kubernetes-style naming convention)
     IF NOT (NEW.metadata).name ~ '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$' THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10003","message": "Invalid metadata.name format","hint": "Name must consist of lowercase alphanumeric characters, ''-'' or ''.'', must start and end with an alphanumeric character"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     -- Validate maximum length
     IF length((NEW.metadata).name) > 63 THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10004","message": "metadata.name is too long","hint": "Name cannot exceed 63 characters"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -95,21 +95,21 @@ BEGIN
             USING message = '{"code": "10002","message": "metadata.workspace is required for the resource","hint": "Please provide a valid workspace in the metadata object"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     -- Validate workspace format (Kubernetes-style naming convention)
     IF NOT (NEW.metadata).workspace ~ '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$' THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10005","message": "Invalid metadata.workspace format","hint": "Workspace must consist of lowercase alphanumeric characters, ''-'' or ''.'', must start and end with an alphanumeric character"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     -- Validate maximum length
     IF length((NEW.metadata).workspace) > 63 THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10006","message": "metadata.workspace is too long","hint": "Workspace cannot exceed 63 characters"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
-    
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
