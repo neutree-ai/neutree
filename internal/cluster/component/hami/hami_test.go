@@ -360,7 +360,9 @@ func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
 }
 
 func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
-	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+	const clusterNamespace = "neutree-system"
+
+	component := NewHAMiComponent(newTestCluster(), clusterNamespace, "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
@@ -377,6 +379,30 @@ func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
 	first, ok := webhooks[0].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "Fail", first["failurePolicy"])
+
+	// The Fail policy must not leak to other namespaces: scope the webhook to
+	// the owning cluster's namespace so a webhook outage during scheduler
+	// rollout cannot block pod creation across the whole cluster.
+	namespaceSelector, ok := first["namespaceSelector"].(map[string]interface{})
+	require.True(t, ok)
+
+	expressions, ok := namespaceSelector["matchExpressions"].([]interface{})
+	require.True(t, ok)
+
+	namespaceMatchFound := false
+	for _, expr := range expressions {
+		m, ok := expr.(map[string]interface{})
+		if !ok || m["key"] != "kubernetes.io/metadata.name" {
+			continue
+		}
+
+		namespaceMatchFound = true
+		values, ok := m["values"].([]interface{})
+		require.True(t, ok)
+		assert.Equal(t, []interface{}{clusterNamespace}, values)
+	}
+
+	assert.True(t, namespaceMatchFound, "webhook namespaceSelector must pin the cluster namespace")
 }
 
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {

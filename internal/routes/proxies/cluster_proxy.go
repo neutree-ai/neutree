@@ -796,6 +796,13 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		return nil
 	}
 
+	// The dispatch guard only routes already-enabled clusters here, but the
+	// function is public and dereferences current below, so keep the contract
+	// explicit for any future caller.
+	if current == nil || current.Spec == nil || !current.Spec.AcceleratorVirtualizationEnabled() {
+		return nil
+	}
+
 	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
 		return nil
 	}
