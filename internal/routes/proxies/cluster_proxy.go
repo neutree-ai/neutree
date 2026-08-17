@@ -949,12 +949,91 @@ func validateClusterAcceleratorVirtualizationInput(
 		return validationErr
 	}
 
+	// Enabling accelerator virtualization changes the cluster's GPU scheduling
+	// and device-plugin behavior. Running inference endpoints would be disrupted
+	// by the scheduler/webhook takeover, so the enable transition is gated on
+	// the cluster having no running GPU endpoints.
+	if !input.Current.Spec.AcceleratorVirtualizationEnabled() &&
+		input.New.Spec.AcceleratorVirtualizationEnabled() {
+		return validateClusterAcceleratorVirtualizationEnableForCurrent(s, input.Current, input.Patch)
+	}
+
 	if !input.Current.Spec.AcceleratorVirtualizationEnabled() ||
 		input.New.Spec.AcceleratorVirtualizationEnabled() {
 		return nil
 	}
 
 	return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
+}
+
+func validateClusterAcceleratorVirtualizationEnableForCurrent(
+	s storage.Storage, current *v1.Cluster, patch v1.Cluster,
+) *validationError {
+	if current == nil || current.Metadata == nil || current.Metadata.Workspace == "" || current.Metadata.Name == "" {
+		return &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    "cluster identity is required when enabling accelerator virtualization",
+		}
+	}
+
+	if patch.Metadata != nil &&
+		((patch.Metadata.Workspace != "" && patch.Metadata.Workspace != current.Metadata.Workspace) ||
+			(patch.Metadata.Name != "" && patch.Metadata.Name != current.Metadata.Name)) {
+		return &validationError{
+			Code:    "10209",
+			Message: "failed to validate cluster accelerator virtualization",
+			Hint:    "cluster metadata in patch body does not match patch target",
+		}
+	}
+
+	return validateClusterAcceleratorVirtualizationEnableForIdentity(
+		s, current.Metadata.Workspace, current.Metadata.Name)
+}
+
+func validateClusterAcceleratorVirtualizationEnableForIdentity(
+	s storage.Storage, workspace, name string,
+) *validationError {
+	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	runningGPUEndpointCount := 0
+
+	for _, endpoint := range endpoints {
+		if endpointRequestsRunningGPU(&endpoint) {
+			runningGPUEndpointCount++
+		}
+	}
+
+	if runningGPUEndpointCount > 0 {
+		return &validationError{
+			Code:    "10229",
+			Message: fmt.Sprintf("cannot enable accelerator virtualization for cluster '%s/%s'", workspace, name),
+			Hint: fmt.Sprintf(
+				"%d GPU endpoint(s) still run on this cluster; pause or delete the GPU endpoints before enabling accelerator virtualization",
+				runningGPUEndpointCount,
+			),
+		}
+	}
+
+	return nil
+}
+
+// endpointRequestsRunningGPU reports whether an endpoint requests accelerator
+// resources (GPU) and is not paused. Pausing an endpoint scales its replicas
+// to zero, so a paused endpoint has replicas == 0.
+func endpointRequestsRunningGPU(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
+		return false
+	}
+
+	if !endpoint.Spec.Resources.HasAccelerator() {
+		return false
+	}
+
+	return endpointReplicaCount(endpoint.Spec) > 0
 }
 
 func validateClusterAcceleratorVirtualizationCluster(cluster v1.Cluster) *validationError {
