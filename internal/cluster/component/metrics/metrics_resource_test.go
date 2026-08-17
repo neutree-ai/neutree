@@ -1605,10 +1605,20 @@ type nameRelabelRule struct {
 	regex       *regexp.Regexp
 }
 
-// parseNameRelabelRules extracts __name__ -> __name__ relabel rules from a
-// vmagent prometheus.yml. Prometheus relabel regexes are RE2 (identical to Go
-// regexp), so applying them with regexp here mirrors the scraper exactly.
-func parseNameRelabelRules(configYAML string) []nameRelabelRule {
+// nameFilterRule is a metric_relabel_configs entry that keep/drop filters on
+// __name__ (a cardinality-control rule). Prometheus keep/drop rules carry an
+// `action` and no `target_label`.
+type nameFilterRule struct {
+	action string // "keep" or "drop"
+	regex  *regexp.Regexp
+}
+
+// parseNameRelabelRules extracts __name__-related rules from a vmagent
+// prometheus.yml: both the canonical rename rules (__name__ -> __name__) and
+// any keep/drop filter on __name__. Prometheus relabel regexes are RE2
+// (identical to Go regexp), so applying them with regexp here mirrors the
+// scraper exactly.
+func parseNameRelabelRules(configYAML string) (rules []nameRelabelRule, filters []nameFilterRule) {
 	var cfg struct {
 		ScrapeConfigs []struct {
 			MetricRelabelConfigs []struct {
@@ -1616,6 +1626,7 @@ func parseNameRelabelRules(configYAML string) []nameRelabelRule {
 				Regex        string   `yaml:"regex"`
 				TargetLabel  string   `yaml:"target_label"`
 				Replacement  string   `yaml:"replacement"`
+				Action       string   `yaml:"action"`
 			} `yaml:"metric_relabel_configs"`
 		} `yaml:"scrape_configs"`
 	}
@@ -1623,21 +1634,30 @@ func parseNameRelabelRules(configYAML string) []nameRelabelRule {
 		panic(err)
 	}
 
-	var rules []nameRelabelRule
 	for _, sc := range cfg.ScrapeConfigs {
 		for _, rc := range sc.MetricRelabelConfigs {
-			rewritesName := len(rc.SourceLabels) == 1 &&
-				rc.SourceLabels[0] == "__name__" && rc.TargetLabel == "__name__"
-			if !rewritesName || rc.Regex == "" {
+			onName := len(rc.SourceLabels) == 1 && rc.SourceLabels[0] == "__name__"
+			if !onName || rc.Regex == "" {
 				continue
 			}
-			rules = append(rules, nameRelabelRule{
-				replacement: rc.Replacement,
-				regex:       regexp.MustCompile(rc.Regex),
-			})
+			switch rc.Action {
+			case "", "replace":
+				if rc.TargetLabel != "__name__" {
+					continue
+				}
+				rules = append(rules, nameRelabelRule{
+					replacement: rc.Replacement,
+					regex:       regexp.MustCompile(rc.Regex),
+				})
+			case "keep", "drop":
+				filters = append(filters, nameFilterRule{
+					action: rc.Action,
+					regex:  regexp.MustCompile(rc.Regex),
+				})
+			}
 		}
 	}
-	return rules
+	return rules, filters
 }
 
 // applyNameRelabels runs metric names through the relabel rules in order,
@@ -1653,7 +1673,7 @@ func applyNameRelabels(name string, rules []nameRelabelRule) string {
 	return out
 }
 
-func loadStaticVMAgentConfig(t *testing.T) []nameRelabelRule {
+func loadStaticVMAgentConfig(t *testing.T) ([]nameRelabelRule, []nameFilterRule) {
 	t.Helper()
 	path := filepath.Join("..", "..", "..", "..", "observability", "vmagent", "prometheus.yml")
 	data, err := os.ReadFile(path)
@@ -1690,7 +1710,7 @@ func TestVMAgentConfigNormalizesSpecDecodeMetricNames(t *testing.T) {
 		}
 	}
 
-	staticRules := loadStaticVMAgentConfig(t)
+	staticRules, _ := loadStaticVMAgentConfig(t)
 
 	t.Run("ssh static config", func(t *testing.T) {
 		for _, m := range specMetrics {
@@ -1734,7 +1754,7 @@ func TestVMAgentConfigNormalizesSpecDecodeMetricNames(t *testing.T) {
 			t.Fatalf("vmagent-config configmap not found in rendered resources")
 		}
 
-		k8sRules := parseNameRelabelRules(config)
+		k8sRules, _ := parseNameRelabelRules(config)
 		for _, m := range specMetrics {
 			if strings.HasPrefix(m, "vllm:") {
 				// K8s vLLM runs natively with `vllm:` names; only the
@@ -1756,29 +1776,25 @@ func TestVMAgentConfigNormalizesSpecDecodeMetricNames(t *testing.T) {
 }
 
 // TestVMAgentConfigDoesNotDropSpecDecodeMetrics asserts neither vmagent config
-// filters __name__ with keep/drop actions, so spec-decode metrics are never
-// excluded at scrape time.
+// filters __name__ with keep/drop actions in metric_relabel_configs, so
+// spec-decode metrics are never excluded at scrape time.
 func TestVMAgentConfigDoesNotDropSpecDecodeMetrics(t *testing.T) {
-	// The relabel rules parsed by parseNameRelabelRules are exactly the
-	// __name__-rewriting rules. If either config ever adds a keep/drop on
-	// __name__, it must surface here as a rule that is NOT the canonical
-	// normalizer; asserting the known rule set proves no spec metric family
-	// is excluded. K8s keep/drop actions live in relabel_configs (target
-	// discovery by pod label), never in metric_relabel_configs on __name__.
-	assertOnlyCanonicalNameRelabels := func(t *testing.T, label string, rules []nameRelabelRule) {
+	// parseNameRelabelRules now surfaces __name__ keep/drop rules (action:
+	// keep/drop carry no target_label). Asserting none exist proves no spec
+	// metric family is filtered. K8s keep/drop actions live in relabel_configs
+	// (target discovery by pod label), never in metric_relabel_configs on
+	// __name__.
+	assertNoNameFilter := func(t *testing.T, label string, filters []nameFilterRule) {
 		t.Helper()
-		for _, r := range rules {
-			switch r.replacement {
-			case "vllm:$1", "sglang:$1":
-				// canonical normalizers
-			default:
-				t.Errorf("%s: unexpected __name__ relabel rule replacement %q (would break spec metric names)", label, r.replacement)
+		if len(filters) > 0 {
+			for _, f := range filters {
+				t.Errorf("%s: found __name__ %s rule (regex %q) — would filter spec-decode metrics", label, f.action, f.regex.String())
 			}
 		}
 	}
 
-	staticRules := loadStaticVMAgentConfig(t)
-	assertOnlyCanonicalNameRelabels(t, "static", staticRules)
+	_, staticFilters := loadStaticVMAgentConfig(t)
+	assertNoNameFilter(t, "static", staticFilters)
 
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -1806,5 +1822,6 @@ func TestVMAgentConfigDoesNotDropSpecDecodeMetrics(t *testing.T) {
 	if config == "" {
 		t.Fatalf("vmagent-config configmap not found in rendered resources")
 	}
-	assertOnlyCanonicalNameRelabels(t, "kubernetes", parseNameRelabelRules(config))
+	_, k8sFilters := parseNameRelabelRules(config)
+	assertNoNameFilter(t, "kubernetes", k8sFilters)
 }

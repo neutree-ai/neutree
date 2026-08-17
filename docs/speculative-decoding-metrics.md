@@ -8,7 +8,7 @@ Speculative decoding is a latency-optimization technique in which a small draft 
 proposes tokens and the large target model verifies them in parallel, accepting some or
 all of the proposed tokens. The metrics below report how well that process is working.
 
-Design doc: [Speculative Decoding Metrics design](../docs/superpowers/specs/2026-08-17-spec-decode-metrics-design.md)
+Design doc: [Speculative Decoding Metrics design](superpowers/specs/2026-08-17-spec-decode-metrics-design.md)
 
 ## Metric surface
 
@@ -95,7 +95,9 @@ Filtering: `{neutree_cluster=~"$Cluster", application="$Endpoint"}`, rate window
 
 Notes:
 
-- Acceptance rate unit is percentunit (0..1) for both engines; acceptance length is in tokens.
+- Acceptance rate unit is percentunit; both engines emit a rate in the 0..1 range for typical
+  load, but SGLang's gauge can exceed 1 near-perfect acceptance (its definition includes the
+  bonus token). Acceptance length is in tokens.
 - vLLM acceptance rate/length are derived in PromQL from counters (per upstream
   docstring); SGLang reads engine gauges directly. `A or B` yields vLLM-derived series for
   vLLM endpoints and falls through to the SGLang gauge for SGLang endpoints.

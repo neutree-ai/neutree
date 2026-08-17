@@ -617,7 +617,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Speculative decoding performance. vLLM derives acceptance rate/length from counters; SGLang reads engine gauges. Shown only when the endpoint enables speculative decoding."
+        "content": "Speculative decoding performance. vLLM derives acceptance rate/length from counters; SGLang reads engine gauges. Values appear when the endpoint enables speculative decoding."
       },
       "transparent": true
     },
@@ -647,7 +647,7 @@
       },
       "targets": [
         {
-          "expr": "(sum(rate(vllm:spec_decode_num_accepted_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:spec_decode_num_draft_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or sglang:spec_accept_rate{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}",
+          "expr": "(sum(rate(vllm:spec_decode_num_accepted_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:spec_decode_num_draft_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or avg(sglang:spec_accept_rate{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
           "refId": "A"
         }
       ]
@@ -678,7 +678,7 @@
       },
       "targets": [
         {
-          "expr": "(1 + sum(rate(vllm:spec_decode_num_accepted_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:spec_decode_num_drafts_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or sglang:spec_accept_length{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}",
+          "expr": "(1 + sum(rate(vllm:spec_decode_num_accepted_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:spec_decode_num_drafts_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or avg(sglang:spec_accept_length{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
           "refId": "A"
         }
       ]
@@ -752,7 +752,7 @@
       },
       "targets": [
         {
-          "expr": "sum by(position)(rate(vllm:spec_decode_num_accepted_tokens_per_pos_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / sum(rate(vllm:spec_decode_num_drafts_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))",
+          "expr": "sum by(position)(rate(vllm:spec_decode_num_accepted_tokens_per_pos_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / scalar(sum(rate(vllm:spec_decode_num_drafts_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "position {{position}}"
         }

@@ -102,18 +102,25 @@ Prometheus expressions (`{...}` = `{neutree_cluster=~"$Cluster",application="$En
 
 | Panel | Type | Expression |
 | --- | --- | --- |
-| Spec Decode Acceptance Rate | stat | `(sum(rate(vllm:spec_decode_num_accepted_tokens_total{...}$__rate_interval)) / sum(rate(vllm:spec_decode_num_draft_tokens_total{...}$__rate_interval))) or sglang:spec_accept_rate{...}` |
-| Mean Spec Decode Acceptance Length | stat | `(1 + sum(rate(vllm:spec_decode_num_accepted_tokens_total{...}$__rate_interval)) / sum(rate(vllm:spec_decode_num_drafts_total{...}$__rate_interval))) or sglang:spec_accept_length{...}` |
+| Spec Decode Acceptance Rate | stat | `(sum(rate(vllm:spec_decode_num_accepted_tokens_total{...}$__rate_interval)) / sum(rate(vllm:spec_decode_num_draft_tokens_total{...}$__rate_interval))) or avg(sglang:spec_accept_rate{...})` |
+| Mean Spec Decode Acceptance Length | stat | `(1 + sum(rate(vllm:spec_decode_num_accepted_tokens_total{...}$__rate_interval)) / sum(rate(vllm:spec_decode_num_drafts_total{...}$__rate_interval))) or avg(sglang:spec_accept_length{...})` |
 | Spec Decode Draft tokens/s | timeseries | `sum(rate(vllm:spec_decode_num_draft_tokens_total{...}$__rate_interval))` (vLLM only) |
 | Spec Decode Accepted tokens/s | timeseries | `sum(rate(vllm:spec_decode_num_accepted_tokens_total{...}$__rate_interval))` (vLLM only) |
-| Per-position Acceptance Rate | timeseries | `sum by(position)(rate(vllm:spec_decode_num_accepted_tokens_per_pos_total{...}$__rate_interval)) / sum(rate(vllm:spec_decode_num_drafts_total{...}$__rate_interval))` (vLLM only), legend `position {{position}}` |
+| Per-position Acceptance Rate | timeseries | `sum by(position)(rate(vllm:spec_decode_num_accepted_tokens_per_pos_total{...}$__rate_interval)) / scalar(sum(rate(vllm:spec_decode_num_drafts_total{...}$__rate_interval)))` (vLLM only), legend `position {{position}}` |
 
 Notes:
 
 - `A or B` yields the vLLM-computed series for vLLM endpoints and falls through to the SGLang gauge for
   SGLang endpoints, mirroring the `or` pattern already used by `neutree_endpoint_token_latency_embed_dashboard.json`.
+- The SGLang side is wrapped in `avg()` because the SSH path tags each series with
+  `deployment`/`replica`/`application`, so a multi-replica SGLang endpoint would otherwise render
+  one stat per replica.
+- The per-position query divides by `scalar(sum(...))` so it is portable to strict PromQL (where
+  `sum by(position)(...) / sum(...)` would drop the LHS series over a label-set mismatch);
+  VictoriaMetrics accepts both forms.
 - Acceptance rate/length are **derived via PromQL** from vLLM counters (per upstream docstring) and read
-  directly from SGLang gauges. Units: rate = percentunit (both engines emit 0..1), length = tokens.
+  directly from SGLang gauges. Units: rate = percentunit (both engines emit 0..1 under typical load;
+  SGLang's gauge can exceed 1 at near-perfect acceptance since it includes the bonus token), length = tokens.
 - The three vLLM-only panels render no-data for SGLang endpoints. That is intentional and documented
   (decision 2).
 
