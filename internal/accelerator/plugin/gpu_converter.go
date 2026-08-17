@@ -105,7 +105,7 @@ func (c *GPUConverter) ConvertToKubernetes(input accelerator.ConvertInput) (*v1.
 	// every CUDA call. Setting CUDA_DISABLE_CONTROL=true makes HAMi skip that
 	// preload so the workload runs at native driver speed instead of paying the
 	// interception overhead for a device it is not virtualizing.
-	if input.Cluster != nil && input.Cluster.Spec != nil && input.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+	if input.Cluster != nil && input.Cluster.Spec.AcceleratorVirtualizationEnabled() {
 		k8s.Env["CUDA_DISABLE_CONTROL"] = "true"
 	}
 

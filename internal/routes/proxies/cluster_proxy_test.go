@@ -963,17 +963,118 @@ func TestValidateClusterAcceleratorVirtualization(t *testing.T) {
 }
 
 func testValidateClusterAcceleratorVirtualizationEnableForCurrent(t *testing.T) {
-	mockStorage := storageMocks.NewMockStorage(t)
-	current := &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"}}
-	patch := v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}}
+	t.Run("rejects mismatched patch body identity", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+		current := &v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"}}
+		patch := v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}}
 
-	validationErr := validateClusterAcceleratorVirtualizationEnableForCurrent(mockStorage, current, patch)
+		validationErr := validateClusterAcceleratorVirtualizationEnableForCurrent(mockStorage, current, patch)
 
-	assert.NotNil(t, validationErr)
-	assert.Equal(t, "10209", validationErr.Code)
-	assert.Equal(t, "failed to validate cluster accelerator virtualization", validationErr.Message)
-	assert.Equal(t, "cluster metadata in patch body does not match patch target", validationErr.Hint)
-	mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+		assert.NotNil(t, validationErr)
+		assert.Equal(t, "10209", validationErr.Code)
+		assert.Equal(t, "failed to validate cluster accelerator virtualization", validationErr.Message)
+		assert.Equal(t, "cluster metadata in patch body does not match patch target", validationErr.Hint)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+	})
+
+	t.Run("rejects missing cluster identity", func(t *testing.T) {
+		mockStorage := storageMocks.NewMockStorage(t)
+
+		validationErr := validateClusterAcceleratorVirtualizationEnableForCurrent(
+			mockStorage, &v1.Cluster{}, v1.Cluster{})
+
+		assert.NotNil(t, validationErr)
+		assert.Equal(t, "10209", validationErr.Code)
+		assert.Equal(t, "failed to validate cluster accelerator virtualization", validationErr.Message)
+		assert.Equal(t, "cluster identity is required when enabling accelerator virtualization", validationErr.Hint)
+		mockStorage.AssertNotCalled(t, "ListEndpoint", mock.Anything)
+	})
+}
+
+func TestEndpointRequestsRunningGPU(t *testing.T) {
+	replicas := func(n int) *int { return &n }
+
+	tests := []struct {
+		name     string
+		endpoint *v1.Endpoint
+		want     bool
+	}{
+		{
+			name:     "nil endpoint",
+			endpoint: nil,
+			want:     false,
+		},
+		{
+			name:     "nil spec",
+			endpoint: &v1.Endpoint{},
+			want:     false,
+		},
+		{
+			name:     "nil resources",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{}},
+			want:     false,
+		},
+		{
+			name: "CPU endpoint is not a running GPU endpoint",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Replicas:  v1.ReplicaSpec{Num: replicas(2)},
+				Resources: &v1.ResourceSpec{CPU: pointer.String("4")},
+			}},
+			want: false,
+		},
+		{
+			name: "GPU endpoint without accelerator type is not running",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Replicas:  v1.ReplicaSpec{Num: replicas(1)},
+				Resources: &v1.ResourceSpec{GPU: pointer.String("1")},
+			}},
+			want: false,
+		},
+		{
+			name: "running GPU endpoint is detected",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Replicas: v1.ReplicaSpec{Num: replicas(1)},
+				Resources: &v1.ResourceSpec{
+					GPU: pointer.String("1"),
+					Accelerator: map[string]string{
+						v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+					},
+				},
+			}},
+			want: true,
+		},
+		{
+			name: "paused GPU endpoint is not running",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Replicas: v1.ReplicaSpec{Num: replicas(0)},
+				Resources: &v1.ResourceSpec{
+					GPU: pointer.String("1"),
+					Accelerator: map[string]string{
+						v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+					},
+				},
+			}},
+			want: false,
+		},
+		{
+			name: "GPU endpoint with nil replicas is treated as running",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Resources: &v1.ResourceSpec{
+					GPU: pointer.String("1"),
+					Accelerator: map[string]string{
+						v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
+					},
+				},
+			}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, endpointRequestsRunningGPU(tt.endpoint))
+		})
+	}
 }
 
 func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
