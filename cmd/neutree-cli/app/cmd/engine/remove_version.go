@@ -44,8 +44,7 @@ Examples:
   # Force remove the last remaining version
   neutree-cli engine remove-version --name vllm --version v0.6.0 --force
 `,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRemoveVersion(opts)
 		},

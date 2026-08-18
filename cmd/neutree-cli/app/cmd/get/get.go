@@ -53,9 +53,8 @@ Examples:
 
   # Watch with custom interval
   neutree-cli get endpoint my-ep -w default --watch --interval 10s`,
-		Args:          cobra.RangeArgs(1, 2),
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:         cobra.RangeArgs(1, 2),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGet(opts, args)
 		},

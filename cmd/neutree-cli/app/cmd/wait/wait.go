@@ -46,9 +46,8 @@ Examples:
 
   # Wait with custom timeout and poll interval
   neutree-cli wait endpoint my-ep -w default --for jsonpath=.status.phase=Running --timeout 5m --interval 10s`,
-		Args:          cobra.ExactArgs(2),
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWait(opts, args)
 		},
