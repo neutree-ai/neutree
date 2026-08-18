@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -698,55 +700,21 @@ func newDeploymentManifestVariables() DeploymentManifestVariables {
 }
 
 // resolveStartupTimeoutSeconds reads deployment_options.startup_timeout_seconds
-// and returns the K8s startup window in seconds. Unset, non-numeric, or
-// non-positive values fall back to defaultStartupTimeoutSeconds (1200) so the
-// rendered manifest stays byte-identical to the historical hard-coded
-// template. Kubernetes clusters only; the SSH/Ray path never reads this key.
+// and returns the K8s startup window in seconds. Only a positive integer or a
+// string that parses to a positive integer is accepted; anything else
+// (non-numeric, zero, negative, sub-second fractional) falls back to
+// defaultStartupTimeoutSeconds (1200) so the rendered manifest stays
+// byte-identical to the historical hard-coded template. Kubernetes clusters
+// only; the SSH/Ray path never reads this key.
 func resolveStartupTimeoutSeconds(endpoint *v1.Endpoint) int {
 	timeout := defaultStartupTimeoutSeconds
 
 	if endpoint.Spec.DeploymentOptions != nil {
 		if raw, ok := endpoint.Spec.DeploymentOptions[startupTimeoutSecondsKey]; ok {
-			switch v := raw.(type) {
-			case float64:
-				// Reject sub-second or non-integer values rather than truncating
-				// to a nonsense manifest (0.5 -> int(0.5) == 0).
-				if v >= 1 {
-					timeout = int(v)
-				} else {
-					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be >= 1, got %v; using default %d",
-						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
-				}
-			case float32:
-				if v >= 1 {
-					timeout = int(v)
-				} else {
-					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be >= 1, got %v; using default %d",
-						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
-				}
-			case int:
-				if v > 0 {
-					timeout = v
-				} else {
-					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
-						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
-				}
-			case int32:
-				if v > 0 {
-					timeout = int(v)
-				} else {
-					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
-						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
-				}
-			case int64:
-				if v > 0 {
-					timeout = int(v)
-				} else {
-					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
-						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
-				}
-			default:
-				klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be a number, got %T; using default %d",
+			if v, err := strconv.Atoi(fmt.Sprintf("%v", raw)); err == nil && v > 0 {
+				timeout = v
+			} else {
+				klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be a positive integer, got %v; using default %d",
 					endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
 			}
 		}

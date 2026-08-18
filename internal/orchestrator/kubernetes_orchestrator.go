@@ -690,15 +690,10 @@ func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string)
 	return false, ""
 }
 
-// checkContainerStatuses checks a slice of container statuses for critical failures.
-// containerType should be "Container" or "Init Container" for error message clarity.
 // checkContainerStatuses checks a slice of container statuses for critical
 // failures. containerType should be "Container" or "Init Container" for error
-// message clarity. applyRestartThreshold gates the "restarted > threshold and
-// still not ready" failure — it is disabled for terminating pods (rolling
-// update / scale-down), whose containers flip Ready to false while retaining
-// a historical restart count.
-func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string, applyRestartThreshold bool) (bool, []string) {
+// message clarity.
+func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string) (bool, []string) {
 	var (
 		failed   bool
 		errorMsg []string
@@ -750,7 +745,7 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 		// Restart accumulation is driven by the kubelet startupProbe window, so
 		// a high count already implies prolonged non-readiness. CrashLoopBackOff
 		// carries an explicit reason in the message.
-		if applyRestartThreshold && !cs.Ready && cs.RestartCount > containerFailureRestartThreshold {
+		if !cs.Ready && cs.RestartCount > containerFailureRestartThreshold {
 			failed = true
 
 			if cs.State.Waiting != nil && cs.State.Waiting.Reason == k8sContainerReasonCrashLoopBackOff {
@@ -784,19 +779,21 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 		// A terminating pod (rolling update / scale-down) flips container Ready
 		// to false while retaining its historical restart count; it must never
 		// be judged by that history or the endpoint would flap FAILED during
-		// routine rollouts. Immediate failures (OOM / image pull / init non-zero
-		// exit) still apply — only the restart-threshold branch is skipped.
-		applyRestartThreshold := pod.DeletionTimestamp == nil
+		// routine rollouts. Skip it entirely — its container state (even an
+		// OOM / image pull) is irrelevant while the pod is already leaving.
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
 
 		// Check init container statuses
-		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container", applyRestartThreshold); f {
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container"); f {
 			failed = true
 
 			errorMsg = append(errorMsg, msgs...)
 		}
 
 		// Check container statuses
-		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.ContainerStatuses, "Container", applyRestartThreshold); f {
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.ContainerStatuses, "Container"); f {
 			failed = true
 
 			errorMsg = append(errorMsg, msgs...)
