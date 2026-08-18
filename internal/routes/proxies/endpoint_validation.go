@@ -244,13 +244,12 @@ func endpointPatchMayAffectResourceValidation(endpoint *v1.Endpoint) bool {
 
 // validateEndpointResourceShape is the unified endpoint resource validator. It
 // validates the replica count for every endpoint, then applies the shared
-// accelerator declaration checks (a declared accelerator needs a type, a
-// product, and a present, parseable card count) before dispatching to the
-// resource-type-specific rules: virtualization (vGPU) resources are checked
-// against a ready, virtualization-enabled Kubernetes cluster and its supported
-// resource keys; physical accelerator resources require a strictly positive
-// card count satisfying the target cluster type's precision rule and a
-// supported product.
+// accelerator declaration checks (a declared accelerator needs a type and a
+// product), resolves the target cluster, applies the shared GPU card-count
+// rule, and finally the resource-type-specific checks: virtualization (vGPU)
+// resources are checked against a ready, virtualization-enabled Kubernetes
+// cluster and its supported resource keys, memory and core percent; physical
+// accelerator resources require a supported product.
 //
 // The two branches are mutually exclusive (selected by
 // resources.HasAcceleratorVirtualization) and differ in cluster-resolution
@@ -294,6 +293,12 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 			return validationErr
 		}
 
+		// vGPU is Kubernetes-only (enforced by validateEndpointVGPUCluster), so
+		// the shared GPU count rule applies with the Kubernetes precision rule.
+		if validationErr := validateAcceleratorCount(resources.GPU, string(v1.KubernetesClusterType)); validationErr != nil {
+			return validationErr
+		}
+
 		if validationErr := validateEndpointVGPUResourcesSupported(resources, cluster); validationErr != nil {
 			return validationErr
 		}
@@ -316,11 +321,6 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		return nil
 	}
 
-	count, err := strconv.ParseFloat(*resources.GPU, 64)
-	if err != nil {
-		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a valid accelerator card count"))
-	}
-
 	cluster, validationErr := resolveAcceleratorValidationCluster(store, endpoint)
 	if validationErr != nil {
 		return validationErr
@@ -331,14 +331,8 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		clusterType = cluster.Spec.Type
 	}
 
-	if !isAcceleratorCountPrecisionValid(count, clusterType) {
-		if clusterType == string(v1.SSHClusterType) {
-			return endpointAcceleratorResourceError(errors.New(
-				"spec.resources.gpu must be a one-decimal value below 1 or an integer at or above 1",
-			))
-		}
-
-		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive integer"))
+	if validationErr := validateAcceleratorCount(resources.GPU, clusterType); validationErr != nil {
+		return validationErr
 	}
 
 	if cluster != nil {
@@ -352,11 +346,8 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 
 // validateAcceleratorDeclaration enforces the accelerator declaration rules
 // shared by every resource shape. When an accelerator block is present it must
-// declare a type and a product, and the card count must be present and
-// parseable — a missing or malformed count would otherwise be read as "no
-// accelerator" and silently drop the declaration. The count must also be
-// strictly greater than zero; the type-specific precision rules (vGPU integer,
-// physical per-cluster-type) are enforced by the resource-type branches.
+// declare a type and a product. The card count is validated separately by
+// validateAcceleratorCount, which needs the target cluster type.
 func validateAcceleratorDeclaration(resources *v1.ResourceSpec) *validationError {
 	if resources.Accelerator == nil {
 		return nil
@@ -370,13 +361,36 @@ func validateAcceleratorDeclaration(resources *v1.ResourceSpec) *validationError
 		return endpointAcceleratorResourceError(errors.New("spec.resources.accelerator.product is required"))
 	}
 
-	if resources.GPU == nil || *resources.GPU == "" {
+	return nil
+}
+
+// validateAcceleratorCount enforces the GPU card-count rules shared by every
+// resource shape. The count must be present, parseable and strictly greater
+// than zero — a missing or malformed count would otherwise be read as "no
+// accelerator" and silently drop the declaration — and must satisfy the
+// cluster type's precision rule. Static (SSH) clusters allow one-decimal
+// counts below one (0.1-0.9) and integers at or above one; Kubernetes clusters
+// allow integers only. An unknown cluster type fails open on the precision
+// rule (the rule cannot be determined) but still requires a present, parseable,
+// strictly positive count.
+func validateAcceleratorCount(gpu *string, clusterType string) *validationError {
+	if gpu == nil || *gpu == "" {
 		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive accelerator card count"))
 	}
 
-	count, err := strconv.ParseFloat(*resources.GPU, 64)
+	count, err := strconv.ParseFloat(*gpu, 64)
 	if err != nil || math.IsInf(count, 0) || math.IsNaN(count) || count <= 0 {
 		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive accelerator card count"))
+	}
+
+	if !isAcceleratorCountPrecisionValid(count, clusterType) {
+		if clusterType == string(v1.SSHClusterType) {
+			return endpointAcceleratorResourceError(errors.New(
+				"spec.resources.gpu must be a one-decimal value below 1 or an integer at or above 1",
+			))
+		}
+
+		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive integer"))
 	}
 
 	return nil
@@ -614,9 +628,10 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 		return nil
 	}
 
-	// Accelerator type/product presence and count parseability are enforced by
-	// the shared validateAcceleratorDeclaration; this function only checks the
-	// virtualization-specific shape (count integer, memory, core percent).
+	// Accelerator type/product presence is enforced by the shared
+	// validateAcceleratorDeclaration and the card count by the shared
+	// validateAcceleratorCount; this function only checks the
+	// virtualization-specific shape (memory, core percent).
 
 	if resources.GetAcceleratorVirtualizationMemoryPercent() != "" {
 		return &validationError{
@@ -624,10 +639,6 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 			Message: "virtualization memory_percent is not supported",
 			Hint:    "Set virtualization.memory_mib instead of virtualization.memory_percent",
 		}
-	}
-
-	if _, err := parsePositiveIntegerResource(resources.GPU, "spec.resources.gpu"); err != nil {
-		return endpointResourceValueError(err)
 	}
 
 	if _, err := parseRequiredPositiveInteger(resources.GetAcceleratorVirtualizationMemoryMiB(), "virtualization.memory_mib"); err != nil {
@@ -842,14 +853,6 @@ func clusterResourceInfo(cluster *v1.Cluster) *v1.ClusterResources {
 	}
 
 	return cluster.Status.ResourceInfo
-}
-
-func parsePositiveIntegerResource(value *string, field string) (int64, error) {
-	if value == nil || *value == "" {
-		return 0, fmt.Errorf("%s must be a positive integer", field)
-	}
-
-	return parseRequiredPositiveInteger(*value, field)
 }
 
 func parseRequiredPositiveInteger(value string, field string) (int64, error) {
