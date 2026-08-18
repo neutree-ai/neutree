@@ -820,6 +820,14 @@ func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, n
 	var errorMsg []string
 
 	for _, pod := range pods {
+		// A terminating pod (rolling update / scale-down) flips container
+		// Ready to false while retaining its historical restart count; it must
+		// never be judged by that history or the endpoint would flap FAILED
+		// during routine rollouts.
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
 		if pod.Status.StartTime == nil {
 			continue
 		}

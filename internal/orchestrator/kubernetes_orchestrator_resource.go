@@ -709,15 +709,38 @@ func resolveStartupTimeoutSeconds(endpoint *v1.Endpoint) int {
 		if raw, ok := endpoint.Spec.DeploymentOptions[startupTimeoutSecondsKey]; ok {
 			switch v := raw.(type) {
 			case float64:
+				// Reject sub-second or non-integer values rather than truncating
+				// to a nonsense manifest (0.5 -> int(0.5) == 0).
+				if v >= 1 {
+					timeout = int(v)
+				} else {
+					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be >= 1, got %v; using default %d",
+						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
+				}
+			case float32:
+				if v >= 1 {
+					timeout = int(v)
+				} else {
+					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be >= 1, got %v; using default %d",
+						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
+				}
+			case int:
+				if v > 0 {
+					timeout = v
+				} else {
+					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
+						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
+				}
+			case int32:
 				if v > 0 {
 					timeout = int(v)
 				} else {
 					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
 						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
 				}
-			case int:
+			case int64:
 				if v > 0 {
-					timeout = v
+					timeout = int(v)
 				} else {
 					klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be > 0, got %v; using default %d",
 						endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)

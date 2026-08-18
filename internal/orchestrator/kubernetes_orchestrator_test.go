@@ -625,6 +625,42 @@ func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartC
 	return f
 }
 
+// WithPodReadyAfterRestarts creates a pod whose container is Ready=true but
+// carries a historical restart count past the failure threshold — a healthy
+// running instance that crashed >5 times during a previous startup. The
+// restart-window check must never judge a ready container by its history.
+func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartCount int32, startTime *metav1.Time) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-ready-restarts",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase:     corev1.PodRunning,
+			StartTime: startTime,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        true,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
 // WithInitContainerRestartingNotReady is the init-container sibling of
 // WithPodRestartingNotReady: restart count past the failure threshold, not
 // ready, past the startup window, not in CrashLoopBackOff.
@@ -1457,6 +1493,18 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 			wantProbeFailureThresh: 60,
 		},
 		{
+			name:                   "int64 integer type accepted",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": int64(300)},
+			wantProgressDeadline:   300,
+			wantProbeFailureThresh: 30,
+		},
+		{
+			name:                   "fractional sub-second falls back to default",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(0.5)},
+			wantProgressDeadline:   defaultStartupTimeoutSeconds,
+			wantProbeFailureThresh: 120,
+		},
+		{
 			name:                   "zero falls back to default",
 			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(0)},
 			wantProgressDeadline:   defaultStartupTimeoutSeconds,
@@ -1592,6 +1640,71 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 			timeoutSecs: 60,
 			wantFailed:  true,
 			wantMsgPart: "restarted 6 times",
+		},
+		{
+			name: "terminating pod with historical restarts -> not failed",
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-terminating",
+						DeletionTimestamp: &metav1.Time{Time: now.Add(-time.Minute)},
+					},
+					Status: corev1.PodStatus{
+						StartTime: &thirtyMinAgo,
+						ContainerStatuses: []corev1.ContainerStatus{
+							{
+								Name:         "engine",
+								Ready:        false, // kubelet flips Ready=false on termination
+								RestartCount: 6,     // historical crashes from a previous startup
+								State: corev1.ContainerState{
+									Running: &corev1.ContainerStateRunning{},
+								},
+							},
+						},
+					},
+				},
+			},
+			timeoutSecs: 1200,
+			wantFailed:  false,
+		},
+		{
+			name: "elapsed exactly equals startup window -> failed",
+			pods: []corev1.Pod{
+				func() corev1.Pod {
+					exactlyWindow := metav1.NewTime(now.Add(-1200 * time.Second))
+					return newPod(&exactlyWindow, "engine", 6, false)
+				}(),
+			},
+			timeoutSecs: 1200,
+			wantFailed:  true,
+			wantMsgPart: "restarted 6 times",
+		},
+		{
+			name: "failure message includes waiting reason and message",
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-crash-waiting"},
+					Status: corev1.PodStatus{
+						StartTime: &thirtyMinAgo,
+						ContainerStatuses: []corev1.ContainerStatus{
+							{
+								Name:         "engine",
+								Ready:        false,
+								RestartCount: 6,
+								State: corev1.ContainerState{
+									Waiting: &corev1.ContainerStateWaiting{
+										Reason:  "CrashLoopBackOff",
+										Message: "back-off restarting failed container",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			timeoutSecs: 1200,
+			wantFailed:  true,
+			wantMsgPart: "CrashLoopBackOff: back-off restarting failed container",
 		},
 	}
 
@@ -3588,11 +3701,14 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			},
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				// Deployment not fully ready (0 ready), but the pod's container is
-				// Ready=true with a high restart count from an old startup. The
-				// restart-window check must not misjudge a ready container.
+				// Ready=true with a high historical restart count and a StartTime
+				// well past the window. The restart-window check must not misjudge
+				// a ready container by its old startup crashes.
+				now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+				start := metav1.NewTime(now.Add(-30 * time.Minute))
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPods(1)
+					WithPodReadyAfterRestarts("test-container", 6, &start)
 			},
 			expectedPhase:  v1.EndpointPhaseDEPLOYING,
 			expectErrorMsg: "Deployment: 0/1 replicas ready",
