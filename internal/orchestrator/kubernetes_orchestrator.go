@@ -692,7 +692,13 @@ func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string)
 
 // checkContainerStatuses checks a slice of container statuses for critical failures.
 // containerType should be "Container" or "Init Container" for error message clarity.
-func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string) (bool, []string) {
+// checkContainerStatuses checks a slice of container statuses for critical
+// failures. containerType should be "Container" or "Init Container" for error
+// message clarity. applyRestartThreshold gates the "restarted > threshold and
+// still not ready" failure — it is disabled for terminating pods (rolling
+// update / scale-down), whose containers flip Ready to false while retaining
+// a historical restart count.
+func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string, applyRestartThreshold bool) (bool, []string) {
 	var (
 		failed   bool
 		errorMsg []string
@@ -724,19 +730,10 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 			continue
 		}
 
-		// Check for CrashLoopBackOff with restart count >= 5
+		// Check for ImagePullBackOff
 		if cs.State.Waiting != nil {
 			reason := cs.State.Waiting.Reason
 
-			if reason == k8sContainerReasonCrashLoopBackOff && cs.RestartCount >= containerFailureRestartThreshold {
-				failed = true
-
-				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
-					podName, containerType, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
-
-				continue
-			}
-			// Check for ImagePullBackOff
 			if reason == k8sContainerReasonImagePullBackOff || reason == k8sContainerReasonErrImagePull {
 				failed = true
 
@@ -746,6 +743,28 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 				continue
 			}
 		}
+
+		// Restart threshold: a container that has restarted past the threshold
+		// and is still not ready is a locatable failure, whether it is crash
+		// looping (CrashLoopBackOff) or stuck starting (startupProbe restarts).
+		// Restart accumulation is driven by the kubelet startupProbe window, so
+		// a high count already implies prolonged non-readiness. CrashLoopBackOff
+		// carries an explicit reason in the message.
+		if applyRestartThreshold && !cs.Ready && cs.RestartCount > containerFailureRestartThreshold {
+			failed = true
+
+			if cs.State.Waiting != nil && cs.State.Waiting.Reason == k8sContainerReasonCrashLoopBackOff {
+				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
+					podName, containerType, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
+			} else {
+				reason, message := containerFailureContext(cs)
+
+				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' restarted %d times and not ready: %s",
+					podName, containerType, cs.Name, cs.RestartCount, joinReasonMessage(reason, message)))
+			}
+
+			continue
+		}
 	}
 
 	return failed, errorMsg
@@ -754,23 +773,30 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 // checkPodFailures checks if any pods have critical failures like CrashLoopBackOff,
 // plus the restart threshold (a container still not ready after repeated
 // restarts is a locatable failure, not an endless Deploying state).
-// Deterministic immediate failures (OOM / image pull / CrashLoopBackOff /
-// unschedulable) are reported first; the restart-threshold check is appended
-// as an additional branch and never masks them.
+// Deterministic immediate failures (OOM / image pull / init non-zero exit /
+// unschedulable) are reported first; the restart-threshold check is a branch
+// inside checkContainerStatuses and never masks them.
 func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, string) {
 	failed := false
 	var errorMsg []string
 
 	for _, pod := range pods {
+		// A terminating pod (rolling update / scale-down) flips container Ready
+		// to false while retaining its historical restart count; it must never
+		// be judged by that history or the endpoint would flap FAILED during
+		// routine rollouts. Immediate failures (OOM / image pull / init non-zero
+		// exit) still apply — only the restart-threshold branch is skipped.
+		applyRestartThreshold := pod.DeletionTimestamp == nil
+
 		// Check init container statuses
-		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container"); f {
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container", applyRestartThreshold); f {
 			failed = true
 
 			errorMsg = append(errorMsg, msgs...)
 		}
 
 		// Check container statuses
-		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.ContainerStatuses, "Container"); f {
+		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.ContainerStatuses, "Container", applyRestartThreshold); f {
 			failed = true
 
 			errorMsg = append(errorMsg, msgs...)
@@ -786,65 +812,6 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 				}
 			}
 		}
-	}
-
-	// Startup-restart threshold: a container that has restarted past the
-	// threshold and still never became ready is a locatable failure, not an
-	// endless Deploying state. Runs after the immediate checks so deterministic
-	// failures keep precedence.
-	if wf, wmsg := checkStartupTimeoutFailures(pods); wf {
-		failed = true
-
-		errorMsg = append(errorMsg, wmsg)
-	}
-
-	return failed, strings.Join(errorMsg, "; ")
-}
-
-// checkStartupTimeoutFailures marks an endpoint failed when a main container
-// has restarted more than containerFailureRestartThreshold times and is still
-// not ready. Restart accumulation is driven by the startupProbe window the
-// kubelet enforces, so a high count already implies the engine has been unable
-// to become ready for a long time — Neutree does not need to re-derive a time
-// window. Init containers are intentionally not judged here: their failure
-// semantics are owned by the model-downloader status check and the immediate
-// init-container checks in checkContainerStatuses. Ready containers are never
-// judged by historical restart counts.
-func checkStartupTimeoutFailures(pods []corev1.Pod) (bool, string) {
-	failed := false
-	var errorMsg []string
-
-	for _, pod := range pods {
-		// A terminating pod (rolling update / scale-down) flips container
-		// Ready to false while retaining its historical restart count; it must
-		// never be judged by that history or the endpoint would flap FAILED
-		// during routine rollouts.
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
-
-		check := func(statuses []corev1.ContainerStatus, containerType string) {
-			for _, cs := range statuses {
-				if cs.Ready {
-					continue
-				}
-
-				if cs.RestartCount <= containerFailureRestartThreshold {
-					continue
-				}
-
-				reason, message := containerFailureContext(cs)
-
-				failed = true
-
-				errorMsg = append(errorMsg, fmt.Sprintf(
-					"Pod '%s' %s '%s' restarted %d times and not ready: %s",
-					pod.Name, containerType, cs.Name, cs.RestartCount,
-					joinReasonMessage(reason, message)))
-			}
-		}
-
-		check(pod.Status.ContainerStatuses, "Container")
 	}
 
 	return failed, strings.Join(errorMsg, "; ")

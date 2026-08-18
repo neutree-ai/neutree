@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -1536,132 +1535,135 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 	}
 }
 
-func Test_checkStartupTimeoutFailures(t *testing.T) {
-	newPod := func(containerName string, restartCount int32, ready bool) corev1.Pod {
-		return corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-restarting"},
-			Status: corev1.PodStatus{
-				ContainerStatuses: []corev1.ContainerStatus{
-					{
-						Name:         containerName,
-						Ready:        ready,
-						RestartCount: restartCount,
-						State: corev1.ContainerState{
-							Running: &corev1.ContainerStateRunning{},
-						},
-					},
-				},
-			},
+func Test_checkContainerStatuses(t *testing.T) {
+	newStatus := func(name string, ready bool, restartCount int32, waitingReason string) corev1.ContainerStatus {
+		cs := corev1.ContainerStatus{
+			Name:         name,
+			Ready:        ready,
+			RestartCount: restartCount,
 		}
+		if waitingReason != "" {
+			cs.State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{
+					Reason:  waitingReason,
+					Message: "message-" + waitingReason,
+				},
+			}
+		} else {
+			cs.State = corev1.ContainerState{
+				Running: &corev1.ContainerStateRunning{},
+			}
+		}
+		return cs
 	}
 
 	tests := []struct {
-		name        string
-		pods        []corev1.Pod
-		wantFailed  bool
-		wantMsgPart string
+		name                  string
+		podName               string
+		statuses              []corev1.ContainerStatus
+		containerType         string
+		applyRestartThreshold bool
+		wantFailed            bool
+		wantMsgPart           string
 	}{
 		{
-			name:        "container restarted >5 times and not ready -> failed",
-			pods:        []corev1.Pod{newPod("engine", 6, false)},
-			wantFailed:  true,
-			wantMsgPart: "restarted 6 times",
+			name:                  "restarted >5 times, not ready, no crashloop -> failed",
+			podName:               "pod-a",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 6, "")},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            true,
+			wantMsgPart:           "restarted 6 times and not ready",
 		},
 		{
-			name:       "container restarted >5 times but ready -> not failed",
-			pods:       []corev1.Pod{newPod("engine", 6, true)},
-			wantFailed: false,
+			name:                  "restarted >5 times, not ready, CrashLoopBackOff -> failed with crashloop detail",
+			podName:               "pod-b",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 6, k8sContainerReasonCrashLoopBackOff)},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            true,
+			wantMsgPart:           "in CrashLoopBackOff (restarted 6 times)",
 		},
 		{
-			name:       "container restarted below threshold and not ready -> not failed",
-			pods:       []corev1.Pod{newPod("engine", 3, false)},
-			wantFailed: false,
+			name:                  "restarted >5 times but ready -> not failed",
+			podName:               "pod-c",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", true, 6, "")},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            false,
 		},
 		{
-			name:       "no pods -> not failed",
-			pods:       nil,
-			wantFailed: false,
+			name:                  "restarted exactly 5 times, not ready -> not failed (threshold is >5)",
+			podName:               "pod-d",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 5, "")},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            false,
 		},
 		{
-			name: "init container restart history is not judged",
-			pods: []corev1.Pod{
+			name:                  "still starting, 0 restarts, not ready -> not failed",
+			podName:               "pod-e",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 0, "")},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            false,
+		},
+		{
+			name:                  "restarted >5 times, not ready, but restart threshold disabled (terminating pod) -> not failed",
+			podName:               "pod-f",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 6, "")},
+			containerType:         "Container",
+			applyRestartThreshold: false,
+			wantFailed:            false,
+		},
+		{
+			name:    "OOM killed is immediate failure regardless of restart threshold",
+			podName: "pod-g",
+			statuses: []corev1.ContainerStatus{
 				{
-					ObjectMeta: metav1.ObjectMeta{Name: "pod-init-restarting"},
-					Status: corev1.PodStatus{
-						InitContainerStatuses: []corev1.ContainerStatus{
-							{
-								Name:         "model-downloader",
-								Ready:        false,
-								RestartCount: 6,
-								State: corev1.ContainerState{
-									Running: &corev1.ContainerStateRunning{},
-								},
-							},
+					Name:         "engine",
+					Ready:        false,
+					RestartCount: 1,
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason: k8sContainerReasonOOMKilled,
 						},
 					},
 				},
 			},
-			wantFailed: false,
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            true,
+			wantMsgPart:           "OOM (Out of Memory)",
 		},
 		{
-			name: "terminating pod with historical restarts -> not failed",
-			pods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:              "pod-terminating",
-						DeletionTimestamp: &metav1.Time{Time: time.Now()},
-					},
-					Status: corev1.PodStatus{
-						ContainerStatuses: []corev1.ContainerStatus{
-							{
-								Name:         "engine",
-								Ready:        false, // kubelet flips Ready=false on termination
-								RestartCount: 6,     // historical crashes from a previous startup
-								State: corev1.ContainerState{
-									Running: &corev1.ContainerStateRunning{},
-								},
-							},
-						},
-					},
-				},
-			},
-			wantFailed: false,
+			name:                  "ImagePullBackOff is immediate failure",
+			podName:               "pod-h",
+			statuses:              []corev1.ContainerStatus{newStatus("engine", false, 0, k8sContainerReasonImagePullBackOff)},
+			containerType:         "Container",
+			applyRestartThreshold: true,
+			wantFailed:            true,
+			wantMsgPart:           "failed to pull image",
 		},
 		{
-			name: "failure message includes waiting reason and message",
-			pods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "pod-crash-waiting"},
-					Status: corev1.PodStatus{
-						ContainerStatuses: []corev1.ContainerStatus{
-							{
-								Name:         "engine",
-								Ready:        false,
-								RestartCount: 6,
-								State: corev1.ContainerState{
-									Waiting: &corev1.ContainerStateWaiting{
-										Reason:  "CrashLoopBackOff",
-										Message: "back-off restarting failed container",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			wantFailed:  true,
-			wantMsgPart: "CrashLoopBackOff: back-off restarting failed container",
+			name:                  "init container restarted >5 times, not ready -> failed (unified rule applies to init too)",
+			podName:               "pod-i",
+			statuses:              []corev1.ContainerStatus{newStatus("model-downloader", false, 6, "")},
+			containerType:         "Init Container",
+			applyRestartThreshold: true,
+			wantFailed:            true,
+			wantMsgPart:           "restarted 6 times and not ready",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hasFailed, msg := checkStartupTimeoutFailures(tt.pods)
+			hasFailed, msgs := checkContainerStatuses(tt.podName, tt.statuses, tt.containerType, tt.applyRestartThreshold)
 			assert.Equal(t, tt.wantFailed, hasFailed)
 			if tt.wantFailed {
-				assert.NotEmpty(t, msg)
+				assert.NotEmpty(t, msgs)
 				if tt.wantMsgPart != "" {
-					assert.Contains(t, msg, tt.wantMsgPart)
+					assert.Contains(t, strings.Join(msgs, "; "), tt.wantMsgPart)
 				}
 			}
 		})
@@ -3415,7 +3417,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPodInCrashLoopBackOff("test-container", 5)
+					WithPodInCrashLoopBackOff("test-container", 6)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: k8sContainerReasonCrashLoopBackOff,
@@ -3471,7 +3473,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerInCrashLoopBackOff(modelDownloaderInitContainerName, 5)
+					WithInitContainerInCrashLoopBackOff(modelDownloaderInitContainerName, 6)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
@@ -3603,7 +3605,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "return ModelDownloading for init container with high restarts (restart check ignores init containers)",
+			name: "return Failed for init container restarted >5 times and not ready (unified rule applies to init too)",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
@@ -3612,8 +3614,8 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
 					WithInitContainerRestartingNotReady(modelDownloaderInitContainerName, 6)
 			},
-			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
-			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "restarted 6 times and not ready",
 			expectError:    false,
 		},
 		{
