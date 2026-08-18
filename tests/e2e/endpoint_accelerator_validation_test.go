@@ -6,6 +6,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 // apiValidationError mirrors the middleware validationError JSON shape returned
