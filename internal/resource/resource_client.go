@@ -44,6 +44,10 @@ func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNo
 	}
 }
 
+// hasDeviceAvailableCapacity reports whether a device still has schedulable
+// capacity in BOTH dimensions. A card contributes to the remaining capacity
+// pool only when it retains both memory and compute; vGPU slices require both,
+// so a card with one dimension exhausted contributes nothing.
 func hasDeviceAvailableCapacity(pool *v1.DeviceResourcePool) bool {
 	return pool != nil && pool.MemoryMiB > 0 && pool.CoreUnits > 0
 }

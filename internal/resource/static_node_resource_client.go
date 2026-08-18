@@ -195,6 +195,11 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 	if acceleratorType == v1.AcceleratorType(v1.StaticNodeAcceleratorTypeCPU) ||
 		len(node.Status.Accelerator.Devices) == 0 {
+		// No device snapshot (or CPU-only): fall back to the base resources
+		// unchanged. Until snapshots populate, Available may carry base-Ray
+		// fractional quantities (e.g. 0.5) rather than fully-free card counts;
+		// this is a transient snapshot state, display-only, and resolved once
+		// the node-agent snapshot reports the physical devices.
 		return staticNodeBaseResourceNode(node, base)
 	}
 
@@ -257,6 +262,14 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 			}
 			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, quantity, availablePool)
 		}
+	}
+
+	// Mirror the Kubernetes resource client: always surface the available
+	// accelerator group (Quantity 0 when no card is fully free) so consumers
+	// can rely on a consistent group shape across cluster types instead of
+	// handling "group absent" for the same logical "0 available" state.
+	if nodeStatus.Available.AcceleratorGroups[acceleratorType] == nil {
+		nodeStatus.Available.AcceleratorGroups[acceleratorType] = newAcceleratorGroup()
 	}
 
 	if len(nodeStatus.Devices) == 0 {
