@@ -582,10 +582,10 @@ func (f *FakeK8sClient) AssertExpectations() {
 
 // WithPodRestartingNotReady creates a pod whose container has restarted more
 // than the failure threshold but is not in CrashLoopBackOff and has not
-// become ready — the slow-startup scenario NEU-613 adds a startup window
-// check for. startTime is the pod's Status.StartTime (start of current
-// launch attempt); containerState selects a non-CrashLoopBackOff state so
-// the new restart-window check is the one under test.
+// become ready — the slow-startup scenario the restart-window check targets.
+// startTime is the pod's Status.StartTime (start of current launch attempt);
+// the container sits in a non-CrashLoopBackOff Running state so the restart
+// window check is the one under test.
 func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartCount int32, startTime *metav1.Time) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
