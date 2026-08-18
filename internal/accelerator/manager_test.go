@@ -28,7 +28,7 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 }
 
-func TestManagerGetEngineContainerRunOptionsCDI(t *testing.T) {
+func TestManagerGetEngineContainerRunOptionsNVIDIA(t *testing.T) {
 	m := &manager{}
 	m.acceleratorsMap.Store(v1.AcceleratorTypeNVIDIAGPU.String(), registerPlugin{
 		resource: v1.AcceleratorTypeNVIDIAGPU.String(),
@@ -39,9 +39,7 @@ func TestManagerGetEngineContainerRunOptionsCDI(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, opts, "--runtime=nvidia")
-	assert.Contains(t, opts, "--device nvidia.com/gpu=all")
-	// CDI convergence: no legacy bare --gpus all injection.
-	assert.NotContains(t, opts, "--gpus all")
+	assert.Contains(t, opts, "--gpus all")
 }
 
 func TestManagerGetEngineContainerRunOptionsEmptyForCPU(t *testing.T) {

@@ -116,10 +116,6 @@ func rayRuntimeDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 
 	options = append(options, profile.ClusterRuntime.Options...)
 
-	for _, device := range profile.ClusterRuntime.CDIDevices {
-		options = append(options, "--device "+device)
-	}
-
 	return options
 }
 

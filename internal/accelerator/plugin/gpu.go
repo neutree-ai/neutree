@@ -241,11 +241,6 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 			},
 			Port: nvidiaDCGMExporterPort,
 			Env: map[string]string{
-				// Keep the legacy all-GPU selector value: this env is shared by
-				// the static-node Docker path and the Kubernetes DaemonSet path,
-				// and the Kubernetes path keeps its current config. The static
-				// node declares GPU access via Runtime + CDIDevices (rendered as
-				// --runtime=nvidia --device nvidia.com/gpu=all), not this env.
 				"NVIDIA_VISIBLE_DEVICES": "all",
 			},
 			ConfigFiles: []v1.AcceleratorExporterConfigFile{
@@ -268,8 +263,8 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				NodeSelector: map[string]string{
 					NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
 				},
-				Runtime:    "nvidia",
-				CDIDevices: []string{"nvidia.com/gpu=all"},
+				Runtime:          "nvidia",
+				DockerRunOptions: []string{"--gpus all"},
 			},
 		},
 	}, nil
@@ -281,14 +276,14 @@ func nvidiaGPUNodeRuntimeConfig() v1.RuntimeConfig {
 		Env: map[string]string{
 			"ACCELERATOR_TYPE": "gpu",
 		},
-		CDIDevices: []string{"nvidia.com/gpu=all"},
+		Options: []string{"--gpus all"},
 	}
 }
 
 func nvidiaGPUContainerRuntimeConfig() v1.RuntimeConfig {
 	return v1.RuntimeConfig{
-		Runtime:    "nvidia",
-		CDIDevices: []string{"nvidia.com/gpu=all"},
+		Runtime: "nvidia",
+		Options: []string{"--gpus all"},
 	}
 }
 

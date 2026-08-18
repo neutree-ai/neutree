@@ -298,14 +298,6 @@ func (c *sshRayClusterReconciler) buildAcceleratorDockerConfig(reconcileCtx *Rec
 		runOptions = append(runOptions, runtimeConfig.Options...)
 	}
 
-	if len(runtimeConfig.CDIDevices) > 0 {
-		changed = true
-
-		for _, device := range runtimeConfig.CDIDevices {
-			runOptions = append(runOptions, "--device "+device)
-		}
-	}
-
 	dockerConfig := base
 	dockerConfig.Image = image
 	dockerConfig.RunOptions = runOptions

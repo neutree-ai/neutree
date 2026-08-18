@@ -480,10 +480,6 @@ func (a *manager) GetEngineContainerRunOptions(acceleratorType string) ([]string
 
 	opts = append(opts, rc.Options...)
 
-	for _, device := range rc.CDIDevices {
-		opts = append(opts, "--device "+device)
-	}
-
 	for k, v := range rc.Env {
 		opts = append(opts, "-e", k+"="+v)
 	}

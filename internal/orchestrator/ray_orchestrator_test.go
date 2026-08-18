@@ -250,7 +250,7 @@ func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 			}
 
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
-			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil).Maybe()
+			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
@@ -482,7 +482,7 @@ func TestRayOrchestrator_createOrUpdateEndpoint_ApplicationNameConsistency(t *te
 			}
 
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
-			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil).Maybe()
+			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
@@ -604,7 +604,7 @@ func TestRayOrchestrator_deleteEndpoint(t *testing.T) {
 			}
 
 			mockAcceleratorMgr := acceleratormocks.NewMockManager(t)
-			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil).Maybe()
+			mockAcceleratorMgr.EXPECT().GetEngineContainerRunOptions(mock.Anything).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllConverters().Return(map[string]plugin.ResourceConverter{}).Maybe()
 			mockAcceleratorMgr.EXPECT().GetAllParsers().Return(map[string]resourceparser.ResourceParser{}).Maybe()
 
@@ -1002,7 +1002,7 @@ func TestEndpointToApplication_ResourceNameNormalization(t *testing.T) {
 			mgr.EXPECT().GetConverter(nvidiaGPU).
 				Return(plugin.NewGPUConverter(), true)
 			mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).
-				Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil).Maybe()
+				Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 
 			cluster := &v1.Cluster{
 				Spec: &v1.ClusterSpec{
@@ -1438,7 +1438,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1459,7 +1459,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
 				"--rm",
 			},
@@ -1478,7 +1478,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1498,7 +1498,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1525,7 +1525,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1568,7 +1568,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
 				mgr := acceleratormocks.NewMockManager(t)
-				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
 				return mgr
 			},
 			setupModelRegistry: func(t *testing.T) {
@@ -1584,7 +1584,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				`--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,"volume-opt=o=addr=10.0.0.1,nfsvers=4.1",volume-opt=device=:/models'`,
 				"--rm",
 			},
@@ -1608,7 +1608,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
 				mgr := acceleratormocks.NewMockManager(t)
-				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
 				return mgr
 			},
 			setupModelRegistry: func(t *testing.T) {
@@ -1624,7 +1624,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--mount 'type=volume,dst=/mnt/ws/ep,volume-opt=type=nfs,volume-opt=o=addr=10.0.0.1,volume-opt=device=:/models'",
 				"--rm",
 			},
@@ -1721,7 +1721,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1768,7 +1768,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 			},
 			expectedBackendOptions: []string{
 				"--runtime=nvidia",
-				"--device nvidia.com/gpu=all",
+				"--gpus all",
 				"--rm",
 			},
 		},
@@ -1799,7 +1799,7 @@ func TestBuildEngineContainerConfigs(t *testing.T) {
 				mgr = tt.setupMgr(t)
 			} else {
 				mgr = acceleratormocks.NewMockManager(t)
-				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil).Maybe()
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil).Maybe()
 			}
 
 			baseConfig, backendConfig, err := buildEngineContainerConfigs(tt.endpoint, tt.engine, tt.imageRegistry, mgr, tt.modelCaches, tt.modelRegistry)
@@ -1918,14 +1918,14 @@ func TestEndpointToApplication_ContainerConfig(t *testing.T) {
 			setupMgr: func(t *testing.T) *acceleratormocks.MockManager {
 				mgr := acceleratormocks.NewMockManager(t)
 				mgr.EXPECT().GetConverter(nvidiaGPU).Return(plugin.NewGPUConverter(), true)
-				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--device nvidia.com/gpu=all"}, nil)
+				mgr.EXPECT().GetEngineContainerRunOptions(nvidiaGPU).Return([]string{"--runtime=nvidia", "--gpus all"}, nil)
 				return mgr
 			},
 			expectContainer:        true,
 			expectedContainerImage: "registry.example.com/neutree/engine-vllm:v0.12.0-ray2.53.0",
 			expectedBaseRunOptions: []string{"--rm"},
 			expectedBackendRunOptions: []string{
-				"--runtime=nvidia", "--device nvidia.com/gpu=all",
+				"--runtime=nvidia", "--gpus all",
 				"-v /data/models:" + filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, "default"),
 				"--rm",
 			},

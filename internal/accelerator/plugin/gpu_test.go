@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -273,7 +272,7 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 				Env: map[string]string{
 					"ACCELERATOR_TYPE": "gpu",
 				},
-				CDIDevices: []string{"nvidia.com/gpu=all"},
+				Options: []string{"--gpus all"},
 			},
 		},
 	}
@@ -312,13 +311,11 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.ClusterRuntime.CDIDevices)
-	assert.Empty(t, profile.ClusterRuntime.Options)
+	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
 	assert.Equal(t, nvidiaGPUNodeRuntimeConfig(), *profile.ClusterRuntime)
 	require.NotNil(t, profile.EngineRuntime)
 	assert.Equal(t, "nvidia", profile.EngineRuntime.Runtime)
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.EngineRuntime.CDIDevices)
-	assert.Empty(t, profile.EngineRuntime.Options)
+	assert.Equal(t, []string{"--gpus all"}, profile.EngineRuntime.Options)
 	containerRuntime, err := p.GetContainerRuntimeConfig()
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
@@ -342,8 +339,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 		map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
 		profile.MetricsExporter.Runtime.NodeSelector)
 	assert.Equal(t, "nvidia", profile.MetricsExporter.Runtime.Runtime)
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.MetricsExporter.Runtime.CDIDevices)
-	assert.Empty(t, profile.MetricsExporter.Runtime.DockerRunOptions)
+	assert.Equal(t, []string{"--gpus all"}, profile.MetricsExporter.Runtime.DockerRunOptions)
 	require.Len(t, profile.MetricsExporter.ConfigFiles, 1)
 	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.MetricsExporter.ConfigFiles[0].Path)
 	collectors := profile.MetricsExporter.ConfigFiles[0].Content
@@ -393,30 +389,24 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS")
 }
 
-func TestGPUAcceleratorPluginProfileLegacyCleanup(t *testing.T) {
-	// The CDI convergence removes legacy bare GPU injection from the NVIDIA
-	// profile: no bare "--gpus all" docker option and no bare
-	// "NVIDIA_VISIBLE_DEVICES=all" env var. GPU access must be declared via
-	// CDI device requests (nvidia.com/gpu=all) plus the nvidia runtime handler.
+func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
+	// The exporter/node-agent previously received only --gpus all without an
+	// explicit runtime handler, which left GPU injection to Docker's default
+	// device-request hook. The exporter profile must select the nvidia handler
+	// explicitly so the runtime shim (not a one-time prestart hook) performs the
+	// OCI device rewrite that systemd can rebuild.
 	p := &GPUAcceleratorPlugin{}
 
 	profile, err := p.GetAcceleratorProfile(context.Background())
 	require.NoError(t, err)
 
-	// Cluster and engine runtimes declare CDI devices, not bare --gpus all.
-	assert.NotContains(t, profile.ClusterRuntime.Options, "--gpus all")
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.ClusterRuntime.CDIDevices)
-	assert.NotContains(t, profile.EngineRuntime.Options, "--gpus all")
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.EngineRuntime.CDIDevices)
-
-	// Exporter runtime selects the nvidia handler and declares CDI devices,
-	// not the legacy --gpus all DockerRunOptions.
+	// Exporter runtime selects the nvidia handler and keeps the --gpus all
+	// Docker option (K8s shares this env path; legacy device selection stays).
 	assert.Equal(t, "nvidia", profile.MetricsExporter.Runtime.Runtime)
-	assert.Equal(t, []string{"nvidia.com/gpu=all"}, profile.MetricsExporter.Runtime.CDIDevices)
-	assert.NotContains(t, profile.MetricsExporter.Runtime.DockerRunOptions, "--gpus all")
+	assert.Equal(t, []string{"--gpus all"}, profile.MetricsExporter.Runtime.DockerRunOptions)
+	assert.Equal(t, "all", profile.MetricsExporter.Env["NVIDIA_VISIBLE_DEVICES"])
 
-	// No GPU component carries the legacy bare --gpus all injection.
-	raw, err := json.Marshal(profile)
-	require.NoError(t, err)
-	assert.NotContains(t, string(raw), "--gpus all")
+	// Node and engine runtimes keep the legacy --gpus all path unchanged.
+	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
+	assert.Equal(t, []string{"--gpus all"}, profile.EngineRuntime.Options)
 }

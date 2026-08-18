@@ -841,16 +841,14 @@ func acceleratorExporterDockerRunOptions(
 		}
 	}
 
-	// The exporter/node-agent previously only received --gpus all without a
-	// --runtime=, leaving GPU permission injection to the legacy
-	// nvidia-container-runtime-hook. Select the runtime handler explicitly and
-	// declare GPU devices via CDI so the device access is part of the OCI spec.
+	// The exporter/node-agent previously received only --gpus all without an
+	// explicit --runtime=. That left GPU injection to Docker's default
+	// device-request hook rather than the nvidia runtime shim. Selecting the
+	// runtime handler explicitly keeps device access in the runtime's OCI
+	// rewrite, which modern NVIDIA toolkits emit into linux.resources.devices
+	// (rebuildable by systemd), instead of a one-time prestart hook.
 	if runtime.Runtime != "" {
 		options = append(options, "--runtime="+runtime.Runtime)
-	}
-
-	for _, device := range runtime.CDIDevices {
-		options = append(options, "--device "+device)
 	}
 
 	options = append(options, runtime.DockerRunOptions...)
