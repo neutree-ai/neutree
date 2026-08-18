@@ -3810,12 +3810,10 @@ func klogTestLogger() klog.Logger {
 	return klog.Background()
 }
 
-// ModelScope is browsable but not yet deployable from, because the container's
-// downloader speaks only the Hugging Face Hub API. Until NEU-689 wires it, that
-// is refused with a reason here rather than falling through the switch, which
-// would produce a manifest carrying no model path at all and fail inside the
-// container with nothing to read.
-func TestKubernetesOrchestrator_setModelRegistryVariables_RefusesModelScopeUntilNEU689(t *testing.T) {
+// The ModelScope deploy path, end to end through the orchestrator: the registry
+// address and credential reach the container under ModelScope's own variable
+// names, and the model args name the repository the downloader will fetch.
+func TestKubernetesOrchestrator_setModelRegistryVariables_ModelScope(t *testing.T) {
 	k := &kubernetesOrchestrator{}
 
 	data := &DeploymentManifestVariables{
@@ -3824,7 +3822,50 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_RefusesModelScopeUntil
 	}
 
 	err := k.setModelRegistryVariables(data, &v1.Endpoint{
-		Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "Qwen/Qwen3-8B"}},
+		Metadata: &v1.Metadata{Name: "ms-endpoint", Workspace: "default"},
+		Spec: &v1.EndpointSpec{
+			Model: &v1.ModelSpec{Name: "Qwen/Qwen2.5-0.5B-Instruct-GGUF", Version: "latest"},
+		},
+	}, &v1.Cluster{}, &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "public-model-scope"},
+		Spec: &v1.ModelRegistrySpec{
+			Type:        v1.ModelScopeModelRegistryType,
+			Url:         "https://www.modelscope.cn/",
+			Credentials: "ms-token",
+		},
+	})
+
+	require.NoError(t, err)
+
+	// Trailing slash trimmed, as for HF_ENDPOINT.
+	assert.Equal(t, "https://www.modelscope.cn", data.Env[v1.ModelScopeEndpointEnv])
+	assert.Equal(t, "ms-token", data.Env[v1.ModelScopeTokenEnv])
+	// A ModelScope credential must never be presented as a Hugging Face one.
+	assert.NotContains(t, data.Env, v1.HFTokenEnv)
+
+	assert.Equal(t, "Qwen/Qwen2.5-0.5B-Instruct-GGUF", data.ModelArgs["registry_path"])
+	// "latest" is normalised to empty so the downloader omits Revision and lets
+	// the hub resolve the repository's own default branch — which is "master",
+	// not "main", and which the hub does not report as an error when guessed
+	// wrongly.
+	assert.Equal(t, "", data.ModelArgs["version"])
+	assert.Contains(t, data.ModelArgs["path"], "Qwen/Qwen2.5-0.5B-Instruct-GGUF")
+}
+
+// A registry with no credential must not put an empty token in the container's
+// environment: the downloader would then send "Authorization: Bearer " on every
+// request instead of making an anonymous one.
+func TestKubernetesOrchestrator_setModelRegistryVariables_ModelScopeWithoutCredentials(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+
+	data := &DeploymentManifestVariables{
+		Env:       map[string]string{},
+		ModelArgs: map[string]interface{}{},
+	}
+
+	err := k.setModelRegistryVariables(data, &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ms-endpoint", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "Qwen/Qwen3-8B"}},
 	}, &v1.Cluster{}, &v1.ModelRegistry{
 		Metadata: &v1.Metadata{Name: "public-model-scope"},
 		Spec: &v1.ModelRegistrySpec{
@@ -3833,8 +3874,6 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_RefusesModelScopeUntil
 		},
 	})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot deploy a model from a ModelScope registry yet")
-	// Nothing half-built is handed back for a caller to deploy anyway.
-	assert.Empty(t, data.ModelArgs)
+	require.NoError(t, err)
+	assert.NotContains(t, data.Env, v1.ModelScopeTokenEnv)
 }

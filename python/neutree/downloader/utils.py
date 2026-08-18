@@ -93,6 +93,8 @@ def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, Down
         rt = (model_args.get("registry_type") or "")
         if isinstance(rt, str) and "hugging-face" in rt.lower():
             backend = "hugging-face"
+        elif isinstance(rt, str) and "model-scope" in rt.lower():
+            backend = "model-scope"
     if not backend:
         # infer from path/name heuristics
         candidate = model_args.get("registry_path") or model_args.get("name") or ""
@@ -109,7 +111,11 @@ def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, Down
     dest = model_args.get("path") or "/models-cache"
 
     credentials = None
-    token = os.environ.get("NEUTREE_DL_TOKEN") or os.environ.get("HF_TOKEN")
+    # The hub-specific variable is chosen by backend rather than by falling
+    # through a shared chain, so a cluster that has both registries configured
+    # cannot send a Hugging Face token to ModelScope or the reverse.
+    hub_token_env = "MODELSCOPE_API_TOKEN" if backend == "model-scope" else "HF_TOKEN"
+    token = os.environ.get("NEUTREE_DL_TOKEN") or os.environ.get(hub_token_env)
     if token and token != "":
         credentials = {"token": token}
 
@@ -188,6 +194,21 @@ def compute_git_sha1(filepath: str) -> str:
         data = f.read()
 
     return git_hash(data)
+
+def is_offline_mode() -> bool:
+    """Whether this container is configured to do no network fetching at all.
+
+    `HF_HUB_OFFLINE` is honoured because it is what an air-gapped neutree
+    deployment already sets for the Hugging Face path, and an operator who has
+    declared the cluster offline means it for every hub, not just that one.
+    `NEUTREE_DL_OFFLINE` is the backend-neutral spelling.
+
+    Only new backends consult this. The Hugging Face path keeps deferring to
+    huggingface_hub's own handling of HF_HUB_OFFLINE, so its behaviour is
+    unchanged.
+    """
+    return env_bool("NEUTREE_DL_OFFLINE", False) or env_bool("HF_HUB_OFFLINE", False)
+
 
 def should_skip_verification() -> bool:
     """Check if file verification should be skipped.
