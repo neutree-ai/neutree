@@ -124,7 +124,7 @@ class Backend:
         Backend deployment for LlamaCpp model inference.
 
         Args:
-            model_registry_type: Type of model registry ("bentoml" or "hugging-face")
+            model_registry_type: Type of model registry ("bentoml", "hugging-face" or "model-scope")
             model_name: Name of the model in the registry
             model_version: Version of the model
             model_file: Specific model file name (for hugging-face)

@@ -24,6 +24,10 @@ def get_downloader(backend: str):
         from .huggingface import HuggingFaceDownloader as D
 
         return D()
+    if backend == "model-scope":
+        from .model_scope import ModelScopeDownloader as D
+
+        return D()
     if backend == "local":
         from .local import LocalDownloader as D
 
