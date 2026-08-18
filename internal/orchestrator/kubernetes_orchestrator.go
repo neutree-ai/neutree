@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -49,12 +50,17 @@ type kubernetesOrchestrator struct {
 	storage storage.Storage
 
 	acceleratorMgr accelerator.Manager
+
+	// now is the clock used for startup-window checks. Injectable for tests;
+	// defaults to time.Now.
+	now func() time.Time
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
 		storage:        opts.Storage,
 		acceleratorMgr: opts.AcceleratorMgr,
+		now:            time.Now,
 	}
 }
 
@@ -600,6 +606,21 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
+	// Startup-window restart threshold: a container that keeps restarting past
+	// the configured startup window and never becomes ready is a locatable
+	// failure, not an endless Deploying state. Checked after checkPodFailures
+	// so deterministic failures (OOM / image pull / CrashLoopBackOff) keep
+	// precedence, and before the model-downloader check so a stuck
+	// model-downloader init container also converges to Failed.
+	startupTimeout := resolveStartupTimeoutSeconds(endpoint)
+	if hasFailed, failedMsg := checkStartupTimeoutFailures(pods, startupTimeout, k.currentTime()); hasFailed {
+		return &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseFAILED,
+			ErrorMessage: "Endpoint failed: " + failedMsg,
+			Resources:    resources,
+		}, nil
+	}
+
 	if hasIncomplete, detail := hasIncompleteModelDownloaderInitContainer(pods); hasIncomplete {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseMODELDOWNLOADING,
@@ -784,6 +805,98 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 	}
 
 	return failed, strings.Join(errorMsg, "; ")
+}
+
+// checkStartupTimeoutFailures marks an endpoint failed when a container has
+// restarted more than containerFailureRestartThreshold times and is still not
+// ready after the startup window (pod.Status.StartTime + startupTimeoutSeconds)
+// has elapsed. Slow-starting engines (CUDA_LAUNCH_BLOCKING, VLLM_TRACE_FUNCTION)
+// are tolerated within the window; genuinely broken instances converge to a
+// locatable failure. Immediate failures (OOM / image pull / CrashLoopBackOff /
+// unschedulable) are handled before this check and are never masked. Ready
+// containers are never judged by historical restart counts.
+func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, now time.Time) (bool, string) {
+	failed := false
+	var errorMsg []string
+
+	for _, pod := range pods {
+		if pod.Status.StartTime == nil {
+			continue
+		}
+
+		elapsed := now.Sub(pod.Status.StartTime.Time)
+		if elapsed < time.Duration(startupTimeoutSeconds)*time.Second {
+			continue
+		}
+
+		check := func(statuses []corev1.ContainerStatus, containerType string) {
+			for _, cs := range statuses {
+				if cs.Ready {
+					continue
+				}
+
+				if cs.RestartCount <= containerFailureRestartThreshold {
+					continue
+				}
+
+				reason, message := containerFailureContext(cs)
+
+				failed = true
+
+				errorMsg = append(errorMsg, fmt.Sprintf(
+					"Pod '%s' %s '%s' restarted %d times and not ready within %d s startup window: %s",
+					pod.Name, containerType, cs.Name, cs.RestartCount, startupTimeoutSeconds,
+					joinReasonMessage(reason, message)))
+			}
+		}
+
+		check(pod.Status.ContainerStatuses, "Container")
+		check(pod.Status.InitContainerStatuses, "Init Container")
+	}
+
+	return failed, strings.Join(errorMsg, "; ")
+}
+
+// containerFailureContext returns the current waiting/terminated reason and
+// message of a container, preferring the live state over the last termination.
+func containerFailureContext(cs corev1.ContainerStatus) (string, string) {
+	if cs.State.Waiting != nil {
+		return cs.State.Waiting.Reason, cs.State.Waiting.Message
+	}
+
+	if cs.State.Terminated != nil {
+		return cs.State.Terminated.Reason, cs.State.Terminated.Message
+	}
+
+	if cs.LastTerminationState.Terminated != nil {
+		return cs.LastTerminationState.Terminated.Reason, cs.LastTerminationState.Terminated.Message
+	}
+
+	return "", ""
+}
+
+// joinReasonMessage renders a container failure context, degrading to a
+// stable placeholder when neither reason nor message is available.
+func joinReasonMessage(reason, message string) string {
+	if reason == "" && message == "" {
+		return "no termination context available"
+	}
+
+	if message == "" {
+		return reason
+	}
+
+	return reason + ": " + message
+}
+
+// currentTime returns the orchestrator's injected clock, falling back to
+// time.Now for structs built without one (e.g. unit tests).
+func (k *kubernetesOrchestrator) currentTime() time.Time {
+	if k.now != nil {
+		return k.now()
+	}
+
+	return time.Now()
 }
 
 // buildDeploymentErrorMessage builds a descriptive error message from deployment conditions
