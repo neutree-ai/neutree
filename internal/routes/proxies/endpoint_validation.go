@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -47,12 +48,14 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 	endpointValidationCreate: {
 		Validators: []endpointValidator{
 			validateEndpointCreateVGPU,
+			validateEndpointCreateAcceleratorResourceShape,
 		},
 	},
 	endpointValidationPatch: {
 		Validators: []endpointValidator{
 			validateEndpointPatchClusterImmutable,
 			validateEndpointPatchVGPU,
+			validateEndpointPatchAcceleratorResourceShape,
 		},
 	},
 	endpointValidationSoftDelete: {},
@@ -544,6 +547,142 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 	}
 
 	return nil
+}
+
+func validateEndpointCreateAcceleratorResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.New == nil {
+		return nil
+	}
+
+	return validateEndpointAcceleratorResourceShape(store, input.New)
+}
+
+func validateEndpointPatchAcceleratorResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.New == nil {
+		return nil
+	}
+
+	if !endpointPatchMayAffectAcceleratorValidation(&input.Patch) {
+		return nil
+	}
+
+	return validateEndpointAcceleratorResourceShape(store, input.New)
+}
+
+func endpointPatchMayAffectAcceleratorValidation(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil {
+		return false
+	}
+
+	return endpoint.Spec.Resources != nil || endpoint.Spec.Cluster != ""
+}
+
+// validateEndpointAcceleratorResourceShape rejects physical accelerator
+// declarations with an empty or unsupported product, or a count that is not a
+// positive integer. It only runs for non-virtualized accelerator resources;
+// virtualization resources are validated by validateEndpointVGPUResourceShape.
+//
+// The checks are vendor-agnostic: product support is derived from the cluster's
+// reported accelerator metadata rather than a hardcoded vendor allowlist, so a
+// cluster that has not reported metadata (e.g. a static cluster) fails open
+// rather than rejecting a request it cannot judge.
+func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
+		return nil
+	}
+
+	resources := endpoint.Spec.Resources
+	if resources.HasAcceleratorVirtualization() {
+		return nil
+	}
+
+	if resources.Accelerator == nil || resources.GetAcceleratorType() == "" {
+		return nil
+	}
+
+	// A count of zero preserves the existing "no accelerator" semantics;
+	// converters treat count <= 0 as no accelerator.
+	if resources.GetGPUCount() == 0 {
+		return nil
+	}
+
+	if resources.GetAcceleratorProduct() == "" {
+		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.accelerator.product is required"))
+	}
+
+	if count := resources.GetGPUCount(); count < 0 || count != math.Trunc(count) {
+		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.gpu must be a positive integer"))
+	}
+
+	return validateAcceleratorProductSupported(store, endpoint, resources)
+}
+
+// validateAcceleratorProductSupported rejects an accelerator product that the
+// target cluster's accelerator metadata does not list for the requested
+// accelerator type. When the cluster or its metadata is unavailable the check
+// fails open, so requests against clusters that have not reported metadata are
+// not rejected.
+func validateAcceleratorProductSupported(store storage.Storage, endpoint *v1.Endpoint, resources *v1.ResourceSpec) *validationError {
+	cluster := endpointAcceleratorCluster(store, endpoint)
+	if cluster == nil {
+		return nil
+	}
+
+	resourceInfo := clusterResourceInfo(cluster)
+	if resourceInfo == nil || resourceInfo.AcceleratorMetadata == nil {
+		return nil
+	}
+
+	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorType(resources.GetAcceleratorType())]
+	if metadata == nil || metadata.Products == nil {
+		return nil
+	}
+
+	if _, ok := metadata.Products[v1.AcceleratorProduct(resources.GetAcceleratorProduct())]; !ok {
+		return endpointAcceleratorResourceError(fmt.Errorf(
+			"unsupported accelerator product %q for accelerator type %q",
+			resources.GetAcceleratorProduct(),
+			resources.GetAcceleratorType(),
+		))
+	}
+
+	return nil
+}
+
+// endpointAcceleratorCluster resolves the endpoint's target cluster, returning
+// nil when the cluster cannot be resolved so product-support validation fails
+// open instead of rejecting a request it cannot judge.
+func endpointAcceleratorCluster(store storage.Storage, endpoint *v1.Endpoint) *v1.Cluster {
+	if store == nil || endpoint == nil || endpoint.Spec == nil {
+		return nil
+	}
+
+	clusterName := endpoint.Spec.Cluster
+	if clusterName == "" {
+		return nil
+	}
+
+	workspace := defaultWorkspace
+	if endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
+		workspace = endpoint.Metadata.Workspace
+	}
+
+	clusters, err := store.ListCluster(storage.ListOption{
+		Filters: endpointClusterLookupFilters(clusterName, workspace),
+	})
+	if err != nil || len(clusters) != 1 {
+		return nil
+	}
+
+	return &clusters[0]
+}
+
+func endpointAcceleratorResourceError(err error) *validationError {
+	return &validationError{
+		Code:    "10230",
+		Message: "invalid endpoint accelerator resources",
+		Hint:    err.Error(),
+	}
 }
 
 func validateEndpointVGPUMemorySpec(resources *v1.ResourceSpec, cluster *v1.Cluster) *validationError {

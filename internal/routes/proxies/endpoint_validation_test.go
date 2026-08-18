@@ -926,7 +926,9 @@ func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.Zero(t, clusterStorage.listCalls)
+	// The accelerator resource shape validator performs one product-support
+	// cluster lookup (fails open when no cluster is present).
+	assert.LessOrEqual(t, clusterStorage.listCalls, 1)
 	assert.Equal(t, "cluster-a", existing.Spec.Cluster)
 	assert.Equal(t, "4096", existing.Spec.Resources.GetAcceleratorVirtualizationMemoryMiB())
 	assert.Equal(t, "50", existing.Spec.Resources.GetAcceleratorVirtualizationCorePercent())
@@ -1135,7 +1137,9 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.Equal(t, 0, clusterStorage.listCalls)
+	// The accelerator resource shape validator performs one product-support
+	// cluster lookup (fails open when no cluster is present).
+	assert.LessOrEqual(t, clusterStorage.listCalls, 1)
 	assert.True(t, handlerCalled)
 }
 
@@ -1950,4 +1954,264 @@ func (s *fakeClusterStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpo
 	}
 
 	return s.endpoints, nil
+}
+
+func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
+	physicalResourceSpec := func(gpu string, accelerator map[string]string) *v1.Endpoint {
+		return &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Cluster: "test-cluster",
+				Resources: &v1.ResourceSpec{
+					GPU:         &gpu,
+					Accelerator: accelerator,
+				},
+			},
+		}
+	}
+
+	physicalWithProduct := func(gpu, product string) *v1.Endpoint {
+		return physicalResourceSpec(gpu, map[string]string{
+			v1.AcceleratorTypeKey:    "npu",
+			v1.AcceleratorProductKey: product,
+		})
+	}
+
+	cluster := clusterWithAcceleratorProduct(v1.AcceleratorType("npu"), "HUAWEI_Ascend310P", 15360, nil)
+	store := &fakeClusterStorage{clusters: []v1.Cluster{*cluster}}
+
+	t.Run("allows physical accelerator with supported product and integer count", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects physical accelerator with empty product", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "product is required")
+		}
+	})
+
+	t.Run("rejects physical accelerator with unknown product", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "unknown-model")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "unsupported accelerator product")
+		}
+	})
+
+	t.Run("rejects fractional physical accelerator count", func(t *testing.T) {
+		endpoint := physicalWithProduct("1.5", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("rejects fractional physical accelerator count below one", func(t *testing.T) {
+		endpoint := physicalWithProduct("0.5", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("allows zero physical accelerator count as unassigned", func(t *testing.T) {
+		endpoint := physicalWithProduct("0", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects negative physical accelerator count", func(t *testing.T) {
+		endpoint := physicalWithProduct("-1", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("skips virtualization resources", func(t *testing.T) {
+		resources := virtualizationResources("npu", "1", "HUAWEI_Ascend310P", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "4096",
+		})
+		endpoint := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Cluster:   "test-cluster",
+				Resources: resources,
+			},
+		}
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("fails open when cluster metadata is unavailable", func(t *testing.T) {
+		emptyStore := &fakeClusterStorage{}
+		endpoint := physicalWithProduct("1", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(emptyStore, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when no accelerator type is declared", func(t *testing.T) {
+		gpu := "1"
+		endpoint := physicalResourceSpec(gpu, nil)
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when resources are nil", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "test-cluster"}}
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+}
+
+func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
+	cluster := clusterWithAcceleratorProduct(v1.AcceleratorType("npu"), "HUAWEI_Ascend310P", 15360, nil)
+	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
+	}
+
+	validBody := func(gpu, product string) string {
+		return `{
+			"metadata": {"name": "endpoint", "workspace": "default"},
+			"spec": {
+				"cluster": "test-cluster",
+				"resources": {
+					"gpu": "` + gpu + `",
+					"accelerator": {"type": "npu", "product": "` + product + `"}
+				}
+			}
+		}`
+	}
+
+	t.Run("rejects fractional physical accelerator count on create", func(t *testing.T) {
+		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
+			http.MethodPost, validBody("1.5", "HUAWEI_Ascend310P"), clusterStorage,
+		)
+
+		var response validationError
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "10230", response.Code)
+		assert.Contains(t, response.Hint, "positive integer")
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("rejects empty accelerator product on create", func(t *testing.T) {
+		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
+			http.MethodPost, validBody("1", ""), clusterStorage,
+		)
+
+		var response validationError
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "10230", response.Code)
+		assert.Contains(t, response.Hint, "product is required")
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("rejects unknown accelerator product on create", func(t *testing.T) {
+		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
+			http.MethodPost, validBody("1", "unknown-model"), clusterStorage,
+		)
+
+		var response validationError
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "10230", response.Code)
+		assert.Contains(t, response.Hint, "unsupported accelerator product")
+		assert.False(t, handlerCalled)
+	})
+
+	t.Run("allows supported product with integer count on create", func(t *testing.T) {
+		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
+			http.MethodPost, validBody("1", "HUAWEI_Ascend310P"), clusterStorage,
+		)
+
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.True(t, handlerCalled)
+	})
+
+	t.Run("fails open when cluster metadata is unavailable", func(t *testing.T) {
+		emptyStore := &fakeClusterStorage{}
+		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
+			http.MethodPost, validBody("1", "HUAWEI_Ascend310P"), emptyStore,
+		)
+
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+		assert.True(t, handlerCalled)
+	})
+
+	t.Run("rejects fractional physical accelerator count on patch", func(t *testing.T) {
+		existing := &v1.Endpoint{
+			Metadata: &v1.Metadata{Name: "endpoint", Workspace: "default"},
+			Spec: &v1.EndpointSpec{
+				Cluster:   "test-cluster",
+				Resources: physicalAcceleratorResources("1", "HUAWEI_Ascend310P"),
+			},
+		}
+		patchStore := &fakeClusterStorage{
+			clusters:  []v1.Cluster{*cluster},
+			endpoints: []v1.Endpoint{*existing},
+		}
+
+		body := `{
+			"spec": {
+				"cluster": "test-cluster",
+				"resources": {
+					"gpu": "1.5",
+					"accelerator": {"type": "npu", "product": "HUAWEI_Ascend310P"}
+				}
+			}
+		}`
+
+		recorder, handlerCalled := runEndpointVGPUValidationWithPath(
+			http.MethodPatch,
+			"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.default",
+			body,
+			patchStore,
+		)
+
+		var response validationError
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "10230", response.Code)
+		assert.Contains(t, response.Hint, "positive integer")
+		assert.False(t, handlerCalled)
+	})
+}
+
+func physicalAcceleratorResources(gpu string, product string) *v1.ResourceSpec {
+	accelerator := map[string]string{
+		v1.AcceleratorTypeKey:    "npu",
+		v1.AcceleratorProductKey: product,
+	}
+
+	return &v1.ResourceSpec{
+		GPU:         &gpu,
+		Accelerator: accelerator,
+	}
 }
