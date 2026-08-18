@@ -598,22 +598,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
-	if hasFailed, failedMsg := k.checkPodFailures(pods); hasFailed {
-		return &v1.EndpointStatus{
-			Phase:        v1.EndpointPhaseFAILED,
-			ErrorMessage: "Endpoint failed: " + failedMsg,
-			Resources:    resources,
-		}, nil
-	}
-
-	// Startup-window restart threshold: a container that keeps restarting past
-	// the configured startup window and never becomes ready is a locatable
-	// failure, not an endless Deploying state. Checked after checkPodFailures
-	// so deterministic failures (OOM / image pull / CrashLoopBackOff) keep
-	// precedence, and before the model-downloader check so a stuck
-	// model-downloader init container also converges to Failed.
-	startupTimeout := resolveStartupTimeoutSeconds(endpoint)
-	if hasFailed, failedMsg := checkStartupTimeoutFailures(pods, startupTimeout, k.currentTime()); hasFailed {
+	if hasFailed, failedMsg := k.checkPodFailures(pods, resolveStartupTimeoutSeconds(endpoint)); hasFailed {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseFAILED,
 			ErrorMessage: "Endpoint failed: " + failedMsg,
@@ -772,8 +757,13 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 	return failed, errorMsg
 }
 
-// checkPodFailures checks if any pods have critical failures like CrashLoopBackOff
-func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, string) {
+// checkPodFailures checks if any pods have critical failures like CrashLoopBackOff,
+// plus the startup-window restart threshold (a container still not ready after
+// repeated restarts past the configured startup window is a locatable failure,
+// not an endless Deploying state). Deterministic immediate failures (OOM /
+// image pull / CrashLoopBackOff / unschedulable) are reported first; the
+// startup-window check is appended as an additional branch and never masks them.
+func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod, startupTimeoutSeconds int) (bool, string) {
 	failed := false
 	var errorMsg []string
 
@@ -804,17 +794,27 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 		}
 	}
 
+	// Startup-window restart threshold: a container that keeps restarting past
+	// the configured window and never becomes ready is a locatable failure.
+	// Runs after the immediate checks so deterministic failures keep precedence.
+	if wf, wmsg := checkStartupTimeoutFailures(pods, startupTimeoutSeconds, k.currentTime()); wf {
+		failed = true
+
+		errorMsg = append(errorMsg, wmsg)
+	}
+
 	return failed, strings.Join(errorMsg, "; ")
 }
 
-// checkStartupTimeoutFailures marks an endpoint failed when a container has
-// restarted more than containerFailureRestartThreshold times and is still not
-// ready after the startup window (pod.Status.StartTime + startupTimeoutSeconds)
+// checkStartupTimeoutFailures marks an endpoint failed when a main container
+// has restarted more than containerFailureRestartThreshold times and is still
+// not ready after the startup window (pod.Status.StartTime + startupTimeoutSeconds)
 // has elapsed. Slow-starting engines (CUDA_LAUNCH_BLOCKING, VLLM_TRACE_FUNCTION)
 // are tolerated within the window; genuinely broken instances converge to a
-// locatable failure. Immediate failures (OOM / image pull / CrashLoopBackOff /
-// unschedulable) are handled before this check and are never masked. Ready
-// containers are never judged by historical restart counts.
+// locatable failure. Init containers are intentionally not judged here — their
+// failure semantics are owned by the model-downloader status check and the
+// immediate init-container checks in checkContainerStatuses. Ready containers
+// are never judged by historical restart counts.
 func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, now time.Time) (bool, string) {
 	failed := false
 	var errorMsg []string
@@ -859,7 +859,6 @@ func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, n
 		}
 
 		check(pod.Status.ContainerStatuses, "Container")
-		check(pod.Status.InitContainerStatuses, "Init Container")
 	}
 
 	return failed, strings.Join(errorMsg, "; ")

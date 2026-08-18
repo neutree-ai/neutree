@@ -1611,7 +1611,7 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 			wantFailed:  false,
 		},
 		{
-			name: "init container restarted >5 times, not ready, past window -> failed",
+			name: "init container restart history is not judged by the startup window",
 			pods: []corev1.Pod{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-init-restarting"},
@@ -1631,8 +1631,7 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 				},
 			},
 			timeoutSecs: 1200,
-			wantFailed:  true,
-			wantMsgPart: "model-downloader",
+			wantFailed:  false,
 		},
 		{
 			name:        "custom short window gates threshold failure",
@@ -3661,7 +3660,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
 		},
 		{
-			name: "return Failed for init container restarted >5 times not ready past startup window",
+			name: "return ModelDownloading for init container with high restarts (window check ignores init containers)",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
@@ -3672,8 +3671,8 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
 					WithInitContainerRestartingNotReady(modelDownloaderInitContainerName, 6, &start)
 			},
-			expectedPhase:  v1.EndpointPhaseFAILED,
-			expectErrorMsg: "restarted 6 times",
+			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
+			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
 			expectError:    false,
 			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
 		},
