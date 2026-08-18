@@ -578,14 +578,21 @@ func endpointPatchMayAffectAcceleratorValidation(endpoint *v1.Endpoint) bool {
 }
 
 // validateEndpointAcceleratorResourceShape rejects physical accelerator
-// declarations with an empty or unsupported product, or a count that is not a
-// positive integer. It only runs for non-virtualized accelerator resources;
-// virtualization resources are validated by validateEndpointVGPUResourceShape.
+// declarations with an empty or unsupported product, or a count that violates
+// the target cluster type's precision rule. It only runs for non-virtualized
+// accelerator resources; virtualization resources are validated by
+// validateEndpointVGPUResourceShape.
 //
-// The checks are vendor-agnostic: product support is derived from the cluster's
-// reported accelerator metadata rather than a hardcoded vendor allowlist, so a
-// cluster that has not reported metadata (e.g. a static cluster) fails open
-// rather than rejecting a request it cannot judge.
+// The count rule depends on the cluster type: static (SSH) clusters preserve 0
+// as unassigned, allow one-decimal counts below one (0.1-0.9), and allow
+// integers at or above one; Kubernetes clusters allow positive integers only.
+// This mirrors the endpoint form's input precision rules so the API accepts
+// exactly what the UI permits.
+//
+// The checks are vendor-agnostic: product support is derived from the target
+// cluster's reported accelerator metadata rather than a hardcoded vendor
+// allowlist, so a cluster that has not reported metadata fails open rather than
+// rejecting a request it cannot judge.
 func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v1.Endpoint) *validationError {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return nil
@@ -600,46 +607,106 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 		return nil
 	}
 
-	// A nil, empty, or explicitly-zero count preserves the existing "no
-	// accelerator" semantics; converters treat count <= 0 as no accelerator.
-	// Any other value is a declared accelerator count and must be a positive
-	// integer, so a malformed string (e.g. "abc") is rejected rather than
-	// silently deploying without an accelerator.
-	if resources.GPU == nil || *resources.GPU == "" || *resources.GPU == "0" {
+	// A nil or empty count means no accelerator count was declared; leave it
+	// alone rather than guessing the intended semantics.
+	if resources.GPU == nil || *resources.GPU == "" {
 		return nil
 	}
 
 	count, err := strconv.ParseFloat(*resources.GPU, 64)
 	if err != nil {
-		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.gpu must be a positive integer"))
+		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a valid accelerator card count"))
 	}
 
-	if resources.GetAcceleratorProduct() == "" {
-		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.accelerator.product is required"))
+	cluster, validationErr := resolveAcceleratorValidationCluster(store, endpoint)
+	if validationErr != nil {
+		return validationErr
 	}
 
-	if count < 0 || math.IsInf(count, 0) || math.IsNaN(count) || count != math.Trunc(count) {
-		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.gpu must be a positive integer"))
+	clusterType := ""
+	if cluster != nil && cluster.Spec != nil {
+		clusterType = cluster.Spec.Type
 	}
 
-	return validateAcceleratorProductSupported(store, endpoint, resources)
+	if !isAcceleratorCountPrecisionValid(count, clusterType) {
+		if clusterType == string(v1.SSHClusterType) {
+			return endpointAcceleratorResourceError(errors.New(
+				"spec.resources.gpu must be 0, a one-decimal value below 1, or an integer at or above 1",
+			))
+		}
+
+		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive integer"))
+	}
+
+	// A zero count on a static cluster is "unassigned", not an accelerator
+	// request, so product checks do not apply. Any positive count requests an
+	// accelerator and therefore needs a non-empty, supported product.
+	if count > 0 {
+		if resources.GetAcceleratorProduct() == "" {
+			return endpointAcceleratorResourceError(errors.New("spec.resources.accelerator.product is required"))
+		}
+
+		if cluster != nil {
+			if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
+				return validationErr
+			}
+		}
+	}
+
+	return nil
 }
 
-// validateAcceleratorProductSupported rejects an accelerator product that the
-// target cluster's accelerator metadata does not list for the requested
-// accelerator type. When the cluster or its metadata is unavailable the check
-// fails open, so requests against clusters that have not reported metadata are
-// not rejected. An infrastructure failure while looking up the cluster is
+// isAcceleratorCountPrecisionValid reports whether an accelerator card count
+// satisfies the precision rule for a cluster type. Static (SSH) clusters
+// preserve 0 as unassigned, allow one-decimal counts below one (0.1-0.9), and
+// allow integers at or above one. Kubernetes clusters allow positive integers
+// only. An unknown cluster type fails open (accepts) because the rule cannot
+// be determined.
+func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
+	// +Inf, -Inf and NaN never represent a real card count; reject them before
+	// the per-type rules (which +Inf would otherwise pass as an "integer").
+	if math.IsInf(count, 0) || math.IsNaN(count) {
+		return false
+	}
+
+	switch clusterType {
+	case string(v1.KubernetesClusterType):
+		return count >= 1 && count == math.Trunc(count)
+	case string(v1.SSHClusterType):
+		if count < 0 {
+			return false
+		}
+
+		if count == 0 {
+			return true // unassigned
+		}
+
+		if count >= 1 {
+			return count == math.Trunc(count)
+		}
+
+		// 0 < count < 1: exactly one decimal place.
+		scaled := count * 10
+		return math.Abs(scaled-math.Round(scaled)) < 1e-9
+	default:
+		return true
+	}
+}
+
+// resolveAcceleratorValidationCluster resolves the endpoint's target cluster,
+// returning a nil cluster when it cannot be resolved so per-type count and
+// product-support rules fail open instead of rejecting a request that cannot
+// be judged. An infrastructure failure while looking up the cluster is
 // surfaced as an internal error rather than accepted silently, matching the
 // established vGPU cluster lookup contract.
-func validateAcceleratorProductSupported(store storage.Storage, endpoint *v1.Endpoint, resources *v1.ResourceSpec) *validationError {
+func resolveAcceleratorValidationCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
 	if store == nil || endpoint == nil || endpoint.Spec == nil {
-		return nil
+		return nil, nil
 	}
 
 	clusterName := endpoint.Spec.Cluster
 	if clusterName == "" {
-		return nil
+		return nil, nil
 	}
 
 	workspace := defaultWorkspace
@@ -651,17 +718,23 @@ func validateAcceleratorProductSupported(store storage.Storage, endpoint *v1.End
 		Filters: endpointClusterLookupFilters(clusterName, workspace),
 	})
 	if err != nil {
-		return internalServerValidationError()
+		return nil, internalServerValidationError()
 	}
 
-	// Fail open when the target cluster cannot be resolved: product support
-	// cannot be judged, and rejecting it would break legitimate requests
-	// against clusters (e.g. static clusters) that do not report metadata.
 	if len(clusters) != 1 {
-		return nil
+		return nil, nil
 	}
 
-	resourceInfo := clusterResourceInfo(&clusters[0])
+	return &clusters[0], nil
+}
+
+// validateAcceleratorProductSupported rejects an accelerator product that the
+// target cluster's accelerator metadata does not list for the requested
+// accelerator type. When the cluster's metadata is unavailable the check fails
+// open, so requests against clusters that have not reported metadata are not
+// rejected.
+func validateAcceleratorProductSupported(cluster *v1.Cluster, resources *v1.ResourceSpec) *validationError {
+	resourceInfo := clusterResourceInfo(cluster)
 	if resourceInfo == nil || resourceInfo.AcceleratorMetadata == nil {
 		return nil
 	}
