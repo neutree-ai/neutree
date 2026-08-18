@@ -260,6 +260,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 			if isDeviceFullyAvailable(allocatablePool, availablePool) {
 				quantity = 1
 			}
+
 			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, quantity, availablePool)
 		}
 	}

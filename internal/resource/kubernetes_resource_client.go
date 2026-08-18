@@ -523,6 +523,7 @@ func buildKubernetesNeutreeAcceleratorResources(
 			if isDeviceFullyAvailable(allocatable, available) {
 				quantity = 1
 			}
+
 			addKubernetesNeutreeProductResource(availableGroup, product, quantity, available)
 		}
 
