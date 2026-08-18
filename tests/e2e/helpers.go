@@ -1337,23 +1337,24 @@ func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
 
 // endpointOpts holds configurable fields for applyEndpoint.
 type endpointOpts struct {
-	engineName        string
-	engineVersion     string
-	model             string
-	modelVersion      string
-	task              string
-	engineArgs        []EngineArg
-	gpu               string
-	cpu               string
-	memory            string
-	accType           string
-	accProduct        string
-	vgpuMemoryMiB     string
-	vgpuMemoryPercent string
-	vgpuCorePercent   string
-	env               map[string]string
-	forceUpdate       bool
-	replicas          int
+	engineName            string
+	engineVersion         string
+	model                 string
+	modelVersion          string
+	task                  string
+	engineArgs            []EngineArg
+	gpu                   string
+	cpu                   string
+	memory                string
+	accType               string
+	accProduct            string
+	vgpuMemoryMiB         string
+	vgpuMemoryPercent     string
+	vgpuCorePercent       string
+	env                   map[string]string
+	forceUpdate           bool
+	replicas              int
+	startupTimeoutSeconds int
 }
 
 // EndpointOption configures a single field of endpointOpts.
@@ -1426,6 +1427,13 @@ func withReplicas(num int) EndpointOption {
 	return func(o *endpointOpts) { o.replicas = num }
 }
 
+// withStartupTimeoutSeconds injects deployment_options.startup_timeout_seconds
+// (K8s clusters only). Zero or unset leaves the field absent, so the K8s
+// Deployment keeps its default startup window.
+func withStartupTimeoutSeconds(num int) EndpointOption {
+	return func(o *endpointOpts) { o.startupTimeoutSeconds = num }
+}
+
 // renderEndpoint renders the endpoint YAML template and returns the temp file path and resolved options.
 func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endpointOpts) {
 	o := &endpointOpts{
@@ -1474,6 +1482,7 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_ENGINE_ARGS":                               o.engineArgs,
 		"E2E_ENV":                                       o.env,
 		"E2E_REPLICAS_NUM":                              o.replicas,
+		"E2E_STARTUP_TIMEOUT_SECONDS":                   o.startupTimeoutSeconds,
 	}
 
 	yamlPath, err := renderTemplateToTempFile(filepath.Join("testdata", "endpoint.yaml"), data)

@@ -51,3 +51,6 @@ spec:
       load_factor: 1.25
       type: consistent_hash
       virtual_nodes: 150
+{{- if .E2E_STARTUP_TIMEOUT_SECONDS }}
+    startup_timeout_seconds: {{ .E2E_STARTUP_TIMEOUT_SECONDS }}
+{{- end }}

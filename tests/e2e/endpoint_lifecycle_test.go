@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -249,6 +250,76 @@ var _ = Describe("Endpoint Lifecycle", Ordered, Label("endpoint", "lifecycle"), 
 				os.Remove(yamlPath)
 				ExpectFailed(r)
 			}
+		})
+	})
+
+	// --- Startup Timeout ---
+
+	Describe("Startup Timeout", Label("startup-timeout"), func() {
+		var (
+			k8sH      *K8sHelper
+			namespace string
+		)
+
+		BeforeAll(func() {
+			kubeconfig := requireK8sProfile()
+			k8sH = NewK8sHelper(kubeconfig)
+
+			c := getClusterFullJSON(clusterName)
+			namespace = ClusterNamespace(c.Metadata.Workspace, c.Metadata.Name, c.ID)
+		})
+
+		It("should render custom startup_timeout_seconds into the K8s Deployment spec", Label("C2745706"), func() {
+			epName := "e2e-ep-lc-stto-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			yamlPath := applyEndpoint(epName, clusterName, withStartupTimeoutSeconds(300))
+			defer os.Remove(yamlPath)
+
+			By("Waiting for endpoint to reach Running with the custom startup window")
+			waitEndpointRunning(epName)
+
+			By("Asserting the Deployment spec reflects startup_timeout_seconds=300")
+			dep, err := k8sH.GetDeployment(context.Background(), namespace, epName)
+			Expect(err).NotTo(HaveOccurred(), "failed to get deployment %s/%s", namespace, epName)
+
+			Expect(dep.Spec.ProgressDeadlineSeconds).NotTo(BeNil())
+			Expect(*dep.Spec.ProgressDeadlineSeconds).To(BeEquivalentTo(300))
+
+			Expect(dep.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+			var startupProbeFailureThreshold int32
+			found := false
+			for _, ctr := range dep.Spec.Template.Spec.Containers {
+				if ctr.StartupProbe != nil {
+					startupProbeFailureThreshold = ctr.StartupProbe.FailureThreshold
+					found = true
+					break
+				}
+			}
+			Expect(found).To(BeTrue(), "expected a container with a startupProbe")
+			Expect(startupProbeFailureThreshold).To(BeEquivalentTo(30))
+		})
+
+		It("should reach Failed with a locatable error when a not-ready instance exceeds a short startup window", Label("C2745707"), func() {
+			epName := "e2e-ep-lc-stto-fail-" + Cfg.RunID
+			DeferCleanup(func() { deleteEndpoint(epName) })
+
+			// A small window plus a model that cannot be served keeps the pod
+			// from becoming ready; after the window the restart-window check
+			// (or the existing CrashLoopBackOff/init threshold) converges the
+			// endpoint to Failed with a locatable message.
+			yamlPath := applyEndpoint(epName, clusterName,
+				withStartupTimeoutSeconds(60),
+				withModel("non-existent-model-"+Cfg.RunID, "v0.0.0"),
+				withoutForceUpdate())
+			defer os.Remove(yamlPath)
+
+			waitEndpointFailed(epName)
+
+			ep := getEndpoint(epName)
+			Expect(ep.Status.Phase).To(BeEquivalentTo("Failed"))
+			Expect(ep.Status.ErrorMessage).NotTo(BeEmpty())
+			Expect(ep.Status.ErrorMessage).To(ContainSubstring("Pod"))
 		})
 	})
 
