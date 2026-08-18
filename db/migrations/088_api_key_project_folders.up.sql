@@ -183,21 +183,29 @@ CREATE FUNCTION api.get_api_key_project_groups(
     total_projects BIGINT
 ) LANGUAGE sql STABLE SECURITY DEFINER AS $$
     WITH folders AS (
-        SELECT to_jsonb(p) AS project, p.id AS project_id, p.created_at
+        SELECT to_jsonb(p) AS project, p.id AS project_id, p.workspace, p.created_at
         FROM api.api_key_projects p
-        WHERE p.workspace = p_workspace
+        WHERE (p_workspace IS NULL OR p.workspace = p_workspace)
           AND api.has_permission(auth.uid(), 'workspace:read', p.workspace)
         UNION ALL
         SELECT jsonb_build_object(
-                   'id', '__ungrouped__',
-                   'workspace', p_workspace,
+                   'id', '__ungrouped__:' || key_workspaces.workspace,
+                   'workspace', key_workspaces.workspace,
                    'name', 'Ungrouped',
                    'description', '',
                    'is_ungrouped', true
                ),
                NULL::uuid,
+               key_workspaces.workspace,
                '-infinity'::timestamptz
-        WHERE api.has_permission(auth.uid(), 'workspace:read', p_workspace)
+        FROM (
+            SELECT DISTINCT (metadata).workspace AS workspace
+            FROM api.api_keys
+            WHERE user_id = auth.uid()
+              AND (metadata).deletion_timestamp IS NULL
+              AND (p_workspace IS NULL OR (metadata).workspace = p_workspace)
+        ) key_workspaces
+        WHERE api.has_permission(auth.uid(), 'workspace:read', key_workspaces.workspace)
     ), matching AS (
         SELECT f.*,
                NULLIF(trim(p_search), '') IS NULL
@@ -208,7 +216,7 @@ CREATE FUNCTION api.get_api_key_project_groups(
            OR EXISTS (
                SELECT 1 FROM api.api_keys k
                WHERE k.user_id = auth.uid()
-                 AND (k.metadata).workspace = p_workspace
+                 AND (k.metadata).workspace = f.workspace
                  AND k.project_id IS NOT DISTINCT FROM f.project_id
                  AND (k.metadata).deletion_timestamp IS NULL
                  AND (
@@ -236,7 +244,7 @@ CREATE FUNCTION api.get_api_key_project_groups(
     FROM visible v
     LEFT JOIN api.api_keys k
       ON k.user_id = auth.uid()
-     AND (k.metadata).workspace = p_workspace
+     AND (k.metadata).workspace = v.workspace
      AND k.project_id IS NOT DISTINCT FROM v.project_id
      AND (k.metadata).deletion_timestamp IS NULL
      AND (
@@ -250,8 +258,8 @@ CREATE FUNCTION api.get_api_key_project_groups(
              ILIKE '%' || trim(p_search) || '%'
          OR k.description ILIKE '%' || trim(p_search) || '%'
      )
-    GROUP BY v.project, v.created_at, v.project_id, v.total_projects
-    ORDER BY v.created_at, v.project_id NULLS FIRST;
+    GROUP BY v.project, v.workspace, v.created_at, v.project_id, v.total_projects
+    ORDER BY v.workspace, v.created_at, v.project_id NULLS FIRST;
 $$;
 
 DROP FUNCTION api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER, JSONB);
