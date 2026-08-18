@@ -42,7 +42,7 @@ func TestManagerGetEngineContainerRunOptionsNVIDIA(t *testing.T) {
 	assert.Contains(t, opts, "--gpus all")
 }
 
-func TestManagerGetEngineContainerRunOptionsEmptyForCPU(t *testing.T) {
+func TestManagerGetEngineContainerRunOptionsEmptyForNoAccelerator(t *testing.T) {
 	m := &manager{}
 
 	opts, err := m.GetEngineContainerRunOptions("")

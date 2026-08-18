@@ -150,6 +150,9 @@ type AcceleratorExporterRuntimeProfile struct {
 	// injection to the default Docker device-request hook instead of the
 	// nvidia runtime. Selecting the handler explicitly keeps device access in
 	// the runtime shim's OCI rewrite (systemd-rebuildable) on modern toolkits.
+	// omitempty is deliberate: unlike RuntimeConfig.Runtime (which is always
+	// set for accelerator runtimes), an empty handler here is meaningful —
+	// it means the exporter does not select a special runtime.
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
