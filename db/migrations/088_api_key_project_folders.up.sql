@@ -114,8 +114,7 @@ BEGIN
 
     SELECT count(*) INTO v_count
     FROM api.api_keys
-    WHERE project_id = p_project_id
-      AND (metadata).deletion_timestamp IS NULL;
+    WHERE project_id = p_project_id;
 
     IF v_count > 0 THEN
         RAISE EXCEPTION 'Project has % API keys', v_count
@@ -199,11 +198,14 @@ CREATE FUNCTION api.get_api_key_project_groups(
                key_workspaces.workspace,
                '-infinity'::timestamptz
         FROM (
+            SELECT p_workspace AS workspace
+            WHERE p_workspace IS NOT NULL
+            UNION
             SELECT DISTINCT (metadata).workspace AS workspace
             FROM api.api_keys
             WHERE user_id = auth.uid()
               AND (metadata).deletion_timestamp IS NULL
-              AND (p_workspace IS NULL OR (metadata).workspace = p_workspace)
+              AND p_workspace IS NULL
         ) key_workspaces
         WHERE api.has_permission(auth.uid(), 'workspace:read', key_workspaces.workspace)
     ), matching AS (
@@ -211,7 +213,22 @@ CREATE FUNCTION api.get_api_key_project_groups(
                NULLIF(trim(p_search), '') IS NULL
                    OR f.project->>'name' ILIKE '%' || trim(p_search) || '%' AS project_matches
         FROM folders f
-        WHERE NULLIF(trim(p_search), '') IS NULL
+        WHERE (
+            p_api_key_disabled IS NULL
+            OR EXISTS (
+                SELECT 1 FROM api.api_keys status_key
+                WHERE status_key.user_id = auth.uid()
+                  AND (status_key.metadata).workspace = f.workspace
+                  AND status_key.project_id IS NOT DISTINCT FROM f.project_id
+                  AND (status_key.metadata).deletion_timestamp IS NULL
+                  AND COALESCE(
+                      ((status_key.spec).limits ->> 'disabled')::boolean,
+                      false
+                  ) = p_api_key_disabled
+            )
+        )
+        AND (
+           NULLIF(trim(p_search), '') IS NULL
            OR f.project->>'name' ILIKE '%' || trim(p_search) || '%'
            OR EXISTS (
                SELECT 1 FROM api.api_keys k
@@ -224,7 +241,7 @@ CREATE FUNCTION api.get_api_key_project_groups(
                          ILIKE '%' || trim(p_search) || '%'
                      OR k.description ILIKE '%' || trim(p_search) || '%'
                  )
-           )
+           ))
     ), visible AS (
         SELECT m.*, count(*) OVER () AS total_projects
         FROM matching m
@@ -260,6 +277,34 @@ CREATE FUNCTION api.get_api_key_project_groups(
      )
     GROUP BY v.project, v.workspace, v.created_at, v.project_id, v.total_projects
     ORDER BY v.workspace, v.created_at, v.project_id NULLS FIRST;
+$$;
+
+CREATE FUNCTION api.count_api_key_project_group_api_keys(
+    p_workspace TEXT,
+    p_search TEXT DEFAULT NULL,
+    p_api_key_disabled BOOLEAN DEFAULT NULL
+) RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER AS $$
+    SELECT count(*)
+    FROM api.api_keys k
+    LEFT JOIN api.api_key_projects p ON p.id = k.project_id
+    WHERE k.user_id = auth.uid()
+      AND (k.metadata).deletion_timestamp IS NULL
+      AND (p_workspace IS NULL OR (k.metadata).workspace = p_workspace)
+      AND api.has_permission(
+          auth.uid(), 'workspace:read', (k.metadata).workspace
+      )
+      AND (
+          p_api_key_disabled IS NULL
+          OR COALESCE(((k.spec).limits ->> 'disabled')::boolean, false)
+              = p_api_key_disabled
+      )
+      AND (
+          NULLIF(trim(p_search), '') IS NULL
+          OR p.name ILIKE '%' || trim(p_search) || '%'
+          OR COALESCE((k.metadata).display_name, (k.metadata).name)
+              ILIKE '%' || trim(p_search) || '%'
+          OR k.description ILIKE '%' || trim(p_search) || '%'
+      );
 $$;
 
 DROP FUNCTION api.create_api_key(TEXT, TEXT, INTEGER, TEXT, INTEGER, JSONB);
