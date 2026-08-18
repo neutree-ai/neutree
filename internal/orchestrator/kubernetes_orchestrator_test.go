@@ -582,11 +582,9 @@ func (f *FakeK8sClient) AssertExpectations() {
 
 // WithPodRestartingNotReady creates a pod whose container has restarted more
 // than the failure threshold but is not in CrashLoopBackOff and has not
-// become ready — the slow-startup scenario the restart-window check targets.
-// startTime is the pod's Status.StartTime (start of current launch attempt);
-// the container sits in a non-CrashLoopBackOff Running state so the restart
-// window check is the one under test.
-func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartCount int32, startTime *metav1.Time) *FakeK8sClient {
+// become ready. The container sits in a non-CrashLoopBackOff Running state so
+// the restart-threshold check is the one under test.
+func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartCount int32) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pod-restarting",
@@ -597,8 +595,7 @@ func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartC
 			},
 		},
 		Status: corev1.PodStatus{
-			Phase:     corev1.PodRunning,
-			StartTime: startTime,
+			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
 					Name:         containerName,
@@ -628,8 +625,8 @@ func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartC
 // WithPodReadyAfterRestarts creates a pod whose container is Ready=true but
 // carries a historical restart count past the failure threshold — a healthy
 // running instance that crashed >5 times during a previous startup. The
-// restart-window check must never judge a ready container by its history.
-func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartCount int32, startTime *metav1.Time) *FakeK8sClient {
+// restart-threshold check must never judge a ready container by its history.
+func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartCount int32) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pod-ready-restarts",
@@ -640,8 +637,7 @@ func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartC
 			},
 		},
 		Status: corev1.PodStatus{
-			Phase:     corev1.PodRunning,
-			StartTime: startTime,
+			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
 					Name:         containerName,
@@ -663,8 +659,8 @@ func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartC
 
 // WithInitContainerRestartingNotReady is the init-container sibling of
 // WithPodRestartingNotReady: restart count past the failure threshold, not
-// ready, past the startup window, not in CrashLoopBackOff.
-func (f *FakeK8sClient) WithInitContainerRestartingNotReady(containerName string, restartCount int32, startTime *metav1.Time) *FakeK8sClient {
+// ready, not in CrashLoopBackOff.
+func (f *FakeK8sClient) WithInitContainerRestartingNotReady(containerName string, restartCount int32) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pod-init-restarting",
@@ -675,8 +671,7 @@ func (f *FakeK8sClient) WithInitContainerRestartingNotReady(containerName string
 			},
 		},
 		Status: corev1.PodStatus{
-			Phase:     corev1.PodRunning,
-			StartTime: startTime,
+			Phase: corev1.PodRunning,
 			InitContainerStatuses: []corev1.ContainerStatus{
 				{
 					Name:         containerName,
@@ -1542,16 +1537,10 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 }
 
 func Test_checkStartupTimeoutFailures(t *testing.T) {
-	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-	thirtyMinAgo := metav1.NewTime(now.Add(-30 * time.Minute))
-	fiveMinAgo := metav1.NewTime(now.Add(-5 * time.Minute))
-	noStartTime := (*metav1.Time)(nil)
-
-	newPod := func(startTime *metav1.Time, containerName string, restartCount int32, ready bool) corev1.Pod {
+	newPod := func(containerName string, restartCount int32, ready bool) corev1.Pod {
 		return corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod-restarting"},
 			Status: corev1.PodStatus{
-				StartTime: startTime,
 				ContainerStatuses: []corev1.ContainerStatus{
 					{
 						Name:         containerName,
@@ -1569,54 +1558,36 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 	tests := []struct {
 		name        string
 		pods        []corev1.Pod
-		timeoutSecs int
 		wantFailed  bool
 		wantMsgPart string
 	}{
 		{
-			name:        "container restarted >5 times, not ready, past window -> failed",
-			pods:        []corev1.Pod{newPod(&thirtyMinAgo, "engine", 6, false)},
-			timeoutSecs: 1200,
+			name:        "container restarted >5 times and not ready -> failed",
+			pods:        []corev1.Pod{newPod("engine", 6, false)},
 			wantFailed:  true,
 			wantMsgPart: "restarted 6 times",
 		},
 		{
-			name:        "container restarted >5 times, ready, past window -> not failed",
-			pods:        []corev1.Pod{newPod(&thirtyMinAgo, "engine", 6, true)},
-			timeoutSecs: 1200,
-			wantFailed:  false,
+			name:       "container restarted >5 times but ready -> not failed",
+			pods:       []corev1.Pod{newPod("engine", 6, true)},
+			wantFailed: false,
 		},
 		{
-			name:        "container restarted >5 times, not ready, within window -> not failed",
-			pods:        []corev1.Pod{newPod(&fiveMinAgo, "engine", 6, false)},
-			timeoutSecs: 1200,
-			wantFailed:  false,
+			name:       "container restarted below threshold and not ready -> not failed",
+			pods:       []corev1.Pod{newPod("engine", 3, false)},
+			wantFailed: false,
 		},
 		{
-			name:        "container restarted below threshold, not ready, past window -> not failed",
-			pods:        []corev1.Pod{newPod(&thirtyMinAgo, "engine", 3, false)},
-			timeoutSecs: 1200,
-			wantFailed:  false,
+			name:       "no pods -> not failed",
+			pods:       nil,
+			wantFailed: false,
 		},
 		{
-			name:        "pod without StartTime -> not failed",
-			pods:        []corev1.Pod{newPod(noStartTime, "engine", 6, false)},
-			timeoutSecs: 1200,
-			wantFailed:  false,
-		},
-		{
-			name:        "no pods -> not failed",
-			pods:        nil,
-			timeoutSecs: 1200,
-			wantFailed:  false,
-		},
-		{
-			name: "init container restart history is not judged by the startup window",
+			name: "init container restart history is not judged",
 			pods: []corev1.Pod{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-init-restarting"},
 					Status: corev1.PodStatus{
-						StartTime: &thirtyMinAgo,
 						InitContainerStatuses: []corev1.ContainerStatus{
 							{
 								Name:         "model-downloader",
@@ -1630,15 +1601,7 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 					},
 				},
 			},
-			timeoutSecs: 1200,
-			wantFailed:  false,
-		},
-		{
-			name:        "custom short window gates threshold failure",
-			pods:        []corev1.Pod{newPod(&fiveMinAgo, "engine", 6, false)},
-			timeoutSecs: 60,
-			wantFailed:  true,
-			wantMsgPart: "restarted 6 times",
+			wantFailed: false,
 		},
 		{
 			name: "terminating pod with historical restarts -> not failed",
@@ -1646,10 +1609,9 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "pod-terminating",
-						DeletionTimestamp: &metav1.Time{Time: now.Add(-time.Minute)},
+						DeletionTimestamp: &metav1.Time{Time: time.Now()},
 					},
 					Status: corev1.PodStatus{
-						StartTime: &thirtyMinAgo,
 						ContainerStatuses: []corev1.ContainerStatus{
 							{
 								Name:         "engine",
@@ -1663,20 +1625,7 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 					},
 				},
 			},
-			timeoutSecs: 1200,
-			wantFailed:  false,
-		},
-		{
-			name: "elapsed exactly equals startup window -> failed",
-			pods: []corev1.Pod{
-				func() corev1.Pod {
-					exactlyWindow := metav1.NewTime(now.Add(-1200 * time.Second))
-					return newPod(&exactlyWindow, "engine", 6, false)
-				}(),
-			},
-			timeoutSecs: 1200,
-			wantFailed:  true,
-			wantMsgPart: "restarted 6 times",
+			wantFailed: false,
 		},
 		{
 			name: "failure message includes waiting reason and message",
@@ -1684,7 +1633,6 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "pod-crash-waiting"},
 					Status: corev1.PodStatus{
-						StartTime: &thirtyMinAgo,
 						ContainerStatuses: []corev1.ContainerStatus{
 							{
 								Name:         "engine",
@@ -1701,7 +1649,6 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 					},
 				},
 			},
-			timeoutSecs: 1200,
 			wantFailed:  true,
 			wantMsgPart: "CrashLoopBackOff: back-off restarting failed container",
 		},
@@ -1709,7 +1656,7 @@ func Test_checkStartupTimeoutFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hasFailed, msg := checkStartupTimeoutFailures(tt.pods, tt.timeoutSecs, now)
+			hasFailed, msg := checkStartupTimeoutFailures(tt.pods)
 			assert.Equal(t, tt.wantFailed, hasFailed)
 			if tt.wantFailed {
 				assert.NotEmpty(t, msg)
@@ -3318,7 +3265,6 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 		expectedPhase  v1.EndpointPhase
 		expectErrorMsg string
 		expectError    bool
-		now            *time.Time // optional; when set, injected into the orchestrator
 	}{
 		{
 			name: "return error if deployment fetch fails",
@@ -3643,76 +3589,49 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "return Failed for container restarted >5 times not ready past startup window",
+			name: "return Failed for container restarted >5 times and not ready",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			setupMock: func(t *testing.T) *FakeK8sClient {
-				now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-				start := metav1.NewTime(now.Add(-30 * time.Minute))
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPodRestartingNotReady("test-container", 6, &start)
+					WithPodRestartingNotReady("test-container", 6)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "restarted 6 times",
 			expectError:    false,
-			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
 		},
 		{
-			name: "return ModelDownloading for init container with high restarts (window check ignores init containers)",
+			name: "return ModelDownloading for init container with high restarts (restart check ignores init containers)",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			setupMock: func(t *testing.T) *FakeK8sClient {
-				now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-				start := metav1.NewTime(now.Add(-30 * time.Minute))
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerRestartingNotReady(modelDownloaderInitContainerName, 6, &start)
+					WithInitContainerRestartingNotReady(modelDownloaderInitContainerName, 6)
 			},
 			expectedPhase:  v1.EndpointPhaseMODELDOWNLOADING,
 			expectErrorMsg: modelDownloaderInitContainerName + " init container is running",
 			expectError:    false,
-			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
 		},
 		{
-			name: "return Deploying for container restarted >5 times not ready within startup window",
-			inputEndpoint: func() *v1.Endpoint {
-				return newEndpoint()
-			},
-			setupMock: func(t *testing.T) *FakeK8sClient {
-				now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-				start := metav1.NewTime(now.Add(-5 * time.Minute))
-				return NewFakeK8sClient(t).
-					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPodRestartingNotReady("test-container", 6, &start)
-			},
-			expectedPhase:  v1.EndpointPhaseDEPLOYING,
-			expectErrorMsg: "Deployment: 0/1 replicas ready",
-			expectError:    false,
-			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
-		},
-		{
-			name: "return Deploying for ready pod with historical restarts past startup window",
+			name: "return Deploying for container restarted >5 times but ready",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				// Deployment not fully ready (0 ready), but the pod's container is
-				// Ready=true with a high historical restart count and a StartTime
-				// well past the window. The restart-window check must not misjudge
-				// a ready container by its old startup crashes.
-				now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
-				start := metav1.NewTime(now.Add(-30 * time.Minute))
+				// Ready=true with a high historical restart count. The restart
+				// threshold check must not misjudge a ready container.
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPodReadyAfterRestarts("test-container", 6, &start)
+					WithPodReadyAfterRestarts("test-container", 6)
 			},
 			expectedPhase:  v1.EndpointPhaseDEPLOYING,
 			expectErrorMsg: "Deployment: 0/1 replicas ready",
 			expectError:    false,
-			now:            func() *time.Time { t := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC); return &t }(),
 		},
 	}
 
@@ -3721,9 +3640,6 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			fakeClient := tt.setupMock(t)
 
 			o := &kubernetesOrchestrator{}
-			if tt.now != nil {
-				o.now = func() time.Time { return *tt.now }
-			}
 
 			status, err := o.getEndpointStats(fakeClient, "test-namespace", &v1.Cluster{Spec: &v1.ClusterSpec{}}, tt.inputEndpoint())
 

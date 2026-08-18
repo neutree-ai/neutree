@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -50,17 +49,12 @@ type kubernetesOrchestrator struct {
 	storage storage.Storage
 
 	acceleratorMgr accelerator.Manager
-
-	// now is the clock used for startup-window checks. Injectable for tests;
-	// defaults to time.Now.
-	now func() time.Time
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
 		storage:        opts.Storage,
 		acceleratorMgr: opts.AcceleratorMgr,
-		now:            time.Now,
 	}
 }
 
@@ -598,7 +592,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
-	if hasFailed, failedMsg := k.checkPodFailures(pods, resolveStartupTimeoutSeconds(endpoint)); hasFailed {
+	if hasFailed, failedMsg := k.checkPodFailures(pods); hasFailed {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseFAILED,
 			ErrorMessage: "Endpoint failed: " + failedMsg,
@@ -758,12 +752,12 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 }
 
 // checkPodFailures checks if any pods have critical failures like CrashLoopBackOff,
-// plus the startup-window restart threshold (a container still not ready after
-// repeated restarts past the configured startup window is a locatable failure,
-// not an endless Deploying state). Deterministic immediate failures (OOM /
-// image pull / CrashLoopBackOff / unschedulable) are reported first; the
-// startup-window check is appended as an additional branch and never masks them.
-func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod, startupTimeoutSeconds int) (bool, string) {
+// plus the restart threshold (a container still not ready after repeated
+// restarts is a locatable failure, not an endless Deploying state).
+// Deterministic immediate failures (OOM / image pull / CrashLoopBackOff /
+// unschedulable) are reported first; the restart-threshold check is appended
+// as an additional branch and never masks them.
+func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, string) {
 	failed := false
 	var errorMsg []string
 
@@ -794,10 +788,11 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod, startupTime
 		}
 	}
 
-	// Startup-window restart threshold: a container that keeps restarting past
-	// the configured window and never becomes ready is a locatable failure.
-	// Runs after the immediate checks so deterministic failures keep precedence.
-	if wf, wmsg := checkStartupTimeoutFailures(pods, startupTimeoutSeconds, k.currentTime()); wf {
+	// Startup-restart threshold: a container that has restarted past the
+	// threshold and still never became ready is a locatable failure, not an
+	// endless Deploying state. Runs after the immediate checks so deterministic
+	// failures keep precedence.
+	if wf, wmsg := checkStartupTimeoutFailures(pods); wf {
 		failed = true
 
 		errorMsg = append(errorMsg, wmsg)
@@ -808,14 +803,14 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod, startupTime
 
 // checkStartupTimeoutFailures marks an endpoint failed when a main container
 // has restarted more than containerFailureRestartThreshold times and is still
-// not ready after the startup window (pod.Status.StartTime + startupTimeoutSeconds)
-// has elapsed. Slow-starting engines (CUDA_LAUNCH_BLOCKING, VLLM_TRACE_FUNCTION)
-// are tolerated within the window; genuinely broken instances converge to a
-// locatable failure. Init containers are intentionally not judged here — their
-// failure semantics are owned by the model-downloader status check and the
-// immediate init-container checks in checkContainerStatuses. Ready containers
-// are never judged by historical restart counts.
-func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, now time.Time) (bool, string) {
+// not ready. Restart accumulation is driven by the startupProbe window the
+// kubelet enforces, so a high count already implies the engine has been unable
+// to become ready for a long time — Neutree does not need to re-derive a time
+// window. Init containers are intentionally not judged here: their failure
+// semantics are owned by the model-downloader status check and the immediate
+// init-container checks in checkContainerStatuses. Ready containers are never
+// judged by historical restart counts.
+func checkStartupTimeoutFailures(pods []corev1.Pod) (bool, string) {
 	failed := false
 	var errorMsg []string
 
@@ -825,15 +820,6 @@ func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, n
 		// never be judged by that history or the endpoint would flap FAILED
 		// during routine rollouts.
 		if pod.DeletionTimestamp != nil {
-			continue
-		}
-
-		if pod.Status.StartTime == nil {
-			continue
-		}
-
-		elapsed := now.Sub(pod.Status.StartTime.Time)
-		if elapsed < time.Duration(startupTimeoutSeconds)*time.Second {
 			continue
 		}
 
@@ -852,8 +838,8 @@ func checkStartupTimeoutFailures(pods []corev1.Pod, startupTimeoutSeconds int, n
 				failed = true
 
 				errorMsg = append(errorMsg, fmt.Sprintf(
-					"Pod '%s' %s '%s' restarted %d times and not ready within %d s startup window: %s",
-					pod.Name, containerType, cs.Name, cs.RestartCount, startupTimeoutSeconds,
+					"Pod '%s' %s '%s' restarted %d times and not ready: %s",
+					pod.Name, containerType, cs.Name, cs.RestartCount,
 					joinReasonMessage(reason, message)))
 			}
 		}
@@ -894,16 +880,6 @@ func joinReasonMessage(reason, message string) string {
 	}
 
 	return reason + ": " + message
-}
-
-// currentTime returns the orchestrator's injected clock, falling back to
-// time.Now for structs built without one (e.g. unit tests).
-func (k *kubernetesOrchestrator) currentTime() time.Time {
-	if k.now != nil {
-		return k.now()
-	}
-
-	return time.Now()
 }
 
 // buildDeploymentErrorMessage builds a descriptive error message from deployment conditions
