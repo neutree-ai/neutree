@@ -326,7 +326,7 @@ func TestStaticNodeResourceClientUsesBaseRayAllocatableAndSnapshotAvailableQuant
 	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
 
-func TestStaticNodeResourceClientNoAvailableGroupWhenAllCardsFullyAllocated(t *testing.T) {
+func TestStaticNodeResourceClientAvailableGroupPresentWithZeroQuantityWhenAllCardsFullyAllocated(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
 			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
@@ -386,9 +386,12 @@ func TestStaticNodeResourceClientNoAvailableGroupWhenAllCardsFullyAllocated(t *t
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
 	// Both cards are fully allocated — no card has any remaining capacity, so
-	// the available accelerator group is empty (no card counted as available).
+	// the available group is present with quantity 0 (mirroring the Kubernetes
+	// resource client's consistent group shape).
 	availableGroup := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	assert.Nil(t, availableGroup)
+	require.NotNil(t, availableGroup)
+	assert.Equal(t, float64(0), availableGroup.Quantity)
+	assert.Empty(t, availableGroup.Products)
 }
 
 func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T) {
