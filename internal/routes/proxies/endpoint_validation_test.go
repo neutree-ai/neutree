@@ -42,39 +42,6 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("rejects vGPU endpoint without product", func(t *testing.T) {
-		resources := vgpuResources("1", "", map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
-		})
-
-		err := validateEndpointVGPUResourceShape(resources)
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10218", err.Code)
-		assert.Contains(t, err.Hint, "target accelerator product")
-		assert.NotContains(t, err.Hint, "GPU")
-	})
-
-	t.Run("rejects vGPU endpoint without accelerator type", func(t *testing.T) {
-		gpu := "1"
-		resources := &v1.ResourceSpec{
-			GPU: &gpu,
-			Accelerator: map[string]string{
-				v1.AcceleratorProductKey:                 "Tesla-T4",
-				v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
-			},
-		}
-
-		err := validateEndpointVGPUResourceShape(resources)
-
-		if assert.NotNil(t, err) {
-			assert.Equal(t, "10217", err.Code)
-			assert.Equal(t, "endpoint accelerator virtualization requires accelerator type", err.Message)
-			assert.Contains(t, err.Hint, "non-empty accelerator type")
-			assert.NotContains(t, err.Hint, "NVIDIA")
-		}
-	})
-
 	t.Run("rejects unsupported memory percent", func(t *testing.T) {
 		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
@@ -2040,7 +2007,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "positive integer")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2050,7 +2017,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "positive integer")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2060,7 +2027,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "one-decimal value below 1")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2127,7 +2094,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "one-decimal value below 1")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2157,7 +2124,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "valid accelerator card count")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2167,7 +2134,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "positive integer")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
 		}
 	})
 
@@ -2177,7 +2144,19 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
-			assert.Contains(t, err.Hint, "positive integer")
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects an empty accelerator type", func(t *testing.T) {
+		endpoint := physicalResourceSpec("1", map[string]string{
+			v1.AcceleratorProductKey: "Tesla-T4",
+		})
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "accelerator.type is required")
 		}
 	})
 
@@ -2306,7 +2285,7 @@ func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
 		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "positive integer")
+		assert.Contains(t, response.Hint, "positive accelerator card count")
 		assert.False(t, handlerCalled)
 	})
 
