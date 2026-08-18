@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -277,17 +278,130 @@ type nfsFile struct {
 	bentomlStore
 
 	nfsServerPath string
+
+	// mu guards leased. A client is used by one request at a time, but Connect and
+	// Disconnect decide whether this client owns a lease on a mount point shared
+	// with every other client of the same registry, so the bookkeeping is not left
+	// to chance.
+	mu     sync.Mutex
+	leased bool
 }
 
+// Connect takes a read lease on the registry's mount point, mounting it if it is
+// not there yet. Every client of the same registry shares that one mount point,
+// so holding a lease is what keeps a concurrent Disconnect elsewhere from
+// unmounting the tree this client is about to read.
 func (n *nfsFile) Connect() error {
-	return nfs.MountNFS(n.nfsServerPath, n.path)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.leased {
+		return nil
+	}
+
+	if err := nfs.AcquireMount(n.nfsServerPath, n.path); err != nil {
+		return err
+	}
+
+	n.leased = true
+
+	return nil
 }
 
+// Disconnect means two different things depending on who calls it, and the
+// difference is what this bug was about:
+//
+//   - A client that connected is a reader letting go. It drops its lease and
+//     leaves the mount alone: the registry's other readers, and the reconcile
+//     loop, are still using it.
+//   - A client that never connected is a lifecycle caller — registry deletion, or
+//     a reconnect after a failure — asking for the mount itself to go. That is
+//     the only path that unmounts, and it is refused with ErrMountBusy while
+//     readers hold leases.
 func (n *nfsFile) Disconnect() error {
-	// Disconnect intentionally keeps nfs.Unmount's synchronous behavior. A
-	// ListModels timeout has already made the registry Failed; unmount retains
-	// its lifecycle semantics before the controller reconnects.
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.leased {
+		nfs.ReleaseMount(n.path)
+		n.leased = false
+
+		return nil
+	}
+
 	return nfs.Unmount(n.path)
+}
+
+// ListModels tells an empty registry apart from a mount that disappeared. Reading
+// a BentoML tree whose root is gone looks exactly like reading an empty one, so
+// without this check a storage failure is served as a successful empty list — and
+// the caller believes the registry has no models.
+func (n *nfsFile) ListModels(option ListOption) (*ModelPage, error) {
+	page, err := n.bentomlStore.ListModels(option)
+	if err != nil {
+		return nil, n.explainStorageFailure(err)
+	}
+
+	if page.Total != nil && *page.Total == 0 {
+		if mountErr := n.checkMount(); mountErr != nil {
+			return nil, mountErr
+		}
+	}
+
+	return page, nil
+}
+
+func (n *nfsFile) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
+	model, err := n.bentomlStore.GetModelVersion(name, version)
+	if err != nil {
+		return nil, n.explainStorageFailure(err)
+	}
+
+	return model, nil
+}
+
+func (n *nfsFile) GetModelDetail(name, version string) (*v1.ModelVersion, error) {
+	detail, err := n.bentomlStore.GetModelDetail(name, version)
+	if err != nil {
+		return nil, n.explainStorageFailure(err)
+	}
+
+	return detail, nil
+}
+
+func (n *nfsFile) GetReadme(name, version string) (*Readme, error) {
+	readme, err := n.bentomlStore.GetReadme(name, version)
+	if err != nil {
+		return nil, n.explainStorageFailure(err)
+	}
+
+	return readme, nil
+}
+
+// explainStorageFailure re-reads the mount before a read failure is reported as
+// what it appeared to be. A file that vanished mid-read, or a model that is
+// suddenly not found, is a different answer depending on whether the mount is
+// still there — and "the model does not exist" is the wrong thing to tell a user
+// whose storage dropped out.
+func (n *nfsFile) explainStorageFailure(err error) error {
+	if mountErr := n.checkMount(); mountErr != nil {
+		return mountErr
+	}
+
+	return err
+}
+
+func (n *nfsFile) checkMount() error {
+	exists, err := nfs.IsMountExist(n.nfsServerPath, n.path)
+	if err != nil {
+		return errors.Wrapf(ErrStorageUnavailable, "failed to check NFS mount %s at %s: %v", n.nfsServerPath, n.path, err)
+	}
+
+	if !exists {
+		return errors.Wrapf(ErrStorageUnavailable, "NFS mount %s at %s is no longer present", n.nfsServerPath, n.path)
+	}
+
+	return nil
 }
 
 func (n *nfsFile) HealthyCheck() error {

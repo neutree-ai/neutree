@@ -115,9 +115,20 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 	}
 
 	if obj.Status != nil && obj.Status.Phase == v1.ModelRegistryPhaseFAILED {
+		// A failed registry is reconnected from scratch. If other clients are reading
+		// through the backing mount right now, it is not this reconcile's to tear
+		// down: they were served fine, so the mount works, and removing it would
+		// break their reads to fix a status. Connect below is then a no-op.
 		if err = modelRegistry.Disconnect(); err != nil {
-			return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
-				obj.Metadata.Workspace, obj.Metadata.Name)
+			if !errors.Is(err, model_registry.ErrMountBusy) {
+				return errors.Wrapf(err, "failed to disconnect model registry %s/%s",
+					obj.Metadata.Workspace, obj.Metadata.Name)
+			}
+
+			klog.V(4).Infof("model registry %s/%s is still being read, keeping its mount: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, err)
+
+			err = nil
 		}
 	}
 
@@ -125,6 +136,17 @@ func (c *ModelRegistryController) sync(obj *v1.ModelRegistry) (err error) {
 		return errors.Wrapf(err, "failed to connect model registry %s/%s",
 			obj.Metadata.Workspace, obj.Metadata.Name)
 	}
+
+	// This reconcile is one more reader of a mount point shared with every request
+	// handler, so it gives its lease back when it is done. It does not tear the
+	// mount down — releasing a lease never does — the mount stays up for the next
+	// reader, and only deletion or a reconnect after failure removes it.
+	defer func() {
+		if disconnectErr := modelRegistry.Disconnect(); disconnectErr != nil {
+			klog.Warningf("failed to release model registry %s/%s connection: %v",
+				obj.Metadata.Workspace, obj.Metadata.Name, disconnectErr)
+		}
+	}()
 
 	if err = modelRegistry.HealthyCheck(); err != nil {
 		return errors.Wrapf(err, "health check failed for model registry %s/%s",

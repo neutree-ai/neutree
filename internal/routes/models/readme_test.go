@@ -122,6 +122,14 @@ func TestGetModelReadme_DistinguishesFailures(t *testing.T) {
 			wantReason: reasonUnauthorized,
 		},
 		{
+			// The mount the registry reads through went away. Not a fact about the
+			// model — answering 404 here would tell the user their model is gone.
+			name:       "the registry's storage dropped out",
+			err:        errors.Wrap(model_registry.ErrStorageUnavailable, "NFS mount is no longer present"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantReason: reasonUnavailable,
+		},
+		{
 			// Nothing is wrong; come back later. Passed through as itself so a
 			// client does not have to parse prose to know that.
 			name:       "the registry is throttling us",
