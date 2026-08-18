@@ -2377,29 +2377,29 @@ func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
 	})
 }
 
-func TestEndpointPatchMayAffectAcceleratorValidation(t *testing.T) {
+func TestEndpointPatchMayAffectResourceValidation(t *testing.T) {
 	t.Run("runs when the patch touches resources", func(t *testing.T) {
 		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{}}}
 
-		assert.True(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
 	})
 
 	t.Run("runs when the patch touches cluster", func(t *testing.T) {
 		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}}
 
-		assert.True(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
 	})
 
-	t.Run("skips for a replicas-only patch", func(t *testing.T) {
+	t.Run("runs for a replicas-only patch because it gates virtualization validation", func(t *testing.T) {
 		replicas := 3
 		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &replicas}}}
 
-		assert.False(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
 	})
 
 	t.Run("skips for a nil spec", func(t *testing.T) {
-		assert.False(t, endpointPatchMayAffectAcceleratorValidation(nil))
-		assert.False(t, endpointPatchMayAffectAcceleratorValidation(&v1.Endpoint{}))
+		assert.False(t, endpointPatchMayAffectResourceValidation(nil))
+		assert.False(t, endpointPatchMayAffectResourceValidation(&v1.Endpoint{}))
 	})
 }
 

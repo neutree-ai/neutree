@@ -47,15 +47,13 @@ type endpointValidationConfig struct {
 var endpointValidationConfigs = map[endpointValidationOperation]endpointValidationConfig{
 	endpointValidationCreate: {
 		Validators: []endpointValidator{
-			validateEndpointCreateVGPU,
-			validateEndpointCreateAcceleratorResourceShape,
+			validateEndpointCreateResourceShape,
 		},
 	},
 	endpointValidationPatch: {
 		Validators: []endpointValidator{
 			validateEndpointPatchClusterImmutable,
-			validateEndpointPatchVGPU,
-			validateEndpointPatchAcceleratorResourceShape,
+			validateEndpointPatchResourceShape,
 		},
 	},
 	endpointValidationSoftDelete: {},
@@ -205,24 +203,68 @@ func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error)
 	return metadata.DeletionTimestamp != "", nil
 }
 
-func validateEndpointCreateVGPU(store storage.Storage, input *endpointValidationInput) *validationError {
-	if input.Patch.GetDeletionTimestamp() != "" {
+func validateEndpointCreateResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.Patch.GetDeletionTimestamp() != "" {
 		return nil
 	}
 
-	return validateEndpointVGPUEffective(store, input.New)
+	return validateEndpointResourceShape(store, input.New)
 }
 
 func validateEndpointPatchClusterImmutable(_ storage.Storage, input *endpointValidationInput) *validationError {
 	return validateEndpointClusterImmutable(input)
 }
 
-func validateEndpointPatchVGPU(store storage.Storage, input *endpointValidationInput) *validationError {
-	if !endpointPatchMayAffectVGPUValidation(&input.Patch) {
+func validateEndpointPatchResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.New == nil {
 		return nil
 	}
 
-	return validateEndpointVGPUEffective(store, input.New)
+	if !endpointPatchMayAffectResourceValidation(&input.Patch) {
+		return nil
+	}
+
+	return validateEndpointResourceShape(store, input.New)
+}
+
+// endpointPatchMayAffectResourceValidation reports whether a patch could change
+// the endpoint's resource shape (resources, target cluster, or replica count).
+// Replica count is included because it gates virtualization validation for
+// paused endpoints; cluster and resources are included because they gate the
+// accelerator and product checks.
+func endpointPatchMayAffectResourceValidation(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil {
+		return false
+	}
+
+	return endpoint.Spec.Resources != nil ||
+		endpoint.Spec.Cluster != "" ||
+		endpoint.Spec.Replicas.Num != nil
+}
+
+// validateEndpointResourceShape is the unified endpoint resource validator. It
+// validates the replica count for every endpoint, then dispatches to the
+// virtualization (vGPU) or physical-accelerator resource rules based on the
+// declared accelerator resources.
+func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil {
+		return nil
+	}
+
+	if validationErr := validateEndpointReplicaCount(endpoint.Spec); validationErr != nil {
+		return validationErr
+	}
+
+	resources := endpoint.Spec.Resources
+	if resources == nil {
+		return nil
+	}
+
+	if resources.HasAcceleratorVirtualization() {
+		return validateEndpointVirtualizationResources(store, endpoint)
+	}
+
+	return validateEndpointAcceleratorResourceShape(store, endpoint)
 }
 
 func validateEndpointClusterImmutable(input *endpointValidationInput) *validationError {
@@ -317,16 +359,13 @@ func buildPostgrestEndpointPatchValidationNew(current *v1.Endpoint, body []byte)
 	return &next, nil
 }
 
-func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+func validateEndpointVirtualizationResources(store storage.Storage, endpoint *v1.Endpoint) *validationError {
 	if endpoint == nil || endpoint.Spec == nil {
 		return nil
 	}
 
-	if validationErr := validateEndpointReplicaCount(endpoint.Spec); validationErr != nil {
-		return validationErr
-	}
-
-	if endpoint.Spec.Resources == nil || !endpoint.Spec.Resources.HasAcceleratorVirtualization() {
+	resources := endpoint.Spec.Resources
+	if resources == nil || !resources.HasAcceleratorVirtualization() {
 		return nil
 	}
 
@@ -343,15 +382,15 @@ func validateEndpointVGPUEffective(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUResourcesSupported(endpoint.Spec.Resources, cluster); validationErr != nil {
+	if validationErr := validateEndpointVGPUResourcesSupported(resources, cluster); validationErr != nil {
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUResourceShape(endpoint.Spec.Resources); validationErr != nil {
+	if validationErr := validateEndpointVGPUResourceShape(resources); validationErr != nil {
 		return validationErr
 	}
 
-	if validationErr := validateEndpointVGPUMemorySpec(endpoint.Spec.Resources, cluster); validationErr != nil {
+	if validationErr := validateEndpointVGPUMemorySpec(resources, cluster); validationErr != nil {
 		return validationErr
 	}
 
@@ -420,16 +459,6 @@ func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*
 	}
 
 	return &clusters[0], nil
-}
-
-func endpointPatchMayAffectVGPUValidation(endpoint *v1.Endpoint) bool {
-	if endpoint == nil || endpoint.Spec == nil {
-		return false
-	}
-
-	return endpoint.Spec.Resources != nil ||
-		endpoint.Spec.Cluster != "" ||
-		endpoint.Spec.Replicas.Num != nil
 }
 
 func endpointClusterLookupFilters(cluster, workspace string) []storage.Filter {
@@ -549,39 +578,11 @@ func validateEndpointVGPUResourceShape(resources *v1.ResourceSpec) *validationEr
 	return nil
 }
 
-func validateEndpointCreateAcceleratorResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
-	if input == nil || input.New == nil {
-		return nil
-	}
-
-	return validateEndpointAcceleratorResourceShape(store, input.New)
-}
-
-func validateEndpointPatchAcceleratorResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
-	if input == nil || input.New == nil {
-		return nil
-	}
-
-	if !endpointPatchMayAffectAcceleratorValidation(&input.Patch) {
-		return nil
-	}
-
-	return validateEndpointAcceleratorResourceShape(store, input.New)
-}
-
-func endpointPatchMayAffectAcceleratorValidation(endpoint *v1.Endpoint) bool {
-	if endpoint == nil || endpoint.Spec == nil {
-		return false
-	}
-
-	return endpoint.Spec.Resources != nil || endpoint.Spec.Cluster != ""
-}
-
 // validateEndpointAcceleratorResourceShape rejects physical accelerator
 // declarations with an empty or unsupported product, or a count that is not a
 // strictly positive number satisfying the target cluster type's precision
 // rule. It only runs for non-virtualized accelerator resources; virtualization
-// resources are validated by validateEndpointVGPUResourceShape.
+// resources are validated by validateEndpointVirtualizationResources.
 //
 // Declaring an accelerator (a non-empty accelerator type) requires a count
 // greater than zero: an accelerator with zero cards is an inconsistent request,
