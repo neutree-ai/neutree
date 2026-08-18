@@ -251,7 +251,11 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		}
 
 		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
-			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
+			quantity := 0.0
+			if isDeviceFullyAvailable(allocatablePool, availablePool) {
+				quantity = 1
+			}
+			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, quantity, availablePool)
 		}
 	}
 
@@ -328,11 +332,13 @@ func completeStaticNodeAcceleratorQuantities(
 		return
 	}
 
-	// Static clusters support fractional GPU quantities. Keep the group-level
-	// quantity aligned with the native Ray dashboard resources, while device
-	// pools and virtualization details still come from the node-agent snapshot.
+	// Static clusters support fractional GPU quantities. Keep the Allocatable
+	// group quantity aligned with the native Ray dashboard resources (total
+	// capacity), while device pools and virtualization details come from the
+	// node-agent snapshot. The Available quantity is device-count driven
+	// (fully-free physical cards) from the snapshot — base Ray fractional
+	// quantities would count partially-allocated cards as partially available.
 	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
-	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
 }
 
 func completeStaticNodeAcceleratorQuantity(
@@ -589,7 +595,7 @@ func addStaticNodeAcceleratorResource(
 	quantity float64,
 	pool *v1.DeviceResourcePool,
 ) {
-	if info == nil || acceleratorType == "" || product == "" || quantity == 0 {
+	if info == nil || acceleratorType == "" || product == "" || (quantity == 0 && pool == nil) {
 		return
 	}
 
