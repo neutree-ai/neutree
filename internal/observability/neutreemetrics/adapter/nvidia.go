@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
@@ -28,8 +29,27 @@ func (a *nvidiaAccelerator) BuildMetrics(
 	_ context.Context,
 	evidence AcceleratorEvidence,
 ) (AcceleratorMetricResult, error) {
+	if evidence.AcceleratorType != "" && evidence.AcceleratorType != a.Type() {
+		return AcceleratorMetricResult{}, fmt.Errorf(
+			"adapter %q selected for accelerator type %q",
+			a.Type(),
+			evidence.AcceleratorType,
+		)
+	}
+
 	if !evidence.ExporterUp {
-		return AcceleratorMetricResult{}, nil
+		// Physical evidence and scheduler evidence degrade independently: the
+		// explicit replica GPU usages come from the scheduler-side usage
+		// provider and are still emitted when the accelerator exporter is down,
+		// matching the legacy normalizer behavior.
+		return AcceleratorMetricResult{
+			Samples: normalizer.NormalizeEndpointReplicaGPUUsageSamples(
+				evidence.Labels,
+				evidence.EndpointReplicaGPUUsages,
+				evidence.EndpointAllocations,
+				nil,
+			),
+		}, nil
 	}
 
 	labels := evidence.Labels

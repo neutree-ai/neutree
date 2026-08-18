@@ -77,6 +77,10 @@ type AcceleratorMetricResult struct {
 	Samples []normalizer.Sample
 }
 
+// adapters is populated from init() functions at package load and is read-only
+// afterwards, so reads need no synchronization. This is the same contract as the
+// controller plugin registry it mirrors (internal/accelerator/plugin), which
+// keeps a mutex only because it registers at runtime.
 var (
 	adapters = make(map[string]Accelerator)
 )

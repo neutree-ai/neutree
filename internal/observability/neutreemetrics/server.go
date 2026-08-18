@@ -221,7 +221,16 @@ func (s *Server) selectedAccelerator() adapter.Accelerator {
 		return nil
 	}
 
-	return s.config.Accelerators[s.config.AcceleratorType]
+	accel := s.config.Accelerators[s.config.AcceleratorType]
+	if accel == nil {
+		// The node-agent fails fast on unregistered types at startup, but a
+		// Server constructed directly would silently fall back to the legacy
+		// DCGM path for a configured type. Surface it so the regression is not
+		// silent.
+		klog.V(2).InfoS("Accelerator adapter not registered; falling back to legacy path", "accelerator_type", s.config.AcceleratorType)
+	}
+
+	return accel
 }
 
 func (s *Server) acceleratorSamples(
@@ -245,7 +254,11 @@ func (s *Server) acceleratorSamples(
 	result, err := accel.BuildMetrics(ctx, evidence)
 	if err != nil {
 		klog.V(2).InfoS("Accelerator adapter failed to build metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
-		return nil
+		// An adapter that fails must not silently fall back to the legacy DCGM
+		// path: a configured accelerator type without accelerator samples is a
+		// degraded (but explicit) state, not a reason to parse vendor text as
+		// DCGM.
+		return []metricsnormalizer.Sample{}
 	}
 
 	// A non-nil AcceleratorSamples selects the adapter path in the normalizer.

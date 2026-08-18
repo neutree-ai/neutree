@@ -9,11 +9,223 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 )
 
 // TestNvidiaAdapterBuildMetricsMatchesLegacyDCGMSamples verifies the nvidia
 // adapter (reference implementation) produces the same accelerator samples the
 // legacy normalizer DCGM path produced, so existing DCGM assertions stay green.
+func TestNvidiaAdapterPathEmitsNoDuplicateExplicitUsageSamples(t *testing.T) {
+	// The adapter path must not double-emit explicit replica GPU usage samples:
+	// the nvidia adapter produces them, and the normalizer must not append the
+	// same samples again when AcceleratorSamples are pre-computed.
+	usedBytes := 4096.0 * 1024 * 1024
+	utilization := 0.75
+
+	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 62
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 2048
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
+`
+
+	allocations := []model.EndpointAllocation{
+		{
+			Workspace:  "default",
+			Cluster:    "k8s-a",
+			Endpoint:   "chat",
+			InstanceID: "chat-abc",
+			ReplicaID:  "chat-abc",
+			NodeID:     "node-a",
+			Devices: []v1.DeviceAllocation{
+				{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920, CoreUnits: 100, NodeID: "node-a"},
+			},
+		},
+	}
+	usages := []model.EndpointReplicaGPUUsage{
+		{
+			Endpoint:         "chat",
+			InstanceID:       "chat-abc",
+			ReplicaID:        "chat-abc",
+			NodeID:           "node-a",
+			GPUUUID:          "GPU-abc",
+			AcceleratorIndex: "0",
+			VDeviceIndex:     "0",
+			Product:          "NVIDIA_A100",
+			MemoryUsedBytes:  &usedBytes,
+			UtilizationRatio: &utilization,
+		},
+	}
+
+	result, err := (&nvidiaAccelerator{}).BuildMetrics(context.Background(), AcceleratorEvidence{
+		AcceleratorType:          v1.AcceleratorTypeNVIDIAGPU.String(),
+		ExporterText:             raw,
+		ExporterUp:               true,
+		Labels:                   testLabels(),
+		EndpointAllocations:      allocations,
+		EndpointReplicaGPUUsages: usages,
+	})
+	require.NoError(t, err)
+
+	samples := (&normalizer.Normalizer{}).Samples(normalizer.NormalizeRequest{
+		Labels:                   testLabels(),
+		AcceleratorSamples:       result.Samples,
+		EndpointAllocations:      allocations,
+		EndpointReplicaGPUUsages: usages,
+	})
+
+	memoryUsedCount := 0
+	utilizationCount := 0
+	for _, sample := range samples {
+		switch sample.Name {
+		case "neutree_endpoint_replica_accelerator_memory_used_bytes":
+			memoryUsedCount++
+		case "neutree_endpoint_replica_accelerator_utilization_ratio":
+			utilizationCount++
+		}
+	}
+
+	assert.Equal(t, 1, memoryUsedCount, "explicit replica memory_used_bytes must appear exactly once")
+	assert.Equal(t, 1, utilizationCount, "explicit replica utilization_ratio must appear exactly once")
+}
+
+func TestNvidiaAdapterEmitsSchedulerSamplesWhenExporterDown(t *testing.T) {
+	// Physical and scheduler evidence degrade independently: with the exporter
+	// down but explicit replica GPU usages present, the adapter must still emit
+	// the scheduler-only usage samples (matching the legacy path).
+	usedBytes := 4096.0 * 1024 * 1024
+	utilization := 0.75
+
+	allocations := []model.EndpointAllocation{
+		{
+			Workspace:  "default",
+			Cluster:    "k8s-a",
+			Endpoint:   "chat",
+			InstanceID: "chat-abc",
+			ReplicaID:  "chat-abc",
+			NodeID:     "node-a",
+			Devices: []v1.DeviceAllocation{
+				{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 81920, CoreUnits: 100, NodeID: "node-a"},
+			},
+		},
+	}
+	usages := []model.EndpointReplicaGPUUsage{
+		{
+			Endpoint:         "chat",
+			InstanceID:       "chat-abc",
+			ReplicaID:        "chat-abc",
+			NodeID:           "node-a",
+			GPUUUID:          "GPU-abc",
+			AcceleratorIndex: "0",
+			VDeviceIndex:     "0",
+			Product:          "NVIDIA_A100",
+			MemoryUsedBytes:  &usedBytes,
+			UtilizationRatio: &utilization,
+		},
+	}
+
+	result, err := (&nvidiaAccelerator{}).BuildMetrics(context.Background(), AcceleratorEvidence{
+		AcceleratorType:          v1.AcceleratorTypeNVIDIAGPU.String(),
+		ExporterUp:               false,
+		Labels:                   testLabels(),
+		EndpointAllocations:      allocations,
+		EndpointReplicaGPUUsages: usages,
+	})
+	require.NoError(t, err)
+
+	output := formatSamples(result.Samples)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_memory_used_bytes{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-abc",node="node-a",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"} 4294967296`)
+	assert.Contains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="chat-abc",node="node-a",product="NVIDIA_A100",replica="chat-abc",vdevice_index="0"} 0.75`)
+	assert.NotContains(t, output, "neutree_accelerator_utilization_ratio{")
+}
+
+func TestNvidiaAdapterMatchesLegacyPathForSameDCGMInput(t *testing.T) {
+	// Differential guard: the nvidia adapter must produce the exact same
+	// accelerator samples the legacy normalizer path produced for the same
+	// DCGM input, so the migration stays behavior-preserving.
+	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 87
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 43008
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 81920
+	DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 72
+	DCGM_FI_PROF_PCIE_TX_BYTES{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 1024
+	DCGM_FI_PROF_PCIE_RX_BYTES{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 2048
+	DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-def",device="nvidia1",modelName="A100"} 0
+DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-def",device="nvidia1",modelName="A100"} 2048
+DCGM_FI_DEV_FB_TOTAL{gpu="1",UUID="GPU-def",device="nvidia1",modelName="A100"} 81920
+DCGM_FI_DEV_GPU_TEMP{gpu="1",UUID="GPU-def",device="nvidia1",modelName="A100"} 41
+DCGM_FI_DRIVER_VERSION{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100",Driver_Version="535.104.05"} 1
+DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 12020
+DCGM_FI_DEV_CUDA_COMPUTE_CAPABILITY{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100",cuda_compute_capability="8.0"} 0
+DCGM_FI_DEV_PCI_BUSID{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100",pci_bus_id="00000000:3B:00.0"} 1
+DCGM_FI_DEV_PCIE_LINK_GEN{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 4
+DCGM_FI_DEV_PCIE_LINK_WIDTH{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 16
+DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 42
+`
+
+	infos := []model.GPUHardwareInfo{
+		{UUID: "GPU-abc", Index: "0", Product: "A100", PCIEBusID: "00000000:3B:00.0", NUMANode: "1"},
+		{UUID: "GPU-def", Index: "1", Product: "A100"},
+	}
+	allocations := []model.EndpointAllocation{
+		{
+			Workspace:  "default",
+			Cluster:    "static-a",
+			Endpoint:   "chat",
+			InstanceID: "chat-replica-a",
+			ReplicaID:  "replica-a",
+			NodeID:     "head-0",
+			Devices: []v1.DeviceAllocation{
+				{
+					UUID:          "GPU-abc",
+					Product:       "NVIDIA_A100",
+					MemoryMiB:     81920,
+					CoreUnits:     100,
+					NodeID:        "head-0",
+					UsedMemoryMiB: 4096,
+				},
+			},
+		},
+	}
+
+	legacyOutput := (&normalizer.Normalizer{}).Samples(normalizer.NormalizeRequest{
+		Labels: testLabels(),
+		AcceleratorExporter: &model.ScrapeResult{
+			Target: normalizer.TargetAcceleratorExporter,
+			Up:     true,
+			Body:   raw,
+		},
+		EndpointAllocations: allocations,
+		GPUHardwareInfos:    infos,
+	})
+
+	result, err := (&nvidiaAccelerator{}).BuildMetrics(context.Background(), AcceleratorEvidence{
+		AcceleratorType:     v1.AcceleratorTypeNVIDIAGPU.String(),
+		ExporterText:        raw,
+		ExporterUp:          true,
+		Labels:              testLabels(),
+		EndpointAllocations: allocations,
+		GPUHardwareInfos:    infos,
+	})
+	require.NoError(t, err)
+
+	legacyByKey := sampleKeySet(legacyOutput)
+	for _, sample := range result.Samples {
+		key := sampleKey(sample)
+		assert.Contains(t, legacyByKey, key, "adapter sample %s must exist in legacy output", key)
+	}
+}
+
+func sampleKey(s normalizer.Sample) string {
+	return s.Name + formatLabels(s.Labels)
+}
+
+func sampleKeySet(samples []normalizer.Sample) map[string]struct{} {
+	set := make(map[string]struct{}, len(samples))
+	for _, sample := range samples {
+		set[sampleKey(sample)] = struct{}{}
+	}
+
+	return set
+}
+
 func TestNvidiaAdapterBuildMetricsMatchesLegacyDCGMSamples(t *testing.T) {
 	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 87
 DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 43008

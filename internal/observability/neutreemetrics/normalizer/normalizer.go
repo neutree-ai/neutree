@@ -103,12 +103,14 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 		req.Labels,
 		req.EndpointReplicaRuntimeUsages,
 	)...)
-	samples = append(samples, NormalizeEndpointReplicaGPUUsageSamples(
-		req.Labels,
-		req.EndpointReplicaGPUUsages,
-		req.EndpointAllocations,
-		acceleratorIndexes,
-	)...)
+	if req.AcceleratorSamples == nil {
+		samples = append(samples, NormalizeEndpointReplicaGPUUsageSamples(
+			req.Labels,
+			req.EndpointReplicaGPUUsages,
+			req.EndpointAllocations,
+			acceleratorIndexes,
+		)...)
+	}
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].Name == samples[j].Name {

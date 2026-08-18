@@ -3,6 +3,7 @@ package neutreemetrics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -170,6 +171,63 @@ func TestServerMetricsWithAcceleratorTypeButNoExporterSkipsAcceleratorSamples(t 
 	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent"} 1`)
 	assert.NotContains(t, body, "neutree_accelerator_utilization_ratio")
 	assert.NotContains(t, body, "neutree_node_accelerator_total")
+}
+
+func TestServerMetricsDoesNotFallBackToLegacyWhenAdapterErrors(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	acceleratorExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 1024
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
+`))
+	}))
+	t.Cleanup(acceleratorExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		AcceleratorType: "nvidia_gpu",
+		Accelerators: map[string]adapter.Accelerator{
+			"nvidia_gpu": failingAccelerator{},
+		},
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+
+	body := readResponseBody(t, metricsResp)
+	// A failing adapter must disable accelerator samples entirely, not fall
+	// back to parsing the DCGM body through the legacy path.
+	assert.NotContains(t, body, "neutree_accelerator_utilization_ratio")
+	assert.NotContains(t, body, "neutree_node_accelerator_total")
+}
+
+type failingAccelerator struct{}
+
+func (failingAccelerator) Type() string { return "nvidia_gpu" }
+
+func (failingAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+	return adapter.AcceleratorMetricResult{}, fmt.Errorf("adapter boom")
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {

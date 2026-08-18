@@ -137,8 +137,7 @@ func (o *options) config() (neutreemetrics.Config, error) {
 		ListenAddress:   o.listenAddress,
 		Labels:          o.labels(),
 		AcceleratorType: o.acceleratorType,
-		Accelerators:    adapter.GetLocalAccelerators(),
-	}
+	}.WithAccelerators(adapter.GetLocalAccelerators())
 
 	writer, err := o.kubernetesWriter()
 	if err != nil {
