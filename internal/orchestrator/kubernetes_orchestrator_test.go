@@ -1468,6 +1468,7 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 		deploymentOptions      map[string]interface{}
 		wantProgressDeadline   int
 		wantProbeFailureThresh int
+		wantErr                bool
 	}{
 		{
 			name:                   "default when startup_timeout_seconds unset",
@@ -1494,22 +1495,19 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 			wantProbeFailureThresh: 30,
 		},
 		{
-			name:                   "fractional sub-second falls back to default",
-			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(0.5)},
-			wantProgressDeadline:   defaultStartupTimeoutSeconds,
-			wantProbeFailureThresh: 120,
+			name:              "fractional sub-second rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(0.5)},
+			wantErr:           true,
 		},
 		{
-			name:                   "zero falls back to default",
-			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(0)},
-			wantProgressDeadline:   defaultStartupTimeoutSeconds,
-			wantProbeFailureThresh: 120,
+			name:              "zero rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(0)},
+			wantErr:           true,
 		},
 		{
-			name:                   "negative falls back to default",
-			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(-1)},
-			wantProgressDeadline:   defaultStartupTimeoutSeconds,
-			wantProbeFailureThresh: 120,
+			name:              "negative rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(-1)},
+			wantErr:           true,
 		},
 		{
 			name:                   "numeric string accepted",
@@ -1518,10 +1516,9 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 			wantProbeFailureThresh: 30,
 		},
 		{
-			name:                   "non-numeric string falls back to default",
-			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": "abc"},
-			wantProgressDeadline:   defaultStartupTimeoutSeconds,
-			wantProbeFailureThresh: 120,
+			name:              "non-numeric string rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": "abc"},
+			wantErr:           true,
 		},
 		{
 			name:                   "unrelated deployment options ignored",
@@ -1534,8 +1531,14 @@ func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := newDeploymentManifestVariables()
-			k.setStartupTimeoutVariables(&data, newEndpoint(tt.deploymentOptions))
+			err := k.setStartupTimeoutVariables(&data, newEndpoint(tt.deploymentOptions))
 
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantProgressDeadline, data.ProgressDeadlineSeconds)
 			assert.Equal(t, tt.wantProbeFailureThresh, data.StartupProbeFailureThreshold)
 		})

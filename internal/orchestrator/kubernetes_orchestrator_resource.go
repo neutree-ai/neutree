@@ -15,7 +15,6 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
@@ -486,7 +485,9 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.setBasicVariables(&data, endpoint, deployedCluster, engine)
 
 	// Set startup timeout (progressDeadlineSeconds + startupProbe threshold)
-	k.setStartupTimeoutVariables(&data, endpoint)
+	if err := k.setStartupTimeoutVariables(&data, endpoint); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
 
 	// Set deploy image variables
 	if err := k.setDeployImageVariables(&data, endpoint, engine, imageRegistry); err != nil {
@@ -702,33 +703,38 @@ func newDeploymentManifestVariables() DeploymentManifestVariables {
 // resolveStartupTimeoutSeconds reads deployment_options.startup_timeout_seconds
 // and returns the K8s startup window in seconds. Only a positive integer or a
 // string that parses to a positive integer is accepted; anything else
-// (non-numeric, zero, negative, sub-second fractional) falls back to
-// defaultStartupTimeoutSeconds (1200) so the rendered manifest stays
-// byte-identical to the historical hard-coded template. Kubernetes clusters
-// only; the SSH/Ray path never reads this key.
-func resolveStartupTimeoutSeconds(endpoint *v1.Endpoint) int {
-	timeout := defaultStartupTimeoutSeconds
-
+// (non-numeric, zero, negative, sub-second fractional) is an error so the user
+// learns the value did not take effect instead of silently falling back.
+// Unset uses defaultStartupTimeoutSeconds (1200) so the rendered manifest
+// stays byte-identical to the historical hard-coded template. Kubernetes
+// clusters only; the SSH/Ray path never reads this key.
+func resolveStartupTimeoutSeconds(endpoint *v1.Endpoint) (int, error) {
 	if endpoint.Spec.DeploymentOptions != nil {
 		if raw, ok := endpoint.Spec.DeploymentOptions[startupTimeoutSecondsKey]; ok {
-			if v, err := strconv.Atoi(fmt.Sprintf("%v", raw)); err == nil && v > 0 {
-				timeout = v
-			} else {
-				klog.Warningf("endpoint %s deployment_options.startup_timeout_seconds must be a positive integer, got %v; using default %d",
-					endpoint.Metadata.WorkspaceName(), raw, defaultStartupTimeoutSeconds)
+			v, err := strconv.Atoi(fmt.Sprintf("%v", raw))
+			if err != nil || v <= 0 {
+				return 0, errors.Errorf("endpoint %s deployment_options.startup_timeout_seconds must be a positive integer, got %v",
+					endpoint.Metadata.WorkspaceName(), raw)
 			}
+
+			return v, nil
 		}
 	}
 
-	return timeout
+	return defaultStartupTimeoutSeconds, nil
 }
 
 // setStartupTimeoutVariables derives the Deployment progress deadline and
 // startupProbe failure threshold from the resolved startup window. Kubernetes
 // clusters only; the SSH/Ray path never calls this.
-func (k *kubernetesOrchestrator) setStartupTimeoutVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
-	timeout := resolveStartupTimeoutSeconds(endpoint)
+func (k *kubernetesOrchestrator) setStartupTimeoutVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) error {
+	timeout, err := resolveStartupTimeoutSeconds(endpoint)
+	if err != nil {
+		return err
+	}
 
 	data.ProgressDeadlineSeconds = timeout
 	data.StartupProbeFailureThreshold = (timeout + startupProbePeriodSeconds - 1) / startupProbePeriodSeconds
+
+	return nil
 }
