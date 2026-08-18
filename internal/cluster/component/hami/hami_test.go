@@ -322,6 +322,150 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 	}
 }
 
+func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	deployment := findObject(t, objs.Items, "Deployment", SchedulerName)
+	require.NotNil(t, deployment)
+
+	// Rollout must bring up the new scheduler before tearing down the old one so
+	// a single-node cluster never loses its only scheduler mid-update.
+	strategy, found, err := unstructured.NestedMap(deployment.Object, "spec", "strategy")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "RollingUpdate", strategy["type"])
+
+	rollingUpdate, ok := strategy["rollingUpdate"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, int64(0), rollingUpdate["maxUnavailable"])
+	assert.Equal(t, int64(1), rollingUpdate["maxSurge"])
+
+	// Scheduler anti-affinity is a soft preference, not a hard requirement, so a
+	// single-node cluster can still schedule the replacement pod during rollout.
+	affinity, found, err := unstructured.NestedMap(deployment.Object, "spec", "template", "spec", "affinity")
+	require.NoError(t, err)
+	require.True(t, found)
+
+	antiAffinity, ok := affinity["podAntiAffinity"].(map[string]interface{})
+	require.True(t, ok)
+	preferred, ok := antiAffinity["preferredDuringSchedulingIgnoredDuringExecution"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, preferred, 1)
+	_, hasRequired := antiAffinity["requiredDuringSchedulingIgnoredDuringExecution"]
+	assert.False(t, hasRequired, "scheduler anti-affinity must not be hard-required")
+}
+
+func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
+	const clusterNamespace = "neutree-system"
+
+	component := NewHAMiComponent(newTestCluster(), clusterNamespace, "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+	require.NotNil(t, webhook)
+
+	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, webhooks)
+
+	first, ok := webhooks[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Fail", first["failurePolicy"])
+
+	// The Fail policy must not leak to other namespaces: scope the webhook to
+	// the owning cluster's namespace so a webhook outage during scheduler
+	// rollout cannot block pod creation across the whole cluster.
+	namespaceSelector, ok := first["namespaceSelector"].(map[string]interface{})
+	require.True(t, ok)
+
+	expressions, ok := namespaceSelector["matchExpressions"].([]interface{})
+	require.True(t, ok)
+
+	namespaceMatchFound := false
+	for _, expr := range expressions {
+		m, ok := expr.(map[string]interface{})
+		if !ok || m["key"] != "kubernetes.io/metadata.name" {
+			continue
+		}
+
+		namespaceMatchFound = true
+		values, ok := m["values"].([]interface{})
+		require.True(t, ok)
+		assert.Equal(t, []interface{}{clusterNamespace}, values)
+	}
+
+	assert.True(t, namespaceMatchFound, "webhook namespaceSelector must pin the cluster namespace")
+}
+
+func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
+	const deviceConfigChecksumAnnotation = "checksum/hami-scheduler-device-config"
+
+	type deviceChecksums struct {
+		scheduler    string
+		devicePlugin string
+	}
+
+	renderChecksums := func(deviceConfigContent interface{}) deviceChecksums {
+		component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+			"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+		plan := nvidiaDevicePluginNodeScopePlan()
+		if deviceConfigContent != nil {
+			if plan.ConfigPatch == nil {
+				plan.ConfigPatch = map[string]interface{}{}
+			}
+
+			plan.ConfigPatch["device-config"] = map[string]interface{}{
+				"content": deviceConfigContent,
+			}
+		}
+
+		objs, err := component.renderResources(plan)
+		require.NoError(t, err)
+
+		deployment := findObject(t, objs.Items, "Deployment", SchedulerName)
+		require.NotNil(t, deployment)
+
+		schedulerChecksum, found, err := unstructured.NestedString(
+			deployment.Object, "spec", "template", "metadata", "annotations", deviceConfigChecksumAnnotation)
+		require.NoError(t, err)
+		require.True(t, found, "scheduler Deployment must carry the device-config checksum annotation")
+
+		daemonSet := findObject(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName)
+		require.NotNil(t, daemonSet)
+
+		devicePluginChecksum, found, err := unstructured.NestedString(
+			daemonSet.Object, "spec", "template", "metadata", "annotations", deviceConfigChecksumAnnotation)
+		require.NoError(t, err)
+		require.True(t, found, "device plugin DaemonSet must carry the device-config checksum annotation")
+
+		return deviceChecksums{
+			scheduler:    schedulerChecksum,
+			devicePlugin: devicePluginChecksum,
+		}
+	}
+
+	baseline := renderChecksums(nil)
+	changed := renderChecksums("nvidia:\n  resourceCountName: nvidia.com/gpu\n  resourceMemoryName: nvidia.com/gpumem\n")
+
+	// Both the scheduler Deployment and the device plugin DaemonSet read the
+	// same hami-scheduler-device ConfigMap. A device-config content change must
+	// rotate the checksum on both so scheduler and device plugin roll out
+	// together and never run with divergent device configs.
+	assert.NotEqual(t, baseline.scheduler, changed.scheduler,
+		"device-config content change must rotate the scheduler checksum to trigger a scheduler rollout")
+	assert.NotEqual(t, baseline.devicePlugin, changed.devicePlugin,
+		"device-config content change must rotate the device plugin checksum to trigger a device plugin rollout")
+}
+
 func TestHAMiComponentDevicePluginNodeSelectorUsesVirtualizationLabelOnly(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))

@@ -41,6 +41,43 @@ the hardcoded default. This lets a cluster supply its own device-config
 templates (for example chip hard-slice templates) through chart values without
 rebuilding the chart.
 
+### `scheduler.updateStrategy` value
+
+The scheduler Deployment previously used the Kubernetes default RollingUpdate
+strategy (25% surge / 25% unavailable). On a single-replica scheduler with no
+hostPort binding, an update could take down the only scheduler before its
+replacement became ready. The chart now renders `spec.strategy` from
+`values.scheduler.updateStrategy`; the packaged default is
+`maxUnavailable: 0, maxSurge: 1` so the new scheduler is created before the
+old one is removed and a single-node cluster never loses its only scheduler.
+
+### Soft scheduler pod anti-affinity
+
+The scheduler pod anti-affinity (active when `scheduler.leaderElect` is true)
+is now `preferredDuringSchedulingIgnoredDuringExecution` instead of the
+upstream hard `requiredDuringSchedulingIgnoredDuringExecution`. On a
+single-node cluster the hard form made a scheduler rollout unschedulable
+(the new pod could never satisfy the different-host constraint); the soft form
+keeps the spread intent on multi-node clusters while allowing co-location when
+no other node is available. Leader election still guards against two active
+schedulers during the brief rollout overlap.
+
+## Webhook namespace scoping and failure policy
+
+Neutree configures the admission webhook (in Go, not in this chart) to:
+
+- scope its `namespaceSelector` to the owning cluster's namespace
+  (`kubernetes.io/metadata.name In [<cluster-namespace>]`) so the webhook only
+  intercepts pods created inside that namespace — not every namespace on the
+  cluster; and
+- set `failurePolicy: Fail`, so GPU pods cannot fall through to the default
+  scheduler and bypass the HAMi global device view when the scheduler webhook
+  is unreachable.
+
+Because the Fail policy is scoped to the cluster namespace, a scheduler
+rollout or leader-pod restart (during which the webhook Service may briefly
+have no endpoints) cannot block pod creation in other namespaces.
+
 ## Verification
 
 - `helm template` renders `device-config.content` into the

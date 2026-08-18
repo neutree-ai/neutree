@@ -99,6 +99,16 @@ func (c *GPUConverter) ConvertToKubernetes(input accelerator.ConvertInput) (*v1.
 		return k8s, nil
 	}
 
+	// A full-card (non-virtualized) GPU workload on a cluster with accelerator
+	// virtualization enabled still lands on a HAMi-managed node, where the HAMi
+	// device plugin preloads libvgpu.so via /etc/ld.so.preload and intercepts
+	// every CUDA call. Setting CUDA_DISABLE_CONTROL=true makes HAMi skip that
+	// preload so the workload runs at native driver speed instead of paying the
+	// interception overhead for a device it is not virtualizing.
+	if input.Cluster != nil && input.Cluster.Spec.AcceleratorVirtualizationEnabled() {
+		k8s.Env["CUDA_DISABLE_CONTROL"] = "true"
+	}
+
 	return k8s, nil
 }
 
