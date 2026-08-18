@@ -9,12 +9,14 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -483,6 +485,204 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQ
 	require.Equal(t, float64(0), available.Quantity)
 	require.Equal(t, float64(0), available.ProductGroups["NVIDIA-L20"])
 	require.Equal(t, float64(0), available.Products["NVIDIA-L20"].Quantity)
+}
+
+func TestK8sResourceClientListNodesPartiallyAllocatedDeviceDoesNotCountAsAvailableCard(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node",
+			Labels: map[string]string{
+				plugin.NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA-L20",
+				plugin.NvidiaGPUCountResource:             "2",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+					{"uuid":"GPU-1","memory_mib":46068,"healthy":true,"minor_number":0},
+					{"uuid":"GPU-2","memory_mib":46068,"healthy":true,"minor_number":1}
+				]`,
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infer-1",
+			Namespace: "default",
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":23034,"core_units":50}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node, pod).
+		Build()
+	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+	})
+
+	nodes, err := client.ListNodes(context.Background(), nil)
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	require.Len(t, nodes[0].Status.Devices, 2)
+
+	// GPU-1 is partially allocated (half memory + half cores): it must NOT
+	// count as an available whole card, but its remaining capacity must still
+	// be present in the schedulable pool.
+	require.Equal(t, int64(23034), nodes[0].Status.Devices[0].Available.MemoryMiB)
+	require.Equal(t, int64(50), nodes[0].Status.Devices[0].Available.CoreUnits)
+
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.Equal(t, float64(1), available.Quantity)
+	require.Equal(t, float64(1), available.ProductGroups["NVIDIA-L20"])
+	require.Equal(t, float64(1), available.Products["NVIDIA-L20"].Quantity)
+	// Remaining capacity pool aggregates GPU-1 (23034/50) + GPU-2 (46068/100).
+	require.Equal(t, float64(69102), available.Products["NVIDIA-L20"].Virtualization.MemoryMiB)
+	require.Equal(t, float64(150), available.Products["NVIDIA-L20"].Virtualization.CoreUnits)
+}
+
+func TestK8sResourceClientListNodesAvailableCardCountingScenarios(t *testing.T) {
+	// The unified "used" determination: a healthy card counts as an available
+	// whole card only when both memory and compute are fully free. Cover the
+	// scenarios from NEU-608: unallocated, memory-only allocation, compute-only
+	// allocation, both allocated, fully exhausted.
+	const allocMemoryMiB = int64(46068)
+	const allocCoreUnits = int64(100)
+
+	testCases := []struct {
+		name              string
+		allocation        string // JSON for neutree.ai/accelerator-allocations annotation
+		wantAvailable     float64
+		wantPoolMemoryMiB float64
+		wantPoolCoreUnits float64
+		wantPoolNil       bool
+	}{
+		{
+			name:              "unallocated card is fully available",
+			allocation:        "",
+			wantAvailable:     1,
+			wantPoolMemoryMiB: float64(allocMemoryMiB),
+			wantPoolCoreUnits: float64(allocCoreUnits),
+		},
+		{
+			name:              "memory-only allocation marks card used",
+			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":23034,"core_units":0}]`,
+			wantAvailable:     0,
+			wantPoolMemoryMiB: 23034,
+			wantPoolCoreUnits: float64(allocCoreUnits),
+		},
+		{
+			name:              "compute-only allocation marks card used",
+			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":0,"core_units":50}]`,
+			wantAvailable:     0,
+			wantPoolMemoryMiB: float64(allocMemoryMiB),
+			wantPoolCoreUnits: 50,
+		},
+		{
+			name:              "both memory and compute allocated marks card used",
+			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":23034,"core_units":50}]`,
+			wantAvailable:     0,
+			wantPoolMemoryMiB: 23034,
+			wantPoolCoreUnits: 50,
+		},
+		{
+			name:              "fully exhausted card is not available",
+			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46068,"core_units":100}]`,
+			wantAvailable:     0,
+			wantPoolMemoryMiB: 0,
+			wantPoolCoreUnits: 0,
+			wantPoolNil:       true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						plugin.NvidiaGPUKubernetesNodeSelectorKey: "NVIDIA-L20",
+						plugin.NvidiaGPUCountResource:             "1",
+					},
+					Annotations: map[string]string{
+						resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
+							{"uuid":"GPU-1","memory_mib":46068,"healthy":true,"minor_number":0}
+						]`,
+					},
+				},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{
+						corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+						corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+						plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("100"),
+					},
+				},
+			}
+
+			objects := []client.Object{node}
+			if tc.allocation != "" {
+				objects = append(objects, &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "infer-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							resourceparser.NeutreeAcceleratorAllocationsAnnotation: tc.allocation,
+						},
+					},
+					Spec:   corev1.PodSpec{NodeName: "gpu-node"},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+				})
+			}
+
+			ctrClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objects...).
+				Build()
+			client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+			})
+
+			nodes, err := client.ListNodes(context.Background(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			require.Len(t, nodes[0].Status.Devices, 1)
+
+			available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+			require.NotNil(t, available)
+			assert.Equal(t, tc.wantAvailable, available.Quantity)
+			assert.Equal(t, tc.wantAvailable, available.ProductGroups["NVIDIA-L20"])
+			assert.Equal(t, tc.wantAvailable, available.Products["NVIDIA-L20"].Quantity)
+			if tc.wantPoolNil {
+				assert.Nil(t, available.Products["NVIDIA-L20"].Virtualization)
+				return
+			}
+			assert.Equal(t, tc.wantPoolMemoryMiB, available.Products["NVIDIA-L20"].Virtualization.MemoryMiB)
+			assert.Equal(t, tc.wantPoolCoreUnits, available.Products["NVIDIA-L20"].Virtualization.CoreUnits)
+		})
+	}
 }
 
 func TestK8sResourceClientListNodesEnhancesBaseResourcesWithoutGPUCountLabel(t *testing.T) {

@@ -249,6 +249,11 @@ func expectNVIDIAVirtualizedClusterResources(cluster v1.Cluster) string {
 	deviceCount := expectClusterProductDevices(resources.NodeResources, productName)
 	ExpectWithOffset(1, allocatableProduct.Quantity).To(Equal(float64(deviceCount)))
 
+	// Available card count must equal the fully-free device count (partially
+	// allocated cards are no longer counted as available whole cards).
+	fullyFreeCount := expectClusterProductFullyFreeDevices(resources.NodeResources, productName)
+	ExpectWithOffset(1, availableProduct.Quantity).To(Equal(float64(fullyFreeCount)))
+
 	return productName
 }
 
@@ -288,6 +293,32 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	}
 
 	ExpectWithOffset(1, count).To(BeNumerically(">", 0))
+
+	return count
+}
+
+// expectClusterProductFullyFreeDevices counts devices of the given product that
+// are fully free (available memory AND compute both >= allocatable), matching
+// the backend "available card" determination unified in NEU-608.
+func expectClusterProductFullyFreeDevices(nodes map[string]*v1.NodeResourceStatus, productName string) int {
+	count := 0
+
+	for _, node := range nodes {
+		for _, device := range node.Devices {
+			if device.Product != productName {
+				continue
+			}
+
+			ExpectWithOffset(1, device.Health).To(BeTrue())
+			ExpectWithOffset(1, device.Allocatable).NotTo(BeNil())
+			ExpectWithOffset(1, device.Available).NotTo(BeNil())
+
+			if device.Available.MemoryMiB >= device.Allocatable.MemoryMiB &&
+				device.Available.CoreUnits >= device.Allocatable.CoreUnits {
+				count++
+			}
+		}
+	}
 
 	return count
 }

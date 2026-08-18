@@ -450,13 +450,16 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *t
 	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
 	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
-	assert.Equal(t, float64(2), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
-	assert.Equal(t, float64(2),
+	// GPU-abc is fully allocated (exhausted) and GPU-def is fully free, so the
+	// available card count is 1 (snapshot device-count semantics, not the base
+	// Ray quantity 2).
+	assert.Equal(t, float64(1), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(1),
 		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
 	availableProduct := resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
-	assert.Equal(t, float64(2), availableProduct.Quantity)
+	assert.Equal(t, float64(1), availableProduct.Quantity)
 	assert.Equal(t, float64(15360), availableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), availableProduct.Virtualization.CoreUnits)
 	assert.Equal(t, float64(32), resources.Allocatable.CPU)
