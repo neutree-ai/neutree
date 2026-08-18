@@ -687,6 +687,7 @@ func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
 
 		// 0 < count < 1: exactly one decimal place.
 		scaled := count * 10
+
 		return math.Abs(scaled-math.Round(scaled)) < 1e-9
 	default:
 		return true
