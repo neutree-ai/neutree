@@ -2054,12 +2054,27 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		}
 	})
 
-	t.Run("allows a zero count as unassigned on a static cluster", func(t *testing.T) {
+	t.Run("rejects a zero count on a static cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("0", "Tesla-T4")
 
 		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
 
-		assert.Nil(t, err)
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "one-decimal value below 1")
+		}
+	})
+
+	t.Run("rejects a missing count when an accelerator is declared", func(t *testing.T) {
+		endpoint := physicalResourceSpec("", map[string]string{
+			v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey: "Tesla-T4",
+		})
+
+		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
 	})
 
 	t.Run("allows a one-decimal count below one on a static cluster", func(t *testing.T) {

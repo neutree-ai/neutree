@@ -578,16 +578,21 @@ func endpointPatchMayAffectAcceleratorValidation(endpoint *v1.Endpoint) bool {
 }
 
 // validateEndpointAcceleratorResourceShape rejects physical accelerator
-// declarations with an empty or unsupported product, or a count that violates
-// the target cluster type's precision rule. It only runs for non-virtualized
-// accelerator resources; virtualization resources are validated by
-// validateEndpointVGPUResourceShape.
+// declarations with an empty or unsupported product, or a count that is not a
+// strictly positive number satisfying the target cluster type's precision
+// rule. It only runs for non-virtualized accelerator resources; virtualization
+// resources are validated by validateEndpointVGPUResourceShape.
 //
-// The count rule depends on the cluster type: static (SSH) clusters preserve 0
-// as unassigned, allow one-decimal counts below one (0.1-0.9), and allow
-// integers at or above one; Kubernetes clusters allow positive integers only.
-// This mirrors the endpoint form's input precision rules so the API accepts
-// exactly what the UI permits.
+// Declaring an accelerator (a non-empty accelerator type) requires a count
+// greater than zero: an accelerator with zero cards is an inconsistent request,
+// and converters treat count <= 0 as "no accelerator", which would silently
+// drop the declaration. The "no accelerator" state is expressed by omitting
+// the accelerator type entirely, not by a zero count.
+//
+// The count precision rule depends on the cluster type: static (SSH) clusters
+// allow one-decimal counts below one (0.1-0.9) and integers at or above one;
+// Kubernetes clusters allow integers only. This mirrors the endpoint form's
+// input precision rules so the API accepts exactly what the UI permits.
 //
 // The checks are vendor-agnostic: product support is derived from the target
 // cluster's reported accelerator metadata rather than a hardcoded vendor
@@ -607,10 +612,11 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 		return nil
 	}
 
-	// A nil or empty count means no accelerator count was declared; leave it
-	// alone rather than guessing the intended semantics.
+	// An accelerator is declared, so a count is required and must be > 0. A
+	// missing or malformed count would otherwise be read as "no accelerator"
+	// and silently drop the declaration.
 	if resources.GPU == nil || *resources.GPU == "" {
-		return nil
+		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive accelerator card count"))
 	}
 
 	count, err := strconv.ParseFloat(*resources.GPU, 64)
@@ -631,25 +637,23 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 	if !isAcceleratorCountPrecisionValid(count, clusterType) {
 		if clusterType == string(v1.SSHClusterType) {
 			return endpointAcceleratorResourceError(errors.New(
-				"spec.resources.gpu must be 0, a one-decimal value below 1, or an integer at or above 1",
+				"spec.resources.gpu must be a one-decimal value below 1 or an integer at or above 1",
 			))
 		}
 
 		return endpointAcceleratorResourceError(errors.New("spec.resources.gpu must be a positive integer"))
 	}
 
-	// A zero count on a static cluster is "unassigned", not an accelerator
-	// request, so product checks do not apply. Any positive count requests an
-	// accelerator and therefore needs a non-empty, supported product.
-	if count > 0 {
-		if resources.GetAcceleratorProduct() == "" {
-			return endpointAcceleratorResourceError(errors.New("spec.resources.accelerator.product is required"))
-		}
+	// Count is strictly positive here (enforced by isAcceleratorCountPrecisionValid),
+	// so the declaration always requests an accelerator and needs a non-empty,
+	// supported product.
+	if resources.GetAcceleratorProduct() == "" {
+		return endpointAcceleratorResourceError(errors.New("spec.resources.accelerator.product is required"))
+	}
 
-		if cluster != nil {
-			if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
-				return validationErr
-			}
+	if cluster != nil {
+		if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
+			return validationErr
 		}
 	}
 
@@ -657,11 +661,13 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 }
 
 // isAcceleratorCountPrecisionValid reports whether an accelerator card count
-// satisfies the precision rule for a cluster type. Static (SSH) clusters
-// preserve 0 as unassigned, allow one-decimal counts below one (0.1-0.9), and
-// allow integers at or above one. Kubernetes clusters allow positive integers
-// only. An unknown cluster type fails open (accepts) because the rule cannot
-// be determined.
+// satisfies the strict-positivity and precision rules for a cluster type. The
+// count must be strictly greater than zero — a zero count means "no
+// accelerator", which is expressed by omitting the accelerator type, not by a
+// zero count — and must satisfy the type-specific precision rule. Static (SSH)
+// clusters allow one-decimal counts below one (0.1-0.9) and integers at or
+// above one; Kubernetes clusters allow integers only. An unknown cluster type
+// fails open (accepts) because the rule cannot be determined.
 func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
 	// +Inf, -Inf and NaN never represent a real card count; reject them before
 	// the per-type rules (which +Inf would otherwise pass as an "integer").
@@ -669,18 +675,15 @@ func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
 		return false
 	}
 
+	// The count must be strictly positive.
+	if count <= 0 {
+		return false
+	}
+
 	switch clusterType {
 	case string(v1.KubernetesClusterType):
-		return count >= 1 && count == math.Trunc(count)
+		return count == math.Trunc(count)
 	case string(v1.SSHClusterType):
-		if count < 0 {
-			return false
-		}
-
-		if count == 0 {
-			return true // unassigned
-		}
-
 		if count >= 1 {
 			return count == math.Trunc(count)
 		}
