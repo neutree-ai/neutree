@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
@@ -121,4 +122,39 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 
 	_, ok := provider.(hami.KubernetesProvider)
 	assert.True(t, ok)
+}
+
+func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = "unknown-accelerator"
+
+	_, err := opts.config()
+
+	assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+}
+
+func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = v1.AcceleratorTypeNVIDIAGPU.String()
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), config.AcceleratorType)
+	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
+}
+
+func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Empty(t, config.AcceleratorType)
+	// The registry is always populated; empty AcceleratorType selects the
+	// legacy DCGM path even though the nvidia adapter is registered.
+	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
 }

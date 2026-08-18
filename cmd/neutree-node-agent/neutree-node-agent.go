@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/pflag"
@@ -17,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
@@ -83,6 +86,7 @@ type options struct {
 	metricsMode             string
 	node                    string
 	nodeIP                  string
+	acceleratorType         string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -105,6 +109,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.metricsMode, "metrics-mode", o.metricsMode, "Metrics exporter mode: managed or external")
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
+	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
+		"Accelerator type selecting the metrics adapter (for example nvidia_gpu); empty uses the legacy DCGM path")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -117,9 +123,21 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) config() (neutreemetrics.Config, error) {
+	if o.acceleratorType != "" {
+		if _, ok := adapter.GetLocalAccelerators()[o.acceleratorType]; !ok {
+			return neutreemetrics.Config{}, fmt.Errorf(
+				"accelerator adapter %q is not registered; available adapters: %s",
+				o.acceleratorType,
+				registeredAdapterTypes(),
+			)
+		}
+	}
+
 	config := neutreemetrics.Config{
-		ListenAddress: o.listenAddress,
-		Labels:        o.labels(),
+		ListenAddress:   o.listenAddress,
+		Labels:          o.labels(),
+		AcceleratorType: o.acceleratorType,
+		Accelerators:    adapter.GetLocalAccelerators(),
 	}
 
 	writer, err := o.kubernetesWriter()
@@ -140,6 +158,17 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil
+}
+
+func registeredAdapterTypes() string {
+	types := make([]string, 0, len(adapter.GetLocalAccelerators()))
+	for typ := range adapter.GetLocalAccelerators() {
+		types = append(types, typ)
+	}
+
+	sort.Strings(types)
+
+	return strings.Join(types, ", ")
 }
 
 func (o *options) scrapeTargetProvider(

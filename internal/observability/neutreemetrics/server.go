@@ -16,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
@@ -33,10 +34,13 @@ type Config struct {
 	ListenAddress        string
 	Labels               model.CanonicalLabels
 	ScrapeTargetProvider ScrapeTargetProvider
-	// TODO: Introduce accelerator exporter adapters here. The first built-in
-	// adapter is NVIDIA DCGM-compatible metrics; future external adapters should
-	// map vendor exporter output into Neutree's canonical accelerator samples
-	// before normalizing to neutree_* metrics and device snapshots.
+	// AcceleratorType selects the accelerator adapter from the registry when
+	// non-empty. Empty keeps the legacy DCGM normalizer path.
+	AcceleratorType string
+	// Accelerators is the registered accelerator adapter registry used to
+	// resolve AcceleratorType to an adapter.
+	Accelerators map[string]adapter.Accelerator
+	// DeviceSnapshotProvider is the external device snapshot provider.
 	DeviceSnapshotProvider   model.DeviceSnapshotProvider
 	AllocationProvider       allocation.Provider
 	RuntimeUsageProvider     runtimeusage.Provider
@@ -46,6 +50,14 @@ type Config struct {
 	KubernetesWriter         *metricskubernetes.AnnotationWriter
 	AnnotationSyncInterval   time.Duration
 	HTTPClient               *http.Client
+}
+
+// WithAccelerators returns a copy of the config carrying the given accelerator
+// adapter registry, mirroring how NodeAgent assembles adapters via the plugin
+// injection pattern.
+func (c Config) WithAccelerators(accelerators map[string]adapter.Accelerator) Config {
+	c.Accelerators = accelerators
+	return c
 }
 
 type Server struct {
@@ -189,14 +201,61 @@ func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.Normali
 		EndpointReplicaGPUUsages:     s.endpointReplicaGPUUsages(ctx),
 	}
 
-	if acceleratorExporter := s.scrapeAcceleratorExporters(ctx); acceleratorExporter != nil {
+	acceleratorExporter := s.scrapeAcceleratorExporters(ctx)
+	if acceleratorExporter != nil {
 		gpuHardwareInfos := s.gpuHardwareInfosFromScrape(ctx, acceleratorExporter)
 		normalizeReq.AcceleratorExporter = acceleratorExporter
 		normalizeReq.EndpointAllocations = s.endpointAllocationsFromScrape(ctx, acceleratorExporter, gpuHardwareInfos)
 		normalizeReq.GPUHardwareInfos = gpuHardwareInfos
 	}
 
+	if accel := s.selectedAccelerator(); accel != nil {
+		normalizeReq.AcceleratorSamples = s.acceleratorSamples(ctx, accel, acceleratorExporter, normalizeReq)
+	}
+
 	return normalizeReq
+}
+
+func (s *Server) selectedAccelerator() adapter.Accelerator {
+	if s.config.AcceleratorType == "" {
+		return nil
+	}
+
+	return s.config.Accelerators[s.config.AcceleratorType]
+}
+
+func (s *Server) acceleratorSamples(
+	ctx context.Context,
+	accel adapter.Accelerator,
+	acceleratorExporter *model.ScrapeResult,
+	normalizeReq metricsnormalizer.NormalizeRequest,
+) []metricsnormalizer.Sample {
+	evidence := adapter.AcceleratorEvidence{
+		AcceleratorType:          s.config.AcceleratorType,
+		Labels:                   s.config.Labels,
+		EndpointAllocations:      normalizeReq.EndpointAllocations,
+		GPUHardwareInfos:         normalizeReq.GPUHardwareInfos,
+		EndpointReplicaGPUUsages: normalizeReq.EndpointReplicaGPUUsages,
+	}
+	if acceleratorExporter != nil {
+		evidence.ExporterText = acceleratorExporter.Body
+		evidence.ExporterUp = acceleratorExporter.Up
+	}
+
+	result, err := accel.BuildMetrics(ctx, evidence)
+	if err != nil {
+		klog.V(2).InfoS("Accelerator adapter failed to build metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
+		return nil
+	}
+
+	// A non-nil AcceleratorSamples selects the adapter path in the normalizer.
+	// Return an empty (non-nil) slice so an adapter that produced no samples
+	// still disables the legacy DCGM path rather than falling back to it.
+	if result.Samples == nil {
+		return []metricsnormalizer.Sample{}
+	}
+
+	return result.Samples
 }
 
 func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []model.EndpointReplicaRuntimeUsage {
