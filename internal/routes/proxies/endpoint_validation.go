@@ -271,9 +271,9 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		return nil
 	}
 
-	// A paused virtualization endpoint skips all resource validation — the
+	// A paused endpoint (zero replicas) skips all resource validation — the
 	// pause action itself must not be blocked by the resource shape.
-	if resources.HasAcceleratorVirtualization() && endpointReplicaCount(endpoint.Spec) == 0 {
+	if endpointReplicaCount(endpoint.Spec) == 0 {
 		return nil
 	}
 
@@ -327,7 +327,7 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 	}
 
 	clusterType := ""
-	if cluster != nil && cluster.Spec != nil {
+	if cluster.Spec != nil {
 		clusterType = cluster.Spec.Type
 	}
 
@@ -335,10 +335,8 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
-	if cluster != nil {
-		if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
-			return validationErr
-		}
+	if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
+		return validationErr
 	}
 
 	return nil
@@ -689,20 +687,24 @@ func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
 	}
 }
 
-// resolveAcceleratorValidationCluster resolves the endpoint's target cluster,
-// returning a nil cluster when it cannot be resolved so per-type count and
-// product-support rules fail open instead of rejecting a request that cannot
-// be judged. An infrastructure failure while looking up the cluster is
-// surfaced as an internal error rather than accepted silently, matching the
-// established vGPU cluster lookup contract.
+// resolveAcceleratorValidationCluster resolves the endpoint's target cluster
+// for physical accelerator validation. The cluster must resolve to exactly one
+// entry, matching the vGPU cluster lookup contract: an unresolvable cluster is
+// a malformed request, not a request to skip validation. An infrastructure
+// failure while looking up the cluster is surfaced as an internal error rather
+// than accepted silently.
 func resolveAcceleratorValidationCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
-	if store == nil || endpoint == nil || endpoint.Spec == nil {
-		return nil, nil
+	if store == nil {
+		return nil, internalServerValidationError()
+	}
+
+	if endpoint == nil || endpoint.Spec == nil {
+		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
 	}
 
 	clusterName := endpoint.Spec.Cluster
 	if clusterName == "" {
-		return nil, nil
+		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
 	}
 
 	workspace := defaultWorkspace
@@ -717,8 +719,12 @@ func resolveAcceleratorValidationCluster(store storage.Storage, endpoint *v1.End
 		return nil, internalServerValidationError()
 	}
 
-	if len(clusters) != 1 {
-		return nil, nil
+	if len(clusters) == 0 {
+		return nil, endpointAcceleratorResourceError(fmt.Errorf("cluster %s/%s not found", workspace, clusterName))
+	}
+
+	if len(clusters) > 1 {
+		return nil, endpointAcceleratorResourceError(fmt.Errorf("multiple clusters matched %s/%s", workspace, clusterName))
 	}
 
 	return &clusters[0], nil

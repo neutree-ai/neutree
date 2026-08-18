@@ -868,7 +868,10 @@ func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrec
 
 func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(t *testing.T) {
 	existing := endpointWithVGPU("cluster-a", "team-a")
+	cluster := clusterWithAcceleratorProduct(v1.AcceleratorType("custom_accelerator"), "replacement-product", 16384, nil)
+	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
 	clusterStorage := &fakeClusterStorage{
+		clusters:  []v1.Cluster{*cluster},
 		endpoints: []v1.Endpoint{*existing},
 	}
 	body := `{
@@ -1077,7 +1080,10 @@ func TestEndpointVGPUValidationAllowsNonVGPUPatchWhenReplicasChange(t *testing.T
 }
 
 func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
 	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
 		endpoints: []v1.Endpoint{
 			*endpointWithVGPU("cluster-a", "team-a"),
 		},
@@ -2172,13 +2178,15 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		}
 	})
 
-	t.Run("fails open when the cluster is not found", func(t *testing.T) {
+	t.Run("rejects when the cluster is not found", func(t *testing.T) {
 		emptyStore := &fakeClusterStorage{}
-		endpoint := physicalWithProduct("1.5", "Tesla-T4")
+		endpoint := physicalWithProduct("1", "Tesla-T4")
 
 		err := validateEndpointResourceShape(emptyStore, endpoint)
 
-		assert.Nil(t, err)
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "cluster default/test-cluster not found")
+		}
 	})
 
 	t.Run("fails open when the cluster metadata is unavailable", func(t *testing.T) {
@@ -2324,14 +2332,18 @@ func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
 		assert.True(t, handlerCalled)
 	})
 
-	t.Run("fails open when the cluster metadata is unavailable", func(t *testing.T) {
+	t.Run("rejects when the cluster is not found on create", func(t *testing.T) {
 		emptyStore := &fakeClusterStorage{}
 		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
 			http.MethodPost, validBody("1", "Tesla-T4"), emptyStore,
 		)
 
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		assert.True(t, handlerCalled)
+		var response validationError
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		assert.Equal(t, "10230", response.Code)
+		assert.Contains(t, response.Hint, "not found")
+		assert.False(t, handlerCalled)
 	})
 
 	t.Run("rejects a fractional count on a kubernetes cluster patch", func(t *testing.T) {
