@@ -2035,6 +2035,56 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("allows empty physical accelerator count as unassigned", func(t *testing.T) {
+		endpoint := physicalWithProduct("", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects malformed physical accelerator count", func(t *testing.T) {
+		endpoint := physicalWithProduct("abc", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("rejects infinite physical accelerator count", func(t *testing.T) {
+		endpoint := physicalWithProduct("+Inf", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("rejects NaN physical accelerator count", func(t *testing.T) {
+		endpoint := physicalWithProduct("NaN", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(store, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("returns internal error when cluster lookup fails", func(t *testing.T) {
+		errorStore := &fakeClusterStorage{listError: errors.New("database down")}
+		endpoint := physicalWithProduct("1", "HUAWEI_Ascend310P")
+
+		err := validateEndpointAcceleratorResourceShape(errorStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "500", err.Code)
+			assert.Equal(t, http.StatusInternalServerError, err.HTTPStatus)
+		}
+	})
+
 	t.Run("rejects negative physical accelerator count", func(t *testing.T) {
 		endpoint := physicalWithProduct("-1", "HUAWEI_Ascend310P")
 
@@ -2201,6 +2251,32 @@ func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
 		assert.Equal(t, "10230", response.Code)
 		assert.Contains(t, response.Hint, "positive integer")
 		assert.False(t, handlerCalled)
+	})
+}
+
+func TestEndpointPatchMayAffectAcceleratorValidation(t *testing.T) {
+	t.Run("runs when the patch touches resources", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{}}}
+
+		assert.True(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+	})
+
+	t.Run("runs when the patch touches cluster", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}}
+
+		assert.True(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+	})
+
+	t.Run("skips for a replicas-only patch", func(t *testing.T) {
+		replicas := 3
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &replicas}}}
+
+		assert.False(t, endpointPatchMayAffectAcceleratorValidation(endpoint))
+	})
+
+	t.Run("skips for a nil spec", func(t *testing.T) {
+		assert.False(t, endpointPatchMayAffectAcceleratorValidation(nil))
+		assert.False(t, endpointPatchMayAffectAcceleratorValidation(&v1.Endpoint{}))
 	})
 }
 

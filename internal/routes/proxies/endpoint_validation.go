@@ -600,17 +600,25 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 		return nil
 	}
 
-	// A count of zero preserves the existing "no accelerator" semantics;
-	// converters treat count <= 0 as no accelerator.
-	if resources.GetGPUCount() == 0 {
+	// A nil, empty, or explicitly-zero count preserves the existing "no
+	// accelerator" semantics; converters treat count <= 0 as no accelerator.
+	// Any other value is a declared accelerator count and must be a positive
+	// integer, so a malformed string (e.g. "abc") is rejected rather than
+	// silently deploying without an accelerator.
+	if resources.GPU == nil || *resources.GPU == "" || *resources.GPU == "0" {
 		return nil
+	}
+
+	count, err := strconv.ParseFloat(*resources.GPU, 64)
+	if err != nil {
+		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.gpu must be a positive integer"))
 	}
 
 	if resources.GetAcceleratorProduct() == "" {
 		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.accelerator.product is required"))
 	}
 
-	if count := resources.GetGPUCount(); count < 0 || count != math.Trunc(count) {
+	if count < 0 || math.IsInf(count, 0) || math.IsNaN(count) || count != math.Trunc(count) {
 		return endpointAcceleratorResourceError(fmt.Errorf("spec.resources.gpu must be a positive integer"))
 	}
 
@@ -621,38 +629,10 @@ func validateEndpointAcceleratorResourceShape(store storage.Storage, endpoint *v
 // target cluster's accelerator metadata does not list for the requested
 // accelerator type. When the cluster or its metadata is unavailable the check
 // fails open, so requests against clusters that have not reported metadata are
-// not rejected.
+// not rejected. An infrastructure failure while looking up the cluster is
+// surfaced as an internal error rather than accepted silently, matching the
+// established vGPU cluster lookup contract.
 func validateAcceleratorProductSupported(store storage.Storage, endpoint *v1.Endpoint, resources *v1.ResourceSpec) *validationError {
-	cluster := endpointAcceleratorCluster(store, endpoint)
-	if cluster == nil {
-		return nil
-	}
-
-	resourceInfo := clusterResourceInfo(cluster)
-	if resourceInfo == nil || resourceInfo.AcceleratorMetadata == nil {
-		return nil
-	}
-
-	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorType(resources.GetAcceleratorType())]
-	if metadata == nil || metadata.Products == nil {
-		return nil
-	}
-
-	if _, ok := metadata.Products[v1.AcceleratorProduct(resources.GetAcceleratorProduct())]; !ok {
-		return endpointAcceleratorResourceError(fmt.Errorf(
-			"unsupported accelerator product %q for accelerator type %q",
-			resources.GetAcceleratorProduct(),
-			resources.GetAcceleratorType(),
-		))
-	}
-
-	return nil
-}
-
-// endpointAcceleratorCluster resolves the endpoint's target cluster, returning
-// nil when the cluster cannot be resolved so product-support validation fails
-// open instead of rejecting a request it cannot judge.
-func endpointAcceleratorCluster(store storage.Storage, endpoint *v1.Endpoint) *v1.Cluster {
 	if store == nil || endpoint == nil || endpoint.Spec == nil {
 		return nil
 	}
@@ -670,11 +650,41 @@ func endpointAcceleratorCluster(store storage.Storage, endpoint *v1.Endpoint) *v
 	clusters, err := store.ListCluster(storage.ListOption{
 		Filters: endpointClusterLookupFilters(clusterName, workspace),
 	})
-	if err != nil || len(clusters) != 1 {
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	// Fail open when the target cluster cannot be resolved: product support
+	// cannot be judged, and rejecting it would break legitimate requests
+	// against clusters (e.g. static clusters) that do not report metadata.
+	if len(clusters) != 1 {
 		return nil
 	}
 
-	return &clusters[0]
+	resourceInfo := clusterResourceInfo(&clusters[0])
+	if resourceInfo == nil || resourceInfo.AcceleratorMetadata == nil {
+		return nil
+	}
+
+	metadata := resourceInfo.AcceleratorMetadata[v1.AcceleratorType(resources.GetAcceleratorType())]
+	// A nil product map means the cluster reported no product metadata for the
+	// type, so support cannot be judged and the check fails open. A present but
+	// empty map is authoritative: the cluster reports the type with no products,
+	// so every product is rejected (same empty-is-authoritative contract as
+	// validateEndpointVGPUResourcesSupported's supported_resources list).
+	if metadata == nil || metadata.Products == nil {
+		return nil
+	}
+
+	if _, ok := metadata.Products[v1.AcceleratorProduct(resources.GetAcceleratorProduct())]; !ok {
+		return endpointAcceleratorResourceError(fmt.Errorf(
+			"unsupported accelerator product %q for accelerator type %q",
+			resources.GetAcceleratorProduct(),
+			resources.GetAcceleratorType(),
+		))
+	}
+
+	return nil
 }
 
 func endpointAcceleratorResourceError(err error) *validationError {

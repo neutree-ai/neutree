@@ -90,6 +90,11 @@ var _ = Describe("Endpoint Accelerator Resource Validation", Ordered, Label("end
 	})
 
 	It("rejects an unknown accelerator product when cluster metadata lists supported products", Label("C2745664"), func() {
+		cluster := getClusterFullJSON(clusterName)
+		if !clusterReportsAcceleratorProducts(cluster) {
+			Skip("Cluster does not report accelerator metadata products; unknown-product rejection cannot be judged")
+		}
+
 		epName := "e2e-ep-accval-unknownprod-" + Cfg.RunID
 		DeferCleanup(func() { deleteEndpoint(epName) })
 
@@ -107,11 +112,25 @@ var _ = Describe("Endpoint Accelerator Resource Validation", Ordered, Label("end
 	})
 
 	It("does not create partial endpoints for rejected payloads", Label("C2745665"), func() {
-		for _, suffix := range []string{"frac", "emptyprod", "unknownprod"} {
+		rejectionPayloads := []struct {
+			suffix  string
+			gpu     string
+			product string
+		}{
+			{"frac", "1.5", accProduct},
+			{"emptyprod", "1", ""},
+			{"unknownprod", "1", "unknown-product-model"},
+		}
+
+		for _, payload := range rejectionPayloads {
 			_, code := callNeutreeAPIWithJSON(
 				http.MethodPost,
 				"/api/v1/endpoints",
-				endpointPayload("e2e-ep-accval-partial-"+suffix+"-"+Cfg.RunID, "1.5", accProduct),
+				endpointPayload(
+					"e2e-ep-accval-partial-"+payload.suffix+"-"+Cfg.RunID,
+					payload.gpu,
+					payload.product,
+				),
 			)
 			Expect(code).To(Equal(http.StatusBadRequest))
 		}
@@ -121,3 +140,21 @@ var _ = Describe("Endpoint Accelerator Resource Validation", Ordered, Label("end
 		Expect(r.Stdout).NotTo(ContainSubstring("e2e-ep-accval-partial-"))
 	})
 })
+
+// clusterReportsAcceleratorProducts reports whether the cluster exposes
+// accelerator metadata products for any accelerator type. The product-support
+// validator fails open on clusters without this metadata, so an unknown-product
+// rejection test is only meaningful when the metadata is present.
+func clusterReportsAcceleratorProducts(cluster v1.Cluster) bool {
+	if cluster.Status == nil || cluster.Status.ResourceInfo == nil {
+		return false
+	}
+
+	for _, metadata := range cluster.Status.ResourceInfo.AcceleratorMetadata {
+		if len(metadata.Products) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
