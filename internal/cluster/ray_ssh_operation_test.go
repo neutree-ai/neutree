@@ -64,6 +64,44 @@ func TestBuildAcceleratorDockerConfig(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			name: "mutate accelerator runtime config appends CDI device request",
+			input: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					Image:      "rayproject/ray:latest",
+					RunOptions: []string{},
+				},
+			},
+			want: &v1.RayClusterConfig{
+				Docker: v1.Docker{
+					Image: "rayproject/ray:latest-test",
+					RunOptions: []string{
+						"--runtime=nvidia",
+						"-e ACCELERATOR_TYPE=gpu",
+						"--volume /cluster-only:/cluster-only:ro",
+						"--device nvidia.com/gpu=all",
+					},
+				},
+			},
+			setupMock: func(m *acceleratormocks.MockManager) {
+				m.On("GetNodeRuntimeConfig", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+					v1.RuntimeConfig{
+						ImageSuffix: "test",
+						Runtime:     "nvidia",
+						Env: map[string]string{
+							"ACCELERATOR_TYPE": "gpu",
+						},
+						Options: []string{
+							"--volume /cluster-only:/cluster-only:ro",
+						},
+						CDIDevices: []string{
+							"nvidia.com/gpu=all",
+						},
+					}, nil)
+			},
+			wantErr:     false,
+			wantChanged: true,
+		},
+		{
 			name: "mutate accelerator runtime config success, never changed",
 			input: &v1.RayClusterConfig{
 				Docker: v1.Docker{

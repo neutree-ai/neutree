@@ -82,6 +82,12 @@ type RuntimeConfig struct {
 	Env         map[string]string `json:"env"`
 	Runtime     string            `json:"runtime"`
 	Options     []string          `json:"options"`
+	// CDIDevices declares the CDI device requests for containers that need
+	// accelerator access on Docker/static-node backends. It renders as
+	// `--device <cdi>` and replaces legacy bare `--gpus all` injection. Empty
+	// means the component does not need accelerator devices (CPU / non-GPU).
+	// The Runtime field only selects the handler; devices are declared here.
+	CDIDevices []string `json:"cdi_devices,omitempty"`
 }
 
 type AcceleratorProfile struct {
@@ -144,6 +150,15 @@ type AcceleratorExporterRuntimeProfile struct {
 	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// Runtime selects the Docker runtime handler (e.g. "nvidia") on StaticNode.
+	// Kubernetes does not parse it. Without this, exporter/node-agent
+	// containers only received `--gpus all` and no `--runtime=`, which left the
+	// GPU permission injection to the legacy nvidia-container-runtime-hook.
+	Runtime string `json:"runtime,omitempty"`
+	// CDIDevices declares the CDI device requests for the component on
+	// StaticNode, rendered as docker `--device <cdi>`. It replaces bare
+	// `--gpus all` in DockerRunOptions. Kubernetes must not parse it.
+	CDIDevices []string `json:"cdi_devices,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 }

@@ -17,12 +17,14 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			Env: map[string]string{
 				"ACCELERATOR_TYPE": "gpu",
 			},
-			Options: []string{"--gpus all"},
+			Options:    []string{"--volume /cluster-only:/cluster-only:ro"},
+			CDIDevices: []string{"nvidia.com/gpu=all"},
 		},
 		EngineRuntime: &RuntimeConfig{
 			ImageSuffix: "cuda-engine",
 			Runtime:     "nvidia",
 			Options:     []string{"--gpus", "all"},
+			CDIDevices:  []string{"nvidia.com/gpu=all"},
 		},
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
@@ -44,6 +46,8 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 				NodeSelector: map[string]string{
 					"nvidia.com/gpu.present": "true",
 				},
+				Runtime:          "nvidia",
+				CDIDevices:       []string{"nvidia.com/gpu=all"},
 				DockerRunOptions: []string{"--gpus all"},
 			},
 		},
@@ -64,11 +68,13 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.ClusterRuntime)
 	assert.Equal(t, "cuda", decoded.ClusterRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.ClusterRuntime.Runtime)
-	assert.Equal(t, []string{"--gpus all"}, decoded.ClusterRuntime.Options)
+	assert.Equal(t, []string{"--volume /cluster-only:/cluster-only:ro"}, decoded.ClusterRuntime.Options)
+	assert.Equal(t, []string{"nvidia.com/gpu=all"}, decoded.ClusterRuntime.CDIDevices)
 	require.NotNil(t, decoded.EngineRuntime)
 	assert.Equal(t, "cuda-engine", decoded.EngineRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.EngineRuntime.Runtime)
 	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
+	assert.Equal(t, []string{"nvidia.com/gpu=all"}, decoded.EngineRuntime.CDIDevices)
 	require.NotNil(t, decoded.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", decoded.MetricsExporter.Name)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.MetricsExporter.Args)
@@ -80,6 +86,8 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.MetricsExporter.Runtime.Capabilities)
 	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.MetricsExporter.Runtime.Capabilities.Add)
 	assert.Equal(t, map[string]string{"nvidia.com/gpu.present": "true"}, decoded.MetricsExporter.Runtime.NodeSelector)
+	assert.Equal(t, "nvidia", decoded.MetricsExporter.Runtime.Runtime)
+	assert.Equal(t, []string{"nvidia.com/gpu=all"}, decoded.MetricsExporter.Runtime.CDIDevices)
 	assert.Equal(t, []string{"--gpus all"}, decoded.MetricsExporter.Runtime.DockerRunOptions)
 }
 

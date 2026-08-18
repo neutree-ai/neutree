@@ -20,7 +20,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Env: map[string]string{
 					"ACCELERATOR_TYPE": "gpu",
 				},
-				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
+				Options:    []string{"--volume /cluster-only:/cluster-only:ro"},
+				CDIDevices: []string{"nvidia.com/gpu=all"},
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
@@ -41,7 +42,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 					Capabilities: &v1.AcceleratorExporterCapabilities{
 						Add: []string{"SYS_ADMIN"},
 					},
-					DockerRunOptions: []string{"--gpus all"},
+					Runtime:          "nvidia",
+					CDIDevices:       []string{"nvidia.com/gpu=all"},
+					DockerRunOptions: []string{},
 				},
 			},
 		},
@@ -108,7 +111,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/root/.docker", rayHead.Env["DOCKER_CONFIG"])
 	assert.Equal(t, "gpu", rayHead.Env["ACCELERATOR_TYPE"])
 	assert.Contains(t, rayHead.DockerRunOptions, "--runtime=nvidia")
-	assert.Contains(t, rayHead.DockerRunOptions, "--gpus all")
+	assert.Contains(t, rayHead.DockerRunOptions, "--device nvidia.com/gpu=all")
+	assert.NotContains(t, rayHead.DockerRunOptions, "--gpus all")
 	assert.Contains(t, rayHead.DockerRunOptions, "--volume /etc/neutree/docker:/root/.docker:ro")
 	require.NotNil(t, head.Spec.Warm)
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
@@ -137,7 +141,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
-	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
+	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--runtime=nvidia", "--device nvidia.com/gpu=all"}, exporter.DockerRunOptions)
 	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
 	assert.Equal(t, 19400, exporter.Ports[0].Port)
@@ -165,7 +169,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--pid=host")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cgroupns=host")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
-	assert.Contains(t, nodeAgent.DockerRunOptions, "--gpus all")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--runtime=nvidia")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--device nvidia.com/gpu=all")
+	assert.NotContains(t, nodeAgent.DockerRunOptions, "--gpus all")
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
 	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
 	requireVolume(t, nodeAgent, "host-cgroup", "/sys/fs/cgroup", "/host/sys/fs/cgroup")
@@ -806,8 +812,8 @@ func TestPlannerPlanWaitsForDesiredComponents(t *testing.T) {
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 					ClusterRuntime: &v1.RuntimeConfig{
-						Runtime: "nvidia",
-						Options: []string{"--gpus all"},
+						Runtime:    "nvidia",
+						CDIDevices: []string{"nvidia.com/gpu=all"},
 					},
 				},
 			},
