@@ -10,6 +10,7 @@ type OEMConfigSpec struct {
 	BrandName           string `json:"brand_name,omitempty"`
 	LogoBase64          string `json:"logo_base64,omitempty"`
 	LogoCollapsedBase64 string `json:"logo_collapsed_base64,omitempty"`
+	CustomCSS           string `json:"custom_css,omitempty"`
 }
 
 type OEMConfig struct {
