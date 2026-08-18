@@ -1989,7 +1989,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("allows a supported product with a positive integer count on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		assert.Nil(t, err)
 	})
@@ -1997,7 +1997,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects an empty product on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1", "")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "product is required")
@@ -2007,7 +2007,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects an unknown product on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1", "unknown-model")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "unsupported accelerator product")
@@ -2017,7 +2017,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a fractional count at or above one on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1.5", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2027,7 +2027,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a fractional count below one on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("0.5", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2037,7 +2037,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a zero count on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("0", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2047,7 +2047,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a negative count on a kubernetes cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("-1", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2057,7 +2057,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a zero count on a static cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("0", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "one-decimal value below 1")
@@ -2070,7 +2070,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 			v1.AcceleratorProductKey: "Tesla-T4",
 		})
 
-		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive accelerator card count")
@@ -2081,7 +2081,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		for _, gpu := range []string{"0.1", "0.5", "0.9"} {
 			endpoint := physicalWithProduct(gpu, "Tesla-T4")
 
-			err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+			err := validateEndpointResourceShape(sshStore, endpoint)
 
 			assert.Nil(t, err)
 		}
@@ -2091,7 +2091,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		for _, gpu := range []string{"1", "2", "8"} {
 			endpoint := physicalWithProduct(gpu, "Tesla-T4")
 
-			err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+			err := validateEndpointResourceShape(sshStore, endpoint)
 
 			assert.Nil(t, err)
 		}
@@ -2101,7 +2101,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		for _, gpu := range []string{"0.01", "0.15"} {
 			endpoint := physicalWithProduct(gpu, "Tesla-T4")
 
-			err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+			err := validateEndpointResourceShape(sshStore, endpoint)
 
 			if assert.NotNil(t, err) {
 				assert.Contains(t, err.Hint, "one-decimal value below 1")
@@ -2113,7 +2113,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		for _, gpu := range []string{"1.5", "2.5"} {
 			endpoint := physicalWithProduct(gpu, "Tesla-T4")
 
-			err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+			err := validateEndpointResourceShape(sshStore, endpoint)
 
 			if assert.NotNil(t, err) {
 				assert.Contains(t, err.Hint, "integer at or above 1")
@@ -2124,7 +2124,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a negative count on a static cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("-1", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "one-decimal value below 1")
@@ -2134,7 +2134,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects an empty product on a static cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1", "")
 
-		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "product is required")
@@ -2144,7 +2144,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects an unknown product on a static cluster", func(t *testing.T) {
 		endpoint := physicalWithProduct("1", "unknown-model")
 
-		err := validateEndpointAcceleratorResourceShape(sshStore, endpoint)
+		err := validateEndpointResourceShape(sshStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "unsupported accelerator product")
@@ -2154,7 +2154,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a malformed count", func(t *testing.T) {
 		endpoint := physicalWithProduct("abc", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "valid accelerator card count")
@@ -2164,7 +2164,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects an infinite count", func(t *testing.T) {
 		endpoint := physicalWithProduct("+Inf", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2174,7 +2174,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("rejects a NaN count", func(t *testing.T) {
 		endpoint := physicalWithProduct("NaN", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Contains(t, err.Hint, "positive integer")
@@ -2185,7 +2185,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		errorStore := &fakeClusterStorage{listError: errors.New("database down")}
 		endpoint := physicalWithProduct("1", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(errorStore, endpoint)
+		err := validateEndpointResourceShape(errorStore, endpoint)
 
 		if assert.NotNil(t, err) {
 			assert.Equal(t, "500", err.Code)
@@ -2197,7 +2197,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		emptyStore := &fakeClusterStorage{}
 		endpoint := physicalWithProduct("1.5", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(emptyStore, endpoint)
+		err := validateEndpointResourceShape(emptyStore, endpoint)
 
 		assert.Nil(t, err)
 	})
@@ -2208,32 +2208,49 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 		noMetadataStore := &fakeClusterStorage{clusters: []v1.Cluster{*cluster}}
 		endpoint := physicalWithProduct("1", "Tesla-T4")
 
-		err := validateEndpointAcceleratorResourceShape(noMetadataStore, endpoint)
+		err := validateEndpointResourceShape(noMetadataStore, endpoint)
 
 		assert.Nil(t, err)
 	})
 
-	t.Run("skips virtualization resources", func(t *testing.T) {
+	t.Run("routes virtualization resources to the vGPU chain", func(t *testing.T) {
+		replicas := 1
 		resources := virtualizationResources(string(v1.AcceleratorTypeNVIDIAGPU), "1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryMiBKey: "4096",
 		})
-		endpoint := &v1.Endpoint{
-			Spec: &v1.EndpointSpec{
-				Cluster:   "test-cluster",
-				Resources: resources,
-			},
+		endpoint := func() *v1.Endpoint {
+			return &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Cluster:   "test-cluster",
+					Replicas:  v1.ReplicaSpec{Num: &replicas},
+					Resources: resources,
+				},
+			}
 		}
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		// A virtualization-enabled, ready cluster passes the vGPU chain.
+		readyCluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
+		markClusterVGPUReady(readyCluster, "test-cluster", "default")
+		readyStore := &fakeClusterStorage{clusters: []v1.Cluster{*readyCluster}}
+
+		err := validateEndpointResourceShape(readyStore, endpoint())
 
 		assert.Nil(t, err)
+
+		// A non-virtualization-ready cluster is rejected by the vGPU chain, not
+		// skipped by the physical-accelerator path.
+		err = validateEndpointResourceShape(k8sStore, endpoint())
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10222", err.Code)
+		}
 	})
 
 	t.Run("skips when no accelerator type is declared", func(t *testing.T) {
 		gpu := "1"
 		endpoint := physicalResourceSpec(gpu, nil)
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		assert.Nil(t, err)
 	})
@@ -2241,7 +2258,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	t.Run("skips when resources are nil", func(t *testing.T) {
 		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "test-cluster"}}
 
-		err := validateEndpointAcceleratorResourceShape(k8sStore, endpoint)
+		err := validateEndpointResourceShape(k8sStore, endpoint)
 
 		assert.Nil(t, err)
 	})
