@@ -31,9 +31,8 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 func TestManagerGetEngineContainerRunOptionsCDI(t *testing.T) {
 	m := &manager{}
 	m.acceleratorsMap.Store(v1.AcceleratorTypeNVIDIAGPU.String(), registerPlugin{
-		resource:         v1.AcceleratorTypeNVIDIAGPU.String(),
-		plugin:           &plugin.GPUAcceleratorPlugin{},
-		lastRegisterTime: time.Now(),
+		resource: v1.AcceleratorTypeNVIDIAGPU.String(),
+		plugin:   &plugin.GPUAcceleratorPlugin{},
 	})
 
 	opts, err := m.GetEngineContainerRunOptions(v1.AcceleratorTypeNVIDIAGPU.String())
