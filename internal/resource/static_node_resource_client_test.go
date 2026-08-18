@@ -189,7 +189,7 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 	require.NotNil(t, allocatableProduct.Virtualization)
 	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
-	assert.Equal(t, float64(1), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(0), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	availableProduct := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
@@ -247,7 +247,7 @@ func TestStaticNodeResourceClientCompletesCPUAndMemoryFromBaseResources(t *testi
 	assert.Equal(t, float64(48), resources.Available.Memory)
 }
 
-func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) {
+func TestStaticNodeResourceClientUsesBaseRayAllocatableAndSnapshotAvailableQuantities(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
 			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
@@ -316,14 +316,17 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 
 	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 	require.NotNil(t, available)
-	assert.Equal(t, float64(0.5), available.Quantity)
-	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
-	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	// GPU-abc is fully allocated, GPU-def is half allocated — neither card is
+	// fully free, so the available card count is 0 (not the base Ray 0.5).
+	assert.Equal(t, float64(0), available.Quantity)
+	assert.Equal(t, float64(0), available.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(0), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	// Remaining capacity pool still preserves GPU-def's leftover 7680/50.
 	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
 	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
 
-func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAvailableDevices(t *testing.T) {
+func TestStaticNodeResourceClientNoAvailableGroupWhenAllCardsFullyAllocated(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
 			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
@@ -382,12 +385,10 @@ func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAv
 
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
-	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.NotNil(t, available)
-	assert.Equal(t, float64(0.5), available.Quantity)
-	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
-	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
-	assert.Nil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
+	// Both cards are fully allocated — no card has any remaining capacity, so
+	// the available accelerator group is empty (no card counted as available).
+	availableGroup := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	assert.Nil(t, availableGroup)
 }
 
 func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T) {

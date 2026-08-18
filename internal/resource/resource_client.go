@@ -48,6 +48,20 @@ func hasDeviceAvailableCapacity(pool *v1.DeviceResourcePool) bool {
 	return pool != nil && pool.MemoryMiB > 0 && pool.CoreUnits > 0
 }
 
+// isDeviceFullyAvailable reports whether a healthy device retains its full
+// allocatable memory and compute, i.e. it has not been partially allocated
+// (used) in either dimension. A partially allocated card must not count as an
+// available whole card, while its remaining capacity still contributes to the
+// schedulable pool (see kubernetes/static resource clients).
+func isDeviceFullyAvailable(allocatable, available *v1.DeviceResourcePool) bool {
+	if allocatable == nil || available == nil {
+		return false
+	}
+
+	return available.MemoryMiB >= allocatable.MemoryMiB &&
+		available.CoreUnits >= allocatable.CoreUnits
+}
+
 func memoryBytesToGiB(value float64) float64 {
 	if value < 0 {
 		return 0
