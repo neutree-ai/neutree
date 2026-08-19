@@ -268,6 +268,42 @@ type AcceleratorMetricResult struct {
 - NodeAgent 装配：`--accelerator-type` 非空时从 registry 取 adapter，`BuildMetrics` 结果送入现有 normalizer 的通用样本出口（公共标签、descriptor 校验、序列化）；为空时走 legacy DCGM 路径。
 - 后续把 NVIDIA DCGM 逻辑也迁入 `nvidia` adapter（不在本次范围）。
 
+### 通用硬件信息模型（方案 B）与指标输出处理
+
+**`GPUHardwareInfo` 是 NVIDIA 专属模型**（含 `CUDACapability`/`CUDADriverVersion`/`NVLink`/`NVSwitch` 等 CUDA/NVIDIA 概念），**不能作为 `AcceleratorEvidence`/`AcceleratorMetricResult` 的通用载荷**——NPU 无 CUDA/NVLink，放进去即违背"Evidence 不解释厂商语义"。抽象为通用模型：
+
+```go
+// model/accelerator_hardware_info.go（通用字段，跨厂商）
+type AcceleratorHardwareInfo struct {
+    UUID           string // 通用: vdie_id / GPU-UUID
+    Index          string // 通用: 设备索引
+    Product        string // 通用: 产品型号(model_name / product)
+    Architecture   string // 通用: 架构(310P3 / Ampere)
+    DriverVersion  string // 通用: 驱动版本
+    MemoryTotalMiB string // 通用: 显存/内存容量
+    PCIEBusID      string // 通用: PCIe bus
+    PCIEGeneration string // 通用
+    PCIEWidth      string // 通用
+    NUMANode       string // 通用
+    // 不含 CUDA/NVLink/NVSwitch —— nvidia adapter 内部承载
+}
+```
+
+厂商专属字段留在各 adapter 内部（nvidia adapter 内嵌 `AcceleratorHardwareInfo` + `CUDACapability`/`NVLink`/`NVSwitch` 扩展），只在生成专属指标时使用。
+
+**指标输出的现状与目标**：
+
+- **现状**：`handleMetrics`（server.go）→ `normalizer.Samples(normalizeReq)` 生成全部 `neutre_*` 样本（含 `normalizeGPUHardwareInfoSamples` 生成的 `hardware_info`/`nvidia_info`）→ `newMetricsCollector`（collector.go）白名单/标签校验 + Prometheus 序列化 → HTTP 暴露。`GPUHardwareInfos` 从 server.go 传入 normalizer。
+- **目标**：样本生成移到 `adapter.BuildMetrics()`——adapter 生成 `hardware_info`（通用字段）与专属指标（nvidia 的 `nvidia_info`），结果 `AcceleratorMetricResult.Samples` 直接进 `newMetricsCollector` 公共出口；collector 的白名单/标签校验/序列化**复用不变**（`AcceleratorMetricResult.Samples` 与现有 `[]normalizer.Sample` 同构）。
+- **设备快照路径**：`applyGPUHardwareInfoToSnapshot` 只消费通用字段（UUID/Product/MemoryTotalMiB/MinorNumber），方案 B 后**逻辑不变、仅类型换为 `AcceleratorHardwareInfo`**。
+
+```
+handleMetrics（server.go）
+  ├─ adapter 路径:  result.Samples → newMetricsCollector → Prometheus
+  └─ legacy 路径:   normalizer.Samples → newMetricsCollector → Prometheus
+       （DCGM 未迁移时双轨并存；迁移完成后只剩 adapter 路径）
+```
+
 ### 企业版注册机制（镜像 core 注入模式）
 
 NodeAgent 侧的 adapter 注册**完全镜像 core 的 accelerator plugin 注入模式**（`internal/accelerator/plugin/` 的包级 registry + `init()` 注册），企业版通过**独立 NodeAgent 镜像**内置 `npu` adapter。

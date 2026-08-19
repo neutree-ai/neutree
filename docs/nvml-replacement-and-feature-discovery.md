@@ -68,6 +68,8 @@ nvidia.com/gpu.memory=15360            → MemoryTotalMiB(节点级 fallback)
 
 新增一个 `nvidiaFeatureDiscoveryProvider`，从 node metadata.labels 提取静态字段，作为 `GPUHardwareInfoProvider` 的 primary；DCGM scrape 作为设备级字段（UUID/Index/PCIe/Minor）的权威源。`Merge` 合并。
 
+> **模型收敛（方案 B）**：`model.GPUHardwareInfo` 是 NVIDIA 专属模型（含 `CUDACapability`/`NVLink`/`NVSwitch`），不进入 `AcceleratorEvidence`/`AcceleratorMetricResult`。抽象为通用 `model.AcceleratorHardwareInfo`（UUID/Index/Product/Architecture/DriverVersion/MemoryTotalMiB/PCIE*/NUMANode，不含 CUDA/NVLink），厂商专属字段留在各 adapter 内部。见权威设计 §通用硬件信息模型。
+
 ### 静态 Ray/SSH（Docker）
 
 **NFD worker 的 standalone 模式已 deprecated**（只探测不发布 label，依赖弃用 gRPC API）。正确做法是**直接部署 GFD 容器**：
