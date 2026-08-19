@@ -707,42 +707,6 @@ func TestEndpointVGPUValidationAllowsPausedPostWhenVirtualizationNotReady(t *tes
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) {
-	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
-		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
-	})
-	markClusterVGPUReady(cluster, "cluster-a", "team-a")
-	clusterStorage := &fakeClusterStorage{
-		clusters: []v1.Cluster{*cluster},
-	}
-	body := `{
-		"metadata": {"name": "endpoint", "workspace": "team-a"},
-		"spec": {
-			"cluster": "cluster-a",
-			"resources": {
-				"gpu": "1",
-				"accelerator": {
-					"type": "nvidia_gpu",
-					"product": "Tesla-T4",
-					"virtualization.memory_mib": "4096",
-					"virtualization.core_percent": "50"
-				}
-			}
-		}
-	}`
-
-	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPatch, body, clusterStorage)
-
-	var response validationError
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10221", response.Code)
-	assert.Equal(t, "invalid endpoint patch target", response.Message)
-	assert.Contains(t, response.Hint, "endpoint lookup filters")
-	assert.NotContains(t, response.Hint, "vGPU")
-	assert.False(t, handlerCalled)
-}
-
 func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 	tests := []struct {
 		name               string
