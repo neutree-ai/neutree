@@ -245,16 +245,14 @@ func endpointPatchMayAffectResourceValidation(endpoint *v1.Endpoint) bool {
 // validateEndpointResourceShape is the unified endpoint resource validator. It
 // validates the replica count for every endpoint, then applies the shared
 // accelerator declaration checks (a declared accelerator needs a type and a
-// product), resolves the target cluster strictly, applies the shared GPU
-// card-count rule, and finally the resource-type-specific checks:
-// virtualization (vGPU) resources are checked against a ready, virtualization-
-// enabled Kubernetes cluster and its supported resource keys, memory and core
-// percent; physical accelerator resources require a supported product.
+// product), resolves the target cluster strictly, and applies the shared GPU
+// card-count and product-support rules. Virtualization (vGPU) resources are
+// then additionally checked against a ready, virtualization-enabled Kubernetes
+// cluster, its supported virtualization resource keys, and the memory/core
+// percent shape.
 //
-// The two branches are mutually exclusive (selected by
-// resources.HasAcceleratorVirtualization). The cluster must always resolve to
-// exactly one entry; the virtualization branch additionally enforces that the
-// cluster is virtualization-ready.
+// The cluster must always resolve to exactly one entry; the virtualization
+// path additionally enforces that the cluster is virtualization-ready.
 func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint) *validationError {
 	if endpoint == nil || endpoint.Spec == nil {
 		return nil
@@ -265,7 +263,7 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 	}
 
 	resources := endpoint.Spec.Resources
-	if resources == nil {
+	if resources == nil || resources.Accelerator == nil {
 		return nil
 	}
 
@@ -280,20 +278,33 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		return validationErr
 	}
 
+	cluster, validationErr := resolveEndpointCluster(store, endpoint)
+	if validationErr != nil {
+		return validationErr
+	}
+
+	// Shared GPU card-count rule, common to every resource shape. vGPU is
+	// Kubernetes-only (enforced by validateEndpointVGPUCluster), so its cluster
+	// type always yields the Kubernetes precision rule.
+	clusterType := ""
+	if cluster.Spec != nil {
+		clusterType = cluster.Spec.Type
+	}
+
+	if validationErr := validateAcceleratorCount(resources.GPU, clusterType); validationErr != nil {
+		return validationErr
+	}
+
+	// Shared product-support rule: the declared accelerator product must be
+	// listed in the target cluster's accelerator metadata for the requested
+	// type, for both virtualization and physical resources.
+	if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
+		return validationErr
+	}
+
 	if resources.HasAcceleratorVirtualization() {
 		// ---- virtualization (vGPU) resources ----
-		cluster, validationErr := resolveEndpointCluster(store, endpoint)
-		if validationErr != nil {
-			return validationErr
-		}
-
 		if validationErr := validateEndpointVGPUCluster(cluster); validationErr != nil {
-			return validationErr
-		}
-
-		// vGPU is Kubernetes-only (enforced by validateEndpointVGPUCluster), so
-		// the shared GPU count rule applies with the Kubernetes precision rule.
-		if validationErr := validateAcceleratorCount(resources.GPU, string(v1.KubernetesClusterType)); validationErr != nil {
 			return validationErr
 		}
 
@@ -312,29 +323,6 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		// Capacity is intentionally left to scheduling/runtime status. Cluster
 		// resource snapshots can be stale and should not be used as admission gates.
 		return nil
-	}
-
-	// ---- physical accelerator resources ----
-	if resources.Accelerator == nil {
-		return nil
-	}
-
-	cluster, validationErr := resolveEndpointCluster(store, endpoint)
-	if validationErr != nil {
-		return validationErr
-	}
-
-	clusterType := ""
-	if cluster.Spec != nil {
-		clusterType = cluster.Spec.Type
-	}
-
-	if validationErr := validateAcceleratorCount(resources.GPU, clusterType); validationErr != nil {
-		return validationErr
-	}
-
-	if validationErr := validateAcceleratorProductSupported(cluster, resources); validationErr != nil {
-		return validationErr
 	}
 
 	return nil

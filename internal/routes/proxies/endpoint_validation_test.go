@@ -1120,6 +1120,10 @@ func TestEndpointVGPUValidationAllowsPatchWhenReplacementProductMemoryIsUnknown(
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
 	})
+	// L4 is known to the cluster (so the shared product-support check passes)
+	// but its memory is not reported, so the memory spec check fails open.
+	cluster.Status.ResourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["L4"] =
+		&v1.AcceleratorProductMetadata{}
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
