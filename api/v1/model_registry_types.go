@@ -65,6 +65,20 @@ const (
 	HFTokenEnv = "HF_TOKEN"
 	HFEndpoint = "HF_ENDPOINT"
 
+	// ModelScopeEndpointEnv and ModelScopeTokenEnv carry the registry's address
+	// and credential into the inference container, the same way the HF_* pair
+	// does. The names are ModelScope's own, so a mirror configured for the
+	// official SDK is configured for this downloader too.
+	//
+	// Deliberately distinct from HF_TOKEN rather than reusing a single
+	// "the hub token" variable: a cluster can have both registries, and a
+	// Hugging Face token sent to ModelScope is a credential disclosed to a third
+	// party for no benefit.
+	ModelScopeEndpointEnv = "MODELSCOPE_ENDPOINT"
+	// gosec flags this as a hardcoded credential; it is the *name* of the
+	// variable a credential is read from, which is exactly why it is a constant.
+	ModelScopeTokenEnv = "MODELSCOPE_API_TOKEN" //nolint:gosec // G101: env var name, not a secret
+
 	BentoMLHomeEnv = "BENTOML_HOME"
 )
 

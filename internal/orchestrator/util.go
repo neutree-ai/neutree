@@ -18,23 +18,6 @@ import (
 
 const acceleratorTypeCPU = "cpu"
 
-// errModelScopeDeployNotWiredYet is what both orchestrators answer when asked to
-// build an application from a ModelScope registry.
-//
-// It is a statement about this repository, not about ModelScope. The hub serves
-// both operations a downloader needs — list a revision's files, fetch one by
-// path — and internal/model_registry/model_scope.go names those endpoints. What
-// is missing is the container-side downloader, which today speaks only the
-// Hugging Face Hub API. NEU-689 wires it and deletes this refusal together with
-// the two cases that raise it.
-//
-// Until then the refusal is explicit rather than a fall-through, because falling
-// through the per-kind switch produces an application with no model path at all
-// and fails inside the container with nothing to read.
-var errModelScopeDeployNotWiredYet = errors.New(
-	"cannot deploy a model from a ModelScope registry yet: its models can be browsed and selected, " +
-		"but the inference runtime's downloader does not speak the ModelScope API")
-
 // engineTPArgKey returns the underscore-form engine_args key the engine
 // uses for tensor parallel size. vLLM uses `tensor_parallel_size`; SGLang's
 // ServerArgs dataclass field is `tp_size`. Returns "" when the engine
@@ -52,13 +35,23 @@ func engineTPArgKey(engineName string) string {
 	}
 }
 
+// endpointModelServeName is the model id the endpoint answers to over the
+// OpenAI-compatible API.
+//
+// A version is appended only for registries where it names a distinct stored
+// artifact — bentoml. On a hub the "version" is a git revision, so appending it
+// would publish a model as "Qwen/Qwen2.5-0.5B-Instruct:master", which is not a
+// name any client would ask for and differs from what the same model is called
+// when deployed from Hugging Face. Both hub kinds are excluded for that reason.
 func endpointModelServeName(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) string {
 	serveName := endpoint.Spec.Model.Name
 	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameSGLang {
 		return serveName
 	}
 
-	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
+	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion &&
+		modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType &&
+		modelRegistry.Spec.Type != v1.ModelScopeModelRegistryType {
 		serveName = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
 	}
 
@@ -424,6 +417,24 @@ func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, mod
 		// For HuggingFace, return the version as-is (including empty string).
 		// Empty string will be converted to None by the Python downloader,
 		// which causes huggingface_hub to use the repository's default branch (main/master/etc).
+		return modelVersion, nil
+	}
+
+	if modelRegistry.Spec.Type == v1.ModelScopeModelRegistryType {
+		// Same shape as Hugging Face — the "version" is a git revision, not a
+		// stored artifact version, so there is nothing to look up.
+		//
+		// "latest" is normalised away rather than passed through. ModelScope's
+		// default branch is "master", not "main", and a wrong revision is not
+		// refused by the hub: it answers HTTP 200 with an empty file list. The
+		// downloader therefore omits the Revision parameter entirely for the
+		// default, letting the hub resolve the repository's own default branch,
+		// and "" is how that intent is spelled. This matches modelScope.revision()
+		// in internal/model_registry/model_scope.go.
+		if modelVersion == v1.LatestVersion {
+			return "", nil
+		}
+
 		return modelVersion, nil
 	}
 

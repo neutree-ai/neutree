@@ -4113,3 +4113,99 @@ func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_NoDashboardURL
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dashboard URL")
 }
+
+// The ModelScope deploy path through the Ray (SSH cluster) orchestrator. The
+// Kubernetes orchestrator has the same test; both are here because the two
+// build their model args independently and a fix applied to one has silently
+// missed the other before.
+func TestEndpointToApplication_ModelScope(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "ms-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine:            &v1.EndpointEngineSpec{Engine: "llama-cpp", Version: "0.3.7"},
+			Resources:         &v1.ResourceSpec{Accelerator: map[string]string{}},
+			DeploymentOptions: map[string]interface{}{},
+			Model: &v1.ModelSpec{
+				Name:    "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+				File:    "*q2_k.gguf",
+				Version: v1.LatestVersion,
+				Task:    "text-generation",
+			},
+		},
+	}
+
+	modelRegistry := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "public-model-scope"},
+		Spec: &v1.ModelRegistrySpec{
+			Type:        v1.ModelScopeModelRegistryType,
+			Url:         "https://www.modelscope.cn/",
+			Credentials: "ms-token",
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil, nil,
+		&acceleratormocks.MockManager{})
+	require.NoError(t, err)
+
+	modelArgs, ok := app.Args["model"].(map[string]interface{})
+	require.True(t, ok, "the application must carry model args")
+
+	// The repository the downloader will fetch. Before NEU-689 this path was
+	// refused outright, and before the refusal existed it fell through the
+	// switch leaving registry_path empty — an application with no model to load.
+	assert.Equal(t, "Qwen/Qwen2.5-0.5B-Instruct-GGUF", modelArgs["registry_path"])
+	// The registry type is carried as v1.ModelRegistryType, not as a bare string;
+	// the downloader's --registry_type is rendered from it.
+	assert.Equal(t, v1.ModelRegistryType(v1.ModelScopeModelRegistryType), modelArgs["registry_type"])
+	// "latest" is normalised away so the downloader omits Revision and the hub
+	// resolves its own default branch ("master", not "main").
+	assert.Equal(t, "", modelArgs["version"])
+	// The served model id carries no revision suffix, matching Hugging Face.
+	assert.Equal(t, "Qwen/Qwen2.5-0.5B-Instruct-GGUF", modelArgs["serve_name"])
+
+	env, ok := app.RuntimeEnv["env_vars"].(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "https://www.modelscope.cn", env[v1.ModelScopeEndpointEnv])
+	assert.Equal(t, "ms-token", env[v1.ModelScopeTokenEnv])
+	// A ModelScope credential must never be presented as a Hugging Face one.
+	assert.NotContains(t, env, v1.HFTokenEnv)
+	assert.NotContains(t, env, v1.HFEndpoint)
+}
+
+// Hugging Face regression guard (acceptance criterion 3): adding the ModelScope
+// case must not have changed anything on the path that already worked.
+func TestEndpointToApplication_HuggingFaceUnchangedByModelScopeSupport(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "hf-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine:            &v1.EndpointEngineSpec{Engine: "vllm", Version: "0.5.0"},
+			Resources:         &v1.ResourceSpec{Accelerator: map[string]string{}},
+			DeploymentOptions: map[string]interface{}{},
+			Model:             &v1.ModelSpec{Name: "Qwen/Qwen3-8B", Version: "main"},
+		},
+	}
+
+	modelRegistry := &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "public-hugging-face"},
+		Spec: &v1.ModelRegistrySpec{
+			Type:        v1.HuggingFaceModelRegistryType,
+			Url:         "https://huggingface.co/",
+			Credentials: "hf-token",
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, modelRegistry, nil, nil,
+		&acceleratormocks.MockManager{})
+	require.NoError(t, err)
+
+	modelArgs := app.Args["model"].(map[string]interface{})
+	assert.Equal(t, "Qwen/Qwen3-8B", modelArgs["registry_path"])
+	// Passed through verbatim, as before — HF does its own default-branch handling.
+	assert.Equal(t, "main", modelArgs["version"])
+
+	env := app.RuntimeEnv["env_vars"].(map[string]string)
+	assert.Equal(t, "https://huggingface.co", env[v1.HFEndpoint])
+	assert.Equal(t, "hf-token", env[v1.HFTokenEnv])
+	assert.NotContains(t, env, v1.ModelScopeEndpointEnv)
+	assert.NotContains(t, env, v1.ModelScopeTokenEnv)
+}
