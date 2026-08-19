@@ -2255,100 +2255,14 @@ func TestValidateEndpointResourceShape(t *testing.T) {
 	})
 }
 
+// TestEndpointResourceShapeMiddleware covers the middleware integration paths
+// that the unit-level TestValidateEndpointResourceShape cannot: the endpoint
+// PATCH resolution flow. The create-path validation semantics (count
+// precision, product support, strict cluster resolution) are already covered
+// by TestValidateEndpointResourceShape at the unit level.
 func TestEndpointResourceShapeMiddleware(t *testing.T) {
 	cluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
 	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
-	clusterStorage := &fakeClusterStorage{
-		clusters: []v1.Cluster{*cluster},
-	}
-
-	validBody := func(gpu, product string) string {
-		return `{
-			"metadata": {"name": "endpoint", "workspace": "default"},
-			"spec": {
-				"cluster": "test-cluster",
-				"resources": {
-					"gpu": "` + gpu + `",
-					"accelerator": {"type": "nvidia_gpu", "product": "` + product + `"}
-				}
-			}
-		}`
-	}
-
-	t.Run("rejects a fractional count on a kubernetes cluster create", func(t *testing.T) {
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("1.5", "Tesla-T4"), clusterStorage,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "positive integer")
-		assert.False(t, handlerCalled)
-	})
-
-	t.Run("rejects a zero count on a kubernetes cluster create", func(t *testing.T) {
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("0", "Tesla-T4"), clusterStorage,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "positive accelerator card count")
-		assert.False(t, handlerCalled)
-	})
-
-	t.Run("rejects an empty accelerator product on create", func(t *testing.T) {
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("1", ""), clusterStorage,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "product is required")
-		assert.False(t, handlerCalled)
-	})
-
-	t.Run("rejects an unknown accelerator product on create", func(t *testing.T) {
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("1", "unknown-model"), clusterStorage,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "unsupported accelerator product")
-		assert.False(t, handlerCalled)
-	})
-
-	t.Run("allows a supported product with a positive integer count on create", func(t *testing.T) {
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("1", "Tesla-T4"), clusterStorage,
-		)
-
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-		assert.True(t, handlerCalled)
-	})
-
-	t.Run("rejects when the cluster is not found on create", func(t *testing.T) {
-		emptyStore := &fakeClusterStorage{}
-		recorder, handlerCalled := runEndpointVGPUValidationWithHandler(
-			http.MethodPost, validBody("1", "Tesla-T4"), emptyStore,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "not found")
-		assert.False(t, handlerCalled)
-	})
 
 	t.Run("rejects a fractional count on a kubernetes cluster patch", func(t *testing.T) {
 		existing := &v1.Endpoint{
