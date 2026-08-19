@@ -392,7 +392,11 @@ END;
 $$;
 
 CREATE FUNCTION api.update_api_key_configuration(
-    p_api_key_id UUID, p_project_id UUID, p_limits JSONB
+    p_api_key_id UUID,
+    p_project_id UUID,
+    p_limits JSONB,
+    p_display_name TEXT,
+    p_description TEXT
 ) RETURNS api.api_keys LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE v_key api.api_keys; v_workspace TEXT;
 BEGIN
@@ -401,6 +405,10 @@ BEGIN
     WHERE id = p_api_key_id AND user_id = auth.uid();
     IF NOT FOUND THEN
         RAISE EXCEPTION 'API key not found or permission denied' USING ERRCODE = '42501';
+    END IF;
+
+    IF p_display_name IS NULL OR length(trim(p_display_name)) = 0 THEN
+        RAISE EXCEPTION 'API key display name is required' USING ERRCODE = '22023';
     END IF;
 
     v_workspace := (v_key.metadata).workspace;
@@ -413,7 +421,20 @@ BEGIN
         RAISE EXCEPTION 'Project must belong to the API key workspace' USING ERRCODE = '22023';
     END IF;
 
-    UPDATE api.api_keys SET project_id = p_project_id WHERE id = p_api_key_id;
+    UPDATE api.api_keys
+    SET project_id = p_project_id,
+        metadata = ROW(
+            (metadata).name,
+            trim(p_display_name),
+            (metadata).workspace,
+            (metadata).deletion_timestamp,
+            (metadata).creation_timestamp,
+            now(),
+            (metadata).labels,
+            (metadata).annotations
+        )::api.metadata,
+        description = COALESCE(p_description, '')
+    WHERE id = p_api_key_id;
     PERFORM api.set_api_key_limits(p_api_key_id, COALESCE(p_limits, '{}'::jsonb));
     SELECT * INTO v_key FROM api.api_keys WHERE id = p_api_key_id;
     RETURN v_key;

@@ -35,6 +35,7 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 	grantWorkspaceRead(t, db, bob.ID, "bob")
 
 	var projectID string
+	var keyID string
 	WithUserContext(t, db, alice.ID, func(tx *sql.Tx) {
 		if err := tx.QueryRow(`
 			SELECT id FROM api.create_api_key_project('default', '客服系统', '共享文件夹')
@@ -42,7 +43,6 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 			t.Fatalf("create shared project: %v", err)
 		}
 
-		var keyID string
 		if err := tx.QueryRow(`
 			SELECT id FROM api.create_api_key(
 				'default', 'apikey-alice', 0, '客服系统生产 Key',
@@ -84,7 +84,48 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 		); err != nil {
 			t.Fatalf("move key to ungrouped: %v", err)
 		}
+
+		if _, err := tx.Exec(`
+			SELECT api.update_api_key_configuration(
+				$1, $2, '{}'::jsonb, '客服系统正式 Key', 'Production calls'
+			)
+		`, keyID, projectID); err != nil {
+			t.Fatalf("update API key details: %v", err)
+		}
+
+		var technicalName, displayName, description string
+		var updatedProject sql.NullString
+		if err := tx.QueryRow(`
+			SELECT (metadata).name, (metadata).display_name, description, project_id
+			FROM api.api_keys WHERE id = $1
+		`, keyID).Scan(
+			&technicalName, &displayName, &description, &updatedProject,
+		); err != nil {
+			t.Fatalf("read updated API key: %v", err)
+		}
+		if technicalName != "apikey-alice" {
+			t.Fatalf("technical name=%q, want unchanged", technicalName)
+		}
+		if displayName != "客服系统正式 Key" || description != "Production calls" {
+			t.Fatalf("updated identity=(%q, %q), want new values", displayName, description)
+		}
+		if !updatedProject.Valid || updatedProject.String != projectID {
+			t.Fatalf("updated project=%v, want %s", updatedProject, projectID)
+		}
+
 	})
+
+	err := execWithContext(t, db, []SetContextFunc{setUserContext(alice.ID)}, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			SELECT api.update_api_key_configuration(
+				$1, NULL, '{}'::jsonb, '   ', ''
+			)
+		`, keyID)
+		return err
+	})
+	if err == nil || !strings.Contains(err.Error(), "display name is required") {
+		t.Fatalf("expected blank display name rejection, got %v", err)
+	}
 
 	var bobProjectID string
 	WithUserContext(t, db, bob.ID, func(tx *sql.Tx) {
@@ -131,7 +172,7 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 		})
 	}
 
-	err := execWithContext(t, db, []SetContextFunc{setUserContext(bob.ID)}, func(tx *sql.Tx) error {
+	err = execWithContext(t, db, []SetContextFunc{setUserContext(bob.ID)}, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
 			SELECT api.create_api_key(
 				'default', 'apikey-bob-denied', 0, '客服系统生产 Key',
