@@ -17,7 +17,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			Env: map[string]string{
 				"ACCELERATOR_TYPE": "gpu",
 			},
-			Options: []string{"--gpus all"},
+			Options: []string{"--volume /cluster-only:/cluster-only:ro"},
 		},
 		EngineRuntime: &RuntimeConfig{
 			ImageSuffix: "cuda-engine",
@@ -44,6 +44,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 				NodeSelector: map[string]string{
 					"nvidia.com/gpu.present": "true",
 				},
+				Runtime:          "nvidia",
 				DockerRunOptions: []string{"--gpus all"},
 			},
 		},
@@ -64,7 +65,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.ClusterRuntime)
 	assert.Equal(t, "cuda", decoded.ClusterRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.ClusterRuntime.Runtime)
-	assert.Equal(t, []string{"--gpus all"}, decoded.ClusterRuntime.Options)
+	assert.Equal(t, []string{"--volume /cluster-only:/cluster-only:ro"}, decoded.ClusterRuntime.Options)
 	require.NotNil(t, decoded.EngineRuntime)
 	assert.Equal(t, "cuda-engine", decoded.EngineRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.EngineRuntime.Runtime)
@@ -80,6 +81,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.MetricsExporter.Runtime.Capabilities)
 	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.MetricsExporter.Runtime.Capabilities.Add)
 	assert.Equal(t, map[string]string{"nvidia.com/gpu.present": "true"}, decoded.MetricsExporter.Runtime.NodeSelector)
+	assert.Equal(t, "nvidia", decoded.MetricsExporter.Runtime.Runtime)
 	assert.Equal(t, []string{"--gpus all"}, decoded.MetricsExporter.Runtime.DockerRunOptions)
 }
 

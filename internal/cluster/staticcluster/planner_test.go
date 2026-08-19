@@ -41,6 +41,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 					Capabilities: &v1.AcceleratorExporterCapabilities{
 						Add: []string{"SYS_ADMIN"},
 					},
+					Runtime:          "nvidia",
 					DockerRunOptions: []string{"--gpus all"},
 				},
 			},
@@ -137,7 +138,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test", exporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, exporter.Args)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
-	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--gpus all"}, exporter.DockerRunOptions)
+	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--runtime=nvidia", "--gpus all"}, exporter.DockerRunOptions)
 	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
 	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
 	assert.Equal(t, 19400, exporter.Ports[0].Port)
@@ -165,6 +166,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--pid=host")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cgroupns=host")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
+	assert.Contains(t, nodeAgent.DockerRunOptions, "--runtime=nvidia")
 	assert.Contains(t, nodeAgent.DockerRunOptions, "--gpus all")
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
 	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
@@ -1876,5 +1878,51 @@ func markStaticNodeUpgradeReady(
 				ObservedImage: component.Image,
 			})
 		}
+	}
+}
+
+func TestAcceleratorExporterDockerRunOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime *v1.AcceleratorExporterRuntimeProfile
+		want    []string
+	}{
+		{
+			name:    "nil runtime returns nil",
+			runtime: nil,
+			want:    nil,
+		},
+		{
+			name:    "empty runtime has no --runtime flag (CPU / non-GPU)",
+			runtime: &v1.AcceleratorExporterRuntimeProfile{HostNetwork: true},
+			want:    []string{"--net=host"},
+		},
+		{
+			name: "nvidia runtime with capabilities and docker options",
+			runtime: &v1.AcceleratorExporterRuntimeProfile{
+				HostNetwork: true,
+				Capabilities: &v1.AcceleratorExporterCapabilities{
+					Add: []string{"SYS_ADMIN"},
+				},
+				Runtime:          "nvidia",
+				DockerRunOptions: []string{"--gpus all"},
+			},
+			want: []string{"--net=host", "--cap-add=SYS_ADMIN", "--runtime=nvidia", "--gpus all"},
+		},
+		{
+			name: "host pid adds --pid=host",
+			runtime: &v1.AcceleratorExporterRuntimeProfile{
+				HostPID: true,
+				Runtime: "nvidia",
+			},
+			want: []string{"--pid=host", "--runtime=nvidia"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := acceleratorExporterDockerRunOptions(tt.runtime)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
