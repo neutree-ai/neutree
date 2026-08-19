@@ -65,6 +65,20 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 		); err != nil {
 			t.Fatalf("move key into project: %v", err)
 		}
+
+		var secretFields int
+		if err := tx.QueryRow(`
+			SELECT count(*)
+			FROM api.get_api_key_project_groups('default', NULL, NULL, 1, 20) g,
+			     jsonb_array_elements(g.api_keys) key
+			WHERE key->>'id' = $1
+			  AND key #> '{status,sk_value}' IS NOT NULL
+		`, keyID).Scan(&secretFields); err != nil {
+			t.Fatalf("inspect grouped API key: %v", err)
+		}
+		if secretFields != 0 {
+			t.Fatalf("grouped API key exposed %d secret fields, want 0", secretFields)
+		}
 		if _, err := tx.Exec(
 			`SELECT api.move_api_keys_to_project(ARRAY[$1::uuid], NULL)`, keyID,
 		); err != nil {

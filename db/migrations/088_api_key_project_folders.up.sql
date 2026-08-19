@@ -261,7 +261,10 @@ CREATE FUNCTION api.get_api_key_project_groups(
     )
     SELECT v.project,
            COALESCE(
-               jsonb_agg(to_jsonb(k) ORDER BY (k.metadata).creation_timestamp)
+               jsonb_agg(
+                   to_jsonb(k) #- '{status,sk_value}'
+                   ORDER BY (k.metadata).creation_timestamp
+               )
                    FILTER (WHERE k.id IS NOT NULL),
                '[]'::jsonb
            ),
