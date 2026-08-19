@@ -72,28 +72,84 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 		}
 	})
 
+	var bobProjectID string
 	WithUserContext(t, db, bob.ID, func(tx *sql.Tx) {
-		var visibleID string
+		var visibleCount int
 		if err := tx.QueryRow(`
-			SELECT id FROM api.list_api_key_projects('default')
-			WHERE name = '客服系统'
-		`).Scan(&visibleID); err != nil || visibleID != projectID {
-			t.Fatalf("shared project id=%q err=%v, want %q", visibleID, err, projectID)
+			SELECT count(*) FROM api.list_api_key_projects('default')
+			WHERE id = $1
+		`, projectID).Scan(&visibleCount); err != nil || visibleCount != 0 {
+			t.Fatalf("other user's project count=%d err=%v, want 0", visibleCount, err)
 		}
 
-		if _, err := tx.Exec(`
-			SELECT api.create_api_key_project('default', '客服系统', '')
-		`); err == nil || !strings.Contains(err.Error(), "already exists") {
-			t.Fatalf("expected workspace-wide duplicate rejection, got %v", err)
+		if err := tx.QueryRow(`
+			SELECT id FROM api.create_api_key_project('default', '客服系统', '')
+		`).Scan(&bobProjectID); err != nil {
+			t.Fatalf("same project name for another user: %v", err)
 		}
 
-		if _, err := tx.Exec(`
-			SELECT api.create_api_key(
-				'default', 'apikey-bob', 0, '客服系统生产 Key',
+		var technicalName string
+		if err := tx.QueryRow(`
+			SELECT (metadata).name FROM api.create_api_key(
+				'default', NULL, 0, '客服系统生产 Key',
 				NULL, NULL, $1, 'Bob key'
 			)
-		`, projectID); err != nil {
-			t.Fatalf("duplicate display name in shared project: %v", err)
+		`, bobProjectID).Scan(&technicalName); err != nil {
+			t.Fatalf("backend-generated technical name: %v", err)
+		}
+		if !strings.HasPrefix(technicalName, "apikey-") {
+			t.Fatalf("generated technical name=%q, want apikey- prefix", technicalName)
 		}
 	})
+
+	for name, query := range map[string]string{
+		"update another user's project": `SELECT api.update_api_key_project($1, 'renamed', NULL)`,
+		"delete another user's project": `SELECT api.delete_api_key_project($1)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := execWithContext(t, db, []SetContextFunc{setUserContext(bob.ID)}, func(tx *sql.Tx) error {
+				_, err := tx.Exec(query, projectID)
+				return err
+			})
+			if err == nil {
+				t.Fatalf("expected %s to fail", name)
+			}
+		})
+	}
+
+	err := execWithContext(t, db, []SetContextFunc{setUserContext(bob.ID)}, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+			SELECT api.create_api_key(
+				'default', 'apikey-bob-denied', 0, '客服系统生产 Key',
+				NULL, NULL, $1, 'Bob key'
+			)
+		`, projectID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected assigning an API key to another user's project to fail")
+	}
+
+	WithUserContext(t, db, alice.ID, func(tx *sql.Tx) {
+		if _, err := tx.Exec(`
+			SELECT api.create_api_key_project('default', 'Support', '')
+		`); err != nil {
+			t.Fatalf("create project for case-insensitive uniqueness test: %v", err)
+		}
+	})
+
+	for name, projectName := range map[string]string{
+		"exact duplicate":            "客服系统",
+		"case-insensitive duplicate": "support",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := execWithContext(t, db, []SetContextFunc{setUserContext(alice.ID)}, func(tx *sql.Tx) error {
+				_, err := tx.Exec(`SELECT api.create_api_key_project('default', $1, '')`, projectName)
+				return err
+			})
+			if err == nil || !strings.Contains(err.Error(), "already exists") {
+				t.Fatalf("expected %s rejection, got %v", name, err)
+			}
+		})
+	}
 }

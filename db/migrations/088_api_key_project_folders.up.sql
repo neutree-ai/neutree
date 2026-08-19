@@ -1,4 +1,4 @@
--- Optional, workspace-shared folders for organizing API keys.
+-- Optional, user-owned folders for organizing API keys within a workspace.
 BEGIN;
 
 CREATE TABLE api.api_key_projects (
@@ -6,11 +6,13 @@ CREATE TABLE api.api_key_projects (
     workspace TEXT NOT NULL CHECK (length(trim(workspace)) > 0),
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
     description TEXT NOT NULL DEFAULT '',
-    created_by UUID REFERENCES api.user_profiles(id) ON DELETE SET NULL,
+    user_id UUID NOT NULL REFERENCES api.user_profiles(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (workspace, name)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX api_key_projects_user_workspace_name_unique_idx
+    ON api.api_key_projects (user_id, workspace, lower(name));
 
 ALTER TABLE api.api_keys
     ADD COLUMN project_id UUID REFERENCES api.api_key_projects(id) ON DELETE RESTRICT,
@@ -20,7 +22,10 @@ CREATE INDEX api_keys_project_id_idx ON api.api_keys (project_id);
 
 ALTER TABLE api.api_key_projects ENABLE ROW LEVEL SECURITY;
 CREATE POLICY api_key_projects_select ON api.api_key_projects FOR SELECT
-    USING (api.has_permission(auth.uid(), 'workspace:read', workspace));
+    USING (
+        user_id = auth.uid()
+        AND api.has_permission(auth.uid(), 'workspace:read', workspace)
+    );
 
 CREATE FUNCTION api.touch_api_key_project()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
@@ -51,7 +56,7 @@ BEGIN
     END IF;
 
     INSERT INTO api.api_key_projects (
-        workspace, name, description, created_by
+        workspace, name, description, user_id
     ) VALUES (
         p_workspace, trim(p_name), COALESCE(p_description, ''), auth.uid()
     )
@@ -67,7 +72,8 @@ RETURNS SETOF api.api_key_projects
 LANGUAGE sql STABLE SECURITY DEFINER AS $$
     SELECT p.*
     FROM api.api_key_projects p
-    WHERE p.workspace = p_workspace
+    WHERE p.user_id = auth.uid()
+      AND p.workspace = p_workspace
       AND api.has_permission(auth.uid(), 'workspace:read', p.workspace)
     ORDER BY p.created_at, p.id;
 $$;
@@ -88,6 +94,7 @@ BEGIN
     SET name = COALESCE(trim(p_name), p.name),
         description = COALESCE(p_description, p.description)
     WHERE p.id = p_project_id
+      AND p.user_id = auth.uid()
       AND api.has_permission(auth.uid(), 'workspace:read', p.workspace)
     RETURNING * INTO v_result;
 
@@ -106,7 +113,8 @@ DECLARE v_count BIGINT; v_workspace TEXT;
 BEGIN
     SELECT workspace INTO v_workspace
     FROM api.api_key_projects
-    WHERE id = p_project_id;
+    WHERE id = p_project_id
+      AND user_id = auth.uid();
 
     IF NOT FOUND OR NOT api.has_permission(auth.uid(), 'workspace:read', v_workspace) THEN
         RAISE EXCEPTION 'project not found or permission denied' USING ERRCODE = '42501';
@@ -137,7 +145,8 @@ BEGIN
     IF p_project_id IS NOT NULL THEN
         SELECT workspace INTO v_workspace
         FROM api.api_key_projects
-        WHERE id = p_project_id;
+        WHERE id = p_project_id
+          AND user_id = auth.uid();
         IF NOT FOUND OR NOT api.has_permission(auth.uid(), 'workspace:read', v_workspace) THEN
             RAISE EXCEPTION 'target project not found or permission denied' USING ERRCODE = '42501';
         END IF;
@@ -184,7 +193,8 @@ CREATE FUNCTION api.get_api_key_project_groups(
     WITH folders AS (
         SELECT to_jsonb(p) AS project, p.id AS project_id, p.workspace, p.created_at
         FROM api.api_key_projects p
-        WHERE (p_workspace IS NULL OR p.workspace = p_workspace)
+        WHERE p.user_id = auth.uid()
+          AND (p_workspace IS NULL OR p.workspace = p_workspace)
           AND api.has_permission(auth.uid(), 'workspace:read', p.workspace)
         UNION ALL
         SELECT jsonb_build_object(
@@ -201,11 +211,11 @@ CREATE FUNCTION api.get_api_key_project_groups(
             SELECT p_workspace AS workspace
             WHERE p_workspace IS NOT NULL
             UNION
-            SELECT DISTINCT (metadata).workspace AS workspace
-            FROM api.api_keys
-            WHERE user_id = auth.uid()
-              AND (metadata).deletion_timestamp IS NULL
-              AND p_workspace IS NULL
+            SELECT (w.metadata).name AS workspace
+            FROM api.workspaces w
+            WHERE p_workspace IS NULL
+              AND (w.metadata).deletion_timestamp IS NULL
+              AND api.has_permission(auth.uid(), 'workspace:read', (w.metadata).name)
         ) key_workspaces
         WHERE api.has_permission(auth.uid(), 'workspace:read', key_workspaces.workspace)
     ), matching AS (
@@ -335,12 +345,11 @@ BEGIN
     END IF;
     IF p_project_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM api.api_key_projects
-        WHERE id = p_project_id AND workspace = p_workspace
+        WHERE id = p_project_id
+          AND user_id = p_user_id
+          AND workspace = p_workspace
     ) THEN
         RAISE EXCEPTION 'Project must belong to the selected workspace' USING ERRCODE = '22023';
-    END IF;
-    IF p_display_name IS NULL OR length(trim(p_display_name)) = 0 THEN
-        p_display_name := p_name;
     END IF;
     IF p_limits IS NULL AND p_quota IS NOT NULL AND p_quota > 0 THEN
         p_limits := jsonb_build_object(
@@ -350,6 +359,12 @@ BEGIN
     PERFORM api.validate_api_key_limits(p_limits);
     v_quota := COALESCE((p_limits #>> '{token_quota,limit}')::bigint, 0);
     v_key_id := gen_random_uuid();
+    IF p_name IS NULL OR length(trim(p_name)) = 0 THEN
+        p_name := 'apikey-' || v_key_id::text;
+    END IF;
+    IF p_display_name IS NULL OR length(trim(p_display_name)) = 0 THEN
+        p_display_name := p_name;
+    END IF;
     v_key_value := api.generate_api_key(p_user_id, v_key_id, p_expires_in);
 
     INSERT INTO api.api_keys (
@@ -388,7 +403,9 @@ BEGIN
     v_workspace := (v_key.metadata).workspace;
     IF p_project_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM api.api_key_projects
-        WHERE id = p_project_id AND workspace = v_workspace
+        WHERE id = p_project_id
+          AND user_id = auth.uid()
+          AND workspace = v_workspace
     ) THEN
         RAISE EXCEPTION 'Project must belong to the API key workspace' USING ERRCODE = '22023';
     END IF;
