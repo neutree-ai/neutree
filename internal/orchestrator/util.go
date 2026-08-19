@@ -58,6 +58,12 @@ func endpointModelServeName(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegist
 		return serveName
 	}
 
+	// No registry means no registry-side version to disambiguate against, so the
+	// bare model name is the served name.
+	if modelRegistry == nil || modelRegistry.Spec == nil {
+		return serveName
+	}
+
 	if endpoint.Spec.Model.Version != "" && endpoint.Spec.Model.Version != v1.LatestVersion && modelRegistry.Spec.Type != v1.HuggingFaceModelRegistryType {
 		serveName = endpoint.Spec.Model.Name + ":" + endpoint.Spec.Model.Version
 	}
@@ -135,6 +141,30 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 	}
 
 	return &engine[0], nil
+}
+
+// resolveEndpointModelRegistry returns the model registry an endpoint deploys
+// from, or nil when it names none.
+//
+// nil is a legitimate state, not a lookup failure: an engine that ships its own
+// weights has nothing to fetch. Callers must handle it.
+func resolveEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
+	if endpoint.Spec == nil || endpoint.Spec.Model == nil || endpoint.Spec.Model.Registry == "" {
+		return nil, nil
+	}
+
+	return getEndpointModelRegistry(s, endpoint)
+}
+
+// endpointModelRegistryType renders the registry type for the deploy template,
+// empty when the endpoint names no registry. The templates branch on this value,
+// so an absent registry has to read as "none" rather than crash the render.
+func endpointModelRegistryType(modelRegistry *v1.ModelRegistry) string {
+	if modelRegistry == nil || modelRegistry.Spec == nil {
+		return ""
+	}
+
+	return string(modelRegistry.Spec.Type)
 }
 
 func getEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
