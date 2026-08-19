@@ -229,8 +229,8 @@ func validateEndpointPatchResourceShape(store storage.Storage, input *endpointVa
 
 // endpointPatchMayAffectResourceValidation reports whether a patch could change
 // the endpoint's resource shape (resources, target cluster, or replica count).
-// Replica count is included because it gates virtualization validation for
-// paused endpoints; cluster and resources are included because they gate the
+// Replica count is included because a paused endpoint skips all resource
+// validation; cluster and resources are included because they gate the
 // accelerator and product checks.
 func endpointPatchMayAffectResourceValidation(endpoint *v1.Endpoint) bool {
 	if endpoint == nil || endpoint.Spec == nil {
@@ -245,18 +245,16 @@ func endpointPatchMayAffectResourceValidation(endpoint *v1.Endpoint) bool {
 // validateEndpointResourceShape is the unified endpoint resource validator. It
 // validates the replica count for every endpoint, then applies the shared
 // accelerator declaration checks (a declared accelerator needs a type and a
-// product), resolves the target cluster, applies the shared GPU card-count
-// rule, and finally the resource-type-specific checks: virtualization (vGPU)
-// resources are checked against a ready, virtualization-enabled Kubernetes
-// cluster and its supported resource keys, memory and core percent; physical
-// accelerator resources require a supported product.
+// product), resolves the target cluster strictly, applies the shared GPU
+// card-count rule, and finally the resource-type-specific checks:
+// virtualization (vGPU) resources are checked against a ready, virtualization-
+// enabled Kubernetes cluster and its supported resource keys, memory and core
+// percent; physical accelerator resources require a supported product.
 //
 // The two branches are mutually exclusive (selected by
-// resources.HasAcceleratorVirtualization) and differ in cluster-resolution
-// semantics: the virtualization branch enforces a resolvable, virtualization-
-// ready cluster, while the physical branch fails open when the target cluster
-// cannot be resolved because the applicable count and product rules cannot be
-// judged.
+// resources.HasAcceleratorVirtualization). The cluster must always resolve to
+// exactly one entry; the virtualization branch additionally enforces that the
+// cluster is virtualization-ready.
 func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint) *validationError {
 	if endpoint == nil || endpoint.Spec == nil {
 		return nil
@@ -284,7 +282,7 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 
 	if resources.HasAcceleratorVirtualization() {
 		// ---- virtualization (vGPU) resources ----
-		cluster, validationErr := resolveEndpointVGPUCluster(store, endpoint)
+		cluster, validationErr := resolveEndpointCluster(store, endpoint)
 		if validationErr != nil {
 			return validationErr
 		}
@@ -321,7 +319,7 @@ func validateEndpointResourceShape(store storage.Storage, endpoint *v1.Endpoint)
 		return nil
 	}
 
-	cluster, validationErr := resolveAcceleratorValidationCluster(store, endpoint)
+	cluster, validationErr := resolveEndpointCluster(store, endpoint)
 	if validationErr != nil {
 		return validationErr
 	}
@@ -515,14 +513,23 @@ func resolveEndpointPatch(
 	return &endpoints[0], nil
 }
 
-func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
+// resolveEndpointCluster resolves the endpoint's target cluster for resource
+// validation. The cluster must resolve to exactly one entry: an unresolvable
+// cluster is a malformed request, not a request to skip validation. An
+// infrastructure failure while looking up the cluster is surfaced as an
+// internal error rather than accepted silently.
+func resolveEndpointCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
 	if store == nil {
 		return nil, internalServerValidationError()
 	}
 
+	if endpoint == nil || endpoint.Spec == nil {
+		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
+	}
+
 	clusterName := endpoint.Spec.Cluster
 	if clusterName == "" {
-		return nil, endpointVGPUTargetError("spec.cluster is required for endpoint accelerator virtualization")
+		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
 	}
 
 	workspace := defaultWorkspace
@@ -538,11 +545,11 @@ func resolveEndpointVGPUCluster(store storage.Storage, endpoint *v1.Endpoint) (*
 	}
 
 	if len(clusters) == 0 {
-		return nil, endpointVGPUTargetError(fmt.Sprintf("cluster %s/%s not found", workspace, clusterName))
+		return nil, endpointAcceleratorResourceError(fmt.Errorf("cluster %s/%s not found", workspace, clusterName))
 	}
 
 	if len(clusters) > 1 {
-		return nil, endpointVGPUTargetError(fmt.Sprintf("multiple clusters matched %s/%s", workspace, clusterName))
+		return nil, endpointAcceleratorResourceError(fmt.Errorf("multiple clusters matched %s/%s", workspace, clusterName))
 	}
 
 	return &clusters[0], nil
@@ -685,49 +692,6 @@ func isAcceleratorCountPrecisionValid(count float64, clusterType string) bool {
 	default:
 		return true
 	}
-}
-
-// resolveAcceleratorValidationCluster resolves the endpoint's target cluster
-// for physical accelerator validation. The cluster must resolve to exactly one
-// entry, matching the vGPU cluster lookup contract: an unresolvable cluster is
-// a malformed request, not a request to skip validation. An infrastructure
-// failure while looking up the cluster is surfaced as an internal error rather
-// than accepted silently.
-func resolveAcceleratorValidationCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.Cluster, *validationError) {
-	if store == nil {
-		return nil, internalServerValidationError()
-	}
-
-	if endpoint == nil || endpoint.Spec == nil {
-		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
-	}
-
-	clusterName := endpoint.Spec.Cluster
-	if clusterName == "" {
-		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
-	}
-
-	workspace := defaultWorkspace
-	if endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
-		workspace = endpoint.Metadata.Workspace
-	}
-
-	clusters, err := store.ListCluster(storage.ListOption{
-		Filters: endpointClusterLookupFilters(clusterName, workspace),
-	})
-	if err != nil {
-		return nil, internalServerValidationError()
-	}
-
-	if len(clusters) == 0 {
-		return nil, endpointAcceleratorResourceError(fmt.Errorf("cluster %s/%s not found", workspace, clusterName))
-	}
-
-	if len(clusters) > 1 {
-		return nil, endpointAcceleratorResourceError(fmt.Errorf("multiple clusters matched %s/%s", workspace, clusterName))
-	}
-
-	return &clusters[0], nil
 }
 
 // validateAcceleratorProductSupported rejects an accelerator product that the
@@ -896,14 +860,6 @@ func endpointResourceValueError(err error) *validationError {
 		Code:    "10216",
 		Message: "invalid endpoint accelerator virtualization resources",
 		Hint:    err.Error(),
-	}
-}
-
-func endpointVGPUTargetError(hint string) *validationError {
-	return &validationError{
-		Code:    "10221",
-		Message: "invalid endpoint accelerator virtualization target",
-		Hint:    hint,
 	}
 }
 
