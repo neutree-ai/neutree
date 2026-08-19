@@ -690,8 +690,9 @@ func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string)
 	return false, ""
 }
 
-// checkContainerStatuses checks a slice of container statuses for critical failures.
-// containerType should be "Container" or "Init Container" for error message clarity.
+// checkContainerStatuses checks a slice of container statuses for critical
+// failures. containerType should be "Container" or "Init Container" for error
+// message clarity.
 func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, containerType string) (bool, []string) {
 	var (
 		failed   bool
@@ -724,19 +725,10 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 			continue
 		}
 
-		// Check for CrashLoopBackOff with restart count >= 5
+		// Check for ImagePullBackOff
 		if cs.State.Waiting != nil {
 			reason := cs.State.Waiting.Reason
 
-			if reason == k8sContainerReasonCrashLoopBackOff && cs.RestartCount >= containerFailureRestartThreshold {
-				failed = true
-
-				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
-					podName, containerType, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
-
-				continue
-			}
-			// Check for ImagePullBackOff
 			if reason == k8sContainerReasonImagePullBackOff || reason == k8sContainerReasonErrImagePull {
 				failed = true
 
@@ -746,17 +738,50 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 				continue
 			}
 		}
+
+		// Restart threshold: a container that has restarted past the threshold
+		// and is still not ready is a locatable failure, whether it is crash
+		// looping (CrashLoopBackOff) or stuck starting (startupProbe restarts).
+		// Restart accumulation is driven by the kubelet startupProbe window, so
+		// a high count already implies prolonged non-readiness. The base
+		// "restarted N times and not ready" message is always emitted; the
+		// failure context (reason + message, CrashLoopBackOff included) is
+		// appended only when both are present.
+		if !cs.Ready && cs.RestartCount > containerFailureRestartThreshold {
+			failed = true
+
+			reason, message := containerFailureContext(cs)
+
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' restarted %d times and not ready%s",
+				podName, containerType, cs.Name, cs.RestartCount, joinReasonMessage(reason, message)))
+
+			continue
+		}
 	}
 
 	return failed, errorMsg
 }
 
-// checkPodFailures checks if any pods have critical failures like CrashLoopBackOff
+// checkPodFailures checks if any pods have critical failures like CrashLoopBackOff,
+// plus the restart threshold (a container still not ready after repeated
+// restarts is a locatable failure, not an endless Deploying state).
+// Deterministic immediate failures (OOM / image pull / init non-zero exit /
+// unschedulable) are reported first; the restart-threshold check is a branch
+// inside checkContainerStatuses and never masks them.
 func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, string) {
 	failed := false
 	var errorMsg []string
 
 	for _, pod := range pods {
+		// A terminating pod (rolling update / scale-down) flips container Ready
+		// to false while retaining its historical restart count; it must never
+		// be judged by that history or the endpoint would flap FAILED during
+		// routine rollouts. Skip it entirely — its container state (even an
+		// OOM / image pull) is irrelevant while the pod is already leaving.
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
 		// Check init container statuses
 		if f, msgs := checkContainerStatuses(pod.Name, pod.Status.InitContainerStatuses, "Init Container"); f {
 			failed = true
@@ -784,6 +809,35 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 	}
 
 	return failed, strings.Join(errorMsg, "; ")
+}
+
+// containerFailureContext returns the current waiting/terminated reason and
+// message of a container, preferring the live state over the last termination.
+func containerFailureContext(cs corev1.ContainerStatus) (string, string) {
+	if cs.State.Waiting != nil {
+		return cs.State.Waiting.Reason, cs.State.Waiting.Message
+	}
+
+	if cs.State.Terminated != nil {
+		return cs.State.Terminated.Reason, cs.State.Terminated.Message
+	}
+
+	if cs.LastTerminationState.Terminated != nil {
+		return cs.LastTerminationState.Terminated.Reason, cs.LastTerminationState.Terminated.Message
+	}
+
+	return "", ""
+}
+
+// joinReasonMessage returns the failure-context suffix for the restart
+// threshold message: ": reason: message" when both are present, empty
+// otherwise, so a missing context does not fabricate a reason.
+func joinReasonMessage(reason, message string) string {
+	if reason == "" || message == "" {
+		return ""
+	}
+
+	return ": " + reason + ": " + message
 }
 
 // buildDeploymentErrorMessage builds a descriptive error message from deployment conditions

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -579,6 +580,124 @@ func (f *FakeK8sClient) AssertExpectations() {
 	// No-op for compatibility with test code
 }
 
+// WithPodRestartingNotReady creates a pod whose container has restarted more
+// than the failure threshold but is not in CrashLoopBackOff and has not
+// become ready. The container sits in a non-CrashLoopBackOff Running state so
+// the restart-threshold check is the one under test.
+func (f *FakeK8sClient) WithPodRestartingNotReady(containerName string, restartCount int32) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-restarting",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        false,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 137,
+							Reason:   "StartError",
+							Message:  "startup probe failed after repeated restarts",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+// WithPodReadyAfterRestarts creates a pod whose container is Ready=true but
+// carries a historical restart count past the failure threshold — a healthy
+// running instance that crashed >5 times during a previous startup. The
+// restart-threshold check must never judge a ready container by its history.
+func (f *FakeK8sClient) WithPodReadyAfterRestarts(containerName string, restartCount int32) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-ready-restarts",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        true,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
+// WithInitContainerRestartingNotReady is the init-container sibling of
+// WithPodRestartingNotReady: restart count past the failure threshold, not
+// ready, not in CrashLoopBackOff.
+func (f *FakeK8sClient) WithInitContainerRestartingNotReady(containerName string, restartCount int32) *FakeK8sClient {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-init-restarting",
+			Namespace: "test-namespace",
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			InitContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:         containerName,
+					Ready:        false,
+					RestartCount: restartCount,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{},
+					},
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 137,
+							Reason:   "StartError",
+							Message:  "model downloader failed after repeated restarts",
+						},
+					},
+				},
+			},
+		},
+	}
+	err := f.Client.Create(context.Background(), pod)
+	if err != nil {
+		f.t.Fatalf("failed to create pod: %v", err)
+	}
+	return f
+}
+
 // errorClient wraps a client to simulate errors
 type errorClient struct {
 	client.Client
@@ -768,6 +887,44 @@ func TestBuildVllmDeployment(t *testing.T) {
 	}
 
 	// Additional checks can be added here to validate the structure of the generated object
+}
+
+func TestBuildVllmDeploymentRendersStartupTimeout(t *testing.T) {
+	data := DeploymentManifestVariables{
+		NeutreeVersion:               "v0.1.0",
+		ClusterName:                  "test-cluster",
+		Workspace:                    "test-workspace",
+		Namespace:                    "default",
+		ImagePrefix:                  "registry.example.com",
+		ImageRepo:                    "myrepo",
+		ImageTag:                     "v1.0.0",
+		ImagePullSecret:              "my-secret",
+		EngineName:                   "vllm",
+		EngineVersion:                "v0.24.0",
+		EndpointName:                 "test-endpoint",
+		ModelArgs:                    map[string]interface{}{"name": "gpt-4", "task": "text-generation", "path": "/mnt/models/gpt-4", "registry_type": "bentoml", "registry_path": "/mnt/registry/gpt-4-model", "serve_name": "gpt-4-serve"},
+		Resources:                    map[string]string{"cpu": "500m", "memory": "1Gi"},
+		RoutingLogic:                 "roundrobin",
+		Replicas:                     1,
+		ProgressDeadlineSeconds:      300,
+		StartupProbeFailureThreshold: 30,
+	}
+
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0"), data)
+	require.NoError(t, err)
+	require.Len(t, objs.Items, 1)
+
+	var deployment appsv1.Deployment
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, &deployment))
+
+	require.NotNil(t, deployment.Spec.ProgressDeadlineSeconds)
+	assert.Equal(t, int32(300), *deployment.Spec.ProgressDeadlineSeconds)
+
+	require.NotNil(t, deployment.Spec.Template.Spec.Containers)
+	require.Len(t, deployment.Spec.Template.Spec.Containers, 1)
+	probe := deployment.Spec.Template.Spec.Containers[0].StartupProbe
+	require.NotNil(t, probe)
+	assert.Equal(t, int32(30), probe.FailureThreshold)
 }
 
 func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
@@ -1292,6 +1449,295 @@ func TestKubernetesOrchestrator_setBasicVariables(t *testing.T) {
 	assert.NotEmpty(t, data.Namespace)
 	assert.NotEmpty(t, data.ImagePullSecret)
 	assert.Equal(t, data.NeutreeVersion, "v0.1.0")
+}
+
+func TestKubernetesOrchestrator_setStartupTimeoutVariables(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+
+	newEndpoint := func(deploymentOptions map[string]interface{}) *v1.Endpoint {
+		return &v1.Endpoint{
+			Metadata: &v1.Metadata{Name: "test-endpoint"},
+			Spec: &v1.EndpointSpec{
+				DeploymentOptions: deploymentOptions,
+			},
+		}
+	}
+
+	tests := []struct {
+		name                   string
+		deploymentOptions      map[string]interface{}
+		wantProgressDeadline   int
+		wantProbeFailureThresh int
+		wantErr                bool
+	}{
+		{
+			name:                   "default when startup_timeout_seconds unset",
+			deploymentOptions:      nil,
+			wantProgressDeadline:   defaultStartupTimeoutSeconds,
+			wantProbeFailureThresh: 120,
+		},
+		{
+			name:                   "custom startup_timeout_seconds",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": float64(300)},
+			wantProgressDeadline:   300,
+			wantProbeFailureThresh: 30,
+		},
+		{
+			name:                   "custom integer type",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": 600},
+			wantProgressDeadline:   600,
+			wantProbeFailureThresh: 60,
+		},
+		{
+			name:                   "int64 integer type accepted",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": int64(300)},
+			wantProgressDeadline:   300,
+			wantProbeFailureThresh: 30,
+		},
+		{
+			name:              "fractional sub-second rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(0.5)},
+			wantErr:           true,
+		},
+		{
+			name:              "zero rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(0)},
+			wantErr:           true,
+		},
+		{
+			name:              "negative rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": float64(-1)},
+			wantErr:           true,
+		},
+		{
+			name:                   "numeric string accepted",
+			deploymentOptions:      map[string]interface{}{"startup_timeout_seconds": "300"},
+			wantProgressDeadline:   300,
+			wantProbeFailureThresh: 30,
+		},
+		{
+			name:              "non-numeric string rejected",
+			deploymentOptions: map[string]interface{}{"startup_timeout_seconds": "abc"},
+			wantErr:           true,
+		},
+		{
+			name:                   "unrelated deployment options ignored",
+			deploymentOptions:      map[string]interface{}{"scheduler": map[string]interface{}{"type": "consistent_hash"}},
+			wantProgressDeadline:   defaultStartupTimeoutSeconds,
+			wantProbeFailureThresh: 120,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := newDeploymentManifestVariables()
+			err := k.setStartupTimeoutVariables(&data, newEndpoint(tt.deploymentOptions))
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantProgressDeadline, data.ProgressDeadlineSeconds)
+			assert.Equal(t, tt.wantProbeFailureThresh, data.StartupProbeFailureThreshold)
+		})
+	}
+}
+
+func Test_checkContainerStatuses(t *testing.T) {
+	newStatus := func(name string, ready bool, restartCount int32, waitingReason string) corev1.ContainerStatus {
+		cs := corev1.ContainerStatus{
+			Name:         name,
+			Ready:        ready,
+			RestartCount: restartCount,
+		}
+		if waitingReason != "" {
+			cs.State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{
+					Reason:  waitingReason,
+					Message: "message-" + waitingReason,
+				},
+			}
+		} else {
+			cs.State = corev1.ContainerState{
+				Running: &corev1.ContainerStateRunning{},
+			}
+		}
+		return cs
+	}
+
+	tests := []struct {
+		name          string
+		podName       string
+		statuses      []corev1.ContainerStatus
+		containerType string
+		wantFailed    bool
+		wantMsgPart   string
+	}{
+		{
+			name:          "restarted >5 times, not ready, no failure context -> failed with base message",
+			podName:       "pod-a",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, "")},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "restarted 6 times and not ready",
+		},
+		{
+			name:          "restarted >5 times, not ready, CrashLoopBackOff -> failed with crashloop context",
+			podName:       "pod-b",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, k8sContainerReasonCrashLoopBackOff)},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "restarted 6 times and not ready: CrashLoopBackOff: message-CrashLoopBackOff",
+		},
+		{
+			name:          "restarted >5 times, not ready, non-crashloop with context -> failed with context suffix",
+			podName:       "pod-j",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, "StartError")},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "restarted 6 times and not ready: StartError: message-StartError",
+		},
+		{
+			name:          "restarted >5 times but ready -> not failed",
+			podName:       "pod-c",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", true, 6, "")},
+			containerType: "Container",
+			wantFailed:    false,
+		},
+		{
+			name:          "restarted exactly 5 times, not ready -> not failed (threshold is >5)",
+			podName:       "pod-d",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 5, "")},
+			containerType: "Container",
+			wantFailed:    false,
+		},
+		{
+			name:          "still starting, 0 restarts, not ready -> not failed",
+			podName:       "pod-e",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 0, "")},
+			containerType: "Container",
+			wantFailed:    false,
+		},
+		{
+			name:    "OOM killed is immediate failure",
+			podName: "pod-g",
+			statuses: []corev1.ContainerStatus{
+				{
+					Name:         "engine",
+					Ready:        false,
+					RestartCount: 1,
+					LastTerminationState: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Reason: k8sContainerReasonOOMKilled,
+						},
+					},
+				},
+			},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "OOM (Out of Memory)",
+		},
+		{
+			name:          "ImagePullBackOff is immediate failure",
+			podName:       "pod-h",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 0, k8sContainerReasonImagePullBackOff)},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "failed to pull image",
+		},
+		{
+			name:          "init container restarted >5 times, not ready, no failure context -> failed with base message",
+			podName:       "pod-i",
+			statuses:      []corev1.ContainerStatus{newStatus("model-downloader", false, 6, "")},
+			containerType: "Init Container",
+			wantFailed:    true,
+			wantMsgPart:   "restarted 6 times and not ready",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasFailed, msgs := checkContainerStatuses(tt.podName, tt.statuses, tt.containerType)
+			assert.Equal(t, tt.wantFailed, hasFailed)
+			if tt.wantFailed {
+				assert.NotEmpty(t, msgs)
+				if tt.wantMsgPart != "" {
+					assert.Contains(t, strings.Join(msgs, "; "), tt.wantMsgPart)
+				}
+			}
+		})
+	}
+}
+
+// Test_checkPodFailures covers pod-level gating that checkContainerStatuses
+// does not own: terminating pods are skipped entirely so a rolling update /
+// scale-down never flags an endpoint FAILED off the old pod's history.
+func Test_checkPodFailures(t *testing.T) {
+	restartingPod := func(name string, terminating bool, restartCount int32, ready bool) corev1.Pod {
+		p := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{
+					{
+						Name:         "engine",
+						Ready:        ready,
+						RestartCount: restartCount,
+						State: corev1.ContainerState{
+							Terminated: &corev1.ContainerStateTerminated{
+								ExitCode: 137,
+								Reason:   "StartError",
+								Message:  "startup probe failed",
+							},
+						},
+					},
+				},
+			},
+		}
+		if terminating {
+			p.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		}
+		return p
+	}
+
+	tests := []struct {
+		name        string
+		pods        []corev1.Pod
+		wantFailed  bool
+		wantMsgPart string
+	}{
+		{
+			name:       "terminating pod with historical restarts -> not failed",
+			pods:       []corev1.Pod{restartingPod("pod-terminating", true, 6, false)},
+			wantFailed: false,
+		},
+		{
+			name:        "non-terminating pod restarted >5 times not ready -> failed",
+			pods:        []corev1.Pod{restartingPod("pod-active", false, 6, false)},
+			wantFailed:  true,
+			wantMsgPart: "restarted 6 times and not ready: StartError: startup probe failed",
+		},
+		{
+			name: "terminating pod skipped but healthy active pod not flagged",
+			pods: []corev1.Pod{
+				restartingPod("pod-terminating", true, 6, false),
+				restartingPod("pod-active", false, 0, true),
+			},
+			wantFailed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := &kubernetesOrchestrator{}
+			hasFailed, msg := k.checkPodFailures(tt.pods)
+			assert.Equal(t, tt.wantFailed, hasFailed)
+			if tt.wantFailed && tt.wantMsgPart != "" {
+				assert.Contains(t, msg, tt.wantMsgPart)
+			}
+		})
+	}
 }
 
 func TestKubernetesOrchestrator_setRoutingLogic(t *testing.T) {
@@ -3041,7 +3487,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithPodInCrashLoopBackOff("test-container", 5)
+					WithPodInCrashLoopBackOff("test-container", 6)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: k8sContainerReasonCrashLoopBackOff,
@@ -3097,7 +3543,7 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			setupMock: func(t *testing.T) *FakeK8sClient {
 				return NewFakeK8sClient(t).
 					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
-					WithInitContainerInCrashLoopBackOff(modelDownloaderInitContainerName, 5)
+					WithInitContainerInCrashLoopBackOff(modelDownloaderInitContainerName, 6)
 			},
 			expectedPhase:  v1.EndpointPhaseFAILED,
 			expectErrorMsg: "Init Container",
@@ -3212,6 +3658,51 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			},
 			expectedPhase:  v1.EndpointPhaseDEPLOYING,
 			expectErrorMsg: "ReplicaSet is progressing",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for container restarted >5 times and not ready",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPodRestartingNotReady("test-container", 6)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "restarted 6 times",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for init container restarted >5 times and not ready (unified rule applies to init too)",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithInitContainerRestartingNotReady(modelDownloaderInitContainerName, 6)
+			},
+			expectedPhase:  v1.EndpointPhaseFAILED,
+			expectErrorMsg: "restarted 6 times and not ready",
+			expectError:    false,
+		},
+		{
+			name: "return Deploying for container restarted >5 times but ready",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				// Deployment not fully ready (0 ready), but the pod's container is
+				// Ready=true with a high historical restart count. The restart
+				// threshold check must not misjudge a ready container.
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithPodReadyAfterRestarts("test-container", 6)
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "Deployment: 0/1 replicas ready",
 			expectError:    false,
 		},
 	}
