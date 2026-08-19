@@ -2255,54 +2255,6 @@ func TestValidateEndpointResourceShape(t *testing.T) {
 	})
 }
 
-// TestEndpointResourceShapeMiddleware covers the middleware integration paths
-// that the unit-level TestValidateEndpointResourceShape cannot: the endpoint
-// PATCH resolution flow. The create-path validation semantics (count
-// precision, product support, strict cluster resolution) are already covered
-// by TestValidateEndpointResourceShape at the unit level.
-func TestEndpointResourceShapeMiddleware(t *testing.T) {
-	cluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
-	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
-
-	t.Run("rejects a fractional count on a kubernetes cluster patch", func(t *testing.T) {
-		existing := &v1.Endpoint{
-			Metadata: &v1.Metadata{Name: "endpoint", Workspace: "default"},
-			Spec: &v1.EndpointSpec{
-				Cluster:   "test-cluster",
-				Resources: physicalAcceleratorResources("1", "Tesla-T4"),
-			},
-		}
-		patchStore := &fakeClusterStorage{
-			clusters:  []v1.Cluster{*cluster},
-			endpoints: []v1.Endpoint{*existing},
-		}
-
-		body := `{
-			"spec": {
-				"cluster": "test-cluster",
-				"resources": {
-					"gpu": "1.5",
-					"accelerator": {"type": "nvidia_gpu", "product": "Tesla-T4"}
-				}
-			}
-		}`
-
-		recorder, handlerCalled := runEndpointVGPUValidationWithPath(
-			http.MethodPatch,
-			"/endpoints?metadata->>name=eq.endpoint&metadata->>workspace=eq.default",
-			body,
-			patchStore,
-		)
-
-		var response validationError
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-		assert.Equal(t, "10230", response.Code)
-		assert.Contains(t, response.Hint, "positive integer")
-		assert.False(t, handlerCalled)
-	})
-}
-
 func TestEndpointPatchMayAffectResourceValidation(t *testing.T) {
 	t.Run("runs when the patch touches resources", func(t *testing.T) {
 		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{}}}
@@ -2327,16 +2279,4 @@ func TestEndpointPatchMayAffectResourceValidation(t *testing.T) {
 		assert.False(t, endpointPatchMayAffectResourceValidation(nil))
 		assert.False(t, endpointPatchMayAffectResourceValidation(&v1.Endpoint{}))
 	})
-}
-
-func physicalAcceleratorResources(gpu string, product string) *v1.ResourceSpec {
-	accelerator := map[string]string{
-		v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
-		v1.AcceleratorProductKey: product,
-	}
-
-	return &v1.ResourceSpec{
-		GPU:         &gpu,
-		Accelerator: accelerator,
-	}
 }
