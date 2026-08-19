@@ -896,9 +896,9 @@ func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	// The accelerator resource shape validator performs one product-support
-	// cluster lookup (fails open when no cluster is present).
-	assert.LessOrEqual(t, clusterStorage.listCalls, 1)
+	// The unified resource shape validator performs one strict cluster lookup
+	// for the shared product-support check.
+	assert.Equal(t, 1, clusterStorage.listCalls)
 	assert.Equal(t, "cluster-a", existing.Spec.Cluster)
 	assert.Equal(t, "4096", existing.Spec.Resources.GetAcceleratorVirtualizationMemoryMiB())
 	assert.Equal(t, "50", existing.Spec.Resources.GetAcceleratorVirtualizationCorePercent())
@@ -1110,9 +1110,9 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	// The accelerator resource shape validator performs one product-support
-	// cluster lookup (fails open when no cluster is present).
-	assert.LessOrEqual(t, clusterStorage.listCalls, 1)
+	// The unified resource shape validator performs one strict cluster lookup
+	// for the shared product-support check.
+	assert.Equal(t, 1, clusterStorage.listCalls)
 	assert.True(t, handlerCalled)
 }
 
@@ -1933,7 +1933,7 @@ func (s *fakeClusterStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpo
 	return s.endpoints, nil
 }
 
-func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
+func TestValidateEndpointResourceShape(t *testing.T) {
 	physicalResourceSpec := func(gpu string, accelerator map[string]string) *v1.Endpoint {
 		return &v1.Endpoint{
 			Spec: &v1.EndpointSpec{
@@ -2255,7 +2255,7 @@ func TestValidateEndpointAcceleratorResourceShape(t *testing.T) {
 	})
 }
 
-func TestEndpointAcceleratorResourceShapeMiddleware(t *testing.T) {
+func TestEndpointResourceShapeMiddleware(t *testing.T) {
 	cluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
 	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
 	clusterStorage := &fakeClusterStorage{
