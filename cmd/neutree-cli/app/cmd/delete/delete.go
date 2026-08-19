@@ -51,8 +51,7 @@ Examples:
 
   # Ignore resources that don't exist
   neutree-cli delete Endpoint my-ep -w default --ignore-not-found --server-url https://api.neutree.ai --api-key sk_xxx`,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDelete(opts, args)
 		},

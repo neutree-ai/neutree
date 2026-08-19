@@ -88,9 +88,8 @@ Examples:
 
   # Export everything for one API key over the last week
   neutree-cli export access-log -w default --api-key-id <uuid> --since 2026-07-07 --limit 0`,
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAccessLogExport(cmd, opts)
 		},

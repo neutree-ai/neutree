@@ -74,9 +74,8 @@ Examples:
 
   # One API key, JSON Lines piped to jq
   neutree-cli export model-usage --api-key-id <uuid> --format jsonl | jq -c .`,
-		Args:          cobra.NoArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runModelUsageExport(opts)
 		},
