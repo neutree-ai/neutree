@@ -47,11 +47,11 @@ jobs:
       - name: Architecture boundaries
         run: bash scripts/check-boundaries.sh
 
-      - name: Migration pairs (PR only)
+      - name: Migration hygiene (PR only)
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin "${{ github.base_ref }}" --depth=50
-          bash scripts/check-migration-pairs.sh "origin/${{ github.base_ref }}"
+          bash scripts/check-migrations.sh "origin/${{ github.base_ref }}"
 
       - name: Upload Coverage report to CodeCov
         uses: codecov/codecov-action@v1.0.15
