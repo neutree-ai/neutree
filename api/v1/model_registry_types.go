@@ -19,6 +19,7 @@ type ModelRegistryType string
 
 const (
 	HuggingFaceModelRegistryType = "hugging-face"
+	ModelScopeModelRegistryType  = "model-scope"
 	BentoMLModelRegistryType     = "bentoml"
 )
 
@@ -34,12 +35,21 @@ const (
 // VisibilityForModelRegistryType states whether a registry kind is public.
 // Unknown kinds are private: a kind this build does not know about is not one
 // whose contents are on someone else's hub.
+//
+// This is one half of a pair. The other is api.visibility(), last redefined in
+// db/migrations/088_model_registry_visibility_model_scope.up.sql, which answers
+// the same question for clients reading the resource through PostgREST.
+// A public kind added to one and not the other is not a build failure and not a
+// visible error: the registry simply reports itself private, and the UI then
+// shows it storage figures that will never arrive and write controls that cannot
+// work. Add every new public kind to both.
 func VisibilityForModelRegistryType(registryType ModelRegistryType) string {
-	if registryType == HuggingFaceModelRegistryType {
+	switch registryType {
+	case HuggingFaceModelRegistryType, ModelScopeModelRegistryType:
 		return ModelRegistryVisibilityPublic
+	default:
+		return ModelRegistryVisibilityPrivate
 	}
-
-	return ModelRegistryVisibilityPrivate
 }
 
 type BentoMLModelRegistryConnectType string
@@ -59,9 +69,14 @@ const (
 )
 
 type ModelRegistrySpec struct {
-	Type        ModelRegistryType `json:"type"` // only support 'bentoml' | 'hugging-face'
-	Url         string            `json:"url"`  // only support 'file://localhost/path/to/model' | 'https://huggingface.co' | 'nfs://nfs-server:/path/to/model';
-	Credentials string            `json:"credentials" api:"-"`
+	// Type is one of 'bentoml' | 'hugging-face' | 'model-scope'.
+	Type ModelRegistryType `json:"type"`
+	// Url is the registry's address, in the form its type takes:
+	// 'file://localhost/path/to/model' or 'nfs://nfs-server:/path/to/model' for
+	// bentoml, and a hub or mirror address such as 'https://huggingface.co' or
+	// 'https://www.modelscope.cn' for the public kinds.
+	Url         string `json:"url"`
+	Credentials string `json:"credentials" api:"-"`
 }
 
 // ModelRegistryStats is a cached summary of what a registry currently holds. It

@@ -4300,3 +4300,32 @@ func int32Ptr(v int32) *int32 { return &v }
 func klogTestLogger() klog.Logger {
 	return klog.Background()
 }
+
+// ModelScope is browsable but not yet deployable from, because the container's
+// downloader speaks only the Hugging Face Hub API. Until NEU-689 wires it, that
+// is refused with a reason here rather than falling through the switch, which
+// would produce a manifest carrying no model path at all and fail inside the
+// container with nothing to read.
+func TestKubernetesOrchestrator_setModelRegistryVariables_RefusesModelScopeUntilNEU689(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+
+	data := &DeploymentManifestVariables{
+		Env:       map[string]string{},
+		ModelArgs: map[string]interface{}{},
+	}
+
+	err := k.setModelRegistryVariables(data, &v1.Endpoint{
+		Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "Qwen/Qwen3-8B"}},
+	}, &v1.Cluster{}, &v1.ModelRegistry{
+		Metadata: &v1.Metadata{Name: "public-model-scope"},
+		Spec: &v1.ModelRegistrySpec{
+			Type: v1.ModelScopeModelRegistryType,
+			Url:  "https://www.modelscope.cn",
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot deploy a model from a ModelScope registry yet")
+	// Nothing half-built is handed back for a caller to deploy anyway.
+	assert.Empty(t, data.ModelArgs)
+}

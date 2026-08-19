@@ -20,12 +20,15 @@ type ModelRegistryOptions struct {
 	// points at — the Hub, or a mirror reachable from inside the network. It has
 	// no effect unless the built-in registries are enabled.
 	HuggingFaceEndpoint string
+	// ModelScopeEndpoint is the ModelScope counterpart of HuggingFaceEndpoint.
+	ModelScopeEndpoint string
 }
 
 func NewModelRegistryOptions() *ModelRegistryOptions {
 	return &ModelRegistryOptions{
 		EnableBuiltinPublicRegistries: false,
 		HuggingFaceEndpoint:           model_registry.DefaultHuggingFaceEndpoint,
+		ModelScopeEndpoint:            model_registry.DefaultModelScopeEndpoint,
 	}
 }
 
@@ -35,4 +38,6 @@ func (o *ModelRegistryOptions) AddFlags(fs *pflag.FlagSet) {
 		"provision a built-in read-only model registry for each supported public hub in every workspace")
 	fs.StringVar(&o.HuggingFaceEndpoint, "hugging-face-endpoint", o.HuggingFaceEndpoint,
 		"address the built-in Hugging Face registry points at, e.g. an in-network mirror")
+	fs.StringVar(&o.ModelScopeEndpoint, "model-scope-endpoint", o.ModelScopeEndpoint,
+		"address the built-in ModelScope registry points at, e.g. an in-network mirror")
 }

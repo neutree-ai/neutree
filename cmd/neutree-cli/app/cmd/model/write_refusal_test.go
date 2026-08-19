@@ -16,7 +16,7 @@ import (
 // registryServer answers the registry lookup both write commands make first,
 // and records every path it is asked for so a test can assert what the command
 // did *not* go on to do.
-func registryServer(t *testing.T, registryType string) (url string, paths func() []string) {
+func registryServer(t *testing.T, registryName, registryType, registryURL string) (url string, paths func() []string) {
 	t.Helper()
 
 	var (
@@ -30,8 +30,8 @@ func registryServer(t *testing.T, registryType string) (url string, paths func()
 		mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"id":1,"metadata":{"name":"public-hugging-face","workspace":"default"},` +
-			`"spec":{"type":"` + registryType + `","url":"https://huggingface.co"}}]`))
+		_, _ = w.Write([]byte(`[{"id":1,"metadata":{"name":"` + registryName + `","workspace":"default"},` +
+			`"spec":{"type":"` + registryType + `","url":"` + registryURL + `"}}]`))
 	}))
 	t.Cleanup(server.Close)
 
@@ -56,7 +56,7 @@ func useServer(t *testing.T, url string) {
 // refusal itself is only half the point: the other half is that a user who
 // picked the wrong registry does not pay for a full upload to find out.
 func TestPushRefusesAPublicRegistryBeforeUploading(t *testing.T) {
-	url, paths := registryServer(t, "hugging-face")
+	url, paths := registryServer(t, "public-hugging-face", "hugging-face", "https://huggingface.co")
 	useServer(t, url)
 
 	modelDir := t.TempDir()
@@ -80,7 +80,7 @@ func TestPushRefusesAPublicRegistryBeforeUploading(t *testing.T) {
 // from stdin when --force is absent, so a test that gets as far as the prompt
 // hangs or fails on a closed stdin rather than reporting the refusal.
 func TestDeleteRefusesAPublicRegistryBeforePrompting(t *testing.T) {
-	url, paths := registryServer(t, "hugging-face")
+	url, paths := registryServer(t, "public-hugging-face", "hugging-face", "https://huggingface.co")
 	useServer(t, url)
 
 	cmd := NewModelCmd()
@@ -91,6 +91,50 @@ func TestDeleteRefusesAPublicRegistryBeforePrompting(t *testing.T) {
 	require.EqualError(t, err,
 		`cannot delete models from model registry "public-hugging-face": `+
 			`it is a hugging-face registry, which neutree reads from but never writes to`)
+
+	for _, path := range paths() {
+		require.NotContains(t, path, "/models", "delete reached the model endpoint after being refused")
+	}
+}
+
+// The same two commands, against ModelScope, with no ModelScope-specific code
+// anywhere in the CLI.
+//
+// NEU-625 moved the judgement out of the commands and into
+// v1.VisibilityForModelRegistryType; NEU-627 taught that one mapping about
+// model-scope. If the mapping is the only thing that had to learn, these pass
+// as they are — and the exact sentence is asserted, not merely that an error
+// came back, because a refusal still reading "hugging-face" would mean the
+// judgement is not really coming from the mapping.
+func TestPushRefusesModelScopeWithNoModelScopeSpecificCLICode(t *testing.T) {
+	url, paths := registryServer(t, "public-model-scope", "model-scope", "https://www.modelscope.cn")
+	useServer(t, url)
+
+	modelDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(modelDir, "config.json"), []byte(`{}`), 0o600))
+
+	cmd := NewModelCmd()
+	cmd.SetArgs([]string{"push", modelDir, "--name", "tinymodel", "--version", "v1", "-r", "public-model-scope"})
+
+	require.EqualError(t, cmd.Execute(),
+		`cannot push models to model registry "public-model-scope": `+
+			`it is a model-scope registry, which neutree reads from but never writes to`)
+
+	for _, path := range paths() {
+		require.NotContains(t, path, "/models", "push reached the model endpoint after being refused")
+	}
+}
+
+func TestDeleteRefusesModelScopeWithNoModelScopeSpecificCLICode(t *testing.T) {
+	url, paths := registryServer(t, "public-model-scope", "model-scope", "https://www.modelscope.cn")
+	useServer(t, url)
+
+	cmd := NewModelCmd()
+	cmd.SetArgs([]string{"delete", "Qwen/Qwen3-8B:latest", "-r", "public-model-scope"})
+
+	require.EqualError(t, cmd.Execute(),
+		`cannot delete models from model registry "public-model-scope": `+
+			`it is a model-scope registry, which neutree reads from but never writes to`)
 
 	for _, path := range paths() {
 		require.NotContains(t, path, "/models", "delete reached the model endpoint after being refused")

@@ -45,6 +45,10 @@ publicModelRegistries:
     # Address the built-in Hugging Face registry points at. Set this to a mirror
     # reachable from inside the network when the Hub itself is not.
     url: "https://huggingface.co"
+  modelScope:
+    # Address the built-in ModelScope registry points at. Set this to a mirror
+    # reachable from inside the network when the hub itself is not.
+    url: "https://www.modelscope.cn"
 
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.

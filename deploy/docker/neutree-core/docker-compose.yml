@@ -191,6 +191,7 @@ services:
 {{ if .BuiltinPublicModelRegistries }}
       - --enable-builtin-public-model-registries
       - --hugging-face-endpoint={{ .HuggingFaceEndpoint }}
+      - --model-scope-endpoint={{ .ModelScopeEndpoint }}
 {{ end }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/collect:/etc/neutree/collect
