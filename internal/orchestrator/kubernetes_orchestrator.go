@@ -743,20 +743,17 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 		// and is still not ready is a locatable failure, whether it is crash
 		// looping (CrashLoopBackOff) or stuck starting (startupProbe restarts).
 		// Restart accumulation is driven by the kubelet startupProbe window, so
-		// a high count already implies prolonged non-readiness. CrashLoopBackOff
-		// carries an explicit reason in the message.
+		// a high count already implies prolonged non-readiness. The base
+		// "restarted N times and not ready" message is always emitted; the
+		// failure context (reason + message, CrashLoopBackOff included) is
+		// appended only when both are present.
 		if !cs.Ready && cs.RestartCount > containerFailureRestartThreshold {
 			failed = true
 
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason == k8sContainerReasonCrashLoopBackOff {
-				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' in CrashLoopBackOff (restarted %d times): %s",
-					podName, containerType, cs.Name, cs.RestartCount, cs.State.Waiting.Message))
-			} else {
-				reason, message := containerFailureContext(cs)
+			reason, message := containerFailureContext(cs)
 
-				errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' restarted %d times and not ready: %s",
-					podName, containerType, cs.Name, cs.RestartCount, joinReasonMessage(reason, message)))
-			}
+			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' restarted %d times and not ready%s",
+				podName, containerType, cs.Name, cs.RestartCount, joinReasonMessage(reason, message)))
 
 			continue
 		}
@@ -832,18 +829,15 @@ func containerFailureContext(cs corev1.ContainerStatus) (string, string) {
 	return "", ""
 }
 
-// joinReasonMessage renders a container failure context, degrading to a
-// stable placeholder when neither reason nor message is available.
+// joinReasonMessage returns the failure-context suffix for the restart
+// threshold message: ": reason: message" when both are present, empty
+// otherwise, so a missing context does not fabricate a reason.
 func joinReasonMessage(reason, message string) string {
-	if reason == "" && message == "" {
-		return "no termination context available"
+	if reason == "" || message == "" {
+		return ""
 	}
 
-	if message == "" {
-		return reason
-	}
-
-	return reason + ": " + message
+	return ": " + reason + ": " + message
 }
 
 // buildDeploymentErrorMessage builds a descriptive error message from deployment conditions

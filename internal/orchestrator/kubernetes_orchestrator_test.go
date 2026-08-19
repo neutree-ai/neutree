@@ -1576,7 +1576,7 @@ func Test_checkContainerStatuses(t *testing.T) {
 		wantMsgPart   string
 	}{
 		{
-			name:          "restarted >5 times, not ready, no crashloop -> failed",
+			name:          "restarted >5 times, not ready, no failure context -> failed with base message",
 			podName:       "pod-a",
 			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, "")},
 			containerType: "Container",
@@ -1584,12 +1584,20 @@ func Test_checkContainerStatuses(t *testing.T) {
 			wantMsgPart:   "restarted 6 times and not ready",
 		},
 		{
-			name:          "restarted >5 times, not ready, CrashLoopBackOff -> failed with crashloop detail",
+			name:          "restarted >5 times, not ready, CrashLoopBackOff -> failed with crashloop context",
 			podName:       "pod-b",
 			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, k8sContainerReasonCrashLoopBackOff)},
 			containerType: "Container",
 			wantFailed:    true,
-			wantMsgPart:   "in CrashLoopBackOff (restarted 6 times)",
+			wantMsgPart:   "restarted 6 times and not ready: CrashLoopBackOff: message-CrashLoopBackOff",
+		},
+		{
+			name:          "restarted >5 times, not ready, non-crashloop with context -> failed with context suffix",
+			podName:       "pod-j",
+			statuses:      []corev1.ContainerStatus{newStatus("engine", false, 6, "StartError")},
+			containerType: "Container",
+			wantFailed:    true,
+			wantMsgPart:   "restarted 6 times and not ready: StartError: message-StartError",
 		},
 		{
 			name:          "restarted >5 times but ready -> not failed",
@@ -1640,7 +1648,7 @@ func Test_checkContainerStatuses(t *testing.T) {
 			wantMsgPart:   "failed to pull image",
 		},
 		{
-			name:          "init container restarted >5 times, not ready -> failed (unified rule applies to init too)",
+			name:          "init container restarted >5 times, not ready, no failure context -> failed with base message",
 			podName:       "pod-i",
 			statuses:      []corev1.ContainerStatus{newStatus("model-downloader", false, 6, "")},
 			containerType: "Init Container",
@@ -1677,7 +1685,11 @@ func Test_checkPodFailures(t *testing.T) {
 						Ready:        ready,
 						RestartCount: restartCount,
 						State: corev1.ContainerState{
-							Running: &corev1.ContainerStateRunning{},
+							Terminated: &corev1.ContainerStateTerminated{
+								ExitCode: 137,
+								Reason:   "StartError",
+								Message:  "startup probe failed",
+							},
 						},
 					},
 				},
@@ -1704,7 +1716,7 @@ func Test_checkPodFailures(t *testing.T) {
 			name:        "non-terminating pod restarted >5 times not ready -> failed",
 			pods:        []corev1.Pod{restartingPod("pod-active", false, 6, false)},
 			wantFailed:  true,
-			wantMsgPart: "restarted 6 times and not ready",
+			wantMsgPart: "restarted 6 times and not ready: StartError: startup probe failed",
 		},
 		{
 			name: "terminating pod skipped but healthy active pod not flagged",
