@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +72,10 @@ type EndpointGPUUsageProvider interface {
 }
 
 func NewServer(config Config) (*Server, error) {
+	if config.AcceleratorType != "" && isNilAccelerator(config.Accelerators[config.AcceleratorType]) {
+		return nil, fmt.Errorf("accelerator adapter %q is not registered", config.AcceleratorType)
+	}
+
 	if config.HTTPClient == nil {
 		config.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
@@ -84,6 +89,21 @@ func NewServer(config Config) (*Server, error) {
 		httpClient: config.HTTPClient,
 		normalizer: &metricsnormalizer.Normalizer{},
 	}, nil
+}
+
+// isNilAccelerator also rejects typed-nil values stored in the adapter interface.
+func isNilAccelerator(accel adapter.Accelerator) bool {
+	if accel == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(accel)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -221,16 +241,7 @@ func (s *Server) selectedAccelerator() adapter.Accelerator {
 		return nil
 	}
 
-	accel := s.config.Accelerators[s.config.AcceleratorType]
-	if accel == nil {
-		// The node-agent fails fast on unregistered types at startup, but a
-		// Server constructed directly would silently fall back to the legacy
-		// DCGM path for a configured type. Surface it so the regression is not
-		// silent.
-		klog.V(2).InfoS("Accelerator adapter not registered; falling back to legacy path", "accelerator_type", s.config.AcceleratorType)
-	}
-
-	return accel
+	return s.config.Accelerators[s.config.AcceleratorType]
 }
 
 func (s *Server) acceleratorSamples(

@@ -91,6 +91,40 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
 }
 
+func TestNewServerRejectsUnregisteredAcceleratorType(t *testing.T) {
+	testCases := []struct {
+		name         string
+		accelerators map[string]adapter.Accelerator
+	}{
+		{
+			name: "missing adapter",
+		},
+		{
+			name: "nil adapter",
+			accelerators: map[string]adapter.Accelerator{
+				"unknown-accelerator": nil,
+			},
+		},
+		{
+			name: "typed nil adapter",
+			accelerators: map[string]adapter.Accelerator{
+				"unknown-accelerator": (*typedNilAccelerator)(nil),
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := NewServer(Config{
+				AcceleratorType: "unknown-accelerator",
+				Accelerators:    testCase.accelerators,
+			})
+
+			assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+		})
+	}
+}
+
 func TestServerMetricsRoutesThroughSelectedAcceleratorAdapter(t *testing.T) {
 	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184`))
@@ -228,6 +262,14 @@ func (failingAccelerator) Type() string { return "nvidia_gpu" }
 
 func (failingAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
 	return adapter.AcceleratorMetricResult{}, fmt.Errorf("adapter boom")
+}
+
+type typedNilAccelerator struct{}
+
+func (*typedNilAccelerator) Type() string { return "unknown-accelerator" }
+
+func (*typedNilAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+	return adapter.AcceleratorMetricResult{}, nil
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {
