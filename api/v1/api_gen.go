@@ -335,7 +335,6 @@ type ApiModelRegistriesUpdate struct {
 type ApiOemConfigSelect struct {
 	BrandName           sql.NullString `json:"brand_name"`
 	CreatedAt           sql.NullString `json:"created_at"`
-	CustomCSS           sql.NullString `json:"custom_css"`
 	Id                  int32          `json:"id"`
 	LogoBase64          sql.NullString `json:"logo_base64"`
 	LogoCollapsedBase64 sql.NullString `json:"logo_collapsed_base64"`
@@ -345,7 +344,6 @@ type ApiOemConfigSelect struct {
 type ApiOemConfigInsert struct {
 	BrandName           sql.NullString `json:"brand_name"`
 	CreatedAt           sql.NullString `json:"created_at"`
-	CustomCSS           sql.NullString `json:"custom_css"`
 	Id                  sql.NullInt32  `json:"id"`
 	LogoBase64          sql.NullString `json:"logo_base64"`
 	LogoCollapsedBase64 sql.NullString `json:"logo_collapsed_base64"`
@@ -355,7 +353,6 @@ type ApiOemConfigInsert struct {
 type ApiOemConfigUpdate struct {
 	BrandName           sql.NullString `json:"brand_name"`
 	CreatedAt           sql.NullString `json:"created_at"`
-	CustomCSS           sql.NullString `json:"custom_css"`
 	Id                  sql.NullInt32  `json:"id"`
 	LogoBase64          sql.NullString `json:"logo_base64"`
 	LogoCollapsedBase64 sql.NullString `json:"logo_collapsed_base64"`
@@ -618,7 +615,6 @@ type ApiModelCatalogStatus struct {
 
 type ApiOemConfigSpec struct {
 	BrandName           string `json:"brand_name"`
-	CustomCSS           string `json:"custom_css"`
 	LogoBase64          string `json:"logo_base64"`
 	LogoCollapsedBase64 string `json:"logo_collapsed_base64"`
 }
