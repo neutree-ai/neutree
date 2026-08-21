@@ -10,7 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
-func TestSynchronizeCurrentBaselineCreatesCurrentPairAndMissingHistoricalProfiles(t *testing.T) {
+func TestSynchronizeCurrentBaselineCreatesExactCatalogAndDefault(t *testing.T) {
 	store := &currentBaselineMemoryStore{}
 
 	err := SynchronizeCurrentBaseline(
@@ -22,30 +22,43 @@ func TestSynchronizeCurrentBaselineCreatesCurrentPairAndMissingHistoricalProfile
 	require.NoError(t, err)
 	require.Len(t, store.createdReleaseInfos, 1)
 	require.Empty(t, store.updatedReleaseInfos)
-	require.Len(t, store.createdClusterProfiles, 6)
-	require.Empty(t, store.updatedClusterProfiles)
+	require.Len(t, store.createdClusterProfiles, 3)
 
-	assert.Equal(t, "v1.2.0", store.createdReleaseInfos[0].GetName())
-	assert.Equal(t, []string{"v1.1", "v1.2"}, store.createdReleaseInfos[0].Spec.CompatibleClusterBaselines)
-	assertSSHProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.0", v1.SSHClusterType), "v1.1.0", "v1.1.0-alpha.8")
-	assertKubernetesProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.0", v1.KubernetesClusterType), "v1.1.0", "v1.1.0", "v1.1.0-alpha.8")
-	assertSSHProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.1", v1.SSHClusterType), "v1.1.1", "v1.1.0-rc.1")
-	assertKubernetesProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.1", v1.KubernetesClusterType), "v1.1.1", "v1.1.1", "v1.1.0-rc.1")
-	assertSSHProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.2.0", v1.SSHClusterType), "v1.1.1", "v1.1.0-rc.1")
-	assertKubernetesProfileTags(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.2.0", v1.KubernetesClusterType), "v1.1.1", "v1.1.1", "v1.1.0-rc.1")
+	info := store.createdReleaseInfos[0]
+	assert.Equal(t, "v1.2.0", info.GetName())
+	assert.Equal(t, "v1.2.0", info.Spec.DefaultClusterVersion)
+	assert.Equal(t, []string{"v1.1", "v1.2"}, info.Spec.CompatibleClusterBaselines)
+
+	assert.ElementsMatch(t, []string{"v1.1.0", "v1.1.1", "v1.2.0"}, createdProfileNames(store.createdClusterProfiles))
+	for _, profile := range store.createdClusterProfiles {
+		assertCompleteProfile(t, profile)
+	}
 }
 
-func TestSynchronizeCurrentBaselineOverwritesOnlyCurrentPairAndPreservesExistingProfiles(t *testing.T) {
-	existingHistorical := clusterProfileNamed("v1.1.1", v1.SSHClusterType, "preserve")
-	existingPrerelease := clusterProfileNamed("v1.2.0-alpha.1", v1.KubernetesClusterType, "preserve-alpha")
+func TestSynchronizeCurrentBaselineUpdatesReleaseInfoAndLeavesIdenticalProfiles(t *testing.T) {
+	profiles := []*v1.ClusterProfile{
+		mustCommunityProfile(t, "v1.1.0"),
+		mustCommunityProfile(t, "v1.1.1"),
+		mustCommunityProfile(t, "v1.2.0"),
+	}
+	storedProfiles := make([]v1.ClusterProfile, 0, len(profiles))
+	for index, profile := range profiles {
+		profile.ID = index + 1
+		profile.Metadata.CreationTimestamp = "2026-08-21T00:00:00Z"
+		profile.Metadata.UpdateTimestamp = "2026-08-21T00:00:00Z"
+		storedProfiles = append(storedProfiles, *profile)
+	}
+
 	store := &currentBaselineMemoryStore{
-		releaseInfos: []v1.ReleaseInfo{{ID: 11, Metadata: &v1.Metadata{Name: "v1.2.0"}, Spec: &v1.ReleaseInfoSpec{}}},
-		clusterProfiles: []v1.ClusterProfile{
-			{ID: 21, Metadata: &v1.Metadata{Name: "v1.2.0"}, Spec: &v1.ClusterProfileSpec{ClusterType: v1.SSHClusterType}},
-			{ID: 22, Metadata: &v1.Metadata{Name: "v1.2.0"}, Spec: &v1.ClusterProfileSpec{ClusterType: v1.KubernetesClusterType}},
-			*existingHistorical,
-			*existingPrerelease,
-		},
+		releaseInfos: []v1.ReleaseInfo{{
+			ID:       11,
+			Metadata: &v1.Metadata{Name: "v1.2.0"},
+			Spec: &v1.ReleaseInfoSpec{
+				DefaultClusterVersion:      "v1.1.1",
+				CompatibleClusterBaselines: []string{"v1.1"},
+			},
+		}},
+		clusterProfiles: storedProfiles,
 	}
 
 	err := SynchronizeCurrentBaseline(
@@ -58,112 +71,106 @@ func TestSynchronizeCurrentBaselineOverwritesOnlyCurrentPairAndPreservesExisting
 	require.Empty(t, store.createdReleaseInfos)
 	require.Len(t, store.updatedReleaseInfos, 1)
 	assert.Equal(t, "11", store.updatedReleaseInfoIDs[0])
-	require.Len(t, store.updatedClusterProfiles, 2)
-	assert.ElementsMatch(t, []string{"21", "22"}, store.updatedClusterProfileIDs)
-	require.Len(t, store.createdClusterProfiles, 3)
-	assert.NotNil(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.0", v1.SSHClusterType))
-	assert.NotNil(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.0", v1.KubernetesClusterType))
-	assert.NotNil(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.1.1", v1.KubernetesClusterType))
-	assert.Equal(t, "preserve", existingHistorical.Spec.Components.RayRuntime.Tag)
-	assert.Equal(t, "preserve-alpha", existingPrerelease.Spec.Components.RayRuntime.Tag)
+	assert.Equal(t, "v1.2.0", store.updatedReleaseInfos[0].Spec.DefaultClusterVersion)
+	assert.Empty(t, store.createdClusterProfiles)
 }
 
-func TestSynchronizeCurrentBaselineDoesNotSeedHistoryForOtherBaseline(t *testing.T) {
-	store := &currentBaselineMemoryStore{}
+func TestSynchronizeCurrentBaselineRejectsProfileDriftBeforeWriting(t *testing.T) {
+	drifted := mustCommunityProfile(t, "v1.2.0")
+	ssh, found := drifted.Spec.ComponentsFor(v1.SSHClusterType)
+	require.True(t, found)
+	ssh.RayRuntime.Tag = "drifted"
+	drifted.Spec.Components[v1.SSHClusterType] = ssh
+	drifted.ID = 12
 
-	err := SynchronizeCurrentBaseline(
-		store,
-		"v1.3.0",
-		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
-			return releaseInfoBuilderOutput(baseline, []string{"v1.3"}, nil), nil
-		}),
-		clusterProfileBuilderFunc(func(baseline, clusterType string) (*v1.ClusterProfile, error) {
-			return clusterProfileBuilderOutput(baseline, clusterType, nil), nil
-		}),
-	)
-	require.NoError(t, err)
-	assert.Len(t, store.createdReleaseInfos, 1)
-	assert.Len(t, store.createdClusterProfiles, 2)
-	assert.NotNil(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.3.0", v1.SSHClusterType))
-	assert.NotNil(t, findCreatedClusterProfile(t, store.createdClusterProfiles, "v1.3.0", v1.KubernetesClusterType))
-}
-
-func TestSynchronizeCurrentBaselineRejectsPrereleaseBeforeBuildersOrStore(t *testing.T) {
-	store := &currentBaselineMemoryStore{}
-	releaseBuilderCalled := false
-	profileBuilderCalled := false
-
-	err := SynchronizeCurrentBaseline(
-		store,
-		"v1.3.0-rc.1",
-		releaseInfoBuilderFunc(func(baseline string) (*v1.ReleaseInfo, error) {
-			releaseBuilderCalled = true
-			return releaseInfoBuilderOutput(baseline, []string{"v1.3"}, nil), nil
-		}),
-		clusterProfileBuilderFunc(func(baseline, _ string) (*v1.ClusterProfile, error) {
-			profileBuilderCalled = true
-			return clusterProfileBuilderOutput(baseline, v1.SSHClusterType, nil), nil
-		}),
-	)
-	require.ErrorContains(t, err, "stable release info baseline")
-	assert.False(t, releaseBuilderCalled)
-	assert.False(t, profileBuilderCalled)
-	assert.Zero(t, store.listReleaseInfoCalls)
-	assert.Zero(t, store.listClusterProfileCalls)
-}
-
-func TestSynchronizeCurrentBaselineRejectsBuilderOutputForAnotherBaseline(t *testing.T) {
-	store := &currentBaselineMemoryStore{}
+	store := &currentBaselineMemoryStore{
+		releaseInfos: []v1.ReleaseInfo{{
+			ID:       11,
+			Metadata: &v1.Metadata{Name: "v1.2.0"},
+			Spec: &v1.ReleaseInfoSpec{
+				DefaultClusterVersion:      "v1.1.1",
+				CompatibleClusterBaselines: []string{"v1.1"},
+			},
+		}},
+		clusterProfiles: []v1.ClusterProfile{*drifted},
+	}
 
 	err := SynchronizeCurrentBaseline(
 		store,
 		"v1.2.0",
-		releaseInfoBuilderFunc(func(string) (*v1.ReleaseInfo, error) {
-			return releaseInfoBuilderOutput("v1.1.0", []string{"v1.1"}, nil), nil
-		}),
-		clusterProfileBuilderFunc(func(baseline, clusterType string) (*v1.ClusterProfile, error) {
-			return clusterProfileBuilderOutput(baseline, clusterType, nil), nil
-		}),
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
 	)
-	require.ErrorContains(t, err, "release info builder output name")
+	require.ErrorContains(t, err, "cluster profile v1.2.0 content drift")
 	assert.Empty(t, store.createdReleaseInfos)
+	assert.Empty(t, store.updatedReleaseInfos)
 	assert.Empty(t, store.createdClusterProfiles)
 }
 
-func TestValidateCurrentReleaseInfoBuilderOutputRejectsInvalidStructure(t *testing.T) {
+func TestSynchronizeCurrentBaselineCreatesOnlyMissingProfiles(t *testing.T) {
+	first := mustCommunityProfile(t, "v1.1.0")
+	second := mustCommunityProfile(t, "v1.1.1")
+	first.ID = 1
+	second.ID = 2
+	store := &currentBaselineMemoryStore{clusterProfiles: []v1.ClusterProfile{*first, *second}}
+
+	err := SynchronizeCurrentBaseline(
+		store,
+		"v1.2.0",
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
+	)
+	require.NoError(t, err)
+	require.Len(t, store.createdClusterProfiles, 1)
+	assert.Equal(t, "v1.2.0", store.createdClusterProfiles[0].GetName())
+}
+
+func TestSynchronizeCurrentBaselinePreservesPrereleaseReleaseIdentity(t *testing.T) {
+	store := &currentBaselineMemoryStore{}
+	baseline := "v1.3.0-alpha.1"
+
+	err := SynchronizeCurrentBaseline(
+		store,
+		baseline,
+		releaseInfoBuilderFunc(func(name string) (*v1.ReleaseInfo, error) {
+			return releaseInfoBuilderOutput(name, baseline, []string{"v1.3"}), nil
+		}),
+		clusterProfileBuilderFunc(func(string) ([]*v1.ClusterProfile, error) {
+			return []*v1.ClusterProfile{completeProfile(baseline)}, nil
+		}),
+	)
+	require.NoError(t, err)
+	require.Len(t, store.createdReleaseInfos, 1)
+	assert.Equal(t, baseline, store.createdReleaseInfos[0].GetName())
+	require.Len(t, store.createdClusterProfiles, 1)
+	assert.Equal(t, baseline, store.createdClusterProfiles[0].GetName())
+}
+
+func TestValidateCurrentReleaseInfoBuilderOutputRejectsInvalidPolicy(t *testing.T) {
 	testCases := []struct {
 		name string
 		info *v1.ReleaseInfo
 		want string
 	}{
 		{
-			name: "wrong api version",
-			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2"}, func(info *v1.ReleaseInfo) {
-				info.APIVersion = "v2"
-			}),
-			want: "api version",
+			name: "missing default cluster version",
+			info: releaseInfoBuilderOutput("v1.2.0", "", []string{"v1.2"}),
+			want: "default cluster version is required",
 		},
 		{
-			name: "wrong kind",
-			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2"}, func(info *v1.ReleaseInfo) {
-				info.Kind = "Other"
-			}),
-			want: "kind",
-		},
-		{
-			name: "empty compatible baselines",
-			info: releaseInfoBuilderOutput("v1.2.0", nil, nil),
-			want: "compatible cluster baselines",
-		},
-		{
-			name: "malformed compatible baseline",
-			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.2.0"}, nil),
-			want: "invalid compatible cluster baseline",
+			name: "invalid default cluster version",
+			info: releaseInfoBuilderOutput("v1.2.0", "v1.2", []string{"v1.2"}),
+			want: "invalid default cluster version",
 		},
 		{
 			name: "duplicate compatible baseline",
-			info: releaseInfoBuilderOutput("v1.2.0", []string{"v1.1", "v1.1"}, nil),
+			info: releaseInfoBuilderOutput("v1.2.0", "v1.2.0", []string{"v1.2", "v1.2"}),
 			want: "duplicate compatible cluster baseline",
+		},
+		{
+			name: "default cluster version outside compatible baselines",
+			info: releaseInfoBuilderOutput("v1.2.0", "v1.2.0", []string{"v1.1"}),
+			want: "default cluster version \"v1.2.0\" has incompatible baseline \"v1.2\"",
 		},
 	}
 
@@ -175,67 +182,128 @@ func TestValidateCurrentReleaseInfoBuilderOutputRejectsInvalidStructure(t *testi
 	}
 }
 
-func TestValidateCurrentClusterProfileBuilderOutputRejectsInvalidStructure(t *testing.T) {
+func TestValidateCurrentClusterProfileCatalogRejectsEmptyCatalog(t *testing.T) {
+	info := releaseInfoBuilderOutput("v1.2.0", "v1.2.0", []string{"v1.1", "v1.2"})
+
+	err := validateCurrentClusterProfileCatalog(info, nil)
+
+	assert.EqualError(t, err, "cluster profile catalog is empty")
+}
+
+func TestValidateCurrentClusterProfileCatalogRequiresDefaultProfile(t *testing.T) {
+	info := releaseInfoBuilderOutput("v1.2.0", "v1.2.0", []string{"v1.1", "v1.2"})
+
+	err := validateCurrentClusterProfileCatalog(info, []*v1.ClusterProfile{completeProfile("v1.1.1")})
+
+	assert.EqualError(t, err, `cluster profile catalog is missing default cluster version "v1.2.0"`)
+}
+
+func TestValidateCurrentClusterProfileBuilderOutputRequiresCompleteMatrices(t *testing.T) {
 	testCases := []struct {
 		name    string
 		profile *v1.ClusterProfile
 		want    string
 	}{
 		{
-			name: "wrong api version",
-			profile: clusterProfileBuilderOutput("v1.2.0", v1.SSHClusterType, func(profile *v1.ClusterProfile) {
-				profile.APIVersion = "v2"
-			}),
-			want: "api version",
+			name: "missing kubernetes matrix",
+			profile: func() *v1.ClusterProfile {
+				profile := completeProfile("v1.2.0")
+				delete(profile.Spec.Components, v1.KubernetesClusterType)
+				return profile
+			}(),
+			want: "kubernetes component matrix is required",
 		},
 		{
-			name: "wrong kind",
-			profile: clusterProfileBuilderOutput("v1.2.0", v1.SSHClusterType, func(profile *v1.ClusterProfile) {
-				profile.Kind = "Other"
-			}),
-			want: "kind",
+			name: "unsupported matrix type",
+			profile: func() *v1.ClusterProfile {
+				profile := completeProfile("v1.2.0")
+				profile.Spec.Components["docker"] = v1.ClusterProfileComponents{}
+				return profile
+			}(),
+			want: "unsupported component matrix type",
 		},
 		{
-			name: "missing component image",
-			profile: clusterProfileBuilderOutput("v1.2.0", v1.SSHClusterType, func(profile *v1.ClusterProfile) {
-				profile.Spec.Components.RayRuntime.Image = ""
-			}),
-			want: "ray runtime image",
-		},
-		{
-			name: "missing component tag",
-			profile: clusterProfileBuilderOutput("v1.2.0", v1.KubernetesClusterType, func(profile *v1.ClusterProfile) {
-				profile.Spec.Components.KubeStateMetrics.Tag = ""
-			}),
+			name: "missing required component tag",
+			profile: func() *v1.ClusterProfile {
+				profile := completeProfile("v1.2.0")
+				components, found := profile.Spec.ComponentsFor(v1.KubernetesClusterType)
+				require.True(t, found)
+				components.KubeStateMetrics.Tag = ""
+				profile.Spec.Components[v1.KubernetesClusterType] = components
+				return profile
+			}(),
 			want: "kube state metrics tag",
+		},
+		{
+			name: "workspace metadata",
+			profile: func() *v1.ClusterProfile {
+				profile := completeProfile("v1.2.0")
+				profile.Metadata.Workspace = "default"
+				return profile
+			}(),
+			want: "metadata.workspace must be empty",
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := validateCurrentClusterProfileBuilderOutput("v1.2.0", testCase.profile.GetClusterType(), testCase.profile)
+			err := validateCurrentClusterProfileBuilderOutput(testCase.profile)
 			require.ErrorContains(t, err, testCase.want)
 		})
 	}
+}
+
+func TestSynchronizeCurrentBaselineIgnoresServerTimestampsOnReplay(t *testing.T) {
+	persisted := mustCommunityProfile(t, "v1.2.0")
+	persisted.Metadata.CreationTimestamp = "2026-01-01T00:00:00Z"
+	persisted.Metadata.UpdateTimestamp = "2026-01-02T00:00:00Z"
+	persisted.Metadata.DeletionTimestamp = "2026-01-03T00:00:00Z"
+
+	store := &currentBaselineMemoryStore{clusterProfiles: []v1.ClusterProfile{*persisted}}
+	err := SynchronizeCurrentBaseline(
+		store,
+		"v1.2.0",
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
+	)
+
+	require.NoError(t, err)
+	assert.NotContains(t, createdProfileNames(store.createdClusterProfiles), "v1.2.0")
+}
+
+func TestSynchronizeCurrentBaselineTreatsEmptyMetadataMapsAsIdentical(t *testing.T) {
+	profiles, err := releaseprofile.CommunityClusterProfiles()
+	require.NoError(t, err)
+	storedProfiles := make([]v1.ClusterProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		profile.Metadata.Labels = map[string]string{}
+		profile.Metadata.Annotations = map[string]string{}
+		storedProfiles = append(storedProfiles, *profile)
+	}
+
+	store := &currentBaselineMemoryStore{clusterProfiles: storedProfiles}
+	err = SynchronizeCurrentBaseline(
+		store,
+		"v1.2.0",
+		releaseprofile.NewCommunityReleaseInfoBuilder(),
+		releaseprofile.NewCommunityClusterProfileBuilder(),
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, store.createdClusterProfiles)
 }
 
 type currentBaselineMemoryStore struct {
 	releaseInfos    []v1.ReleaseInfo
 	clusterProfiles []v1.ClusterProfile
 
-	listReleaseInfoCalls    int
-	listClusterProfileCalls int
-
-	createdReleaseInfos      []*v1.ReleaseInfo
-	updatedReleaseInfos      []*v1.ReleaseInfo
-	updatedReleaseInfoIDs    []string
-	createdClusterProfiles   []*v1.ClusterProfile
-	updatedClusterProfiles   []*v1.ClusterProfile
-	updatedClusterProfileIDs []string
+	createdReleaseInfos    []*v1.ReleaseInfo
+	updatedReleaseInfos    []*v1.ReleaseInfo
+	updatedReleaseInfoIDs  []string
+	createdClusterProfiles []*v1.ClusterProfile
 }
 
 func (store *currentBaselineMemoryStore) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
-	store.listReleaseInfoCalls++
 	return store.releaseInfos, nil
 }
 
@@ -251,18 +319,11 @@ func (store *currentBaselineMemoryStore) UpdateReleaseInfo(id string, info *v1.R
 }
 
 func (store *currentBaselineMemoryStore) ListClusterProfile() ([]v1.ClusterProfile, error) {
-	store.listClusterProfileCalls++
 	return store.clusterProfiles, nil
 }
 
 func (store *currentBaselineMemoryStore) CreateClusterProfile(profile *v1.ClusterProfile) error {
 	store.createdClusterProfiles = append(store.createdClusterProfiles, profile)
-	return nil
-}
-
-func (store *currentBaselineMemoryStore) UpdateClusterProfile(id string, profile *v1.ClusterProfile) error {
-	store.updatedClusterProfileIDs = append(store.updatedClusterProfileIDs, id)
-	store.updatedClusterProfiles = append(store.updatedClusterProfiles, profile)
 	return nil
 }
 
@@ -272,88 +333,70 @@ func (builder releaseInfoBuilderFunc) BuildReleaseInfo(baseline string) (*v1.Rel
 	return builder(baseline)
 }
 
-type clusterProfileBuilderFunc func(string, string) (*v1.ClusterProfile, error)
+type clusterProfileBuilderFunc func(string) ([]*v1.ClusterProfile, error)
 
-func (builder clusterProfileBuilderFunc) BuildClusterProfile(baseline, clusterType string) (*v1.ClusterProfile, error) {
-	return builder(baseline, clusterType)
+func (builder clusterProfileBuilderFunc) BuildClusterProfiles(baseline string) ([]*v1.ClusterProfile, error) {
+	return builder(baseline)
 }
 
-func clusterProfileNamed(name, clusterType, rayRuntimeTag string) *v1.ClusterProfile {
-	return &v1.ClusterProfile{
-		Metadata: &v1.Metadata{Name: name},
-		Spec: &v1.ClusterProfileSpec{ClusterType: clusterType, Components: v1.ClusterProfileComponents{
-			RayRuntime: v1.ImageRef{Tag: rayRuntimeTag},
-		}},
-	}
-}
-
-func findCreatedClusterProfile(t *testing.T, profiles []*v1.ClusterProfile, name, clusterType string) *v1.ClusterProfile {
-	t.Helper()
-	for _, profile := range profiles {
-		if profile.GetName() == name && profile.GetClusterType() == clusterType {
-			return profile
-		}
-	}
-	t.Fatalf("cluster profile %s/%s was not created", name, clusterType)
-	return nil
-}
-
-func assertSSHProfileTags(t *testing.T, profile *v1.ClusterProfile, rayRuntime, nodeAgent string) {
-	t.Helper()
-	require.NotNil(t, profile.Spec)
-	assert.Equal(t, v1.SSHClusterType, profile.GetClusterType())
-	assert.Equal(t, rayRuntime, profile.Spec.Components.RayRuntime.Tag)
-	assert.Equal(t, nodeAgent, profile.Spec.Components.NodeAgent.Tag)
-	assert.Equal(t, "v1.8.2", profile.Spec.Components.NodeExporter.Tag)
-	assert.Equal(t, "v1.115.0", profile.Spec.Components.VMAgent.Tag)
-}
-
-func assertKubernetesProfileTags(t *testing.T, profile *v1.ClusterProfile, runtime, router, nodeAgent string) {
-	t.Helper()
-	require.NotNil(t, profile.Spec)
-	assert.Equal(t, v1.KubernetesClusterType, profile.GetClusterType())
-	assert.Equal(t, runtime, profile.Spec.Components.KubernetesRuntime.Tag)
-	assert.Equal(t, router, profile.Spec.Components.Router.Tag)
-	assert.Equal(t, nodeAgent, profile.Spec.Components.NodeAgent.Tag)
-	assert.Equal(t, "v1.8.2", profile.Spec.Components.NodeExporter.Tag)
-	assert.Equal(t, "v1.115.0", profile.Spec.Components.VMAgent.Tag)
-	assert.Equal(t, "v2.15.0", profile.Spec.Components.KubeStateMetrics.Tag)
-}
-
-func releaseInfoBuilderOutput(baseline string, compatibleClusterBaselines []string, mutate func(*v1.ReleaseInfo)) *v1.ReleaseInfo {
-	info := &v1.ReleaseInfo{
+func releaseInfoBuilderOutput(name, defaultClusterVersion string, compatibleBaselines []string) *v1.ReleaseInfo {
+	return &v1.ReleaseInfo{
 		APIVersion: "v1",
 		Kind:       v1.ReleaseInfoKind,
-		Metadata:   &v1.Metadata{Name: baseline},
+		Metadata:   &v1.Metadata{Name: name},
 		Spec: &v1.ReleaseInfoSpec{
-			CompatibleClusterBaselines: compatibleClusterBaselines,
+			DefaultClusterVersion:      defaultClusterVersion,
+			CompatibleClusterBaselines: compatibleBaselines,
 		},
 	}
-	if mutate != nil {
-		mutate(info)
-	}
-
-	return info
 }
 
-func clusterProfileBuilderOutput(baseline, clusterType string, mutate func(*v1.ClusterProfile)) *v1.ClusterProfile {
-	profile := &v1.ClusterProfile{
+func mustCommunityProfile(t *testing.T, version string) *v1.ClusterProfile {
+	t.Helper()
+	profile, err := releaseprofile.CommunityClusterProfile(version)
+	require.NoError(t, err)
+	return profile
+}
+
+func completeProfile(name string) *v1.ClusterProfile {
+	return &v1.ClusterProfile{
 		APIVersion: "v1",
 		Kind:       v1.ClusterProfileKind,
-		Metadata:   &v1.Metadata{Name: baseline},
-		Spec: &v1.ClusterProfileSpec{ClusterType: clusterType, Components: v1.ClusterProfileComponents{
-			RayRuntime:        v1.ImageRef{Image: "ray", Tag: "tag"},
-			KubernetesRuntime: v1.ImageRef{Image: "kubernetes-runtime", Tag: "tag"},
-			Router:            v1.ImageRef{Image: "router", Tag: "tag"},
-			NodeAgent:         v1.ImageRef{Image: "node-agent", Tag: "tag"},
-			NodeExporter:      v1.ImageRef{Image: "node-exporter", Tag: "tag"},
-			VMAgent:           v1.ImageRef{Image: "vmagent", Tag: "tag"},
-			KubeStateMetrics:  v1.ImageRef{Image: "kube-state-metrics", Tag: "tag"},
+		Metadata:   &v1.Metadata{Name: name},
+		Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
+			v1.SSHClusterType: {
+				RayRuntime:   v1.ImageRef{Image: "neutree/neutree-serve", Tag: name},
+				NodeAgent:    v1.ImageRef{Image: "neutree/node-agent", Tag: name},
+				NodeExporter: v1.ImageRef{Image: "prom/node-exporter", Tag: name},
+				VMAgent:      v1.ImageRef{Image: "victoriametrics/vmagent", Tag: name},
+			},
+			v1.KubernetesClusterType: {
+				KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: name},
+				Router:            v1.ImageRef{Image: "neutree/router", Tag: name},
+				NodeAgent:         v1.ImageRef{Image: "neutree/node-agent", Tag: name},
+				NodeExporter:      v1.ImageRef{Image: "prom/node-exporter", Tag: name},
+				VMAgent:           v1.ImageRef{Image: "victoriametrics/vmagent", Tag: name},
+				KubeStateMetrics:  v1.ImageRef{Image: "kube-state-metrics/kube-state-metrics", Tag: name},
+			},
 		}},
 	}
-	if mutate != nil {
-		mutate(profile)
+}
+
+func assertCompleteProfile(t *testing.T, profile *v1.ClusterProfile) {
+	t.Helper()
+	require.NotNil(t, profile)
+	require.NotNil(t, profile.Spec)
+	_, found := profile.Spec.ComponentsFor(v1.SSHClusterType)
+	assert.True(t, found)
+	_, found = profile.Spec.ComponentsFor(v1.KubernetesClusterType)
+	assert.True(t, found)
+}
+
+func createdProfileNames(profiles []*v1.ClusterProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		names = append(names, profile.GetName())
 	}
 
-	return profile
+	return names
 }

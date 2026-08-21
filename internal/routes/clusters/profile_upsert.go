@@ -3,10 +3,12 @@ package clusters
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -31,8 +33,6 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// RawMessage preserves an explicit JSON null, which must be rejected just
-		// like true or false so callers cannot retain a force-update escape hatch.
 		if request.ForceUpdate != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "force_update is not supported for cluster profiles"})
 			return
@@ -49,14 +49,8 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		minor, err := releaseinfo.NormalizeClusterMinor(request.Profile.GetName())
-		if err != nil {
+		if err := profileEligibleForReleaseInfo(request.Profile.GetName(), info); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if !compatibleClusterBaselines(info.Spec.CompatibleClusterBaselines)[minor] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("cluster profile %s is not compatible with current release info", request.Profile.GetName())})
 			return
 		}
 
@@ -67,8 +61,7 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		for index := range profiles {
-			if profiles[index].GetName() != request.Profile.GetName() ||
-				profiles[index].GetClusterType() != request.Profile.GetClusterType() {
+			if profiles[index].GetName() != request.Profile.GetName() {
 				continue
 			}
 
@@ -78,8 +71,8 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			}
 
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
-				"cluster profile %s/%s already exists with different content",
-				request.Profile.GetName(), request.Profile.GetClusterType(),
+				"cluster profile %s already exists with different content",
+				request.Profile.GetName(),
 			)})
 
 			return
@@ -115,29 +108,75 @@ func validateProfileForUpsert(profile *v1.ClusterProfile) error {
 		return fmt.Errorf("profile metadata.workspace is not supported")
 	}
 
+	if _, err := parseExactClusterVersion(profile.Metadata.Name); err != nil {
+		return err
+	}
+
 	if profile.Spec == nil {
 		return fmt.Errorf("profile spec is required")
 	}
 
-	if !v1.IsSupportedClusterType(profile.Spec.ClusterType) {
-		return fmt.Errorf("profile spec.cluster_type must be %q or %q", v1.SSHClusterType, v1.KubernetesClusterType)
+	if len(profile.Spec.Components) != 2 {
+		return fmt.Errorf("profile spec.components must contain exactly %q and %q", v1.SSHClusterType, v1.KubernetesClusterType)
 	}
 
-	if _, err := releaseinfo.NormalizeClusterMinor(profile.Metadata.Name); err != nil {
-		return err
+	for clusterType := range profile.Spec.Components {
+		if !v1.IsSupportedClusterType(clusterType) {
+			return fmt.Errorf("profile spec.components contains unsupported cluster type %q", clusterType)
+		}
 	}
 
-	for _, component := range requiredProfileComponents(profile.Spec.ClusterType, profile.Spec.Components) {
-		if strings.TrimSpace(component.ref.Image) == "" {
-			return fmt.Errorf("profile spec.components.%s.image is required", component.name)
+	for _, clusterType := range []string{v1.SSHClusterType, v1.KubernetesClusterType} {
+		components, found := profile.Spec.ComponentsFor(clusterType)
+		if !found {
+			return fmt.Errorf("profile spec.components.%s is required", clusterType)
 		}
 
-		if strings.TrimSpace(component.ref.Tag) == "" {
-			return fmt.Errorf("profile spec.components.%s.tag is required", component.name)
+		for _, component := range requiredProfileComponents(clusterType, components) {
+			if strings.TrimSpace(component.ref.Image) == "" {
+				return fmt.Errorf("profile spec.components.%s.image is required", component.name)
+			}
+
+			if strings.TrimSpace(component.ref.Tag) == "" {
+				return fmt.Errorf("profile spec.components.%s.tag is required", component.name)
+			}
 		}
 	}
 
 	return nil
+}
+
+func profileEligibleForReleaseInfo(version string, info *v1.ReleaseInfo) error {
+	if info == nil || info.Spec == nil {
+		return fmt.Errorf("release info metadata and spec are required")
+	}
+
+	profileVersion, err := parseExactClusterVersion(version)
+	if err != nil {
+		return err
+	}
+
+	defaultVersion, err := parseExactClusterVersion(info.Spec.DefaultClusterVersion)
+	if err != nil {
+		return fmt.Errorf("invalid default cluster version %q: %w", info.Spec.DefaultClusterVersion, err)
+	}
+
+	if profileVersion.GreaterThan(defaultVersion) {
+		return fmt.Errorf("cluster profile %s exceeds default cluster version %s", version, info.Spec.DefaultClusterVersion)
+	}
+
+	minor, err := releaseinfo.NormalizeClusterMinor(version)
+	if err != nil {
+		return err
+	}
+
+	for _, compatible := range info.Spec.CompatibleClusterBaselines {
+		if compatible == minor {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cluster profile %s is not compatible with current release info", version)
 }
 
 type profileComponent struct {
@@ -169,13 +208,28 @@ func requiredProfileComponents(clusterType string, components v1.ClusterProfileC
 }
 
 func sameClusterProfileContent(existing, requested *v1.ClusterProfile) bool {
-	if existing == nil || requested == nil || existing.Spec == nil || requested.Spec == nil {
+	if existing == nil || requested == nil || existing.Spec == nil || requested.Spec == nil || existing.Metadata == nil || requested.Metadata == nil {
 		return false
 	}
 
 	return existing.APIVersion == requested.APIVersion &&
 		existing.Kind == requested.Kind &&
 		existing.GetName() == requested.GetName() &&
-		existing.GetClusterType() == requested.GetClusterType() &&
-		reflect.DeepEqual(existing.Spec.Components, requested.Spec.Components)
+		existing.Metadata.Workspace == requested.Metadata.Workspace &&
+		maps.Equal(existing.Metadata.Labels, requested.Metadata.Labels) &&
+		maps.Equal(existing.Metadata.Annotations, requested.Metadata.Annotations) &&
+		reflect.DeepEqual(existing.Spec, requested.Spec)
+}
+
+func parseExactClusterVersion(version string) (*semver.Version, error) {
+	if strings.TrimSpace(version) != version || !strings.HasPrefix(version, "v") {
+		return nil, fmt.Errorf("cluster version %q must use v-prefixed semantic version", version)
+	}
+
+	parsed, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster version %q: %w", version, err)
+	}
+
+	return parsed, nil
 }

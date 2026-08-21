@@ -30,13 +30,14 @@ func TestReleaseInfoSchemeRegistration(t *testing.T) {
 	assert.IsType(t, &ReleaseInfo{}, tableObj)
 }
 
-func TestReleaseInfoJSONRoundTripPreservesCompatibleBaselines(t *testing.T) {
+func TestReleaseInfoJSONRoundTripPreservesClusterVersionPolicy(t *testing.T) {
 	input := &ReleaseInfo{
 		ID:         1,
 		APIVersion: "v1",
 		Kind:       ReleaseInfoKind,
 		Metadata:   &Metadata{Name: "v1.2.0"},
 		Spec: &ReleaseInfoSpec{
+			DefaultClusterVersion:      "v1.2.0",
 			CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
 		},
 	}
@@ -48,6 +49,7 @@ func TestReleaseInfoJSONRoundTripPreservesCompatibleBaselines(t *testing.T) {
 	require.NoError(t, json.Unmarshal(payload, &output))
 	require.NotNil(t, output.Spec)
 	assert.Equal(t, "v1.2.0", output.Metadata.Name)
+	assert.Equal(t, "v1.2.0", output.Spec.DefaultClusterVersion)
 	assert.Equal(t, []string{"v1.1", "v1.2"}, output.Spec.CompatibleClusterBaselines)
 }
 
@@ -57,6 +59,8 @@ func TestReleaseInfoAPIShapeOmitsLegacyMatrixState(t *testing.T) {
 	assert.False(t, hasStatus, "ReleaseInfo must not expose mutable status")
 
 	specType := reflect.TypeOf(ReleaseInfoSpec{})
+	_, found := specType.FieldByName("DefaultClusterVersion")
+	assert.True(t, found, "ReleaseInfo.spec must expose the default cluster version")
 	for _, field := range []string{"Channel", "BuildIdentity", "ClusterVersions"} {
 		_, found := specType.FieldByName(field)
 		assert.False(t, found, "ReleaseInfo.spec must not expose legacy %s", field)

@@ -21,29 +21,30 @@ func TestNormalizeClusterType(t *testing.T) {
 }
 
 func TestClusterProfileImagesAddsROCMSuffixForAMDSSHPackage(t *testing.T) {
-	profile, err := releaseprofile.CommunityClusterProfile("v1.2.0", v1.SSHClusterType)
+	profile, err := releaseprofile.CommunityClusterProfile("v1.2.0")
 	require.NoError(t, err)
 
-	images, err := clusterProfileImages(profile, "amd_gpu")
+	images, err := clusterProfileImages(profile, v1.SSHClusterType, "amd_gpu")
 	require.NoError(t, err)
 	assert.Contains(t, images, "neutree/neutree-serve:v1.1.1-rocm")
 	assert.NotContains(t, images, "neutree/neutree-serve:v1.1.1")
 }
 
 func TestManifestProfileOmitsEmptyComponents(t *testing.T) {
-	profile, err := releaseprofile.CommunityClusterProfile("v1.2.0", v1.KubernetesClusterType)
+	profile, err := releaseprofile.CommunityClusterProfile("v1.2.0")
 	require.NoError(t, err)
 
 	rendered := manifestProfile(profile)
-	require.NotNil(t, rendered.Components.KubernetesRuntime)
-	assert.Nil(t, rendered.Components.RayRuntime)
+	kubernetes := rendered.Components[v1.KubernetesClusterType]
+	require.NotNil(t, kubernetes.KubernetesRuntime)
+	assert.Nil(t, kubernetes.RayRuntime)
 }
 
 func TestRunYAMLUsesCanonicalClusterType(t *testing.T) {
 	var output bytes.Buffer
-	err := run("v1.2.0", "k8s", "", "yaml", &output)
+	err := run("v1.2.0", "", "", "yaml", &output)
 	require.NoError(t, err)
-	assert.Contains(t, output.String(), "cluster_type: kubernetes")
+	assert.Contains(t, output.String(), "kubernetes:")
 	assert.Contains(t, output.String(), "cluster_profile:")
 }
 
@@ -62,8 +63,8 @@ func TestRunYAMLOutputPassesPackageProfileValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, manifest.ClusterProfile)
 	assert.Equal(t, "v1.2.0", manifest.ClusterProfile.Version)
-	assert.Equal(t, v1.KubernetesClusterType, manifest.ClusterProfile.ClusterType)
-	assert.Equal(t, "v1.1.1", manifest.ClusterProfile.Components.KubernetesRuntime.Tag)
+	kubernetes := manifest.ClusterProfile.Components[v1.KubernetesClusterType]
+	assert.Equal(t, "v1.1.1", kubernetes.KubernetesRuntime.Tag)
 }
 
 func TestRunImagesOutputsOneImagePerLine(t *testing.T) {

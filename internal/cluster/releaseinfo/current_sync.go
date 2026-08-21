@@ -2,6 +2,8 @@ package releaseinfo
 
 import (
 	"fmt"
+	"maps"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -11,29 +13,28 @@ import (
 
 var compatibleClusterBaselinePattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
 
-// CurrentBaselineStore persists the ReleaseInfo and ClusterProfile pair for
-// the current control-plane baseline.
+// CurrentBaselineStore persists the ReleaseInfo policy and ClusterProfile
+// catalog for the current control-plane release.
 type CurrentBaselineStore interface {
 	ListReleaseInfo() ([]v1.ReleaseInfo, error)
 	CreateReleaseInfo(*v1.ReleaseInfo) error
 	UpdateReleaseInfo(id string, info *v1.ReleaseInfo) error
 	ListClusterProfile() ([]v1.ClusterProfile, error)
 	CreateClusterProfile(*v1.ClusterProfile) error
-	UpdateClusterProfile(id string, profile *v1.ClusterProfile) error
 }
 
-// SynchronizeCurrentBaseline creates or overwrites the current semantic
-// ReleaseInfo and one full-version ClusterProfile for each supported cluster
-// family. Historical profile seeds are created only when first introducing the
-// v1.2.0 baseline.
+// SynchronizeCurrentBaseline updates the current ReleaseInfo policy and
+// ensures every catalog Profile exists. Existing Profiles are immutable: an
+// identical replay is a no-op and any content drift fails initialization before
+// changing either resource.
 func SynchronizeCurrentBaseline(
 	store CurrentBaselineStore,
 	baseline string,
 	releaseInfoBuilder releaseprofile.ReleaseInfoBuilder,
 	clusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder,
 ) error {
-	if _, err := parseStableReleaseInfoBaseline(baseline); err != nil {
-		return fmt.Errorf("invalid stable release info baseline %q: %w", baseline, err)
+	if _, err := parseExactReleaseInfoBaseline(baseline); err != nil {
+		return fmt.Errorf("invalid release info baseline %q: %w", baseline, err)
 	}
 
 	if store == nil {
@@ -57,19 +58,13 @@ func SynchronizeCurrentBaseline(
 		return err
 	}
 
-	currentProfiles := make([]*v1.ClusterProfile, 0, 2)
+	profiles, err := clusterProfileBuilder.BuildClusterProfiles(baseline)
+	if err != nil {
+		return fmt.Errorf("build cluster profile catalog: %w", err)
+	}
 
-	for _, clusterType := range []string{v1.SSHClusterType, v1.KubernetesClusterType} {
-		profile, err := clusterProfileBuilder.BuildClusterProfile(baseline, clusterType)
-		if err != nil {
-			return fmt.Errorf("build %s cluster profile: %w", clusterType, err)
-		}
-
-		if err := validateCurrentClusterProfileBuilderOutput(baseline, clusterType, profile); err != nil {
-			return err
-		}
-
-		currentProfiles = append(currentProfiles, profile)
+	if err := validateCurrentClusterProfileCatalog(info, profiles); err != nil {
+		return err
 	}
 
 	infos, err := store.ListReleaseInfo()
@@ -77,9 +72,25 @@ func SynchronizeCurrentBaseline(
 		return fmt.Errorf("list release infos: %w", err)
 	}
 
-	profiles, err := store.ListClusterProfile()
+	persistedProfiles, err := store.ListClusterProfile()
 	if err != nil {
 		return fmt.Errorf("list cluster profiles: %w", err)
+	}
+
+	existingProfiles, err := clusterProfileIndexByName(persistedProfiles)
+	if err != nil {
+		return err
+	}
+
+	for _, profile := range profiles {
+		existing := existingProfiles[profile.GetName()]
+		if existing == nil {
+			continue
+		}
+
+		if !clusterProfilesSemanticallyEqual(existing, profile) {
+			return fmt.Errorf("cluster profile %s content drift", profile.GetName())
+		}
 	}
 
 	if existing := releaseInfoByName(infos, baseline); existing == nil {
@@ -90,34 +101,13 @@ func SynchronizeCurrentBaseline(
 		return fmt.Errorf("update release info: %w", err)
 	}
 
-	for _, profile := range currentProfiles {
-		if existing := clusterProfileByIdentity(profiles, baseline, profile.GetClusterType()); existing == nil {
-			if err := store.CreateClusterProfile(deepCopyClusterProfile(profile)); err != nil {
-				return fmt.Errorf("create %s cluster profile: %w", profile.GetClusterType(), err)
-			}
-		} else if err := store.UpdateClusterProfile(existing.GetID(), deepCopyClusterProfile(profile)); err != nil {
-			return fmt.Errorf("update %s cluster profile: %w", profile.GetClusterType(), err)
+	for _, profile := range profiles {
+		if existingProfiles[profile.GetName()] != nil {
+			continue
 		}
-	}
 
-	if baseline != "v1.2.0" {
-		return nil
-	}
-
-	for _, historicalVersion := range []string{"v1.1.0", "v1.1.1"} {
-		for _, clusterType := range []string{v1.SSHClusterType, v1.KubernetesClusterType} {
-			if clusterProfileByIdentity(profiles, historicalVersion, clusterType) != nil {
-				continue
-			}
-
-			historical, err := releaseprofile.CommunityHistoricalClusterProfile(historicalVersion, clusterType)
-			if err != nil {
-				return fmt.Errorf("build historical %s cluster profile %s: %w", clusterType, historicalVersion, err)
-			}
-
-			if err := store.CreateClusterProfile(deepCopyClusterProfile(historical)); err != nil {
-				return fmt.Errorf("create historical %s cluster profile %s: %w", clusterType, historicalVersion, err)
-			}
+		if err := store.CreateClusterProfile(deepCopyClusterProfile(profile)); err != nil {
+			return fmt.Errorf("create cluster profile %s: %w", profile.GetName(), err)
 		}
 	}
 
@@ -141,6 +131,22 @@ func validateCurrentReleaseInfoBuilderOutput(baseline string, info *v1.ReleaseIn
 		return fmt.Errorf("release info builder output name %q must match requested baseline %q", info.Metadata.Name, baseline)
 	}
 
+	if info.Metadata.Workspace != "" {
+		return fmt.Errorf("release info builder output metadata.workspace must be empty")
+	}
+
+	if _, err := parseExactReleaseInfoBaseline(info.Metadata.Name); err != nil {
+		return fmt.Errorf("invalid release info builder output name %q: %w", info.Metadata.Name, err)
+	}
+
+	if strings.TrimSpace(info.Spec.DefaultClusterVersion) == "" {
+		return fmt.Errorf("release info builder output default cluster version is required")
+	}
+
+	if _, err := parseExactVPrefixedSemVer(info.Spec.DefaultClusterVersion); err != nil {
+		return fmt.Errorf("invalid default cluster version %q: %w", info.Spec.DefaultClusterVersion, err)
+	}
+
 	if len(info.Spec.CompatibleClusterBaselines) == 0 {
 		return fmt.Errorf("release info builder output compatible cluster baselines are required")
 	}
@@ -159,10 +165,78 @@ func validateCurrentReleaseInfoBuilderOutput(baseline string, info *v1.ReleaseIn
 		seenBaselines[compatibleBaseline] = struct{}{}
 	}
 
+	defaultMinor, err := NormalizeClusterMinor(info.Spec.DefaultClusterVersion)
+	if err != nil {
+		return fmt.Errorf("invalid default cluster version %q: %w", info.Spec.DefaultClusterVersion, err)
+	}
+
+	if _, found := seenBaselines[defaultMinor]; !found {
+		return fmt.Errorf("default cluster version %q has incompatible baseline %q", info.Spec.DefaultClusterVersion, defaultMinor)
+	}
+
 	return nil
 }
 
-func validateCurrentClusterProfileBuilderOutput(baseline, clusterType string, profile *v1.ClusterProfile) error {
+func validateCurrentClusterProfileCatalog(info *v1.ReleaseInfo, profiles []*v1.ClusterProfile) error {
+	if len(profiles) == 0 {
+		return fmt.Errorf("cluster profile catalog is empty")
+	}
+
+	if info == nil || info.Spec == nil {
+		return fmt.Errorf("release info metadata and spec are required")
+	}
+
+	defaultVersion, err := parseExactVPrefixedSemVer(info.Spec.DefaultClusterVersion)
+	if err != nil {
+		return fmt.Errorf("invalid default cluster version %q: %w", info.Spec.DefaultClusterVersion, err)
+	}
+
+	compatibleBaselines := make(map[string]struct{}, len(info.Spec.CompatibleClusterBaselines))
+	for _, baseline := range info.Spec.CompatibleClusterBaselines {
+		compatibleBaselines[baseline] = struct{}{}
+	}
+
+	seenProfiles := make(map[string]struct{}, len(profiles))
+
+	for _, profile := range profiles {
+		if err := validateCurrentClusterProfileBuilderOutput(profile); err != nil {
+			return err
+		}
+
+		name := profile.GetName()
+		if _, found := seenProfiles[name]; found {
+			return fmt.Errorf("duplicate cluster profile builder output %q", name)
+		}
+
+		seenProfiles[name] = struct{}{}
+		version, err := parseExactVPrefixedSemVer(name)
+
+		if err != nil {
+			return fmt.Errorf("invalid cluster profile version %q: %w", name, err)
+		}
+
+		if version.GreaterThan(defaultVersion) {
+			return fmt.Errorf("cluster profile %q exceeds default cluster version %q", name, info.Spec.DefaultClusterVersion)
+		}
+
+		minor, err := NormalizeClusterMinor(name)
+		if err != nil {
+			return err
+		}
+
+		if _, found := compatibleBaselines[minor]; !found {
+			return fmt.Errorf("cluster profile %q has incompatible baseline %q", name, minor)
+		}
+	}
+
+	if _, found := seenProfiles[info.Spec.DefaultClusterVersion]; !found {
+		return fmt.Errorf("cluster profile catalog is missing default cluster version %q", info.Spec.DefaultClusterVersion)
+	}
+
+	return nil
+}
+
+func validateCurrentClusterProfileBuilderOutput(profile *v1.ClusterProfile) error {
 	if profile == nil || profile.Metadata == nil || profile.Spec == nil {
 		return fmt.Errorf("cluster profile builder output requires cluster profile, metadata, and spec")
 	}
@@ -175,21 +249,34 @@ func validateCurrentClusterProfileBuilderOutput(baseline, clusterType string, pr
 		return fmt.Errorf("cluster profile builder output kind must be %s", v1.ClusterProfileKind)
 	}
 
-	if profile.Metadata.Name != baseline {
-		return fmt.Errorf("cluster profile builder output name %q must match requested baseline %q", profile.Metadata.Name, baseline)
+	if profile.Metadata.Workspace != "" {
+		return fmt.Errorf("cluster profile builder output metadata.workspace must be empty")
 	}
 
-	if profile.Spec.ClusterType != clusterType {
-		return fmt.Errorf("cluster profile builder output type %q must match requested type %q", profile.Spec.ClusterType, clusterType)
+	if _, err := parseExactVPrefixedSemVer(profile.Metadata.Name); err != nil {
+		return fmt.Errorf("invalid cluster profile version %q: %w", profile.Metadata.Name, err)
 	}
 
-	for _, component := range requiredClusterProfileComponents(profile.Spec.ClusterType, profile.Spec.Components) {
-		if strings.TrimSpace(component.ref.Image) == "" {
-			return fmt.Errorf("cluster profile builder output %s image is required", component.name)
+	for clusterType := range profile.Spec.Components {
+		if !v1.IsSupportedClusterType(clusterType) {
+			return fmt.Errorf("unsupported component matrix type %q", clusterType)
+		}
+	}
+
+	for _, clusterType := range []string{v1.SSHClusterType, v1.KubernetesClusterType} {
+		components, found := profile.Spec.ComponentsFor(clusterType)
+		if !found {
+			return fmt.Errorf("%s component matrix is required", clusterType)
 		}
 
-		if strings.TrimSpace(component.ref.Tag) == "" {
-			return fmt.Errorf("cluster profile builder output %s tag is required", component.name)
+		for _, component := range requiredClusterProfileComponents(clusterType, components) {
+			if strings.TrimSpace(component.ref.Image) == "" {
+				return fmt.Errorf("cluster profile builder output %s image is required", component.name)
+			}
+
+			if strings.TrimSpace(component.ref.Tag) == "" {
+				return fmt.Errorf("cluster profile builder output %s tag is required", component.name)
+			}
 		}
 	}
 
@@ -238,14 +325,33 @@ func releaseInfoByName(infos []v1.ReleaseInfo, name string) *v1.ReleaseInfo {
 	return nil
 }
 
-func clusterProfileByIdentity(profiles []v1.ClusterProfile, name, clusterType string) *v1.ClusterProfile {
+func clusterProfileIndexByName(profiles []v1.ClusterProfile) (map[string]*v1.ClusterProfile, error) {
+	indexed := make(map[string]*v1.ClusterProfile, len(profiles))
+
 	for index := range profiles {
-		if profiles[index].GetName() == name && profiles[index].GetClusterType() == clusterType {
-			return &profiles[index]
+		name := profiles[index].GetName()
+		if _, found := indexed[name]; found {
+			return nil, fmt.Errorf("duplicate persisted cluster profile %q", name)
 		}
+
+		indexed[name] = &profiles[index]
 	}
 
-	return nil
+	return indexed, nil
+}
+
+func clusterProfilesSemanticallyEqual(existing, candidate *v1.ClusterProfile) bool {
+	if existing == nil || candidate == nil || existing.Metadata == nil || candidate.Metadata == nil {
+		return existing == candidate
+	}
+
+	return existing.APIVersion == candidate.APIVersion &&
+		existing.Kind == candidate.Kind &&
+		existing.Metadata.Name == candidate.Metadata.Name &&
+		existing.Metadata.Workspace == candidate.Metadata.Workspace &&
+		maps.Equal(existing.Metadata.Labels, candidate.Metadata.Labels) &&
+		maps.Equal(existing.Metadata.Annotations, candidate.Metadata.Annotations) &&
+		reflect.DeepEqual(existing.Spec, candidate.Spec)
 }
 
 func deepCopyReleaseInfo(info *v1.ReleaseInfo) *v1.ReleaseInfo {
@@ -273,10 +379,24 @@ func deepCopyClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {
 
 	if profile.Spec != nil {
 		spec := *profile.Spec
+		spec.Components = copyClusterProfileComponents(profile.Spec.Components)
 		copy.Spec = &spec
 	}
 
 	return &copy
+}
+
+func copyClusterProfileComponents(values map[string]v1.ClusterProfileComponents) map[string]v1.ClusterProfileComponents {
+	if values == nil {
+		return nil
+	}
+
+	copy := make(map[string]v1.ClusterProfileComponents, len(values))
+	for clusterType, components := range values {
+		copy[clusterType] = components
+	}
+
+	return copy
 }
 
 func deepCopyMetadata(metadata *v1.Metadata) *v1.Metadata {

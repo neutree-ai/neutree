@@ -12,8 +12,12 @@ import (
 )
 
 type ImageService interface {
+	CheckImageExists(image string, auth authn.Authenticator, useHTTP bool) (bool, error)
 	// CheckPullPermission checks if the provided auth has pull permission for the image
 	CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error)
+	ListImageTags(imageRepo string, auth authn.Authenticator, useHTTP bool) ([]string, error)
+	// GetImageLabels returns the labels from an image's config.
+	GetImageLabels(image string, auth authn.Authenticator, useHTTP bool) (map[string]string, error)
 }
 
 type imageService struct {
@@ -28,6 +32,24 @@ func NewImageService() ImageService {
 	}
 }
 
+func (svc *imageService) CheckImageExists(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
+	ref, err := name.ParseReference(image, registryNameOptions(useHTTP)...)
+	if err != nil {
+		return false, errors.Wrap(err, "failed to parse image "+image)
+	}
+
+	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(svc.registryTransport(ref.Context().Registry.RegistryStr(), useHTTP)))
+	if err != nil {
+		if isNotFoundTransportError(err) {
+			return false, nil
+		}
+
+		return false, errors.Wrap(err, "failed to request image "+image)
+	}
+
+	return true, nil
+}
+
 func (svc *imageService) CheckPullPermission(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
 	ref, err := name.ParseReference(image, registryNameOptions(useHTTP)...)
 	if err != nil {
@@ -36,7 +58,8 @@ func (svc *imageService) CheckPullPermission(image string, auth authn.Authentica
 
 	_, err = remote.Head(ref, remote.WithAuth(auth), remote.WithTransport(svc.registryTransport(ref.Context().Registry.RegistryStr(), useHTTP)))
 	if err != nil {
-		if transportErr, ok := err.(*transport.Error); ok {
+		var transportErr *transport.Error
+		if errors.As(err, &transportErr) {
 			if transportErr.StatusCode == http.StatusUnauthorized || transportErr.StatusCode == http.StatusForbidden {
 				return false, nil
 			}
@@ -53,12 +76,65 @@ func (svc *imageService) CheckPullPermission(image string, auth authn.Authentica
 	return true, nil
 }
 
+func (svc *imageService) GetImageLabels(image string, auth authn.Authenticator, useHTTP bool) (map[string]string, error) {
+	ref, err := name.ParseReference(image, registryNameOptions(useHTTP)...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse image "+image)
+	}
+
+	img, err := remote.Image(ref, remote.WithAuth(auth), remote.WithTransport(svc.registryTransport(ref.Context().Registry.RegistryStr(), useHTTP)))
+	if err != nil {
+		// Tags may disappear between List and the label request. Treat a
+		// missing candidate as a non-match so availability discovery can keep
+		// evaluating the remaining tags.
+		if isNotFoundTransportError(err) {
+			return map[string]string{}, nil
+		}
+
+		return nil, errors.Wrap(err, "failed to fetch image "+image)
+	}
+
+	cfg, err := img.ConfigFile()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get config for image "+image)
+	}
+
+	if cfg == nil || cfg.Config.Labels == nil {
+		return map[string]string{}, nil
+	}
+
+	return cfg.Config.Labels, nil
+}
+
+func (svc *imageService) ListImageTags(imageRepo string, auth authn.Authenticator, useHTTP bool) ([]string, error) {
+	repo, err := name.NewRepository(imageRepo, registryNameOptions(useHTTP)...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse image repo "+imageRepo)
+	}
+
+	tags, err := remote.List(repo, remote.WithAuth(auth), remote.WithTransport(svc.registryTransport(repo.Registry.RegistryStr(), useHTTP)))
+	if err != nil {
+		if isNotFoundTransportError(err) {
+			return nil, nil
+		}
+
+		return nil, errors.Wrap(err, "failed to list the image tags of image repo "+imageRepo)
+	}
+
+	return tags, nil
+}
+
 func registryNameOptions(useHTTP bool) []name.Option {
 	if useHTTP {
 		return []name.Option{name.Insecure}
 	}
 
 	return nil
+}
+
+func isNotFoundTransportError(err error) bool {
+	var transportErr *transport.Error
+	return errors.As(err, &transportErr) && transportErr.StatusCode == http.StatusNotFound
 }
 
 func (svc *imageService) registryTransport(registry string, useHTTP bool) http.RoundTripper {

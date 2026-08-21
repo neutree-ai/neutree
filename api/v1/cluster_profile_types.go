@@ -21,10 +21,9 @@ type ClusterProfile struct {
 }
 
 type ClusterProfileSpec struct {
-	// ClusterType is part of the profile identity together with metadata.name.
-	// A version can have different component material for SSH and Kubernetes.
-	ClusterType string                   `json:"cluster_type"`
-	Components  ClusterProfileComponents `json:"components,omitempty"`
+	// Components carries the complete component matrices for the supported
+	// cluster families. metadata.name is the sole exact-version identity.
+	Components map[string]ClusterProfileComponents `json:"components,omitempty"`
 }
 
 type ClusterProfileComponents struct {
@@ -61,13 +60,15 @@ func (obj *ClusterProfile) GetName() string {
 	return obj.Metadata.Name
 }
 
-// GetClusterType returns the cluster family covered by this profile.
-func (obj *ClusterProfile) GetClusterType() string {
-	if obj == nil || obj.Spec == nil {
-		return ""
+// ComponentsFor returns the component matrix for one supported cluster family.
+func (spec *ClusterProfileSpec) ComponentsFor(clusterType string) (ClusterProfileComponents, bool) {
+	if spec == nil || !IsSupportedClusterType(clusterType) {
+		return ClusterProfileComponents{}, false
 	}
 
-	return obj.Spec.ClusterType
+	components, found := spec.Components[clusterType]
+
+	return components, found
 }
 
 // ClusterProfile is global and deliberately has no workspace ownership.

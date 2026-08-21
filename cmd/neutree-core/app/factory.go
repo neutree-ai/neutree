@@ -7,7 +7,6 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cluster/clusterprofile"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/cluster/staticnode"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -33,7 +32,6 @@ func NewClusterControllerFactory() ControllerFactory {
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
 				Storage:                         opts.config.Storage,
-				ReleaseInfoProvider:             releaseinfo.NewProvider(opts.config.Storage, opts.config.Version),
 				Gw:                              opts.config.Gateway,
 				AcceleratorManager:              opts.config.AcceleratorManager,
 				ClusterProfileComponentResolver: clusterProfileProvider,

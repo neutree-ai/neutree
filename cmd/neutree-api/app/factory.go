@@ -52,12 +52,11 @@ type ProxyRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFun
 func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
-			Storage:             deps.Config.Storage,
-			StorageAccessURL:    deps.Config.StorageAccessURL,
-			AuthEndpoint:        deps.Config.AuthEndpoint,
-			AuthConfig:          deps.Config.AuthConfig,
-			ImageService:        registry.NewImageService(),
-			ReleaseInfoProvider: releaseinfo.NewProvider(deps.Config.Storage, deps.Config.Version),
+			Storage:          deps.Config.Storage,
+			StorageAccessURL: deps.Config.StorageAccessURL,
+			AuthEndpoint:     deps.Config.AuthEndpoint,
+			AuthConfig:       deps.Config.AuthConfig,
+			ImageService:     registry.NewImageService(),
 		})
 
 		return nil
@@ -120,6 +119,7 @@ func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
 			Storage:             deps.Config.Storage,
 			ReleaseInfoProvider: releaseinfo.NewProvider(deps.Config.Storage, deps.Config.Version),
+			ImageService:        registry.NewImageService(),
 		})
 
 		return nil

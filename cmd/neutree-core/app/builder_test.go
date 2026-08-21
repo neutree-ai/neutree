@@ -41,7 +41,7 @@ func (builder *testReleaseInfoBuilderWithBaseline) CurrentReleaseInfoBaseline() 
 
 type testCurrentClusterProfileBuilder struct{}
 
-func (builder *testCurrentClusterProfileBuilder) BuildClusterProfile(string, string) (*v1.ClusterProfile, error) {
+func (builder *testCurrentClusterProfileBuilder) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
 	return nil, nil
 }
 
@@ -425,17 +425,17 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 			wantSync:       true,
 		},
 		{
-			name:     "nightly resolves its stable baseline",
+			name:     "nightly preserves exact release identity",
 			identity: "v1.2.0-nightly.20260805",
 			infos:    []v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}},
-			want:     "v1.2.0",
+			want:     "v1.2.0-nightly.20260805",
 			wantSync: true,
 		},
 		{
-			name:     "release candidate resolves its stable baseline",
+			name:     "release candidate preserves exact release identity",
 			identity: "v1.2.0-rc.1",
 			infos:    []v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}},
-			want:     "v1.2.0",
+			want:     "v1.2.0-rc.1",
 			wantSync: true,
 		},
 	}

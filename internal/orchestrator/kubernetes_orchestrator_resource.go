@@ -112,8 +112,7 @@ func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifes
 }
 
 // setNeutreeRuntimeImage resolves the model-downloader runtime image from the
-// exact Kubernetes ClusterProfile. Legacy clusters retain the historical
-// version-derived image reference.
+// exact Kubernetes ClusterProfile for the deployed Cluster version.
 func (k *kubernetesOrchestrator) setNeutreeRuntimeImage(
 	data *DeploymentManifestVariables,
 	deployedCluster *v1.Cluster,
@@ -131,18 +130,8 @@ func (k *kubernetesOrchestrator) setNeutreeRuntimeImage(
 		return errors.New("deployed cluster version is required")
 	}
 
-	profileAware, err := cluster.IsClusterProfileAwareVersion(version)
-	if err != nil {
-		return errors.Wrap(err, "determine cluster profile requirement")
-	}
-
-	if !profileAware {
-		data.NeutreeRuntimeImage = util.RewriteImageRef(data.ImagePrefix, "neutree/neutree-runtime:"+version)
-		return nil
-	}
-
 	if k == nil || k.storage == nil {
-		return errors.New("storage is required to resolve Kubernetes cluster profile")
+		return errors.New("storage is required to resolve exact Kubernetes cluster profile")
 	}
 
 	components, err := clusterprofile.NewProvider(k.storage).ComponentsFor(version, v1.KubernetesClusterType)

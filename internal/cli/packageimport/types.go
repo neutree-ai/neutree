@@ -25,9 +25,8 @@ type PackageManifest struct {
 // ClusterProfile is the package YAML representation of one exact Cluster
 // profile. It deliberately does not carry workspace resource fields.
 type ClusterProfile struct {
-	Version     string                   `json:"version" yaml:"version"`
-	ClusterType string                   `json:"cluster_type" yaml:"cluster_type"`
-	Components  ClusterProfileComponents `json:"components" yaml:"components"`
+	Version    string                              `json:"version" yaml:"version"`
+	Components map[string]ClusterProfileComponents `json:"components" yaml:"components"`
 }
 
 type ClusterProfileComponents struct {
@@ -52,21 +51,24 @@ func (profile *ClusterProfile) ToAPIClusterProfile() *v1.ClusterProfile {
 		return nil
 	}
 
-	components := profile.Components
+	components := make(map[string]v1.ClusterProfileComponents, len(profile.Components))
+	for clusterType, value := range profile.Components {
+		components[clusterType] = v1.ClusterProfileComponents{
+			RayRuntime:        v1.ImageRef{Image: value.RayRuntime.Image, Tag: value.RayRuntime.Tag},
+			KubernetesRuntime: v1.ImageRef{Image: value.KubernetesRuntime.Image, Tag: value.KubernetesRuntime.Tag},
+			Router:            v1.ImageRef{Image: value.Router.Image, Tag: value.Router.Tag},
+			NodeAgent:         v1.ImageRef{Image: value.NodeAgent.Image, Tag: value.NodeAgent.Tag},
+			NodeExporter:      v1.ImageRef{Image: value.NodeExporter.Image, Tag: value.NodeExporter.Tag},
+			VMAgent:           v1.ImageRef{Image: value.VMAgent.Image, Tag: value.VMAgent.Tag},
+			KubeStateMetrics:  v1.ImageRef{Image: value.KubeStateMetrics.Image, Tag: value.KubeStateMetrics.Tag},
+		}
+	}
 
 	return &v1.ClusterProfile{
 		APIVersion: "v1",
 		Kind:       v1.ClusterProfileKind,
 		Metadata:   &v1.Metadata{Name: profile.Version},
-		Spec: &v1.ClusterProfileSpec{ClusterType: profile.ClusterType, Components: v1.ClusterProfileComponents{
-			RayRuntime:        v1.ImageRef{Image: components.RayRuntime.Image, Tag: components.RayRuntime.Tag},
-			KubernetesRuntime: v1.ImageRef{Image: components.KubernetesRuntime.Image, Tag: components.KubernetesRuntime.Tag},
-			Router:            v1.ImageRef{Image: components.Router.Image, Tag: components.Router.Tag},
-			NodeAgent:         v1.ImageRef{Image: components.NodeAgent.Image, Tag: components.NodeAgent.Tag},
-			NodeExporter:      v1.ImageRef{Image: components.NodeExporter.Image, Tag: components.NodeExporter.Tag},
-			VMAgent:           v1.ImageRef{Image: components.VMAgent.Image, Tag: components.VMAgent.Tag},
-			KubeStateMetrics:  v1.ImageRef{Image: components.KubeStateMetrics.Image, Tag: components.KubeStateMetrics.Tag},
-		}},
+		Spec:       &v1.ClusterProfileSpec{Components: components},
 	}
 }
 

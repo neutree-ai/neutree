@@ -10,16 +10,17 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const testImageManifest = `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","size":0,"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},"layers":[]}`
 
-func TestImageServiceDoesNotExposeDeprecatedVersionDiscoveryMethods(t *testing.T) {
+func TestImageServiceExposesStrictVersionDiscoveryMethods(t *testing.T) {
 	serviceType := reflect.TypeOf((*ImageService)(nil)).Elem()
 	for _, method := range []string{"CheckImageExists", "ListImageTags", "GetImageLabels"} {
 		_, exists := serviceType.MethodByName(method)
-		require.False(t, exists, "release-profile version discovery must not expose %s", method)
+		require.True(t, exists, "release-profile availability requires %s", method)
 	}
 }
 
@@ -58,6 +59,21 @@ func TestImageService_DefaultHTTPSDoesNotDowngradeToHTTP(t *testing.T) {
 	allowed, err := service.CheckPullPermission(registryHost+"/neutree/router:v1.2.0", authn.Anonymous, false)
 	require.Error(t, err)
 	require.False(t, allowed)
+}
+
+func TestImageService_GetImageLabelsTreatsMissingTagAsEmptyLabels(t *testing.T) {
+	server := httptest.NewServer(testRegistryHandler())
+	t.Cleanup(server.Close)
+
+	registryHost := strings.TrimPrefix(server.URL, "http://")
+	labels, err := NewImageService().GetImageLabels(
+		registryHost+"/neutree/router:missing",
+		authn.Anonymous,
+		true,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, labels)
 }
 
 func testRegistryHandler() http.Handler {

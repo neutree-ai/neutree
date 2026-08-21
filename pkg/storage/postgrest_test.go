@@ -134,7 +134,7 @@ func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
 		switch r.Method {
 		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ReleaseInfo","metadata":{"name":"v1.2.0"},"spec":{"compatible_cluster_baselines":["v1.1","v1.2"]}}]`))
+			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ReleaseInfo","metadata":{"name":"v1.2.0"},"spec":{"default_cluster_version":"v1.2.0","compatible_cluster_baselines":["v1.1","v1.2"]}}]`))
 		case http.MethodPost:
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`[]`))
@@ -157,7 +157,7 @@ func TestReleaseInfoStorageUsesInternalTable(t *testing.T) {
 		APIVersion: "v1",
 		Kind:       v1.ReleaseInfoKind,
 		Metadata:   &v1.Metadata{Name: "v1.2.0"},
-		Spec:       &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.1", "v1.2"}},
+		Spec:       &v1.ReleaseInfoSpec{DefaultClusterVersion: "v1.2.0", CompatibleClusterBaselines: []string{"v1.1", "v1.2"}},
 	}
 	require.NoError(t, s.CreateReleaseInfo(info))
 	require.NoError(t, s.UpdateReleaseInfo("7", info))
@@ -188,6 +188,7 @@ func assertReleaseInfoPayloadIsMinimal(t *testing.T, body []byte) {
 	spec, ok := payload["spec"].(map[string]interface{})
 	require.True(t, ok, "release info payload must contain an object spec")
 	assert.Equal(t, []interface{}{"v1.1", "v1.2"}, spec["compatible_cluster_baselines"])
+	assert.Equal(t, "v1.2.0", spec["default_cluster_version"])
 	assert.NotContains(t, spec, "channel")
 	assert.NotContains(t, spec, "build_identity")
 	assert.NotContains(t, spec, "cluster_versions")
@@ -200,7 +201,7 @@ func TestClusterProfileStorageUsesInternalTable(t *testing.T) {
 		switch r.Method {
 		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ClusterProfile","metadata":{"name":"v1.2.0-rc.1"},"spec":{"cluster_type":"ssh","components":{"ray_runtime":{"image":"neutree/neutree-serve","tag":"v1.2.0-rc.1"}}}}]`))
+			_, _ = w.Write([]byte(`[{"id":7,"api_version":"v1","kind":"ClusterProfile","metadata":{"name":"v1.2.0-rc.1"},"spec":{"components":{"ssh":{"ray_runtime":{"image":"neutree/neutree-serve","tag":"v1.2.0-rc.1"}},"kubernetes":{"kubernetes_runtime":{"image":"neutree/neutree-runtime","tag":"v1.2.0-rc.1"}}}}}]`))
 		case http.MethodPost:
 			_, _ = io.Copy(io.Discard, r.Body)
 			w.WriteHeader(http.StatusCreated)
@@ -219,8 +220,9 @@ func TestClusterProfileStorageUsesInternalTable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, profiles, 1)
 	assert.Equal(t, "v1.2.0-rc.1", profiles[0].GetName())
-	assert.Equal(t, v1.SSHClusterType, profiles[0].GetClusterType())
-	assert.Equal(t, "neutree/neutree-serve", profiles[0].Spec.Components.RayRuntime.Image)
+	ssh, found := profiles[0].Spec.ComponentsFor(v1.SSHClusterType)
+	require.True(t, found)
+	assert.Equal(t, "neutree/neutree-serve", ssh.RayRuntime.Image)
 
 	profile := &v1.ClusterProfile{Metadata: &v1.Metadata{Name: "v1.2.0-rc.1"}}
 	require.NoError(t, s.CreateClusterProfile(profile))

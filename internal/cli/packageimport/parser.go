@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 )
 
 const (
@@ -172,25 +172,43 @@ func (p *Parser) validateClusterProfile(profile *ClusterProfile) error {
 		return nil
 	}
 
-	if _, err := releaseinfo.NormalizeClusterMinor(profile.Version); err != nil {
+	if _, err := parseExactPackageVersion(profile.Version); err != nil {
 		return err
 	}
 
-	if !v1.IsSupportedClusterType(profile.ClusterType) {
-		return errors.Errorf("cluster_profile.cluster_type must be %q or %q", v1.SSHClusterType, v1.KubernetesClusterType)
+	if len(profile.Components) != 2 {
+		return errors.Errorf("cluster_profile.components must contain exactly %q and %q", v1.SSHClusterType, v1.KubernetesClusterType)
 	}
 
-	for _, component := range requiredClusterProfileComponents(profile.ClusterType, profile.Components) {
-		if strings.TrimSpace(component.ref.Image) == "" {
-			return errors.Errorf("cluster_profile.components.%s.image is required", component.name)
+	for clusterType := range profile.Components {
+		if !v1.IsSupportedClusterType(clusterType) {
+			return errors.Errorf("cluster_profile.components contains unsupported cluster type %q", clusterType)
 		}
 
-		if strings.TrimSpace(component.ref.Tag) == "" {
-			return errors.Errorf("cluster_profile.components.%s.tag is required", component.name)
+		for _, component := range requiredClusterProfileComponents(clusterType, profile.Components[clusterType]) {
+			if strings.TrimSpace(component.ref.Image) == "" {
+				return errors.Errorf("cluster_profile.components.%s.%s.image is required", clusterType, component.name)
+			}
+
+			if strings.TrimSpace(component.ref.Tag) == "" {
+				return errors.Errorf("cluster_profile.components.%s.%s.tag is required", clusterType, component.name)
+			}
 		}
 	}
 
 	return nil
+}
+
+func parseExactPackageVersion(version string) (string, error) {
+	if strings.TrimSpace(version) != version || !strings.HasPrefix(version, "v") {
+		return "", errors.Errorf("cluster version %q must use v-prefixed semantic version", version)
+	}
+
+	if _, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v")); err != nil {
+		return "", errors.Wrapf(err, "invalid cluster version %q", version)
+	}
+
+	return version, nil
 }
 
 type clusterProfileComponent struct {

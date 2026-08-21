@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/client"
 	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
@@ -40,7 +39,7 @@ func TestRunReleasePreflightReportsEveryIncompatibleCluster(t *testing.T) {
 
 	err := runReleasePreflight(
 		&fakeClusterLister{clusters: rawClusters},
-		&fakeClusterProfileVersionLister{profiles: []client.ClusterProfileVersion{{Version: "v1.1.1", ClusterType: v1.KubernetesClusterType}}},
+		[]*v1.ClusterProfile{preflightProfile("v1.1.1")},
 		preflightTargetReleaseInfo(),
 		&output,
 	)
@@ -66,7 +65,7 @@ func TestRunReleasePreflightRejectsMissingExactProfileForProfileAwareCluster(t *
 	var output bytes.Buffer
 	err = runReleasePreflight(
 		&fakeClusterLister{clusters: []json.RawMessage{rawCluster}},
-		&fakeClusterProfileVersionLister{profiles: []client.ClusterProfileVersion{{Version: "v1.2.0", ClusterType: v1.SSHClusterType}}},
+		[]*v1.ClusterProfile{preflightProfile("v1.1.1")},
 		preflightTargetReleaseInfo(),
 		&output,
 	)
@@ -76,12 +75,73 @@ func TestRunReleasePreflightRejectsMissingExactProfileForProfileAwareCluster(t *
 	assert.Contains(t, output.String(), "v1.2.0/kubernetes has no exact ClusterProfile")
 }
 
+func TestRunReleasePreflightRejectsIncompleteEmbeddedCatalog(t *testing.T) {
+	var output bytes.Buffer
+	profile := preflightProfile("v1.1.1")
+	profile.Spec.Components[v1.KubernetesClusterType] = v1.ClusterProfileComponents{}
+	err := runReleasePreflight(
+		&fakeClusterLister{},
+		[]*v1.ClusterProfile{profile},
+		preflightTargetReleaseInfo(),
+		&output,
+	)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "incomplete")
+}
+
+func TestRunReleasePreflightRejectsDuplicateEmbeddedProfiles(t *testing.T) {
+	var output bytes.Buffer
+	err := runReleasePreflight(
+		&fakeClusterLister{},
+		[]*v1.ClusterProfile{preflightProfile("v1.1.1"), preflightProfile("v1.1.1")},
+		preflightTargetReleaseInfo(),
+		&output,
+	)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "duplicated")
+}
+
+func TestRunReleasePreflightRejectsInvalidEmbeddedProfileEnvelope(t *testing.T) {
+	var output bytes.Buffer
+	profile := preflightProfile("v1.1.1")
+	profile.Kind = "WrongKind"
+
+	err := runReleasePreflight(
+		&fakeClusterLister{},
+		[]*v1.ClusterProfile{profile},
+		preflightTargetReleaseInfo(),
+		&output,
+	)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "kind must be ClusterProfile")
+}
+
+func TestRunReleasePreflightRejectsDefaultOutsideCompatibleBaselines(t *testing.T) {
+	var output bytes.Buffer
+	target := preflightTargetReleaseInfo()
+	target.Spec.CompatibleClusterBaselines = []string{"v1.1"}
+
+	err := runReleasePreflight(
+		&fakeClusterLister{},
+		[]*v1.ClusterProfile{preflightProfile("v1.1.1")},
+		target,
+		&output,
+	)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "has incompatible baseline")
+}
+
 func TestBuildReleasePreflightTargetUsesCLIReleaseInfo(t *testing.T) {
 	target, err := buildReleasePreflightTarget("v1.2.0-alpha.1")
 
 	require.NoError(t, err)
-	assert.Equal(t, "v1.2.0", target.GetName())
+	assert.Equal(t, "v1.2.0-alpha.1", target.GetName())
 	assert.Equal(t, []string{"v1.1", "v1.2"}, target.Spec.CompatibleClusterBaselines)
+	assert.Equal(t, "v1.2.0", target.Spec.DefaultClusterVersion)
 
 	target, err = buildReleasePreflightTarget("b64e294")
 	require.NoError(t, err)
@@ -122,23 +182,19 @@ func TestNeutreeCorePreflightDoesNotInheritInstallOnlyFlags(t *testing.T) {
 
 func preflightTargetReleaseInfo() *v1.ReleaseInfo {
 	return &v1.ReleaseInfo{
-		Metadata: &v1.Metadata{Name: "v1.2.0"},
-		Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: []string{"v1.1", "v1.2"}},
+		APIVersion: "v1",
+		Kind:       v1.ReleaseInfoKind,
+		Metadata:   &v1.Metadata{Name: "v1.2.0"},
+		Spec: &v1.ReleaseInfoSpec{
+			DefaultClusterVersion:      "v1.2.0",
+			CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
+		},
 	}
 }
 
 type fakeClusterLister struct {
 	clusters []json.RawMessage
 	err      error
-}
-
-type fakeClusterProfileVersionLister struct {
-	profiles []client.ClusterProfileVersion
-	err      error
-}
-
-func (lister *fakeClusterProfileVersionLister) ListClusterProfileVersions() ([]client.ClusterProfileVersion, error) {
-	return lister.profiles, lister.err
 }
 
 func (lister *fakeClusterLister) List(kind, workspace string) ([]json.RawMessage, error) {
@@ -157,10 +213,37 @@ type preflightReleaseInfoBuilder struct {
 func (builder *preflightReleaseInfoBuilder) BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error) {
 	return &v1.ReleaseInfo{
 		Metadata: &v1.Metadata{Name: baseline},
-		Spec:     &v1.ReleaseInfoSpec{CompatibleClusterBaselines: append([]string(nil), builder.compatibles...)},
+		Spec: &v1.ReleaseInfoSpec{
+			DefaultClusterVersion:      "v1.3.0",
+			CompatibleClusterBaselines: append([]string(nil), builder.compatibles...),
+		},
 	}, nil
 }
 
 func (builder *preflightReleaseInfoBuilder) CurrentReleaseInfoBaseline() string {
 	return builder.baseline
+}
+
+func preflightProfile(version string) *v1.ClusterProfile {
+	return &v1.ClusterProfile{
+		APIVersion: "v1",
+		Kind:       v1.ClusterProfileKind,
+		Metadata:   &v1.Metadata{Name: version},
+		Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
+			v1.SSHClusterType: {
+				RayRuntime:   v1.ImageRef{Image: "neutree/serve", Tag: version},
+				NodeAgent:    v1.ImageRef{Image: "neutree/node-agent", Tag: version},
+				NodeExporter: v1.ImageRef{Image: "prom/node-exporter", Tag: version},
+				VMAgent:      v1.ImageRef{Image: "vmagent", Tag: version},
+			},
+			v1.KubernetesClusterType: {
+				KubernetesRuntime: v1.ImageRef{Image: "neutree/runtime", Tag: version},
+				Router:            v1.ImageRef{Image: "neutree/router", Tag: version},
+				NodeAgent:         v1.ImageRef{Image: "neutree/node-agent", Tag: version},
+				NodeExporter:      v1.ImageRef{Image: "prom/node-exporter", Tag: version},
+				VMAgent:           v1.ImageRef{Image: "vmagent", Tag: version},
+				KubeStateMetrics:  v1.ImageRef{Image: "kube-state-metrics", Tag: version},
+			},
+		}},
+	}
 }

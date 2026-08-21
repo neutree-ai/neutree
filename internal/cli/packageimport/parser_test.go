@@ -658,27 +658,37 @@ func TestParseManifestFileValidatesClusterProfile(t *testing.T) {
 			name: "accepts a complete exact cluster profile",
 			profile: `
   version: v1.2.0-alpha.1
-  cluster_type: ssh
   components:
-    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
-    router: {image: neutree/router, tag: v1.2.0-alpha.1}
-    node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
-    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
-    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
-    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+    ssh:
+      ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
+      node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
+      node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+      vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+    kubernetes:
+      kubernetes_runtime: {image: neutree/neutree-runtime, tag: v1.2.0-alpha.1}
+      router: {image: neutree/router, tag: v1.2.0-alpha.1}
+      node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
+      node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+      vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+      kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
 `,
 		},
 		{
 			name: "rejects profile missing a required component",
 			profile: `
   version: v1.2.0-alpha.1
-  cluster_type: ssh
   components:
-    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
-    router: {image: neutree/router, tag: v1.2.0-alpha.1}
-    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
-    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
-    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+    ssh:
+      ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
+      node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+      vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+    kubernetes:
+      kubernetes_runtime: {image: neutree/neutree-runtime, tag: v1.2.0-alpha.1}
+      router: {image: neutree/router, tag: v1.2.0-alpha.1}
+      node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
+      node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
+      vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
+      kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
 `,
 			wantErr: "node_agent",
 		},
@@ -686,14 +696,9 @@ func TestParseManifestFileValidatesClusterProfile(t *testing.T) {
 			name: "rejects non semantic profile version",
 			profile: `
   version: v1.2
-  cluster_type: ssh
   components:
-    ray_runtime: {image: neutree/neutree-serve, tag: v1.2.0-alpha.1}
-    router: {image: neutree/router, tag: v1.2.0-alpha.1}
-    node_agent: {image: neutree/neutree-node-agent, tag: v1.2.0-alpha.1}
-    node_exporter: {image: quay.io/prometheus/node-exporter, tag: v1.8.2}
-    vmagent: {image: victoriametrics/vmagent, tag: v1.115.0}
-    kube_state_metrics: {image: registry.k8s.io/kube-state-metrics/kube-state-metrics, tag: v2.15.0}
+    ssh: {}
+    kubernetes: {}
 `,
 			wantErr: "invalid cluster version",
 		},

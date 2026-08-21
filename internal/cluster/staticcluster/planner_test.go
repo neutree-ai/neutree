@@ -320,7 +320,7 @@ func TestPlannerPlanRendersExactClusterProfileRayRuntime(t *testing.T) {
 	}
 }
 
-func TestPlannerPlanLegacyVersionSkipsClusterProfileResolver(t *testing.T) {
+func TestPlannerRequiresExactClusterProfileForLegacyVersion(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v1.0.3"
 	resolverCalls := 0
@@ -342,20 +342,15 @@ func TestPlannerPlanLegacyVersionSkipsClusterProfileResolver(t *testing.T) {
 		),
 	}
 
-	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
-
-	assert.Zero(t, resolverCalls)
-	head := findStaticNode(nodes, "head-0")
-	require.NotNil(t, head)
-	rayHead := findComponent(head.Spec.Components, rayHeadComponentName)
-	require.NotNil(t, rayHead)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.0.3", rayHead.Image)
+	_, err := planner.Plan(context.Background(), cluster, currentNodes)
+	require.ErrorContains(t, err, "resolve cluster profile components")
+	assert.Equal(t, 1, resolverCalls)
 }
 
 func TestPlannerRejectsProfileAwareVersionWithoutClusterProfileResolver(t *testing.T) {
 	components, selected, err := (&Planner{}).profileComponents("v1.2.0")
 
-	require.ErrorContains(t, err, "cluster profile component resolver is required")
+	require.ErrorContains(t, err, "exact cluster profile component resolver is required")
 	assert.False(t, selected)
 	assert.Empty(t, components)
 }

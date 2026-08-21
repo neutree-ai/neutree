@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
@@ -1357,6 +1358,36 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateRayClusterConfigUsesExactProfileRuntimeImage(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "profile-cluster"},
+		Spec: &v1.ClusterSpec{
+			Type:    v1.SSHClusterType,
+			Version: "v1.2.0",
+			Config: &v1.ClusterConfig{SSHConfig: &v1.RaySSHProvisionClusterConfig{
+				Auth: v1.Auth{SSHUser: "root"},
+			}},
+		},
+	}
+	sshConfig, err := util.ParseSSHClusterConfig(cluster)
+	require.NoError(t, err)
+
+	reconciler := &sshRayClusterReconciler{}
+	config, err := reconciler.generateRayClusterConfig(&ReconcileContext{
+		Cluster:         cluster,
+		ImageRegistry:   &v1.ImageRegistry{Spec: &v1.ImageRegistrySpec{URL: "https://registry.example.com", Repository: "neutree"}},
+		ProfileSelected: true,
+		ProfileComponents: v1.ClusterProfileComponents{RayRuntime: v1.ImageRef{
+			Image: "neutree/neutree-serve",
+			Tag:   "v1.1.1",
+		}},
+		sshClusterConfig: sshConfig,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.1.1", config.Docker.Image)
 }
 
 func TestMutateModelCache(t *testing.T) {
