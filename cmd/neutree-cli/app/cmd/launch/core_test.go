@@ -244,6 +244,35 @@ func TestPrepareNeutreeCoreDeployConfig_PreservesVRLOperators(t *testing.T) {
 	assert.Contains(t, string(vector), "<= 1572864")
 }
 
+// The decode only exists in the template, and a template that renders wrong fails
+// at Vector startup rather than in CI — same reason as the NEU-583 guard above.
+func TestPrepareNeutreeCoreDeployConfig_DecodesEndpointName(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(vector),
+		"decode_percent(.extracted_data.url_split[4]) ?? .extracted_data.url_split[4]")
+	// The fallback is the point: without it an absent segment or an invalid
+	// escape aborts the remap instead of keeping the raw value.
+	assert.NotContains(t, string(vector),
+		"endpoint_name = .extracted_data.url_split[4]")
+}
+
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 	tests := []struct {
 		name          string
