@@ -433,9 +433,10 @@ ENGINE_VLLM_IMAGE_TAG = $(ENGINE_VLLM_IMAGE_VERSION)-ray2.53.0
 ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:$(ENGINE_VLLM_IMAGE_TAG)
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
+ENGINE_PACKAGE_MIRROR_REGISTRY ?=
 
 .PHONY: build-engine-package
-build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION)
+build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION, ENGINE_PACKAGE_MIRROR_REGISTRY)
 	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
 	bash $(ENGINE_PACKAGE_SCRIPT) \
 		-n $(ENGINE_NAME) \
@@ -444,6 +445,7 @@ build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENG
 		-s "$(ENGINE_TASKS)" \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
+		$(if $(ENGINE_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(ENGINE_PACKAGE_MIRROR_REGISTRY)) \
 		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
 		-d "$(ENGINE_DESCRIPTION)"
 
