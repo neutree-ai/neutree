@@ -42,39 +42,6 @@ func TestValidateEndpointVGPUResourceShape(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("rejects vGPU endpoint without product", func(t *testing.T) {
-		resources := vgpuResources("1", "", map[string]string{
-			v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
-		})
-
-		err := validateEndpointVGPUResourceShape(resources)
-
-		assert.NotNil(t, err)
-		assert.Equal(t, "10218", err.Code)
-		assert.Contains(t, err.Hint, "target accelerator product")
-		assert.NotContains(t, err.Hint, "GPU")
-	})
-
-	t.Run("rejects vGPU endpoint without accelerator type", func(t *testing.T) {
-		gpu := "1"
-		resources := &v1.ResourceSpec{
-			GPU: &gpu,
-			Accelerator: map[string]string{
-				v1.AcceleratorProductKey:                 "Tesla-T4",
-				v1.AcceleratorVirtualizationMemoryMiBKey: "8192",
-			},
-		}
-
-		err := validateEndpointVGPUResourceShape(resources)
-
-		if assert.NotNil(t, err) {
-			assert.Equal(t, "10217", err.Code)
-			assert.Equal(t, "endpoint accelerator virtualization requires accelerator type", err.Message)
-			assert.Contains(t, err.Hint, "non-empty accelerator type")
-			assert.NotContains(t, err.Hint, "NVIDIA")
-		}
-	})
-
 	t.Run("rejects unsupported memory percent", func(t *testing.T) {
 		resources := vgpuResources("1", "Tesla-T4", map[string]string{
 			v1.AcceleratorVirtualizationMemoryPercentKey: "50",
@@ -740,42 +707,6 @@ func TestEndpointVGPUValidationAllowsPausedPostWhenVirtualizationNotReady(t *tes
 	assert.True(t, handlerCalled)
 }
 
-func TestEndpointVGPUValidationRejectsPatchWithoutEndpointFilters(t *testing.T) {
-	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
-		healthyDevice("gpu-0", "Tesla-T4", 1024, 100),
-	})
-	markClusterVGPUReady(cluster, "cluster-a", "team-a")
-	clusterStorage := &fakeClusterStorage{
-		clusters: []v1.Cluster{*cluster},
-	}
-	body := `{
-		"metadata": {"name": "endpoint", "workspace": "team-a"},
-		"spec": {
-			"cluster": "cluster-a",
-			"resources": {
-				"gpu": "1",
-				"accelerator": {
-					"type": "nvidia_gpu",
-					"product": "Tesla-T4",
-					"virtualization.memory_mib": "4096",
-					"virtualization.core_percent": "50"
-				}
-			}
-		}
-	}`
-
-	recorder, handlerCalled := runEndpointVGPUValidationWithHandler(http.MethodPatch, body, clusterStorage)
-
-	var response validationError
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "10221", response.Code)
-	assert.Equal(t, "invalid endpoint patch target", response.Message)
-	assert.Contains(t, response.Hint, "endpoint lookup filters")
-	assert.NotContains(t, response.Hint, "vGPU")
-	assert.False(t, handlerCalled)
-}
-
 func TestEndpointValidationRejectsPatchWithInvalidTarget(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -901,7 +832,10 @@ func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrec
 
 func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(t *testing.T) {
 	existing := endpointWithVGPU("cluster-a", "team-a")
+	cluster := clusterWithAcceleratorProduct(v1.AcceleratorType("custom_accelerator"), "replacement-product", 16384, nil)
+	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
 	clusterStorage := &fakeClusterStorage{
+		clusters:  []v1.Cluster{*cluster},
 		endpoints: []v1.Endpoint{*existing},
 	}
 	body := `{
@@ -926,7 +860,9 @@ func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.Zero(t, clusterStorage.listCalls)
+	// The unified resource shape validator performs one strict cluster lookup
+	// for the shared product-support check.
+	assert.Equal(t, 1, clusterStorage.listCalls)
 	assert.Equal(t, "cluster-a", existing.Spec.Cluster)
 	assert.Equal(t, "4096", existing.Spec.Resources.GetAcceleratorVirtualizationMemoryMiB())
 	assert.Equal(t, "50", existing.Spec.Resources.GetAcceleratorVirtualizationCorePercent())
@@ -1108,7 +1044,10 @@ func TestEndpointVGPUValidationAllowsNonVGPUPatchWhenReplicasChange(t *testing.T
 }
 
 func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
+	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, nil)
+	cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
 	clusterStorage := &fakeClusterStorage{
+		clusters: []v1.Cluster{*cluster},
 		endpoints: []v1.Endpoint{
 			*endpointWithVGPU("cluster-a", "team-a"),
 		},
@@ -1135,7 +1074,9 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 
 	assert.Equal(t, http.StatusNoContent, recorder.Code)
 	assert.Equal(t, 1, clusterStorage.endpointListCalls)
-	assert.Equal(t, 0, clusterStorage.listCalls)
+	// The unified resource shape validator performs one strict cluster lookup
+	// for the shared product-support check.
+	assert.Equal(t, 1, clusterStorage.listCalls)
 	assert.True(t, handlerCalled)
 }
 
@@ -1143,6 +1084,10 @@ func TestEndpointVGPUValidationAllowsPatchWhenReplacementProductMemoryIsUnknown(
 	cluster := clusterWithNVIDIAGPUProduct("Tesla-T4", 16384, []*v1.DeviceResource{
 		healthyDevice("gpu-0", "Tesla-T4", 4096, 50),
 	})
+	// L4 is known to the cluster (so the shared product-support check passes)
+	// but its memory is not reported, so the memory spec check fails open.
+	cluster.Status.ResourceInfo.AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["L4"] =
+		&v1.AcceleratorProductMetadata{}
 	markClusterVGPUReady(cluster, "cluster-a", "team-a")
 	clusterStorage := &fakeClusterStorage{
 		clusters: []v1.Cluster{*cluster},
@@ -1950,4 +1895,352 @@ func (s *fakeClusterStorage) ListEndpoint(option storage.ListOption) ([]v1.Endpo
 	}
 
 	return s.endpoints, nil
+}
+
+func TestValidateEndpointResourceShape(t *testing.T) {
+	physicalResourceSpec := func(gpu string, accelerator map[string]string) *v1.Endpoint {
+		return &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Cluster: "test-cluster",
+				Resources: &v1.ResourceSpec{
+					GPU:         &gpu,
+					Accelerator: accelerator,
+				},
+			},
+		}
+	}
+
+	physicalWithProduct := func(gpu, product string) *v1.Endpoint {
+		return physicalResourceSpec(gpu, map[string]string{
+			v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey: product,
+		})
+	}
+
+	clusterWithType := func(clusterType string) *fakeClusterStorage {
+		cluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
+		cluster.Spec = &v1.ClusterSpec{Type: clusterType}
+
+		return &fakeClusterStorage{clusters: []v1.Cluster{*cluster}}
+	}
+
+	k8sStore := clusterWithType(v1.KubernetesClusterType)
+	sshStore := clusterWithType(v1.SSHClusterType)
+
+	t.Run("allows a supported product with a positive integer count on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("rejects an empty product on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "product is required")
+		}
+	})
+
+	t.Run("rejects an unknown product on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "unknown-model")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "unsupported accelerator product")
+		}
+	})
+
+	t.Run("rejects a fractional count at or above one on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1.5", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("rejects a fractional count below one on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("0.5", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive integer")
+		}
+	})
+
+	t.Run("rejects a zero count on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("0", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects a negative count on a kubernetes cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("-1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects a zero count on a static cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("0", "Tesla-T4")
+
+		err := validateEndpointResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects a missing count when an accelerator is declared", func(t *testing.T) {
+		endpoint := physicalResourceSpec("", map[string]string{
+			v1.AcceleratorTypeKey:    string(v1.AcceleratorTypeNVIDIAGPU),
+			v1.AcceleratorProductKey: "Tesla-T4",
+		})
+
+		err := validateEndpointResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("allows a one-decimal count below one on a static cluster", func(t *testing.T) {
+		for _, gpu := range []string{"0.1", "0.5", "0.9"} {
+			endpoint := physicalWithProduct(gpu, "Tesla-T4")
+
+			err := validateEndpointResourceShape(sshStore, endpoint)
+
+			assert.Nil(t, err)
+		}
+	})
+
+	t.Run("allows an integer count at or above one on a static cluster", func(t *testing.T) {
+		for _, gpu := range []string{"1", "2", "8"} {
+			endpoint := physicalWithProduct(gpu, "Tesla-T4")
+
+			err := validateEndpointResourceShape(sshStore, endpoint)
+
+			assert.Nil(t, err)
+		}
+	})
+
+	t.Run("rejects a multi-decimal count below one on a static cluster", func(t *testing.T) {
+		for _, gpu := range []string{"0.01", "0.15"} {
+			endpoint := physicalWithProduct(gpu, "Tesla-T4")
+
+			err := validateEndpointResourceShape(sshStore, endpoint)
+
+			if assert.NotNil(t, err) {
+				assert.Contains(t, err.Hint, "one-decimal value below 1")
+			}
+		}
+	})
+
+	t.Run("rejects a non-integer count at or above one on a static cluster", func(t *testing.T) {
+		for _, gpu := range []string{"1.5", "2.5"} {
+			endpoint := physicalWithProduct(gpu, "Tesla-T4")
+
+			err := validateEndpointResourceShape(sshStore, endpoint)
+
+			if assert.NotNil(t, err) {
+				assert.Contains(t, err.Hint, "integer at or above 1")
+			}
+		}
+	})
+
+	t.Run("rejects a negative count on a static cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("-1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects an empty product on a static cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "")
+
+		err := validateEndpointResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "product is required")
+		}
+	})
+
+	t.Run("rejects an unknown product on a static cluster", func(t *testing.T) {
+		endpoint := physicalWithProduct("1", "unknown-model")
+
+		err := validateEndpointResourceShape(sshStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "unsupported accelerator product")
+		}
+	})
+
+	t.Run("rejects a malformed count", func(t *testing.T) {
+		endpoint := physicalWithProduct("abc", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects an infinite count", func(t *testing.T) {
+		endpoint := physicalWithProduct("+Inf", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects a NaN count", func(t *testing.T) {
+		endpoint := physicalWithProduct("NaN", "Tesla-T4")
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "positive accelerator card count")
+		}
+	})
+
+	t.Run("rejects an empty accelerator type", func(t *testing.T) {
+		endpoint := physicalResourceSpec("1", map[string]string{
+			v1.AcceleratorProductKey: "Tesla-T4",
+		})
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "accelerator.type is required")
+		}
+	})
+
+	t.Run("returns an internal error when the cluster lookup fails", func(t *testing.T) {
+		errorStore := &fakeClusterStorage{listError: errors.New("database down")}
+		endpoint := physicalWithProduct("1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(errorStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "500", err.Code)
+			assert.Equal(t, http.StatusInternalServerError, err.HTTPStatus)
+		}
+	})
+
+	t.Run("rejects when the cluster is not found", func(t *testing.T) {
+		emptyStore := &fakeClusterStorage{}
+		endpoint := physicalWithProduct("1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(emptyStore, endpoint)
+
+		if assert.NotNil(t, err) {
+			assert.Contains(t, err.Hint, "cluster default/test-cluster not found")
+		}
+	})
+
+	t.Run("fails open when the cluster metadata is unavailable", func(t *testing.T) {
+		cluster := clusterWithoutNVIDIAGPUProducts()
+		cluster.Spec = &v1.ClusterSpec{Type: v1.KubernetesClusterType}
+		noMetadataStore := &fakeClusterStorage{clusters: []v1.Cluster{*cluster}}
+		endpoint := physicalWithProduct("1", "Tesla-T4")
+
+		err := validateEndpointResourceShape(noMetadataStore, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("routes virtualization resources to the vGPU chain", func(t *testing.T) {
+		replicas := 1
+		resources := virtualizationResources(string(v1.AcceleratorTypeNVIDIAGPU), "1", "Tesla-T4", map[string]string{
+			v1.AcceleratorVirtualizationMemoryMiBKey: "4096",
+		})
+		endpoint := func() *v1.Endpoint {
+			return &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Cluster:   "test-cluster",
+					Replicas:  v1.ReplicaSpec{Num: &replicas},
+					Resources: resources,
+				},
+			}
+		}
+
+		// A virtualization-enabled, ready cluster passes the vGPU chain.
+		readyCluster := clusterWithAcceleratorProduct(v1.AcceleratorTypeNVIDIAGPU, "Tesla-T4", 16384, nil)
+		markClusterVGPUReady(readyCluster, "test-cluster", "default")
+		readyStore := &fakeClusterStorage{clusters: []v1.Cluster{*readyCluster}}
+
+		err := validateEndpointResourceShape(readyStore, endpoint())
+
+		assert.Nil(t, err)
+
+		// A non-virtualization-ready cluster is rejected by the vGPU chain, not
+		// skipped by the physical-accelerator path.
+		err = validateEndpointResourceShape(k8sStore, endpoint())
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10222", err.Code)
+		}
+	})
+
+	t.Run("skips when no accelerator type is declared", func(t *testing.T) {
+		gpu := "1"
+		endpoint := physicalResourceSpec(gpu, nil)
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("skips when resources are nil", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "test-cluster"}}
+
+		err := validateEndpointResourceShape(k8sStore, endpoint)
+
+		assert.Nil(t, err)
+	})
+}
+
+func TestEndpointPatchMayAffectResourceValidation(t *testing.T) {
+	t.Run("runs when the patch touches resources", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Resources: &v1.ResourceSpec{}}}
+
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
+	})
+
+	t.Run("runs when the patch touches cluster", func(t *testing.T) {
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}}
+
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
+	})
+
+	t.Run("runs for a replicas-only patch because it gates virtualization validation", func(t *testing.T) {
+		replicas := 3
+		endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &replicas}}}
+
+		assert.True(t, endpointPatchMayAffectResourceValidation(endpoint))
+	})
+
+	t.Run("skips for a nil spec", func(t *testing.T) {
+		assert.False(t, endpointPatchMayAffectResourceValidation(nil))
+		assert.False(t, endpointPatchMayAffectResourceValidation(&v1.Endpoint{}))
+	})
 }
