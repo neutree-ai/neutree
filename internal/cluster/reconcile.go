@@ -30,10 +30,19 @@ type ClusterReconcile interface {
 	ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error
 }
 
+// ClusterProfileComponentResolver resolves the typed component profile for an
+// exact Cluster version.
+type ClusterProfileComponentResolver interface {
+	ComponentsFor(clusterVersion, clusterType string) (v1.ClusterProfileComponents, error)
+}
+
 type ReconcileContext struct {
 	Ctx           context.Context
 	Cluster       *v1.Cluster
 	ImageRegistry *v1.ImageRegistry
+	// ProfileComponents is the exact ClusterProfile selected by spec.version.
+	ProfileComponents v1.ClusterProfileComponents
+	ProfileSelected   bool
 
 	// ssh cluster specific fields
 	sshClusterConfig    *v1.RaySSHProvisionClusterConfig
@@ -56,6 +65,26 @@ type ReconcileContext struct {
 
 func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
+	components, err := resolveClusterProfileComponents(cluster, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster version: %w", err)
+	}
+
+	return newReconcile(cluster, acceleratorManager, s, metricsRemoteWriteURL, components)
+}
+
+func NewReconcileWithClusterProfile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	s storage.Storage, metricsRemoteWriteURL string, resolver ClusterProfileComponentResolver) (ClusterReconcile, error) {
+	components, err := resolveClusterProfileComponents(cluster, resolver)
+	if err != nil {
+		return nil, err
+	}
+
+	return newReconcile(cluster, acceleratorManager, s, metricsRemoteWriteURL, components)
+}
+
+func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
+	s storage.Storage, metricsRemoteWriteURL string, components v1.ClusterProfileComponents) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
 		legacy := &sshRayClusterReconciler{
@@ -74,15 +103,73 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 				storage:            s,
 				acceleratorManager: acceleratorManager,
 				legacy:             legacy,
+				profileComponents:  components,
 			}, nil
 		}
 
 		return legacy, nil
 	case v1.KubernetesClusterType:
-		return NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL), nil
+		return NewNativeKubernetesClusterReconcilerWithClusterProfileComponents(s, acceleratorManager, metricsRemoteWriteURL, components), nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}
+}
+
+func resolveClusterProfileComponents(
+	cluster *v1.Cluster,
+	resolver ClusterProfileComponentResolver,
+) (v1.ClusterProfileComponents, error) {
+	if cluster == nil || cluster.Spec == nil {
+		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster spec is required")
+	}
+
+	profileAware, err := isClusterProfileAwareVersion(cluster.Spec.Version)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, err
+	}
+
+	if !profileAware {
+		return v1.ClusterProfileComponents{}, nil
+	}
+
+	if resolver == nil {
+		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster profile component resolver is required for cluster version %s", cluster.Spec.Version)
+	}
+
+	components, err := resolver.ComponentsFor(cluster.Spec.Version, cluster.Spec.Type)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, fmt.Errorf("resolve cluster profile components: %w", err)
+	}
+
+	return components, nil
+}
+
+func isClusterProfileAwareVersion(version string) (bool, error) {
+	baseVersion, err := semver.BaseVersion(version)
+	if err != nil {
+		return false, fmt.Errorf("parse cluster version %q: %w", version, err)
+	}
+
+	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
+	if err != nil {
+		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
+	}
+
+	return !legacy, nil
+}
+
+// IsClusterProfileAwareVersion reports whether a cluster version requires a
+// database-backed ClusterProfile.
+func IsClusterProfileAwareVersion(version string) (bool, error) {
+	return isClusterProfileAwareVersion(version)
+}
+
+func profileImage(componentName string, ref v1.ImageRef) (string, error) {
+	if ref.Image == "" || ref.Tag == "" {
+		return "", fmt.Errorf("cluster profile component %s requires image and tag", componentName)
+	}
+
+	return ref.Image + ":" + ref.Tag, nil
 }
 
 func isStaticNodeClusterFlowVersion(version string) (bool, error) {

@@ -15,6 +15,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
 	appsv1 "k8s.io/api/apps/v1"
@@ -200,6 +201,152 @@ func TestBuildMetricsResourcesWithNumericClusterMetadata(t *testing.T) {
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config")
 	assert.Assert(t, strings.Contains(vmagentConfig.Data["prometheus.yml"], "regex: \"123\""))
 	assert.Assert(t, strings.Contains(vmagentConfig.Data["prometheus.yml"], "replacement: \"456\""))
+}
+
+func TestMetricsManifestVariablesUseClusterProfileComponentImages(t *testing.T) {
+	metricsCmpt := NewMetricsComponentWithClusterProfileComponents(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"http://vm:8480/insert/0/prometheus/",
+		v1.KubernetesClusterConfig{},
+		nil,
+		nil,
+		v1.ClusterProfileComponents{
+			NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "release-node-exporter"},
+			NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "release-node-agent"},
+			VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "release-vmagent"},
+			KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "release-ksm"},
+		},
+	)
+
+	variables, err := metricsCmpt.buildManifestVariables()
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-image-prefix/prometheus/node-exporter:release-node-exporter", variables.NodeExporterImage)
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:release-node-agent", variables.NeutreeNodeAgentMetricsImage)
+	assert.Equal(t, "test-image-prefix/victoriametrics/vmagent:release-vmagent", variables.VMAgentImage)
+	assert.Equal(t, "test-image-prefix/kube-state-metrics/kube-state-metrics:release-ksm", variables.KubeStateMetricsImage)
+}
+
+func TestMetricsProfileComponentsRejectMissingRequiredImageTag(t *testing.T) {
+	metricsCmpt := NewMetricsComponentWithClusterProfileComponents(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"http://vm:8480/insert/0/prometheus/",
+		v1.KubernetesClusterConfig{},
+		nil,
+		nil,
+		v1.ClusterProfileComponents{
+			NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+			NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0"},
+			VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent"},
+			KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
+		},
+	)
+
+	_, err := metricsCmpt.GetMetricsResources(context.Background())
+
+	require.ErrorContains(t, err, "cluster profile component vmagent requires image and tag")
+}
+
+func TestBuildAcceleratorExporterUsesProfileImage(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "dcgm-exporter",
+				Image: "example.com/accelerator/dcgm-exporter:test",
+				Port:  19400,
+			},
+		}, nil).Once()
+
+	metricsCmpt := NewMetricsComponentWithClusterProfileComponents(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"http://vm:8480/insert/0/prometheus/",
+		v1.KubernetesClusterConfig{},
+		nil,
+		acceleratorMgr,
+		v1.ClusterProfileComponents{
+			NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+			NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0"},
+			VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
+			KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
+		},
+	)
+
+	exporter, ok := metricsCmpt.buildAcceleratorExporter(context.Background(), v1.AcceleratorTypeNVIDIAGPU.String())
+
+	assert.Assert(t, ok)
+	assert.Equal(t, "test-image-prefix/accelerator/dcgm-exporter:test", exporter.Image)
+	acceleratorMgr.AssertExpectations(t)
+}
+
+func TestMetricsPlansSupportedAcceleratorExporter(t *testing.T) {
+	acceleratorType := v1.AcceleratorTypeNVIDIAGPU.String()
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{acceleratorType}).Once()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, acceleratorType).
+		Return(&v1.AcceleratorProfile{
+			AcceleratorType: acceleratorType,
+			MetricsExporter: &v1.AcceleratorExporterProfile{
+				Name:  "dcgm-exporter",
+				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Port:  19400,
+				Runtime: &v1.AcceleratorExporterRuntimeProfile{
+					NodeSelector: map[string]string{"accelerator.example.com/nvidia": "true"},
+				},
+			},
+		}, nil).Once()
+
+	metricsCmpt := NewMetricsComponentWithClusterProfileComponents(
+		&v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.0",
+				Config:  &v1.ClusterConfig{AcceleratorType: &acceleratorType},
+			},
+		},
+		"test-namespace",
+		"test-image-prefix",
+		"test-image-pull-secret",
+		"http://vm:8480/insert/0/prometheus/",
+		v1.KubernetesClusterConfig{},
+		fake.NewClientBuilder().WithObjects(metricsTestNode("nvidia-node", map[string]string{
+			"accelerator.example.com/nvidia": "true",
+		})).Build(),
+		acceleratorMgr,
+		v1.ClusterProfileComponents{
+			NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+			NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0"},
+			VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
+			KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
+		},
+	)
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+	findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "custom-gpu-dcgm-exporter"))
+	}
+	acceleratorMgr.AssertExpectations(t)
 }
 
 func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {

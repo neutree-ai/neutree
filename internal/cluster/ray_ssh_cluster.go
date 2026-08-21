@@ -266,8 +266,9 @@ func (c *sshRayClusterReconciler) reconcileHeadNode(reconcileCtx *ReconcileConte
 
 	if alive {
 		// Head is fully healthy (dashboard reachable + raylet alive).
-		// Check version consistency to handle rollback scenarios
-		// where Head was upgraded but user rolled spec.Version back.
+		// The API rejects version downgrades, so a healthy head whose version
+		// differs from spec.version can only mean an interrupted upgrade left
+		// the head on a stale build. Rebuild to converge on the desired version.
 		if reconcileCtx.Cluster.Spec != nil && reconcileCtx.Cluster.Spec.Version != "" {
 			if headVersion != "" && headVersion != reconcileCtx.Cluster.Spec.Version {
 				klog.Infof("Head node version %s does not match spec version %s for cluster %s, rebuilding",

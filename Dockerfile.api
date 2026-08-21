@@ -23,8 +23,6 @@ RUN \
 # Build the fronted static files
 FROM fronted-base as fronted-builder
 
-ARG DEFAULT_CLUSTER_VERSION
-ENV VITE_DEFAULT_CLUSTER_VERSION=${DEFAULT_CLUSTER_VERSION}
 
 ENV NODE_ENV production
 
@@ -58,8 +56,6 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} \
 FROM --platform=linux/${ARCH} ubuntu:22.04
 ENV NODE_ENV production
 
-ARG DEFAULT_CLUSTER_VERSION
-ENV VITE_DEFAULT_CLUSTER_VERSION=${DEFAULT_CLUSTER_VERSION}
 
 # Copy requirements file and install dependencies
 COPY requirements.txt .
