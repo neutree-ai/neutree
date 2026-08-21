@@ -453,6 +453,44 @@ func (s *postgrestStorage) UpdateStaticNode(id string, data *v1.StaticNode) erro
 	return err
 }
 
+func (s *postgrestStorage) ListClusterProfile(option ListOption) ([]v1.ClusterProfile, error) {
+	var response []v1.ClusterProfile
+	err := s.genericList(CLUSTER_PROFILE_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateClusterProfile(data *v1.ClusterProfile) error {
+	_, _, err := s.postgrestClient.From(CLUSTER_PROFILE_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateClusterProfile(id string, data *v1.ClusterProfile) error {
+	_, _, err := s.postgrestClient.From(CLUSTER_PROFILE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
+	var response []v1.ReleaseInfo
+	err := s.genericList(RELEASE_INFO_TABLE, &response, ListOption{})
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateReleaseInfo(data *v1.ReleaseInfo) error {
+	_, _, err := s.postgrestClient.From(RELEASE_INFO_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateReleaseInfo(id string, data *v1.ReleaseInfo) error {
+	_, _, err := s.postgrestClient.From(RELEASE_INFO_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
 func (s *postgrestStorage) DeleteStaticNode(id string) error {
 	_, _, err := s.postgrestClient.From(STATIC_NODE_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
 

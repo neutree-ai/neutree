@@ -9,6 +9,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	appsv1 "k8s.io/api/apps/v1"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
@@ -335,12 +337,13 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 	Describe("K8s Cluster Upgrade with Endpoint Compatibility", Ordered, Label("k8s", "endpoint-compat"), func() {
 		var (
-			clusterName string
-			epName      string
-			kubeconfig  string
-			oldVersion  string
-			k8sH        *K8sHelper
-			namespace   string
+			clusterName               string
+			epName                    string
+			kubeconfig                string
+			oldVersion                string
+			k8sH                      *K8sHelper
+			namespace                 string
+			runtimeImageBeforeUpgrade string
 		)
 
 		BeforeAll(func() {
@@ -391,6 +394,12 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 			ep := getEndpoint(epName)
 			Expect(ep.Status.Phase).To(BeEquivalentTo("Running"))
+
+			d, err := k8sH.GetDeployment(context.Background(), namespace, epName)
+			Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", epName)
+			runtimeImageBeforeUpgrade = modelDownloaderImage(d)
+			Expect(runtimeImageBeforeUpgrade).NotTo(BeEmpty(),
+				"initial endpoint deployment should contain model-downloader image")
 		})
 
 		It("should upgrade cluster without triggering endpoint deployment rollout", func() {
@@ -443,7 +452,7 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 			}
 		})
 
-		It("should update deployment image after endpoint config change", func() {
+		It("should update deployment and retain runtime image after endpoint config change", func() {
 			ctx := context.Background()
 
 			deploys, err := k8sH.ListDeployments(ctx, namespace, "app=inference")
@@ -483,8 +492,15 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 			waitEndpointRunning(epName)
 
-			By("Verifying model-downloader initContainer image matches cluster version")
-			newVersion := profileClusterVersion()
+			By("Verifying model-downloader keeps its profile-owned runtime image")
+			expectedRuntimeImage := runtimeImageBeforeUpgrade
+			if expectedRuntimeImage == "" {
+				d, err := k8sH.GetDeployment(ctx, namespace, epName)
+				Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", epName)
+				expectedRuntimeImage = modelDownloaderImage(d)
+			}
+			Expect(expectedRuntimeImage).NotTo(BeEmpty(),
+				"endpoint deployment should contain model-downloader image")
 
 			deploys, err = k8sH.ListDeployments(ctx, namespace, "app=inference")
 			Expect(err).NotTo(HaveOccurred())
@@ -496,9 +512,8 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 
 				for _, ic := range d.Spec.Template.Spec.InitContainers {
 					if ic.Name == "model-downloader" {
-						Expect(ic.Image).To(ContainSubstring(newVersion),
-							"model-downloader image should contain cluster version %s, got %s",
-							newVersion, ic.Image)
+						Expect(ic.Image).To(Equal(expectedRuntimeImage),
+							"model-downloader image should retain the profile-owned runtime image")
 
 						return
 					}
@@ -509,3 +524,17 @@ var _ = Describe("Cluster Upgrade", Ordered, Label("cluster", "upgrade"), func()
 		})
 	})
 })
+
+func modelDownloaderImage(deployment *appsv1.Deployment) string {
+	if deployment == nil {
+		return ""
+	}
+
+	for _, container := range deployment.Spec.Template.Spec.InitContainers {
+		if container.Name == "model-downloader" {
+			return container.Image
+		}
+	}
+
+	return ""
+}

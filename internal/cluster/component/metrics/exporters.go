@@ -89,8 +89,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 		return nil, nil
 	}
 
-	acceleratorTypes := append([]string{}, m.acceleratorMgr.SupportPlugins()...)
-	sort.Strings(acceleratorTypes)
+	acceleratorTypes := m.acceleratorTypes()
 
 	candidates := make([]metricsAcceleratorExporter, 0, len(acceleratorTypes))
 
@@ -102,6 +101,13 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	}
 
 	return m.selectClusterAcceleratorExporter(ctx, candidates)
+}
+
+func (m *MetricsComponent) acceleratorTypes() []string {
+	acceleratorTypes := append([]string{}, m.acceleratorMgr.SupportPlugins()...)
+	sort.Strings(acceleratorTypes)
+
+	return acceleratorTypes
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
@@ -127,6 +133,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
+
 	if strings.TrimSpace(exporterProfile.Image) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {

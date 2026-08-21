@@ -10,6 +10,8 @@ ARCH="${ARCH:-amd64}"
 OUTPUT_DIR="./dist"
 MIRROR_REGISTRY=""
 TEMP_DIR=$(mktemp -d)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,7 +36,7 @@ Usage: $0 [OPTIONS]
 
 Options:
     --type <TYPE>              Package type: controlplane, cluster
-    --version <VERSION>        Version tag (default: latest)
+    --version <VERSION>        Version tag (default: latest; required for cluster packages)
     --arch <ARCH>              Architecture: amd64, arm64 (default: amd64)
     --cluster-type <TYPE>      Cluster type: k8s or ssh (required if type=cluster)
     --accelerator <ACCEL>      Accelerator type: nvidia_gpu, amd_gpu (for k8s/ssh cluster; appends <ACCEL>-images.txt)
@@ -133,6 +135,11 @@ case "$PACKAGE_TYPE" in
             usage
         fi
 
+        if [[ "$VERSION" == "latest" ]]; then
+            log_error "Cluster packages require an explicit supported --version"
+            exit 1
+        fi
+
         case "$CLUSTER_TYPE" in
             k8s)
                 PACKAGE_NAME="neutree-cluster-k8s"
@@ -221,6 +228,22 @@ for list_file in "${IMAGE_LIST_FILES[@]}"; do
         fi
     done < "$list_file"
 done
+
+PROFILE_MANIFEST=""
+if [[ "$PACKAGE_TYPE" == "cluster" ]]; then
+    PROFILE_MANIFEST="${TEMP_DIR}/cluster-profile.yaml"
+    log_info "Generating cluster profile from release profile catalog"
+    go run "${PROJECT_ROOT}/cmd/neutree-release-profile" \
+        --version "$VERSION" \
+        --cluster-type "$CLUSTER_TYPE" \
+        --accelerator "$ACCELERATOR" \
+        --format images >> "$MERGED_IMAGE_LIST"
+    go run "${PROJECT_ROOT}/cmd/neutree-release-profile" \
+        --version "$VERSION" \
+        --cluster-type "$CLUSTER_TYPE" \
+        --accelerator "$ACCELERATOR" \
+        --format yaml > "$PROFILE_MANIFEST"
+fi
 
 
 # Deduplicate
@@ -312,6 +335,10 @@ for image in "${IMAGES_TO_PULL[@]}"; do
     digest: "${digest}"
 EOF
 done
+
+if [[ -n "$PROFILE_MANIFEST" ]]; then
+    cat "$PROFILE_MANIFEST" >> "${PACKAGE_DIR}/manifest.yaml"
+fi
 
 log_info "Manifest generated successfully"
 

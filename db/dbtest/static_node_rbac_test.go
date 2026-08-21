@@ -17,7 +17,13 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 			'v1',
 			'StaticNodeCluster',
 				ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+				ROW(
+					'v1.0.2'::text,
+					'registry.example.com/neutree'::text,
+					NULL::jsonb,
+					jsonb_build_array(),
+					NULL::jsonb
+				)::api.static_node_cluster_spec,
 			ROW('Ready', 0, 0, FALSE, FALSE, 'v1.0.2', NULL, NULL)::api.static_node_cluster_status
 		)
 	`, clusterName, workspace)
@@ -37,6 +43,37 @@ func createStaticNodeResources(t *testing.T, tx *sql.Tx, workspace, clusterName 
 	`, "10.0.0.10", workspace, clusterName)
 	if err != nil {
 		t.Fatalf("failed to create static node: %v", err)
+	}
+}
+
+func TestStaticNodeClusterSpecOmitsReleaseComponents(t *testing.T) {
+	adminDB := GetTestDB(t)
+	ctx := context.Background()
+
+	tx, err := adminDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("failed to begin transaction: %v", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var componentsExist bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_attribute
+			WHERE attrelid = 'api.static_node_cluster_spec'::regclass
+				AND attname = 'components'
+				AND attnum > 0
+				AND NOT attisdropped
+		)
+	`).Scan(&componentsExist)
+	if err != nil {
+		t.Fatalf("check static node release components schema: %v", err)
+	}
+	if componentsExist {
+		t.Fatal("static node cluster spec must not persist release components")
 	}
 }
 
@@ -192,7 +229,13 @@ func TestStaticNodeRBAC_DirectUserWritesAreBlocked(t *testing.T) {
 					'v1',
 					'StaticNodeCluster',
 						ROW('blocked-static', NULL, 'default', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-						ROW('v1.0.2', NULL, NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+						ROW(
+							'v1.0.2'::text,
+							NULL::text,
+							NULL::jsonb,
+							jsonb_build_array(),
+							NULL::jsonb
+						)::api.static_node_cluster_spec,
 					ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 				)
 			`,
@@ -338,7 +381,13 @@ func TestStaticNodeRBAC_ServiceRoleCanManageInternalResources(t *testing.T) {
 			'v1',
 			'StaticNodeCluster',
 			ROW($1, NULL, $2, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.0.2', 'registry.example.com/neutree', NULL, jsonb_build_array(), NULL)::api.static_node_cluster_spec,
+			ROW(
+				'v1.0.2'::text,
+				'registry.example.com/neutree'::text,
+				NULL::jsonb,
+				jsonb_build_array(),
+				NULL::jsonb
+			)::api.static_node_cluster_spec,
 			ROW('Provisioning', 0, 0, FALSE, FALSE, NULL, NULL, NULL)::api.static_node_cluster_status
 		)
 	`, insertedCluster, workspace); err != nil {

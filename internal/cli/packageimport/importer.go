@@ -18,11 +18,16 @@ import (
 
 // Importer handles importing packages
 type Importer struct {
-	apiClient *client.Client
-	extractor *Extractor
-	parser    *Parser
-	validator *Validator
+	apiClient        *client.Client
+	apiClientFactory APIClientFactory
+	extractor        *Extractor
+	parser           *Parser
+	validator        *Validator
 }
+
+// APIClientFactory builds an API client only when a package needs to register
+// a ClusterProfile with the control plane.
+type APIClientFactory func() (*client.Client, error)
 
 // NewImporter creates a new Importer
 func NewImporter(apiClient *client.Client) *Importer {
@@ -31,6 +36,17 @@ func NewImporter(apiClient *client.Client) *Importer {
 		extractor: NewExtractor(),
 		parser:    NewParser(),
 		validator: NewValidator(),
+	}
+}
+
+// NewImporterWithAPIClientFactory creates an Importer that defers control-plane
+// client construction until a manifest includes a ClusterProfile.
+func NewImporterWithAPIClientFactory(apiClientFactory APIClientFactory) *Importer {
+	return &Importer{
+		apiClientFactory: apiClientFactory,
+		extractor:        NewExtractor(),
+		parser:           NewParser(),
+		validator:        NewValidator(),
 	}
 }
 
@@ -71,7 +87,7 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 	// If skip image load, just register engine metadata
 	if opts.SkipImageLoad {
 		klog.Info("Skipping image handling as per configuration")
-		return i.registerEngines(ctx, opts, manifest, result)
+		return i.registerManifest(ctx, opts, manifest, result)
 	}
 
 	// If package_url is present, stream-extract and push images
@@ -118,13 +134,13 @@ func (i *Importer) importFromManifest(ctx context.Context, opts *ImportOptions, 
 
 		result.ImagesImported = pushedImages
 
-		return i.registerEngines(ctx, opts, manifest, result)
+		return i.registerManifest(ctx, opts, manifest, result)
 	}
 
 	// No package_url and not skipping images — register metadata only
 	klog.Info("No package URL specified, registering engine metadata only (no images to process)")
 
-	return i.registerEngines(ctx, opts, manifest, result)
+	return i.registerManifest(ctx, opts, manifest, result)
 }
 
 // importFromArchive handles the traditional tar.gz archive import flow.
@@ -173,7 +189,51 @@ func (i *Importer) importFromArchive(ctx context.Context, opts *ImportOptions, r
 
 	result.ImagesImported = pushedImages
 
-	return i.registerEngines(ctx, opts, manifest, result)
+	return i.registerManifest(ctx, opts, manifest, result)
+}
+
+func (i *Importer) registerManifest(ctx context.Context, opts *ImportOptions, manifest *PackageManifest, result *ImportResult) (*ImportResult, error) {
+	result, err := i.registerEngines(ctx, opts, manifest, result)
+	if err != nil {
+		return result, err
+	}
+
+	if manifest.ClusterProfile == nil {
+		return result, nil
+	}
+
+	apiClient, err := i.clusterProfileAPIClient()
+	if err != nil {
+		return result, err
+	}
+
+	profile := manifest.ClusterProfile.ToAPIClusterProfile()
+	if _, err := apiClient.Clusters.UpsertClusterProfile(profile); err != nil {
+		return result, errors.Wrap(err, "failed to register cluster profile")
+	}
+
+	return result, nil
+}
+
+func (i *Importer) clusterProfileAPIClient() (*client.Client, error) {
+	if i.apiClient != nil {
+		return i.apiClient, nil
+	}
+
+	if i.apiClientFactory == nil {
+		return nil, errors.New("API client is required to register cluster profile")
+	}
+
+	apiClient, err := i.apiClientFactory()
+	if err != nil {
+		return nil, errors.Wrap(err, "create API client for cluster profile")
+	}
+
+	if apiClient == nil {
+		return nil, errors.New("API client is required to register cluster profile")
+	}
+
+	return apiClient, nil
 }
 
 // registerEngines registers engine metadata from manifest.

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -579,7 +580,27 @@ type MetricsManifestVariables struct {
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
-func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
+func (m *MetricsComponent) buildManifestVariables() (MetricsManifestVariables, error) {
+	vmagentImage, err := m.componentImage("vmagent", m.profileComponents.VMAgent, defaultVMAgentImage)
+	if err != nil {
+		return MetricsManifestVariables{}, err
+	}
+
+	nodeExporterImage, err := m.componentImage("node_exporter", m.profileComponents.NodeExporter, defaultNodeExporterImage)
+	if err != nil {
+		return MetricsManifestVariables{}, err
+	}
+
+	nodeAgentImage, err := m.componentImage("node_agent", m.profileComponents.NodeAgent, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent)
+	if err != nil {
+		return MetricsManifestVariables{}, err
+	}
+
+	kubeStateMetricsImage, err := m.componentImage("kube_state_metrics", m.profileComponents.KubeStateMetrics, defaultKubeStateMetricsImage)
+	if err != nil {
+		return MetricsManifestVariables{}, err
+	}
+
 	// Default values for metrics component
 	version := componentversion.VictoriaMetrics
 	replicas := 1
@@ -602,14 +623,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		Namespace:                        m.namespace,
 		ImagePullSecret:                  m.imagePullSecret,
 		Version:                          version,
-		VMAgentImage:                     util.RewriteImageRef(m.imagePrefix, defaultVMAgentImage),
+		VMAgentImage:                     vmagentImage,
 		NodeExporterName:                 nodeExporterDaemonSetName,
-		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
+		NodeExporterImage:                nodeExporterImage,
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
+		NeutreeNodeAgentMetricsImage:     nodeAgentImage,
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
+		KubeStateMetricsImage:            kubeStateMetricsImage,
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),
@@ -620,7 +641,21 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		HashSuffix:                       util.HashString(m.cluster.Key()),
 		InferenceDefaultPort:             v1.DefaultMetricsExportPort,
 		InferenceScrapeRules:             m.inferenceScrapeRules,
+	}, nil
+}
+
+func (m *MetricsComponent) componentImage(componentName string, component v1.ImageRef, legacyImage string) (string, error) {
+	if m.profileSelected {
+		if strings.TrimSpace(component.Image) == "" || strings.TrimSpace(component.Tag) == "" {
+			return "", fmt.Errorf("cluster profile component %s requires image and tag", componentName)
+		}
+
+		return util.RewriteImageRef(m.imagePrefix, component.Image+":"+component.Tag), nil
 	}
+
+	image := legacyImage
+
+	return util.RewriteImageRef(m.imagePrefix, image), nil
 }
 
 func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {

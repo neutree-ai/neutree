@@ -168,6 +168,8 @@ func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
 	staticNodeClusterSpecType := reflect.TypeOf(StaticNodeClusterSpec{})
 	_, hasHead := staticNodeClusterSpecType.FieldByName("Head")
 	assert.False(t, hasHead, "StaticNodeCluster head must be derived from spec.nodes[].role=head")
+	_, hasComponents := staticNodeClusterSpecType.FieldByName("Components")
+	assert.False(t, hasComponents, "StaticNodeCluster spec must not persist resolved component images")
 
 	staticNodeClusterStatusType := reflect.TypeOf(StaticNodeClusterStatus{})
 	_, hasNestedUpgrade := staticNodeClusterStatusType.FieldByName("Upgrade")

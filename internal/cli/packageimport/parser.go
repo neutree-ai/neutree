@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 )
 
 const (
@@ -108,14 +112,18 @@ func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
 		return nil, errors.New("manifest_version is required")
 	}
 
-	if len(manifest.Engines) == 0 {
-		return nil, errors.New("at least one engine entry is required in manifest")
+	if len(manifest.Engines) == 0 && manifest.ClusterProfile == nil {
+		return nil, errors.New("at least one engine entry is required when cluster_profile is not set")
 	}
 
 	for idx := range manifest.Engines {
 		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
 			return nil, errors.Wrap(err, "invalid engine configuration in manifest")
 		}
+	}
+
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return nil, errors.Wrap(err, "invalid cluster profile in manifest")
 	}
 
 	return manifest, nil
@@ -152,7 +160,65 @@ func (p *Parser) validateManifest(manifest *PackageManifest, extractedPath strin
 		}
 	}
 
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return errors.Wrap(err, "invalid cluster profile in manifest")
+	}
+
 	return nil
+}
+
+func (p *Parser) validateClusterProfile(profile *ClusterProfile) error {
+	if profile == nil {
+		return nil
+	}
+
+	if _, err := releaseinfo.NormalizeClusterMinor(profile.Version); err != nil {
+		return err
+	}
+
+	if !v1.IsSupportedClusterType(profile.ClusterType) {
+		return errors.Errorf("cluster_profile.cluster_type must be %q or %q", v1.SSHClusterType, v1.KubernetesClusterType)
+	}
+
+	for _, component := range requiredClusterProfileComponents(profile.ClusterType, profile.Components) {
+		if strings.TrimSpace(component.ref.Image) == "" {
+			return errors.Errorf("cluster_profile.components.%s.image is required", component.name)
+		}
+
+		if strings.TrimSpace(component.ref.Tag) == "" {
+			return errors.Errorf("cluster_profile.components.%s.tag is required", component.name)
+		}
+	}
+
+	return nil
+}
+
+type clusterProfileComponent struct {
+	name string
+	ref  ClusterImageRef
+}
+
+func requiredClusterProfileComponents(clusterType string, components ClusterProfileComponents) []clusterProfileComponent {
+	switch clusterType {
+	case v1.SSHClusterType:
+		return []clusterProfileComponent{
+			{name: "ray_runtime", ref: components.RayRuntime},
+			{name: "node_agent", ref: components.NodeAgent},
+			{name: "node_exporter", ref: components.NodeExporter},
+			{name: "vmagent", ref: components.VMAgent},
+		}
+	case v1.KubernetesClusterType:
+		return []clusterProfileComponent{
+			{name: "kubernetes_runtime", ref: components.KubernetesRuntime},
+			{name: "router", ref: components.Router},
+			{name: "node_agent", ref: components.NodeAgent},
+			{name: "node_exporter", ref: components.NodeExporter},
+			{name: "vmagent", ref: components.VMAgent},
+			{name: "kube_state_metrics", ref: components.KubeStateMetrics},
+		}
+	default:
+		return nil
+	}
 }
 
 func (p *Parser) validateEngineConfig(engine *EngineMetadata) error {

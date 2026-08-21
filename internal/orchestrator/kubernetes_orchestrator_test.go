@@ -16,7 +16,9 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -887,6 +889,59 @@ func TestBuildVllmDeployment(t *testing.T) {
 	}
 
 	// Additional checks can be added here to validate the structure of the generated object
+}
+
+func TestKubernetesTemplatesUseResolvedRuntimeImage(t *testing.T) {
+	const runtimeImage = "registry.example.com/neutree/neutree/neutree-runtime:v1.1.1"
+
+	data := DeploymentManifestVariables{
+		NeutreeVersion:      "v1.2.0",
+		NeutreeRuntimeImage: runtimeImage,
+		ClusterName:         "test-cluster",
+		Workspace:           "test-workspace",
+		Namespace:           "default",
+		ImagePrefix:         "registry.example.com/neutree",
+		ImageRepo:           "neutree/vllm",
+		ImageTag:            "v0.24.0",
+		ImagePullSecret:     "my-secret",
+		EndpointName:        "test-endpoint",
+		ModelArgs: map[string]interface{}{
+			"name":          "model",
+			"version":       "v1",
+			"task":          "text-generation",
+			"path":          "/mnt/models/model",
+			"file":          "model.gguf",
+			"registry_type": "bentoml",
+			"registry_path": "/mnt/registry/model",
+			"serve_name":    "model",
+		},
+		Resources:    map[string]string{"cpu": "500m", "memory": "1Gi"},
+		RoutingLogic: "roundrobin",
+		Replicas:     1,
+	}
+
+	for _, template := range []struct {
+		engineKey  string
+		engineName string
+	}{
+		{engineKey: "vllm-v0.17.1", engineName: "vllm"},
+		{engineKey: "vllm-v0.24.0", engineName: "vllm"},
+		{engineKey: "sglang-v0.5.10", engineName: "sglang"},
+		{engineKey: "llama-cpp-v0.3.7", engineName: "llama-cpp"},
+	} {
+		t.Run(template.engineKey, func(t *testing.T) {
+			data.EngineName = template.engineName
+			objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, template.engineKey), data)
+			require.NoError(t, err)
+			require.Len(t, objs.Items, 1)
+
+			var deployment appsv1.Deployment
+			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, &deployment))
+			require.Len(t, deployment.Spec.Template.Spec.InitContainers, 1)
+			assert.Equal(t, modelDownloaderInitContainerName, deployment.Spec.Template.Spec.InitContainers[0].Name)
+			assert.Equal(t, runtimeImage, deployment.Spec.Template.Spec.InitContainers[0].Image)
+		})
+	}
 }
 
 func TestBuildVllmDeploymentRendersStartupTimeout(t *testing.T) {
@@ -3140,6 +3195,62 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
+	t.Run("legacy cluster uses version-derived runtime image", func(t *testing.T) {
+		k := &kubernetesOrchestrator{}
+		data := DeploymentManifestVariables{ImagePrefix: "registry.example.com/neutree"}
+
+		err := k.setNeutreeRuntimeImage(&data, &v1.Cluster{
+			Spec: &v1.ClusterSpec{Version: "v1.0.1", Type: v1.KubernetesClusterType},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, "registry.example.com/neutree/neutree/neutree-runtime:v1.0.1", data.NeutreeRuntimeImage)
+	})
+
+	t.Run("profile-aware cluster uses Kubernetes profile material", func(t *testing.T) {
+		store := storagemocks.NewMockStorage(t)
+		store.EXPECT().ListClusterProfile(mock.Anything).Return([]v1.ClusterProfile{
+			{
+				Metadata: &v1.Metadata{Name: "v1.2.0"},
+				Spec: &v1.ClusterProfileSpec{
+					ClusterType: v1.KubernetesClusterType,
+					Components: v1.ClusterProfileComponents{
+						KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"},
+					},
+				},
+			},
+		}, nil).Once()
+		k := &kubernetesOrchestrator{storage: store}
+		data := DeploymentManifestVariables{ImagePrefix: "registry.example.com/neutree"}
+
+		err := k.setNeutreeRuntimeImage(&data, &v1.Cluster{
+			Spec: &v1.ClusterSpec{Version: "v1.2.0", Type: v1.KubernetesClusterType},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, "registry.example.com/neutree/neutree/neutree-runtime:v1.1.1", data.NeutreeRuntimeImage)
+	})
+
+	t.Run("profile-aware cluster rejects missing Kubernetes profile", func(t *testing.T) {
+		store := storagemocks.NewMockStorage(t)
+		store.EXPECT().ListClusterProfile(mock.Anything).Return([]v1.ClusterProfile{
+			{
+				Metadata: &v1.Metadata{Name: "v1.2.0"},
+				Spec:     &v1.ClusterProfileSpec{ClusterType: v1.SSHClusterType},
+			},
+		}, nil).Once()
+		k := &kubernetesOrchestrator{storage: store}
+		data := DeploymentManifestVariables{ImagePrefix: "registry.example.com/neutree"}
+
+		err := k.setNeutreeRuntimeImage(&data, &v1.Cluster{
+			Spec: &v1.ClusterSpec{Version: "v1.2.0", Type: v1.KubernetesClusterType},
+		})
+
+		require.ErrorContains(t, err, "cluster profile v1.2.0/kubernetes not found")
+	})
 }
 
 func TestGenerateModelCacheConfig(t *testing.T) {

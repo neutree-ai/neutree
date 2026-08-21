@@ -1,6 +1,9 @@
 package router
 
 import (
+	"fmt"
+	"strings"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -152,7 +155,6 @@ type RouteManifestVariables struct {
 	Namespace       string
 	ImagePullSecret string
 	Version         string // Cluster version (spec.version), used for version labels
-	RouterVersion   string // Router image version (config.Router.Version or spec.version), used for image tag
 	RouterImage     string
 	Replicas        int
 	Resources       map[string]string
@@ -160,12 +162,16 @@ type RouteManifestVariables struct {
 }
 
 // buildManifestVariables creates the data structure for rendering manifests
-func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
+func (r *RouterComponent) buildManifestVariables() (RouteManifestVariables, error) {
 	version := r.cluster.Spec.Version
+	routerImage := r.routerImage
 
-	routerVersion := version
-	if r.config.Router.Version != "" {
-		routerVersion = r.config.Router.Version
+	if r.profileSelected && strings.TrimSpace(routerImage) == "" {
+		return RouteManifestVariables{}, fmt.Errorf("cluster profile component router requires image and tag")
+	}
+
+	if !r.profileSelected && routerImage == "" {
+		routerImage = "neutree/router:" + version
 	}
 
 	accessMode := v1.KubernetesAccessModeLoadBalancer
@@ -199,10 +205,9 @@ func (r *RouterComponent) buildManifestVariables() RouteManifestVariables {
 		Namespace:       r.namespace,
 		ImagePullSecret: r.imagePullSecret,
 		Version:         version,
-		RouterVersion:   routerVersion,
-		RouterImage:     util.RewriteImageRef(r.imagePrefix, "neutree/router:"+routerVersion),
+		RouterImage:     util.RewriteImageRef(r.imagePrefix, routerImage),
 		Replicas:        replicas,
 		Resources:       resources,
 		AccessMode:      string(accessMode),
-	}
+	}, nil
 }

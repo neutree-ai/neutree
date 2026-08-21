@@ -8,11 +8,17 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 type Planner struct {
-	AcceleratorProfileProvider AcceleratorProfileProvider
-	MetricsRemoteWriteURL      string
+	ClusterProfileComponentsResolver ClusterProfileComponentsResolver
+	AcceleratorProfileProvider       AcceleratorProfileProvider
+	MetricsRemoteWriteURL            string
+}
+
+type ClusterProfileComponentsResolver interface {
+	ComponentsFor(clusterVersion, clusterType string) (v1.ClusterProfileComponents, error)
 }
 
 type AcceleratorProfileProvider interface {
@@ -65,6 +71,11 @@ func (r *Planner) buildDesiredNodePlans(
 
 	if len(cluster.Spec.Nodes) == 0 {
 		return nil, errors.New("static node cluster spec.nodes is required")
+	}
+
+	profileComponents, profileSelected, err := r.profileComponents(cluster.Spec.Version)
+	if err != nil {
+		return nil, err
 	}
 
 	nodeNames := make(map[string]struct{}, len(cluster.Spec.Nodes))
@@ -121,7 +132,11 @@ func (r *Planner) buildDesiredNodePlans(
 			return nil, err
 		}
 
-		components := buildNodeComponents(cluster, desiredNode, profile, r.MetricsRemoteWriteURL)
+		components, err := buildNodeComponents(cluster, desiredNode, profileComponents, profileSelected, profile, r.MetricsRemoteWriteURL)
+		if err != nil {
+			return nil, err
+		}
+
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
@@ -164,4 +179,40 @@ func (r *Planner) buildDesiredNodePlans(
 	}
 
 	return plans, nil
+}
+
+func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, bool, error) {
+	profileAware, err := isClusterProfileAwareVersion(version)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, false, err
+	}
+
+	if !profileAware {
+		return v1.ClusterProfileComponents{}, false, nil
+	}
+
+	if r == nil || r.ClusterProfileComponentsResolver == nil {
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("cluster profile component resolver is required for static node cluster version %s", version)
+	}
+
+	components, err := r.ClusterProfileComponentsResolver.ComponentsFor(version, v1.SSHClusterType)
+	if err != nil {
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("resolve cluster profile components: %w", err)
+	}
+
+	return components, true, nil
+}
+
+func isClusterProfileAwareVersion(version string) (bool, error) {
+	baseVersion, err := semver.BaseVersion(version)
+	if err != nil {
+		return false, fmt.Errorf("parse static node cluster version %q: %w", version, err)
+	}
+
+	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
+	if err != nil {
+		return false, fmt.Errorf("invalid static node cluster version %q: %w", version, err)
+	}
+
+	return !legacy, nil
 }

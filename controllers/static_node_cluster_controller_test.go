@@ -33,7 +33,8 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 		Return(nil).
 		Maybe()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -51,7 +52,8 @@ func TestStaticNodeClusterControllerReconcile(t *testing.T) {
 
 func TestStaticNodeClusterControllerReconcileRejectsWrongType(t *testing.T) {
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: newMockStaticNodeClusterStorage(t, nil),
+		Storage:                          newMockStaticNodeClusterStorage(t, nil),
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -67,6 +69,15 @@ func TestNewStaticNodeClusterControllerRequiresStorage(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, controller)
 	assert.Contains(t, err.Error(), "storage is required")
+}
+
+func TestNewStaticNodeClusterControllerRequiresClusterProfileResolver(t *testing.T) {
+	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
+		Storage: newMockStaticNodeClusterStorage(t, nil),
+	})
+
+	require.ErrorContains(t, err, "cluster profile component resolver is required")
+	assert.Nil(t, controller)
 }
 
 func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing.T) {
@@ -93,7 +104,8 @@ func TestStaticNodeClusterControllerReconcileRecordsNodeOwnerConflict(t *testing
 		Return(nil).
 		Maybe()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -145,7 +157,8 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 		Return(nil).
 		Maybe()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -180,7 +193,8 @@ func TestStaticNodeClusterControllerReconcileRequiresRayVerificationBeforeReady(
 	mockDashboard := mockStaticNodeClusterDashboard(t)
 	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -217,7 +231,8 @@ func TestStaticNodeClusterControllerReconcileDoesNotUpdateStaticNodeStatusOnUpse
 		Maybe()
 	mockStorage.On("UpdateStaticNodeCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -251,7 +266,8 @@ func TestStaticNodeClusterControllerReconcileFailsReadyClusterWhenRayVerificatio
 	mockDashboard := mockStaticNodeClusterDashboard(t)
 	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -289,7 +305,8 @@ func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testin
 		Maybe()
 	mockStorage.On("UpdateStaticNodeCluster", mock.Anything, mock.Anything).Return(nil).Maybe()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
+		Storage:                          mockStorage,
+		ClusterProfileComponentsResolver: controllerTestClusterProfileResolver{},
 	})
 	require.NoError(t, err)
 
@@ -421,4 +438,17 @@ func controllerStaticClusterNodeIP(name string) string {
 	}
 
 	return "10.0.0.10"
+}
+
+type controllerTestClusterProfileResolver struct{}
+
+func (controllerTestClusterProfileResolver) ComponentsFor(version, _ string) (v1.ClusterProfileComponents, error) {
+	return v1.ClusterProfileComponents{
+		RayRuntime:       v1.ImageRef{Image: "neutree/neutree-serve", Tag: version},
+		Router:           v1.ImageRef{Image: "neutree/router", Tag: version},
+		NodeAgent:        v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.1.0-rc.1"},
+		NodeExporter:     v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+		VMAgent:          v1.ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"},
+		KubeStateMetrics: v1.ImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"},
+	}, nil
 }

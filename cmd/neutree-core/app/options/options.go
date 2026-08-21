@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/version"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -24,7 +25,6 @@ type NeutreeCoreOptions struct {
 	Controller    *ControllerOptions
 	Server        *ServerOptions
 	Observability *ObservabilityOptions
-	Cluster       *ClusterOptions
 	Auth          *AuthOptions
 	ModelRegistry *ModelRegistryOptions
 }
@@ -36,7 +36,6 @@ func NewOptions() *NeutreeCoreOptions {
 		Controller:    NewControllerOptions(),
 		Server:        NewServerOptions(),
 		Observability: NewObservabilityOptions(),
-		Cluster:       NewClusterOptions(),
 		Auth:          NewAuthOptions(),
 		ModelRegistry: NewModelRegistryOptions(),
 	}
@@ -48,7 +47,6 @@ func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Controller.AddFlags(fs)
 	o.Server.AddFlags(fs)
 	o.Observability.AddFlags(fs)
-	o.Cluster.AddFlags(fs)
 	o.Auth.AddFlags(fs)
 	o.ModelRegistry.AddFlags(fs)
 }
@@ -63,7 +61,8 @@ func (o *NeutreeCoreOptions) Validate() error {
 
 func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, error) {
 	c := &config.CoreConfig{
-		Scheme: scheme,
+		Scheme:  scheme,
+		Version: version.Get().AppVersion,
 	}
 
 	gin.SetMode(o.Server.GinMode)
@@ -164,7 +163,6 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		Workers: o.Controller.Workers,
 	}
 	c.ClusterControllerConfig = &config.ClusterControllerConfig{
-		DefaultClusterVersion: o.Cluster.DefaultClusterVersion,
 		MetricsRemoteWriteURL: o.Observability.MetricsRemoteWriteURL,
 	}
 	c.ServerConfig = &config.ServerConfig{
