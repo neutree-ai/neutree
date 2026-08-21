@@ -33,9 +33,12 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reconciler, err := NewReconcile(&v1.Cluster{
+			resolver := clusterProfileComponentResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
+				return v1.ClusterProfileComponents{RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: version}}, nil
+			})
+			reconciler, err := NewReconcileWithClusterProfile(&v1.Cluster{
 				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: tt.version},
-			}, nil, nil, "")
+			}, nil, nil, "", resolver)
 
 			require.NoError(t, err)
 			_, isStatic := reconciler.(*staticRayReconciler)
@@ -49,7 +52,7 @@ func TestNewReconcileRequiresClusterProfileResolverForProfileAwareCluster(t *tes
 		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.1.0"},
 	}, nil, nil, "")
 
-	require.ErrorContains(t, err, "cluster profile component resolver is required")
+	require.ErrorContains(t, err, "exact cluster profile component resolver is required")
 	assert.Nil(t, reconciler)
 }
 

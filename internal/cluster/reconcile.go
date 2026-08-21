@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -91,6 +92,8 @@ func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 			executor:           &command.OSExecutor{},
 			acceleratorManager: acceleratorManager,
 			storage:            s,
+			profileComponents:  components,
+			profileSelected:    true,
 		}
 
 		useStaticFlow, err := isStaticNodeClusterFlowVersion(cluster.GetVersion())
@@ -123,17 +126,12 @@ func resolveClusterProfileComponents(
 		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster spec is required")
 	}
 
-	profileAware, err := isClusterProfileAwareVersion(cluster.Spec.Version)
-	if err != nil {
-		return v1.ClusterProfileComponents{}, err
-	}
-
-	if !profileAware {
-		return v1.ClusterProfileComponents{}, nil
+	if _, err := releaseinfo.NormalizeClusterMinor(cluster.Spec.Version); err != nil {
+		return v1.ClusterProfileComponents{}, fmt.Errorf("invalid cluster version %q: %w", cluster.Spec.Version, err)
 	}
 
 	if resolver == nil {
-		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster profile component resolver is required for cluster version %s", cluster.Spec.Version)
+		return v1.ClusterProfileComponents{}, fmt.Errorf("exact cluster profile component resolver is required for cluster version %s", cluster.Spec.Version)
 	}
 
 	components, err := resolver.ComponentsFor(cluster.Spec.Version, cluster.Spec.Type)
@@ -142,26 +140,6 @@ func resolveClusterProfileComponents(
 	}
 
 	return components, nil
-}
-
-func isClusterProfileAwareVersion(version string) (bool, error) {
-	baseVersion, err := semver.BaseVersion(version)
-	if err != nil {
-		return false, fmt.Errorf("parse cluster version %q: %w", version, err)
-	}
-
-	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
-	if err != nil {
-		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
-	}
-
-	return !legacy, nil
-}
-
-// IsClusterProfileAwareVersion reports whether a cluster version requires a
-// database-backed ClusterProfile.
-func IsClusterProfileAwareVersion(version string) (bool, error) {
-	return isClusterProfileAwareVersion(version)
 }
 
 func profileImage(componentName string, ref v1.ImageRef) (string, error) {

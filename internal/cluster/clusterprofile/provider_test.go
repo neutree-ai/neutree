@@ -11,17 +11,15 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-func TestProviderResolvesExactClusterProfileIdentity(t *testing.T) {
+func TestProviderResolvesExactClusterProfileAndRequestedMatrix(t *testing.T) {
 	provider := NewProvider(&reader{profiles: []v1.ClusterProfile{
-		profile("v1.2.0", v1.SSHClusterType, "stable"),
-		profile("v1.2.0-rc.1", v1.SSHClusterType, "release-candidate"),
-		profile("v1.2.0-rc.1", v1.KubernetesClusterType, "kubernetes-release-candidate"),
+		profile("v1.2.0", "stable", "stable-kubernetes"),
+		profile("v1.2.0-rc.1", "release-candidate", "kubernetes-release-candidate"),
 	}})
 
-	resolved, err := provider.ProfileFor("v1.2.0-rc.1", v1.SSHClusterType)
+	resolved, err := provider.ProfileFor("v1.2.0-rc.1")
 	require.NoError(t, err)
 	assert.Equal(t, "v1.2.0-rc.1", resolved.GetName())
-	assert.Equal(t, v1.SSHClusterType, resolved.GetClusterType())
 
 	components, err := provider.ComponentsFor("v1.2.0-rc.1", v1.KubernetesClusterType)
 	require.NoError(t, err)
@@ -29,23 +27,28 @@ func TestProviderResolvesExactClusterProfileIdentity(t *testing.T) {
 }
 
 func TestProviderDoesNotFallBackFromFullClusterVersion(t *testing.T) {
-	provider := NewProvider(&reader{profiles: []v1.ClusterProfile{profile("v1.2.0", v1.SSHClusterType, "stable")}})
+	provider := NewProvider(&reader{profiles: []v1.ClusterProfile{profile("v1.2.0", "stable", "stable-kubernetes")}})
 
-	_, err := provider.ProfileFor("v1.2.0-alpha.1", v1.SSHClusterType)
-	require.ErrorContains(t, err, "cluster profile v1.2.0-alpha.1/ssh not found")
+	_, err := provider.ProfileFor("v1.2.0-alpha.1")
+	require.ErrorContains(t, err, "cluster profile v1.2.0-alpha.1 not found")
 }
 
-func TestProviderDoesNotFallBackAcrossClusterTypes(t *testing.T) {
-	provider := NewProvider(&reader{profiles: []v1.ClusterProfile{profile("v1.2.0", v1.SSHClusterType, "stable")}})
+func TestProviderRejectsMissingRequestedMatrix(t *testing.T) {
+	provider := NewProvider(&reader{profiles: []v1.ClusterProfile{{
+		Metadata: &v1.Metadata{Name: "v1.2.0"},
+		Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
+			v1.SSHClusterType: {RayRuntime: v1.ImageRef{Tag: "stable"}},
+		}},
+	}}})
 
-	_, err := provider.ProfileFor("v1.2.0", v1.KubernetesClusterType)
-	require.ErrorContains(t, err, "cluster profile v1.2.0/kubernetes not found")
+	_, err := provider.ComponentsFor("v1.2.0", v1.KubernetesClusterType)
+	require.ErrorContains(t, err, "cluster profile v1.2.0 has no kubernetes component matrix")
 }
 
 func TestProviderReturnsStorageError(t *testing.T) {
 	provider := NewProvider(&reader{err: errors.New("database unavailable")})
 
-	_, err := provider.ProfileFor("v1.2.0", v1.SSHClusterType)
+	_, err := provider.ProfileFor("v1.2.0")
 	require.ErrorContains(t, err, "list cluster profiles")
 }
 
@@ -58,11 +61,12 @@ func (reader *reader) ListClusterProfile(storage.ListOption) ([]v1.ClusterProfil
 	return reader.profiles, reader.err
 }
 
-func profile(name, clusterType, rayRuntimeTag string) v1.ClusterProfile {
+func profile(name, sshRuntimeTag, kubernetesRuntimeTag string) v1.ClusterProfile {
 	return v1.ClusterProfile{
 		Metadata: &v1.Metadata{Name: name},
-		Spec: &v1.ClusterProfileSpec{ClusterType: clusterType, Components: v1.ClusterProfileComponents{
-			RayRuntime: v1.ImageRef{Tag: rayRuntimeTag},
+		Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
+			v1.SSHClusterType:        {RayRuntime: v1.ImageRef{Tag: sshRuntimeTag}},
+			v1.KubernetesClusterType: {RayRuntime: v1.ImageRef{Tag: kubernetesRuntimeTag}},
 		}},
 	}
 }

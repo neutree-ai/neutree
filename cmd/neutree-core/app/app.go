@@ -67,10 +67,6 @@ func (store currentBaselineStore) CreateClusterProfile(profile *v1.ClusterProfil
 	return store.storage.CreateClusterProfile(profile)
 }
 
-func (store currentBaselineStore) UpdateClusterProfile(id string, profile *v1.ClusterProfile) error {
-	return store.storage.UpdateClusterProfile(id, profile)
-}
-
 // App represents the main application
 type App struct {
 	config                       *config.CoreConfig

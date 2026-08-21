@@ -3,24 +3,20 @@ package releaseinfo
 import (
 	"fmt"
 	"strings"
-
-	"github.com/Masterminds/semver/v3"
 )
 
-// NormalizeControlPlaneRelease returns the stable ReleaseInfo baseline for a
-// complete control-plane build identity. Prerelease and nightly builds share
-// their final vX.Y.Z baseline; development and dirty builds are resolved from
-// persisted ReleaseInfos by ResolveCurrentControlPlaneBaseline.
+// NormalizeControlPlaneRelease validates and returns the exact ReleaseInfo
+// identity for a complete control-plane build. Prerelease identities remain
+// distinct from their eventual stable releases; development and dirty builds
+// are resolved from persisted ReleaseInfos by ResolveCurrentControlPlaneBaseline.
 func NormalizeControlPlaneRelease(buildIdentity string) (string, error) {
-	identity := strings.TrimSpace(buildIdentity)
-	if !strings.HasPrefix(identity, "v") {
+	if strings.TrimSpace(buildIdentity) != buildIdentity || !strings.HasPrefix(buildIdentity, "v") {
 		return "", fmt.Errorf("control-plane release %q must use v-prefixed semantic version", buildIdentity)
 	}
 
-	version, err := semver.StrictNewVersion(strings.TrimPrefix(identity, "v"))
-	if err != nil {
+	if _, err := parseExactVPrefixedSemVer(buildIdentity); err != nil {
 		return "", fmt.Errorf("invalid control-plane release %q: %w", buildIdentity, err)
 	}
 
-	return fmt.Sprintf("v%d.%d.%d", version.Major(), version.Minor(), version.Patch()), nil
+	return buildIdentity, nil
 }

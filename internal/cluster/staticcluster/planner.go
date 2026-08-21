@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 )
 
 type Planner struct {
@@ -182,17 +182,12 @@ func (r *Planner) buildDesiredNodePlans(
 }
 
 func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, bool, error) {
-	profileAware, err := isClusterProfileAwareVersion(version)
-	if err != nil {
-		return v1.ClusterProfileComponents{}, false, err
-	}
-
-	if !profileAware {
-		return v1.ClusterProfileComponents{}, false, nil
+	if _, err := releaseinfo.NormalizeClusterMinor(version); err != nil {
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("parse static node cluster version %q: %w", version, err)
 	}
 
 	if r == nil || r.ClusterProfileComponentsResolver == nil {
-		return v1.ClusterProfileComponents{}, false, fmt.Errorf("cluster profile component resolver is required for static node cluster version %s", version)
+		return v1.ClusterProfileComponents{}, false, fmt.Errorf("exact cluster profile component resolver is required for static node cluster version %s", version)
 	}
 
 	components, err := r.ClusterProfileComponentsResolver.ComponentsFor(version, v1.SSHClusterType)
@@ -201,18 +196,4 @@ func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents
 	}
 
 	return components, true, nil
-}
-
-func isClusterProfileAwareVersion(version string) (bool, error) {
-	baseVersion, err := semver.BaseVersion(version)
-	if err != nil {
-		return false, fmt.Errorf("parse static node cluster version %q: %w", version, err)
-	}
-
-	legacy, err := semver.LessThan(baseVersion, "v1.1.0")
-	if err != nil {
-		return false, fmt.Errorf("invalid static node cluster version %q: %w", version, err)
-	}
-
-	return !legacy, nil
 }

@@ -29,19 +29,23 @@ func TestReleaseInfoHasMinimalGlobalSchema(t *testing.T) {
 			'v1',
 			'ReleaseInfo',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('["v1.1","v1.2"]'::jsonb)::api.release_info_spec
+			ROW('v1.2.0', '["v1.1","v1.2"]'::jsonb)::api.release_info_spec
 		)
 	`, releaseName); err != nil {
 		t.Fatalf("insert release info as service_role: %v", err)
 	}
 
+	var defaultClusterVersion string
 	var compatibleBaselinesJSON []byte
 	if err = serviceTx.QueryRowContext(ctx, `
-		SELECT (spec).compatible_cluster_baselines
+		SELECT (spec).default_cluster_version, (spec).compatible_cluster_baselines
 		FROM api.release_infos
 		WHERE (metadata).name = $1
-	`, releaseName).Scan(&compatibleBaselinesJSON); err != nil {
+	`, releaseName).Scan(&defaultClusterVersion, &compatibleBaselinesJSON); err != nil {
 		t.Fatalf("read release info as service_role: %v", err)
+	}
+	if defaultClusterVersion != "v1.2.0" {
+		t.Fatalf("expected persisted default cluster version, got %q", defaultClusterVersion)
 	}
 	if string(compatibleBaselinesJSON) != `["v1.1", "v1.2"]` && string(compatibleBaselinesJSON) != `["v1.1","v1.2"]` {
 		t.Fatalf("expected persisted compatible cluster baselines, got %s", compatibleBaselinesJSON)
@@ -73,7 +77,7 @@ func TestReleaseInfoHasMinimalGlobalSchema(t *testing.T) {
 			'v1',
 			'ReleaseInfo',
 			ROW('v1.2.1', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('[]'::jsonb)::api.release_info_spec
+			ROW('v1.2.1', '[]'::jsonb)::api.release_info_spec
 		)
 	`)
 	if err == nil {
@@ -123,6 +127,23 @@ func TestLegacyReleaseStateSchemaIsRemoved(t *testing.T) {
 				t.Fatalf("legacy %s.%s must be removed", composite.name, field)
 			}
 		}
+	}
+
+	var defaultClusterVersionExists bool
+	if err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_attribute
+			WHERE attrelid = 'api.release_info_spec'::regclass
+				AND attname = 'default_cluster_version'
+				AND attnum > 0
+				AND NOT attisdropped
+		)
+	`).Scan(&defaultClusterVersionExists); err != nil {
+		t.Fatalf("check release info default cluster version: %v", err)
+	}
+	if !defaultClusterVersionExists {
+		t.Fatal("release info default_cluster_version must exist")
 	}
 
 	var snapshotsExist bool
@@ -188,7 +209,7 @@ func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
 			'v1',
 			'ReleaseInfo',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('["v1.1","v1.2"]'::jsonb)::api.release_info_spec
+			ROW('v1.2.0', '["v1.1","v1.2"]'::jsonb)::api.release_info_spec
 		)
 	`, releaseName); err != nil {
 		t.Fatalf("insert final release info: %v", err)
@@ -199,9 +220,9 @@ func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
 			'v1',
 			'ClusterProfile',
 			ROW('v1.2.0', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			'{"cluster_type":"ssh","components":{"ray_runtime":{"image":"neutree/neutree-serve","tag":"v1.1.1"}}}'::jsonb
+			$1::jsonb
 		)
-	`); err != nil {
+	`, completeClusterProfileSpec); err != nil {
 		t.Fatalf("insert final cluster profile: %v", err)
 	}
 

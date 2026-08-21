@@ -15,7 +15,7 @@ func (externalReleaseInfoBuilder) BuildReleaseInfo(string) (*v1.ReleaseInfo, err
 
 type externalClusterProfileBuilder struct{}
 
-func (externalClusterProfileBuilder) BuildClusterProfile(string, string) (*v1.ClusterProfile, error) {
+func (externalClusterProfileBuilder) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
 	return nil, nil
 }
 

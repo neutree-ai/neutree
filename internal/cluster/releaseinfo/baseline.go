@@ -15,12 +15,11 @@ var workflowShortCommitBuildPattern = regexp.MustCompile(`^[0-9a-f]{7}$`)
 // NormalizeClusterMinor returns the supported minor line for a complete Cluster
 // version. Cluster prereleases belong to the minor line of their final release.
 func NormalizeClusterMinor(clusterVersion string) (string, error) {
-	versionText := strings.TrimSpace(clusterVersion)
-	if !strings.HasPrefix(versionText, "v") {
+	if strings.TrimSpace(clusterVersion) != clusterVersion || !strings.HasPrefix(clusterVersion, "v") {
 		return "", fmt.Errorf("cluster version %q must use v-prefixed semantic version", clusterVersion)
 	}
 
-	version, err := semver.StrictNewVersion(strings.TrimPrefix(versionText, "v"))
+	version, err := parseExactVPrefixedSemVer(clusterVersion)
 	if err != nil {
 		return "", fmt.Errorf("invalid cluster version %q: %w", clusterVersion, err)
 	}
@@ -74,7 +73,7 @@ func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error)
 	for index := range infos {
 		name := infos[index].GetName()
 
-		version, err := parseStableReleaseInfoBaseline(name)
+		version, err := parseExactReleaseInfoBaseline(name)
 		if err != nil {
 			continue
 		}
@@ -92,24 +91,14 @@ func highestPersistedReleaseInfoBaseline(infos []v1.ReleaseInfo) (string, error)
 	return selectedName, nil
 }
 
-func parseStableReleaseInfoBaseline(baseline string) (*semver.Version, error) {
-	if !strings.HasPrefix(baseline, "v") {
+func parseExactReleaseInfoBaseline(baseline string) (*semver.Version, error) {
+	return parseExactVPrefixedSemVer(baseline)
+}
+
+func parseExactVPrefixedSemVer(value string) (*semver.Version, error) {
+	if strings.TrimSpace(value) != value || !strings.HasPrefix(value, "v") {
 		return nil, fmt.Errorf("must use v-prefixed semantic version")
 	}
 
-	version, err := semver.StrictNewVersion(strings.TrimPrefix(baseline, "v"))
-	if err != nil {
-		return nil, err
-	}
-
-	if version.Prerelease() != "" || version.Metadata() != "" {
-		return nil, fmt.Errorf("must be a stable release info baseline")
-	}
-
-	stableBaseline := fmt.Sprintf("v%d.%d.%d", version.Major(), version.Minor(), version.Patch())
-	if baseline != stableBaseline {
-		return nil, fmt.Errorf("must be an exact stable release info baseline")
-	}
-
-	return version, nil
+	return semver.StrictNewVersion(strings.TrimPrefix(value, "v"))
 }

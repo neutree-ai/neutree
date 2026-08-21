@@ -3198,7 +3198,7 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 }
 
 func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
-	t.Run("legacy cluster uses version-derived runtime image", func(t *testing.T) {
+	t.Run("every cluster version requires an exact profile", func(t *testing.T) {
 		k := &kubernetesOrchestrator{}
 		data := DeploymentManifestVariables{ImagePrefix: "registry.example.com/neutree"}
 
@@ -3206,8 +3206,8 @@ func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
 			Spec: &v1.ClusterSpec{Version: "v1.0.1", Type: v1.KubernetesClusterType},
 		})
 
-		require.NoError(t, err)
-		assert.Equal(t, "registry.example.com/neutree/neutree/neutree-runtime:v1.0.1", data.NeutreeRuntimeImage)
+		require.ErrorContains(t, err, "storage is required to resolve exact Kubernetes cluster profile")
+		assert.Empty(t, data.NeutreeRuntimeImage)
 	})
 
 	t.Run("profile-aware cluster uses Kubernetes profile material", func(t *testing.T) {
@@ -3216,9 +3216,11 @@ func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
 			{
 				Metadata: &v1.Metadata{Name: "v1.2.0"},
 				Spec: &v1.ClusterProfileSpec{
-					ClusterType: v1.KubernetesClusterType,
-					Components: v1.ClusterProfileComponents{
-						KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"},
+					Components: map[string]v1.ClusterProfileComponents{
+						v1.KubernetesClusterType: {
+							KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"},
+						},
+						v1.SSHClusterType: {},
 					},
 				},
 			},
@@ -3239,7 +3241,9 @@ func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
 		store.EXPECT().ListClusterProfile(mock.Anything).Return([]v1.ClusterProfile{
 			{
 				Metadata: &v1.Metadata{Name: "v1.2.0"},
-				Spec:     &v1.ClusterProfileSpec{ClusterType: v1.SSHClusterType},
+				Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
+					v1.SSHClusterType: {},
+				}},
 			},
 		}, nil).Once()
 		k := &kubernetesOrchestrator{storage: store}
@@ -3249,7 +3253,7 @@ func TestKubernetesOrchestrator_setNeutreeRuntimeImage(t *testing.T) {
 			Spec: &v1.ClusterSpec{Version: "v1.2.0", Type: v1.KubernetesClusterType},
 		})
 
-		require.ErrorContains(t, err, "cluster profile v1.2.0/kubernetes not found")
+		require.ErrorContains(t, err, "cluster profile v1.2.0 has no kubernetes component matrix")
 	})
 }
 

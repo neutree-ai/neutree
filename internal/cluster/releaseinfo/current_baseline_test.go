@@ -46,9 +46,9 @@ func TestResolveCurrentControlPlaneBaseline(t *testing.T) {
 		wantErr  string
 	}{
 		{name: "stable", identity: "v1.2.0", want: "v1.2.0"},
-		{name: "nightly", identity: "v1.2.0-nightly.20260805", want: "v1.2.0"},
-		{name: "alpha", identity: "v1.2.0-alpha.1", want: "v1.2.0"},
-		{name: "release candidate", identity: "v1.2.0-rc.1", want: "v1.2.0"},
+		{name: "nightly preserves exact identity", identity: "v1.2.0-nightly.20260805", want: "v1.2.0-nightly.20260805"},
+		{name: "alpha preserves exact identity", identity: "v1.2.0-alpha.1", want: "v1.2.0-alpha.1"},
+		{name: "release candidate preserves exact identity", identity: "v1.2.0-rc.1", want: "v1.2.0-rc.1"},
 		{
 			name:     "development build uses highest persisted release info",
 			identity: "v1.2.0-dev.12",
@@ -70,14 +70,14 @@ func TestResolveCurrentControlPlaneBaseline(t *testing.T) {
 			want: "v1.2.0",
 		},
 		{
-			name:     "development build ignores prerelease and metadata release info names",
+			name:     "development build considers prerelease and metadata release info names",
 			identity: "dev",
 			infos: []v1.ReleaseInfo{
 				*releaseInfoNamed("v1.2.0"),
 				*releaseInfoNamed("v1.3.0-rc.1"),
 				*releaseInfoNamed("v1.2.1+build.1"),
 			},
-			want: "v1.2.0",
+			want: "v1.3.0-rc.1",
 		},
 		{
 			name:     "raw development marker uses highest persisted release info",

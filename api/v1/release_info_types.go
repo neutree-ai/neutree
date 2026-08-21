@@ -21,6 +21,7 @@ type ReleaseInfo struct {
 }
 
 type ReleaseInfoSpec struct {
+	DefaultClusterVersion      string   `json:"default_cluster_version"`
 	CompatibleClusterBaselines []string `json:"compatible_cluster_baselines,omitempty"`
 }
 

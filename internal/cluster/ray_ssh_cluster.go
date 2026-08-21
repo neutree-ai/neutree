@@ -43,6 +43,8 @@ type sshRayClusterReconciler struct {
 	executor           command.Executor
 	acceleratorManager accelerator.Manager
 	storage            storage.Storage
+	profileComponents  v1.ClusterProfileComponents
+	profileSelected    bool
 }
 
 // logWithProcessMessage logs the process messages and updates the cluster status error message.
@@ -94,11 +96,13 @@ func (c *sshRayClusterReconciler) Reconcile(ctx context.Context, cluster *v1.Clu
 	}
 
 	reconcileCtx := &ReconcileContext{
-		Ctx:              ctx,
-		Cluster:          cluster,
-		ImageRegistry:    imageRegistry,
-		sshClusterConfig: sshClusterConfig,
-		rayService:       c.getDashboardService(sshClusterConfig.Provider.HeadIP),
+		Ctx:               ctx,
+		Cluster:           cluster,
+		ImageRegistry:     imageRegistry,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
+		sshClusterConfig:  sshClusterConfig,
+		rayService:        c.getDashboardService(sshClusterConfig.Provider.HeadIP),
 	}
 
 	err = c.generateConfig(reconcileCtx)
@@ -203,10 +207,12 @@ func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *
 	}
 
 	reconcileCtx := &ReconcileContext{
-		Ctx:              ctx,
-		Cluster:          cluster,
-		ImageRegistry:    imageRegistry,
-		sshClusterConfig: sshClusterConfig,
+		Ctx:               ctx,
+		Cluster:           cluster,
+		ImageRegistry:     imageRegistry,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
+		sshClusterConfig:  sshClusterConfig,
 	}
 
 	err = c.generateConfig(reconcileCtx)

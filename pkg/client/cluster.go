@@ -13,17 +13,6 @@ type ClusterProfileUpsertResult struct {
 	Operation string `json:"operation"`
 }
 
-// ClusterProfileVersion identifies one imported ClusterProfile without
-// exposing the profile's component image material.
-type ClusterProfileVersion struct {
-	Version     string `json:"version"`
-	ClusterType string `json:"cluster_type"`
-}
-
-type clusterProfileVersionsResponse struct {
-	Profiles []ClusterProfileVersion `json:"profiles"`
-}
-
 // ClustersService owns calls to Cluster-specific helper endpoints.
 type ClustersService struct {
 	client *Client
@@ -68,32 +57,4 @@ func (service *ClustersService) UpsertClusterProfile(profile *v1.ClusterProfile)
 	}
 
 	return result, nil
-}
-
-// ListClusterProfileVersions returns imported ClusterProfile identities for
-// upgrade preflight checks. The endpoint is restricted to system admins.
-func (service *ClustersService) ListClusterProfileVersions() ([]ClusterProfileVersion, error) {
-	requestURL := fmt.Sprintf("%s/api/v1/clusters/profile_versions", service.client.baseURL)
-
-	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := service.client.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if err = expectStatus(resp, http.StatusOK); err != nil {
-		return nil, err
-	}
-
-	var result clusterProfileVersionsResponse
-	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return result.Profiles, nil
 }

@@ -30,21 +30,28 @@ func TestClusterProfileSchemeRegistration(t *testing.T) {
 	assert.IsType(t, &ClusterProfile{}, tableObj)
 }
 
-func TestClusterProfileJSONRoundTripPreservesTypedComponents(t *testing.T) {
+func TestClusterProfileJSONRoundTripPreservesCompleteComponents(t *testing.T) {
 	input := &ClusterProfile{
 		ID:         1,
 		APIVersion: "v1",
 		Kind:       ClusterProfileKind,
 		Metadata:   &Metadata{Name: "v1.2.0-rc.1"},
 		Spec: &ClusterProfileSpec{
-			ClusterType: KubernetesClusterType,
-			Components: ClusterProfileComponents{
-				KubernetesRuntime: ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.0-rc.1"},
-				Router:            ImageRef{Image: "neutree/router", Tag: "v1.2.0-rc.1"},
-				NodeAgent:         ImageRef{Image: "neutree/node-agent", Tag: "v1.2.0-rc.1"},
-				NodeExporter:      ImageRef{Image: "prom/node-exporter", Tag: "v1.8.2"},
-				VMAgent:           ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.102.1"},
-				KubeStateMetrics:  ImageRef{Image: "kube-state-metrics/kube-state-metrics", Tag: "v2.13.0"},
+			Components: map[string]ClusterProfileComponents{
+				SSHClusterType: {
+					RayRuntime:   ImageRef{Image: "neutree/neutree-serve", Tag: "v1.2.0-rc.1"},
+					NodeAgent:    ImageRef{Image: "neutree/node-agent", Tag: "v1.2.0-rc.1"},
+					NodeExporter: ImageRef{Image: "prom/node-exporter", Tag: "v1.8.2"},
+					VMAgent:      ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.102.1"},
+				},
+				KubernetesClusterType: {
+					KubernetesRuntime: ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.0-rc.1"},
+					Router:            ImageRef{Image: "neutree/router", Tag: "v1.2.0-rc.1"},
+					NodeAgent:         ImageRef{Image: "neutree/node-agent", Tag: "v1.2.0-rc.1"},
+					NodeExporter:      ImageRef{Image: "prom/node-exporter", Tag: "v1.8.2"},
+					VMAgent:           ImageRef{Image: "victoriametrics/vmagent", Tag: "v1.102.1"},
+					KubeStateMetrics:  ImageRef{Image: "kube-state-metrics/kube-state-metrics", Tag: "v2.13.0"},
+				},
 			},
 		},
 	}
@@ -57,15 +64,25 @@ func TestClusterProfileJSONRoundTripPreservesTypedComponents(t *testing.T) {
 		"kind": "ClusterProfile",
 		"metadata": {"name": "v1.2.0-rc.1"},
 		"spec": {
-			"cluster_type": "kubernetes",
 			"components": {
-				"ray_runtime": {},
-				"kubernetes_runtime": {"image": "neutree/neutree-runtime", "tag": "v1.2.0-rc.1"},
-				"router": {"image": "neutree/router", "tag": "v1.2.0-rc.1"},
-				"node_agent": {"image": "neutree/node-agent", "tag": "v1.2.0-rc.1"},
-				"node_exporter": {"image": "prom/node-exporter", "tag": "v1.8.2"},
-				"vmagent": {"image": "victoriametrics/vmagent", "tag": "v1.102.1"},
-				"kube_state_metrics": {"image": "kube-state-metrics/kube-state-metrics", "tag": "v2.13.0"}
+				"ssh": {
+					"ray_runtime": {"image": "neutree/neutree-serve", "tag": "v1.2.0-rc.1"},
+					"kubernetes_runtime": {},
+					"router": {},
+					"node_agent": {"image": "neutree/node-agent", "tag": "v1.2.0-rc.1"},
+					"node_exporter": {"image": "prom/node-exporter", "tag": "v1.8.2"},
+					"vmagent": {"image": "victoriametrics/vmagent", "tag": "v1.102.1"},
+					"kube_state_metrics": {}
+				},
+				"kubernetes": {
+					"ray_runtime": {},
+					"kubernetes_runtime": {"image": "neutree/neutree-runtime", "tag": "v1.2.0-rc.1"},
+					"router": {"image": "neutree/router", "tag": "v1.2.0-rc.1"},
+					"node_agent": {"image": "neutree/node-agent", "tag": "v1.2.0-rc.1"},
+					"node_exporter": {"image": "prom/node-exporter", "tag": "v1.8.2"},
+					"vmagent": {"image": "victoriametrics/vmagent", "tag": "v1.102.1"},
+					"kube_state_metrics": {"image": "kube-state-metrics/kube-state-metrics", "tag": "v2.13.0"}
+				}
 			}
 		}
 	}`, string(payload))
@@ -74,9 +91,15 @@ func TestClusterProfileJSONRoundTripPreservesTypedComponents(t *testing.T) {
 	require.NoError(t, json.Unmarshal(payload, &output))
 	require.NotNil(t, output.Spec)
 	assert.Equal(t, "v1.2.0-rc.1", output.GetName())
-	assert.Equal(t, KubernetesClusterType, output.GetClusterType())
-	assert.Equal(t, "neutree/neutree-runtime", output.Spec.Components.KubernetesRuntime.Image)
-	assert.Equal(t, "v2.13.0", output.Spec.Components.KubeStateMetrics.Tag)
+	ssh, found := output.Spec.ComponentsFor(SSHClusterType)
+	require.True(t, found)
+	assert.Equal(t, "neutree/neutree-serve", ssh.RayRuntime.Image)
+	kubernetes, found := output.Spec.ComponentsFor(KubernetesClusterType)
+	require.True(t, found)
+	assert.Equal(t, "neutree/neutree-runtime", kubernetes.KubernetesRuntime.Image)
+	assert.Equal(t, "v2.13.0", kubernetes.KubeStateMetrics.Tag)
+	_, found = output.Spec.ComponentsFor("docker")
+	assert.False(t, found)
 }
 
 func TestClusterProfileAPIShapeExcludesLegacyReleaseInfoFields(t *testing.T) {
@@ -87,9 +110,9 @@ func TestClusterProfileAPIShapeExcludesLegacyReleaseInfoFields(t *testing.T) {
 	}
 
 	specType := reflect.TypeOf(ClusterProfileSpec{})
-	require.Equal(t, 2, specType.NumField())
+	require.Equal(t, 1, specType.NumField())
 	_, found := specType.FieldByName("ClusterType")
-	assert.True(t, found, "ClusterProfileSpec must expose cluster type identity")
+	assert.False(t, found, "ClusterProfile identity must be the exact version only")
 	_, found = specType.FieldByName("Components")
 	assert.True(t, found, "ClusterProfileSpec must expose typed components")
 

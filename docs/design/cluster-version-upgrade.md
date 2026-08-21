@@ -1,5 +1,7 @@
 # Cluster Version Upgrade
 
+> **历史文档（NEU-605）**：本文保留早期集群升级流程作为历史记录，其中关于 typed `(version, cluster_type)` Profile、旧的 Profile fallback、tag discovery 和隐式 API 准入的描述已废止。当前 `ReleaseInfo`/`ClusterProfile` 契约、package、CLI、API、UI 和 E2E 设计以 [NEU-605 权威设计文档](https://gitlab.smartx.com/wei.huang/neutree-dev-docs/-/merge_requests/87) 及其配套 E2E 文档为准。
+
 ## 1. Background
 
 Neutree v1.0.1 introduces two key improvements to cluster base images:

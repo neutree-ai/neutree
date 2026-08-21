@@ -20,12 +20,11 @@ import (
 )
 
 type Dependencies struct {
-	Storage             storage.Storage
-	StorageAccessURL    string
-	AuthEndpoint        string
-	AuthConfig          middleware.AuthConfig
-	ImageService        registry.ImageService
-	ReleaseInfoProvider ReleaseInfoProvider
+	Storage          storage.Storage
+	StorageAccessURL string
+	AuthEndpoint     string
+	AuthConfig       middleware.AuthConfig
+	ImageService     registry.ImageService
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {

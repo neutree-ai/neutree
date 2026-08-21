@@ -18,9 +18,8 @@ type clusterProfileManifest struct {
 }
 
 type clusterProfileYAML struct {
-	Version     string                       `yaml:"version"`
-	ClusterType string                       `yaml:"cluster_type"`
-	Components  clusterProfileComponentsYAML `yaml:"components"`
+	Version    string                                  `yaml:"version"`
+	Components map[string]clusterProfileComponentsYAML `yaml:"components"`
 }
 
 type clusterProfileComponentsYAML struct {
@@ -57,12 +56,7 @@ func main() {
 }
 
 func run(version, clusterType, accelerator, format string, out io.Writer) error {
-	normalizedType, err := normalizeClusterType(clusterType)
-	if err != nil {
-		return err
-	}
-
-	profile, err := releaseprofile.CommunityClusterProfile(strings.TrimSpace(version), normalizedType)
+	profile, err := releaseprofile.CommunityClusterProfile(strings.TrimSpace(version))
 	if err != nil {
 		return err
 	}
@@ -78,7 +72,12 @@ func run(version, clusterType, accelerator, format string, out io.Writer) error 
 
 		return err
 	case "images":
-		images, err := clusterProfileImages(profile, accelerator)
+		normalizedType, err := normalizeClusterType(clusterType)
+		if err != nil {
+			return err
+		}
+
+		images, err := clusterProfileImages(profile, normalizedType, accelerator)
 		if err != nil {
 			return err
 		}
@@ -107,7 +106,7 @@ func normalizeClusterType(clusterType string) (string, error) {
 }
 
 func manifestProfile(profile *v1.ClusterProfile) clusterProfileYAML {
-	components := clusterProfileComponentsYAML{}
+	components := make(map[string]clusterProfileComponentsYAML)
 	if profile == nil || profile.Spec == nil {
 		return clusterProfileYAML{Components: components}
 	}
@@ -120,22 +119,25 @@ func manifestProfile(profile *v1.ClusterProfile) clusterProfileYAML {
 		return &imageRefYAML{Image: ref.Image, Tag: ref.Tag}
 	}
 
-	components.RayRuntime = setRef(profile.Spec.Components.RayRuntime)
-	components.KubernetesRuntime = setRef(profile.Spec.Components.KubernetesRuntime)
-	components.Router = setRef(profile.Spec.Components.Router)
-	components.NodeAgent = setRef(profile.Spec.Components.NodeAgent)
-	components.NodeExporter = setRef(profile.Spec.Components.NodeExporter)
-	components.VMAgent = setRef(profile.Spec.Components.VMAgent)
-	components.KubeStateMetrics = setRef(profile.Spec.Components.KubeStateMetrics)
+	for clusterType, profileComponents := range profile.Spec.Components {
+		components[clusterType] = clusterProfileComponentsYAML{
+			RayRuntime:        setRef(profileComponents.RayRuntime),
+			KubernetesRuntime: setRef(profileComponents.KubernetesRuntime),
+			Router:            setRef(profileComponents.Router),
+			NodeAgent:         setRef(profileComponents.NodeAgent),
+			NodeExporter:      setRef(profileComponents.NodeExporter),
+			VMAgent:           setRef(profileComponents.VMAgent),
+			KubeStateMetrics:  setRef(profileComponents.KubeStateMetrics),
+		}
+	}
 
 	return clusterProfileYAML{
-		Version:     profile.GetName(),
-		ClusterType: profile.GetClusterType(),
-		Components:  components,
+		Version:    profile.GetName(),
+		Components: components,
 	}
 }
 
-func clusterProfileImages(profile *v1.ClusterProfile, accelerator string) ([]string, error) {
+func clusterProfileImages(profile *v1.ClusterProfile, clusterType, accelerator string) ([]string, error) {
 	if profile == nil || profile.Spec == nil {
 		return nil, fmt.Errorf("cluster profile spec is required")
 	}
@@ -150,26 +152,31 @@ func clusterProfileImages(profile *v1.ClusterProfile, accelerator string) ([]str
 
 	var images []string
 
-	switch profile.GetClusterType() {
+	components, found := profile.Spec.ComponentsFor(clusterType)
+	if !found {
+		return nil, fmt.Errorf("cluster profile has no %s component matrix", clusterType)
+	}
+
+	switch clusterType {
 	case v1.SSHClusterType:
-		rayRuntime := profile.Spec.Components.RayRuntime
+		rayRuntime := components.RayRuntime
 		if strings.TrimSpace(accelerator) == "amd_gpu" && strings.TrimSpace(rayRuntime.Image) != "" && strings.TrimSpace(rayRuntime.Tag) != "" {
 			rayRuntime.Tag += "-rocm"
 		}
 
 		images = add(images, rayRuntime)
-		images = add(images, profile.Spec.Components.NodeAgent)
-		images = add(images, profile.Spec.Components.NodeExporter)
-		images = add(images, profile.Spec.Components.VMAgent)
+		images = add(images, components.NodeAgent)
+		images = add(images, components.NodeExporter)
+		images = add(images, components.VMAgent)
 	case v1.KubernetesClusterType:
-		images = add(images, profile.Spec.Components.KubernetesRuntime)
-		images = add(images, profile.Spec.Components.Router)
-		images = add(images, profile.Spec.Components.NodeAgent)
-		images = add(images, profile.Spec.Components.NodeExporter)
-		images = add(images, profile.Spec.Components.VMAgent)
-		images = add(images, profile.Spec.Components.KubeStateMetrics)
+		images = add(images, components.KubernetesRuntime)
+		images = add(images, components.Router)
+		images = add(images, components.NodeAgent)
+		images = add(images, components.NodeExporter)
+		images = add(images, components.VMAgent)
+		images = add(images, components.KubeStateMetrics)
 	default:
-		return nil, fmt.Errorf("unsupported cluster type %q", profile.GetClusterType())
+		return nil, fmt.Errorf("unsupported cluster type %q", clusterType)
 	}
 
 	return dedupe(images), nil

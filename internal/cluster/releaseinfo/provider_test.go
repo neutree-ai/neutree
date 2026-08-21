@@ -13,12 +13,13 @@ func TestProviderResolvesCurrentBaseline(t *testing.T) {
 	store := &releaseInfoReader{infos: []v1.ReleaseInfo{
 		*releaseInfoNamed("v1.1.0"),
 		*releaseInfoNamed("v1.2.0"),
+		*releaseInfoNamed("v1.2.0-nightly.20260804"),
 	}}
 	provider := NewProvider(store, "v1.2.0-nightly.20260804")
 
 	info, err := provider.Current()
 	require.NoError(t, err)
-	require.Equal(t, "v1.2.0", info.GetName())
+	require.Equal(t, "v1.2.0-nightly.20260804", info.GetName())
 
 }
 
