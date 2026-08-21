@@ -26,10 +26,13 @@ func TestGetUsageByDimensionPermissionScope(t *testing.T) {
 			SELECT id FROM api.create_api_key(
 				p_workspace := $1,
 				p_name := 'owner-key',
-				p_quota := 1000
+				p_quota := 1000,
+				p_display_name := 'Owner display',
+				p_description := 'Owner description'
 			)
 		`, workspace).Scan(&ownerKeyID)
 	})
+
 	if err != nil {
 		t.Fatalf("failed to create owner API key: %v", err)
 	}
@@ -48,6 +51,40 @@ func TestGetUsageByDimensionPermissionScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert daily usage: %v", err)
 	}
+
+	t.Run("owner can read own quota summary without usage-read", func(t *testing.T) {
+		var count int
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(owner.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT count(*) FROM api.get_api_keys_usage_summary($1)
+				WHERE api_key_id = $2
+			`, workspace, ownerKeyID).Scan(&count)
+		})
+		if err != nil {
+			t.Fatalf("owner quota summary: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("owner quota summary rows=%d, want 1", count)
+		}
+	})
+
+	t.Run("usage rows include API key display identity", func(t *testing.T) {
+		var displayName, description string
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(owner.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT api_key_display_name, api_key_description
+				FROM api.get_usage_by_dimension(
+					CURRENT_DATE - 1, CURRENT_DATE + 1, $1, NULL, $2
+				) LIMIT 1
+			`, ownerKeyID, workspace).Scan(&displayName, &description)
+		})
+		if err != nil {
+			t.Fatalf("usage display identity: %v", err)
+		}
+		if displayName != "Owner display" || description != "Owner description" {
+			t.Fatalf("usage identity=(%q,%q), want display name and description", displayName, description)
+		}
+	})
 
 	// countOwnerRows returns how many get_usage_by_dimension rows for the
 	// owner's key are visible to the given caller.
