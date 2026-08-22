@@ -326,7 +326,18 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	rayClusterConfig.Docker.Image = util.BuildClusterImageRef(imagePrefix, cluster.Spec.Version, "")
+	if reconcileContext.ProfileSelected {
+		rayClusterConfig.Docker.Image, err = sshProfileRuntimeImage(
+			imagePrefix,
+			reconcileContext.ProfileComponents.RayRuntime,
+			"",
+		)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		rayClusterConfig.Docker.Image = util.BuildClusterImageRef(imagePrefix, cluster.Spec.Version, "")
+	}
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
@@ -607,7 +618,19 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 		imageSuffix = c.acceleratorManager.GetImageSuffix(*reconcileCtx.Cluster.Status.AcceleratorType)
 	}
 
-	clusterImage := util.BuildClusterImageRef(imagePrefix, reconcileCtx.Cluster.Spec.Version, imageSuffix)
+	var clusterImage string
+	if reconcileCtx.ProfileSelected {
+		clusterImage, err = sshProfileRuntimeImage(
+			imagePrefix,
+			reconcileCtx.ProfileComponents.RayRuntime,
+			imageSuffix,
+		)
+		if err != nil {
+			return err
+		}
+	} else {
+		clusterImage = util.BuildClusterImageRef(imagePrefix, reconcileCtx.Cluster.Spec.Version, imageSuffix)
+	}
 
 	imageSet := map[string]struct{}{clusterImage: {}}
 	for _, img := range engineImages {
@@ -760,6 +783,21 @@ func (c *sshRayClusterReconciler) pullImagesOnNode(reconcileCtx *ReconcileContex
 	}
 
 	return nil
+}
+
+// sshProfileRuntimeImage resolves the exact SSH runtime image from the
+// ClusterProfile and applies the existing accelerator tag suffix convention.
+func sshProfileRuntimeImage(imagePrefix string, runtime v1.ImageRef, suffix string) (string, error) {
+	if strings.TrimSpace(runtime.Image) == "" || strings.TrimSpace(runtime.Tag) == "" {
+		return "", errors.New("cluster profile component ray_runtime requires image and tag")
+	}
+
+	tag := runtime.Tag
+	if suffix != "" {
+		tag += "-" + suffix
+	}
+
+	return util.RewriteImageRef(imagePrefix, runtime.Image+":"+tag), nil
 }
 
 func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v1.ModelCache) {

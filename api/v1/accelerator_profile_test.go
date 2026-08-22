@@ -56,6 +56,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, string(data), `"engine_runtime"`)
 	assert.Contains(t, string(data), `"metrics_exporter"`)
 	assert.Contains(t, string(data), `"name":"dcgm-exporter"`)
+	assert.Contains(t, string(data), `"image":"nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"`)
 	assert.NotContains(t, string(data), `"resource_defaults"`)
 	assert.NotContains(t, string(data), `"raw_metrics"`)
 
@@ -72,6 +73,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
 	require.NotNil(t, decoded.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", decoded.MetricsExporter.Name)
+	assert.Equal(t, "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless", decoded.MetricsExporter.Image)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.MetricsExporter.Args)
 	assert.Equal(t, 19400, decoded.MetricsExporter.Port)
 	require.Len(t, decoded.MetricsExporter.ConfigFiles, 1)
@@ -95,4 +97,21 @@ func TestGetAcceleratorProfileResponse(t *testing.T) {
 	data, err := json.Marshal(response)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"profile":{"accelerator_type":"amd_gpu"}}`, string(data))
+}
+
+func TestAcceleratorProfilePreservesMetricsExporterImage(t *testing.T) {
+	profile := AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"metrics_exporter": {
+			"name": "dcgm-exporter",
+			"image": "example.com/untrusted/dcgm-exporter:latest",
+			"port": 19400
+		}
+	}`), &profile))
+
+	reencoded, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.Contains(t, string(reencoded), `"image":"example.com/untrusted/dcgm-exporter:latest"`)
+	require.NotNil(t, profile.MetricsExporter)
+	assert.Equal(t, "example.com/untrusted/dcgm-exporter:latest", profile.MetricsExporter.Image)
 }

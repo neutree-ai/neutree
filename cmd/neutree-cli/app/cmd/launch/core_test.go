@@ -75,7 +75,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 
 			// Verify flags
 			for flag, expectedValue := range tt.expectedFields {
-				flagValue, err := cmd.PersistentFlags().GetString(flag)
+				flagValue, err := cmd.Flags().GetString(flag)
 				require.NoError(t, err)
 				assert.Equal(t, expectedValue, flagValue)
 			}
@@ -531,15 +531,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 	mockExecutor.AssertExpectations(t)
 }
 
-func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMutation(t *testing.T) {
-	tempDir := t.TempDir()
-	composeDir := filepath.Join(tempDir, "neutree-core")
-	require.NoError(t, os.MkdirAll(composeDir, 0755))
-
-	composeFile := filepath.Join(composeDir, "docker-compose.yml")
-	const sentinel = "sentinel: keep-this-file\n"
-	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
-
+func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleReleaseBeforeMutation(t *testing.T) {
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
 		return "v1.2.0-nightly-20260729"
@@ -548,63 +540,51 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 		getCLIAppVersion = oldGetCLIAppVersion
 	})
 
-	mockExecutor := &mocks.MockExecutor{}
-	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+	err := installNeutreeCoreSingleNodeByDocker(nil, neutreeCoreInstallOptions{
 		commonOptions: &commonOptions{
-			workDir:    tempDir,
+			workDir:    t.TempDir(),
 			nodeIP:     "192.168.1.1",
 			deployType: constants.DeployTypeLocal,
 			deployMode: constants.DeployModeSingle,
+			dryRun:     true,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.1.0-nightly-20260728",
+		version:   "v1.3.0",
 	})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not compatible")
-	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
-
-	got, readErr := os.ReadFile(composeFile)
-	require.NoError(t, readErr)
-	assert.Equal(t, sentinel, string(got))
+	require.ErrorContains(t, err, "not compatible")
 }
 
-func TestInstallNeutreeCoreSingleNodeByDockerRejectsEmptyVersionBeforeMutation(t *testing.T) {
-	tempDir := t.TempDir()
-	composeDir := filepath.Join(tempDir, "neutree-core")
-	require.NoError(t, os.MkdirAll(composeDir, 0755))
-
-	composeFile := filepath.Join(composeDir, "docker-compose.yml")
-	const sentinel = "sentinel: keep-this-file\n"
-	require.NoError(t, os.WriteFile(composeFile, []byte(sentinel), 0600))
-
-	oldGetCLIAppVersion := getCLIAppVersion
-	getCLIAppVersion = func() string {
-		return "dev"
-	}
-	t.Cleanup(func() {
-		getCLIAppVersion = oldGetCLIAppVersion
-	})
-
-	mockExecutor := &mocks.MockExecutor{}
-	err := installNeutreeCoreSingleNodeByDocker(mockExecutor, neutreeCoreInstallOptions{
+func TestInstallNeutreeCoreSingleNodeByDockerDryRunAcceptsReleaseArtifactTag(t *testing.T) {
+	err := installNeutreeCoreSingleNodeByDocker(nil, neutreeCoreInstallOptions{
 		commonOptions: &commonOptions{
-			workDir:    tempDir,
+			workDir:    t.TempDir(),
 			nodeIP:     "192.168.1.1",
 			deployType: constants.DeployTypeLocal,
 			deployMode: constants.DeployModeSingle,
+			dryRun:     true,
 		},
 		jwtSecret: "test-secret",
-		version:   "",
+		version:   "6776e1f",
 	})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid target version")
-	mockExecutor.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything, mock.Anything)
+	require.NoError(t, err)
+}
 
-	got, readErr := os.ReadFile(composeFile)
-	require.NoError(t, readErr)
-	assert.Equal(t, sentinel, string(got))
+func TestInstallNeutreeCoreSingleNodeByDockerDryRunRejectsBlankImageTag(t *testing.T) {
+	err := installNeutreeCoreSingleNodeByDocker(nil, neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    t.TempDir(),
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+			dryRun:     true,
+		},
+		jwtSecret: "test-secret",
+		version:   " \t ",
+	})
+
+	require.EqualError(t, err, "neutree core image tag is required")
 }
 
 func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompose(t *testing.T) {

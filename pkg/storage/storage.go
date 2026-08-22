@@ -28,6 +28,8 @@ const (
 	API_KEY_TABLE             = "api_keys"
 	USER_PROFILE_TABLE        = "user_profiles"
 	EXTERNAL_ENDPOINT_TABLE   = "external_endpoints"
+	CLUSTER_PROFILE_TABLE     = "cluster_profiles"
+	RELEASE_INFO_TABLE        = "release_infos"
 	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
 	STATIC_NODE_TABLE         = "static_nodes"
 )
@@ -223,6 +225,18 @@ type StaticNodeStorage interface {
 	UpdateStaticNode(id string, data *v1.StaticNode) error
 }
 
+type ReleaseInfoStorage interface {
+	ListReleaseInfo() ([]v1.ReleaseInfo, error)
+	CreateReleaseInfo(data *v1.ReleaseInfo) error
+	UpdateReleaseInfo(id string, data *v1.ReleaseInfo) error
+}
+
+type ClusterProfileStorage interface {
+	ListClusterProfile(option ListOption) ([]v1.ClusterProfile, error)
+	CreateClusterProfile(data *v1.ClusterProfile) error
+	UpdateClusterProfile(id string, data *v1.ClusterProfile) error
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -239,6 +253,8 @@ type Storage interface {
 	ExternalEndpointStorage
 	StaticNodeClusterStorage
 	StaticNodeStorage
+	ClusterProfileStorage
+	ReleaseInfoStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

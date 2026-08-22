@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
@@ -108,14 +112,18 @@ func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
 		return nil, errors.New("manifest_version is required")
 	}
 
-	if len(manifest.Engines) == 0 {
-		return nil, errors.New("at least one engine entry is required in manifest")
+	if len(manifest.Engines) == 0 && manifest.ClusterProfile == nil {
+		return nil, errors.New("at least one engine entry is required when cluster_profile is not set")
 	}
 
 	for idx := range manifest.Engines {
 		if err := p.validateEngineConfig(manifest.Engines[idx]); err != nil {
 			return nil, errors.Wrap(err, "invalid engine configuration in manifest")
 		}
+	}
+
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return nil, errors.Wrap(err, "invalid cluster profile in manifest")
 	}
 
 	return manifest, nil
@@ -152,7 +160,83 @@ func (p *Parser) validateManifest(manifest *PackageManifest, extractedPath strin
 		}
 	}
 
+	if err := p.validateClusterProfile(manifest.ClusterProfile); err != nil {
+		return errors.Wrap(err, "invalid cluster profile in manifest")
+	}
+
 	return nil
+}
+
+func (p *Parser) validateClusterProfile(profile *ClusterProfile) error {
+	if profile == nil {
+		return nil
+	}
+
+	if _, err := parseExactPackageVersion(profile.Version); err != nil {
+		return err
+	}
+
+	if len(profile.Components) != 2 {
+		return errors.Errorf("cluster_profile.components must contain exactly %q and %q", v1.SSHClusterType, v1.KubernetesClusterType)
+	}
+
+	for clusterType := range profile.Components {
+		if !v1.IsSupportedClusterType(clusterType) {
+			return errors.Errorf("cluster_profile.components contains unsupported cluster type %q", clusterType)
+		}
+
+		for _, component := range requiredClusterProfileComponents(clusterType, profile.Components[clusterType]) {
+			if strings.TrimSpace(component.ref.Image) == "" {
+				return errors.Errorf("cluster_profile.components.%s.%s.image is required", clusterType, component.name)
+			}
+
+			if strings.TrimSpace(component.ref.Tag) == "" {
+				return errors.Errorf("cluster_profile.components.%s.%s.tag is required", clusterType, component.name)
+			}
+		}
+	}
+
+	return nil
+}
+
+func parseExactPackageVersion(version string) (string, error) {
+	if strings.TrimSpace(version) != version || !strings.HasPrefix(version, "v") {
+		return "", errors.Errorf("cluster version %q must use v-prefixed semantic version", version)
+	}
+
+	if _, err := semver.StrictNewVersion(strings.TrimPrefix(version, "v")); err != nil {
+		return "", errors.Wrapf(err, "invalid cluster version %q", version)
+	}
+
+	return version, nil
+}
+
+type clusterProfileComponent struct {
+	name string
+	ref  ClusterImageRef
+}
+
+func requiredClusterProfileComponents(clusterType string, components ClusterProfileComponents) []clusterProfileComponent {
+	switch clusterType {
+	case v1.SSHClusterType:
+		return []clusterProfileComponent{
+			{name: "ray_runtime", ref: components.RayRuntime},
+			{name: "node_agent", ref: components.NodeAgent},
+			{name: "node_exporter", ref: components.NodeExporter},
+			{name: "vmagent", ref: components.VMAgent},
+		}
+	case v1.KubernetesClusterType:
+		return []clusterProfileComponent{
+			{name: "kubernetes_runtime", ref: components.KubernetesRuntime},
+			{name: "router", ref: components.Router},
+			{name: "node_agent", ref: components.NodeAgent},
+			{name: "node_exporter", ref: components.NodeExporter},
+			{name: "vmagent", ref: components.VMAgent},
+			{name: "kube_state_metrics", ref: components.KubeStateMetrics},
+		}
+	default:
+		return nil
+	}
 }
 
 func (p *Parser) validateEngineConfig(engine *EngineMetadata) error {

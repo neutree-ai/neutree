@@ -1,1 +1,1 @@
-neutree/neutree-serve:latest-rocm
+# AMD SSH cluster runtime image is generated from the release-profile catalog.

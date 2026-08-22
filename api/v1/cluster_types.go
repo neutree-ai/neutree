@@ -26,10 +26,6 @@ const (
 // backed lifecycle.
 const StaticNodeClusterFlowVersionGate = "v1.0.1"
 
-// MinimumSelectableClusterVersionGate is the highest cluster version hidden
-// from version selection and available-version responses.
-const MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
-
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`
@@ -45,7 +41,7 @@ type ClusterSpec struct {
 	Config                    *ClusterConfig                 `json:"config"`
 	ImageRegistry             string                         `json:"image_registry"`
 	AcceleratorVirtualization *AcceleratorVirtualizationSpec `json:"accelerator_virtualization,omitempty" yaml:"accelerator_virtualization,omitempty"`
-	// the neutree serving version, if not specified, the default version will be used
+	// Version is the explicitly selected Neutree serving release for this cluster.
 	Version string `json:"version"`
 }
 
@@ -143,7 +139,6 @@ type KubernetesClusterConfig struct {
 }
 
 type RouterSpec struct {
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 	// access mode for router service, currently support LoadBalancer, NodePort.
 	AccessMode KubernetesAccessMode `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
 	Replicas   int                  `json:"replicas,omitempty" yaml:"replicas,omitempty"`
@@ -303,20 +298,7 @@ const (
 
 // Image name constants for Neutree components.
 const (
-	NeutreeServeImageName  = "neutree/neutree-serve"
-	NeutreeRouterImageName = "neutree/router"
-)
-
-// Image label keys used to identify metadata in container images.
-// These labels are set at build time via `docker build --label`.
-const (
-	// ImageLabelVersion is the version label for container images.
-	// This is the same key as NeutreeServingVersionLabel, used consistently
-	// across image labels, K8s Deployment/Pod labels, and Ray node labels.
-	ImageLabelVersion = NeutreeServingVersionLabel
-	// ImageLabelAcceleratorType is the accelerator type of the image (e.g. "nvidia_gpu", "amd_gpu").
-	// Empty or absent for the default (NVIDIA) variant.
-	ImageLabelAcceleratorType = "neutree.ai/accelerator-type"
+	NeutreeServeImageName = "neutree/neutree-serve"
 )
 
 // GetVersion returns the cluster's desired version from spec, or empty string if nil.

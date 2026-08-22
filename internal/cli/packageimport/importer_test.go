@@ -1,10 +1,15 @@
 package packageimport
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -560,4 +565,40 @@ func TestValidateCapabilities(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRegisterManifestRegistersClusterProfileAfterPackageImport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "/api/v1/clusters/profile_upsert", request.URL.Path)
+
+		var payload struct {
+			Profile *v1.ClusterProfile `json:"profile"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		require.NotNil(t, payload.Profile)
+		assert.Equal(t, "v1.2.0-alpha.1", payload.Profile.GetName())
+		ssh, found := payload.Profile.Spec.ComponentsFor(v1.SSHClusterType)
+		require.True(t, found)
+		assert.Equal(t, "neutree/neutree-serve", ssh.RayRuntime.Image)
+		assert.Equal(t, "v1.2.0-alpha.1", ssh.RayRuntime.Tag)
+		_, found = payload.Profile.Spec.ComponentsFor(v1.KubernetesClusterType)
+		assert.True(t, found)
+		_, _ = writer.Write([]byte(`{"operation":"created"}`))
+	}))
+	defer server.Close()
+
+	importer := NewImporter(client.NewClient(server.URL))
+	result, err := importer.registerManifest(context.Background(), &ImportOptions{}, &PackageManifest{
+		ClusterProfile: &ClusterProfile{
+			Version: "v1.2.0-alpha.1",
+			Components: map[string]ClusterProfileComponents{
+				v1.SSHClusterType:        {RayRuntime: ClusterImageRef{Image: "neutree/neutree-serve", Tag: "v1.2.0-alpha.1"}, NodeAgent: ClusterImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.2.0-alpha.1"}, NodeExporter: ClusterImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"}, VMAgent: ClusterImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"}},
+				v1.KubernetesClusterType: {KubernetesRuntime: ClusterImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.0-alpha.1"}, Router: ClusterImageRef{Image: "neutree/router", Tag: "v1.2.0-alpha.1"}, NodeAgent: ClusterImageRef{Image: "neutree/neutree-node-agent", Tag: "v1.2.0-alpha.1"}, NodeExporter: ClusterImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"}, VMAgent: ClusterImageRef{Image: "victoriametrics/vmagent", Tag: "v1.115.0"}, KubeStateMetrics: ClusterImageRef{Image: "registry.k8s.io/kube-state-metrics/kube-state-metrics", Tag: "v2.15.0"}},
+			},
+		},
+	}, &ImportResult{})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }

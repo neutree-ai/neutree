@@ -5,6 +5,7 @@ import (
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -116,8 +117,9 @@ type ClustersRegisterFunc func(group *gin.RouterGroup, middlewares []gin.Handler
 func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
-			Storage:      deps.Config.Storage,
-			ImageService: registry.NewImageService(),
+			Storage:             deps.Config.Storage,
+			ReleaseInfoProvider: releaseinfo.NewProvider(deps.Config.Storage, deps.Config.Version),
+			ImageService:        registry.NewImageService(),
 		})
 
 		return nil
