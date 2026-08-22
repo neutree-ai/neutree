@@ -96,3 +96,41 @@ func TestGetAcceleratorProfileResponse(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"profile":{"accelerator_type":"amd_gpu"}}`, string(data))
 }
+
+func TestAcceleratorExporterProfileJSONRoundTripStructuredRuntime(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"ascend_npu",
+		"metrics_exporter":{
+			"name":"npu-exporter",
+			"image":"example.com/ascend/npu-exporter:test",
+			"command":["/usr/local/bin/npu-exporter"],
+			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
+			"port":8082,
+			"readiness":{
+				"http_path":"/metrics",
+				"initial_delay_seconds":15,
+				"period_seconds":5,
+				"timeout_seconds":5,
+				"failure_threshold":3
+			},
+			"runtime":{
+				"privileged":true,
+				"volumes":[
+					{"name":"ascend-driver","host_path":{"path":"/usr/local/Ascend/driver","type":"directory"}},
+					{"name":"containerd-socket","host_path":{"path":"/run/containerd/containerd.sock","type":"socket"}}
+				],
+				"volume_mounts":[
+					{"name":"ascend-driver","mount_path":"/usr/local/Ascend/driver"},
+					{"name":"containerd-socket","mount_path":"/run/containerd/containerd.sock","read_only":false}
+				]
+			}
+		}
+	}`
+
+	profile := AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(profileJSON), &profile))
+
+	data, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.JSONEq(t, profileJSON, string(data))
+}

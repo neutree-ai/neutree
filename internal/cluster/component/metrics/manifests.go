@@ -442,6 +442,10 @@ spec:
       containers:
       - name: {{ .ContainerName }}
         image: {{ .Image }}
+{{ if .Command }}
+        command:
+{{ .Command | toYaml | indent 8 }}
+{{ end }}
 {{ if .Args }}
         args:
 {{ .Args | toYaml | indent 8 }}
@@ -453,11 +457,13 @@ spec:
         ports:
         - name: metrics
           containerPort: {{ .Port }}
-{{ if .Capabilities }}
+{{ if .ReadinessProbe }}
+        readinessProbe:
+{{ .ReadinessProbe | toYaml | indent 10 }}
+{{ end }}
+{{ if .SecurityContext }}
         securityContext:
-          capabilities:
-            add:
-{{ .Capabilities | toYaml | indent 12 }}
+{{ .SecurityContext | toYaml | indent 10 }}
 {{ end }}
 {{ if .VolumeMounts }}
         volumeMounts:
