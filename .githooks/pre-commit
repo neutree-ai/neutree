@@ -5,7 +5,7 @@
 #   2. gofmt                       — format check
 #   3. go vet                      — static analysis
 #   4. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
-#   5. migration hygiene           — up/down pairs + unique version numbers (scripts/check-migrations.sh)
+#   5. migration hygiene           — immutable history, pairs, unique versions, seed-owned reload (scripts/check-migrations.sh)
 #   6. golangci-lint (full)        — CI-equivalent lint for non-test/non-mock files
 #   7. go test -short              — affected packages only
 #
