@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -140,6 +141,60 @@ func TestPrepareObsStackDeployConfig(t *testing.T) {
 				assert.FileExists(t, filepath.Join(tempDir, "obs-stack", "grafana", "provisioning", "datasources", "cluster.yml"))
 			}
 		})
+	}
+}
+
+// The version reaches the Compose stack through a template variable, so what the
+// CLI actually deploys is only visible after a real render.
+func TestPrepareObsStackDeployConfig_PinsGrafanaVersion(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := &obsStackInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+	}
+
+	require.NoError(t, prepareObsStackDeployConfig(options))
+
+	rendered, err := os.ReadFile(filepath.Join(tempDir, "obs-stack", "docker-compose.yml"))
+	require.NoError(t, err)
+
+	assert.Contains(t, string(rendered), "grafana/grafana:"+componentversion.Grafana)
+	// The template variable itself must be gone: an unrendered `{{ }}` reaches
+	// Docker verbatim and fails at pull time rather than here.
+	assert.NotContains(t, string(rendered), "{{")
+}
+
+// Grafana is pinned in three places that are only correct together. A bump that
+// lands in one of them produces a deployment pulling an image the offline package
+// does not carry, which only shows up at install time on a machine with no
+// registry to fall back to.
+func TestGrafanaVersionPinsAgree(t *testing.T) {
+	// From this package back to the repository root.
+	root := filepath.Join("..", "..", "..", "..", "..")
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{
+			path: filepath.Join(root, "scripts", "builder", "image-lists", "controlplane", "images.txt"),
+			want: "grafana/grafana:" + componentversion.Grafana,
+		},
+		{
+			path: filepath.Join(root, "deploy", "chart", "neutree", "values.yaml"),
+			want: `tag: "` + componentversion.Grafana + `"`,
+		},
+	} {
+		content, err := os.ReadFile(tc.path)
+		require.NoError(t, err)
+
+		assert.Containsf(t, string(content), tc.want,
+			"%s does not pin Grafana %s", tc.path, componentversion.Grafana)
 	}
 }
 
