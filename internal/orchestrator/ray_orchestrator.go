@@ -111,7 +111,7 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 		return nil, errors.Wrap(err, "failed to get engine")
 	}
 
-	modelRegistry, err := getEndpointModelRegistry(o.storage, endpoint)
+	modelRegistry, err := resolveEndpointModelRegistry(o.storage, endpoint)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get model registry")
 	}
@@ -152,8 +152,9 @@ func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
 	}
 
-	// validate model registry status
-	if ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+	// An endpoint that names no registry has nothing to validate here.
+	if ctx.ModelRegistry != nil &&
+		(ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED) {
 		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
 	}
 
@@ -185,7 +186,7 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 		return err
 	}
 
-	if !isNew {
+	if !isNew && ctx.ModelRegistry != nil {
 		// always exec connect model to cluster, for cluster may dynamic scale, we need ensure model exists on all cluster nodes.
 		// todo: In order to reduce model connection actions, a new controller may be created in the future to uniformly manage model connections on the cluster.
 		err = o.connectSSHClusterEndpointModel(*ctx.ModelRegistry, *ctx.Endpoint, connect)
@@ -913,7 +914,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	}
 
 	modelArgs := map[string]interface{}{
-		"registry_type": modelRegistry.Spec.Type,
+		"registry_type": endpointModelRegistryType(modelRegistry),
 		"name":          endpoint.Spec.Model.Name,
 		"file":          endpoint.Spec.Model.File,
 		"version":       endpoint.Spec.Model.Version,
@@ -934,8 +935,10 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		modelCacheRelativePath = modelCaches[0].Name
 	}
 
-	switch modelRegistry.Spec.Type {
-	case v1.BentoMLModelRegistryType:
+	// With no registry there is nothing to place from: modelArgs keeps the bare
+	// name / version the spec carries.
+	switch endpointModelRegistryType(modelRegistry) {
+	case string(v1.BentoMLModelRegistryType):
 		registryURL, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if registryURL != nil && registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
@@ -951,7 +954,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
 			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 		}
-	case v1.HuggingFaceModelRegistryType:
+	case string(v1.HuggingFaceModelRegistryType):
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
 			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials

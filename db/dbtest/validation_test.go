@@ -797,3 +797,59 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 		t.Log("NULL accelerator accepted successfully")
 	})
 }
+
+// Migration 090: the database no longer requires spec.model.registry. Whether an
+// endpoint needs one is decided by the API, not here.
+func TestEndpointModelRegistryOptional(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	insert := func(registry string, name string) string {
+		return fmt.Sprintf(`
+			INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Endpoint',
+				ROW(
+					'test-cluster',
+					ROW('%s', '%s', '', 'v1', '', NULL)::api.model_spec,
+					ROW('flex', 'v1')::api.endpoint_engine_spec,
+					ROW('4', '2', NULL, '16')::api.resource_spec,
+					ROW(1)::api.replica_spec,
+					NULL,
+					NULL,
+					NULL
+				)::api.endpoint_spec,
+				ROW('test-ep-%s', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`, registry, name, name)
+	}
+
+	t.Run("endpoint without a model registry is accepted", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if _, err = tx.ExecContext(ctx, insert("", "builtin-model")); err != nil {
+			t.Fatalf("expected registry-less endpoint to be accepted, got: %v", err)
+		}
+	})
+
+	t.Run("endpoint with a model registry is still accepted", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if _, err = tx.ExecContext(ctx, insert("test-registry", "registry-model")); err != nil {
+			t.Fatalf("expected registry-backed endpoint to be accepted, got: %v", err)
+		}
+	})
+}

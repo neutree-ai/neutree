@@ -4113,3 +4113,33 @@ func TestRayOrchestrator_prepareOrchestratorContextForPauseDelete_NoDashboardURL
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dashboard URL")
 }
+
+// The API admits endpoints that name no model registry, so the deploy path has to
+// render one. Every registry-shaped step below would otherwise nil-deref, leaving
+// such an endpoint permanently stuck in reconcile.
+func TestEndpointToApplication_WithoutModelRegistry(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "ocr"},
+		Spec: &v1.EndpointSpec{
+			Engine:            &v1.EndpointEngineSpec{Engine: "flex", Version: "1.0.0"},
+			Resources:         &v1.ResourceSpec{Accelerator: map[string]string{}},
+			DeploymentOptions: map[string]interface{}{},
+			Model:             &v1.ModelSpec{Name: "packaged-ocr", Version: "v2"},
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, nil, nil, nil, &acceleratormocks.MockManager{})
+
+	require.NoError(t, err)
+
+	modelArgs, ok := app.Args["model"].(map[string]interface{})
+	require.True(t, ok)
+
+	assert.Equal(t, "packaged-ocr", modelArgs["name"])
+	// No registry type to branch on, and no version suffix to disambiguate
+	// against: the engine serves the bare name.
+	assert.Equal(t, "", modelArgs["registry_type"])
+	assert.Equal(t, "packaged-ocr", modelArgs["serve_name"])
+	// Registry-specific placement never ran, so no path was invented.
+	assert.NotContains(t, modelArgs, "registry_path")
+}

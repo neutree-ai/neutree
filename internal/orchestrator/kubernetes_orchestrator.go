@@ -74,7 +74,7 @@ func (k *kubernetesOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoin
 		return nil, errors.Wrap(err, "failed to get engine")
 	}
 
-	modelRegistry, err := getEndpointModelRegistry(k.storage, endpoint)
+	modelRegistry, err := resolveEndpointModelRegistry(k.storage, endpoint)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get model registry")
 	}
@@ -114,8 +114,9 @@ func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) 
 		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
 	}
 
-	// validate model registry status
-	if ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED {
+	// An endpoint that names no registry has nothing to validate here.
+	if ctx.ModelRegistry != nil &&
+		(ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED) {
 		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
 	}
 

@@ -384,7 +384,7 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 		"file":          endpoint.Spec.Model.File,
 		"task":          endpoint.Spec.Model.Task,
 		"path":          endpoint.Spec.Model.Name, // default to model name
-		"registry_type": string(modelRegistry.Spec.Type),
+		"registry_type": endpointModelRegistryType(modelRegistry),
 	}
 
 	modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
@@ -407,8 +407,10 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		modelCacheRelativePath = modelCaches[0].Name
 	}
 
-	switch modelRegistry.Spec.Type {
-	case v1.BentoMLModelRegistryType:
+	// With no registry there is nothing to place from: the model args keep the
+	// bare name / version the spec carries.
+	switch endpointModelRegistryType(modelRegistry) {
+	case string(v1.BentoMLModelRegistryType):
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
@@ -439,7 +441,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			})
 		}
 
-	case v1.HuggingFaceModelRegistryType:
+	case string(v1.HuggingFaceModelRegistryType):
 		data.Env[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
