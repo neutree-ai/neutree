@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">Ascend NPU 监控端到端流程</title>
+  <desc id="diagram-desc">Planner 下发 NodeAgent 和 NPU Exporter 契约，NodeAgent 按 accelerator_type 选择一个企业 NPU Adapter 对象，再按 cluster_type 断言 Kubernetes 或 Static 能力接口。Adapter 使用驱动发现硬件，并将当前集群的强类型 evidence 转换为设备快照及 Neutree 指标。原始 Exporter 指标保持 vmagent 旁路，同时明确各类降级和 Feature Discovery 排除边界。</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #111827; letter-spacing: 0; }
+      .title { font-size: 28px; font-weight: 700; }
+      .subtitle { font-size: 14px; fill: #6b7280; }
+      .lane-title { font-size: 15px; font-weight: 700; }
+      .section-title { font-size: 17px; font-weight: 700; }
+      .node-title { font-size: 15px; font-weight: 700; }
+      .node-text { font-size: 12.5px; fill: #4b5563; }
+      .tiny { font-size: 11.5px; fill: #6b7280; }
+      .arrow-label { font-size: 11.5px; font-weight: 600; }
+      .badge-text { font-size: 12px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .step-text { font-size: 13px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .text-white { fill: #ffffff; }
+      .lane { fill: #f9fafb; stroke: #e5e7eb; stroke-width: 1.5; }
+      .control-lane { fill: #fff7ed; stroke: #fed7aa; stroke-width: 1.5; }
+      .degrade-lane { fill: #fffdf7; stroke: #fde68a; stroke-width: 1.5; }
+      .box { fill: #ffffff; stroke: #d1d5db; stroke-width: 1.5; }
+      .box-blue { fill: #eff6ff; stroke: #93c5fd; stroke-width: 1.5; }
+      .box-green { fill: #ecfdf5; stroke: #6ee7b7; stroke-width: 1.5; }
+      .box-orange { fill: #fff7ed; stroke: #fdba74; stroke-width: 1.5; }
+      .box-gray { fill: #f9fafb; stroke: #d1d5db; stroke-width: 1.5; }
+      .box-red { fill: #fef2f2; stroke: #fca5a5; stroke-width: 1.5; }
+      .group-blue { fill: #f8fbff; stroke: #60a5fa; stroke-width: 1.5; }
+      .group-green { fill: #f7fefb; stroke: #6ee7b7; stroke-width: 1.5; }
+      .arrow-blue { fill: none; stroke: #2563eb; stroke-width: 2.2; marker-end: url(#arrow-blue); }
+      .arrow-green { fill: none; stroke: #059669; stroke-width: 2.2; marker-end: url(#arrow-green); }
+      .arrow-orange { fill: none; stroke: #ea580c; stroke-width: 2.2; marker-end: url(#arrow-orange); }
+      .arrow-gray { fill: none; stroke: #6b7280; stroke-width: 2; marker-end: url(#arrow-gray); }
+      .arrow-dashed { stroke-dasharray: 7 6; }
+      .arrow-red { fill: none; stroke: #dc2626; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow-alert); }
+    </style>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/></marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/></marker>
+    <marker id="arrow-alert" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/></marker>
+  </defs>
+
+  <rect width="1600" height="1200" fill="#ffffff"/>
+  <text x="40" y="48" class="title">Ascend NPU 监控端到端流程</text>
+  <text x="40" y="77" class="subtitle">控制契约、硬件发现、动态证据归属、通用快照与指标输出</text>
+
+  <!-- Control plane -->
+  <rect x="40" y="105" width="1520" height="150" rx="8" class="control-lane"/>
+  <text x="60" y="132" class="lane-title" fill="#9a3412">控制面 · 部署与显式契约</text>
+
+  <rect x="75" y="145" width="245" height="75" rx="8" class="box-orange"/>
+  <circle cx="105" cy="182" r="17" fill="#ea580c"/>
+  <path d="M 96 175 H 114 M 96 182 H 114 M 96 189 H 108" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <text x="132" y="177" class="node-title">Planner + 企业插件</text>
+  <text x="132" y="199" class="node-text">按集群模式生成组件规格</text>
+
+  <rect x="375" y="145" width="260" height="75" rx="8" class="box-orange"/>
+  <circle cx="405" cy="182" r="17" fill="#ea580c"/>
+  <path d="M 398 172 H 409 L 414 177 V 193 H 398 Z M 409 172 V 178 H 414" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="432" y="177" class="node-title">组件契约 / Profile</text>
+  <text x="432" y="199" class="node-text">镜像、参数、端口、挂载、探针</text>
+
+  <rect x="710" y="135" width="365" height="95" rx="8" class="box-orange"/>
+  <circle cx="742" cy="182" r="18" fill="#ea580c"/>
+  <path d="M 734 175 H 750 V 189 H 734 Z M 730 179 H 734 M 750 179 H 754 M 730 185 H 734 M 750 185 H 754" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="772" y="160" class="node-title">NodeAgent 共享层</text>
+  <text x="772" y="181" class="node-text">accelerator_type 选择唯一 Adapter</text>
+  <text x="772" y="201" class="node-text">cluster_type 断言 K8s / Static 能力</text>
+  <text x="772" y="220" class="tiny">独立挂载 driver/DCMI；负责通用校验与序列化</text>
+
+  <rect x="1160" y="145" width="350" height="75" rx="8" class="box-orange"/>
+  <circle cx="1192" cy="182" r="17" fill="#ea580c"/>
+  <path d="M 1184 188 A 10 10 0 1 1 1200 188 M 1192 188 L 1198 178" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="1220" y="177" class="node-title">NPU Exporter 运行契约</text>
+  <text x="1220" y="199" class="node-text">:8082、独立的 driver/DCMI/sysfs/runtime 挂载</text>
+
+  <!-- Data plane background -->
+  <rect x="40" y="290" width="1520" height="630" rx="8" class="lane"/>
+  <text x="60" y="319" class="lane-title">数据面 · 一次 scrape 周期</text>
+
+  <!-- Evidence inputs -->
+  <text x="75" y="349" class="section-title">原始输入与证据</text>
+  <text x="238" y="349" class="tiny">Common + 当前集群 evidence</text>
+
+  <rect x="75" y="365" width="330" height="75" rx="8" class="box-green"/>
+  <circle cx="105" cy="402" r="17" fill="#059669"/>
+  <rect x="97" y="394" width="16" height="16" rx="2" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+  <path d="M 101 390 V 394 M 109 390 V 394 M 101 410 V 414 M 109 410 V 414 M 93 398 H 97 M 113 398 H 117 M 93 406 H 97 M 113 406 H 117" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="132" y="395" class="node-title">Ascend 驱动 / DCMI + sysfs</text>
+  <text x="132" y="417" class="node-text">静态 inventory 的权威来源</text>
+
+  <rect x="75" y="475" width="330" height="95" rx="8" class="box-blue"/>
+  <circle cx="105" cy="522" r="17" fill="#2563eb"/>
+  <path d="M 96 529 A 10 10 0 1 1 114 529 M 105 529 L 111 515" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="132" y="505" class="node-title">NPU Exporter :8082</text>
+  <text x="132" y="527" class="node-text">物理动态指标、process_info</text>
+  <text x="132" y="547" class="node-text">container_npu；310P DDR / 910B HBM</text>
+
+  <rect x="75" y="595" width="330" height="115" rx="8" class="box-blue"/>
+  <circle cx="105" cy="652" r="17" fill="#2563eb"/>
+  <text x="105" y="652" class="badge-text">K8s</text>
+  <text x="132" y="626" class="node-title">KubernetesAcceleratorEvidence</text>
+  <text x="132" y="648" class="node-text">PodResources: ResourceName + DeviceIDs</text>
+  <text x="132" y="669" class="node-text">Endpoint Pod: ns/name/UID/node/labels</text>
+  <text x="132" y="690" class="node-text">每 Pod HAMi annotations（vdie / quota）</text>
+
+  <rect x="75" y="735" width="330" height="85" rx="8" class="box-blue"/>
+  <circle cx="105" cy="777" r="17" fill="#2563eb"/>
+  <path d="M 98 770 H 112 M 105 770 V 784 M 99 784 H 111" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="132" y="769" class="node-title">StaticAcceleratorEvidence</text>
+  <text x="132" y="791" class="node-text">Actor / PID / 子孙进程归属链</text>
+
+  <rect x="75" y="835" width="330" height="65" rx="8" class="box-gray"/>
+  <circle cx="105" cy="867" r="17" fill="#6b7280"/>
+  <text x="105" y="867" class="badge-text">H</text>
+  <text x="132" y="861" class="node-title">HAMi :9395（可选）</text>
+  <text x="132" y="882" class="node-text">仅节点级备用 / 交叉校验</text>
+
+  <!-- Adapter -->
+  <rect x="460" y="315" width="590" height="585" rx="8" class="box"/>
+  <rect x="460" y="315" width="590" height="55" rx="8" fill="#111827"/>
+  <path d="M 460 362 H 1050 V 370 H 460 Z" fill="#111827"/>
+  <circle cx="492" cy="342" r="16" fill="#2563eb"/>
+  <path d="M 484 342 H 500 M 492 334 V 350" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <text x="520" y="348" class="section-title text-white">Enterprise NPU Adapter · 单注册对象 / 厂商语义所有者</text>
+
+  <rect x="495" y="395" width="520" height="80" rx="8" class="box-green"/>
+  <circle cx="525" cy="435" r="16" fill="#059669"/>
+  <text x="525" y="435" class="step-text">1</text>
+  <text x="553" y="426" class="node-title">DiscoverHardware</text>
+  <text x="553" y="448" class="node-text">设备型号、驱动/HCCS capability、ID / UUID；不依赖 Exporter</text>
+
+  <rect x="485" y="495" width="540" height="380" rx="8" class="group-blue"/>
+  <text x="505" y="523" class="node-title" fill="#1d4ed8">BuildKubernetesMetrics / BuildStaticMetrics</text>
+
+  <rect x="510" y="535" width="490" height="75" rx="8" class="box-blue"/>
+  <circle cx="540" cy="572" r="16" fill="#2563eb"/>
+  <text x="540" y="572" class="step-text">2</text>
+  <text x="568" y="564" class="node-title">解析动态指标</text>
+  <text x="568" y="586" class="node-text">Common evidence；私有 parser / builder 复用</text>
+
+  <rect x="510" y="635" width="490" height="145" rx="8" class="box-blue"/>
+  <circle cx="540" cy="681" r="16" fill="#2563eb"/>
+  <text x="540" y="681" class="step-text">3</text>
+  <text x="568" y="660" class="node-title">Allocation Router：精确过滤、解析、校验唯一性</text>
+  <text x="568" y="684" class="node-text">K8s direct：logic ID → DCMI → UUID</text>
+  <text x="568" y="705" class="node-text">HAMi：逐 Pod annotation → vdie UUID + memory quota</text>
+  <text x="568" y="726" class="node-text">Static Ray：Actor PID → 子孙进程 → vdie_id / UUID</text>
+  <text x="568" y="748" class="tiny">HAMi/vNPU：allocated 取 annotation quota；used/util 缺失</text>
+  <text x="568" y="766" class="tiny">Static shared：memory=round(total×fraction)，core=round(100×fraction)</text>
+
+  <rect x="510" y="805" width="490" height="50" rx="8" class="box-blue"/>
+  <circle cx="540" cy="830" r="16" fill="#2563eb"/>
+  <text x="540" y="830" class="step-text">4</text>
+  <text x="568" y="826" class="node-title">校验并输出</text>
+  <text x="568" y="844" class="tiny">只发已注册通用 / vendor info metric ID；缺失或歧义即省略</text>
+
+  <!-- Outputs -->
+  <rect x="1110" y="330" width="420" height="250" rx="8" class="group-green"/>
+  <text x="1130" y="359" class="section-title" fill="#047857">硬件与设备快照</text>
+
+  <rect x="1140" y="385" width="360" height="75" rx="8" class="box-green"/>
+  <circle cx="1170" cy="422" r="16" fill="#059669"/>
+  <path d="M 1162 415 H 1178 V 429 H 1162 Z M 1166 419 H 1174 M 1166 424 H 1174" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round"/>
+  <text x="1198" y="414" class="node-title">AcceleratorHardwareSnapshot</text>
+  <text x="1198" y="437" class="node-text">StaticNodeAcceleratorStatus 完整 inventory</text>
+
+  <rect x="1140" y="485" width="360" height="70" rx="8" class="box-green"/>
+  <circle cx="1170" cy="520" r="16" fill="#059669"/>
+  <path d="M 1162 512 H 1178 V 528 H 1162 Z M 1162 518 H 1178" fill="none" stroke="#ffffff" stroke-width="1.7"/>
+  <text x="1198" y="512" class="node-title">NodeDeviceSnapshot</text>
+  <text x="1198" y="534" class="node-text">共享层组装：hardware + 已验证 allocations</text>
+
+  <rect x="1110" y="600" width="420" height="185" rx="8" class="group-blue"/>
+  <text x="1130" y="629" class="section-title" fill="#1d4ed8">Neutree 指标路径</text>
+
+  <rect x="1140" y="650" width="360" height="55" rx="8" class="box-blue"/>
+  <circle cx="1170" cy="677" r="15" fill="#2563eb"/>
+  <path d="M 1162 683 L 1167 676 L 1172 680 L 1178 670" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1198" y="672" class="node-title">AcceleratorMetricResult</text>
+  <text x="1198" y="691" class="tiny">通用 + 白名单 vendor info metric ID</text>
+
+  <rect x="1140" y="725" width="360" height="40" rx="8" class="box-blue"/>
+  <text x="1160" y="751" class="node-title">共享层 newMetricsCollector → neutree_*</text>
+
+  <rect x="1110" y="805" width="420" height="90" rx="8" class="box-gray"/>
+  <text x="1130" y="831" class="node-title">原始指标旁路</text>
+  <rect x="1140" y="840" width="360" height="40" rx="8" fill="#ffffff" stroke="#9ca3af" stroke-width="1.5"/>
+  <text x="1160" y="866" class="node-title">vmagent ← npu-exporter raw metrics</text>
+
+  <!-- Degradation and explicit exclusions -->
+  <rect x="40" y="950" width="1520" height="155" rx="8" class="degrade-lane"/>
+  <text x="60" y="979" class="lane-title" fill="#92400e">独立降级 · 保留仍可信的路径</text>
+
+  <rect x="65" y="995" width="280" height="85" rx="8" class="box-gray"/>
+  <text x="83" y="1020" class="node-title">Exporter 不可用</text>
+  <text x="83" y="1042" class="node-text">保留驱动 inventory</text>
+  <text x="83" y="1062" class="node-text">省略动态 / 进程指标</text>
+
+  <rect x="360" y="995" width="280" height="85" rx="8" class="box-gray"/>
+  <text x="378" y="1020" class="node-title">驱动 / DCMI 不可用</text>
+  <text x="378" y="1042" class="node-text">不回退 Feature Discovery</text>
+  <text x="378" y="1062" class="node-text">只保留节点 / runtime 状态</text>
+
+  <rect x="655" y="995" width="280" height="85" rx="8" class="box-gray"/>
+  <text x="673" y="1018" class="node-title">归属证据缺失或歧义</text>
+  <text x="673" y="1038" class="tiny">K8s：node allocated/free + 全副本省略</text>
+  <text x="673" y="1056" class="tiny">Ray：仅省略歧义 Actor</text>
+  <text x="673" y="1074" class="tiny">物理 inventory / 动态指标继续输出</text>
+
+  <rect x="950" y="995" width="260" height="85" rx="8" class="box-gray"/>
+  <text x="968" y="1020" class="node-title">HAMi :9395 不可用</text>
+  <text x="968" y="1042" class="node-text">仅失去节点级交叉校验</text>
+  <text x="968" y="1062" class="node-text">不影响 Pod annotation 路径</text>
+
+  <rect x="1225" y="995" width="310" height="85" rx="8" class="box-red"/>
+  <circle cx="1252" cy="1037" r="15" fill="#dc2626"/>
+  <path d="M 1246 1031 L 1258 1043 M 1258 1031 L 1246 1043" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <text x="1276" y="1025" class="node-title" fill="#991b1b">GFD / NPU Feature Discovery</text>
+  <text x="1276" y="1047" class="node-text">不部署、不消费、不作为 fallback</text>
+  <text x="1276" y="1067" class="node-text">仅参考其 PCI/sysfs 识别逻辑</text>
+
+  <!-- Connectors are above lane/group backgrounds and route only through gutters. -->
+  <path d="M 320 182 L 375 182" class="arrow-orange"/>
+  <path d="M 635 182 L 710 182" class="arrow-orange"/>
+  <path d="M 505 145 L 505 124 L 1335 124 L 1335 145" class="arrow-orange"/>
+  <path d="M 892 230 L 892 315" class="arrow-orange"/>
+
+  <path d="M 405 402 L 495 402 L 495 435" class="arrow-green"/>
+  <path d="M 405 522 L 510 522 L 510 572" class="arrow-blue"/>
+  <path d="M 405 652 L 510 652 L 510 681" class="arrow-blue"/>
+  <path d="M 405 777 L 455 777 L 455 720 L 510 720" class="arrow-blue"/>
+  <path d="M 405 866 L 440 866 L 440 758 L 510 758" class="arrow-gray arrow-dashed"/>
+  <path d="M 405 545 L 430 545 L 430 910 L 1090 910 L 1090 855 L 1140 855" class="arrow-gray arrow-dashed"/>
+
+  <path d="M 755 475 L 980 475 L 980 535" class="arrow-green"/>
+  <path d="M 755 610 L 755 635" class="arrow-blue"/>
+  <path d="M 755 780 L 755 805" class="arrow-blue"/>
+  <path d="M 1015 435 L 1140 422" class="arrow-green"/>
+  <path d="M 1000 704 L 1072 704 L 1072 520 L 1140 520" class="arrow-blue"/>
+  <path d="M 1000 830 L 1088 830 L 1088 677 L 1140 677" class="arrow-blue"/>
+  <path d="M 1320 460 L 1320 485" class="arrow-green"/>
+  <path d="M 1320 705 L 1320 725" class="arrow-blue"/>
+
+  <text x="332" y="171" class="arrow-label">生成</text>
+  <text x="654" y="171" class="arrow-label">下发</text>
+  <text x="900" y="117" class="arrow-label">Profile 部署</text>
+  <text x="905" y="278" class="arrow-label">选择并调用</text>
+  <text x="415" y="390" class="tiny">直连</text>
+  <text x="415" y="511" class="tiny">原文</text>
+  <text x="416" y="641" class="tiny">Pod</text>
+  <text x="416" y="766" class="tiny">PID</text>
+  <text x="409" y="851" class="tiny">校验</text>
+
+  <!-- Legend -->
+  <text x="50" y="1148" class="lane-title">图例</text>
+  <line x1="105" y1="1143" x2="155" y2="1143" stroke="#ea580c" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
+  <text x="168" y="1148" class="node-text">控制 / 部署</text>
+  <line x1="290" y1="1143" x2="340" y2="1143" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <text x="353" y="1148" class="node-text">硬件发现 / inventory</text>
+  <line x1="535" y1="1143" x2="585" y2="1143" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <text x="598" y="1148" class="node-text">证据 / 归属 / 通用指标</text>
+  <line x1="830" y1="1143" x2="880" y2="1143" stroke="#6b7280" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow-gray)"/>
+  <text x="893" y="1148" class="node-text">可选校验 / 原始旁路</text>
+  <line x1="1125" y1="1143" x2="1175" y2="1143" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow-alert)"/>
+  <text x="1188" y="1148" class="node-text">排除边界</text>
+  <text x="50" y="1180" class="tiny">每个类型只注册一个 Adapter 对象；NodeAgent 按 cluster_type 断言能力，厂商字段、设备 ID 和资源语义仍只由 Adapter 解释。</text>
+</svg>
