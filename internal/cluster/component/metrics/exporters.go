@@ -37,12 +37,14 @@ type metricsAcceleratorExporter struct {
 	AcceleratorType string
 	ExporterName    string
 	Image           string
+	Command         []string
 	Args            []string
 	Env             []corev1.EnvVar
 	Port            int
 	MetricsPath     string
 
-	Capabilities []corev1.Capability
+	ReadinessProbe  *corev1.Probe
+	SecurityContext *corev1.SecurityContext
 
 	NodeSelector   map[string]string
 	ConfigFileData map[string]string
@@ -95,7 +97,11 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorExporter, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
-		exporter, ok := m.buildAcceleratorExporter(ctx, acceleratorType)
+		exporter, ok, err := m.buildAcceleratorExporter(ctx, acceleratorType)
+		if err != nil {
+			return nil, fmt.Errorf("build accelerator exporter for %s: %w", acceleratorType, err)
+		}
+
 		if ok {
 			candidates = append(candidates, exporter)
 		}
@@ -115,27 +121,43 @@ func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExport
 func (m *MetricsComponent) buildAcceleratorExporter(
 	ctx context.Context,
 	acceleratorType string,
-) (metricsAcceleratorExporter, bool) {
+) (metricsAcceleratorExporter, bool, error) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
 	if err != nil {
 		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
-		return metricsAcceleratorExporter{}, false
+		return metricsAcceleratorExporter{}, false, nil
 	}
 
 	if profile == nil || profile.MetricsExporter == nil {
-		return metricsAcceleratorExporter{}, false
+		return metricsAcceleratorExporter{}, false, nil
 	}
 
 	exporterProfile := profile.MetricsExporter
 	if strings.TrimSpace(exporterProfile.Image) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {
-		return metricsAcceleratorExporter{}, false
+		return metricsAcceleratorExporter{}, false, nil
 	}
 
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
-	configFileData, volumeMounts, volumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
 	runtime := exporterProfile.Runtime
+	readinessProbe, err := buildExporterReadinessProbe(exporterProfile.Readiness)
+	if err != nil {
+		return metricsAcceleratorExporter{}, false, err
+	}
+
+	runtimeVolumeMounts, runtimeVolumes, err := buildExporterRuntimeVolumes(runtime)
+	if err != nil {
+		return metricsAcceleratorExporter{}, false, err
+	}
+
+	configFileData, configVolumeMounts, configVolumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
+	if err := validateExporterVolumeCollisions(runtimeVolumeMounts, runtimeVolumes, configVolumeMounts, configVolumes); err != nil {
+		return metricsAcceleratorExporter{}, false, err
+	}
+
+	volumeMounts := append(append([]corev1.VolumeMount{}, configVolumeMounts...), runtimeVolumeMounts...)
+	volumes := append(append([]corev1.Volume{}, configVolumes...), runtimeVolumes...)
 
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
@@ -144,11 +166,13 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		AcceleratorType: acceleratorType,
 		ExporterName:    exporterProfile.Name,
 		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Command:         append([]string{}, exporterProfile.Command...),
 		Args:            append([]string{}, exporterProfile.Args...),
 		Env:             buildExporterEnv(exporterProfile.Env),
 		Port:            exporterProfile.Port,
 		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		Capabilities:    exporterRuntimeCapabilities(runtime),
+		ReadinessProbe:  readinessProbe,
+		SecurityContext: exporterRuntimeSecurityContext(runtime),
 		NodeSelector:    exporterRuntimeNodeSelector(runtime),
 		ConfigFileData:  configFileData,
 		ConfigChecksum:  configChecksum,
@@ -156,7 +180,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Volumes:         volumes,
 	}
 
-	return exporter, true
+	return exporter, true, nil
 }
 
 func acceleratorExporterName(acceleratorType string, exporterName string) string {
