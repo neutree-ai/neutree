@@ -1,0 +1,59 @@
+# Sanitized representative subset captured on 2026-08-19 from NPU Exporter v26.1.0 on Ascend 310P.
+# Device UUIDs and PCI bus IDs are synthetic. Runtime identity labels are empty, and
+# scrape timestamps are removed. Metric names, label names, product strings, and
+# numeric sample values are preserved from the captured response.
+
+# HELP machine_card_nums Amount of card installed on the machine.
+# TYPE machine_card_nums gauge
+machine_card_nums 2
+# HELP machine_npu_nums Amount of npu installed on the machine.
+# TYPE machine_npu_nums gauge
+machine_npu_nums 4
+# HELP node_base_info the common information of this node
+# TYPE node_base_info gauge
+node_base_info{driverVersion="25.5.2",exporterVersion="v26.1.0_linux-aarch64"} 1
+# HELP npu_exporter_version_info exporter version with value '1'
+# TYPE npu_exporter_version_info gauge
+npu_exporter_version_info{exporterVersion="v26.1.0_linux-aarch64"} 1
+
+# HELP npu_chip_info_name the Ascend npu name with value '1'
+# TYPE npu_chip_info_name gauge
+npu_chip_info_name{container_name="",id="0",name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000001"} 1
+npu_chip_info_name{container_name="",id="1",name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000002"} 1
+npu_chip_info_name{container_name="",id="2",name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000003"} 1
+npu_chip_info_name{container_name="",id="3",name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000004"} 1
+
+# HELP npu_chip_info_product_type the npu product_type information
+# TYPE npu_chip_info_product_type gauge
+npu_chip_info_product_type{container_name="",id="0",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",product_type="Atlas 300I Duo",vdie_id="00000000-00000000-00000000-00000001"} 1
+npu_chip_info_product_type{container_name="",id="1",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",product_type="Atlas 300I Duo",vdie_id="00000000-00000000-00000000-00000002"} 1
+npu_chip_info_product_type{container_name="",id="2",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",product_type="Atlas 300I Duo",vdie_id="00000000-00000000-00000000-00000003"} 1
+npu_chip_info_product_type{container_name="",id="3",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",product_type="Atlas 300I Duo",vdie_id="00000000-00000000-00000000-00000004"} 1
+
+# HELP npu_chip_info_temperature the npu temperature
+# TYPE npu_chip_info_temperature gauge
+npu_chip_info_temperature{container_name="",id="0",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000001"} 49
+npu_chip_info_temperature{container_name="",id="1",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000002"} 51
+npu_chip_info_temperature{container_name="",id="2",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000003"} 51
+npu_chip_info_temperature{container_name="",id="3",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000004"} 50
+
+# HELP npu_chip_info_total_memory the npu total memory
+# TYPE npu_chip_info_total_memory gauge
+npu_chip_info_total_memory{container_name="",id="0",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000001"} 44278
+npu_chip_info_total_memory{container_name="",id="1",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000002"} 43693
+npu_chip_info_total_memory{container_name="",id="2",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000003"} 44278
+npu_chip_info_total_memory{container_name="",id="3",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000004"} 43693
+
+# HELP npu_chip_info_used_memory the npu used memory
+# TYPE npu_chip_info_used_memory gauge
+npu_chip_info_used_memory{container_name="",id="0",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000001"} 1826
+npu_chip_info_used_memory{container_name="",id="1",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000002"} 1124
+npu_chip_info_used_memory{container_name="",id="2",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000003"} 1969
+npu_chip_info_used_memory{container_name="",id="3",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000004"} 976
+
+# HELP npu_chip_info_utilization the ai core utilization
+# TYPE npu_chip_info_utilization gauge
+npu_chip_info_utilization{container_name="",id="0",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000001"} 0
+npu_chip_info_utilization{container_name="",id="1",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:01:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000002"} 0
+npu_chip_info_utilization{container_name="",id="2",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000003"} 0
+npu_chip_info_utilization{container_name="",id="3",model_name="310P3-Ascend-V1",namespace="",pcie_bus_info="0000:02:00.0",pod_name="",vdie_id="00000000-00000000-00000000-00000004"} 0

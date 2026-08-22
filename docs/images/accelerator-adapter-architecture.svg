@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1180" viewBox="0 0 1700 1180" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">加速器 Adapter 统一目标与 NVIDIA 迁移</title>
+  <desc id="diagram-desc">上半部分展示 Planner 向 NodeAgent 下发显式 accelerator_type 和 cluster_type 后，每个厂商只选择一个 Adapter 注册对象，再断言 Kubernetes 或 Static 能力接口。NVIDIA Adapter 和 NPU Adapter 分别调用厂商驱动、解释当前集群的强类型 evidence，并输出统一快照和指标。下半部分展示 NVIDIA 当前仍由共享层直接解析 DCGM、合并受 Exporter 成功约束的 NVML 信息并解释 allocation，迁移完成前保留为互斥的 legacy 路径。</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #111827; letter-spacing: 0; }
+      .title { font-size: 28px; font-weight: 700; }
+      .subtitle { font-size: 14px; fill: #6b7280; }
+      .lane-title { font-size: 16px; font-weight: 700; }
+      .group-title { font-size: 18px; font-weight: 700; }
+      .node-title { font-size: 15px; font-weight: 700; }
+      .node-text { font-size: 12.5px; fill: #4b5563; }
+      .tiny { font-size: 11.5px; fill: #6b7280; }
+      .arrow-label { font-size: 11.5px; font-weight: 600; }
+      .badge { font-size: 11px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .text-white { fill: #ffffff; }
+      .lane { fill: #f9fafb; stroke: #e5e7eb; stroke-width: 1.5; }
+      .vendor-nvidia { fill: #f8fbff; stroke: #93c5fd; stroke-width: 1.5; }
+      .vendor-npu { fill: #f7fefb; stroke: #6ee7b7; stroke-width: 1.5; }
+      .legacy-lane { fill: #f9fafb; stroke: #9ca3af; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #d1d5db; stroke-width: 1.5; }
+      .box-blue { fill: #eff6ff; stroke: #93c5fd; stroke-width: 1.5; }
+      .box-green { fill: #ecfdf5; stroke: #6ee7b7; stroke-width: 1.5; }
+      .box-orange { fill: #fff7ed; stroke: #fdba74; stroke-width: 1.5; }
+      .box-gray { fill: #f3f4f6; stroke: #9ca3af; stroke-width: 1.5; }
+      .box-red { fill: #fef2f2; stroke: #fca5a5; stroke-width: 1.5; }
+      .adapter-blue { fill: #ffffff; stroke: #2563eb; stroke-width: 2; }
+      .adapter-green { fill: #ffffff; stroke: #059669; stroke-width: 2; }
+      .arrow-blue { fill: none; stroke: #2563eb; stroke-width: 2.2; marker-end: url(#arrow-blue); }
+      .arrow-green { fill: none; stroke: #059669; stroke-width: 2.2; marker-end: url(#arrow-green); }
+      .arrow-orange { fill: none; stroke: #ea580c; stroke-width: 2.2; marker-end: url(#arrow-orange); }
+      .arrow-gray { fill: none; stroke: #6b7280; stroke-width: 2; marker-end: url(#arrow-gray); }
+      .arrow-purple { fill: none; stroke: #7c3aed; stroke-width: 2; marker-end: url(#arrow-purple); }
+      .dashed { stroke-dasharray: 7 6; }
+    </style>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/></marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/></marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/></marker>
+  </defs>
+
+  <rect width="1700" height="1180" fill="#ffffff"/>
+  <text x="40" y="48" class="title">加速器 Adapter 统一目标与 NVIDIA 迁移</text>
+  <text x="40" y="77" class="subtitle">统一接口不等于当前实现：目标态按厂商隔离语义，NVIDIA legacy DCGM 在验收前互斥保留</text>
+
+  <!-- Region backgrounds -->
+  <rect x="40" y="105" width="1620" height="650" rx="8" class="lane"/>
+  <rect x="65" y="280" width="750" height="445" rx="8" class="vendor-nvidia"/>
+  <rect x="885" y="280" width="750" height="445" rx="8" class="vendor-npu"/>
+  <rect x="40" y="790" width="1620" height="280" rx="8" class="legacy-lane"/>
+
+  <!-- Node shapes: control -->
+  <rect x="75" y="145" width="330" height="82" rx="8" class="box-orange"/>
+  <circle cx="108" cy="186" r="18" fill="#ea580c"/>
+  <rect x="500" y="130" width="690" height="112" rx="8" class="box-orange"/>
+  <circle cx="535" cy="186" r="19" fill="#ea580c"/>
+  <rect x="1300" y="145" width="310" height="82" rx="8" class="box-red"/>
+  <circle cx="1332" cy="186" r="17" fill="#dc2626"/>
+
+  <!-- Node shapes: NVIDIA target -->
+  <rect x="90" y="342" width="210" height="88" rx="8" class="box-green"/>
+  <circle cx="119" cy="386" r="16" fill="#059669"/>
+  <rect x="320" y="342" width="210" height="88" rx="8" class="box-blue"/>
+  <circle cx="349" cy="386" r="16" fill="#2563eb"/>
+  <rect x="550" y="342" width="235" height="88" rx="8" class="box-blue"/>
+  <circle cx="579" cy="386" r="16" fill="#2563eb"/>
+  <rect x="205" y="480" width="470" height="112" rx="8" class="adapter-blue"/>
+  <rect x="205" y="480" width="470" height="38" rx="8" fill="#2563eb"/>
+  <rect x="205" y="510" width="470" height="8" fill="#2563eb"/>
+  <rect x="90" y="630" width="220" height="68" rx="8" class="box-green"/>
+  <rect x="325" y="630" width="245" height="68" rx="8" class="box-blue"/>
+  <rect x="585" y="630" width="200" height="68" rx="8" class="box-gray"/>
+
+  <!-- Node shapes: NPU target -->
+  <rect x="910" y="342" width="210" height="88" rx="8" class="box-green"/>
+  <circle cx="939" cy="386" r="16" fill="#059669"/>
+  <rect x="1140" y="342" width="210" height="88" rx="8" class="box-blue"/>
+  <circle cx="1169" cy="386" r="16" fill="#2563eb"/>
+  <rect x="1370" y="342" width="235" height="88" rx="8" class="box-blue"/>
+  <circle cx="1399" cy="386" r="16" fill="#2563eb"/>
+  <rect x="1025" y="480" width="470" height="112" rx="8" class="adapter-green"/>
+  <rect x="1025" y="480" width="470" height="38" rx="8" fill="#059669"/>
+  <rect x="1025" y="510" width="470" height="8" fill="#059669"/>
+  <rect x="910" y="630" width="220" height="68" rx="8" class="box-green"/>
+  <rect x="1145" y="630" width="245" height="68" rx="8" class="box-blue"/>
+  <rect x="1405" y="630" width="200" height="68" rx="8" class="box-gray"/>
+
+  <!-- Node shapes: NVIDIA legacy -->
+  <rect x="70" y="845" width="210" height="78" rx="8" class="box-gray"/>
+  <rect x="330" y="845" width="210" height="78" rx="8" class="box-gray"/>
+  <rect x="590" y="830" width="475" height="112" rx="8" class="box-gray"/>
+  <rect x="1115" y="845" width="210" height="78" rx="8" class="box-gray"/>
+  <rect x="1375" y="830" width="240" height="112" rx="8" class="box-orange"/>
+  <rect x="70" y="963" width="240" height="70" rx="8" class="box-gray"/>
+  <rect x="350" y="963" width="240" height="70" rx="8" class="box-gray"/>
+  <rect x="630" y="963" width="260" height="70" rx="8" class="box-green"/>
+
+  <!-- Connectors: control and target -->
+  <path d="M 405 186 L 500 186" class="arrow-orange"/>
+  <path d="M 690 242 L 690 260 L 310 260 L 310 480" class="arrow-orange"/>
+  <path d="M 1000 242 L 1000 260 L 1130 260 L 1130 480" class="arrow-orange"/>
+
+  <path d="M 195 430 L 195 454 L 315 454 L 315 480" class="arrow-green"/>
+  <path d="M 425 430 L 425 480" class="arrow-blue"/>
+  <path d="M 668 430 L 668 454 L 565 454 L 565 480" class="arrow-blue"/>
+  <path d="M 350 592 L 350 610 L 200 610 L 200 630" class="arrow-green"/>
+  <path d="M 530 592 L 530 610 L 448 610 L 448 630" class="arrow-blue"/>
+  <path d="M 425 342 L 425 328 L 800 328 L 800 664 L 785 664" class="arrow-gray dashed"/>
+
+  <path d="M 1015 430 L 1015 454 L 1135 454 L 1135 480" class="arrow-green"/>
+  <path d="M 1245 430 L 1245 480" class="arrow-blue"/>
+  <path d="M 1488 430 L 1488 454 L 1385 454 L 1385 480" class="arrow-blue"/>
+  <path d="M 1170 592 L 1170 610 L 1020 610 L 1020 630" class="arrow-green"/>
+  <path d="M 1350 592 L 1350 610 L 1268 610 L 1268 630" class="arrow-blue"/>
+  <path d="M 1245 342 L 1245 328 L 1620 328 L 1620 664 L 1605 664" class="arrow-gray dashed"/>
+
+  <!-- Connectors: NVIDIA legacy -->
+  <path d="M 280 884 L 330 884" class="arrow-blue"/>
+  <path d="M 540 884 L 590 884" class="arrow-blue"/>
+  <path d="M 1065 884 L 1115 884" class="arrow-blue"/>
+  <path d="M 310 998 L 350 998" class="arrow-purple dashed"/>
+  <path d="M 420 963 L 420 950 L 175 950 L 175 923" class="arrow-purple dashed"/>
+  <path d="M 530 963 L 530 950 L 700 950 L 700 942" class="arrow-purple dashed"/>
+  <path d="M 760 963 L 760 942" class="arrow-green dashed"/>
+  <path d="M 1325 884 L 1375 884" class="arrow-orange"/>
+
+  <!-- Titles and control text -->
+  <text x="60" y="134" class="lane-title">目标态 · 显式类型选择与厂商语义隔离</text>
+  <text x="108" y="186" class="badge">P</text>
+  <text x="139" y="178" class="node-title">Planner / Accelerator Profile</text>
+  <text x="139" y="201" class="node-text">原子下发镜像 / 两类 type / target / runtime</text>
+  <text x="535" y="186" class="badge">NA</text>
+  <text x="568" y="163" class="node-title">NodeAgent 共享层 + Adapter Registry</text>
+  <text x="568" y="185" class="node-text">accelerator_type 选择唯一 Adapter；CPU-only 不选择</text>
+  <text x="568" y="206" class="node-text">cluster_type 断言 K8s / Static；只采当前 evidence</text>
+  <text x="568" y="226" class="tiny">共享层不解释驱动、Exporter 字段、ResourceName、DeviceID、环境变量或进程语义</text>
+  <path d="M 1325 179 L 1339 193 M 1339 179 L 1325 193" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <text x="1362" y="178" class="node-title">GFD / NPU Feature Discovery</text>
+  <text x="1362" y="199" class="node-text">目标数据面不部署、不读取、不 fallback</text>
+  <text x="1362" y="218" class="tiny">仅参考 PCI/sysfs/产品识别实现</text>
+  <text x="422" y="175" class="arrow-label">显式契约</text>
+  <text x="700" y="255" class="arrow-label">nvidia_gpu</text>
+  <text x="1009" y="255" class="arrow-label">npu</text>
+
+  <!-- NVIDIA target text -->
+  <text x="88" y="314" class="group-title">NVIDIA 目标分支</text>
+  <text x="515" y="314" class="tiny">首期：物理 GPU / HAMi core；MIG 待建模</text>
+  <text x="119" y="386" class="badge">NV</text>
+  <text x="148" y="378" class="node-title">NVML + sysfs</text>
+  <text x="148" y="399" class="node-text">UUID / 型号 / 内存 / PCI</text>
+  <text x="148" y="416" class="tiny">NUMA</text>
+  <text x="349" y="386" class="badge">D</text>
+  <text x="378" y="378" class="node-title">DCGM Exporter</text>
+  <text x="378" y="399" class="node-text">动态设备指标原文</text>
+  <text x="579" y="386" class="badge">E</text>
+  <text x="608" y="372" class="node-title">调度 / 进程原始证据</text>
+  <text x="608" y="393" class="node-text">K8s PodResources/HAMi · Static Ray</text>
+  <text x="608" y="412" class="tiny">visible env / nvidia-smi 原文</text>
+  <text x="225" y="505" class="node-title text-white">NVIDIA Adapter · nvidia_gpu · 单注册对象</text>
+  <text x="230" y="542" class="node-title">DiscoverHardware</text>
+  <text x="397" y="542" class="node-text">NVML 驱动探测，Exporter-independent</text>
+  <text x="230" y="568" class="node-title">Cluster capabilities</text>
+  <text x="397" y="568" class="node-text">BuildKubernetesMetrics · BuildStaticMetrics</text>
+  <text x="106" y="654" class="node-title">HardwareSnapshot</text>
+  <text x="106" y="677" class="tiny">共享层组装 NodeDeviceSnapshot</text>
+  <text x="341" y="654" class="node-title">AcceleratorMetricResult</text>
+  <text x="341" y="677" class="tiny">共享层校验并输出 neutree_*</text>
+  <text x="601" y="654" class="node-title">vmagent raw</text>
+  <text x="601" y="677" class="tiny">DCGM 原样保留</text>
+
+  <!-- NPU target text -->
+  <text x="908" y="314" class="group-title">Ascend NPU 目标分支</text>
+  <text x="939" y="386" class="badge">NP</text>
+  <text x="968" y="378" class="node-title">驱动 / DCMI + sysfs</text>
+  <text x="968" y="399" class="node-text">静态 inventory 权威来源</text>
+  <text x="1169" y="386" class="badge">X</text>
+  <text x="1198" y="378" class="node-title">NPU Exporter</text>
+  <text x="1198" y="399" class="node-text">动态 / process 原文</text>
+  <text x="1399" y="386" class="badge">E</text>
+  <text x="1428" y="372" class="node-title">调度 / 进程原始证据</text>
+  <text x="1428" y="393" class="node-text">K8s PodResources/HAMi · Static Ray</text>
+  <text x="1428" y="412" class="tiny">逐 Pod annotation / vdie</text>
+  <text x="1045" y="505" class="node-title text-white">Enterprise NPU Adapter · npu · 单注册对象</text>
+  <text x="1050" y="542" class="node-title">DiscoverHardware</text>
+  <text x="1217" y="542" class="node-text">driver/DCMI 探测，Exporter-independent</text>
+  <text x="1050" y="568" class="node-title">Cluster capabilities</text>
+  <text x="1217" y="568" class="node-text">BuildKubernetesMetrics · BuildStaticMetrics</text>
+  <text x="926" y="654" class="node-title">HardwareSnapshot</text>
+  <text x="926" y="677" class="tiny">共享层组装 NodeDeviceSnapshot</text>
+  <text x="1161" y="654" class="node-title">AcceleratorMetricResult</text>
+  <text x="1161" y="677" class="tiny">共享层校验并输出 neutree_*</text>
+  <text x="1421" y="654" class="node-title">vmagent raw</text>
+  <text x="1421" y="677" class="tiny">Exporter 原样保留</text>
+
+  <!-- Legacy text -->
+  <text x="60" y="820" class="lane-title">NVIDIA 当前兼容路径 · 迁移完成前保留，禁止与显式 nvidia_gpu Adapter 同时运行</text>
+  <text x="86" y="873" class="node-title">DCGM Exporter</text>
+  <text x="86" y="897" class="node-text">设备发现 + 动态指标原文</text>
+  <text x="346" y="873" class="node-title">server.go scrape</text>
+  <text x="346" y="897" class="node-text">Exporter Up 是后续入口条件</text>
+  <text x="610" y="856" class="node-title">共享层直接持有 NVIDIA 语义</text>
+  <text x="610" y="879" class="node-text">devicesnapshot.FromAcceleratorMetrics → nvidia_gpu 快照</text>
+  <text x="610" y="900" class="node-text">hardware.FromAcceleratorMetrics + NVML merge</text>
+  <text x="610" y="921" class="node-text">normalizer DCGM switch + allocation visible env / nvidia-smi</text>
+  <text x="1131" y="873" class="node-title">neutree_* + snapshot</text>
+  <text x="1131" y="897" class="node-text">现有行为保持兼容</text>
+  <text x="1391" y="856" class="node-title">迁移退出门</text>
+  <text x="1391" y="879" class="node-text">golden parity + allocation E2E</text>
+  <text x="1391" y="900" class="node-text">Exporter down 仍有 NVML inventory</text>
+  <text x="1391" y="921" class="node-text">通过后才删除 legacy</text>
+  <text x="86" y="988" class="node-title">GFD 风格 labels（兼容）</text>
+  <text x="86" y="1012" class="tiny">gpu.present / gpu.product</text>
+  <text x="366" y="988" class="node-title">Profile placement / HAMi product</text>
+  <text x="366" y="1012" class="tiny">不能作为设备 identity</text>
+  <text x="646" y="988" class="node-title">NVML provider</text>
+  <text x="646" y="1012" class="tiny">当前仅 Exporter Up 时调用</text>
+  <text x="1331" y="873" class="arrow-label">验收门</text>
+
+  <!-- Legend -->
+  <text x="50" y="1114" class="lane-title">图例</text>
+  <line x1="105" y1="1109" x2="155" y2="1109" stroke="#ea580c" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
+  <text x="168" y="1114" class="node-text">控制 / 迁移</text>
+  <line x1="315" y1="1109" x2="365" y2="1109" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <text x="378" y="1114" class="node-text">驱动发现 / inventory</text>
+  <line x1="585" y1="1109" x2="635" y2="1109" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <text x="648" y="1114" class="node-text">evidence / result</text>
+  <line x1="820" y1="1109" x2="870" y2="1109" stroke="#6b7280" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow-gray)"/>
+  <text x="883" y="1114" class="node-text">raw 指标旁路</text>
+  <line x1="1045" y1="1109" x2="1095" y2="1109" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="7 6" marker-end="url(#arrow-purple)"/>
+  <text x="1108" y="1114" class="node-text">legacy 兼容依赖</text>
+  <rect x="1300" y="1097" width="22" height="22" rx="4" class="box-red"/>
+  <text x="1333" y="1114" class="node-text">目标数据面排除项</text>
+  <text x="50" y="1152" class="tiny">每个 accelerator_type 只注册一个基础对象，再按 cluster_type 断言能力；NVIDIA 显式路径仍为目标态，legacy 以灰色虚线区域保留。</text>
+</svg>
