@@ -12,7 +12,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	mockstorage "github.com/neutree-ai/neutree/pkg/storage/mocks"
@@ -64,10 +63,9 @@ func newTestCoreApp(t *testing.T, port int) *App {
 	// These listener-lifecycle tests only need the HTTP server to start and
 	// stop, so the baseline synchronization is a no-op here.
 	app.synchronizeCurrentBaseline = func(
-		_ releaseinfo.CurrentBaselineStore,
+		_ releaseprofile.CurrentBaselineStore,
 		_ string,
-		_ releaseprofile.ReleaseInfoBuilder,
-		_ releaseprofile.CurrentClusterProfileBuilder,
+		_ releaseprofile.Builder,
 	) error {
 		return nil
 	}
@@ -312,10 +310,9 @@ func TestAppRunWithInjectedPluginShutsDownOnCancel(t *testing.T) {
 
 	// See newTestCoreApp: listener-lifecycle tests skip baseline synchronization.
 	app.synchronizeCurrentBaseline = func(
-		_ releaseinfo.CurrentBaselineStore,
+		_ releaseprofile.CurrentBaselineStore,
 		_ string,
-		_ releaseprofile.ReleaseInfoBuilder,
-		_ releaseprofile.CurrentClusterProfileBuilder,
+		_ releaseprofile.Builder,
 	) error {
 		return nil
 	}

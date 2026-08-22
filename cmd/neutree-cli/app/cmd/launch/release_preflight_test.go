@@ -136,21 +136,22 @@ func TestRunReleasePreflightRejectsDefaultOutsideCompatibleBaselines(t *testing.
 }
 
 func TestBuildReleasePreflightTargetUsesCLIReleaseInfo(t *testing.T) {
-	target, err := buildReleasePreflightTarget("v1.2.0-alpha.1")
+	builder := builtinPreflightBuilder(t)
+	target, err := buildReleasePreflightTargetWithBuilder("v1.2.0-alpha.1", builder)
 
 	require.NoError(t, err)
 	assert.Equal(t, "v1.2.0-alpha.1", target.GetName())
 	assert.Equal(t, []string{"v1.1", "v1.2"}, target.Spec.CompatibleClusterBaselines)
 	assert.Equal(t, "v1.2.0", target.Spec.DefaultClusterVersion)
 
-	target, err = buildReleasePreflightTarget("b64e294")
+	target, err = buildReleasePreflightTargetWithBuilder("b64e294", builder)
 	require.NoError(t, err)
-	assert.Equal(t, releaseprofile.CurrentCommunityReleaseInfoBaseline, target.GetName())
+	assert.Equal(t, "v1.2.0", target.GetName())
 
-	_, err = buildReleasePreflightTarget("dev")
+	_, err = buildReleasePreflightTargetWithBuilder("dev", builder)
 	require.Error(t, err)
 
-	_, err = buildReleasePreflightTarget("DEADBEEF")
+	_, err = buildReleasePreflightTargetWithBuilder("DEADBEEF", builder)
 	require.Error(t, err)
 }
 
@@ -178,6 +179,27 @@ func TestNeutreeCorePreflightDoesNotInheritInstallOnlyFlags(t *testing.T) {
 		assert.Nil(t, preflight.InheritedFlags().Lookup(flagName))
 	}
 	assert.NotNil(t, preflight.RunE)
+}
+
+func TestNewNeutreeCorePreflightCmdDefersBuilderCreation(t *testing.T) {
+	builderCreated := false
+	command := newNeutreeCorePreflightCmd(func() releaseprofile.Builder {
+		builderCreated = true
+
+		return &preflightReleaseInfoBuilder{}
+	})
+
+	assert.False(t, builderCreated)
+	assert.NotNil(t, command.RunE)
+}
+
+func builtinPreflightBuilder(t *testing.T) releaseprofile.Builder {
+	t.Helper()
+
+	builder, err := releaseprofile.NewBuilderForCatalog(releaseprofile.BuiltinCatalog())
+	require.NoError(t, err)
+
+	return builder
 }
 
 func preflightTargetReleaseInfo() *v1.ReleaseInfo {
@@ -222,6 +244,18 @@ func (builder *preflightReleaseInfoBuilder) BuildReleaseInfo(baseline string) (*
 
 func (builder *preflightReleaseInfoBuilder) CurrentReleaseInfoBaseline() string {
 	return builder.baseline
+}
+
+func (builder *preflightReleaseInfoBuilder) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
+	return nil, nil
+}
+
+func (builder *preflightReleaseInfoBuilder) BuildPackageImages(string, string, string) ([]v1.ImageRef, error) {
+	return nil, nil
+}
+
+func (builder *preflightReleaseInfoBuilder) PackageAccelerators(string) []string {
+	return nil
 }
 
 func preflightProfile(version string) *v1.ClusterProfile {

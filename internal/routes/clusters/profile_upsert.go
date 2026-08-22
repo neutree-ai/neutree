@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -165,7 +165,7 @@ func profileEligibleForReleaseInfo(version string, info *v1.ReleaseInfo) error {
 		return fmt.Errorf("cluster profile %s exceeds default cluster version %s", version, info.Spec.DefaultClusterVersion)
 	}
 
-	minor, err := releaseinfo.NormalizeClusterMinor(version)
+	minor, err := releaseprofile.NormalizeClusterMinor(version)
 	if err != nil {
 		return err
 	}

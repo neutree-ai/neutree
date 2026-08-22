@@ -12,6 +12,7 @@ MIRROR_REGISTRY=""
 TEMP_DIR=$(mktemp -d)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+CLUSTER_IMAGE_LIST_ROOT="${PROJECT_ROOT}/scripts/builder/image-lists/cluster"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -140,32 +141,62 @@ case "$PACKAGE_TYPE" in
             exit 1
         fi
 
+        if ! bash "${SCRIPT_DIR}/sync-cluster-image-lists.sh" --check; then
+            log_error "Generated cluster package artifacts are stale"
+            exit 1
+        fi
+
         case "$CLUSTER_TYPE" in
             k8s)
                 PACKAGE_NAME="neutree-cluster-k8s"
-                IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/images.txt")
-
-                if [[ -n "$ACCELERATOR" ]]; then
-                    IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/${ACCELERATOR}-images.txt")
-                    PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
-                fi
-                PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
+                CLUSTER_LIST_TYPE="kubernetes"
                 ;;
             ssh)
                 PACKAGE_NAME="neutree-cluster-ssh"
-                IMAGE_LIST_FILES+=("image-lists/cluster/ssh/images.txt")
-
-                if [[ -n "$ACCELERATOR" ]]; then
-                    IMAGE_LIST_FILES+=("image-lists/cluster/ssh/${ACCELERATOR}-images.txt")
-                    PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
-                fi
-                PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
+                CLUSTER_LIST_TYPE="ssh"
                 ;;
             *)
                 log_error "Unknown cluster type: $CLUSTER_TYPE"
                 usage
                 ;;
         esac
+
+        CLUSTER_GENERATED_DIR="${CLUSTER_IMAGE_LIST_ROOT}/generated/${VERSION}/${CLUSTER_LIST_TYPE}"
+        CLUSTER_PROFILE_SOURCE="${CLUSTER_IMAGE_LIST_ROOT}/generated/${VERSION}/cluster-profile.yaml"
+        CLUSTER_ADDON_DIR="${CLUSTER_IMAGE_LIST_ROOT}/addons/${CLUSTER_LIST_TYPE}"
+
+        if [[ ! -f "$CLUSTER_PROFILE_SOURCE" ]]; then
+            log_error "Unsupported cluster package version: $VERSION"
+            log_error "Missing generated profile: $CLUSTER_PROFILE_SOURCE"
+            exit 1
+        fi
+        if [[ ! -f "${CLUSTER_GENERATED_DIR}/images.txt" ]]; then
+            log_error "Generated image list not found: ${CLUSTER_GENERATED_DIR}/images.txt"
+            exit 1
+        fi
+
+        IMAGE_LIST_FILES+=("${CLUSTER_GENERATED_DIR}/images.txt")
+        if [[ -f "${CLUSTER_ADDON_DIR}/images.txt" ]]; then
+            IMAGE_LIST_FILES+=("${CLUSTER_ADDON_DIR}/images.txt")
+        fi
+
+        if [[ -n "$ACCELERATOR" ]]; then
+            accelerator_found=false
+            if [[ -f "${CLUSTER_GENERATED_DIR}/${ACCELERATOR}-images.txt" ]]; then
+                IMAGE_LIST_FILES+=("${CLUSTER_GENERATED_DIR}/${ACCELERATOR}-images.txt")
+                accelerator_found=true
+            fi
+            if [[ -f "${CLUSTER_ADDON_DIR}/${ACCELERATOR}-images.txt" ]]; then
+                IMAGE_LIST_FILES+=("${CLUSTER_ADDON_DIR}/${ACCELERATOR}-images.txt")
+                accelerator_found=true
+            fi
+            if [[ "$accelerator_found" != "true" ]]; then
+                log_error "Unsupported accelerator package variant: ${CLUSTER_TYPE}/${ACCELERATOR}"
+                exit 1
+            fi
+            PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
+        fi
+        PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
         ;;
     engine)
         log_error "Engine packages should use build-engine-package.sh"
@@ -206,43 +237,15 @@ for list_file in "${IMAGE_LIST_FILES[@]}"; do
         [[ "$line" =~ ^#.*$ ]] && continue
         [[ -z "$line" ]] && continue
 
-        # If the image contains neutree
-        if [[ "$line" =~ neutree ]]; then
-            # Extract image name and tag
-            if [[ "$line" =~ ^([^:]+):(.+)$ ]]; then
-                image_name="${BASH_REMATCH[1]}"
-                image_tag="${BASH_REMATCH[2]}"
-
-                # Replace "latest" in tag with version
-                new_tag="${image_tag//latest/${VERSION}}"
-                echo "${image_name}:${new_tag}" >> "$MERGED_IMAGE_LIST"
-            elif [[ "$line" =~ ^[^:]+$ ]]; then
-                # If no tag, default to version
-                echo "${line}:${VERSION}" >> "$MERGED_IMAGE_LIST"
-            else
-                echo "$line" >> "$MERGED_IMAGE_LIST"
-            fi
-        else
-            # Non-neutree images remain unchanged
-            echo "$line" >> "$MERGED_IMAGE_LIST"
-        fi
+        printf '%s\n' "$line" >> "$MERGED_IMAGE_LIST"
     done < "$list_file"
 done
 
 PROFILE_MANIFEST=""
 if [[ "$PACKAGE_TYPE" == "cluster" ]]; then
     PROFILE_MANIFEST="${TEMP_DIR}/cluster-profile.yaml"
-    log_info "Generating cluster profile from release profile catalog"
-    go run "${PROJECT_ROOT}/cmd/neutree-release-profile" \
-        --version "$VERSION" \
-        --cluster-type "$CLUSTER_TYPE" \
-        --accelerator "$ACCELERATOR" \
-        --format images >> "$MERGED_IMAGE_LIST"
-    go run "${PROJECT_ROOT}/cmd/neutree-release-profile" \
-        --version "$VERSION" \
-        --cluster-type "$CLUSTER_TYPE" \
-        --accelerator "$ACCELERATOR" \
-        --format yaml > "$PROFILE_MANIFEST"
+    log_info "Using generated cluster profile: $CLUSTER_PROFILE_SOURCE"
+    cp "$CLUSTER_PROFILE_SOURCE" "$PROFILE_MANIFEST"
 fi
 
 

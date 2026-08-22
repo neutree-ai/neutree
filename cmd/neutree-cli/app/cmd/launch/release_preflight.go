@@ -11,7 +11,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
@@ -22,41 +21,38 @@ type clusterLister interface {
 // NewNeutreeCorePreflightCmd checks the current clusters before a control-plane
 // upgrade. Installation intentionally does not invoke this command implicitly.
 func NewNeutreeCorePreflightCmd() *cobra.Command {
-	return NewNeutreeCorePreflightCmdWithBuilders(
-		releaseprofile.NewCommunityReleaseInfoBuilder(),
-		releaseprofile.NewCommunityClusterProfileBuilder(),
-	)
+	return NewNeutreeCorePreflightCmdWithBuilder(nil)
 }
 
-// NewNeutreeCorePreflightCmdWithReleaseInfoBuilder creates a preflight command
-// that uses the supplied edition-specific ReleaseInfo builder. The community
-// profile catalog remains the default for backwards compatibility; editions
-// with a different catalog should use NewNeutreeCorePreflightCmdWithBuilders.
-func NewNeutreeCorePreflightCmdWithReleaseInfoBuilder(releaseInfoBuilder releaseprofile.ReleaseInfoBuilder) *cobra.Command {
-	return NewNeutreeCorePreflightCmdWithBuilders(releaseInfoBuilder, releaseprofile.NewCommunityClusterProfileBuilder())
-}
-
-// NewNeutreeCorePreflightCmdWithBuilders creates a preflight command backed by
+// NewNeutreeCorePreflightCmdWithBuilder creates a preflight command backed by
 // an embedded ReleaseInfo and exact ClusterProfile catalog. No server-side
 // profile listing endpoint is required.
-func NewNeutreeCorePreflightCmdWithBuilders(
-	releaseInfoBuilder releaseprofile.ReleaseInfoBuilder,
-	clusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder,
-) *cobra.Command {
-	if releaseInfoBuilder == nil {
-		releaseInfoBuilder = releaseprofile.NewCommunityReleaseInfoBuilder()
-	}
+func NewNeutreeCorePreflightCmdWithBuilder(builder releaseprofile.Builder) *cobra.Command {
+	return newNeutreeCorePreflightCmd(func() releaseprofile.Builder {
+		if builder != nil {
+			return builder
+		}
 
-	if clusterProfileBuilder == nil {
-		clusterProfileBuilder = releaseprofile.NewCommunityClusterProfileBuilder()
-	}
+		return releaseprofile.NewBuilder()
+	})
+}
 
+func newNeutreeCorePreflightCmd(builderFactory func() releaseprofile.Builder) *cobra.Command {
 	return &cobra.Command{
 		Use:           "preflight",
 		Short:         "Check Cluster compatibility before upgrading Neutree Core",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if builderFactory == nil {
+				return fmt.Errorf("release profile builder factory is required")
+			}
+
+			builder := builderFactory()
+			if builder == nil {
+				return fmt.Errorf("release profile builder is required")
+			}
+
 			apiClient, err := global.NewClient()
 			if err != nil {
 				return err
@@ -64,12 +60,12 @@ func NewNeutreeCorePreflightCmdWithBuilders(
 			if apiClient.Generic == nil {
 				return fmt.Errorf("generic API client is unavailable")
 			}
-			target, err := buildReleasePreflightTargetWithBuilder(getCLIAppVersion(), releaseInfoBuilder)
+			target, err := buildReleasePreflightTargetWithBuilder(getCLIAppVersion(), builder)
 			if err != nil {
 				return err
 			}
 
-			profiles, err := clusterProfileBuilder.BuildClusterProfiles(target.GetName())
+			profiles, err := builder.BuildClusterProfiles(target.GetName())
 			if err != nil {
 				return fmt.Errorf("build embedded cluster profile catalog: %w", err)
 			}
@@ -79,26 +75,21 @@ func NewNeutreeCorePreflightCmdWithBuilders(
 	}
 }
 
-func buildReleasePreflightTarget(cliVersion string) (*v1.ReleaseInfo, error) {
-	return buildReleasePreflightTargetWithBuilder(cliVersion, releaseprofile.NewCommunityReleaseInfoBuilder())
-}
-
-func buildReleasePreflightTargetWithBuilder(cliVersion string, releaseInfoBuilder releaseprofile.ReleaseInfoBuilder) (*v1.ReleaseInfo, error) {
-	if releaseInfoBuilder == nil {
-		return nil, fmt.Errorf("release info builder is required")
+func buildReleasePreflightTargetWithBuilder(cliVersion string, builder releaseprofile.Builder) (*v1.ReleaseInfo, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("release profile builder is required")
 	}
 
-	baseline, err := releaseinfo.NormalizeControlPlaneRelease(cliVersion)
+	baseline, err := releaseprofile.NormalizeControlPlaneRelease(cliVersion)
 	if err != nil {
-		baselineProvider, ok := releaseInfoBuilder.(releaseprofile.CurrentReleaseInfoBaselineProvider)
-		if !releaseinfo.IsWorkflowShortCommitBuild(cliVersion) || !ok {
+		if !releaseprofile.IsWorkflowShortCommitBuild(cliVersion) {
 			return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
 		}
 
-		baseline = baselineProvider.CurrentReleaseInfoBaseline()
+		baseline = builder.CurrentReleaseInfoBaseline()
 	}
 
-	info, err := releaseInfoBuilder.BuildReleaseInfo(baseline)
+	info, err := builder.BuildReleaseInfo(baseline)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +125,7 @@ func runReleasePreflight(
 		return fmt.Errorf("target release info has no compatible cluster baselines")
 	}
 
-	defaultMinor, err := releaseinfo.NormalizeClusterMinor(target.Spec.DefaultClusterVersion)
+	defaultMinor, err := releaseprofile.NormalizeClusterMinor(target.Spec.DefaultClusterVersion)
 	if err != nil {
 		return fmt.Errorf("target release info default cluster version: %w", err)
 	}
@@ -163,7 +154,7 @@ func runReleasePreflight(
 
 		version := effectiveClusterVersion(&cluster)
 
-		minor, versionErr := releaseinfo.NormalizeClusterMinor(version)
+		minor, versionErr := releaseprofile.NormalizeClusterMinor(version)
 		name := cluster.GetName()
 
 		workspace := ""

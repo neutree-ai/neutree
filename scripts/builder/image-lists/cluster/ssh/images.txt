@@ -1,1 +1,0 @@
-# SSH cluster profile images are generated from the release-profile catalog.

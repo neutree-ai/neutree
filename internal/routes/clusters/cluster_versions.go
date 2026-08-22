@@ -11,9 +11,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -33,152 +33,256 @@ type availableClusterVersion struct {
 	version *semver.Version
 }
 
+type availableClusterVersionsRequest struct {
+	workspace    string
+	registryName string
+	clusterType  string
+}
+
+type availableClusterVersionsTarget struct {
+	info         *v1.ReleaseInfo
+	profiles     []v1.ClusterProfile
+	imagePrefix  string
+	registryAuth authn.Authenticator
+	useHTTP      bool
+}
+
+type availableClusterVersionsError struct {
+	status  int
+	message string
+}
+
+func (err *availableClusterVersionsError) Error() string {
+	return err.message
+}
+
 // getAvailableClusterVersions returns exact Profiles whose declared material
 // exists in the caller-selected target registry.
 func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		workspace := strings.TrimSpace(c.Query("workspace"))
-		registryName := strings.TrimSpace(c.Query("image_registry"))
-
-		if workspace == "" || registryName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace and image_registry are required"})
-			return
-		}
-
-		clusterType, err := requiredClusterType(c)
+		request, err := parseAvailableClusterVersionsRequest(c)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeAvailableClusterVersionsError(c, err)
+
 			return
 		}
 
-		info, err := currentReleaseInfo(deps)
+		response, err := resolveAvailableClusterVersions(deps, request)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get release info: %v", err)})
+			writeAvailableClusterVersionsError(c, err)
+
 			return
 		}
 
-		if deps == nil || deps.Storage == nil || deps.ImageService == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "storage and image service are required"})
-			return
-		}
-
-		registries, err := deps.Storage.ListImageRegistry(storage.ListOption{Filters: []storage.Filter{
-			{Column: "metadata->>workspace", Operator: "eq", Value: workspace},
-			{Column: "metadata->>name", Operator: "eq", Value: registryName},
-		}})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list image registries: %v", err)})
-			return
-		}
-
-		if len(registries) != 1 || registries[0].Spec == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("image registry %s/%s not found", workspace, registryName)})
-			return
-		}
-
-		imageRegistry := &registries[0]
-
-		imagePrefix, err := util.GetImagePrefix(imageRegistry)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to resolve image registry: %v", err)})
-			return
-		}
-
-		username, password, err := util.GetImageRegistryAuthInfo(imageRegistry)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to resolve image registry auth: %v", err)})
-			return
-		}
-
-		registryAuth := authn.FromConfig(authn.AuthConfig{Username: username, Password: password})
-		useHTTP := util.IsHTTPRegistryURL(imageRegistry.Spec.URL)
-
-		profiles, err := deps.Storage.ListClusterProfile(storage.ListOption{})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list cluster profiles: %v", err)})
-			return
-		}
-
-		defaultVersion, err := parseClusterVersion(info.Spec.DefaultClusterVersion)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("invalid default cluster version: %v", err)})
-			return
-		}
-
-		compatible := compatibleClusterBaselines(info.Spec.CompatibleClusterBaselines)
-
-		var sshAcceleratorVersions map[string]struct{}
-		if clusterType == v1.SSHClusterType {
-			sshAcceleratorVersions, err = discoverSSHAcceleratorVersions(deps.ImageService, imagePrefix, registryAuth, useHTTP)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to check SSH accelerator images: %v", err)})
-				return
-			}
-		}
-
-		versions := make([]availableClusterVersion, 0, len(profiles))
-		defaultAvailable := false
-
-		for index := range profiles {
-			profile := &profiles[index]
-			if profile.GetName() == "" || profile.Spec == nil {
-				continue
-			}
-
-			components, found := profile.Spec.ComponentsFor(clusterType)
-			if !found {
-				continue
-			}
-
-			version, err := parseClusterVersion(profile.GetName())
-			if err != nil || version.GreaterThan(defaultVersion) {
-				continue
-			}
-
-			minor, err := releaseinfo.NormalizeClusterMinor(profile.GetName())
-			if err != nil || !compatible[minor] {
-				continue
-			}
-
-			available, err := checkProfileImages(deps.ImageService, imagePrefix, registryAuth, useHTTP, profile.GetName(), clusterType, components, sshAcceleratorVersions)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to check images for %s: %v", profile.GetName(), err)})
-				return
-			}
-
-			if !available {
-				continue
-			}
-
-			versions = append(versions, availableClusterVersion{name: profile.GetName(), version: version})
-
-			if profile.GetName() == info.Spec.DefaultClusterVersion {
-				defaultAvailable = true
-			}
-		}
-
-		sort.Slice(versions, func(i, j int) bool {
-			if versions[i].version.Equal(versions[j].version) {
-				return versions[i].name < versions[j].name
-			}
-
-			return versions[i].version.LessThan(versions[j].version)
-		})
-
-		available := make([]string, 0, len(versions))
-		for _, version := range versions {
-			available = append(available, version.name)
-		}
-
-		var defaultResponse *string
-
-		if defaultAvailable {
-			value := info.Spec.DefaultClusterVersion
-			defaultResponse = &value
-		}
-
-		c.JSON(http.StatusOK, availableClusterVersionsResponse{AvailableVersions: available, DefaultClusterVersion: defaultResponse})
+		c.JSON(http.StatusOK, response)
 	}
+}
+
+func parseAvailableClusterVersionsRequest(c *gin.Context) (availableClusterVersionsRequest, error) {
+	request := availableClusterVersionsRequest{
+		workspace:    strings.TrimSpace(c.Query("workspace")),
+		registryName: strings.TrimSpace(c.Query("image_registry")),
+	}
+
+	if request.workspace == "" || request.registryName == "" {
+		return availableClusterVersionsRequest{}, newAvailableClusterVersionsError(http.StatusBadRequest, "workspace and image_registry are required")
+	}
+
+	clusterType, err := requiredClusterType(c)
+	if err != nil {
+		return availableClusterVersionsRequest{}, newAvailableClusterVersionsError(http.StatusBadRequest, err.Error())
+	}
+
+	request.clusterType = clusterType
+
+	return request, nil
+}
+
+func resolveAvailableClusterVersions(deps *Dependencies, request availableClusterVersionsRequest) (availableClusterVersionsResponse, error) {
+	target, err := loadAvailableClusterVersionsTarget(deps, request)
+	if err != nil {
+		return availableClusterVersionsResponse{}, err
+	}
+
+	defaultVersion, err := parseClusterVersion(target.info.Spec.DefaultClusterVersion)
+	if err != nil {
+		return availableClusterVersionsResponse{}, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("invalid default cluster version: %v", err))
+	}
+
+	compatible := compatibleClusterBaselines(target.info.Spec.CompatibleClusterBaselines)
+
+	sshAcceleratorVersions, err := availableSSHAcceleratorVersions(deps.ImageService, target, request.clusterType)
+	if err != nil {
+		return availableClusterVersionsResponse{}, err
+	}
+
+	versions, defaultAvailable, err := selectAvailableClusterVersions(deps.ImageService, target, request.clusterType, defaultVersion, compatible, sshAcceleratorVersions)
+	if err != nil {
+		return availableClusterVersionsResponse{}, err
+	}
+
+	return availableClusterVersionsResponse{
+		AvailableVersions:     sortedAvailableClusterVersionNames(versions),
+		DefaultClusterVersion: availableDefaultClusterVersion(target.info, defaultAvailable),
+	}, nil
+}
+
+func loadAvailableClusterVersionsTarget(deps *Dependencies, request availableClusterVersionsRequest) (*availableClusterVersionsTarget, error) {
+	info, err := currentReleaseInfo(deps)
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to get release info: %v", err))
+	}
+
+	if deps == nil || deps.Storage == nil || deps.ImageService == nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, "storage and image service are required")
+	}
+
+	registries, err := deps.Storage.ListImageRegistry(storage.ListOption{Filters: []storage.Filter{
+		{Column: "metadata->>workspace", Operator: "eq", Value: request.workspace},
+		{Column: "metadata->>name", Operator: "eq", Value: request.registryName},
+	}})
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to list image registries: %v", err))
+	}
+
+	if len(registries) != 1 || registries[0].Spec == nil {
+		return nil, newAvailableClusterVersionsError(http.StatusNotFound, fmt.Sprintf("image registry %s/%s not found", request.workspace, request.registryName))
+	}
+
+	imageRegistry := &registries[0]
+
+	imagePrefix, err := util.GetImagePrefix(imageRegistry)
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to resolve image registry: %v", err))
+	}
+
+	username, password, err := util.GetImageRegistryAuthInfo(imageRegistry)
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to resolve image registry auth: %v", err))
+	}
+
+	profiles, err := deps.Storage.ListClusterProfile(storage.ListOption{})
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to list cluster profiles: %v", err))
+	}
+
+	return &availableClusterVersionsTarget{
+		info:         info,
+		profiles:     profiles,
+		imagePrefix:  imagePrefix,
+		registryAuth: authn.FromConfig(authn.AuthConfig{Username: username, Password: password}),
+		useHTTP:      util.IsHTTPRegistryURL(imageRegistry.Spec.URL),
+	}, nil
+}
+
+func availableSSHAcceleratorVersions(service registry.ImageService, target *availableClusterVersionsTarget, clusterType string) (map[string]struct{}, error) {
+	if clusterType != v1.SSHClusterType {
+		return nil, nil
+	}
+
+	versions, err := discoverSSHAcceleratorVersions(service, target.imagePrefix, target.registryAuth, target.useHTTP)
+	if err != nil {
+		return nil, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to check SSH accelerator images: %v", err))
+	}
+
+	return versions, nil
+}
+
+func selectAvailableClusterVersions(
+	service registry.ImageService,
+	target *availableClusterVersionsTarget,
+	clusterType string,
+	defaultVersion *semver.Version,
+	compatible map[string]bool,
+	sshAcceleratorVersions map[string]struct{},
+) ([]availableClusterVersion, bool, error) {
+	versions := make([]availableClusterVersion, 0, len(target.profiles))
+	defaultAvailable := false
+
+	for index := range target.profiles {
+		profile := &target.profiles[index]
+		if profile.GetName() == "" || profile.Spec == nil {
+			continue
+		}
+
+		components, found := profile.Spec.ComponentsFor(clusterType)
+		if !found {
+			continue
+		}
+
+		version, err := parseClusterVersion(profile.GetName())
+		if err != nil || version.GreaterThan(defaultVersion) {
+			continue
+		}
+
+		minor, err := releaseprofile.NormalizeClusterMinor(profile.GetName())
+		if err != nil || !compatible[minor] {
+			continue
+		}
+
+		available, err := checkProfileImages(
+			service,
+			target.imagePrefix,
+			target.registryAuth,
+			target.useHTTP,
+			profile.GetName(),
+			clusterType,
+			components,
+			sshAcceleratorVersions,
+		)
+		if err != nil {
+			return nil, false, newAvailableClusterVersionsError(http.StatusInternalServerError, fmt.Sprintf("failed to check images for %s: %v", profile.GetName(), err))
+		}
+
+		if !available {
+			continue
+		}
+
+		versions = append(versions, availableClusterVersion{name: profile.GetName(), version: version})
+		defaultAvailable = defaultAvailable || profile.GetName() == target.info.Spec.DefaultClusterVersion
+	}
+
+	return versions, defaultAvailable, nil
+}
+
+func sortedAvailableClusterVersionNames(versions []availableClusterVersion) []string {
+	sort.Slice(versions, func(i, j int) bool {
+		if versions[i].version.Equal(versions[j].version) {
+			return versions[i].name < versions[j].name
+		}
+
+		return versions[i].version.LessThan(versions[j].version)
+	})
+
+	available := make([]string, 0, len(versions))
+	for _, version := range versions {
+		available = append(available, version.name)
+	}
+
+	return available
+}
+
+func availableDefaultClusterVersion(info *v1.ReleaseInfo, defaultAvailable bool) *string {
+	if !defaultAvailable {
+		return nil
+	}
+
+	value := info.Spec.DefaultClusterVersion
+
+	return &value
+}
+
+func newAvailableClusterVersionsError(status int, message string) *availableClusterVersionsError {
+	return &availableClusterVersionsError{status: status, message: message}
+}
+
+func writeAvailableClusterVersionsError(c *gin.Context, err error) {
+	response := &availableClusterVersionsError{status: http.StatusInternalServerError, message: err.Error()}
+	if typed, ok := err.(*availableClusterVersionsError); ok {
+		response = typed
+	}
+
+	c.JSON(response.status, gin.H{"error": response.message})
 }
 
 func checkProfileImages(

@@ -338,6 +338,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	} else {
 		rayClusterConfig.Docker.Image = util.BuildClusterImageRef(imagePrefix, cluster.Spec.Version, "")
 	}
+
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.

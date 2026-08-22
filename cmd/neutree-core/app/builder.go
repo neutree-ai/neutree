@@ -18,8 +18,7 @@ type Builder struct {
 	config             *config.CoreConfig
 	acceleratorPlugins []publicaccelerator.Plugin
 
-	releaseInfoBuilder           releaseprofile.ReleaseInfoBuilder
-	currentClusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder
+	releaseProfileBuilder releaseprofile.Builder
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -30,13 +29,12 @@ type Builder struct {
 // NewBuilder creates a new CLI builder
 func NewBuilder() *Builder {
 	b := &Builder{
-		controllerInits:              make(map[string]ControllerFactory),
-		releaseInfoBuilder:           releaseprofile.NewCommunityReleaseInfoBuilder(),
-		currentClusterProfileBuilder: releaseprofile.NewCommunityClusterProfileBuilder(),
-		beforeHooks:                  make(map[string][]controllers.HookFunc),
-		afterHooks:                   make(map[string][]controllers.HookFunc),
-		globalBeforeHooks:            []controllers.HookFunc{},
-		globalAfterHooks:             []controllers.HookFunc{},
+		controllerInits:       make(map[string]ControllerFactory),
+		releaseProfileBuilder: releaseprofile.NewBuilder(),
+		beforeHooks:           make(map[string][]controllers.HookFunc),
+		afterHooks:            make(map[string][]controllers.HookFunc),
+		globalBeforeHooks:     []controllers.HookFunc{},
+		globalAfterHooks:      []controllers.HookFunc{},
 	}
 
 	defaultControllers := map[string]ControllerFactory{
@@ -73,26 +71,15 @@ func (b *Builder) WithAcceleratorPlugins(plugins ...publicaccelerator.Plugin) *B
 	return b
 }
 
-// WithReleaseInfoBuilder configures the builder used for release metadata.
-func (b *Builder) WithReleaseInfoBuilder(builder releaseprofile.ReleaseInfoBuilder) *Builder {
+// WithReleaseProfileBuilder configures the single catalog-backed builder used
+// for release policy, exact Profiles, and package material.
+func (b *Builder) WithReleaseProfileBuilder(builder releaseprofile.Builder) *Builder {
 	if builder == nil {
-		b.releaseInfoBuilder = releaseprofile.NewCommunityReleaseInfoBuilder()
+		b.releaseProfileBuilder = releaseprofile.NewBuilder()
 		return b
 	}
 
-	b.releaseInfoBuilder = builder
-
-	return b
-}
-
-// WithCurrentClusterProfileBuilder configures the builder used for the current cluster profile.
-func (b *Builder) WithCurrentClusterProfileBuilder(builder releaseprofile.CurrentClusterProfileBuilder) *Builder {
-	if builder == nil {
-		b.currentClusterProfileBuilder = releaseprofile.NewCommunityClusterProfileBuilder()
-		return b
-	}
-
-	b.currentClusterProfileBuilder = builder
+	b.releaseProfileBuilder = builder
 
 	return b
 }
@@ -189,8 +176,7 @@ func (b *Builder) Build() (*App, error) {
 	}
 
 	app := NewApp(b.config, registerControllers)
-	app.releaseInfoBuilder = b.releaseInfoBuilder
-	app.currentClusterProfileBuilder = b.currentClusterProfileBuilder
+	app.releaseProfileBuilder = b.releaseProfileBuilder
 
 	return app, nil
 }

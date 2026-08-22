@@ -2,98 +2,81 @@ package releaseprofile
 
 import (
 	"fmt"
-	"strings"
-
-	"github.com/Masterminds/semver/v3"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// ReleaseInfoBuilder builds the current ReleaseInfo candidate for a
-// control-plane baseline. Core owns persistence of the returned object.
-type ReleaseInfoBuilder interface {
-	BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error)
-}
-
-// CurrentReleaseInfoBaselineProvider supplies the stable baseline that a
-// ReleaseInfoBuilder can initialize when a development build has no persisted
-// ReleaseInfo yet. It remains separate from ReleaseInfoBuilder so existing
-// edition-specific builders do not need to opt in unless they support startup
-// bootstrap.
-type CurrentReleaseInfoBaselineProvider interface {
+// Builder constructs the release policy, exact Profiles, and package image
+// payload from one immutable Catalog.
+type Builder interface {
 	CurrentReleaseInfoBaseline() string
-}
-
-// CurrentClusterProfileBuilder builds the exact ClusterProfile catalog for a
-// control-plane baseline. Core owns persistence of the returned objects.
-type CurrentClusterProfileBuilder interface {
+	BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error)
 	BuildClusterProfiles(baseline string) ([]*v1.ClusterProfile, error)
+	BuildPackageImages(clusterVersion, clusterType, accelerator string) ([]v1.ImageRef, error)
+	PackageAccelerators(clusterType string) []string
 }
 
-// CommunityReleaseInfoBuilder provides the community release metadata for the
-// currently supported control-plane baseline.
-type CommunityReleaseInfoBuilder struct{}
-
-// CurrentCommunityReleaseInfoBaseline is the stable baseline carried by the
-// community control-plane build.
-const CurrentCommunityReleaseInfoBaseline = "v1.2.0"
-
-// NewCommunityReleaseInfoBuilder returns the community ReleaseInfo builder.
-func NewCommunityReleaseInfoBuilder() *CommunityReleaseInfoBuilder {
-	return &CommunityReleaseInfoBuilder{}
+type catalogBuilder struct {
+	catalog *Catalog
 }
 
-// CurrentReleaseInfoBaseline returns the baseline used to bootstrap a fresh
-// database from a development control-plane build.
-func (builder *CommunityReleaseInfoBuilder) CurrentReleaseInfoBaseline() string {
-	return CurrentCommunityReleaseInfoBaseline
+// NewBuilder returns the process-default Builder. Calling it freezes the
+// Catalog injection point for the lifetime of the process.
+func NewBuilder() Builder {
+	return &catalogBuilder{catalog: defaultCatalog()}
 }
 
-// BuildReleaseInfo returns the semantic ReleaseInfo for a baseline.
-func (builder *CommunityReleaseInfoBuilder) BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error) {
-	if err := validateCommunityControlPlaneBaseline(baseline); err != nil {
+// NewBuilderForCatalog creates a Builder from an explicit Catalog without
+// consuming or changing the process default. It is suitable for generators and
+// tests that need a deterministic edition-specific catalog.
+func NewBuilderForCatalog(catalog *Catalog) (Builder, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("release profile catalog is required")
+	}
+
+	if err := validateCatalog(catalog); err != nil {
 		return nil, err
 	}
 
-	return &v1.ReleaseInfo{
-		APIVersion: "v1",
-		Kind:       v1.ReleaseInfoKind,
-		Metadata:   &v1.Metadata{Name: baseline},
-		Spec: &v1.ReleaseInfoSpec{
-			DefaultClusterVersion:      "v1.2.0",
-			CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
-		},
-	}, nil
+	return &catalogBuilder{catalog: cloneCatalog(catalog)}, nil
 }
 
-// CommunityClusterProfileBuilder provides the community ClusterProfile for
-// the currently supported control-plane baseline.
-type CommunityClusterProfileBuilder struct{}
+func (builder *catalogBuilder) CurrentReleaseInfoBaseline() string {
+	if builder == nil || builder.catalog == nil {
+		return ""
+	}
 
-// NewCommunityClusterProfileBuilder returns the community ClusterProfile builder.
-func NewCommunityClusterProfileBuilder() *CommunityClusterProfileBuilder {
-	return &CommunityClusterProfileBuilder{}
+	return builder.catalog.spec.CurrentReleaseInfoBaseline
 }
 
-// BuildClusterProfiles returns the complete exact-version catalog for the
-// current control-plane baseline.
-func (builder *CommunityClusterProfileBuilder) BuildClusterProfiles(baseline string) ([]*v1.ClusterProfile, error) {
-	if err := validateCommunityControlPlaneBaseline(baseline); err != nil {
-		return nil, err
+func (builder *catalogBuilder) BuildReleaseInfo(baseline string) (*v1.ReleaseInfo, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("release profile builder is required")
 	}
 
-	return CommunityClusterProfiles()
+	return builder.catalog.buildReleaseInfo(baseline)
 }
 
-func validateCommunityControlPlaneBaseline(baseline string) error {
-	if strings.TrimSpace(baseline) != baseline || !strings.HasPrefix(baseline, "v") {
-		return fmt.Errorf("community release baseline %q is not supported", baseline)
+func (builder *catalogBuilder) BuildClusterProfiles(baseline string) ([]*v1.ClusterProfile, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("release profile builder is required")
 	}
 
-	version, err := semver.StrictNewVersion(strings.TrimPrefix(baseline, "v"))
-	if err != nil || version.Major() != 1 || version.Minor() != 2 {
-		return fmt.Errorf("community release baseline %q is not supported", baseline)
+	return builder.catalog.buildClusterProfiles(baseline)
+}
+
+func (builder *catalogBuilder) BuildPackageImages(clusterVersion, clusterType, accelerator string) ([]v1.ImageRef, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("release profile builder is required")
 	}
 
-	return nil
+	return builder.catalog.buildPackageImages(clusterVersion, clusterType, accelerator)
+}
+
+func (builder *catalogBuilder) PackageAccelerators(clusterType string) []string {
+	if builder == nil || builder.catalog == nil {
+		return nil
+	}
+
+	return builder.catalog.packageAccelerators(clusterType)
 }

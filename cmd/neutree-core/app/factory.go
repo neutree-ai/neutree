@@ -6,9 +6,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
-	"github.com/neutree-ai/neutree/internal/cluster/clusterprofile"
 	"github.com/neutree-ai/neutree/internal/cluster/staticnode"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -26,9 +26,15 @@ type ControllerOptions struct {
 // ControllerFactory defines a function type for creating controllers
 type ControllerFactory func(opts *ControllerOptions) (controllers.Controller, error)
 
+func newClusterProfileProvider(store storage.Storage) *releaseprofile.Provider {
+	return releaseprofile.NewClusterProfileProvider(releaseprofile.ClusterProfileReaderFunc(func() ([]v1.ClusterProfile, error) {
+		return store.ListClusterProfile(storage.ListOption{})
+	}))
+}
+
 func NewClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
-		clusterProfileProvider := clusterprofile.NewProvider(opts.config.Storage)
+		clusterProfileProvider := newClusterProfileProvider(opts.config.Storage)
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
 				Storage:                         opts.config.Storage,
@@ -277,7 +283,7 @@ func NewStaticNodeClusterControllerFactory() ControllerFactory {
 		staticNodeClusterController, err := controllers.NewStaticNodeClusterController(
 			&controllers.StaticNodeClusterControllerOption{
 				Storage:                          opts.config.Storage,
-				ClusterProfileComponentsResolver: clusterprofile.NewProvider(opts.config.Storage),
+				ClusterProfileComponentsResolver: newClusterProfileProvider(opts.config.Storage),
 				AcceleratorProfileProvider:       opts.config.AcceleratorManager,
 				MetricsRemoteWriteURL:            opts.config.ClusterControllerConfig.MetricsRemoteWriteURL,
 			},

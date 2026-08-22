@@ -16,7 +16,6 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -25,6 +24,22 @@ type testReleaseInfoBuilder struct{}
 
 func (builder *testReleaseInfoBuilder) BuildReleaseInfo(string) (*v1.ReleaseInfo, error) {
 	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilder) CurrentReleaseInfoBaseline() string {
+	return "v1.2.0"
+}
+
+func (builder *testReleaseInfoBuilder) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
+	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilder) BuildPackageImages(string, string, string) ([]v1.ImageRef, error) {
+	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilder) PackageAccelerators(string) []string {
+	return nil
 }
 
 type testReleaseInfoBuilderWithBaseline struct {
@@ -39,10 +54,38 @@ func (builder *testReleaseInfoBuilderWithBaseline) CurrentReleaseInfoBaseline() 
 	return builder.baseline
 }
 
+func (builder *testReleaseInfoBuilderWithBaseline) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
+	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilderWithBaseline) BuildPackageImages(string, string, string) ([]v1.ImageRef, error) {
+	return nil, nil
+}
+
+func (builder *testReleaseInfoBuilderWithBaseline) PackageAccelerators(string) []string {
+	return nil
+}
+
 type testCurrentClusterProfileBuilder struct{}
 
 func (builder *testCurrentClusterProfileBuilder) BuildClusterProfiles(string) ([]*v1.ClusterProfile, error) {
 	return nil, nil
+}
+
+func (builder *testCurrentClusterProfileBuilder) CurrentReleaseInfoBaseline() string {
+	return "v1.2.0"
+}
+
+func (builder *testCurrentClusterProfileBuilder) BuildReleaseInfo(string) (*v1.ReleaseInfo, error) {
+	return nil, nil
+}
+
+func (builder *testCurrentClusterProfileBuilder) BuildPackageImages(string, string, string) ([]v1.ImageRef, error) {
+	return nil, nil
+}
+
+func (builder *testCurrentClusterProfileBuilder) PackageAccelerators(string) []string {
+	return nil
 }
 
 func TestNewBuilder(t *testing.T) {
@@ -213,83 +256,43 @@ func (internalTestPlugin) GetResourceParser() resourceparser.ResourceParser {
 	return nil
 }
 
-func TestNewBuilderUsesCommunityReleaseInfoBuilder(t *testing.T) {
+func TestNewBuilderUsesReleaseProfileBuilder(t *testing.T) {
 	builder := NewBuilder()
 
-	if _, ok := builder.releaseInfoBuilder.(*releaseprofile.CommunityReleaseInfoBuilder); !ok {
-		t.Fatalf("expected community release info builder, got %T", builder.releaseInfoBuilder)
+	if builder.releaseProfileBuilder == nil {
+		t.Fatal("expected release profile builder")
 	}
 }
 
-func TestNewBuilderUsesCommunityClusterProfileBuilder(t *testing.T) {
-	builder := NewBuilder()
-
-	if _, ok := builder.currentClusterProfileBuilder.(*releaseprofile.CommunityClusterProfileBuilder); !ok {
-		t.Fatalf("expected community cluster profile builder, got %T", builder.currentClusterProfileBuilder)
-	}
-}
-
-func TestNewAppUsesCommunityReleaseInfoBuilder(t *testing.T) {
+func TestNewAppUsesReleaseProfileBuilder(t *testing.T) {
 	application := NewApp(&config.CoreConfig{}, map[string]controllers.Controller{})
 
-	if _, ok := application.releaseInfoBuilder.(*releaseprofile.CommunityReleaseInfoBuilder); !ok {
-		t.Fatalf("expected community release info builder, got %T", application.releaseInfoBuilder)
+	if application.releaseProfileBuilder == nil {
+		t.Fatal("expected release profile builder")
 	}
 }
 
-func TestNewAppUsesCommunityClusterProfileBuilder(t *testing.T) {
-	application := NewApp(&config.CoreConfig{}, map[string]controllers.Controller{})
-
-	if _, ok := application.currentClusterProfileBuilder.(*releaseprofile.CommunityClusterProfileBuilder); !ok {
-		t.Fatalf("expected community cluster profile builder, got %T", application.currentClusterProfileBuilder)
-	}
-}
-
-func TestBuilderBuildPreservesReleaseInfoBuilder(t *testing.T) {
+func TestBuilderBuildPreservesReleaseProfileBuilder(t *testing.T) {
 	customBuilder := &testReleaseInfoBuilder{}
 	builder := NewBuilder().WithConfig(&config.CoreConfig{GinEngine: gin.New()})
 	builder.controllerInits = map[string]ControllerFactory{}
-	builder.WithReleaseInfoBuilder(customBuilder)
+	builder.WithReleaseProfileBuilder(customBuilder)
 
 	application, err := builder.Build()
 	if err != nil {
 		t.Fatalf("build application: %v", err)
 	}
 
-	if application.releaseInfoBuilder != customBuilder {
-		t.Fatalf("expected built app to retain custom release info builder, got %T", application.releaseInfoBuilder)
+	if application.releaseProfileBuilder != customBuilder {
+		t.Fatalf("expected built app to retain custom release profile builder, got %T", application.releaseProfileBuilder)
 	}
 }
 
-func TestBuilderBuildPreservesCurrentClusterProfileBuilder(t *testing.T) {
-	customBuilder := &testCurrentClusterProfileBuilder{}
-	builder := NewBuilder().WithConfig(&config.CoreConfig{GinEngine: gin.New()})
-	builder.controllerInits = map[string]ControllerFactory{}
-	builder.WithCurrentClusterProfileBuilder(customBuilder)
+func TestBuilderWithNilReleaseProfileBuilderUsesDefault(t *testing.T) {
+	builder := NewBuilder().WithReleaseProfileBuilder(nil)
 
-	application, err := builder.Build()
-	if err != nil {
-		t.Fatalf("build application: %v", err)
-	}
-
-	if application.currentClusterProfileBuilder != customBuilder {
-		t.Fatalf("expected built app to retain custom cluster profile builder, got %T", application.currentClusterProfileBuilder)
-	}
-}
-
-func TestBuilderWithNilReleaseInfoBuilderUsesCommunityDefault(t *testing.T) {
-	builder := NewBuilder().WithReleaseInfoBuilder(nil)
-
-	if _, ok := builder.releaseInfoBuilder.(*releaseprofile.CommunityReleaseInfoBuilder); !ok {
-		t.Fatalf("expected community release info builder after nil input, got %T", builder.releaseInfoBuilder)
-	}
-}
-
-func TestBuilderWithNilCurrentClusterProfileBuilderUsesCommunityDefault(t *testing.T) {
-	builder := NewBuilder().WithCurrentClusterProfileBuilder(nil)
-
-	if _, ok := builder.currentClusterProfileBuilder.(*releaseprofile.CommunityClusterProfileBuilder); !ok {
-		t.Fatalf("expected community cluster profile builder after nil input, got %T", builder.currentClusterProfileBuilder)
+	if builder.releaseProfileBuilder == nil {
+		t.Fatal("expected default release profile builder after nil input")
 	}
 }
 
@@ -352,10 +355,9 @@ func TestAppRunStopsWhenCurrentReleaseInfoSynchronizationFails(t *testing.T) {
 
 	var gotBaseline string
 	application.synchronizeCurrentBaseline = func(
-		_ releaseinfo.CurrentBaselineStore,
+		_ releaseprofile.CurrentBaselineStore,
 		baseline string,
-		_ releaseprofile.ReleaseInfoBuilder,
-		_ releaseprofile.CurrentClusterProfileBuilder,
+		_ releaseprofile.Builder,
 	) error {
 		gotBaseline = baseline
 		return syncErr
@@ -377,7 +379,7 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 		name           string
 		identity       string
 		infos          []v1.ReleaseInfo
-		releaseBuilder releaseprofile.ReleaseInfoBuilder
+		releaseBuilder releaseprofile.Builder
 		want           string
 		wantSync       bool
 	}{
@@ -446,7 +448,7 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 			store.On("ListReleaseInfo").Return(tt.infos, nil).Once()
 			application := NewApp(&config.CoreConfig{Storage: store, Version: tt.identity}, map[string]controllers.Controller{})
 			if tt.releaseBuilder != nil {
-				application.releaseInfoBuilder = tt.releaseBuilder
+				application.releaseProfileBuilder = tt.releaseBuilder
 			}
 			resolution, err := application.currentControlPlaneBaseline()
 			if err != nil {
@@ -463,15 +465,13 @@ func TestAppRunResolvesCurrentControlPlaneBaselineBeforeSynchronization(t *testi
 	}
 }
 
-func TestBuilderRunPassesInjectedReleaseBuildersToSynchronization(t *testing.T) {
+func TestBuilderRunPassesInjectedReleaseProfileBuilderToSynchronization(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	store.On("ListReleaseInfo").Return([]v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}}, nil).Once()
 	releaseBuilder := &testReleaseInfoBuilder{}
-	profileBuilder := &testCurrentClusterProfileBuilder{}
 	builder := NewBuilder().WithConfig(&config.CoreConfig{GinEngine: gin.New(), Storage: store, Version: "v1.2.0"})
 	builder.controllerInits = map[string]ControllerFactory{}
-	builder.WithReleaseInfoBuilder(releaseBuilder)
-	builder.WithCurrentClusterProfileBuilder(profileBuilder)
+	builder.WithReleaseProfileBuilder(releaseBuilder)
 
 	application, err := builder.Build()
 	if err != nil {
@@ -480,16 +480,12 @@ func TestBuilderRunPassesInjectedReleaseBuildersToSynchronization(t *testing.T) 
 
 	syncErr := errors.New("stop after synchronization")
 	application.synchronizeCurrentBaseline = func(
-		_ releaseinfo.CurrentBaselineStore,
+		_ releaseprofile.CurrentBaselineStore,
 		_ string,
-		gotReleaseBuilder releaseprofile.ReleaseInfoBuilder,
-		gotProfileBuilder releaseprofile.CurrentClusterProfileBuilder,
+		gotBuilder releaseprofile.Builder,
 	) error {
-		if gotReleaseBuilder != releaseBuilder {
-			t.Fatalf("expected injected release info builder, got %T", gotReleaseBuilder)
-		}
-		if gotProfileBuilder != profileBuilder {
-			t.Fatalf("expected injected cluster profile builder, got %T", gotProfileBuilder)
+		if gotBuilder != releaseBuilder {
+			t.Fatalf("expected injected release profile builder, got %T", gotBuilder)
 		}
 
 		return syncErr

@@ -1,4 +1,4 @@
-package releaseinfo
+package releaseprofile
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 var compatibleClusterBaselinePattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
@@ -27,12 +26,7 @@ type CurrentBaselineStore interface {
 // ensures every catalog Profile exists. Existing Profiles are immutable: an
 // identical replay is a no-op and any content drift fails initialization before
 // changing either resource.
-func SynchronizeCurrentBaseline(
-	store CurrentBaselineStore,
-	baseline string,
-	releaseInfoBuilder releaseprofile.ReleaseInfoBuilder,
-	clusterProfileBuilder releaseprofile.CurrentClusterProfileBuilder,
-) error {
+func SynchronizeCurrentBaseline(store CurrentBaselineStore, baseline string, builder Builder) error {
 	if _, err := parseExactReleaseInfoBaseline(baseline); err != nil {
 		return fmt.Errorf("invalid release info baseline %q: %w", baseline, err)
 	}
@@ -41,15 +35,11 @@ func SynchronizeCurrentBaseline(
 		return fmt.Errorf("current baseline store is required")
 	}
 
-	if releaseInfoBuilder == nil {
-		return fmt.Errorf("release info builder is required")
+	if builder == nil {
+		return fmt.Errorf("release profile builder is required")
 	}
 
-	if clusterProfileBuilder == nil {
-		return fmt.Errorf("cluster profile builder is required")
-	}
-
-	info, err := releaseInfoBuilder.BuildReleaseInfo(baseline)
+	info, err := builder.BuildReleaseInfo(baseline)
 	if err != nil {
 		return fmt.Errorf("build release info: %w", err)
 	}
@@ -58,7 +48,7 @@ func SynchronizeCurrentBaseline(
 		return err
 	}
 
-	profiles, err := clusterProfileBuilder.BuildClusterProfiles(baseline)
+	profiles, err := builder.BuildClusterProfiles(baseline)
 	if err != nil {
 		return fmt.Errorf("build cluster profile catalog: %w", err)
 	}
@@ -88,16 +78,16 @@ func SynchronizeCurrentBaseline(
 			continue
 		}
 
-		if !clusterProfilesSemanticallyEqual(existing, profile) {
+		if !ClusterProfilesSemanticallyEqual(existing, profile) {
 			return fmt.Errorf("cluster profile %s content drift", profile.GetName())
 		}
 	}
 
 	if existing := releaseInfoByName(infos, baseline); existing == nil {
-		if err := store.CreateReleaseInfo(deepCopyReleaseInfo(info)); err != nil {
+		if err := store.CreateReleaseInfo(cloneReleaseInfo(info)); err != nil {
 			return fmt.Errorf("create release info: %w", err)
 		}
-	} else if err := store.UpdateReleaseInfo(existing.GetID(), deepCopyReleaseInfo(info)); err != nil {
+	} else if err := store.UpdateReleaseInfo(existing.GetID(), cloneReleaseInfo(info)); err != nil {
 		return fmt.Errorf("update release info: %w", err)
 	}
 
@@ -106,7 +96,7 @@ func SynchronizeCurrentBaseline(
 			continue
 		}
 
-		if err := store.CreateClusterProfile(deepCopyClusterProfile(profile)); err != nil {
+		if err := store.CreateClusterProfile(cloneClusterProfile(profile)); err != nil {
 			return fmt.Errorf("create cluster profile %s: %w", profile.GetName(), err)
 		}
 	}
@@ -192,6 +182,7 @@ func validateCurrentClusterProfileCatalog(info *v1.ReleaseInfo, profiles []*v1.C
 	}
 
 	compatibleBaselines := make(map[string]struct{}, len(info.Spec.CompatibleClusterBaselines))
+
 	for _, baseline := range info.Spec.CompatibleClusterBaselines {
 		compatibleBaselines[baseline] = struct{}{}
 	}
@@ -209,8 +200,8 @@ func validateCurrentClusterProfileCatalog(info *v1.ReleaseInfo, profiles []*v1.C
 		}
 
 		seenProfiles[name] = struct{}{}
-		version, err := parseExactVPrefixedSemVer(name)
 
+		version, err := parseExactVPrefixedSemVer(name)
 		if err != nil {
 			return fmt.Errorf("invalid cluster profile version %q: %w", name, err)
 		}
@@ -283,26 +274,22 @@ func validateCurrentClusterProfileBuilderOutput(profile *v1.ClusterProfile) erro
 	return nil
 }
 
-func requiredClusterProfileComponents(clusterType string, components v1.ClusterProfileComponents) []struct {
+type requiredProfileComponent struct {
 	name string
 	ref  v1.ImageRef
-} {
+}
+
+func requiredClusterProfileComponents(clusterType string, components v1.ClusterProfileComponents) []requiredProfileComponent {
 	switch clusterType {
 	case v1.SSHClusterType:
-		return []struct {
-			name string
-			ref  v1.ImageRef
-		}{
+		return []requiredProfileComponent{
 			{name: "ray runtime", ref: components.RayRuntime},
 			{name: "node agent", ref: components.NodeAgent},
 			{name: "node exporter", ref: components.NodeExporter},
 			{name: "vmagent", ref: components.VMAgent},
 		}
 	case v1.KubernetesClusterType:
-		return []struct {
-			name string
-			ref  v1.ImageRef
-		}{
+		return []requiredProfileComponent{
 			{name: "kubernetes runtime", ref: components.KubernetesRuntime},
 			{name: "router", ref: components.Router},
 			{name: "node agent", ref: components.NodeAgent},
@@ -340,7 +327,9 @@ func clusterProfileIndexByName(profiles []v1.ClusterProfile) (map[string]*v1.Clu
 	return indexed, nil
 }
 
-func clusterProfilesSemanticallyEqual(existing, candidate *v1.ClusterProfile) bool {
+// ClusterProfilesSemanticallyEqual compares only mutable protocol content and
+// deliberately ignores database identifiers and server-managed timestamps.
+func ClusterProfilesSemanticallyEqual(existing, candidate *v1.ClusterProfile) bool {
 	if existing == nil || candidate == nil || existing.Metadata == nil || candidate.Metadata == nil {
 		return existing == candidate
 	}
@@ -354,39 +343,41 @@ func clusterProfilesSemanticallyEqual(existing, candidate *v1.ClusterProfile) bo
 		reflect.DeepEqual(existing.Spec, candidate.Spec)
 }
 
-func deepCopyReleaseInfo(info *v1.ReleaseInfo) *v1.ReleaseInfo {
-	copy := *info
-	copy.Metadata = deepCopyMetadata(info.Metadata)
-	copy.Spec = deepCopyReleaseInfoSpec(info.Spec)
-
-	return &copy
-}
-
-func deepCopyReleaseInfoSpec(spec *v1.ReleaseInfoSpec) *v1.ReleaseInfoSpec {
-	if spec == nil {
+func cloneReleaseInfo(info *v1.ReleaseInfo) *v1.ReleaseInfo {
+	if info == nil {
 		return nil
 	}
 
-	copy := *spec
-	copy.CompatibleClusterBaselines = append([]string(nil), spec.CompatibleClusterBaselines...)
+	copy := *info
+	copy.Metadata = cloneMetadata(info.Metadata)
 
-	return &copy
-}
-
-func deepCopyClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {
-	copy := *profile
-	copy.Metadata = deepCopyMetadata(profile.Metadata)
-
-	if profile.Spec != nil {
-		spec := *profile.Spec
-		spec.Components = copyClusterProfileComponents(profile.Spec.Components)
+	if info.Spec != nil {
+		spec := *info.Spec
+		spec.CompatibleClusterBaselines = append([]string(nil), info.Spec.CompatibleClusterBaselines...)
 		copy.Spec = &spec
 	}
 
 	return &copy
 }
 
-func copyClusterProfileComponents(values map[string]v1.ClusterProfileComponents) map[string]v1.ClusterProfileComponents {
+func cloneClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {
+	if profile == nil {
+		return nil
+	}
+
+	copy := *profile
+	copy.Metadata = cloneMetadata(profile.Metadata)
+
+	if profile.Spec != nil {
+		spec := *profile.Spec
+		spec.Components = cloneClusterProfileComponents(profile.Spec.Components)
+		copy.Spec = &spec
+	}
+
+	return &copy
+}
+
+func cloneClusterProfileComponents(values map[string]v1.ClusterProfileComponents) map[string]v1.ClusterProfileComponents {
 	if values == nil {
 		return nil
 	}
@@ -399,19 +390,19 @@ func copyClusterProfileComponents(values map[string]v1.ClusterProfileComponents)
 	return copy
 }
 
-func deepCopyMetadata(metadata *v1.Metadata) *v1.Metadata {
+func cloneMetadata(metadata *v1.Metadata) *v1.Metadata {
 	if metadata == nil {
 		return nil
 	}
 
 	copy := *metadata
-	copy.Labels = copyStringMap(metadata.Labels)
-	copy.Annotations = copyStringMap(metadata.Annotations)
+	copy.Labels = cloneStringMap(metadata.Labels)
+	copy.Annotations = cloneStringMap(metadata.Annotations)
 
 	return &copy
 }
 
-func copyStringMap(values map[string]string) map[string]string {
+func cloneStringMap(values map[string]string) map[string]string {
 	if values == nil {
 		return nil
 	}

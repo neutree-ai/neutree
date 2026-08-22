@@ -11,10 +11,10 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/command"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -126,7 +126,7 @@ func resolveClusterProfileComponents(
 		return v1.ClusterProfileComponents{}, fmt.Errorf("cluster spec is required")
 	}
 
-	if _, err := releaseinfo.NormalizeClusterMinor(cluster.Spec.Version); err != nil {
+	if _, err := releaseprofile.NormalizeClusterMinor(cluster.Spec.Version); err != nil {
 		return v1.ClusterProfileComponents{}, fmt.Errorf("invalid cluster version %q: %w", cluster.Spec.Version, err)
 	}
 

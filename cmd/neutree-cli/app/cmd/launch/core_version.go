@@ -7,8 +7,8 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
 	"github.com/neutree-ai/neutree/internal/version"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 const fallbackNeutreeCoreVersion = "v0.0.1"
@@ -50,7 +50,7 @@ func validateNeutreeCoreVersionCompatibility(cliVersion, targetVersion string) e
 		return fmt.Errorf("neutree core image tag is required")
 	}
 
-	if releaseinfo.IsWorkflowShortCommitBuild(targetVersion) {
+	if releaseprofile.IsWorkflowShortCommitBuild(targetVersion) {
 		return nil
 	}
 

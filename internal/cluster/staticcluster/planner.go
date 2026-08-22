@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/cluster/releaseinfo"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 type Planner struct {
@@ -182,7 +182,7 @@ func (r *Planner) buildDesiredNodePlans(
 }
 
 func (r *Planner) profileComponents(version string) (v1.ClusterProfileComponents, bool, error) {
-	if _, err := releaseinfo.NormalizeClusterMinor(version); err != nil {
+	if _, err := releaseprofile.NormalizeClusterMinor(version); err != nil {
 		return v1.ClusterProfileComponents{}, false, fmt.Errorf("parse static node cluster version %q: %w", version, err)
 	}
 

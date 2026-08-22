@@ -18,9 +18,10 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
-	"github.com/neutree-ai/neutree/internal/cluster/clusterprofile"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const (
@@ -134,7 +135,9 @@ func (k *kubernetesOrchestrator) setNeutreeRuntimeImage(
 		return errors.New("storage is required to resolve exact Kubernetes cluster profile")
 	}
 
-	components, err := clusterprofile.NewProvider(k.storage).ComponentsFor(version, v1.KubernetesClusterType)
+	components, err := releaseprofile.NewClusterProfileProvider(releaseprofile.ClusterProfileReaderFunc(func() ([]v1.ClusterProfile, error) {
+		return k.storage.ListClusterProfile(storage.ListOption{})
+	})).ComponentsFor(version, v1.KubernetesClusterType)
 	if err != nil {
 		return errors.Wrap(err, "resolve Kubernetes cluster profile")
 	}

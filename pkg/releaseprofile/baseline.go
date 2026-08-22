@@ -1,4 +1,4 @@
-package releaseinfo
+package releaseprofile
 
 import (
 	"fmt"
@@ -27,6 +27,22 @@ func NormalizeClusterMinor(clusterVersion string) (string, error) {
 	return fmt.Sprintf("v%d.%d", version.Major(), version.Minor()), nil
 }
 
+// NormalizeControlPlaneRelease validates and returns the exact ReleaseInfo
+// identity for a complete control-plane build. Prerelease identities remain
+// distinct from their eventual stable releases; development and dirty builds
+// are resolved from persisted ReleaseInfos by ResolveCurrentControlPlaneBaseline.
+func NormalizeControlPlaneRelease(buildIdentity string) (string, error) {
+	if strings.TrimSpace(buildIdentity) != buildIdentity || !strings.HasPrefix(buildIdentity, "v") {
+		return "", fmt.Errorf("control-plane release %q must use v-prefixed semantic version", buildIdentity)
+	}
+
+	if _, err := parseExactVPrefixedSemVer(buildIdentity); err != nil {
+		return "", fmt.Errorf("invalid control-plane release %q: %w", buildIdentity, err)
+	}
+
+	return buildIdentity, nil
+}
+
 // ResolveCurrentControlPlaneBaseline selects the ReleaseInfo baseline for the
 // running control plane. Development and dirty builds are intentionally bound
 // to the newest persisted ReleaseInfo because they do not identify a released
@@ -36,9 +52,7 @@ func ResolveCurrentControlPlaneBaseline(buildIdentity string, infos []v1.Release
 		return highestPersistedReleaseInfoBaseline(infos)
 	}
 
-	baseline, err := NormalizeControlPlaneRelease(buildIdentity)
-
-	return baseline, err
+	return NormalizeControlPlaneRelease(buildIdentity)
 }
 
 // IsDevelopmentOrDirtyBuild reports whether a build identity must resolve its
