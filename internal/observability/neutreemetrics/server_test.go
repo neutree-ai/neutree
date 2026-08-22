@@ -3,6 +3,7 @@ package neutreemetrics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
@@ -87,6 +89,187 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
 	assert.Contains(t, body, `neutree_node_accelerator_hardware_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",memory_total_bytes="85899345920",node="node-a",numa_node="unknown",pcie_bus_id="unknown",pcie_generation="unknown",pcie_width="unknown",product="A100"} 1`)
 	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
+}
+
+func TestNewServerRejectsUnregisteredAcceleratorType(t *testing.T) {
+	testCases := []struct {
+		name         string
+		accelerators map[string]adapter.Accelerator
+	}{
+		{
+			name: "missing adapter",
+		},
+		{
+			name: "nil adapter",
+			accelerators: map[string]adapter.Accelerator{
+				"unknown-accelerator": nil,
+			},
+		},
+		{
+			name: "typed nil adapter",
+			accelerators: map[string]adapter.Accelerator{
+				"unknown-accelerator": (*typedNilAccelerator)(nil),
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := NewServer(Config{
+				AcceleratorType: "unknown-accelerator",
+				Accelerators:    testCase.accelerators,
+			})
+
+			assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+		})
+	}
+}
+
+func TestServerMetricsRoutesThroughSelectedAcceleratorAdapter(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	acceleratorExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 1024
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
+`))
+	}))
+	t.Cleanup(acceleratorExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+		Accelerators:    adapter.GetLocalAccelerators(),
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
+	assert.Contains(t, body, `neutree_node_accelerator_total{accelerator_type="nvidia_gpu",cluster_type="kubernetes",node="node-a",product="A100"} 1`)
+}
+
+func TestServerMetricsWithAcceleratorTypeButNoExporterSkipsAcceleratorSamples(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+		Accelerators:    adapter.GetLocalAccelerators(),
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL + "/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+
+	body := readResponseBody(t, metricsResp)
+	assert.Contains(t, body, `neutree_node_ready{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",node_role="unknown",source="neutree-node-agent"} 1`)
+	assert.NotContains(t, body, "neutree_accelerator_utilization_ratio")
+	assert.NotContains(t, body, "neutree_node_accelerator_total")
+}
+
+func TestServerMetricsDoesNotFallBackToLegacyWhenAdapterErrors(t *testing.T) {
+	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184`))
+	}))
+	t.Cleanup(nodeExporter.Close)
+
+	acceleratorExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 1024
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
+`))
+	}))
+	t.Cleanup(acceleratorExporter.Close)
+
+	server, err := NewServer(Config{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		AcceleratorType: "nvidia_gpu",
+		Accelerators: map[string]adapter.Accelerator{
+			"nvidia_gpu": failingAccelerator{},
+		},
+		ScrapeTargetProvider: testTargetProvider(
+			nodeExporter.URL+"/metrics",
+			acceleratorExporter.URL+"/metrics",
+		),
+		HTTPClient:          nodeExporter.Client(),
+		GPUHardwareProvider: emptyGPUHardwareProvider,
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	metricsResp, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = metricsResp.Body.Close() })
+
+	body := readResponseBody(t, metricsResp)
+	// A failing adapter must disable accelerator samples entirely, not fall
+	// back to parsing the DCGM body through the legacy path.
+	assert.NotContains(t, body, "neutree_accelerator_utilization_ratio")
+	assert.NotContains(t, body, "neutree_node_accelerator_total")
+}
+
+type failingAccelerator struct{}
+
+func (failingAccelerator) Type() string { return "nvidia_gpu" }
+
+func (failingAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+	return adapter.AcceleratorMetricResult{}, fmt.Errorf("adapter boom")
+}
+
+type typedNilAccelerator struct{}
+
+func (*typedNilAccelerator) Type() string { return "unknown-accelerator" }
+
+func (*typedNilAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+	return adapter.AcceleratorMetricResult{}, nil
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {
