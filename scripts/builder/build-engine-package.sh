@@ -27,6 +27,49 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+normalize_registry() {
+    local registry="$1"
+    registry="${registry#http://}"
+    registry="${registry#https://}"
+    registry="${registry%/}"
+    echo "$registry"
+}
+
+strip_image_registry() {
+    local image="$1"
+
+    if [[ "$image" =~ ^((localhost)|([^/]*[.:][^/]*))/(.+)$ ]]; then
+        echo "${BASH_REMATCH[4]}"
+    else
+        echo "$image"
+    fi
+}
+
+image_exists_for_platform() {
+    local image="$1"
+    local platform="$2"
+    local image_platform
+    local requested_os
+    local requested_arch
+    local requested_platform
+
+    requested_os="${platform%%/*}"
+    requested_arch="${platform#*/}"
+    requested_arch="${requested_arch%%/*}"
+    requested_platform="${requested_os}/${requested_arch}"
+
+    if ! image_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null); then
+        return 1
+    fi
+
+    if [ "$image_platform" = "$requested_platform" ]; then
+        return 0
+    fi
+
+    print_warn "Image $image found locally for $image_platform, but $platform was requested."
+    return 1
+}
+
 # Function to read and format deploy template
 read_deploy_template() {
     local template_file="$1"
@@ -173,6 +216,7 @@ Options:
     -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
+    --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -255,6 +299,7 @@ SCHEMA_FILE=""
 OUTPUT_FILE=""
 DESCRIPTION=""
 PLATFORM="linux/amd64"
+MIRROR_REGISTRY=""
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
 # declaring false: an engine version with no capabilities block keeps the
@@ -332,6 +377,10 @@ while [[ $# -gt 0 ]]; do
             PLATFORM="$2"
             shift 2
             ;;
+        --mirror-registry)
+            MIRROR_REGISTRY="$2"
+            shift 2
+            ;;
         --manifest-only)
             MANIFEST_ONLY="true"
             shift
@@ -384,6 +433,10 @@ mkdir -p "$IMAGES_DIR"
 
 print_info "Building engine version package: $ENGINE_NAME $ENGINE_VERSION"
 print_info "Temporary directory: $TEMP_DIR"
+if [ -n "$MIRROR_REGISTRY" ]; then
+    MIRROR_REGISTRY=$(normalize_registry "$MIRROR_REGISTRY")
+    print_info "Mirror registry: $MIRROR_REGISTRY"
+fi
 
 IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
 IMAGE_ENTRIES=""
@@ -402,12 +455,36 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
-        if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
-            print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
-            exit 1
+        if image_exists_for_platform "$FULL_IMAGE" "$PLATFORM"; then
+            print_info "Image $FULL_IMAGE found locally. Skipping pull."
+        elif [ -n "$MIRROR_REGISTRY" ]; then
+            IMAGE_WITHOUT_REGISTRY=$(strip_image_registry "$FULL_IMAGE")
+            MIRROR_IMAGE="${MIRROR_REGISTRY}/${IMAGE_WITHOUT_REGISTRY}"
+
+            if image_exists_for_platform "$MIRROR_IMAGE" "$PLATFORM"; then
+                print_info "Mirror image $MIRROR_IMAGE found locally. Skipping pull."
+            else
+                print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
+                if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
+                    print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
+                    exit 1
+                fi
+                print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
+            fi
+
+            print_info "Retagging $MIRROR_IMAGE to $FULL_IMAGE"
+            if ! docker tag "$MIRROR_IMAGE" "$FULL_IMAGE"; then
+                print_error "Failed to tag image: $MIRROR_IMAGE -> $FULL_IMAGE"
+                exit 1
+            fi
+        else
+            print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
+            if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
+                print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
+                exit 1
+            fi
+            print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
         fi
-        print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
 
         ALL_IMAGES+=("$FULL_IMAGE")
     done
