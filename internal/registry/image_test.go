@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,6 +38,46 @@ func TestImageService_CheckPullPermissionUsesConfiguredScheme(t *testing.T) {
 			require.True(t, allowed)
 		})
 	}
+}
+
+func TestImageService_CheckImageExistsUsesConfiguredScheme(t *testing.T) {
+	tests := []struct {
+		name      string
+		newServer func(http.Handler) *httptest.Server
+		useHTTP   bool
+		scheme    string
+	}{
+		{name: "explicit HTTP", newServer: httptest.NewServer, useHTTP: true, scheme: "http"},
+		{name: "HTTPS by default", newServer: httptest.NewTLSServer, scheme: "https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := tt.newServer(testRegistryHandler())
+			t.Cleanup(server.Close)
+
+			image := strings.TrimPrefix(server.URL, tt.scheme+"://") + "/neutree/router:v1.2.0"
+			exists, err := NewImageService().CheckImageExists(image, authn.Anonymous, tt.useHTTP)
+
+			require.NoError(t, err)
+			require.True(t, exists)
+		})
+	}
+}
+
+func TestImageService_CheckImageExistsTreatsMissingTagAsUnavailable(t *testing.T) {
+	server := httptest.NewServer(testRegistryHandler())
+	t.Cleanup(server.Close)
+
+	registryHost := strings.TrimPrefix(server.URL, "http://")
+	exists, err := NewImageService().CheckImageExists(
+		registryHost+"/neutree/router:missing",
+		authn.Anonymous,
+		true,
+	)
+
+	require.NoError(t, err)
+	require.False(t, exists)
 }
 
 func TestImageService_ListImageTagsUsesConfiguredScheme(t *testing.T) {
@@ -89,6 +130,21 @@ func TestImageService_GetImageLabelsUsesConfiguredScheme(t *testing.T) {
 	}
 }
 
+func TestImageService_GetImageLabelsTreatsMissingTagAsEmpty(t *testing.T) {
+	server := httptest.NewServer(testRegistryHandler())
+	t.Cleanup(server.Close)
+
+	registryHost := strings.TrimPrefix(server.URL, "http://")
+	labels, err := NewImageService().GetImageLabels(
+		registryHost+"/neutree/router:missing",
+		authn.Anonymous,
+		true,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, labels)
+}
+
 func TestImageService_DefaultHTTPSDoesNotDowngradeToHTTP(t *testing.T) {
 	server := httptest.NewServer(testRegistryHandler())
 	t.Cleanup(server.Close)
@@ -99,6 +155,10 @@ func TestImageService_DefaultHTTPSDoesNotDowngradeToHTTP(t *testing.T) {
 	allowed, err := service.CheckPullPermission(registryHost+"/neutree/router:v1.2.0", authn.Anonymous, false)
 	require.Error(t, err)
 	require.False(t, allowed)
+
+	exists, err := service.CheckImageExists(registryHost+"/neutree/router:v1.2.0", authn.Anonymous, false)
+	require.Error(t, err)
+	require.False(t, exists)
 
 	_, err = service.ListImageTags(registryHost+"/neutree/router", authn.Anonymous, false)
 	require.Error(t, err)
