@@ -14,6 +14,10 @@ import (
 
 // GetRouteResources returns all Kubernetes resources for the route component
 func (r *RouterComponent) GetRouteResources() (*unstructured.UnstructuredList, error) {
+	if r.routerImage == "" {
+		return nil, errors.New("router profile image is required")
+	}
+
 	variables := r.buildManifestVariables()
 
 	objs, err := util.RenderKubernetesManifest(routerMainifestTemplate, variables)

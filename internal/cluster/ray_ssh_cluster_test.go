@@ -1321,6 +1321,27 @@ func TestNeedsVersionUpgrade(t *testing.T) {
 	}
 }
 
+func TestGenerateDeleteConfigDoesNotRequireProfile(t *testing.T) {
+	reconciler := &sshRayClusterReconciler{}
+	reconcileCtx := &ReconcileContext{
+		Cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		},
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			Provider: v1.Provider{HeadIP: "127.0.0.1"},
+			Auth:     v1.Auth{SSHPrivateKey: "dGVzdC1rZXk="},
+		},
+	}
+
+	err := reconciler.generateDeleteConfig(reconcileCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = reconcileCtx.sshConfigGenerator.Cleanup() })
+
+	require.NotNil(t, reconcileCtx.sshRayClusterConfig)
+	assert.Equal(t, "ray_container", reconcileCtx.sshRayClusterConfig.Docker.ContainerName)
+	assert.Empty(t, reconcileCtx.sshRayClusterConfig.Docker.Image)
+}
+
 func TestUpgradeCluster(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1421,6 +1442,10 @@ func TestUpgradeCluster(t *testing.T) {
 						URL: "registry.example.com",
 					},
 				},
+				ProfileComponents: v1.ClusterProfileComponents{
+					RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v2.0.0"},
+				},
+				ProfileSelected: true,
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 					Provider: v1.Provider{
 						HeadIP: "127.0.0.1",

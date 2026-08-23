@@ -29,6 +29,7 @@ import (
 const (
 	annEndpointSpecHash              = "neutree.ai/endpoint-spec-hash"
 	annNeutreeVersion                = "neutree.ai/neutree-version"
+	annKubernetesRuntimeImage        = "neutree.ai/kubernetes-runtime-image"
 	containerFailureRestartThreshold = 5
 	modelDownloaderInitContainerName = "model-downloader"
 )
@@ -46,15 +47,17 @@ const (
 var _ Orchestrator = &kubernetesOrchestrator{}
 
 type kubernetesOrchestrator struct {
-	storage storage.Storage
+	storage                  storage.Storage
+	clusterProfileComponents v1.ClusterProfileComponents
 
 	acceleratorMgr accelerator.Manager
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
-		storage:        opts.Storage,
-		acceleratorMgr: opts.AcceleratorMgr,
+		storage:                  opts.Storage,
+		acceleratorMgr:           opts.AcceleratorMgr,
+		clusterProfileComponents: opts.ClusterProfileComponents,
 	}
 }
 
@@ -215,8 +218,9 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		return errors.Wrapf(err, "failed to compute endpoint spec hash for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	// Preserve NeutreeVersion when only the cluster version changed (not the endpoint spec).
-	// The spec hash and NeutreeVersion are stored as annotations on the K8s Deployment.
+	// Preserve resolved runtime inputs when only the cluster changed (not the
+	// endpoint spec). The spec hash and resolved values are stored as Deployment
+	// annotations instead of being used to discover a version.
 	existingDep := &appsv1.Deployment{}
 
 	if err := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
@@ -227,16 +231,8 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			return errors.Wrapf(err, "failed to get existing deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 		}
 		// Deployment does not exist yet (first deploy) — nothing to preserve.
-	} else if existingDep.Annotations != nil {
-		storedHash := existingDep.Annotations[annEndpointSpecHash]
-		storedVersion := existingDep.Annotations[annNeutreeVersion]
-
-		// Preserve NeutreeVersion when:
-		// - storedHash == currentSpecHash: endpoint spec unchanged (cluster-only upgrade)
-		// - storedHash == "": legacy endpoint bootstrapped with version but no hash yet
-		if storedVersion != "" && (storedHash == "" || storedHash == currentSpecHash) {
-			renderVars.NeutreeVersion = storedVersion
-		}
+	} else {
+		preserveResolvedDeploymentImages(&renderVars, existingDep, currentSpecHash)
 	}
 
 	deployTemplate, err := k.getDeployTemplate(ctx.Endpoint, ctx.Engine)
@@ -263,8 +259,8 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 			v1.LabelManagedBy:                  v1.LabelManagedByValue,
 		}).
 		WithMutate(func(obj *unstructured.Unstructured) error {
-			// Inject spec hash and NeutreeVersion as annotations on the Deployment
-			// so they are included in the SSA apply and managed by the field owner.
+			// Inject the spec hash and resolved runtime inputs so they are included
+			// in the SSA apply and managed by the field owner.
 			if obj.GetKind() == "Deployment" {
 				ann := obj.GetAnnotations()
 				if ann == nil {
@@ -273,6 +269,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 				ann[annEndpointSpecHash] = currentSpecHash
 				ann[annNeutreeVersion] = renderVars.NeutreeVersion
+				ann[annKubernetesRuntimeImage] = renderVars.KubernetesRuntimeImage
 				obj.SetAnnotations(ann)
 			}
 
@@ -302,7 +299,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		Namespace: namespace,
 		Name:      ctx.Endpoint.Metadata.Name,
 	}, dep); err == nil {
-		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annEndpointSpecHash] == "" {
+		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annEndpointSpecHash] == "" || dep.Annotations[annKubernetesRuntimeImage] == "" {
 			patch := client.MergeFrom(dep.DeepCopy())
 
 			if dep.Annotations == nil {
@@ -311,6 +308,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 			dep.Annotations[annEndpointSpecHash] = currentSpecHash
 			dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
+			dep.Annotations[annKubernetesRuntimeImage] = renderVars.KubernetesRuntimeImage
 
 			if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
 				ctx.logger.Error(patchErr, "Failed to bootstrap deployment annotations")
@@ -319,6 +317,29 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 	}
 
 	return nil
+}
+
+func preserveResolvedDeploymentImages(
+	renderVars *DeploymentManifestVariables,
+	existingDeployment *appsv1.Deployment,
+	currentSpecHash string,
+) {
+	if renderVars == nil || existingDeployment == nil || existingDeployment.Annotations == nil {
+		return
+	}
+
+	storedHash := existingDeployment.Annotations[annEndpointSpecHash]
+	if storedHash != "" && storedHash != currentSpecHash {
+		return
+	}
+
+	if storedVersion := existingDeployment.Annotations[annNeutreeVersion]; storedVersion != "" {
+		renderVars.NeutreeVersion = storedVersion
+	}
+
+	if runtimeImage := existingDeployment.Annotations[annKubernetesRuntimeImage]; runtimeImage != "" {
+		renderVars.KubernetesRuntimeImage = runtimeImage
+	}
 }
 
 // PauseEndpoint scales the endpoint's K8s deployment to zero replicas.

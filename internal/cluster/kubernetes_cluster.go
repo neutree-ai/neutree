@@ -28,16 +28,22 @@ type NativeKubernetesClusterReconciler struct {
 	storage               storage.Storage
 	acceleratorMgr        accelerator.Manager
 	metricsRemoteWriteURL string
+	profileComponents     v1.ClusterProfileComponents
+	profileSelected       bool
 }
 
 func NewNativeKubernetesClusterReconciler(
 	storage storage.Storage,
 	acceleratorMgr accelerator.Manager,
-	metricsRemoteWriteURL string) *NativeKubernetesClusterReconciler {
+	metricsRemoteWriteURL string,
+	profileComponents v1.ClusterProfileComponents,
+) *NativeKubernetesClusterReconciler {
 	c := &NativeKubernetesClusterReconciler{
 		metricsRemoteWriteURL: metricsRemoteWriteURL,
 		storage:               storage,
 		acceleratorMgr:        acceleratorMgr,
+		profileComponents:     profileComponents,
+		profileSelected:       true,
 	}
 
 	return c
@@ -47,8 +53,10 @@ func (c *NativeKubernetesClusterReconciler) Reconcile(ctx context.Context, clust
 	WriteEarlyStatus(cluster, c.storage)
 
 	reconcileCtx := &ReconcileContext{
-		Cluster: cluster,
-		Ctx:     ctx,
+		Cluster:           cluster,
+		Ctx:               ctx,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 		logger:           klog.LoggerWithValues(klog.Background(), "cluster", cluster.Metadata.WorkspaceName()),
@@ -70,6 +78,14 @@ func (c *NativeKubernetesClusterReconciler) generateConfig(reconcileCtx *Reconci
 
 	reconcileCtx.ImageRegistry = imageRegistry
 
+	return c.generateClusterAccessConfig(reconcileCtx)
+}
+
+func (c *NativeKubernetesClusterReconciler) generateDeleteConfig(reconcileCtx *ReconcileContext) error {
+	return c.generateClusterAccessConfig(reconcileCtx)
+}
+
+func (c *NativeKubernetesClusterReconciler) generateClusterAccessConfig(reconcileCtx *ReconcileContext) error {
 	config, err := util.ParseKubernetesClusterConfig(reconcileCtx.Cluster)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse kubernetes cluster config")
@@ -154,9 +170,18 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *ReconcileContext) error {
+	if !reconcileCtx.ProfileSelected {
+		return errors.New("exact cluster profile components are required for kubernetes reconciliation")
+	}
+
 	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return errors.Wrap(err, "failed to get image prefix")
+	}
+
+	routerImage, metricsImages, err := kubernetesComponentImages(imagePrefix, reconcileCtx.ProfileComponents)
+	if err != nil {
+		return err
 	}
 
 	reconcileComps := []component.Component{}
@@ -164,10 +189,11 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 
 	// The Router component is a core component of the cluster and cannot be removed; it should be added first.
 	routerComp := router.NewRouterComponent(reconcileCtx.Cluster,
-		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient)
+		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient).
+		WithRouterImage(routerImage)
 	reconcileComps = append(reconcileComps, routerComp)
 
-	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
+	needReconcileAdditionalComps, needDeleteAdditionalComps := c.ComputeAdditionalComponents(reconcileCtx, imagePrefix, metricsImages)
 	reconcileComps = append(reconcileComps, needReconcileAdditionalComps...)
 	reconcileDeleteComps = append(reconcileDeleteComps, needDeleteAdditionalComps...)
 
@@ -237,13 +263,14 @@ func (c *NativeKubernetesClusterReconciler) inferenceScrapeRules(cluster *v1.Clu
 }
 
 func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcileCtx *ReconcileContext,
-	imagePrefix string) ([]component.Component, []component.Component) {
+	imagePrefix string, metricsImages metrics.ComponentImages) ([]component.Component, []component.Component) {
 	reconcileComps := []component.Component{}
 	reconcileDeleteComps := []component.Component{}
 
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
+		WithComponentImages(metricsImages).
 		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster))
 	reconcileComps = append(reconcileComps, metricsComp)
 
@@ -259,17 +286,56 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	return reconcileComps, reconcileDeleteComps
 }
 
+func kubernetesComponentImages(
+	imagePrefix string,
+	components v1.ClusterProfileComponents,
+) (string, metrics.ComponentImages, error) {
+	routerImage, err := util.BuildProfileImageRef(imagePrefix, "router", components.Router)
+	if err != nil {
+		return "", metrics.ComponentImages{}, errors.Wrap(err, "build router image from cluster profile")
+	}
+
+	nodeAgentImage, err := util.BuildProfileImageRef(imagePrefix, "node agent", components.NodeAgent)
+	if err != nil {
+		return "", metrics.ComponentImages{}, errors.Wrap(err, "build node agent image from cluster profile")
+	}
+
+	nodeExporterImage, err := util.BuildProfileImageRef(imagePrefix, "node exporter", components.NodeExporter)
+	if err != nil {
+		return "", metrics.ComponentImages{}, errors.Wrap(err, "build node exporter image from cluster profile")
+	}
+
+	vmagentImage, err := util.BuildProfileImageRef(imagePrefix, "vmagent", components.VMAgent)
+	if err != nil {
+		return "", metrics.ComponentImages{}, errors.Wrap(err, "build vmagent image from cluster profile")
+	}
+
+	kubeStateMetricsImage, err := util.BuildProfileImageRef(imagePrefix, "kube state metrics", components.KubeStateMetrics)
+	if err != nil {
+		return "", metrics.ComponentImages{}, errors.Wrap(err, "build kube state metrics image from cluster profile")
+	}
+
+	return routerImage, metrics.ComponentImages{
+		NodeAgentImage:        nodeAgentImage,
+		NodeExporterImage:     nodeExporterImage,
+		VMAgentImage:          vmagentImage,
+		KubeStateMetricsImage: kubeStateMetricsImage,
+	}, nil
+}
+
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {
 	WriteEarlyDeleting(cluster, c.storage)
 
 	reconcileCtx := &ReconcileContext{
-		Cluster: cluster,
-		Ctx:     ctx,
+		Cluster:           cluster,
+		Ctx:               ctx,
+		ProfileComponents: c.profileComponents,
+		ProfileSelected:   c.profileSelected,
 
 		clusterNamespace: util.ClusterNamespace(cluster),
 	}
 
-	err := c.generateConfig(reconcileCtx)
+	err := c.generateDeleteConfig(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate config")
 	}

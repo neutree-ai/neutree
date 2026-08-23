@@ -9,47 +9,53 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestBuildClusterImageRef(t *testing.T) {
+func TestBuildProfileImageRef(t *testing.T) {
 	tests := []struct {
 		name        string
 		imagePrefix string
-		version     string
-		imageSuffix string
+		component   string
+		ref         v1.ImageRef
 		expected    string
+		expectError string
 	}{
 		{
-			name:        "default nvidia (no suffix)",
-			imagePrefix: "registry.io/neutree",
-			version:     "v1.0.0",
-			imageSuffix: "",
-			expected:    "registry.io/neutree/neutree/neutree-serve:v1.0.0",
+			name:        "rewrites source registry into the configured registry",
+			imagePrefix: "registry.example.com/neutree",
+			component:   "router",
+			ref:         v1.ImageRef{Image: "quay.io/neutree/router", Tag: "v1.2.0"},
+			expected:    "registry.example.com/neutree/neutree/router:v1.2.0",
 		},
 		{
-			name:        "amd rocm suffix",
-			imagePrefix: "registry.io/neutree",
-			version:     "v1.0.0",
-			imageSuffix: "rocm",
-			expected:    "registry.io/neutree/neutree/neutree-serve:v1.0.0-rocm",
-		},
-		{
-			name:        "rc version with suffix",
-			imagePrefix: "registry.io/neutree",
-			version:     "v1.0.1-rc.1",
-			imageSuffix: "rocm",
-			expected:    "registry.io/neutree/neutree/neutree-serve:v1.0.1-rc.1-rocm",
-		},
-		{
-			name:        "docker hub leaves image unchanged",
+			name:        "keeps docker hub images unchanged",
 			imagePrefix: "docker.io/neutree",
-			version:     "v1.0.0",
-			expected:    "neutree/neutree-serve:v1.0.0",
+			component:   "node exporter",
+			ref:         v1.ImageRef{Image: "quay.io/prometheus/node-exporter", Tag: "v1.8.2"},
+			expected:    "quay.io/prometheus/node-exporter:v1.8.2",
+		},
+		{
+			name:        "rejects an empty image",
+			component:   "router",
+			ref:         v1.ImageRef{Tag: "v1.2.0"},
+			expectError: "router image is required",
+		},
+		{
+			name:        "rejects an empty tag",
+			component:   "router",
+			ref:         v1.ImageRef{Image: "neutree/router"},
+			expectError: "router tag is required",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := BuildClusterImageRef(tt.imagePrefix, tt.version, tt.imageSuffix)
-			assert.Equal(t, tt.expected, got)
+			actual, err := BuildProfileImageRef(tt.imagePrefix, tt.component, tt.ref)
+			if tt.expectError != "" {
+				require.ErrorContains(t, err, tt.expectError)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, actual)
 		})
 	}
 }

@@ -3126,7 +3126,11 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k := &kubernetesOrchestrator{}
+			k := &kubernetesOrchestrator{
+				clusterProfileComponents: v1.ClusterProfileComponents{
+					KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.0"},
+				},
+			}
 			data := newDeploymentManifestVariables()
 
 			err := k.setDeployImageVariables(&data, tt.endpoint, tt.engine, tt.imageRegistry)
@@ -3140,6 +3144,90 @@ func TestKubernetesOrchestrator_setDeployImageVariables(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestKubernetesOrchestratorSetDeployImageVariablesUsesProfileRuntime(t *testing.T) {
+	k := &kubernetesOrchestrator{
+		clusterProfileComponents: v1.ClusterProfileComponents{
+			KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.1"},
+		},
+	}
+	data := newDeploymentManifestVariables()
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine:    &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.5.0"},
+			Resources: &v1.ResourceSpec{CPU: pointer.String("4.0")},
+		},
+	}
+	engine := &v1.Engine{
+		Metadata: &v1.Metadata{Name: "vllm"},
+		Spec: &v1.EngineSpec{Versions: []*v1.EngineVersion{{
+			Version: "v0.5.0",
+			Images:  map[string]*v1.EngineImage{"cpu": {ImageName: "vllm-cpu", Tag: "v0.5.0"}},
+		}}},
+	}
+	imageRegistry := &v1.ImageRegistry{
+		Metadata: &v1.Metadata{Name: "default"},
+		Spec:     &v1.ImageRegistrySpec{URL: "https://registry.neutree.ai", Repository: "neutree"},
+	}
+
+	require.NoError(t, k.setDeployImageVariables(&data, endpoint, engine, imageRegistry))
+	assert.Equal(t, "registry.neutree.ai/neutree/neutree/neutree-runtime:v1.2.1", data.KubernetesRuntimeImage)
+}
+
+func TestKubernetesTemplatesUseProfileRuntimeImage(t *testing.T) {
+	for _, templateKey := range []string{"vllm-v0.17.1", "vllm-v0.24.0", "sglang-v0.5.10", "llama-cpp-v0.3.7"} {
+		t.Run(templateKey, func(t *testing.T) {
+			data := DeploymentManifestVariables{
+				EndpointName:                 "test-endpoint",
+				Namespace:                    "default",
+				ClusterName:                  "test-cluster",
+				Workspace:                    "test-workspace",
+				ImagePullSecret:              "test-secret",
+				ImageRepo:                    "neutree/test-engine",
+				ImageTag:                     "v1.0.0",
+				KubernetesRuntimeImage:       "registry.example.com/neutree/neutree/neutree-runtime:v1.2.1",
+				ModelArgs:                    map[string]interface{}{"name": "test", "registry_type": "huggingface", "registry_path": "test", "path": "/models/test"},
+				EngineArgs:                   map[string]interface{}{},
+				Resources:                    map[string]string{},
+				Env:                          map[string]string{},
+				Annotations:                  map[string]string{},
+				Volumes:                      []corev1.Volume{},
+				VolumeMounts:                 []corev1.VolumeMount{},
+				NodeSelector:                 map[string]string{},
+				Replicas:                     1,
+				ProgressDeadlineSeconds:      defaultStartupTimeoutSeconds,
+				StartupProbeFailureThreshold: defaultStartupTimeoutSeconds / startupProbePeriodSeconds,
+			}
+
+			objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, templateKey), data)
+			require.NoError(t, err)
+			require.Len(t, objs.Items, 1)
+
+			deployment := &appsv1.Deployment{}
+			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, deployment))
+			require.Len(t, deployment.Spec.Template.Spec.InitContainers, 1)
+			assert.Equal(t, data.KubernetesRuntimeImage, deployment.Spec.Template.Spec.InitContainers[0].Image)
+		})
+	}
+}
+
+func TestPreserveResolvedDeploymentImages(t *testing.T) {
+	renderVars := DeploymentManifestVariables{
+		NeutreeVersion:         "v1.2.0",
+		KubernetesRuntimeImage: "registry.example.com/neutree/neutree/neutree-runtime:v1.2.0",
+	}
+	existingDeployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		annEndpointSpecHash:       "stable-spec",
+		annNeutreeVersion:         "v1.1.1",
+		annKubernetesRuntimeImage: "registry.example.com/neutree/neutree/neutree-runtime:v1.1.1",
+	}}}
+
+	preserveResolvedDeploymentImages(&renderVars, existingDeployment, "stable-spec")
+
+	assert.Equal(t, "v1.1.1", renderVars.NeutreeVersion)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-runtime:v1.1.1", renderVars.KubernetesRuntimeImage)
 }
 
 func TestGenerateModelCacheConfig(t *testing.T) {
