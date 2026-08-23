@@ -67,6 +67,23 @@ func TestCatalogAndBuilderReturnDefensiveCopies(t *testing.T) {
 	assert.Equal(t, "v1.1.1", actual.Spec.Components[v1.SSHClusterType].RayRuntime.Tag)
 }
 
+func TestCatalogBuildsPackageArtifactVariants(t *testing.T) {
+	spec := BuiltinCatalog().Spec()
+	profile := profileByName(t, spec.ClusterProfiles, "v1.2.0")
+	ssh := profile.Spec.Components[v1.SSHClusterType]
+	ssh.RayRuntime.Image = "enterprise/neutree-serve"
+	profile.Spec.Components[v1.SSHClusterType] = ssh
+
+	catalog, err := NewCatalog(spec)
+	require.NoError(t, err)
+	builder, err := NewBuilderForCatalog(catalog)
+	require.NoError(t, err)
+
+	images, err := builder.BuildPackageImages("v1.2.0", v1.SSHClusterType, "amd_gpu")
+	require.NoError(t, err)
+	assert.Equal(t, v1.ImageRef{Image: "enterprise/neutree-serve", Tag: "v1.1.1-rocm"}, images[0])
+}
+
 func TestBuilderBoundaryErrors(t *testing.T) {
 	_, err := NewBuilderForCatalog(nil)
 	require.ErrorContains(t, err, "catalog is required")

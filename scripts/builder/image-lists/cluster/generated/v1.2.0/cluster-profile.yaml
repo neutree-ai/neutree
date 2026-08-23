@@ -1,0 +1,35 @@
+cluster_profile:
+    version: v1.2.0
+    components:
+        ssh:
+            ray_runtime:
+                image: neutree/neutree-serve
+                tag: v1.1.1
+            node_agent:
+                image: neutree/neutree-node-agent
+                tag: v1.1.0-rc.1
+            node_exporter:
+                image: quay.io/prometheus/node-exporter
+                tag: v1.8.2
+            vmagent:
+                image: victoriametrics/vmagent
+                tag: v1.115.0
+        kubernetes:
+            kubernetes_runtime:
+                image: neutree/neutree-runtime
+                tag: v1.1.1
+            router:
+                image: neutree/router
+                tag: v1.1.1
+            node_agent:
+                image: neutree/neutree-node-agent
+                tag: v1.1.0-rc.1
+            node_exporter:
+                image: quay.io/prometheus/node-exporter
+                tag: v1.8.2
+            vmagent:
+                image: victoriametrics/vmagent
+                tag: v1.115.0
+            kube_state_metrics:
+                image: registry.k8s.io/kube-state-metrics/kube-state-metrics
+                tag: v2.15.0

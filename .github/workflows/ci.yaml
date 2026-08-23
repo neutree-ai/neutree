@@ -34,6 +34,9 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
           bash scripts/check-migrations.sh "origin/${{ github.base_ref }}"
 
+      - name: Check generated cluster package artifacts
+        run: make check-cluster-image-lists
+
       - name: Prepare for lint
         run: make prepare-build-cli
       - name: Run golangci-lint

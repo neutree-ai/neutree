@@ -2,11 +2,28 @@ package releaseprofile
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 const (
+	// ComponentRayRuntime identifies the SSH ray_runtime component.
+	ComponentRayRuntime = "ray_runtime"
+	// ComponentKubernetesRuntime identifies the Kubernetes runtime component.
+	ComponentKubernetesRuntime = "kubernetes_runtime"
+	// ComponentRouter identifies the Kubernetes router component.
+	ComponentRouter = "router"
+	// ComponentNodeAgent identifies the node agent component.
+	ComponentNodeAgent = "node_agent"
+	// ComponentNodeExporter identifies the node exporter component.
+	ComponentNodeExporter = "node_exporter"
+	// ComponentVMAgent identifies the VictoriaMetrics agent component.
+	ComponentVMAgent = "vmagent"
+	// ComponentKubeStateMetrics identifies the kube-state-metrics component.
+	ComponentKubeStateMetrics = "kube_state_metrics"
+
 	builtinNodeExporterImage     = "quay.io/prometheus/node-exporter"
 	builtinNodeExporterTag       = "v1.8.2"
 	builtinVMAgentImage          = "victoriametrics/vmagent"
@@ -24,9 +41,29 @@ type CatalogSpec struct {
 	DefaultClusterVersion      string
 	CompatibleClusterBaselines []string
 	ClusterProfiles            []*v1.ClusterProfile
+	ArtifactRules              []ArtifactRule
 }
 
-// Catalog owns one release policy and its exact component Profiles.
+// ArtifactRule describes package-only material for one Cluster type and
+// accelerator variant. Profile component matrices remain accelerator-neutral.
+type ArtifactRule struct {
+	ClusterType  string
+	Accelerator  string
+	Replacements []ComponentReplacement
+}
+
+// ComponentReplacement replaces one component reference while rendering a
+// package image list. Tag and TagSuffix are mutually exclusive; an empty Image
+// keeps the image name from the ClusterProfile component.
+type ComponentReplacement struct {
+	Component string
+	Image     string
+	Tag       string
+	TagSuffix string
+}
+
+// Catalog owns one release policy, its exact component Profiles, and package
+// artifact rules.
 type Catalog struct {
 	spec CatalogSpec
 }
@@ -107,6 +144,14 @@ func builtinCatalog() *Catalog {
 		DefaultClusterVersion:      "v1.2.0",
 		CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
 		ClusterProfiles:            profiles,
+		ArtifactRules: []ArtifactRule{{
+			ClusterType: v1.SSHClusterType,
+			Accelerator: "amd_gpu",
+			Replacements: []ComponentReplacement{{
+				Component: ComponentRayRuntime,
+				TagSuffix: "-rocm",
+			}},
+		}},
 	}}
 }
 
@@ -176,6 +221,148 @@ func (catalog *Catalog) buildClusterProfiles(baseline string) ([]*v1.ClusterProf
 	return profiles, nil
 }
 
+func (catalog *Catalog) buildPackageImages(clusterVersion, clusterType, accelerator string) ([]v1.ImageRef, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("release profile catalog is required")
+	}
+
+	if _, err := parseExactVPrefixedSemVer(clusterVersion); err != nil {
+		return nil, fmt.Errorf("invalid cluster version %q: %w", clusterVersion, err)
+	}
+
+	profile := catalog.clusterProfile(clusterVersion)
+	if profile == nil || profile.Spec == nil {
+		return nil, fmt.Errorf("cluster profile %s not found", clusterVersion)
+	}
+
+	components, found := profile.Spec.ComponentsFor(clusterType)
+	if !found {
+		return nil, fmt.Errorf("cluster profile %s has no %s component matrix", clusterVersion, clusterType)
+	}
+
+	images, err := componentImages(clusterType, components)
+	if err != nil {
+		return nil, err
+	}
+
+	if rule := catalog.artifactRule(clusterType, strings.TrimSpace(accelerator)); rule != nil {
+		if err := applyArtifactRule(images, *rule); err != nil {
+			return nil, err
+		}
+	}
+
+	return images, nil
+}
+
+func (catalog *Catalog) clusterProfile(version string) *v1.ClusterProfile {
+	for _, profile := range catalog.spec.ClusterProfiles {
+		if profile.GetName() == version {
+			return cloneClusterProfile(profile)
+		}
+	}
+
+	return nil
+}
+
+func (catalog *Catalog) artifactRule(clusterType, accelerator string) *ArtifactRule {
+	if accelerator == "" {
+		return nil
+	}
+
+	for index := range catalog.spec.ArtifactRules {
+		rule := &catalog.spec.ArtifactRules[index]
+		if rule.ClusterType == clusterType && rule.Accelerator == accelerator {
+			copy := cloneArtifactRule(*rule)
+
+			return &copy
+		}
+	}
+
+	return nil
+}
+
+func (catalog *Catalog) packageAccelerators(clusterType string) []string {
+	if catalog == nil {
+		return nil
+	}
+
+	accelerators := make([]string, 0, len(catalog.spec.ArtifactRules))
+	for _, rule := range catalog.spec.ArtifactRules {
+		if rule.ClusterType == clusterType {
+			accelerators = append(accelerators, rule.Accelerator)
+		}
+	}
+
+	sort.Strings(accelerators)
+
+	return accelerators
+}
+
+func componentImages(clusterType string, components v1.ClusterProfileComponents) ([]v1.ImageRef, error) {
+	switch clusterType {
+	case v1.SSHClusterType:
+		return []v1.ImageRef{components.RayRuntime, components.NodeAgent, components.NodeExporter, components.VMAgent}, nil
+	case v1.KubernetesClusterType:
+		return []v1.ImageRef{
+			components.KubernetesRuntime,
+			components.Router,
+			components.NodeAgent,
+			components.NodeExporter,
+			components.VMAgent,
+			components.KubeStateMetrics,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported cluster profile type %q", clusterType)
+	}
+}
+
+func componentImageIndexes(clusterType string) map[string]int {
+	switch clusterType {
+	case v1.SSHClusterType:
+		return map[string]int{
+			ComponentRayRuntime:   0,
+			ComponentNodeAgent:    1,
+			ComponentNodeExporter: 2,
+			ComponentVMAgent:      3,
+		}
+	case v1.KubernetesClusterType:
+		return map[string]int{
+			ComponentKubernetesRuntime: 0,
+			ComponentRouter:            1,
+			ComponentNodeAgent:         2,
+			ComponentNodeExporter:      3,
+			ComponentVMAgent:           4,
+			ComponentKubeStateMetrics:  5,
+		}
+	default:
+		return nil
+	}
+}
+
+func applyArtifactRule(images []v1.ImageRef, rule ArtifactRule) error {
+	indexes := componentImageIndexes(rule.ClusterType)
+	for _, replacement := range rule.Replacements {
+		index, found := indexes[replacement.Component]
+		if !found {
+			return fmt.Errorf("artifact rule references unsupported %s component %q", rule.ClusterType, replacement.Component)
+		}
+
+		if replacement.Image != "" {
+			images[index].Image = replacement.Image
+		}
+
+		if replacement.Tag != "" {
+			images[index].Tag = replacement.Tag
+		}
+
+		if replacement.TagSuffix != "" {
+			images[index].Tag += replacement.TagSuffix
+		}
+	}
+
+	return nil
+}
+
 func (catalog *Catalog) requireCurrentBaseline(baseline string) error {
 	if baseline != catalog.spec.CurrentReleaseInfoBaseline {
 		return fmt.Errorf("release baseline %q is not supported by catalog", baseline)
@@ -190,11 +377,23 @@ func cloneCatalogSpec(spec CatalogSpec) CatalogSpec {
 		DefaultClusterVersion:      spec.DefaultClusterVersion,
 		CompatibleClusterBaselines: append([]string(nil), spec.CompatibleClusterBaselines...),
 		ClusterProfiles:            make([]*v1.ClusterProfile, 0, len(spec.ClusterProfiles)),
+		ArtifactRules:              make([]ArtifactRule, 0, len(spec.ArtifactRules)),
 	}
 
 	for _, profile := range spec.ClusterProfiles {
 		copy.ClusterProfiles = append(copy.ClusterProfiles, cloneClusterProfile(profile))
 	}
 
+	for _, rule := range spec.ArtifactRules {
+		copy.ArtifactRules = append(copy.ArtifactRules, cloneArtifactRule(rule))
+	}
+
 	return copy
+}
+func cloneArtifactRule(rule ArtifactRule) ArtifactRule {
+	return ArtifactRule{
+		ClusterType:  rule.ClusterType,
+		Accelerator:  rule.Accelerator,
+		Replacements: append([]ComponentReplacement(nil), rule.Replacements...),
+	}
 }

@@ -77,7 +77,7 @@ install-hooks: ## Enable .githooks as local git hooks (run once per worktree)
 	git config extensions.worktreeConfig true
 	git config --worktree core.hooksPath "$(PROJECT_DIR)/.githooks"
 	chmod +x .githooks/pre-commit
-	chmod +x scripts/check-boundaries.sh scripts/check-migrations.sh scripts/builder/sync-controlplane-images.sh
+	chmod +x scripts/check-boundaries.sh scripts/check-migrations.sh scripts/builder/sync-controlplane-images.sh scripts/builder/sync-cluster-image-lists.sh
 	@echo "Git hooks installed for this worktree. Pre-commit will run on every 'git commit'."
 
 build: test build-neutree-core build-neutree-cli build-neutree-api build-all-packages
@@ -484,9 +484,19 @@ build-cluster-package: ## Build cluster package (CLUSTER_PACKAGE_TYPE=k8s|ssh, o
 		$(if $(CLUSTER_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(CLUSTER_PACKAGE_MIRROR_REGISTRY))
 
 .PHONY: sync-images-list
-sync-images-list: ## Sync images list for building package
+sync-images-list: ## Sync all package image lists
 	bash scripts/builder/sync-controlplane-images.sh --write
+	bash scripts/builder/sync-cluster-image-lists.sh --write
 
 .PHONY: check-images-list
-check-images-list: ## Check controlplane images list is up to date
+check-images-list: ## Check all package image lists are up to date
 	bash scripts/builder/sync-controlplane-images.sh --check
+	bash scripts/builder/sync-cluster-image-lists.sh --check
+
+.PHONY: sync-cluster-image-lists
+sync-cluster-image-lists: ## Generate exact cluster package profiles and image lists
+	bash scripts/builder/sync-cluster-image-lists.sh --write
+
+.PHONY: check-cluster-image-lists
+check-cluster-image-lists: ## Check exact cluster package profiles and image lists
+	bash scripts/builder/sync-cluster-image-lists.sh --check

@@ -10,6 +10,9 @@ ARCH="${ARCH:-amd64}"
 OUTPUT_DIR="./dist"
 MIRROR_REGISTRY=""
 TEMP_DIR=$(mktemp -d)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+CLUSTER_IMAGE_LIST_ROOT="${PROJECT_ROOT}/scripts/builder/image-lists/cluster"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,7 +37,7 @@ Usage: $0 [OPTIONS]
 
 Options:
     --type <TYPE>              Package type: controlplane, cluster
-    --version <VERSION>        Version tag (default: latest)
+    --version <VERSION>        Version tag (default: latest; required for cluster packages)
     --arch <ARCH>              Architecture: amd64, arm64 (default: amd64)
     --cluster-type <TYPE>      Cluster type: k8s or ssh (required if type=cluster)
     --accelerator <ACCEL>      Accelerator type: nvidia_gpu, amd_gpu (for k8s/ssh cluster; appends <ACCEL>-images.txt)
@@ -133,32 +136,82 @@ case "$PACKAGE_TYPE" in
             usage
         fi
 
+        if [[ "$VERSION" == "latest" ]]; then
+            log_error "Cluster packages require an explicit supported --version"
+            exit 1
+        fi
+        # Profiles use exact semantic versions. Pre-release identifiers remain
+        # valid package versions, but no argument may change the generated path.
+        if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]] || [[ "$VERSION" == *..* ]]; then
+            log_error "Cluster package version must be a v-prefixed semantic version: $VERSION"
+            exit 1
+        fi
+
+        case "$ACCELERATOR" in
+            ""|nvidia_gpu|amd_gpu)
+                ;;
+            *)
+                log_error "Unsupported accelerator package variant: $ACCELERATOR"
+                exit 1
+                ;;
+        esac
+
+        if ! bash "${SCRIPT_DIR}/sync-cluster-image-lists.sh" --check; then
+            log_error "Generated cluster package artifacts are stale"
+            exit 1
+        fi
+
         case "$CLUSTER_TYPE" in
             k8s)
                 PACKAGE_NAME="neutree-cluster-k8s"
-                IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/images.txt")
-
-                if [[ -n "$ACCELERATOR" ]]; then
-                    IMAGE_LIST_FILES+=("image-lists/cluster/kubernetes/${ACCELERATOR}-images.txt")
-                    PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
-                fi
-                PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
+                CLUSTER_LIST_TYPE="kubernetes"
                 ;;
             ssh)
                 PACKAGE_NAME="neutree-cluster-ssh"
-                IMAGE_LIST_FILES+=("image-lists/cluster/ssh/images.txt")
-
-                if [[ -n "$ACCELERATOR" ]]; then
-                    IMAGE_LIST_FILES+=("image-lists/cluster/ssh/${ACCELERATOR}-images.txt")
-                    PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
-                fi
-                PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
+                CLUSTER_LIST_TYPE="ssh"
                 ;;
             *)
                 log_error "Unknown cluster type: $CLUSTER_TYPE"
                 usage
                 ;;
         esac
+
+        CLUSTER_GENERATED_DIR="${CLUSTER_IMAGE_LIST_ROOT}/generated/${VERSION}/${CLUSTER_LIST_TYPE}"
+        CLUSTER_PROFILE_SOURCE="${CLUSTER_IMAGE_LIST_ROOT}/generated/${VERSION}/cluster-profile.yaml"
+        CLUSTER_ADDON_DIR="${CLUSTER_IMAGE_LIST_ROOT}/addons/${CLUSTER_LIST_TYPE}"
+
+        if [[ ! -f "$CLUSTER_PROFILE_SOURCE" ]]; then
+            log_error "Unsupported cluster package version: $VERSION"
+            log_error "Missing generated profile: $CLUSTER_PROFILE_SOURCE"
+            exit 1
+        fi
+        if [[ ! -f "${CLUSTER_GENERATED_DIR}/images.txt" ]]; then
+            log_error "Generated image list not found: ${CLUSTER_GENERATED_DIR}/images.txt"
+            exit 1
+        fi
+
+        IMAGE_LIST_FILES+=("${CLUSTER_GENERATED_DIR}/images.txt")
+        if [[ -f "${CLUSTER_ADDON_DIR}/images.txt" ]]; then
+            IMAGE_LIST_FILES+=("${CLUSTER_ADDON_DIR}/images.txt")
+        fi
+
+        if [[ -n "$ACCELERATOR" ]]; then
+            accelerator_found=false
+            if [[ -f "${CLUSTER_GENERATED_DIR}/${ACCELERATOR}-images.txt" ]]; then
+                IMAGE_LIST_FILES+=("${CLUSTER_GENERATED_DIR}/${ACCELERATOR}-images.txt")
+                accelerator_found=true
+            fi
+            if [[ -f "${CLUSTER_ADDON_DIR}/${ACCELERATOR}-images.txt" ]]; then
+                IMAGE_LIST_FILES+=("${CLUSTER_ADDON_DIR}/${ACCELERATOR}-images.txt")
+                accelerator_found=true
+            fi
+            if [[ "$accelerator_found" != "true" ]]; then
+                log_error "Unsupported accelerator package variant: ${CLUSTER_TYPE}/${ACCELERATOR}"
+                exit 1
+            fi
+            PACKAGE_NAME="${PACKAGE_NAME}-${ACCELERATOR}"
+        fi
+        PACKAGE_NAME="${PACKAGE_NAME}-${VERSION}-${ARCH}"
         ;;
     engine)
         log_error "Engine packages should use build-engine-package.sh"
@@ -199,29 +252,31 @@ for list_file in "${IMAGE_LIST_FILES[@]}"; do
         [[ "$line" =~ ^#.*$ ]] && continue
         [[ -z "$line" ]] && continue
 
-        # If the image contains neutree
-        if [[ "$line" =~ neutree ]]; then
-            # Extract image name and tag
+        # Control-plane inputs intentionally retain latest placeholders so a
+        # release package resolves its three Neutree images to --version. The
+        # generated ClusterProfile lists already contain exact tags.
+        if [[ "$PACKAGE_TYPE" == "controlplane" && "$line" =~ neutree ]]; then
             if [[ "$line" =~ ^([^:]+):(.+)$ ]]; then
                 image_name="${BASH_REMATCH[1]}"
                 image_tag="${BASH_REMATCH[2]}"
-
-                # Replace "latest" in tag with version
-                new_tag="${image_tag//latest/${VERSION}}"
-                echo "${image_name}:${new_tag}" >> "$MERGED_IMAGE_LIST"
+                printf '%s:%s\n' "$image_name" "${image_tag//latest/${VERSION}}" >> "$MERGED_IMAGE_LIST"
             elif [[ "$line" =~ ^[^:]+$ ]]; then
-                # If no tag, default to version
-                echo "${line}:${VERSION}" >> "$MERGED_IMAGE_LIST"
+                printf '%s:%s\n' "$line" "$VERSION" >> "$MERGED_IMAGE_LIST"
             else
-                echo "$line" >> "$MERGED_IMAGE_LIST"
+                printf '%s\n' "$line" >> "$MERGED_IMAGE_LIST"
             fi
         else
-            # Non-neutree images remain unchanged
-            echo "$line" >> "$MERGED_IMAGE_LIST"
+            printf '%s\n' "$line" >> "$MERGED_IMAGE_LIST"
         fi
     done < "$list_file"
 done
 
+PROFILE_MANIFEST=""
+if [[ "$PACKAGE_TYPE" == "cluster" ]]; then
+    PROFILE_MANIFEST="${TEMP_DIR}/cluster-profile.yaml"
+    log_info "Using generated cluster profile: $CLUSTER_PROFILE_SOURCE"
+    cp "$CLUSTER_PROFILE_SOURCE" "$PROFILE_MANIFEST"
+fi
 
 # Deduplicate
 sort -u "$MERGED_IMAGE_LIST" -o "$MERGED_IMAGE_LIST"
@@ -313,11 +368,16 @@ for image in "${IMAGES_TO_PULL[@]}"; do
 EOF
 done
 
+if [[ -n "$PROFILE_MANIFEST" ]]; then
+    cat "$PROFILE_MANIFEST" >> "${PACKAGE_DIR}/manifest.yaml"
+fi
+
 log_info "Manifest generated successfully"
 
 # Create README
+PACKAGE_TYPE_TITLE=$(printf '%s' "$PACKAGE_TYPE" | awk '{ print toupper(substr($0, 1, 1)) substr($0, 2) }')
 cat > "${PACKAGE_DIR}/README.md" << EOF
-# Neutree ${PACKAGE_TYPE^} Package
+# Neutree ${PACKAGE_TYPE_TITLE} Package
 
 Version: ${VERSION}
 Architecture: ${ARCH}
@@ -353,13 +413,17 @@ PACKAGE_FILE="${OUTPUT_DIR}/${PACKAGE_NAME}.tar.gz"
 log_info "Creating package: $PACKAGE_FILE"
 
 CURRENT_DIR=$(pwd)
+PACKAGE_OUTPUT_PATH="$PACKAGE_FILE"
+if [[ "$PACKAGE_OUTPUT_PATH" != /* ]]; then
+    PACKAGE_OUTPUT_PATH="${CURRENT_DIR}/${PACKAGE_OUTPUT_PATH}"
+fi
 
 cd "$TEMP_DIR" || exit 1
 
 if command -v pigz &> /dev/null; then
-    tar -I "pigz -p 16" -cf "${CURRENT_DIR}/${PACKAGE_FILE}" *
+    tar -I "pigz -p 16" -cf "$PACKAGE_OUTPUT_PATH" *
 else
-    tar -czf "${CURRENT_DIR}/${PACKAGE_FILE}" *
+    tar -czf "$PACKAGE_OUTPUT_PATH" *
 fi
 
 cd "$CURRENT_DIR" || exit 1
