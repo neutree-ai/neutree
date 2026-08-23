@@ -35,6 +35,14 @@ from vllm.entrypoints.pooling.scoring.protocol import RerankRequest
 from vllm.entrypoints.pooling.scoring.serving import ServingScores
 
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
+from serve._kv_cache import (
+    KV_ROUTING_METADATA_KEY,
+    KV_ROUTING_STATS_KEY,
+    LocalKVBlockIndex,
+    LocalKVEventSubscriber,
+    build_local_kv_events_config,
+    build_native_cpu_offload_config,
+)
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
@@ -45,12 +53,14 @@ class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
     STATIC_HASH = "static_hash"
     CONSISTENT_HASH = "consistent_hash"
+    KV_AWARE = "kv_aware"
 
 
 # Mapping from scheduler type to request router class path
 SCHEDULER_CLASS_PATHS = {
     SchedulerType.STATIC_HASH: "serve._replica_scheduler.static_hash_scheduler:StaticHashReplicaScheduler",
     SchedulerType.CONSISTENT_HASH: "serve._replica_scheduler.chwbl_scheduler:ConsistentHashReplicaScheduler",
+    SchedulerType.KV_AWARE: "serve._replica_scheduler.kv_aware_scheduler:KVAwareReplicaScheduler",
 }
 
 
@@ -66,6 +76,8 @@ class Backend:
                  model_registry_path: str = "",
                  model_path: str = "",
                  model_serve_name: str = "",
+                 kv_aware_routing: bool = False,
+                 kv_routing_max_blocks: int = 8192,
                  **engine_kwargs):
         """
         Backend deployment for vLLM inference.
@@ -98,6 +110,39 @@ class Backend:
         self.model_id = model_serve_name
         self.model_path = model_path
         self.model_task = model_task
+        self.kv_aware_routing = kv_aware_routing
+        self.kv_routing_max_blocks = kv_routing_max_blocks
+        self.kv_block_index = None
+        self.kv_event_subscriber = None
+
+        if self.kv_aware_routing:
+            data_parallel_size = engine_kwargs.get("data_parallel_size", 1)
+            if data_parallel_size not in (None, 1):
+                raise ValueError(
+                    "The kv_aware demo currently requires data_parallel_size=1 "
+                    "so one subscriber observes the complete replica event stream"
+                )
+
+            replica_suffix = f"{os.getpid()}-{time.time_ns()}"
+            kv_event_endpoint = f"ipc:///tmp/neutree-kv-events-{replica_suffix}.sock"
+            kv_event_topic = "neutree-kv-events"
+            engine_kwargs["kv_events_config"] = build_local_kv_events_config(
+                engine_kwargs.get("kv_events_config"),
+                endpoint=kv_event_endpoint,
+                topic=kv_event_topic,
+            )
+            if engine_kwargs.get("kv_offloading_size") is not None:
+                engine_kwargs["kv_transfer_config"] = (
+                    build_native_cpu_offload_config(
+                        engine_kwargs.get("kv_transfer_config")
+                    )
+                )
+            self.kv_block_index = LocalKVBlockIndex()
+            self.kv_event_subscriber = LocalKVEventSubscriber(
+                kv_event_endpoint,
+                kv_event_topic,
+                self.kv_block_index,
+            )
 
         # Extract FrontendArgs BEFORE creating AsyncEngineArgs to avoid unexpected keyword errors.
         # FrontendArgs are NOT engine parameters — they configure the Serving layer (chat, embedding, score).
@@ -207,6 +252,18 @@ class Backend:
             engine_args,
             stat_loggers=[NeutreeRayStatLogger],
         )
+        if self.kv_event_subscriber is not None:
+            try:
+                self.kv_event_subscriber.start()
+                print(
+                    "[Backend] KV-aware routing enabled with replica-local event "
+                    f"endpoint={kv_event_endpoint}"
+                )
+            except Exception:
+                logging.exception(
+                    "KV event subscriber failed to start; requests will use "
+                    "fallback routing"
+                )
         self.model_config = None
         self.openai_serving_chat = None
         self.openai_serving_render = None
@@ -332,6 +389,9 @@ class Backend:
         return self.openai_serving_score
 
     async def generate(self, payload: Any):
+        if isinstance(payload, dict) and KV_ROUTING_METADATA_KEY in payload:
+            payload = dict(payload)
+            payload.pop(KV_ROUTING_METADATA_KEY, None)
         await self._ensure_chat()
         result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
 
@@ -354,6 +414,50 @@ class Backend:
                 return error_generator()
 
         return result
+
+    async def routing_token_ids(self, payload: Any):
+        """Render a text-only chat request for the KV-aware request router."""
+        if not self.kv_aware_routing or not isinstance(payload, dict):
+            return None
+        if payload.get("cache_salt") is not None:
+            return None
+        for message in payload.get("messages", []):
+            if not isinstance(message, dict) or not isinstance(
+                message.get("content"), str
+            ):
+                return None
+
+        try:
+            render = await self._ensure_render()
+            rendered = await render.render_chat_request(
+                ChatCompletionRequest(**payload)
+            )
+        except Exception:
+            logging.exception("Failed to render request for KV-aware routing")
+            return None
+        if isinstance(rendered, ErrorResponse):
+            return None
+        token_ids = getattr(rendered, "token_ids", None)
+        if not isinstance(token_ids, list) or not token_ids:
+            return None
+        return {"version": 1, "token_ids": token_ids}
+
+    def record_routing_stats(self):
+        """Return a bounded snapshot consumed by Ray's custom request router."""
+        if self.kv_block_index is None:
+            return {}
+        snapshot = self.kv_block_index.snapshot(self.kv_routing_max_blocks)
+        snapshot["captured_at"] = time.time()
+        snapshot["consumer_alive"] = (
+            self.kv_event_subscriber is not None
+            and self.kv_event_subscriber.is_alive
+        )
+        return {KV_ROUTING_STATS_KEY: snapshot}
+
+    def __del__(self):
+        subscriber = getattr(self, "kv_event_subscriber", None)
+        if subscriber is not None:
+            subscriber.close()
 
     async def generate_embeddings(self, payload: Any):
         await self._ensure_embedding()
@@ -460,7 +564,7 @@ def _stream_error_response(first_chunk: Any) -> Optional[JSONResponse]:
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
 @serve.ingress(app)
 class Controller:
-    def __init__(self, backend: DeploymentHandle):
+    def __init__(self, backend: DeploymentHandle, kv_aware_routing: bool = False):
         """
         Controller deployment that handles HTTP routing and calls the backend.
 
@@ -468,11 +572,29 @@ class Controller:
             backend: Handle to the Backend deployment
         """
         self.backend = backend
+        self.kv_aware_routing = kv_aware_routing
         print("[Controller] Initialized with backend handle")
+
+    async def _attach_kv_routing_metadata(self, payload: Any):
+        if not self.kv_aware_routing or not isinstance(payload, dict):
+            return payload
+        try:
+            routing_metadata = await self.backend.options(
+                stream=False
+            ).routing_token_ids.remote(payload)
+        except Exception:
+            logging.exception("KV routing pre-processing failed; using fallback routing")
+            return payload
+        if not isinstance(routing_metadata, dict):
+            return payload
+        routed_payload = dict(payload)
+        routed_payload[KV_ROUTING_METADATA_KEY] = routing_metadata
+        return routed_payload
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         req_obj = await request.json()
+        req_obj = await self._attach_kv_routing_metadata(req_obj)
         stream = req_obj.get("stream", False)
 
         if stream:
@@ -544,7 +666,7 @@ def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[R
 
     Args:
         scheduler_config: Dictionary containing scheduler configuration with keys:
-            - type: SchedulerType (pow2, static_hash, consistent_hash)
+            - type: SchedulerType (pow2, static_hash, consistent_hash, kv_aware)
             - virtual_nodes: Number of virtual nodes for consistent hash (default: 100)
             - load_factor: Load factor for bounded load (default: 1.25)
             - max_user_messages_for_cache: Number of user messages for cache key (default: 2)
@@ -573,12 +695,25 @@ def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[R
             "load_factor": scheduler_config.get('load_factor', 1.25),
             "max_user_messages_for_cache": scheduler_config.get('max_user_messages_for_cache', 2),
         }
+    elif scheduler_type == SchedulerType.KV_AWARE:
+        router_kwargs = {
+            "max_index_age_s": scheduler_config.get('max_index_age_s', 5.0),
+            "min_matched_blocks": scheduler_config.get('min_matched_blocks', 1),
+        }
 
     print(f"[app_builder] Using custom scheduler: {scheduler_type}, class: {router_class_path}, kwargs: {router_kwargs}")
+
+    config_kwargs = {}
+    if scheduler_type == SchedulerType.KV_AWARE:
+        config_kwargs = {
+            "request_routing_stats_period_s": scheduler_config.get('stats_period_s', 0.5),
+            "request_routing_stats_timeout_s": scheduler_config.get('stats_timeout_s', 2.0),
+        }
 
     return RequestRouterConfig(
         request_router_class=router_class_path,
         request_router_kwargs=router_kwargs,
+        **config_kwargs,
     )
 
 
@@ -598,6 +733,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
     # Extract scheduler configuration and build RequestRouterConfig
     scheduler_config = deployment_options.get('scheduler', {})
     request_router_config = _build_request_router_config(scheduler_config)
+    kv_aware_routing = scheduler_config.get('type') == SchedulerType.KV_AWARE
 
     # Build backend deployment options
     backend_deploy_options = {
@@ -633,6 +769,8 @@ def app_builder(args: Dict[str, Any]) -> Application:
         model_registry_path=model.get('registry_path', ''),
         model_path=model.get('path', ''),
         model_serve_name=model.get('serve_name', ''),
+        kv_aware_routing=kv_aware_routing,
+        kv_routing_max_blocks=scheduler_config.get('max_index_blocks', 8192),
         # Pass all other engine args directly through
         **engine_args
     )
@@ -647,6 +785,7 @@ def app_builder(args: Dict[str, Any]) -> Application:
         }
     ).bind(
         backend=backend_deployment,
+        kv_aware_routing=kv_aware_routing,
     )
 
     return controller_deployment
