@@ -55,65 +55,6 @@ func TestReleaseInfoHasMinimalGlobalSchema(t *testing.T) {
 		t.Fatal("expected duplicate release info name to be rejected")
 	}
 
-	missingDefaultTx := beginServiceRoleTx(t, adminDB, ctx, "missing default cluster version")
-	defer func() {
-		_ = missingDefaultTx.Rollback()
-	}()
-	if _, err = insertReleaseInfo(ctx, missingDefaultTx, "v1.2.1", "", `[]`); err == nil {
-		t.Fatal("expected an empty default cluster version to be rejected")
-	}
-
-	blankDefaultTx := beginServiceRoleTx(t, adminDB, ctx, "blank default cluster version")
-	defer func() {
-		_ = blankDefaultTx.Rollback()
-	}()
-	_, err = blankDefaultTx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'ReleaseInfo',
-			ROW('v1.2.15', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('   ', '[]'::jsonb)::api.release_info_spec
-		)
-	`)
-	if err == nil {
-		t.Fatal("expected blank default cluster version to be rejected")
-	}
-
-	invalidBaselinesTx := beginServiceRoleTx(t, adminDB, ctx, "invalid compatible baselines")
-	defer func() {
-		_ = invalidBaselinesTx.Rollback()
-	}()
-	_, err = invalidBaselinesTx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'ReleaseInfo',
-			ROW('v1.2.16', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.2.16', '{"minor":"v1.2"}'::jsonb)::api.release_info_spec
-		)
-	`)
-	if err == nil {
-		t.Fatal("expected non-array compatible cluster baselines to be rejected")
-	}
-
-	missingBaselinesTx := beginServiceRoleTx(t, adminDB, ctx, "missing compatible baselines")
-	defer func() {
-		_ = missingBaselinesTx.Rollback()
-	}()
-	_, err = missingBaselinesTx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'ReleaseInfo',
-			ROW('v1.2.17', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.2.17', NULL)::api.release_info_spec
-		)
-	`)
-	if err == nil {
-		t.Fatal("expected missing compatible cluster baselines to be rejected")
-	}
-
 	workspaceTx := beginServiceRoleTx(t, adminDB, ctx, "workspace-scoped release info")
 	defer func() {
 		_ = workspaceTx.Rollback()

@@ -133,8 +133,49 @@ func TestClusterProfileSupportedTypes(t *testing.T) {
 	assert.False(t, IsSupportedClusterType("kubernetes\n"))
 }
 
+func TestClusterProfileObjectAccessors(t *testing.T) {
+	obj := &ClusterProfile{ID: 42}
+	assert.Empty(t, obj.GetName())
+	assert.Nil(t, obj.GetLabels())
+	assert.Nil(t, obj.GetAnnotations())
+	assert.Empty(t, obj.GetCreationTimestamp())
+	assert.Empty(t, obj.GetUpdateTimestamp())
+	assert.Empty(t, obj.GetDeletionTimestamp())
+
+	labels := map[string]string{"release": "v1.2.0"}
+	obj.SetLabels(labels)
+	assert.Equal(t, labels, obj.GetLabels())
+
+	annotationOnly := &ClusterProfile{}
+	annotations := map[string]string{"source": "catalog"}
+	annotationOnly.SetAnnotations(annotations)
+	assert.Equal(t, annotations, annotationOnly.GetAnnotations())
+
+	obj.Metadata.Annotations = annotations
+	obj.Metadata.CreationTimestamp = "2026-08-24T00:00:00Z"
+	obj.Metadata.UpdateTimestamp = "2026-08-24T01:00:00Z"
+	obj.Metadata.DeletionTimestamp = "2026-08-24T02:00:00Z"
+	obj.Spec = &ClusterProfileSpec{}
+	obj.SetKind(ClusterProfileKind)
+
+	assert.Equal(t, annotations, obj.GetAnnotations())
+	assert.Equal(t, "2026-08-24T00:00:00Z", obj.GetCreationTimestamp())
+	assert.Equal(t, "2026-08-24T01:00:00Z", obj.GetUpdateTimestamp())
+	assert.Equal(t, "2026-08-24T02:00:00Z", obj.GetDeletionTimestamp())
+	assert.Same(t, obj.Spec, obj.GetSpec())
+	assert.Nil(t, obj.GetStatus())
+	assert.Equal(t, ClusterProfileKind, obj.GetKind())
+	assert.Equal(t, "42", obj.GetID())
+	assert.Same(t, obj.Metadata, obj.GetMetadata())
+}
+
 func TestClusterProfileListSetItems(t *testing.T) {
 	list := &ClusterProfileList{}
+	assert.Empty(t, list.GetKind())
+	list.SetKind(ClusterProfileListKind)
+	assert.Equal(t, ClusterProfileListKind, list.GetKind())
+	assert.Empty(t, list.GetItems())
+
 	list.SetItems([]scheme.Object{
 		&ClusterProfile{ID: 1, Metadata: &Metadata{Name: "v1.2.0-rc.1"}},
 		&ClusterProfile{ID: 2, Metadata: &Metadata{Name: "v1.2.0-rc.2"}},
@@ -143,4 +184,5 @@ func TestClusterProfileListSetItems(t *testing.T) {
 	require.Len(t, list.Items, 2)
 	assert.Equal(t, "v1.2.0-rc.1", list.Items[0].GetName())
 	assert.Equal(t, "v1.2.0-rc.2", list.Items[1].GetName())
+	assert.Len(t, list.GetItems(), 2)
 }

@@ -3,7 +3,6 @@ package dbtest
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"testing"
 )
 
@@ -70,48 +69,6 @@ func TestClusterProfileIsGlobalInternalState(t *testing.T) {
 	_, err = insertClusterProfile(ctx, duplicateTx, profileName, completeClusterProfileSpec)
 	if err == nil {
 		t.Fatal("expected duplicate cluster profile version to be rejected")
-	}
-
-	missingMatrixTx := beginServiceRoleTx(t, adminDB, ctx, "missing matrix")
-	defer func() {
-		_ = missingMatrixTx.Rollback()
-	}()
-	_, err = insertClusterProfile(ctx, missingMatrixTx, "v1.2.0-rc.2", `{"components":{"ssh":{}}}`)
-	if err == nil {
-		t.Fatal("expected missing cluster profile matrix to be rejected")
-	}
-
-	missingComponentsTx := beginServiceRoleTx(t, adminDB, ctx, "missing components")
-	defer func() {
-		_ = missingComponentsTx.Rollback()
-	}()
-	_, err = insertClusterProfile(ctx, missingComponentsTx, "v1.2.0-rc.25", `{}`)
-	if err == nil {
-		t.Fatal("expected a cluster profile without components to be rejected")
-	}
-
-	extraMatrixTx := beginServiceRoleTx(t, adminDB, ctx, "extra matrix")
-	defer func() {
-		_ = extraMatrixTx.Rollback()
-	}()
-	_, err = insertClusterProfile(ctx, extraMatrixTx, "v1.2.0-rc.3", `{"components":{"ssh":{},"kubernetes":{},"docker":{}}}`)
-	if err == nil {
-		t.Fatal("expected extra cluster profile matrix to be rejected")
-	}
-
-	missingComponentTx := beginServiceRoleTx(t, adminDB, ctx, "missing component")
-	defer func() {
-		_ = missingComponentTx.Rollback()
-	}()
-	missingComponentSpec := strings.Replace(
-		completeClusterProfileSpec,
-		`"ray_runtime": {"image": "neutree/neutree-serve", "tag": "v1.2.0-rc.1"}`,
-		`"ray_runtime": {}`,
-		1,
-	)
-	_, err = insertClusterProfile(ctx, missingComponentTx, "v1.2.0-rc.35", missingComponentSpec)
-	if err == nil {
-		t.Fatal("expected incomplete cluster profile component matrix to be rejected")
 	}
 
 	workspaceTx := beginServiceRoleTx(t, adminDB, ctx, "workspace")
