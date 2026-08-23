@@ -487,7 +487,7 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQ
 	require.Equal(t, float64(0), available.Products["NVIDIA-L20"].Quantity)
 }
 
-func TestK8sResourceClientListNodesPartiallyAllocatedDeviceDoesNotCountAsAvailableCard(t *testing.T) {
+func TestK8sResourceClientListNodesPartiallyAllocatedDeviceContributesEquivalentAvailableCapacity(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -545,26 +545,24 @@ func TestK8sResourceClientListNodesPartiallyAllocatedDeviceDoesNotCountAsAvailab
 	require.Len(t, nodes, 1)
 	require.Len(t, nodes[0].Status.Devices, 2)
 
-	// GPU-1 is partially allocated (half memory + half cores): it must NOT
-	// count as an available whole card, but its remaining capacity must still
-	// be present in the schedulable pool.
+	// GPU-1 is partially allocated (half memory + half cores), so it contributes
+	// half an equivalent card while GPU-2 contributes one full equivalent card.
 	require.Equal(t, int64(23034), nodes[0].Status.Devices[0].Available.MemoryMiB)
 	require.Equal(t, int64(50), nodes[0].Status.Devices[0].Available.CoreUnits)
 
 	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(1), available.Quantity)
-	require.Equal(t, float64(1), available.ProductGroups["NVIDIA-L20"])
-	require.Equal(t, float64(1), available.Products["NVIDIA-L20"].Quantity)
+	require.Equal(t, float64(1.5), available.Quantity)
+	require.Equal(t, float64(1.5), available.ProductGroups["NVIDIA-L20"])
+	require.Equal(t, float64(1.5), available.Products["NVIDIA-L20"].Quantity)
 	// Remaining capacity pool aggregates GPU-1 (23034/50) + GPU-2 (46068/100).
 	require.Equal(t, float64(69102), available.Products["NVIDIA-L20"].Virtualization.MemoryMiB)
 	require.Equal(t, float64(150), available.Products["NVIDIA-L20"].Virtualization.CoreUnits)
 }
 
-func TestK8sResourceClientListNodesAvailableCardCountingScenarios(t *testing.T) {
-	// The unified "used" determination: a healthy card counts as an available
-	// whole card only when both memory and compute are fully free. Cover the
-	// scenarios from NEU-608: unallocated, memory-only allocation, compute-only
-	// allocation, both allocated, fully exhausted.
+func TestK8sResourceClientListNodesAvailableEquivalentCapacityScenarios(t *testing.T) {
+	// A healthy device contributes its smaller remaining memory/core ratio.
+	// Cover unallocated, memory-only, compute-only, asymmetric, single-dimension
+	// exhausted, and fully exhausted allocations from NEU-608.
 	const allocMemoryMiB = int64(46068)
 	const allocCoreUnits = int64(100)
 
@@ -577,32 +575,51 @@ func TestK8sResourceClientListNodesAvailableCardCountingScenarios(t *testing.T) 
 		wantPoolNil       bool
 	}{
 		{
-			name:              "unallocated card is fully available",
+			name:              "unallocated card contributes one",
 			allocation:        "",
 			wantAvailable:     1,
 			wantPoolMemoryMiB: float64(allocMemoryMiB),
 			wantPoolCoreUnits: float64(allocCoreUnits),
 		},
 		{
-			name:              "memory-only allocation marks card used",
+			name:              "memory-only allocation contributes remaining memory ratio",
 			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":23034,"core_units":0}]`,
-			wantAvailable:     0,
+			wantAvailable:     0.5,
 			wantPoolMemoryMiB: 23034,
 			wantPoolCoreUnits: float64(allocCoreUnits),
 		},
 		{
-			name:              "compute-only allocation marks card used",
+			name:              "compute-only allocation contributes remaining compute ratio",
 			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":0,"core_units":50}]`,
-			wantAvailable:     0,
+			wantAvailable:     0.5,
 			wantPoolMemoryMiB: float64(allocMemoryMiB),
 			wantPoolCoreUnits: 50,
 		},
 		{
-			name:              "both memory and compute allocated marks card used",
+			name:              "matching partial allocation contributes one half",
 			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":23034,"core_units":50}]`,
-			wantAvailable:     0,
+			wantAvailable:     0.5,
 			wantPoolMemoryMiB: 23034,
 			wantPoolCoreUnits: 50,
+		},
+		{
+			name:              "smaller compute ratio limits capacity",
+			allocation:        `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":11517,"core_units":75}]`,
+			wantAvailable:     0.25,
+			wantPoolMemoryMiB: 34551,
+			wantPoolCoreUnits: 25,
+		},
+		{
+			name:          "exhausted memory does not contribute a residual pool",
+			allocation:    `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46068,"core_units":0}]`,
+			wantAvailable: 0,
+			wantPoolNil:   true,
+		},
+		{
+			name:          "exhausted compute does not contribute a residual pool",
+			allocation:    `[{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":0,"core_units":100}]`,
+			wantAvailable: 0,
+			wantPoolNil:   true,
 		},
 		{
 			name:              "fully exhausted card is not available",

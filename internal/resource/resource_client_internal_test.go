@@ -7,64 +7,82 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsDeviceFullyAvailable(t *testing.T) {
+func TestDeviceAvailableEquivalentQuantity(t *testing.T) {
 	pool := func(memoryMiB, coreUnits int64) *v1.DeviceResourcePool {
 		return &v1.DeviceResourcePool{MemoryMiB: memoryMiB, CoreUnits: coreUnits}
 	}
 
 	testCases := []struct {
-		name          string
-		allocatable   *v1.DeviceResourcePool
-		available     *v1.DeviceResourcePool
-		wantFullyFree bool
+		name           string
+		allocatable    *v1.DeviceResourcePool
+		available      *v1.DeviceResourcePool
+		wantEquivalent float64
 	}{
 		{
-			name:          "fully free matches allocatable",
-			allocatable:   pool(15360, 100),
-			available:     pool(15360, 100),
-			wantFullyFree: true,
+			name:           "fully free device contributes one card",
+			allocatable:    pool(15360, 100),
+			available:      pool(15360, 100),
+			wantEquivalent: 1,
 		},
 		{
-			name:          "more available than allocatable still fully free",
-			allocatable:   pool(15360, 100),
-			available:     pool(16384, 128),
-			wantFullyFree: true,
+			name:           "values above allocatable are clamped",
+			allocatable:    pool(15360, 100),
+			available:      pool(16384, 128),
+			wantEquivalent: 1,
 		},
 		{
-			name:          "memory partially allocated is used",
-			allocatable:   pool(15360, 100),
-			available:     pool(7680, 100),
-			wantFullyFree: false,
+			name:           "memory ratio limits capacity",
+			allocatable:    pool(15360, 100),
+			available:      pool(7680, 100),
+			wantEquivalent: 0.5,
 		},
 		{
-			name:          "compute partially allocated is used",
-			allocatable:   pool(15360, 100),
-			available:     pool(15360, 50),
-			wantFullyFree: false,
+			name:           "compute ratio limits capacity",
+			allocatable:    pool(15360, 100),
+			available:      pool(15360, 50),
+			wantEquivalent: 0.5,
 		},
 		{
-			name:          "fully exhausted is used",
-			allocatable:   pool(15360, 100),
-			available:     pool(0, 0),
-			wantFullyFree: false,
+			name:           "smaller ratio wins when both dimensions are partial",
+			allocatable:    pool(15360, 100),
+			available:      pool(11520, 25),
+			wantEquivalent: 0.25,
 		},
 		{
-			name:          "nil allocatable is not fully free",
-			allocatable:   nil,
-			available:     pool(15360, 100),
-			wantFullyFree: false,
+			name:           "fully exhausted device contributes zero",
+			allocatable:    pool(15360, 100),
+			available:      pool(0, 0),
+			wantEquivalent: 0,
 		},
 		{
-			name:          "nil available is not fully free",
-			allocatable:   pool(15360, 100),
-			available:     nil,
-			wantFullyFree: false,
+			name:           "negative remaining memory is clamped to zero",
+			allocatable:    pool(15360, 100),
+			available:      pool(-1, 100),
+			wantEquivalent: 0,
+		},
+		{
+			name:           "negative remaining compute is clamped to zero",
+			allocatable:    pool(15360, 100),
+			available:      pool(15360, -1),
+			wantEquivalent: 0,
+		},
+		{
+			name:           "zero allocatable dimension contributes zero",
+			allocatable:    pool(0, 100),
+			available:      pool(0, 100),
+			wantEquivalent: 0,
+		},
+		{
+			name:           "missing pool contributes zero",
+			allocatable:    nil,
+			available:      pool(15360, 100),
+			wantEquivalent: 0,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.wantFullyFree, isDeviceFullyAvailable(tc.allocatable, tc.available))
+			assert.Equal(t, tc.wantEquivalent, deviceAvailableEquivalentQuantity(tc.allocatable, tc.available))
 		})
 	}
 }

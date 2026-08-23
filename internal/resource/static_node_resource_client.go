@@ -195,11 +195,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 	if acceleratorType == v1.AcceleratorType(v1.StaticNodeAcceleratorTypeCPU) ||
 		len(node.Status.Accelerator.Devices) == 0 {
-		// No device snapshot (or CPU-only): fall back to the base resources
-		// unchanged. Until snapshots populate, Available may carry base-Ray
-		// fractional quantities (e.g. 0.5) rather than fully-free card counts;
-		// this is a transient snapshot state, display-only, and resolved once
-		// the node-agent snapshot reports the physical devices.
+		// No device snapshot (or CPU-only): fall back to native Ray resources.
+		// Ray remains the source of aggregate available quantities; snapshots add
+		// per-device pools when they are available.
 		return staticNodeBaseResourceNode(node, base)
 	}
 
@@ -256,19 +254,12 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		}
 
 		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
-			quantity := 0.0
-			if isDeviceFullyAvailable(allocatablePool, availablePool) {
-				quantity = 1
-			}
-
-			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, quantity, availablePool)
+			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 0, availablePool)
 		}
 	}
 
-	// Mirror the Kubernetes resource client: always surface the available
-	// accelerator group (Quantity 0 when no card is fully free) so consumers
-	// can rely on a consistent group shape across cluster types instead of
-	// handling "group absent" for the same logical "0 available" state.
+	// Always surface the available accelerator group so consumers can rely on a
+	// consistent group shape across cluster types.
 	if nodeStatus.Available.AcceleratorGroups[acceleratorType] == nil {
 		nodeStatus.Available.AcceleratorGroups[acceleratorType] = newAcceleratorGroup()
 	}
@@ -346,13 +337,11 @@ func completeStaticNodeAcceleratorQuantities(
 		return
 	}
 
-	// Static clusters support fractional GPU quantities. Keep the Allocatable
-	// group quantity aligned with the native Ray dashboard resources (total
-	// capacity), while device pools and virtualization details come from the
-	// node-agent snapshot. The Available quantity is device-count driven
-	// (fully-free physical cards) from the snapshot — base Ray fractional
-	// quantities would count partially-allocated cards as partially available.
+	// Static clusters retain native Ray quantities, including fractional available
+	// capacity. Device pools and virtualization details continue to come from the
+	// node-agent snapshot.
 	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
+	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
 }
 
 func completeStaticNodeAcceleratorQuantity(

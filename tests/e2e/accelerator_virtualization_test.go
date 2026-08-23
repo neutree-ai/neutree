@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -249,10 +250,23 @@ func expectNVIDIAVirtualizedClusterResources(cluster v1.Cluster) string {
 	deviceCount := expectClusterProductDevices(resources.NodeResources, productName)
 	ExpectWithOffset(1, allocatableProduct.Quantity).To(Equal(float64(deviceCount)))
 
-	// Available card count must equal the fully-free device count (partially
-	// allocated cards are no longer counted as available whole cards).
-	fullyFreeCount := expectClusterProductFullyFreeDevices(resources.NodeResources, productName)
-	ExpectWithOffset(1, availableProduct.Quantity).To(Equal(float64(fullyFreeCount)))
+	equivalentAvailableCapacity := expectClusterProductEquivalentAvailableCapacity(
+		resources.NodeResources,
+		productName,
+	)
+	groupEquivalentAvailableCapacity := 0.0
+	for product := range allocatableGroup.Products {
+		groupEquivalentAvailableCapacity += expectClusterProductEquivalentAvailableCapacity(
+			resources.NodeResources,
+			string(product),
+		)
+	}
+	ExpectWithOffset(1, availableGroup.Quantity).To(
+		BeNumerically("~", groupEquivalentAvailableCapacity, 1e-9))
+	ExpectWithOffset(1, availableGroup.ProductGroups[v1.AcceleratorProduct(productName)]).To(
+		BeNumerically("~", equivalentAvailableCapacity, 1e-9))
+	ExpectWithOffset(1, availableProduct.Quantity).To(
+		BeNumerically("~", equivalentAvailableCapacity, 1e-9))
 
 	return productName
 }
@@ -297,11 +311,11 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	return count
 }
 
-// expectClusterProductFullyFreeDevices counts devices of the given product that
-// are fully free (available memory AND compute both >= allocatable), matching
-// the backend "available card" determination unified in NEU-608.
-func expectClusterProductFullyFreeDevices(nodes map[string]*v1.NodeResourceStatus, productName string) int {
-	count := 0
+func expectClusterProductEquivalentAvailableCapacity(
+	nodes map[string]*v1.NodeResourceStatus,
+	productName string,
+) float64 {
+	total := 0.0
 
 	for _, node := range nodes {
 		for _, device := range node.Devices {
@@ -313,14 +327,22 @@ func expectClusterProductFullyFreeDevices(nodes map[string]*v1.NodeResourceStatu
 			ExpectWithOffset(1, device.Allocatable).NotTo(BeNil())
 			ExpectWithOffset(1, device.Available).NotTo(BeNil())
 
-			if device.Available.MemoryMiB >= device.Allocatable.MemoryMiB &&
-				device.Available.CoreUnits >= device.Allocatable.CoreUnits {
-				count++
-			}
+			total += math.Min(
+				clampEquivalentRatio(device.Available.MemoryMiB, device.Allocatable.MemoryMiB),
+				clampEquivalentRatio(device.Available.CoreUnits, device.Allocatable.CoreUnits),
+			)
 		}
 	}
 
-	return count
+	return total
+}
+
+func clampEquivalentRatio(available, allocatable int64) float64 {
+	if allocatable <= 0 {
+		return 0
+	}
+
+	return math.Min(math.Max(float64(available)/float64(allocatable), 0), 1)
 }
 
 func expectNVIDIAProductMemoryMiB(cluster v1.Cluster, productName string) int64 {
