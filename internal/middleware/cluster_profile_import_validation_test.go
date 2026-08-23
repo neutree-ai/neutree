@@ -3,7 +3,6 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,91 +15,84 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type releaseInfoProviderFunc func() (*v1.ReleaseInfo, error)
-
-func (fn releaseInfoProviderFunc) Current() (*v1.ReleaseInfo, error) {
-	return fn()
-}
-
 func TestClusterProfileImportValidation(t *testing.T) {
 	profile := completeClusterProfile("v1.1.1")
-	validReleaseInfo := currentReleaseInfo()
 
 	tests := []struct {
 		name         string
 		payload      any
-		provider     releaseInfoProviderFunc
+		rawBody      string
 		wantStatus   int
 		wantContinue bool
-		wantCalls    int
+		wantProfile  string
 	}{
 		{
 			name:         "allows eligible profile and restores body",
 			payload:      map[string]any{"profile": profile},
-			provider:     func() (*v1.ReleaseInfo, error) { return validReleaseInfo, nil },
 			wantStatus:   http.StatusNoContent,
 			wantContinue: true,
-			wantCalls:    1,
+			wantProfile:  profile.GetName(),
 		},
 		{
-			name:       "rejects force update true",
-			payload:    map[string]any{"profile": profile, "force_update": true},
-			provider:   func() (*v1.ReleaseInfo, error) { return validReleaseInfo, nil },
+			name:       "rejects malformed JSON",
+			rawBody:    `{"profile":`,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "rejects force update false",
-			payload:    map[string]any{"profile": profile, "force_update": false},
-			provider:   func() (*v1.ReleaseInfo, error) { return validReleaseInfo, nil },
+			name:       "rejects missing profile",
+			payload:    map[string]any{},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "rejects force update null",
-			payload:    map[string]any{"profile": profile, "force_update": nil},
-			provider:   func() (*v1.ReleaseInfo, error) { return validReleaseInfo, nil },
-			wantStatus: http.StatusBadRequest,
+			name:        "rejects force update true",
+			payload:     map[string]any{"profile": profile, "force_update": true},
+			wantStatus:  http.StatusBadRequest,
+			wantProfile: "",
 		},
 		{
-			name: "rejects invalid profile through domain validation",
+			name:        "rejects force update false",
+			payload:     map[string]any{"profile": profile, "force_update": false},
+			wantStatus:  http.StatusBadRequest,
+			wantProfile: "",
+		},
+		{
+			name:        "rejects force update null",
+			payload:     map[string]any{"profile": profile, "force_update": nil},
+			wantStatus:  http.StatusBadRequest,
+			wantProfile: "",
+		},
+		{
+			name: "allows domain-invalid profile for API validation",
 			payload: map[string]any{"profile": &v1.ClusterProfile{
 				APIVersion: "v1",
 				Kind:       v1.ClusterProfileKind,
 				Metadata:   &v1.Metadata{Name: "v1.1.1"},
 				Spec:       &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{}},
 			}},
-			provider:   func() (*v1.ReleaseInfo, error) { return validReleaseInfo, nil },
-			wantStatus: http.StatusBadRequest,
-			wantCalls:  1,
-		},
-		{
-			name:       "hides current release provider failure",
-			payload:    map[string]any{"profile": profile},
-			provider:   func() (*v1.ReleaseInfo, error) { return nil, errors.New("database unavailable") },
-			wantStatus: http.StatusInternalServerError,
-			wantCalls:  1,
+			wantStatus:   http.StatusNoContent,
+			wantContinue: true,
+			wantProfile:  "v1.1.1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body, err := json.Marshal(tt.payload)
-			require.NoError(t, err)
-
-			providerCalls := 0
-			provider := releaseInfoProviderFunc(func() (*v1.ReleaseInfo, error) {
-				providerCalls++
-				return tt.provider()
-			})
+			body := []byte(tt.rawBody)
+			if tt.rawBody == "" {
+				var err error
+				body, err = json.Marshal(tt.payload)
+				require.NoError(t, err)
+			}
 
 			continued := false
 			gin.SetMode(gin.TestMode)
 			router := gin.New()
-			router.POST("/profiles", ClusterProfileImportValidation(provider), func(c *gin.Context) {
+			router.POST("/profiles", ClusterProfileImportValidation(), func(c *gin.Context) {
 				continued = true
 
 				validated, found := ClusterProfileImportFromContext(c)
 				require.True(t, found)
-				assert.Equal(t, profile.GetName(), validated.GetName())
+				assert.Equal(t, tt.wantProfile, validated.GetName())
 
 				restoredBody, readErr := io.ReadAll(c.Request.Body)
 				require.NoError(t, readErr)
@@ -115,23 +107,7 @@ func TestClusterProfileImportValidation(t *testing.T) {
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 			assert.Equal(t, tt.wantContinue, continued)
-			assert.Equal(t, tt.wantCalls, providerCalls)
-			if tt.wantStatus == http.StatusInternalServerError {
-				assert.NotContains(t, recorder.Body.String(), "database unavailable")
-			}
 		})
-	}
-}
-
-func currentReleaseInfo() *v1.ReleaseInfo {
-	return &v1.ReleaseInfo{
-		APIVersion: "v1",
-		Kind:       v1.ReleaseInfoKind,
-		Metadata:   &v1.Metadata{Name: "v1.2.0"},
-		Spec: &v1.ReleaseInfoSpec{
-			DefaultClusterVersion:      "v1.2.0",
-			CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
-		},
 	}
 }
 

@@ -100,10 +100,6 @@ func TestProfileUpsertRejectsInvalidRequestsBeforeStorage(t *testing.T) {
 		payload any
 	}{
 		{
-			name:    "invalid matrix",
-			payload: map[string]any{"profile": &v1.ClusterProfile{APIVersion: "v1", Kind: v1.ClusterProfileKind, Metadata: &v1.Metadata{Name: "v1.1.1"}, Spec: &v1.ClusterProfileSpec{}}},
-		},
-		{
 			name:    "force update true",
 			payload: map[string]any{"profile": completeProfile("v1.1.1"), "force_update": true},
 		},
@@ -131,6 +127,28 @@ func TestProfileUpsertRejectsInvalidRequestsBeforeStorage(t *testing.T) {
 			store.AssertNotCalled(t, "CreateClusterProfile", mock.Anything)
 		})
 	}
+}
+
+func TestProfileUpsertRejectsDomainInvalidProfileBeforeStorage(t *testing.T) {
+	store := storageMocks.NewMockStorage(t)
+	allowSystemAdmin(store, "administrator")
+
+	providerCalls := 0
+	response := executeProfileUpsert(t, store, releaseInfoProviderFunc(func() (*v1.ReleaseInfo, error) {
+		providerCalls++
+
+		return validReleaseInfo(), nil
+	}), map[string]any{"profile": &v1.ClusterProfile{
+		APIVersion: "v1",
+		Kind:       v1.ClusterProfileKind,
+		Metadata:   &v1.Metadata{Name: "v1.1.1"},
+		Spec:       &v1.ClusterProfileSpec{},
+	}}, "administrator")
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.Equal(t, 1, providerCalls)
+	store.AssertNotCalled(t, "ListClusterProfile", mock.Anything)
+	store.AssertNotCalled(t, "CreateClusterProfile", mock.Anything)
 }
 
 func TestProfileUpsertMapsProviderFailureAndPermission(t *testing.T) {

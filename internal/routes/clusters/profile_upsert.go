@@ -19,14 +19,33 @@ type profileUpsertResponse struct {
 	Operation string `json:"operation"`
 }
 
-// upsertClusterProfile persists a middleware-validated package Profile. It
-// creates absent versions and permits exact replay, but never updates a stored
-// Profile because component drift would change deployed runtime behavior.
+// upsertClusterProfile validates the Profile against current domain policy,
+// then creates absent versions or permits exact replay. It never updates a
+// stored Profile because component drift would change deployed runtime behavior.
 func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		profile, found := middleware.ClusterProfileImportFromContext(c)
 		if !found {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+
+			return
+		}
+
+		if deps.ReleaseInfoProvider == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+
+			return
+		}
+
+		info, err := deps.ReleaseInfoProvider.Current()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+
+			return
+		}
+
+		if err := releaseprofile.ValidateProfileEligibility(info, profile); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 
 			return
 		}
