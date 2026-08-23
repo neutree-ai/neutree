@@ -67,8 +67,49 @@ func TestReleaseInfoAPIShapeOmitsLegacyMatrixState(t *testing.T) {
 	}
 }
 
+func TestReleaseInfoObjectAccessors(t *testing.T) {
+	obj := &ReleaseInfo{ID: 42}
+	assert.Empty(t, obj.GetName())
+	assert.Nil(t, obj.GetLabels())
+	assert.Nil(t, obj.GetAnnotations())
+	assert.Empty(t, obj.GetCreationTimestamp())
+	assert.Empty(t, obj.GetUpdateTimestamp())
+	assert.Empty(t, obj.GetDeletionTimestamp())
+
+	labels := map[string]string{"release": "v1.2.0"}
+	obj.SetLabels(labels)
+	assert.Equal(t, labels, obj.GetLabels())
+
+	annotationOnly := &ReleaseInfo{}
+	annotations := map[string]string{"source": "catalog"}
+	annotationOnly.SetAnnotations(annotations)
+	assert.Equal(t, annotations, annotationOnly.GetAnnotations())
+
+	obj.Metadata.Annotations = annotations
+	obj.Metadata.CreationTimestamp = "2026-08-24T00:00:00Z"
+	obj.Metadata.UpdateTimestamp = "2026-08-24T01:00:00Z"
+	obj.Metadata.DeletionTimestamp = "2026-08-24T02:00:00Z"
+	obj.Spec = &ReleaseInfoSpec{}
+	obj.SetKind(ReleaseInfoKind)
+
+	assert.Equal(t, annotations, obj.GetAnnotations())
+	assert.Equal(t, "2026-08-24T00:00:00Z", obj.GetCreationTimestamp())
+	assert.Equal(t, "2026-08-24T01:00:00Z", obj.GetUpdateTimestamp())
+	assert.Equal(t, "2026-08-24T02:00:00Z", obj.GetDeletionTimestamp())
+	assert.Same(t, obj.Spec, obj.GetSpec())
+	assert.Nil(t, obj.GetStatus())
+	assert.Equal(t, ReleaseInfoKind, obj.GetKind())
+	assert.Equal(t, "42", obj.GetID())
+	assert.Same(t, obj.Metadata, obj.GetMetadata())
+}
+
 func TestReleaseInfoListSetItems(t *testing.T) {
 	list := &ReleaseInfoList{}
+	assert.Empty(t, list.GetKind())
+	list.SetKind(ReleaseInfoListKind)
+	assert.Equal(t, ReleaseInfoListKind, list.GetKind())
+	assert.Empty(t, list.GetItems())
+
 	list.SetItems([]scheme.Object{
 		&ReleaseInfo{ID: 1, Metadata: &Metadata{Name: "v1.1.0"}},
 		&ReleaseInfo{ID: 2, Metadata: &Metadata{Name: "v1.2.0"}},
@@ -77,4 +118,5 @@ func TestReleaseInfoListSetItems(t *testing.T) {
 	require.Len(t, list.Items, 2)
 	assert.Equal(t, "v1.1.0", list.Items[0].GetName())
 	assert.Equal(t, "v1.2.0", list.Items[1].GetName())
+	assert.Len(t, list.GetItems(), 2)
 }
