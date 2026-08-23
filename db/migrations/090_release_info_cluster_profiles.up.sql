@@ -72,9 +72,9 @@ ALTER TABLE api.cluster_profiles
         jsonb_typeof(spec) = 'object'
         AND spec ? 'components'
         AND jsonb_typeof(spec->'components') = 'object'
-        AND jsonb_object_length(spec->'components') = 2
         AND spec->'components' ? 'ssh'
         AND spec->'components' ? 'kubernetes'
+        AND ((spec->'components') - 'ssh' - 'kubernetes') = '{}'::jsonb
         AND jsonb_typeof(spec->'components'->'ssh') = 'object'
         AND jsonb_typeof(spec->'components'->'kubernetes') = 'object'
         AND (spec->'components'->'ssh') ?& ARRAY['ray_runtime', 'node_agent', 'node_exporter', 'vmagent']
