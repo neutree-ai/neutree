@@ -17,6 +17,7 @@ type Client struct {
 	// Service endpoints
 	Models          *ModelsService
 	Engines         *EnginesService
+	Clusters        *ClustersService
 	ImageRegistries *ImageRegistriesService
 	ModelRegistries *ModelRegistriesService
 	Generic         *GenericService
@@ -102,6 +103,7 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 	// Initialize services
 	client.Models = NewModelsService(client)
 	client.Engines = NewEnginesService(client)
+	client.Clusters = NewClustersService(client)
 	client.ImageRegistries = NewImageRegistriesService(client)
 	client.ModelRegistries = NewModelRegistriesService(client)
 	client.Traces = NewTracesService(client)

@@ -108,8 +108,8 @@ func (p *Parser) ParseManifestFile(path string) (*PackageManifest, error) {
 		return nil, errors.New("manifest_version is required")
 	}
 
-	if len(manifest.Engines) == 0 {
-		return nil, errors.New("at least one engine entry is required in manifest")
+	if len(manifest.Engines) == 0 && manifest.ClusterProfile == nil {
+		return nil, errors.New("at least one engine entry is required when cluster_profile is not set")
 	}
 
 	for idx := range manifest.Engines {
