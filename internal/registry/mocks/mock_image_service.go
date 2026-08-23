@@ -20,9 +20,9 @@ func (_m *MockImageService) EXPECT() *MockImageService_Expecter {
 	return &MockImageService_Expecter{mock: &_m.Mock}
 }
 
-// CheckImageExists provides a mock function with given fields: image, auth
-func (_m *MockImageService) CheckImageExists(image string, auth authn.Authenticator) (bool, error) {
-	ret := _m.Called(image, auth)
+// CheckImageExists provides a mock function with given fields: image, auth, useHTTP
+func (_m *MockImageService) CheckImageExists(image string, auth authn.Authenticator, useHTTP bool) (bool, error) {
+	ret := _m.Called(image, auth, useHTTP)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckImageExists")
@@ -30,17 +30,17 @@ func (_m *MockImageService) CheckImageExists(image string, auth authn.Authentica
 
 	var r0 bool
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) (bool, error)); ok {
-		return rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) (bool, error)); ok {
+		return rf(image, auth, useHTTP)
 	}
-	if rf, ok := ret.Get(0).(func(string, authn.Authenticator) bool); ok {
-		r0 = rf(image, auth)
+	if rf, ok := ret.Get(0).(func(string, authn.Authenticator, bool) bool); ok {
+		r0 = rf(image, auth, useHTTP)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, authn.Authenticator) error); ok {
-		r1 = rf(image, auth)
+	if rf, ok := ret.Get(1).(func(string, authn.Authenticator, bool) error); ok {
+		r1 = rf(image, auth, useHTTP)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -56,13 +56,14 @@ type MockImageService_CheckImageExists_Call struct {
 // CheckImageExists is a helper method to define mock.On call
 //   - image string
 //   - auth authn.Authenticator
-func (_e *MockImageService_Expecter) CheckImageExists(image interface{}, auth interface{}) *MockImageService_CheckImageExists_Call {
-	return &MockImageService_CheckImageExists_Call{Call: _e.mock.On("CheckImageExists", image, auth)}
+//   - useHTTP bool
+func (_e *MockImageService_Expecter) CheckImageExists(image interface{}, auth interface{}, useHTTP interface{}) *MockImageService_CheckImageExists_Call {
+	return &MockImageService_CheckImageExists_Call{Call: _e.mock.On("CheckImageExists", image, auth, useHTTP)}
 }
 
-func (_c *MockImageService_CheckImageExists_Call) Run(run func(image string, auth authn.Authenticator)) *MockImageService_CheckImageExists_Call {
+func (_c *MockImageService_CheckImageExists_Call) Run(run func(image string, auth authn.Authenticator, useHTTP bool)) *MockImageService_CheckImageExists_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(authn.Authenticator))
+		run(args[0].(string), args[1].(authn.Authenticator), args[2].(bool))
 	})
 	return _c
 }
@@ -72,7 +73,7 @@ func (_c *MockImageService_CheckImageExists_Call) Return(_a0 bool, _a1 error) *M
 	return _c
 }
 
-func (_c *MockImageService_CheckImageExists_Call) RunAndReturn(run func(string, authn.Authenticator) (bool, error)) *MockImageService_CheckImageExists_Call {
+func (_c *MockImageService_CheckImageExists_Call) RunAndReturn(run func(string, authn.Authenticator, bool) (bool, error)) *MockImageService_CheckImageExists_Call {
 	_c.Call.Return(run)
 	return _c
 }
