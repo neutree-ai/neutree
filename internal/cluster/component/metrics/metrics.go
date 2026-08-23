@@ -25,6 +25,24 @@ type MetricsComponent struct {
 	logger     klog.Logger
 
 	inferenceScrapeRules InferenceScrapeRules
+	componentImages      ComponentImages
+}
+
+// ComponentImages contains Profile-resolved core Kubernetes metrics images.
+// Accelerator-specific exporters remain controlled by accelerator profiles.
+type ComponentImages struct {
+	NodeAgentImage        string
+	NodeExporterImage     string
+	VMAgentImage          string
+	KubeStateMetricsImage string
+}
+
+// WithComponentImages supplies the exact Profile images for a Kubernetes
+// cluster reconciliation.
+func (m *MetricsComponent) WithComponentImages(images ComponentImages) *MetricsComponent {
+	m.componentImages = images
+
+	return m
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments

@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratormocks.MockOrchestrator) *EndpointController {
@@ -25,8 +26,82 @@ func newTestEndpointController(store *storagemocks.MockStorage, o *orchestratorm
 	gw.On("DeleteEndpoint", mock.Anything).Return(nil)
 	gw.On("GetEndpointServeUrl", mock.Anything).Return("", nil)
 
-	c, _ := NewEndpointController(&EndpointControllerOption{Storage: store, Gw: gw})
+	c, _ := NewEndpointController(&EndpointControllerOption{
+		Storage: store,
+		Gw:      gw,
+		ClusterProfileComponentResolver: endpointClusterProfileResolverFunc(func(string, string) (v1.ClusterProfileComponents, error) {
+			return v1.ClusterProfileComponents{}, nil
+		}),
+	})
 	return c
+}
+
+type endpointClusterProfileResolverFunc func(string, string) (v1.ClusterProfileComponents, error)
+
+func (resolver endpointClusterProfileResolverFunc) ComponentsFor(version, clusterType string) (v1.ClusterProfileComponents, error) {
+	return resolver(version, clusterType)
+}
+
+func TestEndpointControllerPassesExactKubernetesProfileToOrchestrator(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+	}}, nil).Once()
+
+	resolvedVersion := ""
+	resolvedType := ""
+	resolver := endpointClusterProfileResolverFunc(func(version, clusterType string) (v1.ClusterProfileComponents, error) {
+		resolvedVersion = version
+		resolvedType = clusterType
+
+		return v1.ClusterProfileComponents{
+			KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.2.1"},
+		}, nil
+	})
+
+	previousNewOrchestrator := orchestrator.NewOrchestrator
+	t.Cleanup(func() { orchestrator.NewOrchestrator = previousNewOrchestrator })
+	var actualOptions orchestrator.Options
+	orchestrator.NewOrchestrator = func(options orchestrator.Options) (orchestrator.Orchestrator, error) {
+		actualOptions = options
+
+		return &orchestratormocks.MockOrchestrator{}, nil
+	}
+
+	controller, err := NewEndpointController(&EndpointControllerOption{
+		Storage:                         store,
+		ClusterProfileComponentResolver: resolver,
+	})
+	require.NoError(t, err)
+
+	_, err = controller.getOrchestrator(ep(1, ""))
+	require.NoError(t, err)
+	assert.Equal(t, "v1.2.0", resolvedVersion)
+	assert.Equal(t, v1.KubernetesClusterType, resolvedType)
+	assert.Equal(t, "v1.2.1", actualOptions.ClusterProfileComponents.KubernetesRuntime.Tag)
+	store.AssertExpectations(t)
+}
+
+func TestEndpointControllerRejectsKubernetesClusterWithoutExactProfile(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"},
+	}}, nil).Once()
+
+	controller, err := NewEndpointController(&EndpointControllerOption{
+		Storage: store,
+		ClusterProfileComponentResolver: endpointClusterProfileResolverFunc(func(string, string) (v1.ClusterProfileComponents, error) {
+			return v1.ClusterProfileComponents{}, errors.New("cluster profile v1.2.0 not found")
+		}),
+	})
+	require.NoError(t, err)
+
+	_, err = controller.getOrchestrator(ep(1, ""))
+	require.ErrorContains(t, err, "failed to resolve cluster profile components for cluster default/test-cluster")
+	require.ErrorContains(t, err, "cluster profile v1.2.0 not found")
+	store.AssertExpectations(t)
 }
 
 func stringPtr(v string) *string { return &v }

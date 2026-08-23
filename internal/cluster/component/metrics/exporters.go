@@ -13,7 +13,6 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -21,13 +20,9 @@ const (
 	nodeExporterDaemonSetName   = "neutree-node-exporter"
 	nodeExporterPort            = 19100
 	neutreeNodeAgentMetricsName = "neutree-node-agent"
-	neutreeNodeAgentImageName   = "neutree/neutree-node-agent"
 	neutreeNodeAgentMetricsPort = 19101
 	externalDCGMExporterPort    = 9400
 
-	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
-	defaultKubeStateMetricsImage = "registry.k8s.io/kube-state-metrics/kube-state-metrics:" + componentversion.KubeStateMetrics
-	defaultVMAgentImage          = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
 	defaultMetricsPath           = "/metrics"
 	acceleratorExporterJobPrefix = "accelerator-exporter"
 )

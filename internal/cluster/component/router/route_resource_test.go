@@ -25,6 +25,7 @@ func Test_BuildRouterDeployment(t *testing.T) {
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
+		routerImage:     "test-image-prefix/neutree/router:1.0.0",
 		imagePullSecret: "test-image-pull-secret",
 		config: v1.KubernetesClusterConfig{
 			Router: v1.RouterSpec{
@@ -67,6 +68,37 @@ func Test_BuildRouterDeployment(t *testing.T) {
 	t.Fatalf("router deployment not found in resources")
 }
 
+func TestBuildRouterDeploymentUsesProfileImage(t *testing.T) {
+	routerComponent := &RouterComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		namespace:       "test-namespace",
+		imagePullSecret: "test-image-pull-secret",
+		routerImage:     "registry.example.com/neutree/neutree/router:v1.2.1",
+	}
+
+	objs, err := routerComponent.GetRouteResources()
+	require.NoError(t, err)
+
+	for _, obj := range objs.Items {
+		if obj.GetKind() != "Deployment" || obj.GetName() != "router" {
+			continue
+		}
+
+		objContent, err := json.Marshal(obj.Object)
+		require.NoError(t, err)
+		deployment := &appsv1.Deployment{}
+		require.NoError(t, json.Unmarshal(objContent, deployment))
+		assert.Equal(t, "registry.example.com/neutree/neutree/router:v1.2.1", deployment.Spec.Template.Spec.Containers[0].Image)
+
+		return
+	}
+
+	t.Fatal("router deployment not found in resources")
+}
+
 func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
 	routerComponent := &RouterComponent{
 		cluster: &v1.Cluster{
@@ -75,6 +107,7 @@ func Test_BuildRouterDeploymentWithDockerHubKeepsImageUnchanged(t *testing.T) {
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "docker.io/neutree-ai",
+		routerImage:     "neutree/router:1.0.0",
 		imagePullSecret: "test-image-pull-secret",
 	}
 
@@ -116,6 +149,7 @@ func Test_BuildRouterService(t *testing.T) {
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
+		routerImage:     "test-image-prefix/neutree/router:1.0.0",
 		imagePullSecret: "test-image-pull-secret",
 		config: v1.KubernetesClusterConfig{
 			Router: v1.RouterSpec{
@@ -162,6 +196,7 @@ func TestBuildRouterResourcesWithNumericClusterMetadata(t *testing.T) {
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
+		routerImage:     "test-image-prefix/neutree/router:1.0.0",
 		imagePullSecret: "test-image-pull-secret",
 	}
 

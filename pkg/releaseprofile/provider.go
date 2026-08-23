@@ -7,6 +7,12 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+// ComponentProvider resolves the exact component matrix for one cluster
+// version and type.
+type ComponentProvider interface {
+	ComponentsFor(clusterVersion, clusterType string) (v1.ClusterProfileComponents, error)
+}
+
 // Provider resolves persisted ReleaseInfo records and exact component matrices.
 type Provider struct {
 	releaseInfoStorage    storage.ReleaseInfoStorage

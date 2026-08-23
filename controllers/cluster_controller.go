@@ -17,8 +17,7 @@ import (
 )
 
 type ClusterController struct {
-	storage               storage.Storage
-	defaultClusterVersion string
+	storage storage.Storage
 
 	syncHandler func(cluster *v1.Cluster) error
 
@@ -28,14 +27,15 @@ type ClusterController struct {
 
 	gw gateway.Gateway
 
-	acceleratorManager  accelerator.Manager
-	newClusterReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
+	acceleratorManager        accelerator.Manager
+	newClusterReconcile       func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
+	newClusterDeleteReconcile func(*v1.Cluster, accelerator.Manager, storage.Storage, string) (cluster.ClusterReconcile, error)
 }
 
 type ClusterControllerOption struct {
-	Storage               storage.Storage
-	DefaultClusterVersion string
-	MetricsRemoteWriteURL string
+	Storage                         storage.Storage
+	MetricsRemoteWriteURL           string
+	ClusterProfileComponentResolver cluster.ClusterProfileComponentResolver
 
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	Gw                      gateway.Gateway
@@ -43,16 +43,49 @@ type ClusterControllerOption struct {
 }
 
 func NewClusterController(opt *ClusterControllerOption) (*ClusterController, error) {
+	if opt == nil {
+		return nil, errors.New("cluster controller option is required")
+	}
+
+	if opt.ClusterProfileComponentResolver == nil {
+		return nil, errors.New("cluster profile component resolver is required")
+	}
+
 	c := &ClusterController{
-		storage:               opt.Storage,
-		defaultClusterVersion: opt.DefaultClusterVersion,
+		storage: opt.Storage,
 
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
-		gw:                  opt.Gw,
-		acceleratorManager:  opt.AcceleratorManager,
-		newClusterReconcile: cluster.NewReconcile,
+		gw:                 opt.Gw,
+		acceleratorManager: opt.AcceleratorManager,
+		newClusterReconcile: func(
+			clusterObj *v1.Cluster,
+			acceleratorManager accelerator.Manager,
+			store storage.Storage,
+			metricsRemoteWriteURL string,
+		) (cluster.ClusterReconcile, error) {
+			return cluster.NewReconcileWithClusterProfile(
+				clusterObj,
+				acceleratorManager,
+				store,
+				metricsRemoteWriteURL,
+				opt.ClusterProfileComponentResolver,
+			)
+		},
+		newClusterDeleteReconcile: func(
+			clusterObj *v1.Cluster,
+			acceleratorManager accelerator.Manager,
+			store storage.Storage,
+			metricsRemoteWriteURL string,
+		) (cluster.ClusterReconcile, error) {
+			return cluster.NewDeleteReconcile(
+				clusterObj,
+				acceleratorManager,
+				store,
+				metricsRemoteWriteURL,
+			)
+		},
 	}
 
 	c.syncHandler = c.sync
@@ -72,11 +105,6 @@ func (c *ClusterController) Reconcile(obj interface{}) error {
 }
 
 func (controller *ClusterController) sync(obj *v1.Cluster) error {
-	// set default cluster version
-	if obj.Spec.Version == "" {
-		obj.Spec.Version = controller.defaultClusterVersion
-	}
-
 	// Backfill status.version for legacy clusters that were created before
 	// version tracking was introduced. Without this, changing spec.version
 	// on a legacy cluster would show as Updating instead of Upgrading.
@@ -180,7 +208,7 @@ func (controller *ClusterController) reconcileDelete(c *v1.Cluster) error {
 			controller.obsCollectConfigManager.GetMetricsCollectConfigManager().UnregisterMetricsMonitor(c.Key())
 		}
 
-		r, err := controller.newClusterReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
+		r, err := controller.newClusterDeleteReconcile(c, controller.acceleratorManager, controller.storage, controller.metricsRemoteWriteURL)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create cluster reconciler for cluster %s", c.Metadata.WorkspaceName())
 		}

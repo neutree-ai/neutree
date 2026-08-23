@@ -32,10 +32,12 @@ func newTestClusterController(s *storagemocks.MockStorage,
 
 	return &ClusterController{
 		storage:                 s,
-		defaultClusterVersion:   "v1",
 		obsCollectConfigManager: obsCollectConfigManager,
 		gw:                      gw,
 		newClusterReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+			return r, nil
+		},
+		newClusterDeleteReconcile: func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
 			return r, nil
 		},
 	}
@@ -97,6 +99,41 @@ func TestClusterController_Sync_Delete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClusterControllerDeleteUsesDeleteReconciler(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	deleteReconciler := &clustermocks.MockClusterReconcile{}
+	deleteReconciler.On("ReconcileDelete", mock.Anything, mock.Anything).Return(nil).Once()
+	store.On("UpdateCluster", "1", mock.Anything).Return(nil).Once()
+
+	controller := newTestClusterController(store, deleteReconciler)
+	controller.newClusterReconcile = func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+		return nil, errors.New("normal reconciler must not be used for deletion")
+	}
+
+	usedDeleteReconciler := false
+	controller.newClusterDeleteReconcile = func(_ *v1.Cluster, _ accelerator.Manager, _ storage.Storage, _ string) (cluster.ClusterReconcile, error) {
+		usedDeleteReconciler = true
+		return deleteReconciler, nil
+	}
+
+	err := controller.sync(&v1.Cluster{
+		ID: 1,
+		Metadata: &v1.Metadata{
+			Name:              "test",
+			DeletionTimestamp: time.Now().Format(time.RFC3339Nano),
+		},
+		Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "legacy-version-without-profile"},
+		Status: &v1.ClusterStatus{
+			Initialized: true,
+		},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, usedDeleteReconciler)
+	store.AssertExpectations(t)
+	deleteReconciler.AssertExpectations(t)
 }
 
 func TestClusterController_Sync_PendingOrNoStatus(t *testing.T) {

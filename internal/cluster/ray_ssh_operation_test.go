@@ -12,10 +12,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 //
@@ -1340,8 +1342,12 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			r := sshRayClusterReconciler{}
 			sshClusterConfig, _ := util.ParseSSHClusterConfig(tt.cluster)
 			config, err := r.generateRayClusterConfig(&ReconcileContext{
-				Cluster:          tt.cluster,
-				ImageRegistry:    tt.imageRegistry,
+				Cluster:       tt.cluster,
+				ImageRegistry: tt.imageRegistry,
+				ProfileComponents: v1.ClusterProfileComponents{
+					RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: tt.cluster.Spec.Version},
+				},
+				ProfileSelected:  true,
 				sshClusterConfig: sshClusterConfig,
 			})
 
@@ -1357,6 +1363,61 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateRayClusterConfigRequiresExactProfile(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec: &v1.ClusterSpec{
+			Version: "v1.0.0",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{},
+			},
+		},
+	}
+	sshClusterConfig, err := util.ParseSSHClusterConfig(cluster)
+	require.NoError(t, err)
+
+	_, err = (&sshRayClusterReconciler{}).generateRayClusterConfig(&ReconcileContext{
+		Cluster: cluster,
+		ImageRegistry: &v1.ImageRegistry{
+			Spec: &v1.ImageRegistrySpec{URL: "http://registry.example.com"},
+		},
+		sshClusterConfig: sshClusterConfig,
+	})
+	require.ErrorContains(t, err, "exact cluster profile components are required")
+}
+
+func TestPrePullImagesRequiresExactProfile(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
+
+	reconciler := &sshRayClusterReconciler{storage: store}
+	err := reconciler.prePullImages(&ReconcileContext{
+		Cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+		ImageRegistry: &v1.ImageRegistry{
+			Spec: &v1.ImageRegistrySpec{URL: "http://registry.example.com"},
+		},
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			Provider: v1.Provider{HeadIP: "127.0.0.1"},
+		},
+	})
+	require.ErrorContains(t, err, "exact cluster profile components are required")
+	store.AssertExpectations(t)
+}
+
+func TestSSHProfileRuntimeImagePreservesAcceleratorSuffix(t *testing.T) {
+	image, err := sshProfileRuntimeImage(
+		"registry.example.com/neutree",
+		v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+		"rocm",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.1.1-rocm", image)
 }
 
 func TestMutateModelCache(t *testing.T) {

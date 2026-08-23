@@ -19,7 +19,6 @@ type ControllerConfig struct {
 }
 
 type ClusterControllerConfig struct {
-	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
 }
 
