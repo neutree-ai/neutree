@@ -44,6 +44,7 @@ type CoreConfig struct {
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 	AuthClient              auth.Client
+	Version                 string
 
 	// global controller configs
 	ControllerConfig *ControllerConfig

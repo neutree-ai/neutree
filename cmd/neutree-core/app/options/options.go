@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/version"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -63,7 +64,8 @@ func (o *NeutreeCoreOptions) Validate() error {
 
 func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, error) {
 	c := &config.CoreConfig{
-		Scheme: scheme,
+		Scheme:  scheme,
+		Version: version.Get().AppVersion,
 	}
 
 	gin.SetMode(o.Server.GinMode)
