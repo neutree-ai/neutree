@@ -75,7 +75,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 
 			// Verify flags
 			for flag, expectedValue := range tt.expectedFields {
-				flagValue, err := cmd.PersistentFlags().GetString(flag)
+				flagValue, err := cmd.Flags().GetString(flag)
 				require.NoError(t, err)
 				assert.Equal(t, expectedValue, flagValue)
 			}
