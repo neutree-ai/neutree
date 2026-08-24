@@ -9,8 +9,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// ReleaseInfoProvider is the narrow policy dependency needed for cluster
-// package Profile imports.
+// ReleaseInfoProvider is the narrow policy dependency needed by cluster API
+// operations that select versions or import package Profiles.
 type ReleaseInfoProvider interface {
 	Current() (*v1.ReleaseInfo, error)
 }
