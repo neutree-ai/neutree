@@ -46,7 +46,7 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := releaseprofile.ValidateClusterVersionEligibility(info, profile.GetName()); err != nil {
+		if err := releaseprofile.ValidateClusterVersionCompatibility(info, profile.GetName()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 
 			return
