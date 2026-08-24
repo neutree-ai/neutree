@@ -1019,12 +1019,12 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 		"metrics_exporter":{
 			"name":"npu-exporter",
 			"image":"example.com/ascend/npu-exporter:test",
+			"backends":["kubernetes"],
 			"command":["/usr/local/bin/npu-exporter"],
 			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
 			"port":8082,
 			"env":{
-				"NEUTREE_PROFILE_NODE_AGENT_ADAPTER":"true",
-				"NVIDIA_VISIBLE_DEVICES":"all"
+				"NEUTREE_PROFILE_NODE_AGENT_ADAPTER":"true"
 			},
 			"readiness":{
 				"http_path":"/metrics",
@@ -1038,11 +1038,15 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 				"node_selector":{"accelerator.example.com/ascend":"true"},
 				"volumes":[
 					{"name":"ascend-driver","host_path":{"path":"/usr/local/Ascend/driver","type":"directory"}},
-					{"name":"containerd-socket","host_path":{"path":"/run/containerd/containerd.sock","type":"socket"}}
+					{"name":"ascend-dcmi","host_path":{"path":"/usr/local/dcmi","type":"directory"}},
+					{"name":"host-sys","host_path":{"path":"/sys","type":"directory"}},
+					{"name":"container-runtime","host_path":{"path":"/run/containerd","type":"directory"}}
 				],
 				"volume_mounts":[
 					{"name":"ascend-driver","mount_path":"/usr/local/Ascend/driver"},
-					{"name":"containerd-socket","mount_path":"/run/containerd/containerd.sock","read_only":false}
+					{"name":"ascend-dcmi","mount_path":"/usr/local/dcmi"},
+					{"name":"host-sys","mount_path":"/sys"},
+					{"name":"container-runtime","mount_path":"/run/containerd"}
 				]
 			}
 		}
@@ -1103,14 +1107,23 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 	driverMount := requireVolumeMount(t, exporter, "ascend-driver", "/usr/local/Ascend/driver")
 	assert.Assert(t, driverMount.ReadOnly)
 
-	socketVolume := requireVolume(t, exporter, "containerd-socket")
-	if socketVolume.HostPath == nil || socketVolume.HostPath.Type == nil {
-		t.Fatal("expected containerd socket host path volume")
+	for _, expected := range []struct {
+		name string
+		path string
+	}{
+		{name: "ascend-dcmi", path: "/usr/local/dcmi"},
+		{name: "host-sys", path: "/sys"},
+		{name: "container-runtime", path: "/run/containerd"},
+	} {
+		volume := requireVolume(t, exporter, expected.name)
+		if volume.HostPath == nil || volume.HostPath.Type == nil {
+			t.Fatalf("expected %s host path volume", expected.name)
+		}
+		assert.Equal(t, expected.path, volume.HostPath.Path)
+		assert.Equal(t, corev1.HostPathDirectory, *volume.HostPath.Type)
+		mount := requireVolumeMount(t, exporter, expected.name, expected.path)
+		assert.Assert(t, mount.ReadOnly)
 	}
-	assert.Equal(t, "/run/containerd/containerd.sock", socketVolume.HostPath.Path)
-	assert.Equal(t, corev1.HostPathSocket, *socketVolume.HostPath.Type)
-	socketMount := requireVolumeMount(t, exporter, "containerd-socket", "/run/containerd/containerd.sock")
-	assert.Assert(t, !socketMount.ReadOnly)
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
@@ -1120,7 +1133,7 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 	assert.Equal(t, "", envValue(nodeAgentContainer.Env, v1.NodeAgentAdapterProfileKey))
 	assert.Equal(t, "", envValue(nodeAgentContainer.Env, "NVIDIA_VISIBLE_DEVICES"))
 	assert.Equal(t, "", envValue(container.Env, v1.NodeAgentAdapterProfileKey))
-	assert.Equal(t, "all", envValue(container.Env, "NVIDIA_VISIBLE_DEVICES"))
+	assert.Equal(t, "", envValue(container.Env, "NVIDIA_VISIBLE_DEVICES"))
 }
 
 func TestBuildMetricsResourcesSkipsStaticOnlyAcceleratorExporterProfile(t *testing.T) {

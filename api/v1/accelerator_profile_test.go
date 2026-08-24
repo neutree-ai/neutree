@@ -118,11 +118,15 @@ func TestAcceleratorExporterProfileJSONRoundTripStructuredRuntime(t *testing.T) 
 				"privileged":true,
 				"volumes":[
 					{"name":"ascend-driver","host_path":{"path":"/usr/local/Ascend/driver","type":"directory"}},
-					{"name":"containerd-socket","host_path":{"path":"/run/containerd/containerd.sock","type":"socket"}}
+					{"name":"ascend-dcmi","host_path":{"path":"/usr/local/dcmi","type":"directory"}},
+					{"name":"host-sys","host_path":{"path":"/sys","type":"directory"}},
+					{"name":"container-runtime","host_path":{"path":"/run/containerd","type":"directory"}}
 				],
 				"volume_mounts":[
 					{"name":"ascend-driver","mount_path":"/usr/local/Ascend/driver"},
-					{"name":"containerd-socket","mount_path":"/run/containerd/containerd.sock","read_only":false}
+					{"name":"ascend-dcmi","mount_path":"/usr/local/dcmi"},
+					{"name":"host-sys","mount_path":"/sys"},
+					{"name":"container-runtime","mount_path":"/run/containerd"}
 				]
 			}
 		}

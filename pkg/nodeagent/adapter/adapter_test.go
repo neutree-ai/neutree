@@ -86,3 +86,15 @@ func TestMetricResultCloneDoesNotShareDevicesOrLabels(t *testing.T) {
 	assert.Equal(t, 1, *original.Allocations[0].Devices[0].Order)
 	assert.Equal(t, "device-a", original.Samples[0].Labels["device"])
 }
+
+func TestHardwareSnapshotCloneDoesNotShareDeviceAliases(t *testing.T) {
+	original := HardwareSnapshot{Details: []HardwareDetails{{
+		UUID:          "device-a",
+		DeviceAliases: []string{"logical-7"},
+	}}}
+
+	cloned := original.Clone()
+	cloned.Details[0].DeviceAliases[0] = "logical-8"
+
+	assert.Equal(t, "logical-7", original.Details[0].DeviceAliases[0])
+}

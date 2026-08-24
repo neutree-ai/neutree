@@ -53,7 +53,12 @@ type HardwareSnapshot struct {
 // HardwareDetails holds stable hardware fields not represented in the API
 // inventory object.
 type HardwareDetails struct {
-	UUID           string
+	UUID string
+	// DeviceAliases are provider-confirmed, non-authoritative references for
+	// this physical device. Only the owning adapter may interpret an alias, and
+	// it must reject missing or ambiguous mappings rather than treating an alias
+	// as a stable identity fallback.
+	DeviceAliases  []string
 	Architecture   string
 	DriverVersion  string
 	PCIEBusID      string
@@ -212,7 +217,14 @@ func (s HardwareSnapshot) Clone() HardwareSnapshot {
 		}
 	}
 
-	result.Details = append([]HardwareDetails(nil), s.Details...)
+	if len(s.Details) > 0 {
+		result.Details = make([]HardwareDetails, 0, len(s.Details))
+		for _, detail := range s.Details {
+			copied := detail
+			copied.DeviceAliases = append([]string(nil), detail.DeviceAliases...)
+			result.Details = append(result.Details, copied)
+		}
+	}
 
 	return result
 }

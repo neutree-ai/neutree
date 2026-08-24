@@ -106,7 +106,6 @@ func TestBuildExporterReadinessProbeRejectsInvalidValues(t *testing.T) {
 }
 
 func TestBuildComponentVolumesProjectsStructuredHostPaths(t *testing.T) {
-	writable := false
 	mounts, volumes, err := buildComponentVolumes(
 		[]v1.ComponentVolume{
 			{
@@ -117,31 +116,55 @@ func TestBuildComponentVolumesProjectsStructuredHostPaths(t *testing.T) {
 				},
 			},
 			{
-				Name: "containerd-socket",
+				Name: "ascend-dcmi",
 				HostPath: &v1.ComponentHostPathVolumeSource{
-					Path: "/run/containerd/containerd.sock",
-					Type: v1.ComponentHostPathTypeSocket,
+					Path: "/usr/local/dcmi",
+					Type: v1.ComponentHostPathTypeDirectory,
+				},
+			},
+			{
+				Name: "host-sys",
+				HostPath: &v1.ComponentHostPathVolumeSource{
+					Path: "/sys",
+					Type: v1.ComponentHostPathTypeDirectory,
+				},
+			},
+			{
+				Name: "container-runtime",
+				HostPath: &v1.ComponentHostPathVolumeSource{
+					Path: "/run/containerd",
+					Type: v1.ComponentHostPathTypeDirectory,
 				},
 			},
 		},
 		[]v1.ComponentVolumeMount{
 			{Name: "ascend-driver", MountPath: "/usr/local/Ascend/driver"},
-			{Name: "containerd-socket", MountPath: "/run/containerd/containerd.sock", ReadOnly: &writable},
+			{Name: "ascend-dcmi", MountPath: "/usr/local/dcmi"},
+			{Name: "host-sys", MountPath: "/sys"},
+			{Name: "container-runtime", MountPath: "/run/containerd"},
 		},
 	)
 
 	assert.NilError(t, err)
 	assert.DeepEqual(t, []corev1.VolumeMount{
 		{Name: "ascend-driver", MountPath: "/usr/local/Ascend/driver", ReadOnly: true},
-		{Name: "containerd-socket", MountPath: "/run/containerd/containerd.sock", ReadOnly: false},
+		{Name: "ascend-dcmi", MountPath: "/usr/local/dcmi", ReadOnly: true},
+		{Name: "host-sys", MountPath: "/sys", ReadOnly: true},
+		{Name: "container-runtime", MountPath: "/run/containerd", ReadOnly: true},
 	}, mounts)
-	assert.Equal(t, 2, len(volumes))
+	assert.Equal(t, 4, len(volumes))
 	assert.Equal(t, "ascend-driver", volumes[0].Name)
 	assert.Assert(t, volumes[0].HostPath != nil)
 	assert.Equal(t, corev1.HostPathDirectory, *volumes[0].HostPath.Type)
-	assert.Equal(t, "containerd-socket", volumes[1].Name)
+	assert.Equal(t, "ascend-dcmi", volumes[1].Name)
 	assert.Assert(t, volumes[1].HostPath != nil)
-	assert.Equal(t, corev1.HostPathSocket, *volumes[1].HostPath.Type)
+	assert.Equal(t, corev1.HostPathDirectory, *volumes[1].HostPath.Type)
+	assert.Equal(t, "host-sys", volumes[2].Name)
+	assert.Assert(t, volumes[2].HostPath != nil)
+	assert.Equal(t, corev1.HostPathDirectory, *volumes[2].HostPath.Type)
+	assert.Equal(t, "container-runtime", volumes[3].Name)
+	assert.Assert(t, volumes[3].HostPath != nil)
+	assert.Equal(t, corev1.HostPathDirectory, *volumes[3].HostPath.Type)
 }
 
 func TestBuildComponentVolumesRejectsInvalidProfiles(t *testing.T) {
