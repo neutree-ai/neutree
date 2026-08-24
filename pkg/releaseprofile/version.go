@@ -20,17 +20,6 @@ func NormalizeClusterMinor(clusterVersion string) (string, error) {
 	return fmt.Sprintf("v%d.%d", version.Major(), version.Minor()), nil
 }
 
-// NormalizeControlPlaneRelease validates an exact ReleaseInfo identity.
-// Prerelease identities deliberately remain distinct from the eventual stable
-// release.
-func NormalizeControlPlaneRelease(buildIdentity string) (string, error) {
-	if _, err := parseExactVPrefixedSemVer(buildIdentity); err != nil {
-		return "", fmt.Errorf("invalid control-plane release %q: %w", buildIdentity, err)
-	}
-
-	return buildIdentity, nil
-}
-
 // IsWorkflowShortCommitBuild reports whether the identity is the release
 // workflow's short-commit build value.
 func IsWorkflowShortCommitBuild(buildIdentity string) bool {

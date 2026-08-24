@@ -28,12 +28,26 @@ func TestBuiltinCatalogBuildsCurrentReleaseAndExactProfiles(t *testing.T) {
 	assert.Equal(t, v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"}, profile.Spec.Components[v1.KubernetesClusterType].KubernetesRuntime)
 }
 
-func TestBuilderRejectsForeignControlPlaneBaseline(t *testing.T) {
+func TestBuilderRejectsNonCurrentBaseline(t *testing.T) {
 	builder, err := NewBuilderForCatalog(BuiltinCatalog())
 	require.NoError(t, err)
 
-	_, err = builder.BuildReleaseInfo("v1.2.1")
-	require.ErrorContains(t, err, "not supported by catalog")
+	for _, testCase := range []struct {
+		name     string
+		baseline string
+	}{
+		{name: "different release", baseline: "v1.2.1"},
+		{name: "invalid release", baseline: "not-a-release"},
+		{name: "whitespace", baseline: "v1.2.0 "},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := builder.BuildReleaseInfo(testCase.baseline)
+			require.ErrorContains(t, err, "not supported by catalog")
+
+			_, err = builder.BuildClusterProfiles(testCase.baseline)
+			require.ErrorContains(t, err, "not supported by catalog")
+		})
+	}
 }
 
 func TestCatalogAndBuilderReturnDefensiveCopies(t *testing.T) {

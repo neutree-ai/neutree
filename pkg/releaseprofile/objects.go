@@ -38,6 +38,14 @@ func cloneClusterProfile(profile *v1.ClusterProfile) *v1.ClusterProfile {
 	return &copy
 }
 
+func cloneCatalog(catalog *Catalog) *Catalog {
+	if catalog == nil {
+		return nil
+	}
+
+	return &Catalog{spec: cloneCatalogSpec(catalog.spec)}
+}
+
 func cloneMetadata(metadata *v1.Metadata) *v1.Metadata {
 	if metadata == nil {
 		return nil
