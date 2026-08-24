@@ -36,7 +36,7 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 		t.Run(tt.name, func(t *testing.T) {
 			reconciler, err := NewReconcileWithClusterProfile(&v1.Cluster{
 				Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: tt.version},
-			}, nil, nil, "", testClusterProfileComponentResolver())
+			}, nil, nil, "", nil)
 
 			require.NoError(t, err)
 			_, isStatic := reconciler.(*staticRayReconciler)
@@ -60,7 +60,7 @@ func TestNewReconcileRequiresStorage(t *testing.T) {
 		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
 	}, nil, nil, "")
 
-	require.EqualError(t, err, "storage is required to resolve cluster profile")
+	require.EqualError(t, err, "storage is required to reconcile clusters")
 	assert.Nil(t, reconciler)
 }
 
@@ -98,26 +98,13 @@ func TestNewDeleteReconcileDoesNotResolveClusterProfile(t *testing.T) {
 	}
 }
 
-func TestNewReconcileWithClusterProfileUsesExactSSHProfile(t *testing.T) {
-	resolvedVersion := ""
-	resolver := clusterProfileComponentResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
-		resolvedVersion = version
-
-		return v1.ClusterProfileComponents{
-			RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
-		}, nil
-	})
-
+func TestNewReconcileWithClusterProfileDoesNotRequireProfileForSSH(t *testing.T) {
 	reconciler, err := NewReconcileWithClusterProfile(&v1.Cluster{
 		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
-	}, nil, nil, "", resolver)
+	}, nil, nil, "", nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, "v1.0.1", resolvedVersion)
-	sshReconciler, ok := reconciler.(*sshRayClusterReconciler)
-	require.True(t, ok)
-	assert.True(t, sshReconciler.profileSelected)
-	assert.Equal(t, "v1.1.1", sshReconciler.profileComponents.RayRuntime.Tag)
+	assert.IsType(t, &sshRayClusterReconciler{}, reconciler)
 }
 
 func TestNewReconcileWithClusterProfileUsesExactKubernetesProfile(t *testing.T) {
@@ -145,22 +132,8 @@ func TestNewReconcileWithClusterProfileUsesExactKubernetesProfile(t *testing.T) 
 	assert.Equal(t, "v1.2.1", kubernetesReconciler.profileComponents.Router.Tag)
 }
 
-type clusterProfileComponentResolverFunc func(string) (v1.ClusterProfileComponents, error)
-
-func (resolver clusterProfileComponentResolverFunc) ComponentsFor(version, _ string) (v1.ClusterProfileComponents, error) {
-	return resolver(version)
-}
-
 type typedClusterProfileComponentResolverFunc func(string, string) (v1.ClusterProfileComponents, error)
 
 func (resolver typedClusterProfileComponentResolverFunc) ComponentsFor(version, clusterType string) (v1.ClusterProfileComponents, error) {
 	return resolver(version, clusterType)
-}
-
-func testClusterProfileComponentResolver() ClusterProfileComponentResolver {
-	return clusterProfileComponentResolverFunc(func(version string) (v1.ClusterProfileComponents, error) {
-		return v1.ClusterProfileComponents{
-			RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: version},
-		}, nil
-	})
 }

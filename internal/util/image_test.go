@@ -9,6 +9,36 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+func TestBuildClusterImageRef(t *testing.T) {
+	tests := []struct {
+		name        string
+		imagePrefix string
+		version     string
+		imageSuffix string
+		expected    string
+	}{
+		{
+			name:        "default image",
+			imagePrefix: "registry.example.com/neutree",
+			version:     "v1.2.0",
+			expected:    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
+		},
+		{
+			name:        "accelerator image",
+			imagePrefix: "registry.example.com/neutree",
+			version:     "v1.2.0",
+			imageSuffix: "rocm",
+			expected:    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-rocm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, BuildClusterImageRef(tt.imagePrefix, tt.version, tt.imageSuffix))
+		})
+	}
+}
+
 func TestBuildProfileImageRef(t *testing.T) {
 	tests := []struct {
 		name        string

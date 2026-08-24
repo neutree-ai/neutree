@@ -256,7 +256,7 @@ func buildRayRuntimeImage(
 		}
 	}
 
-	return profileComponentImage(cluster, "ray_runtime", component)
+	return staticProfileComponentImage(cluster, "ray runtime", component)
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {

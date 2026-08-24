@@ -116,7 +116,7 @@ func buildMetricsComponents(
 }
 
 func buildNodeExporterComponent(cluster *v1.StaticNodeCluster, component v1.ImageRef) (v1.NodeComponentSpec, error) {
-	image, err := profileComponentImage(cluster, "node_exporter", component)
+	image, err := staticProfileComponentImage(cluster, "node exporter", component)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
@@ -171,7 +171,7 @@ func buildAcceleratorExporterComponent(
 ) v1.NodeComponentSpec {
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
-		Image:            staticComponentImage(cluster, exporter.Image),
+		Image:            staticExternalComponentImage(cluster, exporter.Image),
 		Args:             append([]string{}, exporter.Args...),
 		Env:              copyMetricsStringMap(exporter.Env),
 		Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),
@@ -210,7 +210,7 @@ func buildNodeAgentComponent(
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
 
-	image, err := profileComponentImage(cluster, "node_agent", component)
+	image, err := staticProfileComponentImage(cluster, "node agent", component)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
@@ -330,7 +330,7 @@ func buildVMAgentComponent(
 		vmagentArgs = append(vmagentArgs, "-remoteWrite.url="+metricsRemoteWriteURL)
 	}
 
-	image, err := profileComponentImage(cluster, "vmagent", component)
+	image, err := staticProfileComponentImage(cluster, "vmagent", component)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}

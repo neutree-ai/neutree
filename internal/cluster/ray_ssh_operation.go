@@ -326,18 +326,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 		return nil, errors.Wrap(err, "failed to get image prefix")
 	}
 
-	if !reconcileContext.ProfileSelected {
-		return nil, errors.New("exact cluster profile components are required to generate SSH cluster configuration")
-	}
-
-	rayClusterConfig.Docker.Image, err = sshProfileRuntimeImage(
-		imagePrefix,
-		reconcileContext.ProfileComponents.RayRuntime,
-		"",
-	)
-	if err != nil {
-		return nil, err
-	}
+	rayClusterConfig.Docker.Image = util.BuildClusterImageRef(imagePrefix, cluster.Spec.Version, "")
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
@@ -595,9 +584,9 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 	return nil
 }
 
-// prePullImages pre-pulls the exact Profile runtime image and engine images on all cluster nodes.
-// The Profile runtime image is pre-pulled so upCluster/startNode can start instantly. Engine images
-// used by running endpoints are pre-pulled so inference instances recover quickly after upgrade.
+// prePullImages pre-pulls the legacy cluster runtime image and engine images on all cluster nodes.
+// The runtime image is pre-pulled so upCluster/startNode can start instantly. Engine images used by
+// running endpoints are pre-pulled so inference instances recover quickly after upgrade.
 func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) error {
 	// Collect engine images from running endpoints
 	engineImages, err := c.collectEngineImages(reconcileCtx)
@@ -605,7 +594,7 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 		return errors.Wrap(err, "failed to collect engine images")
 	}
 
-	// Add the exact Profile runtime image for the target cluster version.
+	// Add the legacy runtime image for the target cluster version.
 	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return errors.Wrap(err, "failed to get image prefix")
@@ -617,18 +606,7 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 		imageSuffix = c.acceleratorManager.GetImageSuffix(*reconcileCtx.Cluster.Status.AcceleratorType)
 	}
 
-	if !reconcileCtx.ProfileSelected {
-		return errors.New("exact cluster profile components are required to pre-pull SSH cluster images")
-	}
-
-	clusterImage, err := sshProfileRuntimeImage(
-		imagePrefix,
-		reconcileCtx.ProfileComponents.RayRuntime,
-		imageSuffix,
-	)
-	if err != nil {
-		return err
-	}
+	clusterImage := util.BuildClusterImageRef(imagePrefix, reconcileCtx.Cluster.Spec.Version, imageSuffix)
 
 	imageSet := map[string]struct{}{clusterImage: {}}
 	for _, img := range engineImages {
@@ -781,21 +759,6 @@ func (c *sshRayClusterReconciler) pullImagesOnNode(reconcileCtx *ReconcileContex
 	}
 
 	return nil
-}
-
-// sshProfileRuntimeImage resolves the exact SSH runtime image from a
-// ClusterProfile and preserves the existing accelerator suffix convention.
-func sshProfileRuntimeImage(imagePrefix string, runtime v1.ImageRef, suffix string) (string, error) {
-	if strings.TrimSpace(runtime.Image) == "" || strings.TrimSpace(runtime.Tag) == "" {
-		return "", errors.New("cluster profile component ray_runtime requires image and tag")
-	}
-
-	tag := runtime.Tag
-	if suffix != "" {
-		tag += "-" + suffix
-	}
-
-	return util.RewriteImageRef(imagePrefix, runtime.Image+":"+tag), nil
 }
 
 func mutateModelCaches(sshRayClusterConfig *v1.RayClusterConfig, modelCaches []v1.ModelCache) {

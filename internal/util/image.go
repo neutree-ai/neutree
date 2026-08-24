@@ -7,6 +7,17 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+// BuildClusterImageRef constructs the legacy SSH Ray runtime image reference.
+// imageSuffix is the accelerator-specific suffix from RuntimeConfig.ImageSuffix.
+func BuildClusterImageRef(imagePrefix, version, imageSuffix string) string {
+	tag := version
+	if imageSuffix != "" {
+		tag += "-" + imageSuffix
+	}
+
+	return RewriteImageRef(imagePrefix, v1.NeutreeServeImageName+":"+tag)
+}
+
 // BuildProfileImageRef constructs a pull-side reference from an exact
 // ClusterProfile image and tag. Profile validation owns the normal invariant;
 // this boundary keeps runtime failures clear for incomplete test fixtures or

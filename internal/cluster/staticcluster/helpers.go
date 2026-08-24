@@ -2,9 +2,7 @@ package staticcluster
 
 import (
 	"context"
-	"fmt"
 	"maps"
-	"strings"
 
 	"github.com/pkg/errors"
 
@@ -136,21 +134,21 @@ func copyRuntimeConfig(config *v1.RuntimeConfig) *v1.RuntimeConfig {
 	return &result
 }
 
-func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
+func staticImagePrefix(cluster *v1.StaticNodeCluster) string {
 	imageRegistry := ""
 	if cluster != nil && cluster.Spec != nil {
 		imageRegistry = cluster.Spec.ImageRegistry
 	}
 
-	return util.RewriteImageRef(imageRegistry, image)
+	return imageRegistry
 }
 
-func profileComponentImage(cluster *v1.StaticNodeCluster, componentName string, component v1.ImageRef) (string, error) {
-	if strings.TrimSpace(component.Image) == "" || strings.TrimSpace(component.Tag) == "" {
-		return "", fmt.Errorf("cluster profile component %s requires image and tag", componentName)
-	}
+func staticExternalComponentImage(cluster *v1.StaticNodeCluster, image string) string {
+	return util.RewriteImageRef(staticImagePrefix(cluster), image)
+}
 
-	return staticComponentImage(cluster, component.Image+":"+component.Tag), nil
+func staticProfileComponentImage(cluster *v1.StaticNodeCluster, componentName string, component v1.ImageRef) (string, error) {
+	return util.BuildProfileImageRef(staticImagePrefix(cluster), componentName, component)
 }
 
 func copyAuth(auth *v1.Auth) *v1.Auth {

@@ -1442,10 +1442,6 @@ func TestUpgradeCluster(t *testing.T) {
 						URL: "registry.example.com",
 					},
 				},
-				ProfileComponents: v1.ClusterProfileComponents{
-					RayRuntime: v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v2.0.0"},
-				},
-				ProfileSelected: true,
 				sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
 					Provider: v1.Provider{
 						HeadIP: "127.0.0.1",

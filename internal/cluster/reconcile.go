@@ -32,7 +32,7 @@ type ClusterReconcile interface {
 }
 
 // ClusterProfileComponentResolver resolves the exact component matrix for a
-// Cluster version and type. Runtime callers must provide this dependency.
+// Kubernetes Cluster version and type.
 type ClusterProfileComponentResolver = releaseprofile.ComponentProvider
 
 type ReconcileContext struct {
@@ -135,7 +135,7 @@ func (r *sshDeleteReconciler) ReconcileDelete(ctx context.Context, cluster *v1.C
 func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
 	if s == nil {
-		return nil, fmt.Errorf("storage is required to resolve cluster profile")
+		return nil, fmt.Errorf("storage is required to reconcile clusters")
 	}
 
 	resolver := releaseprofile.NewProvider(s, s)
@@ -144,9 +144,18 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 }
 
 // NewReconcileWithClusterProfile creates a runtime reconciler from an exact
-// Profile resolver. It is used by the Core composition root and focused tests.
+// Profile resolver for Kubernetes clusters. Legacy SSH Ray reconciliation does
+// not consume ClusterProfile component data.
 func NewReconcileWithClusterProfile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string, resolver ClusterProfileComponentResolver) (ClusterReconcile, error) {
+	if cluster == nil || cluster.Spec == nil {
+		return nil, fmt.Errorf("cluster spec is required")
+	}
+
+	if cluster.Spec.Type == v1.SSHClusterType {
+		return newReconcile(cluster, acceleratorManager, s, metricsRemoteWriteURL, v1.ClusterProfileComponents{})
+	}
+
 	components, err := resolveClusterProfileComponents(cluster, resolver)
 	if err != nil {
 		return nil, err
@@ -163,8 +172,6 @@ func newReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 			executor:           &command.OSExecutor{},
 			acceleratorManager: acceleratorManager,
 			storage:            s,
-			profileComponents:  components,
-			profileSelected:    true,
 		}
 
 		useStaticFlow, err := isStaticNodeClusterFlowVersion(cluster.GetVersion())

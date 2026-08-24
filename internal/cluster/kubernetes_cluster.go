@@ -179,7 +179,12 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		return errors.Wrap(err, "failed to get image prefix")
 	}
 
-	routerImage, metricsImages, err := kubernetesComponentImages(imagePrefix, reconcileCtx.ProfileComponents)
+	routerImage, err := router.BuildProfileImage(imagePrefix, reconcileCtx.ProfileComponents.Router)
+	if err != nil {
+		return err
+	}
+
+	metricsImages, err := metrics.BuildProfileComponentImages(imagePrefix, reconcileCtx.ProfileComponents)
 	if err != nil {
 		return err
 	}
@@ -284,43 +289,6 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	}
 
 	return reconcileComps, reconcileDeleteComps
-}
-
-func kubernetesComponentImages(
-	imagePrefix string,
-	components v1.ClusterProfileComponents,
-) (string, metrics.ComponentImages, error) {
-	routerImage, err := util.BuildProfileImageRef(imagePrefix, "router", components.Router)
-	if err != nil {
-		return "", metrics.ComponentImages{}, errors.Wrap(err, "build router image from cluster profile")
-	}
-
-	nodeAgentImage, err := util.BuildProfileImageRef(imagePrefix, "node agent", components.NodeAgent)
-	if err != nil {
-		return "", metrics.ComponentImages{}, errors.Wrap(err, "build node agent image from cluster profile")
-	}
-
-	nodeExporterImage, err := util.BuildProfileImageRef(imagePrefix, "node exporter", components.NodeExporter)
-	if err != nil {
-		return "", metrics.ComponentImages{}, errors.Wrap(err, "build node exporter image from cluster profile")
-	}
-
-	vmagentImage, err := util.BuildProfileImageRef(imagePrefix, "vmagent", components.VMAgent)
-	if err != nil {
-		return "", metrics.ComponentImages{}, errors.Wrap(err, "build vmagent image from cluster profile")
-	}
-
-	kubeStateMetricsImage, err := util.BuildProfileImageRef(imagePrefix, "kube state metrics", components.KubeStateMetrics)
-	if err != nil {
-		return "", metrics.ComponentImages{}, errors.Wrap(err, "build kube state metrics image from cluster profile")
-	}
-
-	return routerImage, metrics.ComponentImages{
-		NodeAgentImage:        nodeAgentImage,
-		NodeExporterImage:     nodeExporterImage,
-		VMAgentImage:          vmagentImage,
-		KubeStateMetricsImage: kubeStateMetricsImage,
-	}, nil
 }
 
 func (c *NativeKubernetesClusterReconciler) ReconcileDelete(ctx context.Context, cluster *v1.Cluster) error {

@@ -558,7 +558,7 @@ func TestPlannerSkipsNodeExporterTargetsForUndiscoveredNodes(t *testing.T) {
 	assert.Empty(t, worker.Spec.Components)
 }
 
-func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
+func TestStaticExternalComponentImageUsesStaticRegistry(t *testing.T) {
 	tests := []struct {
 		name          string
 		imageRegistry string
@@ -620,9 +620,24 @@ func TestStaticComponentImageUsesStaticRegistry(t *testing.T) {
 			cluster := testStaticNodeCluster()
 			cluster.Spec.ImageRegistry = tt.imageRegistry
 
-			assert.Equal(t, tt.want, staticComponentImage(cluster, tt.image))
+			assert.Equal(t, tt.want, staticExternalComponentImage(cluster, tt.image))
 		})
 	}
+}
+
+func TestStaticProfileComponentImageUsesProfileImageRef(t *testing.T) {
+	cluster := testStaticNodeCluster()
+
+	image, err := staticProfileComponentImage(cluster, "ray runtime", v1.ImageRef{
+		Image: "neutree/neutree-serve",
+		Tag:   "v1.2.1",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.1", image)
+
+	_, err = staticProfileComponentImage(cluster, "ray runtime", v1.ImageRef{Image: "neutree/neutree-serve"})
+	require.ErrorContains(t, err, "ray runtime tag is required")
 }
 
 func TestPlannerUsesExactClusterProfileComponents(t *testing.T) {
