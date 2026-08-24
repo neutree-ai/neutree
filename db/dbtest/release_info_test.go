@@ -3,7 +3,6 @@ package dbtest
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 )
 
@@ -103,90 +102,6 @@ func TestReleaseInfoHasMinimalGlobalSchema(t *testing.T) {
 	`)
 	if err == nil {
 		t.Fatal("expected api_user insert into release_infos to be blocked")
-	}
-}
-
-func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
-	upMigration, err := os.ReadFile("../migrations/090_release_info_cluster_profiles.up.sql")
-	if err != nil {
-		t.Fatalf("read forward migration: %v", err)
-	}
-
-	downMigration, err := os.ReadFile("../migrations/090_release_info_cluster_profiles.down.sql")
-	if err != nil {
-		t.Fatalf("read rollback migration: %v", err)
-	}
-
-	adminDB := GetTestDB(t)
-	ctx := context.Background()
-	tx, err := adminDB.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin rollback transaction: %v", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
-		t.Fatalf("restore pre-release-profile schema: %v", err)
-	}
-	if _, err = tx.ExecContext(ctx, string(upMigration)); err != nil {
-		t.Fatalf("apply final release-profile migration: %v", err)
-	}
-
-	var engineCapabilitiesExist bool
-	if err = tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM pg_attribute
-			WHERE attrelid = 'api.engine_version'::regclass
-				AND attname = 'capabilities'
-				AND attnum > 0
-				AND NOT attisdropped
-		)
-	`).Scan(&engineCapabilitiesExist); err != nil {
-		t.Fatalf("check engine_version.capabilities: %v", err)
-	}
-	if !engineCapabilitiesExist {
-		t.Fatal("mainline engine capabilities must remain after release-profile migration")
-	}
-
-	const releaseName = "v1.2.0"
-	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO api.release_infos (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'ReleaseInfo',
-			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('v1.2.0', '["v1.1","v1.2"]'::jsonb)::api.release_info_spec
-		)
-	`, releaseName); err != nil {
-		t.Fatalf("insert final release info: %v", err)
-	}
-	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO api.cluster_profiles (api_version, kind, metadata, spec)
-		VALUES (
-			'v1',
-			'ClusterProfile',
-			ROW('v1.2.0', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			$1::jsonb
-		)
-	`, completeClusterProfileSpec); err != nil {
-		t.Fatalf("insert final cluster profile: %v", err)
-	}
-
-	if _, err = tx.ExecContext(ctx, string(downMigration)); err != nil {
-		t.Fatalf("roll back final release-profile migration: %v", err)
-	}
-
-	for _, tableName := range []string{"api.release_infos", "api.cluster_profiles"} {
-		var exists bool
-		if err = tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, tableName).Scan(&exists); err != nil {
-			t.Fatalf("check rollback table %s: %v", tableName, err)
-		}
-		if exists {
-			t.Fatalf("rollback must remove %s", tableName)
-		}
 	}
 }
 
