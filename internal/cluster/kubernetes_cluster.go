@@ -179,9 +179,9 @@ func (c *NativeKubernetesClusterReconciler) reconcileComponents(reconcileCtx *Re
 		return errors.Wrap(err, "failed to get image prefix")
 	}
 
-	routerImage, err := router.BuildProfileImage(imagePrefix, reconcileCtx.ProfileComponents.Router)
+	routerImage, err := util.BuildProfileImageRef(imagePrefix, "router", reconcileCtx.ProfileComponents.Router)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "build router image from cluster profile")
 	}
 
 	metricsImages, err := metrics.BuildProfileComponentImages(imagePrefix, reconcileCtx.ProfileComponents)
