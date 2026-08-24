@@ -64,59 +64,18 @@ func TestRunNeutreeCorePreflightRejectsInvalidEffectiveVersion(t *testing.T) {
 	assert.Contains(t, output.String(), "invalid cluster version")
 }
 
-func TestBuildNeutreeCorePreflightTarget(t *testing.T) {
+func TestBuildNeutreeCorePreflightTargetUsesBuilderBaseline(t *testing.T) {
 	builder := preflightBuilder{baseline: "v1.2.0"}
 
-	target, err := buildNeutreeCorePreflightTarget("v1.2.0", builder)
+	target, err := buildNeutreeCorePreflightTarget(builder)
 	require.NoError(t, err)
 	assert.Equal(t, "v1.2.0", target.GetName())
-
-	target, err = buildNeutreeCorePreflightTarget("v1.2.0-rc.1", builder)
-	require.NoError(t, err)
-	assert.Equal(t, "v1.2.0-rc.1", target.GetName())
-
-	target, err = buildNeutreeCorePreflightTarget("b64e294", builder)
-	require.NoError(t, err)
-	assert.Equal(t, "v1.2.0", target.GetName())
-
-	_, err = buildNeutreeCorePreflightTarget("dev", builder)
-	require.ErrorContains(t, err, "cannot derive")
-
-	_, err = buildNeutreeCorePreflightTarget("v1.2.0-dirty", builder)
-	require.ErrorContains(t, err, "cannot derive")
-}
-
-func TestNormalizeControlPlaneRelease(t *testing.T) {
-	for _, testCase := range []struct {
-		name    string
-		version string
-		wantErr string
-	}{
-		{name: "stable release", version: "v1.2.0"},
-		{name: "prerelease", version: "v1.2.0-rc.1"},
-		{name: "missing patch", version: "v1.2", wantErr: "invalid control-plane release"},
-		{name: "missing prefix", version: "1.2.0", wantErr: "invalid control-plane release"},
-		{name: "whitespace", version: "v1.2.0 ", wantErr: "invalid control-plane release"},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			actual, err := normalizeControlPlaneRelease(testCase.version)
-			if testCase.wantErr != "" {
-				require.ErrorContains(t, err, testCase.wantErr)
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, testCase.version, actual)
-		})
-	}
 }
 
 func TestNeutreeCorePreflightUsesGlobalGenericClient(t *testing.T) {
 	previousServerURL, previousAPIKey, previousInsecure := global.ServerURL, global.APIKey, global.Insecure
-	previousVersion := getCLIAppVersion
 	t.Cleanup(func() {
 		global.ServerURL, global.APIKey, global.Insecure = previousServerURL, previousAPIKey, previousInsecure
-		getCLIAppVersion = previousVersion
 	})
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -130,7 +89,6 @@ func TestNeutreeCorePreflightUsesGlobalGenericClient(t *testing.T) {
 	global.ServerURL = server.URL
 	global.APIKey = "test-api-key"
 	global.Insecure = false
-	getCLIAppVersion = func() string { return "v1.2.0" }
 
 	command := NewNeutreeCorePreflightCmdWithBuilder(preflightBuilder{baseline: "v1.2.0"})
 	command.SetOut(&bytes.Buffer{})
@@ -140,15 +98,12 @@ func TestNeutreeCorePreflightUsesGlobalGenericClient(t *testing.T) {
 
 func TestNeutreeCorePreflightRequiresGlobalCredentials(t *testing.T) {
 	previousServerURL, previousAPIKey := global.ServerURL, global.APIKey
-	previousVersion := getCLIAppVersion
 	t.Cleanup(func() {
 		global.ServerURL, global.APIKey = previousServerURL, previousAPIKey
-		getCLIAppVersion = previousVersion
 	})
 
 	global.ServerURL = ""
 	global.APIKey = ""
-	getCLIAppVersion = func() string { return "v1.2.0" }
 
 	command := NewNeutreeCorePreflightCmdWithBuilder(preflightBuilder{baseline: "v1.2.0"})
 	require.ErrorContains(t, command.Execute(), "server URL is required")

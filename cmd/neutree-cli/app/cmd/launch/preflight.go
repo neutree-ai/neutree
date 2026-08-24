@@ -42,7 +42,7 @@ func newNeutreeCorePreflightCmd(builderFactory func() releaseprofile.Builder) *c
 			}
 
 			builder := builderFactory()
-			target, err := buildNeutreeCorePreflightTarget(getCLIAppVersion(), builder)
+			target, err := buildNeutreeCorePreflightTarget(builder)
 			if err != nil {
 				return err
 			}
@@ -65,27 +65,12 @@ func newNeutreeCorePreflightCmd(builderFactory func() releaseprofile.Builder) *c
 	}
 }
 
-func buildNeutreeCorePreflightTarget(cliVersion string, builder releaseprofile.Builder) (*v1.ReleaseInfo, error) {
+func buildNeutreeCorePreflightTarget(builder releaseprofile.Builder) (*v1.ReleaseInfo, error) {
 	if builder == nil {
 		return nil, fmt.Errorf("release profile builder is required")
 	}
 
-	var baseline string
-	if releaseprofile.IsWorkflowShortCommitBuild(cliVersion) {
-		baseline = builder.CurrentReleaseInfoBaseline()
-	} else {
-		if isDevelopmentCLIVersion(cliVersion) {
-			return nil, fmt.Errorf("cannot derive release info from CLI version %q", cliVersion)
-		}
-
-		var err error
-		baseline, err = normalizeControlPlaneRelease(cliVersion)
-		if err != nil {
-			return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
-		}
-	}
-
-	info, err := builder.BuildReleaseInfo(baseline)
+	info, err := builder.BuildReleaseInfo(builder.CurrentReleaseInfoBaseline())
 	if err != nil {
 		return nil, fmt.Errorf("build embedded release info: %w", err)
 	}
