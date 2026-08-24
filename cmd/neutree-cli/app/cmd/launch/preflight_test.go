@@ -86,6 +86,31 @@ func TestBuildNeutreeCorePreflightTarget(t *testing.T) {
 	require.ErrorContains(t, err, "cannot derive")
 }
 
+func TestNormalizeControlPlaneRelease(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		version string
+		wantErr string
+	}{
+		{name: "stable release", version: "v1.2.0"},
+		{name: "prerelease", version: "v1.2.0-rc.1"},
+		{name: "missing patch", version: "v1.2", wantErr: "invalid control-plane release"},
+		{name: "missing prefix", version: "1.2.0", wantErr: "invalid control-plane release"},
+		{name: "whitespace", version: "v1.2.0 ", wantErr: "invalid control-plane release"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			actual, err := normalizeControlPlaneRelease(testCase.version)
+			if testCase.wantErr != "" {
+				require.ErrorContains(t, err, testCase.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, testCase.version, actual)
+		})
+	}
+}
+
 func TestNeutreeCorePreflightUsesGlobalGenericClient(t *testing.T) {
 	previousServerURL, previousAPIKey, previousInsecure := global.ServerURL, global.APIKey, global.Insecure
 	previousVersion := getCLIAppVersion

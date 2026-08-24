@@ -79,7 +79,7 @@ func buildNeutreeCorePreflightTarget(cliVersion string, builder releaseprofile.B
 		}
 
 		var err error
-		baseline, err = releaseprofile.NormalizeControlPlaneRelease(cliVersion)
+		baseline, err = normalizeControlPlaneRelease(cliVersion)
 		if err != nil {
 			return nil, fmt.Errorf("cannot derive release info from CLI version %q: %w", cliVersion, err)
 		}
