@@ -134,13 +134,11 @@ func (r *sshDeleteReconciler) ReconcileDelete(ctx context.Context, cluster *v1.C
 
 func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
-	resolver := releaseprofile.NewClusterProfileProvider(releaseprofile.ClusterProfileReaderFunc(func() ([]v1.ClusterProfile, error) {
-		if s == nil {
-			return nil, fmt.Errorf("storage is required to resolve cluster profile")
-		}
+	if s == nil {
+		return nil, fmt.Errorf("storage is required to resolve cluster profile")
+	}
 
-		return s.ListClusterProfile(storage.ListOption{})
-	}))
+	resolver := releaseprofile.NewProvider(s, s)
 
 	return NewReconcileWithClusterProfile(cluster, acceleratorManager, s, metricsRemoteWriteURL, resolver)
 }
