@@ -462,9 +462,11 @@ func nvidiaAllocationDevices(
 		if !ok {
 			device, ok = lookup.byID[reference]
 		}
+
 		if !ok || device.UUID == "" {
 			continue
 		}
+
 		if _, exists := seen[device.UUID]; exists {
 			continue
 		}
@@ -564,6 +566,7 @@ func sortAllocations(allocations []v1.StaticNodeAllocationStatus) {
 		if allocations[i].Endpoint != allocations[j].Endpoint {
 			return allocations[i].Endpoint < allocations[j].Endpoint
 		}
+
 		if allocations[i].InstanceID != allocations[j].InstanceID {
 			return allocations[i].InstanceID < allocations[j].InstanceID
 		}
