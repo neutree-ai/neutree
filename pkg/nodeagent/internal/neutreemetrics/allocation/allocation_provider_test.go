@@ -255,6 +255,7 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 			nodes: []v1.NodeSummary{
 				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
 			},
+			applications: &dashboard.RayServeApplicationsResponse{},
 			actors: map[string]dashboard.Actor{
 				"actor-a": {
 					ActorID: "actor-a",
@@ -293,12 +294,48 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 	assert.Equal(t, "0", evidence.RayEvidence.ActorProcesses[1234].Environment["ASCEND_VISIBLE_DEVICES"])
 }
 
+func TestRayServeAllocationProviderMarksStaticAllocationUnavailableWhenServeApplicationsFail(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applicationsErr: errors.New("serve applications unavailable"),
+			actors: map[string]dashboard.Actor{
+				"actor-a": {
+					ActorID:           "actor-a",
+					NodeID:            "node-a",
+					PID:               1234,
+					RequiredResources: map[string]float64{"NPU": 1},
+				},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		ProcEnv: ProcessEnvReaderFunc(func(int) (map[string]string, error) {
+			return map[string]string{"ASCEND_VISIBLE_DEVICES": "0"}, nil
+		}),
+		ProcessDescendants: ProcessDescendantReaderFunc(func(pid int) ([]int, error) {
+			return []int{pid}, nil
+		}),
+	}
+
+	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, evidence.AllocationAvailable)
+	require.Len(t, evidence.RayEvidence.Actors, 1)
+	assert.Equal(t, "actor-a", evidence.RayEvidence.Actors[0].ActorID)
+	assert.Empty(t, evidence.RayEvidence.Replicas)
+	assert.Contains(t, evidence.RayEvidence.ActorProcesses, 1234)
+}
+
 func TestRayServeAllocationProviderKeepsEvidenceWhenOneActorProcessIsUnavailable(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
 			nodes: []v1.NodeSummary{
 				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
 			},
+			applications: &dashboard.RayServeApplicationsResponse{},
 			actors: map[string]dashboard.Actor{
 				"healthy": {ActorID: "healthy", NodeID: "node-a", PID: 1234},
 				"gone":    {ActorID: "gone", NodeID: "node-a", PID: 5678},
@@ -333,6 +370,7 @@ func TestRayServeAllocationProviderKeepsEvidenceWhenOnlyActorProcessIsUnavailabl
 			nodes: []v1.NodeSummary{
 				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
 			},
+			applications: &dashboard.RayServeApplicationsResponse{},
 			actors: map[string]dashboard.Actor{
 				"gone": {ActorID: "gone", NodeID: "node-a", PID: 5678},
 			},
@@ -783,9 +821,10 @@ GPU-skip, not-a-pid, 128
 }
 
 type fakeRayDashboardService struct {
-	nodes        []v1.NodeSummary
-	applications *dashboard.RayServeApplicationsResponse
-	actors       map[string]dashboard.Actor
+	nodes           []v1.NodeSummary
+	applications    *dashboard.RayServeApplicationsResponse
+	applicationsErr error
+	actors          map[string]dashboard.Actor
 }
 
 func (f *fakeRayDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
@@ -801,7 +840,7 @@ func (f *fakeRayDashboardService) GetClusterStatus() (v1.RayAPIClusterStatus, er
 }
 
 func (f *fakeRayDashboardService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
-	return f.applications, nil
+	return f.applications, f.applicationsErr
 }
 
 func (f *fakeRayDashboardService) UpdateServeApplications(_ dashboard.RayServeApplicationsRequest) error {

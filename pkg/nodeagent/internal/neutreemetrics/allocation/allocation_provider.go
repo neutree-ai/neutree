@@ -335,7 +335,10 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	return adapter.StaticEvidence{
-		AllocationAvailable: true,
+		// A missing Serve-applications response cannot prove that there are no
+		// endpoint replicas. Preserve independent actor evidence, but keep
+		// allocation-derived metrics absent for this collection cycle.
+		AllocationAvailable: applicationsErr == nil && applications != nil,
 		RayEvidence: adapter.RayEvidence{
 			Actors:         rayActorsFromDashboard(actors),
 			Replicas:       replicas,
