@@ -173,7 +173,7 @@ scrape_configs:
       - {{ .Namespace }}
     selectors:
     - role: pod
-      label: app={{ .NeutreeNodeAgentMetricsName }}
+      label: neutree.ai/metrics-target=node-agent
   relabel_configs:
   - source_labels: [__meta_kubernetes_pod_container_port_name]
     action: keep

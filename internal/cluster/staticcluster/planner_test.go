@@ -22,6 +22,19 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				},
 				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
 			},
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+				Privileged: true,
+				Capabilities: &v1.NodeAgentRuntimeCapabilities{
+					Add: []string{"SYS_ADMIN"},
+				},
+				Volumes: []v1.ComponentVolume{{
+					Name:     "vendor-driver",
+					HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
+				}},
+				VolumeMounts:     []v1.ComponentVolumeMount{{Name: "vendor-driver", MountPath: "/opt/vendor/driver"}},
+				Runtime:          "nvidia",
+				DockerRunOptions: []string{"--gpus all"},
+			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
 				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
@@ -157,7 +170,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
 	assert.Contains(t, nodeAgent.Args, "--node=head-0")
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
-	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nodeAgent.Env)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.Empty(t, nodeAgent.Env)
 	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
 	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
 	assert.NotContains(t, nodeAgent.Args, "--static-node-cluster=static-a")
@@ -171,6 +185,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
 	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
 	requireVolume(t, nodeAgent, "host-cgroup", "/sys/fs/cgroup", "/host/sys/fs/cgroup")
+	requireVolume(t, nodeAgent, "vendor-driver", "/opt/vendor/driver", "/opt/vendor/driver")
 	require.Len(t, nodeAgent.Ports, 1)
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
@@ -256,6 +271,80 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 
 	cluster.Spec.Version = "mutated"
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
+}
+
+func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	profiles := map[string]*v1.AcceleratorProfile{
+		v1.AcceleratorTypeNVIDIAGPU.String(): {
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+				Runtime: "nvidia",
+			},
+		},
+	}
+
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: profiles},
+	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+	require.Len(t, nodes, 2)
+
+	head := nodes[0]
+	require.NotNil(t, head.Spec)
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+}
+
+func TestPlannerRejectsInvalidNodeAgentRuntimeProfile(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+		profiles: map[string]*v1.AcceleratorProfile{
+			v1.AcceleratorTypeNVIDIAGPU.String(): {
+				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+				NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+					Volumes: []v1.ComponentVolume{{
+						Name:     "vendor-driver",
+						HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
+					}},
+				},
+			},
+		},
+	}}
+
+	_, err := planner.Plan(context.Background(), cluster, currentNodes)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must have exactly one mount")
 }
 
 func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {

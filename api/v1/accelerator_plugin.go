@@ -91,8 +91,38 @@ type AcceleratorProfile struct {
 	ClusterRuntime *RuntimeConfig `json:"cluster_runtime,omitempty"`
 	// EngineRuntime describes how inference engine containers should access the accelerator.
 	EngineRuntime *RuntimeConfig `json:"engine_runtime,omitempty"`
+	// NodeAgentRuntime describes vendor-specific access required only by the
+	// NodeAgent. It is intentionally independent from MetricsExporter.Runtime
+	// so renderers cannot inherit exporter privilege or mounts implicitly.
+	NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
 	// MetricsExporter describes the optional metrics exporter used for accelerator observability.
 	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
+}
+
+// NodeAgentRuntimeProfile declares the backend-specific NodeAgent access
+// contract for an explicit accelerator profile.
+type NodeAgentRuntimeProfile struct {
+	// KubernetesProducts limits Kubernetes NodeAgent placement to parser-confirmed products.
+	// An empty list accepts every product reported for the accelerator type.
+	KubernetesProducts []string `json:"kubernetes_products,omitempty"`
+	// Privileged requests privileged execution on backends that support it.
+	Privileged bool `json:"privileged,omitempty"`
+	// Capabilities declares Linux capabilities required by the NodeAgent only.
+	Capabilities *NodeAgentRuntimeCapabilities `json:"capabilities,omitempty"`
+	// Volumes declares structured host volumes required by the NodeAgent runtime.
+	Volumes []ComponentVolume `json:"volumes,omitempty"`
+	// VolumeMounts declares the matching container mounts for Volumes.
+	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
+	// Runtime selects the Docker runtime handler on StaticNode.
+	Runtime string `json:"runtime,omitempty"`
+	// DockerRunOptions are StaticNode-only Docker options; Kubernetes does not parse them.
+	DockerRunOptions []string `json:"docker_run_options,omitempty"`
+}
+
+// NodeAgentRuntimeCapabilities declares Linux capabilities required by a
+// NodeAgent runtime profile.
+type NodeAgentRuntimeCapabilities struct {
+	Add []string `json:"add,omitempty"`
 }
 
 type AcceleratorExporterProfile struct {

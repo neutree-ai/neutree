@@ -102,17 +102,6 @@ type GPUHardwareInfo struct {
 	NUMANode          string
 }
 
-type PodResource struct {
-	Namespace  string
-	Name       string
-	Containers []ContainerDevices
-}
-
-type ContainerDevices struct {
-	ResourceName string
-	DeviceIDs    []string
-}
-
 func FirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {

@@ -306,44 +306,70 @@ spec:
           path: /
 {{ end }}
 {{ if .EnableNeutreeNodeAgentMetrics }}
+{{ range .NodeAgents }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ .NeutreeNodeAgentMetricsName }}
-  namespace: {{ .Namespace }}
+  name: {{ .Name }}
+  namespace: {{ $.Namespace }}
   labels:
-    app: {{ .NeutreeNodeAgentMetricsName }}
-    neutree.ai/cluster-version: {{ .ClusterVersion }}
+    app: {{ .Name }}
+    neutree.ai/metrics-target: node-agent
+    neutree.ai/cluster-version: {{ $.ClusterVersion }}
 spec:
   selector:
     matchLabels:
-      app: {{ .NeutreeNodeAgentMetricsName }}
-      cluster: {{ .ClusterName | quote }}
-      workspace: {{ .Workspace | quote }}
+      app: {{ .Name }}
+      neutree.ai/metrics-target: node-agent
+      cluster: {{ $.ClusterName | quote }}
+      workspace: {{ $.Workspace | quote }}
   template:
     metadata:
       labels:
-        app: {{ .NeutreeNodeAgentMetricsName }}
-        cluster: {{ .ClusterName | quote }}
-        workspace: {{ .Workspace | quote }}
-        neutree.ai/cluster-version: {{ .ClusterVersion }}
+        app: {{ .Name }}
+        neutree.ai/metrics-target: node-agent
+        cluster: {{ $.ClusterName | quote }}
+        workspace: {{ $.Workspace | quote }}
+        neutree.ai/cluster-version: {{ $.ClusterVersion }}
     spec:
-      serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
+{{ if or .IncludedNodeNames .ExcludedNodeNames }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchFields:
+{{ if .IncludedNodeNames }}
+              - key: metadata.name
+                operator: In
+                values:
+{{ .IncludedNodeNames | toYaml | indent 18 }}
+{{ end }}
+{{ if .ExcludedNodeNames }}
+              - key: metadata.name
+                operator: NotIn
+                values:
+{{ .ExcludedNodeNames | toYaml | indent 18 }}
+{{ end }}
+{{ end }}
+      serviceAccountName: {{ $.NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
-      - name: {{ .ImagePullSecret }}
+      - name: {{ $.ImagePullSecret }}
       containers:
       - name: neutree-node-agent
-        image: {{ .NeutreeNodeAgentMetricsImage }}
+        image: {{ $.NeutreeNodeAgentMetricsImage }}
         args:
-        - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
+        - --listen-address=:{{ $.NeutreeNodeAgentMetricsPort }}
         - --cluster-type=kubernetes
-        - --metrics-mode={{ .MetricsMode }}
+        - --metrics-mode={{ $.MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
+{{ if .AcceleratorType }}
+        - --accelerator-type={{ .AcceleratorType }}
+{{ end }}
         env:
-{{ if .NeutreeNodeAgentMetricsEnv }}
-{{ .NeutreeNodeAgentMetricsEnv | toYaml | indent 8 }}
+{{ if .Env }}
+{{ .Env | toYaml | indent 8 }}
 {{ end }}
         - name: NODE_NAME
           valueFrom:
@@ -355,7 +381,7 @@ spec:
               fieldPath: status.hostIP
         ports:
         - name: metrics
-          containerPort: {{ .NeutreeNodeAgentMetricsPort }}
+          containerPort: {{ $.NeutreeNodeAgentMetricsPort }}
         livenessProbe:
           httpGet:
             path: /health
@@ -368,23 +394,24 @@ spec:
             port: metrics
           initialDelaySeconds: 5
           periodSeconds: 10
+{{ if .SecurityContext }}
+        securityContext:
+{{ .SecurityContext | toYaml | indent 10 }}
+{{ end }}
         volumeMounts:
-        - name: kubelet-pod-resources
-          mountPath: /var/lib/kubelet/pod-resources
+{{ .VolumeMounts | toYaml | indent 8 }}
         resources:
           limits:
-            {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
+            {{- range $key, $value := $.NeutreeNodeAgentMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
           requests:
-            {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
+            {{- range $key, $value := $.NeutreeNodeAgentMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
       volumes:
-      - name: kubelet-pod-resources
-        hostPath:
-          path: /var/lib/kubelet/pod-resources
-          type: DirectoryOrCreate
+{{ .Volumes | toYaml | indent 6 }}
+{{ end }}
 {{ end }}
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
@@ -555,6 +582,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
 	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
+	NodeAgents                       []metricsNodeAgent
 	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string

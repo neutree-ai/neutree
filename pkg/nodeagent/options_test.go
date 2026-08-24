@@ -1,4 +1,4 @@
-package main
+package nodeagent
 
 import (
 	"testing"
@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 func TestOptionsConfigDefaults(t *testing.T) {
@@ -74,6 +75,8 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	require.NoError(t, err)
 	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
 	require.True(t, ok)
+	_, ok = config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
+	require.True(t, ok)
 	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
 	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
@@ -95,7 +98,7 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	opts := newOptions()
 	opts.clusterType = clusterTypeKubernetes
 
-	provider := opts.allocationProvider(writer)
+	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
 
 	multi, ok := provider.(allocation.MultiProvider)
 	require.True(t, ok)
@@ -104,6 +107,9 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	assert.True(t, ok)
 	_, ok = multi.Providers[1].(hami.KubernetesProvider)
 	assert.True(t, ok)
+	_, ok = kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	assert.True(t, ok)
+	assert.Nil(t, staticEvidenceProvider)
 }
 
 func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
@@ -121,4 +127,40 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 
 	_, ok := provider.(hami.KubernetesProvider)
 	assert.True(t, ok)
+}
+
+func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = "unknown-accelerator"
+
+	_, err := opts.config()
+
+	assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+}
+
+func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: "fixture"}})
+	require.NoError(t, err)
+
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = "fixture"
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Equal(t, "fixture", config.AcceleratorType)
+	assert.Contains(t, config.Accelerators, "fixture")
+}
+
+func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Empty(t, config.AcceleratorType)
+	assert.Empty(t, config.Accelerators)
 }

@@ -51,15 +51,19 @@ type ActorsListResult struct {
 //
 // DeathCause only populates when detail=true is sent in the request.
 type Actor struct {
-	ActorID    string                 `json:"actor_id"`
-	ClassName  string                 `json:"class_name"`
-	State      string                 `json:"state"`
-	Name       string                 `json:"name"`
-	NodeID     string                 `json:"node_id"`
-	PID        int                    `json:"pid"`
-	StartTime  int64                  `json:"start_time"`
-	EndTime    int64                  `json:"end_time"`
-	DeathCause map[string]interface{} `json:"death_cause,omitempty"`
+	ActorID   string `json:"actor_id"`
+	ClassName string `json:"class_name"`
+	State     string `json:"state"`
+	Name      string `json:"name"`
+	NodeID    string `json:"node_id"`
+	PID       int    `json:"pid"`
+	// RequiredResources preserves the raw Ray actor resource request for an
+	// accelerator adapter to interpret without coupling the dashboard client to
+	// a vendor-specific resource name.
+	RequiredResources map[string]float64     `json:"required_resources,omitempty"`
+	StartTime         int64                  `json:"start_time"`
+	EndTime           int64                  `json:"end_time"`
+	DeathCause        map[string]interface{} `json:"death_cause,omitempty"`
 }
 
 // ListActors queries GET /api/v0/actors with the given filters.

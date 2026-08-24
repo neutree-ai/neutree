@@ -1,19 +1,14 @@
-package main
+package nodeagent
 
 import (
-	"context"
-	"flag"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
@@ -22,7 +17,6 @@ import (
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
-	"github.com/neutree-ai/neutree/internal/version"
 )
 
 const (
@@ -30,59 +24,13 @@ const (
 	clusterTypeRay        = "ray"
 )
 
-func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		info := version.Get()
-		fmt.Println(info.String())
-		os.Exit(0)
-	}
-
-	klog.InitFlags(nil)
-
-	if err := flag.Set("v", "2"); err != nil {
-		klog.Fatalf("Failed to set default log verbosity: %v", err)
-	}
-
-	defer klog.Flush()
-
-	opts := newOptions()
-	opts.addFlags(pflag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
-
-	config, err := opts.config()
-	if err != nil {
-		klog.Fatalf("Failed to build neutree-node-agent config: %v", err)
-	}
-
-	klog.V(2).InfoS(
-		"Built neutree-node-agent config",
-		"listen_address", opts.listenAddress,
-		"cluster_type", opts.clusterType,
-		"metrics_mode", opts.metricsMode,
-		"node", opts.node,
-		"node_ip", opts.nodeIP,
-	)
-
-	server, err := neutreemetrics.NewServer(config)
-	if err != nil {
-		klog.Fatalf("Failed to create neutree-node-agent server: %v", err)
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	if err := server.Run(ctx); err != nil {
-		klog.Fatalf("Failed to run neutree-node-agent: %v", err)
-	}
-}
-
 type options struct {
 	listenAddress           string
 	clusterType             string
 	metricsMode             string
 	node                    string
 	nodeIP                  string
+	acceleratorType         string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -105,6 +53,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.metricsMode, "metrics-mode", o.metricsMode, "Metrics exporter mode: managed or external")
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
+	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
+		"Accelerator type selecting the metrics adapter (for example nvidia_gpu); empty uses the legacy DCGM path")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -117,10 +67,31 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) config() (neutreemetrics.Config, error) {
-	config := neutreemetrics.Config{
-		ListenAddress: o.listenAddress,
-		Labels:        o.labels(),
+	registry, err := newAdapterRegistry(DefaultAdapters())
+	if err != nil {
+		return neutreemetrics.Config{}, err
 	}
+
+	return o.configWithRegistry(registry)
+}
+
+func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
+	if o.acceleratorType != "" {
+		if _, ok := registry.byType[o.acceleratorType]; !ok {
+			return neutreemetrics.Config{}, fmt.Errorf(
+				"accelerator adapter %q is not registered; available adapters: %s",
+				o.acceleratorType,
+				registeredAdapterTypes(registry),
+			)
+		}
+	}
+
+	config := neutreemetrics.Config{
+		ListenAddress:   o.listenAddress,
+		Labels:          o.labels(),
+		ClusterType:     o.clusterType,
+		AcceleratorType: o.acceleratorType,
+	}.WithAccelerators(registry.accelerators()).WithAcceleratorMetricDescriptors(registry.descriptorsCopy())
 
 	writer, err := o.kubernetesWriter()
 	if err != nil {
@@ -129,7 +100,10 @@ func (o *options) config() (neutreemetrics.Config, error) {
 
 	config.KubernetesWriter = writer
 	config.ScrapeTargetProvider = o.scrapeTargetProvider(writer)
-	config.AllocationProvider = o.allocationProvider(writer)
+	allocationProvider, kubernetesEvidenceProvider, staticEvidenceProvider := o.allocationProvider(writer)
+	config.AllocationProvider = allocationProvider
+	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
+	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 
@@ -140,6 +114,10 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil
+}
+
+func registeredAdapterTypes(registry adapterRegistry) string {
+	return strings.Join(registry.types(), ", ")
 }
 
 func (o *options) scrapeTargetProvider(
@@ -175,11 +153,15 @@ func (o *options) labels() model.CanonicalLabels {
 
 func (o *options) allocationProvider(
 	writer *metricskubernetes.AnnotationWriter,
-) allocation.Provider {
+) (
+	allocation.Provider,
+	neutreemetrics.KubernetesAcceleratorEvidenceProvider,
+	neutreemetrics.StaticAcceleratorEvidenceProvider,
+) {
 	switch o.clusterType {
 	case clusterTypeKubernetes:
 		if writer == nil {
-			return nil
+			return nil, nil, nil
 		}
 
 		kubernetesProvider := allocation.KubernetesAllocationProvider{
@@ -196,20 +178,22 @@ func (o *options) allocationProvider(
 
 		return allocation.MultiProvider{
 			Providers: []allocation.Provider{kubernetesProvider, hamiProvider},
-		}
+		}, kubernetesProvider, nil
 	case clusterTypeRay:
 		if o.rayDashboardURL == "" {
-			return nil
+			return nil, nil, nil
 		}
 
-		return allocation.RayServeAllocationProvider{
+		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
 			Node:         o.node,
 			NodeIP:       o.nodeIP,
 			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
 		}
+
+		return rayProvider, nil, rayProvider
 	default:
-		return nil
+		return nil, nil, nil
 	}
 }
 

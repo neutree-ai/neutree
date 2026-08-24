@@ -54,6 +54,7 @@ func TestClient_ListActors_ParsesResponse(t *testing.T) {
 						"name": "SERVE_REPLICA::default_test#deploy#xyz789",
 						"node_id": "node-1",
 						"pid": 1234,
+						"required_resources": {"NPU": 0.5},
 						"death_cause": {"actor_died_error_context": {"error_message": "init failed"}}
 					}
 				]
@@ -84,6 +85,7 @@ func TestClient_ListActors_ParsesResponse(t *testing.T) {
 	assert.Equal(t, "SERVE_REPLICA::default_test#deploy#xyz789", a.Name)
 	assert.Equal(t, "node-1", a.NodeID)
 	assert.Equal(t, 1234, a.PID)
+	assert.Equal(t, map[string]float64{"NPU": 0.5}, a.RequiredResources)
 	require.NotNil(t, a.DeathCause)
 }
 

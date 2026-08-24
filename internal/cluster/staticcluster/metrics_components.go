@@ -191,26 +191,16 @@ func buildNodeAgentComponent(
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
 
+	if runtime := nodeAgentRuntime(profile); runtime != nil && profile != nil && profile.AcceleratorType != "" {
+		args = append(args, "--accelerator-type="+profile.AcceleratorType)
+	}
+
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
 		Args:             args,
-		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
-		Volumes: []v1.NodeComponentVolume{
-			{
-				Name:      "host-proc",
-				HostPath:  "/proc",
-				MountPath: "/host/proc",
-				ReadOnly:  true,
-			},
-			{
-				Name:      "host-cgroup",
-				HostPath:  "/sys/fs/cgroup",
-				MountPath: "/host/sys/fs/cgroup",
-				ReadOnly:  true,
-			},
-		},
+		Volumes:          nodeAgentComponentVolumes(profile),
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
@@ -221,44 +211,79 @@ func buildNodeAgentComponent(
 	}
 }
 
-func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
-	exporter := acceleratorExporterProfile(profile)
-	if exporter == nil || len(exporter.Env) == 0 {
-		return nil
-	}
-
-	allowed := map[string]struct{}{
-		"NVIDIA_VISIBLE_DEVICES":     {},
-		"NVIDIA_DRIVER_CAPABILITIES": {},
-	}
-	env := map[string]string{}
-
-	for key, value := range exporter.Env {
-		if _, ok := allowed[key]; !ok {
-			continue
-		}
-
-		env[key] = value
-	}
-
-	return env
-}
-
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
 	return "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
 }
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
-	exporter := acceleratorExporterProfile(profile)
-
-	if exporter == nil || exporter.Runtime == nil {
+	runtime := nodeAgentRuntime(profile)
+	if runtime == nil {
 		return options
 	}
 
-	// Until AcceleratorProfile exposes a dedicated NodeAgentRuntime, reuse the
-	// metrics exporter runtime because both components need accelerator visibility.
-	return appendDockerRunOptionsUnique(options, acceleratorExporterDockerRunOptions(exporter.Runtime)...)
+	if runtime.Privileged {
+		options = append(options, "--privileged")
+	}
+
+	if runtime.Capabilities != nil {
+		for _, capability := range runtime.Capabilities.Add {
+			capability = strings.TrimSpace(capability)
+			if capability != "" {
+				options = append(options, "--cap-add="+capability)
+			}
+		}
+	}
+
+	if runtime.Runtime != "" {
+		options = append(options, "--runtime="+runtime.Runtime)
+	}
+
+	return appendDockerRunOptionsUnique(options, runtime.DockerRunOptions...)
+}
+
+func nodeAgentRuntime(profile *v1.AcceleratorProfile) *v1.NodeAgentRuntimeProfile {
+	if profile == nil {
+		return nil
+	}
+
+	return profile.NodeAgentRuntime
+}
+
+func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponentVolume {
+	volumes := []v1.NodeComponentVolume{
+		{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
+		{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
+	}
+	runtime := nodeAgentRuntime(profile)
+	if runtime == nil {
+		return volumes
+	}
+
+	volumeByName := make(map[string]v1.ComponentVolume, len(runtime.Volumes))
+	for _, volume := range runtime.Volumes {
+		volumeByName[volume.Name] = volume
+	}
+
+	for _, mount := range runtime.VolumeMounts {
+		volume, ok := volumeByName[mount.Name]
+		if !ok || volume.HostPath == nil {
+			continue
+		}
+
+		readOnly := true
+		if mount.ReadOnly != nil {
+			readOnly = *mount.ReadOnly
+		}
+		volumes = append(volumes, v1.NodeComponentVolume{
+			Name:      volume.Name,
+			HostPath:  volume.HostPath.Path,
+			MountPath: mount.MountPath,
+			ReadOnly:  readOnly,
+		})
+	}
+
+	return volumes
 }
 
 func appendDockerRunOptionsUnique(options []string, values ...string) []string {

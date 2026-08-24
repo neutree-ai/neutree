@@ -2,9 +2,13 @@ package staticcluster
 
 import (
 	"context"
+	"fmt"
 	"maps"
+	"path"
+	"strings"
 
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -70,21 +74,126 @@ func (r *Planner) runtimeProfile(
 	if err != nil || profile == nil {
 		return nil, err
 	}
+	if err := validateStaticNodeAgentRuntimeProfile(profile); err != nil {
+		return nil, fmt.Errorf("validate NodeAgent runtime profile for accelerator %q: %w", accelerator.Type, err)
+	}
+
+	resolvedProfile := *profile
+	if resolvedProfile.AcceleratorType == "" {
+		resolvedProfile.AcceleratorType = accelerator.Type
+	}
 
 	provider, ok := r.AcceleratorProfileProvider.(staticNodeRuntimeConfigProvider)
 	if !ok {
-		return profile, nil
+		return &resolvedProfile, nil
 	}
 
 	runtimeConfig, err := provider.GetStaticNodeRuntimeConfig(ctx, &accelerator)
 	if err != nil || runtimeConfig == nil {
-		return profile, err
+		return &resolvedProfile, err
 	}
 
-	resolvedProfile := *profile
 	resolvedProfile.ClusterRuntime = mergeRuntimeConfig(profile.ClusterRuntime, runtimeConfig)
 
 	return &resolvedProfile, nil
+}
+
+func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error {
+	if profile == nil || profile.NodeAgentRuntime == nil {
+		return nil
+	}
+
+	runtime := profile.NodeAgentRuntime
+	volumeNames := make(map[string]struct{}, len(runtime.Volumes))
+	volumeOrder := make([]string, 0, len(runtime.Volumes))
+	for _, volume := range runtime.Volumes {
+		if err := validateStaticComponentVolumeName(volume.Name); err != nil {
+			return err
+		}
+		if _, exists := volumeNames[volume.Name]; exists {
+			return fmt.Errorf("component volume name %q must be unique", volume.Name)
+		}
+		if volume.HostPath == nil {
+			return fmt.Errorf("component volume %q must declare host_path", volume.Name)
+		}
+		if err := validateStaticAbsoluteCleanPath(volume.HostPath.Path, "component volume host_path.path", true); err != nil {
+			return err
+		}
+		switch volume.HostPath.Type {
+		case v1.ComponentHostPathTypeDirectory, v1.ComponentHostPathTypeSocket:
+		default:
+			return fmt.Errorf("component volume %q host_path.type %q is unsupported", volume.Name, volume.HostPath.Type)
+		}
+
+		volumeNames[volume.Name] = struct{}{}
+		volumeOrder = append(volumeOrder, volume.Name)
+	}
+
+	mountNames := make(map[string]struct{}, len(runtime.VolumeMounts))
+	mountPaths := make(map[string]struct{}, len(runtime.VolumeMounts))
+	mountCounts := make(map[string]int, len(runtime.VolumeMounts))
+	for _, mount := range runtime.VolumeMounts {
+		if err := validateStaticComponentVolumeName(mount.Name); err != nil {
+			return fmt.Errorf("component volume mount: %w", err)
+		}
+		if _, exists := mountNames[mount.Name]; exists {
+			return fmt.Errorf("component volume mount name %q must be unique", mount.Name)
+		}
+		if _, exists := volumeNames[mount.Name]; !exists {
+			return fmt.Errorf("component volume mount %q does not reference a declared component volume", mount.Name)
+		}
+		if err := validateStaticAbsoluteCleanPath(mount.MountPath, "component volume mount path", false); err != nil {
+			return err
+		}
+		if _, exists := mountPaths[mount.MountPath]; exists {
+			return fmt.Errorf("component volume mount path %q must be unique", mount.MountPath)
+		}
+
+		mountNames[mount.Name] = struct{}{}
+		mountPaths[mount.MountPath] = struct{}{}
+		mountCounts[mount.Name]++
+	}
+
+	for _, volumeName := range volumeOrder {
+		if mountCounts[volumeName] != 1 {
+			return fmt.Errorf("component volume %q must have exactly one mount", volumeName)
+		}
+	}
+
+	for _, name := range []string{"host-proc", "host-cgroup"} {
+		if _, exists := volumeNames[name]; exists {
+			return fmt.Errorf("component volume name %q conflicts with a NodeAgent host volume", name)
+		}
+	}
+	for _, mountPath := range []string{"/host/proc", "/host/sys/fs/cgroup"} {
+		if _, exists := mountPaths[mountPath]; exists {
+			return fmt.Errorf("component volume mount path %q conflicts with a NodeAgent host mount", mountPath)
+		}
+	}
+
+	return nil
+}
+
+func validateStaticComponentVolumeName(name string) error {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return fmt.Errorf("component volume name %q must be a DNS-1123 label: %s", name, strings.Join(errs, ", "))
+	}
+
+	return nil
+}
+
+func validateStaticAbsoluteCleanPath(value string, field string, allowRoot bool) error {
+	if value == "" || strings.TrimSpace(value) != value {
+		return fmt.Errorf("%s must be a non-empty absolute clean path", field)
+	}
+	if !path.IsAbs(value) || path.Clean(value) != value {
+		return fmt.Errorf("%s must be an absolute clean path", field)
+	}
+	if !allowRoot && value == "/" {
+		return fmt.Errorf("%s must not be the container root", field)
+	}
+
+	return nil
 }
 
 func mergeRuntimeConfig(base, override *v1.RuntimeConfig) *v1.RuntimeConfig {

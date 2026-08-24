@@ -24,6 +24,20 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			Runtime:     "nvidia",
 			Options:     []string{"--gpus", "all"},
 		},
+		NodeAgentRuntime: &NodeAgentRuntimeProfile{
+			KubernetesProducts: []string{"example-product"},
+			Privileged:         true,
+			Capabilities: &NodeAgentRuntimeCapabilities{
+				Add: []string{"SYS_ADMIN"},
+			},
+			Volumes: []ComponentVolume{{
+				Name:     "vendor-driver",
+				HostPath: &ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: ComponentHostPathTypeDirectory},
+			}},
+			VolumeMounts:     []ComponentVolumeMount{{Name: "vendor-driver", MountPath: "/opt/vendor/driver"}},
+			Runtime:          "vendor-runtime",
+			DockerRunOptions: []string{"--device=/dev/vendor0"},
+		},
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
 			Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
@@ -54,6 +68,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"cluster_runtime"`)
 	assert.Contains(t, string(data), `"engine_runtime"`)
+	assert.Contains(t, string(data), `"node_agent_runtime"`)
 	assert.Contains(t, string(data), `"metrics_exporter"`)
 	assert.Contains(t, string(data), `"name":"dcgm-exporter"`)
 	assert.NotContains(t, string(data), `"resource_defaults"`)
@@ -70,6 +85,15 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "cuda-engine", decoded.EngineRuntime.ImageSuffix)
 	assert.Equal(t, "nvidia", decoded.EngineRuntime.Runtime)
 	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
+	require.NotNil(t, decoded.NodeAgentRuntime)
+	assert.Equal(t, []string{"example-product"}, decoded.NodeAgentRuntime.KubernetesProducts)
+	assert.True(t, decoded.NodeAgentRuntime.Privileged)
+	require.NotNil(t, decoded.NodeAgentRuntime.Capabilities)
+	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, "vendor-runtime", decoded.NodeAgentRuntime.Runtime)
+	assert.Equal(t, []string{"--device=/dev/vendor0"}, decoded.NodeAgentRuntime.DockerRunOptions)
+	require.Len(t, decoded.NodeAgentRuntime.Volumes, 1)
+	require.Len(t, decoded.NodeAgentRuntime.VolumeMounts, 1)
 	require.NotNil(t, decoded.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", decoded.MetricsExporter.Name)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.MetricsExporter.Args)

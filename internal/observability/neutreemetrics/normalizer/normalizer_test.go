@@ -139,6 +139,52 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
 }
 
+func TestNormalizerUsesPrecomputedAcceleratorSamples(t *testing.T) {
+	// The adapter path (--accelerator-type set) passes pre-computed accelerator
+	// samples through the normalizer's generic sample exit. The normalizer emits
+	// them unchanged alongside scrape-up samples.
+	precomputed := []Sample{
+		{
+			Name: "neutree_accelerator_utilization_ratio",
+			Labels: map[string]string{
+				"cluster_type":      "kubernetes",
+				"node":              "node-a",
+				"accelerator_type":  "npu",
+				"accelerator_uuid":  "vdie-1",
+				"accelerator_index": "0",
+				"product":           "310P3-Ascend-V1",
+			},
+			Value: 0.5,
+		},
+	}
+
+	output := normalizeForTest(NormalizeRequest{
+		Labels: model.CanonicalLabels{
+			Workspace:      "default",
+			NeutreeCluster: "k8s-a",
+			ClusterType:    "kubernetes",
+			Node:           "node-a",
+			NodeIP:         "10.0.0.10",
+		},
+		NodeExporter: model.ScrapeResult{
+			Target: TargetNodeExporter,
+			Up:     false,
+		},
+		AcceleratorExporter: &model.ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body:   "not-a-dcgm-body",
+		},
+		AcceleratorSamples: precomputed,
+	})
+
+	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",source="neutree-node-agent",target="accelerator-exporter"} 1`)
+	assert.Contains(t, output, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="npu",accelerator_uuid="vdie-1",cluster_type="kubernetes",node="node-a",product="310P3-Ascend-V1"} 0.5`)
+	// The pre-computed samples replace the legacy DCGM conversion: a non-DCGM
+	// exporter body must not produce DCGM-derived samples.
+	assert.NotContains(t, output, `neutree_node_accelerator_total{`)
+}
+
 func TestNormalizerNormalizesEndpointReplicaRuntimeUsage(t *testing.T) {
 	usageBytes := 1024.0
 	workingSetBytes := 768.0
@@ -291,25 +337,21 @@ DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 2048
 DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 `,
 		},
-		EndpointAllocations: []model.EndpointAllocation{
-			{
-				Workspace:  "default",
-				Cluster:    "k8s-a",
-				Endpoint:   "chat",
-				InstanceID: "chat-abc",
-				ReplicaID:  "chat-abc",
-				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{
-						UUID:      "GPU-abc",
-						Product:   "NVIDIA_A100",
-						MemoryMiB: 81920,
-						CoreUnits: 100,
-						NodeID:    "node-a",
-					},
-				},
-			},
-		},
+		EndpointAllocations: []model.EndpointAllocation{{
+			Workspace:  "default",
+			Cluster:    "k8s-a",
+			Endpoint:   "chat",
+			InstanceID: "chat-abc",
+			ReplicaID:  "chat-abc",
+			NodeID:     "node-a",
+			Devices: []v1.DeviceAllocation{{
+				UUID:      "GPU-abc",
+				Product:   "NVIDIA_A100",
+				MemoryMiB: 81920,
+				CoreUnits: 100,
+				NodeID:    "node-a",
+			}},
+		}},
 	})
 
 	commonLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",` +
@@ -353,9 +395,9 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 				InstanceID: "chat-a-abc",
 				ReplicaID:  "chat-a-abc",
 				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 40960, CoreUnits: 50, NodeID: "node-a"},
-				},
+				Devices: []v1.DeviceAllocation{{
+					UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 40960, CoreUnits: 50, NodeID: "node-a",
+				}},
 			},
 			{
 				Workspace:  "default",
@@ -364,9 +406,9 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 				InstanceID: "chat-b-abc",
 				ReplicaID:  "chat-b-abc",
 				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 40960, CoreUnits: 50, NodeID: "node-a"},
-				},
+				Devices: []v1.DeviceAllocation{{
+					UUID: "GPU-abc", Product: "NVIDIA_A100", MemoryMiB: 40960, CoreUnits: 50, NodeID: "node-a",
+				}},
 			},
 		},
 	})
@@ -413,9 +455,9 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
 				InstanceID: "chat-a-abc",
 				ReplicaID:  "chat-a-abc",
 				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 8192, CoreUnits: 50, NodeID: "node-a"},
-				},
+				Devices: []v1.DeviceAllocation{{
+					UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 8192, CoreUnits: 50, NodeID: "node-a",
+				}},
 			},
 			{
 				Workspace:  "default",
@@ -424,9 +466,9 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="Tesla T4"} 15360
 				InstanceID: "chat-b-abc",
 				ReplicaID:  "chat-b-abc",
 				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 7168, CoreUnits: 50, NodeID: "node-a"},
-				},
+				Devices: []v1.DeviceAllocation{{
+					UUID: "GPU-abc", Product: "Tesla-T4", MemoryMiB: 7168, CoreUnits: 50, NodeID: "node-a",
+				}},
 			},
 		},
 		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
@@ -508,38 +550,26 @@ DCGM_FI_DEV_FB_USED{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 4096
 DCGM_FI_DEV_FB_TOTAL{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 46068
 `,
 		},
-		EndpointAllocations: []model.EndpointAllocation{
-			{
-				Workspace:  "default",
-				Cluster:    "k8s-a",
-				Endpoint:   "chat",
-				InstanceID: "chat-abc",
-				ReplicaID:  "chat-abc",
-				NodeID:     "node-a",
-				Devices: []v1.DeviceAllocation{
-					{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
-					{UUID: "GPU-def", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
-				},
+		EndpointAllocations: []model.EndpointAllocation{{
+			Workspace:  "default",
+			Cluster:    "k8s-a",
+			Endpoint:   "chat",
+			InstanceID: "chat-abc",
+			ReplicaID:  "chat-abc",
+			NodeID:     "node-a",
+			Devices: []v1.DeviceAllocation{
+				{UUID: "GPU-abc", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
+				{UUID: "GPU-def", Product: "NVIDIA-L20", MemoryMiB: 23034, CoreUnits: 50, NodeID: "node-a"},
 			},
-		},
+		}},
 		EndpointReplicaGPUUsages: []model.EndpointReplicaGPUUsage{
 			{
-				Endpoint:        "chat",
-				InstanceID:      "chat-abc",
-				ReplicaID:       "chat-abc",
-				NodeID:          "node-a",
-				GPUUUID:         "GPU-abc",
-				VDeviceIndex:    "0",
-				MemoryUsedBytes: &firstUsedBytes,
+				Endpoint: "chat", InstanceID: "chat-abc", ReplicaID: "chat-abc", NodeID: "node-a",
+				GPUUUID: "GPU-abc", VDeviceIndex: "0", MemoryUsedBytes: &firstUsedBytes,
 			},
 			{
-				Endpoint:        "chat",
-				InstanceID:      "chat-abc",
-				ReplicaID:       "chat-abc",
-				NodeID:          "node-a",
-				GPUUUID:         "GPU-def",
-				VDeviceIndex:    "1",
-				MemoryUsedBytes: &secondUsedBytes,
+				Endpoint: "chat", InstanceID: "chat-abc", ReplicaID: "chat-abc", NodeID: "node-a",
+				GPUUUID: "GPU-def", VDeviceIndex: "1", MemoryUsedBytes: &secondUsedBytes,
 			},
 		},
 	})
