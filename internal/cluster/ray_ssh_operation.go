@@ -584,10 +584,9 @@ func (c *sshRayClusterReconciler) upgradeCluster(reconcileCtx *ReconcileContext)
 	return nil
 }
 
-// prePullImages pre-pulls the new cluster image and engine images on all cluster nodes.
-// The cluster image (neutree-serve:<new_version>) is pre-pulled so upCluster/startNode
-// can start instantly. Engine images used by running endpoints are pre-pulled so inference
-// instances recover quickly after upgrade.
+// prePullImages pre-pulls the legacy cluster runtime image and engine images on all cluster nodes.
+// The runtime image is pre-pulled so upCluster/startNode can start instantly. Engine images used by
+// running endpoints are pre-pulled so inference instances recover quickly after upgrade.
 func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) error {
 	// Collect engine images from running endpoints
 	engineImages, err := c.collectEngineImages(reconcileCtx)
@@ -595,7 +594,7 @@ func (c *sshRayClusterReconciler) prePullImages(reconcileCtx *ReconcileContext) 
 		return errors.Wrap(err, "failed to collect engine images")
 	}
 
-	// Add the new cluster image (neutree-serve with new version)
+	// Add the legacy runtime image for the target cluster version.
 	imagePrefix, err := util.GetImagePrefix(reconcileCtx.ImageRegistry)
 	if err != nil {
 		return errors.Wrap(err, "failed to get image prefix")

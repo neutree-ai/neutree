@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strings"
@@ -12,10 +13,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 //
@@ -1357,6 +1360,62 @@ func TestGenerateRayClusterConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateRayClusterConfigUsesLegacyClusterImageWithoutProfile(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster"},
+		Spec: &v1.ClusterSpec{
+			Version: "v1.0.0",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{},
+			},
+		},
+	}
+	sshClusterConfig, err := util.ParseSSHClusterConfig(cluster)
+	require.NoError(t, err)
+
+	config, err := (&sshRayClusterReconciler{}).generateRayClusterConfig(&ReconcileContext{
+		Cluster: cluster,
+		ImageRegistry: &v1.ImageRegistry{
+			Spec: &v1.ImageRegistrySpec{URL: "http://registry.example.com"},
+		},
+		sshClusterConfig: sshClusterConfig,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "registry.example.com/neutree/neutree-serve:v1.0.0", config.Docker.Image)
+}
+
+func TestPrePullImagesUsesLegacyClusterImageWithoutProfile(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{}, nil).Once()
+	executor := &commandmocks.MockExecutor{}
+	executor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), " uptime")
+	})).Return([]byte(""), nil).Once()
+	executor.On("Execute", mock.Anything, "ssh", mock.MatchedBy(func(args []string) bool {
+		return strings.Contains(strings.Join(args, " "), "docker pull registry.example.com/neutree/neutree-serve:v1.0.0")
+	})).Return([]byte(""), nil).Once()
+
+	reconciler := &sshRayClusterReconciler{storage: store, executor: executor}
+	err := reconciler.prePullImages(&ReconcileContext{
+		Ctx: context.Background(),
+		Cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.0.0"},
+		},
+		ImageRegistry: &v1.ImageRegistry{
+			Spec: &v1.ImageRegistrySpec{URL: "http://registry.example.com"},
+		},
+		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
+			Provider: v1.Provider{HeadIP: "127.0.0.1"},
+		},
+		sshRayClusterConfig: &v1.RayClusterConfig{Docker: v1.Docker{}},
+		sshConfigGenerator:  newRaySSHLocalConfigGenerator("test-cluster"),
+	})
+	require.NoError(t, err)
+	store.AssertExpectations(t)
+	executor.AssertExpectations(t)
 }
 
 func TestMutateModelCache(t *testing.T) {

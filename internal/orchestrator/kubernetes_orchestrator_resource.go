@@ -37,27 +37,28 @@ const (
 const startupTimeoutSecondsKey = "startup_timeout_seconds"
 
 type DeploymentManifestVariables struct {
-	EndpointName    string
-	Namespace       string
-	ClusterName     string
-	Workspace       string
-	EngineName      string
-	EngineVersion   string
-	ImagePrefix     string
-	ImageRepo       string
-	ImageTag        string
-	ImagePullSecret string
-	ModelArgs       map[string]interface{}
-	EngineArgs      map[string]interface{}
-	Resources       map[string]string
-	Env             map[string]string
-	Annotations     map[string]string
-	Volumes         []corev1.Volume
-	VolumeMounts    []corev1.VolumeMount
-	RoutingLogic    string
-	Replicas        int32
-	NodeSelector    map[string]string
-	NeutreeVersion  string
+	EndpointName           string
+	Namespace              string
+	ClusterName            string
+	Workspace              string
+	EngineName             string
+	EngineVersion          string
+	ImagePrefix            string
+	ImageRepo              string
+	ImageTag               string
+	KubernetesRuntimeImage string
+	ImagePullSecret        string
+	ModelArgs              map[string]interface{}
+	EngineArgs             map[string]interface{}
+	Resources              map[string]string
+	Env                    map[string]string
+	Annotations            map[string]string
+	Volumes                []corev1.Volume
+	VolumeMounts           []corev1.VolumeMount
+	RoutingLogic           string
+	Replicas               int32
+	NodeSelector           map[string]string
+	NeutreeVersion         string
 	// ProgressDeadlineSeconds bounds how long the Deployment may take to
 	// become available before the controller reports ProgressDeadlineExceeded.
 	// StartupProbeFailureThreshold is the startupProbe failureThreshold; with
@@ -95,6 +96,17 @@ func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifes
 	}
 
 	data.ImagePrefix = imagePrefix
+
+	kubernetesRuntimeImage, err := util.BuildProfileImageRef(
+		imagePrefix,
+		"kubernetes runtime",
+		k.clusterProfileComponents.KubernetesRuntime,
+	)
+	if err != nil {
+		return errors.Wrap(err, "failed to build kubernetes runtime image from cluster profile")
+	}
+
+	data.KubernetesRuntimeImage = kubernetesRuntimeImage
 
 	acceleratorType := endpoint.Spec.Resources.GetAcceleratorType()
 

@@ -15,10 +15,19 @@ type RouterComponent struct {
 	cluster         *v1.Cluster
 	namespace       string
 	imagePrefix     string
+	routerImage     string
 	imagePullSecret string
 	config          v1.KubernetesClusterConfig
 	ctrlClient      client.Client
 	logger          klog.Logger
+}
+
+// WithRouterImage supplies the already-resolved exact Profile image for this
+// runtime reconciliation.
+func (r *RouterComponent) WithRouterImage(image string) *RouterComponent {
+	r.routerImage = image
+
+	return r
 }
 
 func NewRouterComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret string,

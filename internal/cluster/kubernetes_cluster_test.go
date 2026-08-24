@@ -19,6 +19,7 @@ import (
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	plugin "github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/cluster/component/metrics"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
@@ -605,7 +606,7 @@ func TestComputeAdditionalComponents_Metrics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cluster.metricsRemoteWriteURL = tt.metricsRemoteWriteURL
 
-			reconcileComps, deleteComps := cluster.ComputeAdditionalComponents(reconcileCtx, imagePrefix)
+			reconcileComps, deleteComps := cluster.ComputeAdditionalComponents(reconcileCtx, imagePrefix, metrics.ComponentImages{})
 
 			if len(reconcileComps) != tt.expectedReconcileCount {
 				t.Errorf("expected %d reconcile components, got %d", tt.expectedReconcileCount, len(reconcileComps))
@@ -635,7 +636,7 @@ func TestComputeAdditionalComponents_HAMi(t *testing.T) {
 		kubernetesClusterConfig: &v1.KubernetesClusterConfig{},
 	}
 
-	reconcileComps, deleteComps := reconciler.ComputeAdditionalComponents(reconcileCtx, "test-prefix/")
+	reconcileComps, deleteComps := reconciler.ComputeAdditionalComponents(reconcileCtx, "test-prefix/", metrics.ComponentImages{})
 
 	if len(reconcileComps) != 2 {
 		t.Fatalf("expected metrics and accelerator virtualization components to be reconciled, got %d components", len(reconcileComps))

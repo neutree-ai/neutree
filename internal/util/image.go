@@ -7,21 +7,33 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// BuildClusterImageRef constructs the full cluster image reference.
-// imageSuffix is the accelerator-specific suffix (e.g. "rocm") from RuntimeConfig.ImageSuffix;
-// pass empty string for the default (NVIDIA) variant.
-//
-// Examples:
-//
-//	BuildClusterImageRef("registry.io/neutree", "v1.0.0", "")     → "registry.io/neutree/neutree-serve:v1.0.0"
-//	BuildClusterImageRef("registry.io/neutree", "v1.0.0", "rocm") → "registry.io/neutree/neutree-serve:v1.0.0-rocm"
+// BuildClusterImageRef constructs the legacy SSH Ray runtime image reference.
+// imageSuffix is the accelerator-specific suffix from RuntimeConfig.ImageSuffix.
 func BuildClusterImageRef(imagePrefix, version, imageSuffix string) string {
 	tag := version
 	if imageSuffix != "" {
-		tag = version + "-" + imageSuffix
+		tag += "-" + imageSuffix
 	}
 
 	return RewriteImageRef(imagePrefix, v1.NeutreeServeImageName+":"+tag)
+}
+
+// BuildProfileImageRef constructs a pull-side reference from an exact
+// ClusterProfile image and tag. Profile validation owns the normal invariant;
+// this boundary keeps runtime failures clear for incomplete test fixtures or
+// unexpected persisted data.
+func BuildProfileImageRef(imagePrefix, component string, ref v1.ImageRef) (string, error) {
+	image := strings.TrimSpace(ref.Image)
+	if image == "" || image != ref.Image {
+		return "", fmt.Errorf("%s image is required", component)
+	}
+
+	tag := strings.TrimSpace(ref.Tag)
+	if tag == "" || tag != ref.Tag {
+		return "", fmt.Errorf("%s tag is required", component)
+	}
+
+	return RewriteImageRef(imagePrefix, image+":"+tag), nil
 }
 
 // BuildEngineImageRef constructs the full engine image reference from an EngineImage.

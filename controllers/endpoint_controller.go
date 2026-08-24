@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -18,22 +19,33 @@ type EndpointController struct {
 	storage     storage.Storage
 	syncHandler func(endpoint *v1.Endpoint) error // Added syncHandler field
 
-	gw             gateway.Gateway
-	acceleratorMgr accelerator.Manager
+	gw                              gateway.Gateway
+	acceleratorMgr                  accelerator.Manager
+	clusterProfileComponentResolver releaseprofile.ComponentProvider
 }
 
 type EndpointControllerOption struct {
 	Storage storage.Storage
 
-	Gw             gateway.Gateway
-	AcceleratorMgr accelerator.Manager
+	Gw                              gateway.Gateway
+	AcceleratorMgr                  accelerator.Manager
+	ClusterProfileComponentResolver releaseprofile.ComponentProvider
 }
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
+	if option == nil {
+		return nil, errors.New("endpoint controller option is required")
+	}
+
+	if option.ClusterProfileComponentResolver == nil {
+		return nil, errors.New("cluster profile component resolver is required")
+	}
+
 	c := &EndpointController{
-		storage:        option.Storage,
-		gw:             option.Gw,
-		acceleratorMgr: option.AcceleratorMgr,
+		storage:                         option.Storage,
+		gw:                              option.Gw,
+		acceleratorMgr:                  option.AcceleratorMgr,
+		clusterProfileComponentResolver: option.ClusterProfileComponentResolver,
 	}
 
 	c.syncHandler = c.sync
@@ -363,10 +375,22 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 		return nil, storage.ErrResourceNotFound
 	}
 
+	profileComponents := v1.ClusterProfileComponents{}
+	if cluster[0].Spec != nil && cluster[0].Spec.Type == v1.KubernetesClusterType {
+		profileComponents, err = c.clusterProfileComponentResolver.ComponentsFor(
+			cluster[0].Spec.Version,
+			v1.KubernetesClusterType,
+		)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to resolve cluster profile components for cluster %s", cluster[0].Metadata.WorkspaceName())
+		}
+	}
+
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:        &cluster[0],
-		Storage:        c.storage,
-		AcceleratorMgr: c.acceleratorMgr,
+		Cluster:                  &cluster[0],
+		Storage:                  c.storage,
+		AcceleratorMgr:           c.acceleratorMgr,
+		ClusterProfileComponents: profileComponents,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.WorkspaceName())

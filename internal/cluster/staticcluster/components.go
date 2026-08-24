@@ -7,7 +7,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/staticcomponent"
-	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
@@ -21,17 +20,26 @@ const (
 func buildNodeComponents(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
+	profileComponents v1.ClusterProfileComponents,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
-) []v1.NodeComponentSpec {
+) ([]v1.NodeComponentSpec, error) {
 	role := v1.StaticNodeRoleWorker
 	if node != nil && node.Spec != nil {
 		role = node.Spec.Role
 	}
 
-	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
+	rayComponent, err := buildRayComponent(cluster, role, profileComponents.RayRuntime, profile)
+	if err != nil {
+		return nil, err
+	}
 
-	return append(components, buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)...)
+	metricsComponents, err := buildMetricsComponents(cluster, node, role, profileComponents, profile, metricsRemoteWriteURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return append([]v1.NodeComponentSpec{rayComponent}, metricsComponents...), nil
 }
 
 func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {
@@ -41,9 +49,14 @@ func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeCompo
 func buildRayComponent(
 	cluster *v1.StaticNodeCluster,
 	role v1.StaticNodeRole,
+	runtime v1.ImageRef,
 	profile *v1.AcceleratorProfile,
-) v1.NodeComponentSpec {
-	image := buildRayRuntimeImage(cluster, clusterRuntimeImageSuffix(profile))
+) (v1.NodeComponentSpec, error) {
+	image, err := buildRayRuntimeImage(cluster, runtime, profile)
+	if err != nil {
+		return v1.NodeComponentSpec{}, err
+	}
+
 	env := rayRuntimeEnv(profile)
 	dockerRunOptions := rayRuntimeDockerRunOptions(profile)
 	command := []string{"/bin/bash", "-lc"}
@@ -59,7 +72,7 @@ func buildRayComponent(
 			HealthCheck: &v1.NodeComponentHealthCheck{
 				Port: v1.RayletMetricsPort,
 			},
-		}
+		}, nil
 	}
 
 	return v1.NodeComponentSpec{
@@ -72,7 +85,7 @@ func buildRayComponent(
 		HealthCheck: &v1.NodeComponentHealthCheck{
 			Port: v1.RayletMetricsPort,
 		},
-	}
+	}, nil
 }
 
 func rayRuntimeEnv(profile *v1.AcceleratorProfile) map[string]string {
@@ -117,14 +130,6 @@ func rayRuntimeDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options = append(options, profile.ClusterRuntime.Options...)
 
 	return options
-}
-
-func clusterRuntimeImageSuffix(profile *v1.AcceleratorProfile) string {
-	if profile == nil || profile.ClusterRuntime == nil {
-		return ""
-	}
-
-	return profile.ClusterRuntime.ImageSuffix
 }
 
 func rayStartCommand(
@@ -240,17 +245,18 @@ func buildNodeWarmSpec(components []v1.NodeComponentSpec) *v1.WarmSpec {
 	}
 }
 
-func buildRayRuntimeImage(cluster *v1.StaticNodeCluster, imageSuffixes ...string) string {
-	if cluster == nil || cluster.Spec == nil || cluster.Spec.Version == "" || cluster.Spec.ImageRegistry == "" {
-		return ""
+func buildRayRuntimeImage(
+	cluster *v1.StaticNodeCluster,
+	component v1.ImageRef,
+	acceleratorProfile *v1.AcceleratorProfile,
+) (string, error) {
+	if acceleratorProfile != nil && acceleratorProfile.ClusterRuntime != nil {
+		if suffix := strings.TrimSpace(acceleratorProfile.ClusterRuntime.ImageSuffix); suffix != "" {
+			component.Tag += "-" + suffix
+		}
 	}
 
-	imageSuffix := ""
-	if len(imageSuffixes) > 0 {
-		imageSuffix = imageSuffixes[0]
-	}
-
-	return util.BuildClusterImageRef(strings.TrimRight(cluster.Spec.ImageRegistry, "/"), cluster.Spec.Version, imageSuffix)
+	return staticProfileComponentImage(cluster, "ray runtime", component)
 }
 
 func warmImageName(component v1.NodeComponentSpec) string {

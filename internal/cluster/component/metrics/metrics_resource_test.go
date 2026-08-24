@@ -14,6 +14,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/mock"
 	"gopkg.in/yaml.v3"
 	"gotest.tools/v3/assert"
@@ -40,6 +41,15 @@ func metricsTestNodeWithAnnotations(name string, annotations map[string]string) 
 	node.Annotations = annotations
 
 	return node
+}
+
+func testMetricsComponentImages(imagePrefix string) ComponentImages {
+	return ComponentImages{
+		VMAgentImage:          util.RewriteImageRef(imagePrefix, "victoriametrics/vmagent:v1.115.0"),
+		NodeExporterImage:     util.RewriteImageRef(imagePrefix, "quay.io/prometheus/node-exporter:v1.8.2"),
+		NodeAgentImage:        util.RewriteImageRef(imagePrefix, "neutree/neutree-node-agent:v1.1.0-rc.1"),
+		KubeStateMetricsImage: util.RewriteImageRef(imagePrefix, "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0"),
+	}
 }
 
 func TestMetricsDeleteRemovesNeutreeAcceleratorDevicesAnnotation(t *testing.T) {
@@ -99,6 +109,7 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		componentImages:       testMetricsComponentImages("test-image-prefix"),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -126,6 +137,36 @@ func TestBuildVMAgentDeployment(t *testing.T) {
 	}
 
 	t.Fatalf("vmagent deployment not found in resources")
+}
+
+func TestBuildMetricsResourcesUsesProfileImages(t *testing.T) {
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.2.0"},
+		},
+		namespace:             "test-namespace",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		componentImages: ComponentImages{
+			VMAgentImage:          "registry.example.com/neutree/victoriametrics/vmagent:v1.2.1",
+			NodeExporterImage:     "registry.example.com/neutree/prometheus/node-exporter:v1.2.1",
+			NodeAgentImage:        "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.1",
+			KubeStateMetricsImage: "registry.example.com/neutree/kube-state-metrics/kube-state-metrics:v1.2.1",
+		},
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+
+	assert.Equal(t, "registry.example.com/neutree/victoriametrics/vmagent:v1.2.1",
+		findMetricsDeployment(t, objs, "vmagent").Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "registry.example.com/neutree/prometheus/node-exporter:v1.2.1",
+		findMetricsDaemonSet(t, objs, "neutree-node-exporter").Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.1",
+		findMetricsDaemonSet(t, objs, "neutree-node-agent").Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "registry.example.com/neutree/kube-state-metrics/kube-state-metrics:v1.2.1",
+		findMetricsDeployment(t, objs, "neutree-kube-state-metrics").Spec.Template.Spec.Containers[0].Image)
 }
 
 func TestBuildMetricsResourcesWithoutValidRemoteWriteOmitsVMAgentAndKeepsLocalCollectors(t *testing.T) {
@@ -407,6 +448,7 @@ func TestBuildMetricsResourcesIncludesKubeStateMetrics(t *testing.T) {
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",
 		imagePullSecret: "test-image-pull-secret",
+		componentImages: testMetricsComponentImages("test-image-prefix"),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -510,6 +552,12 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 				imagePullSecret:       "test-image-pull-secret",
 				metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 				acceleratorMgr:        accelerator.NewManager(),
+				componentImages: ComponentImages{
+					VMAgentImage:          tt.vmagentImage,
+					NodeExporterImage:     tt.nodeExporterImage,
+					NodeAgentImage:        tt.nodeAgentImage,
+					KubeStateMetricsImage: tt.kubeStateMetricsImage,
+				},
 				ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
 					"nvidia.com/gpu.present": "true",
 				})).Build(),
@@ -551,6 +599,7 @@ func TestBuildMetricsResourcesIncludesNodeExporterDaemonSet(t *testing.T) {
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		componentImages:       testMetricsComponentImages("test-image-prefix"),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -595,6 +644,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 		imagePrefix:           "test-image-prefix",
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		componentImages:       testMetricsComponentImages("test-image-prefix"),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())

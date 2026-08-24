@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1319,6 +1320,70 @@ func TestNeedsVersionUpgrade(t *testing.T) {
 			assert.Equal(t, tt.expected, needsVersionUpgrade(tt.cluster))
 		})
 	}
+}
+
+func TestReconcileDeleteRequiresImageRegistry(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListImageRegistry", mock.Anything).Return(nil, assert.AnError).Once()
+
+	reconciler := &sshRayClusterReconciler{storage: store}
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{ImageRegistry: "registry-a"},
+	}
+
+	err := reconciler.ReconcileDelete(nil, cluster)
+
+	require.ErrorContains(t, err, "failed to get used image registry: failed to list image registry")
+	store.AssertExpectations(t)
+}
+
+func TestReconcileDeleteUsesLegacyRegistryBackedConfig(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{
+		{
+			Metadata: &v1.Metadata{Name: "registry-a", Workspace: "default"},
+			Spec: &v1.ImageRegistrySpec{
+				URL:        "https://registry.example.com",
+				Repository: "neutree",
+			},
+			Status: &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+		},
+	}, nil).Once()
+
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec: &v1.ClusterSpec{
+			ImageRegistry: "registry-a",
+			Version:       "v2.0.0",
+			Config: &v1.ClusterConfig{
+				SSHConfig: &v1.RaySSHProvisionClusterConfig{
+					Provider: v1.Provider{HeadIP: "127.0.0.1"},
+					Auth:     v1.Auth{SSHPrivateKey: "dGVzdC1rZXk="},
+				},
+			},
+		},
+		Status: &v1.ClusterStatus{AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.StringPtr()},
+	}
+	expectedImage := util.BuildClusterImageRef("registry.example.com/neutree", cluster.Spec.Version, "")
+
+	executor := &commandmocks.MockExecutor{}
+	executor.On("Execute", mock.Anything, "bash", mock.MatchedBy(func(args []string) bool {
+		return len(args) > 1 && strings.Contains(args[1], "ray down")
+	})).Run(func(args mock.Arguments) {
+		command := strings.Fields(args.Get(2).([]string)[1])
+		config, err := os.ReadFile(command[len(command)-1])
+		require.NoError(t, err)
+		require.Contains(t, string(config), "image: "+expectedImage)
+	}).Return([]byte(""), nil).Once()
+
+	reconciler := &sshRayClusterReconciler{storage: store, executor: executor}
+
+	err := reconciler.ReconcileDelete(nil, cluster)
+
+	require.NoError(t, err)
+	store.AssertExpectations(t)
+	executor.AssertExpectations(t)
 }
 
 func TestUpgradeCluster(t *testing.T) {

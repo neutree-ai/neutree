@@ -134,13 +134,21 @@ func copyRuntimeConfig(config *v1.RuntimeConfig) *v1.RuntimeConfig {
 	return &result
 }
 
-func staticComponentImage(cluster *v1.StaticNodeCluster, image string) string {
+func staticImagePrefix(cluster *v1.StaticNodeCluster) string {
 	imageRegistry := ""
 	if cluster != nil && cluster.Spec != nil {
 		imageRegistry = cluster.Spec.ImageRegistry
 	}
 
-	return util.RewriteImageRef(imageRegistry, image)
+	return imageRegistry
+}
+
+func staticExternalComponentImage(cluster *v1.StaticNodeCluster, image string) string {
+	return util.RewriteImageRef(staticImagePrefix(cluster), image)
+}
+
+func staticProfileComponentImage(cluster *v1.StaticNodeCluster, componentName string, component v1.ImageRef) (string, error) {
+	return util.BuildProfileImageRef(staticImagePrefix(cluster), componentName, component)
 }
 
 func copyAuth(auth *v1.Auth) *v1.Auth {

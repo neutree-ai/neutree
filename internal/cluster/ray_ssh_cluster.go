@@ -39,6 +39,8 @@ func init() { //nolint:gochecknoinits
 
 var _ ClusterReconcile = &sshRayClusterReconciler{}
 
+// Deprecated: sshRayClusterReconciler is retained for legacy SSH Ray clusters
+// and does not consume ClusterProfile component data.
 type sshRayClusterReconciler struct {
 	executor           command.Executor
 	acceleratorManager accelerator.Manager
@@ -239,6 +241,10 @@ func (c *sshRayClusterReconciler) generateConfig(reconcileCtx *ReconcileContext)
 		return errors.Wrap(err, "failed to generate ray cluster config")
 	}
 
+	return generateRaySSHLocalConfig(reconcileCtx, rayClusterConfig)
+}
+
+func generateRaySSHLocalConfig(reconcileCtx *ReconcileContext, rayClusterConfig *v1.RayClusterConfig) error {
 	reconcileCtx.sshRayClusterConfig = rayClusterConfig
 	reconcileCtx.sshConfigGenerator = newRaySSHLocalConfigGenerator(reconcileCtx.Cluster.GetName())
 

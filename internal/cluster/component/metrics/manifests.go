@@ -6,7 +6,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -540,7 +539,6 @@ type MetricsManifestVariables struct {
 	Workspace                        string
 	Namespace                        string
 	ImagePullSecret                  string
-	Version                          string
 	VMAgentImage                     string
 	NodeExporterName                 string
 	NodeExporterImage                string
@@ -581,7 +579,6 @@ type MetricsManifestVariables struct {
 // buildManifestVariables creates the data structure for rendering manifests
 func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	// Default values for metrics component
-	version := componentversion.VictoriaMetrics
 	replicas := 1
 	resources := map[string]string{
 		"cpu":    "100m",
@@ -601,15 +598,14 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		Workspace:                        m.cluster.Metadata.Workspace,
 		Namespace:                        m.namespace,
 		ImagePullSecret:                  m.imagePullSecret,
-		Version:                          version,
-		VMAgentImage:                     util.RewriteImageRef(m.imagePrefix, defaultVMAgentImage),
+		VMAgentImage:                     m.componentImages.VMAgentImage,
 		NodeExporterName:                 nodeExporterDaemonSetName,
-		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
+		NodeExporterImage:                m.componentImages.NodeExporterImage,
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
+		NeutreeNodeAgentMetricsImage:     m.componentImages.NodeAgentImage,
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
-		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
+		KubeStateMetricsImage:            m.componentImages.KubeStateMetricsImage,
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
 		MetricsMode:                      string(m.acceleratorExporterMode()),
