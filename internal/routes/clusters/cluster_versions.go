@@ -110,13 +110,6 @@ func resolveAvailableClusterVersions(
 	defaultAvailable := false
 	for index := range target.profiles {
 		profile := &target.profiles[index]
-		if err := releaseprofile.ValidateClusterProfile(profile); err != nil {
-			return availableClusterVersionsResponse{}, newAvailableClusterVersionsError(
-				http.StatusInternalServerError,
-				fmt.Sprintf("invalid stored cluster profile %q: %v", profile.GetName(), err),
-			)
-		}
-
 		if err := releaseprofile.ValidateClusterVersionEligibility(target.releaseInfo, profile.GetName()); err != nil {
 			continue
 		}
@@ -174,12 +167,6 @@ func loadAvailableClusterVersionsTarget(
 		return nil, newAvailableClusterVersionsError(
 			http.StatusInternalServerError,
 			fmt.Sprintf("failed to get release info: %v", err),
-		)
-	}
-	if err := releaseprofile.ValidateReleaseInfo(info); err != nil {
-		return nil, newAvailableClusterVersionsError(
-			http.StatusInternalServerError,
-			fmt.Sprintf("invalid current release info: %v", err),
 		)
 	}
 
