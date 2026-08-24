@@ -118,7 +118,7 @@ func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
 			Storage:             deps.Config.Storage,
-			ReleaseInfoProvider: releaseprofile.NewReleaseInfoProvider(deps.Config.Storage, deps.Config.Version),
+			ReleaseInfoProvider: releaseprofile.NewProvider(deps.Config.Storage, deps.Config.Storage),
 			ImageService:        registry.NewImageService(),
 		})
 
