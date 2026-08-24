@@ -2,7 +2,9 @@ package clusters
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,8 +21,8 @@ type profileUpsertResponse struct {
 	Operation string `json:"operation"`
 }
 
-// upsertClusterProfile validates the Profile against current domain policy,
-// then creates absent versions or permits exact replay. It never updates a
+// upsertClusterProfile checks the Profile version against current policy, then
+// creates absent versions or permits exact replay. It never updates a
 // stored Profile because component drift would change deployed runtime behavior.
 func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -44,7 +46,7 @@ func upsertClusterProfile(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := releaseprofile.ValidateProfileEligibility(info, profile); err != nil {
+		if err := releaseprofile.ValidateClusterVersionEligibility(info, profile.GetName()); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 
 			return
@@ -97,7 +99,7 @@ func findClusterProfile(s storage.Storage, version string) (*v1.ClusterProfile, 
 }
 
 func respondExistingClusterProfile(c *gin.Context, existing, incoming *v1.ClusterProfile) {
-	if releaseprofile.ClusterProfilesSemanticallyEqual(existing, incoming) {
+	if clusterProfilesSemanticallyEqual(existing, incoming) {
 		c.JSON(http.StatusOK, profileUpsertResponse{Operation: "unchanged"})
 
 		return
@@ -106,6 +108,20 @@ func respondExistingClusterProfile(c *gin.Context, existing, incoming *v1.Cluste
 	c.JSON(http.StatusConflict, gin.H{
 		"error": fmt.Sprintf("cluster profile %s already exists with different content", incoming.GetName()),
 	})
+}
+
+func clusterProfilesSemanticallyEqual(left, right *v1.ClusterProfile) bool {
+	if left == nil || right == nil || left.Metadata == nil || right.Metadata == nil {
+		return left == right
+	}
+
+	return left.APIVersion == right.APIVersion &&
+		left.Kind == right.Kind &&
+		left.Metadata.Name == right.Metadata.Name &&
+		left.Metadata.Workspace == right.Metadata.Workspace &&
+		maps.Equal(left.Metadata.Labels, right.Metadata.Labels) &&
+		maps.Equal(left.Metadata.Annotations, right.Metadata.Annotations) &&
+		reflect.DeepEqual(left.Spec, right.Spec)
 }
 
 func isUniqueViolation(err error) bool {

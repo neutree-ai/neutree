@@ -129,7 +129,7 @@ func TestProfileUpsertRejectsInvalidRequestsBeforeStorage(t *testing.T) {
 	}
 }
 
-func TestProfileUpsertRejectsDomainInvalidProfileBeforeStorage(t *testing.T) {
+func TestProfileUpsertRejectsIneligibleVersionBeforeStorage(t *testing.T) {
 	store := storageMocks.NewMockStorage(t)
 	allowSystemAdmin(store, "administrator")
 
@@ -138,12 +138,7 @@ func TestProfileUpsertRejectsDomainInvalidProfileBeforeStorage(t *testing.T) {
 		providerCalls++
 
 		return validReleaseInfo(), nil
-	}), map[string]any{"profile": &v1.ClusterProfile{
-		APIVersion: "v1",
-		Kind:       v1.ClusterProfileKind,
-		Metadata:   &v1.Metadata{Name: "v1.1.1"},
-		Spec:       &v1.ClusterProfileSpec{},
-	}}, "administrator")
+	}), map[string]any{"profile": completeProfile("v1.2.1")}, "administrator")
 
 	assert.Equal(t, http.StatusBadRequest, response.Code)
 	assert.Equal(t, 1, providerCalls)
