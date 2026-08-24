@@ -149,6 +149,29 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 	assert.Contains(t, config.Accelerators, "fixture")
 }
 
+func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: "fixture"}})
+	require.NoError(t, err)
+
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "fixture"
+	opts.acceleratorExporterPort = 8082
+	opts.acceleratorExporterPath = "/npu-metrics"
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Equal(t, 8082, config.AcceleratorExporterPort)
+	assert.Equal(t, "/npu-metrics", config.AcceleratorExporterMetricsPath)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		MetricsMode:                    neutreemetrics.MetricsModeManaged,
+		AcceleratorType:                "fixture",
+		AcceleratorExporterPort:        8082,
+		AcceleratorExporterMetricsPath: "/npu-metrics",
+		}, config.ScrapeTargetProvider)
+}
+
 func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType

@@ -25,6 +25,8 @@ type options struct {
 	node                    string
 	nodeIP                  string
 	acceleratorType         string
+	acceleratorExporterPort int
+	acceleratorExporterPath string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -49,6 +51,10 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
 	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
 		"Accelerator type selecting the metrics adapter (for example nvidia_gpu)")
+	fs.IntVar(&o.acceleratorExporterPort, "accelerator-exporter-port", o.acceleratorExporterPort,
+		"Profile-derived accelerator exporter metrics port for an explicit adapter")
+	fs.StringVar(&o.acceleratorExporterPath, "accelerator-exporter-metrics-path", o.acceleratorExporterPath,
+		"Profile-derived accelerator exporter metrics path for an explicit adapter")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -62,10 +68,12 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 
 func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
 	config := neutreemetrics.Config{
-		ListenAddress:   o.listenAddress,
-		Labels:          o.labels(),
-		ClusterType:     o.clusterType,
-		AcceleratorType: o.acceleratorType,
+		ListenAddress:                  o.listenAddress,
+		Labels:                         o.labels(),
+		ClusterType:                    o.clusterType,
+		AcceleratorType:                o.acceleratorType,
+		AcceleratorExporterPort:        o.acceleratorExporterPort,
+		AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
 	}.WithAccelerators(registry.accelerators()).WithAcceleratorMetricDescriptors(registry.descriptorsCopy())
 
 	writer, err := o.kubernetesWriter()
@@ -100,13 +108,19 @@ func (o *options) scrapeTargetProvider(
 		}
 
 		return neutreemetrics.KubernetesScrapeTargetProvider{
-			Client:      writer.Client,
-			MetricsMode: o.metricsMode,
-			NodeName:    writer.NodeName,
+			Client:                         writer.Client,
+			MetricsMode:                    o.metricsMode,
+			NodeName:                       writer.NodeName,
+			AcceleratorType:                o.acceleratorType,
+			AcceleratorExporterPort:        o.acceleratorExporterPort,
+			AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
 		}
 	case v1.SSHClusterType:
 		return neutreemetrics.StaticScrapeTargetProvider{
-			MetricsMode: o.metricsMode,
+			MetricsMode:                    o.metricsMode,
+			AcceleratorType:                o.acceleratorType,
+			AcceleratorExporterPort:        o.acceleratorExporterPort,
+			AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
 		}
 	default:
 		return nil

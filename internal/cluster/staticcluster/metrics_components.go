@@ -87,8 +87,10 @@ func buildMetricsComponents(
 ) []v1.NodeComponentSpec {
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
-	if exporter := acceleratorExporterProfile(profile); exporter != nil {
-		components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
+	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
+		if exporter := staticAcceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
+			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
+		}
 	}
 
 	components = append(components, buildNodeAgentComponent(cluster, node, profile))
@@ -139,6 +141,22 @@ func acceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorE
 	return profile.MetricsExporter
 }
 
+func staticAcceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorExporterProfile {
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil || !exporter.SupportsBackend(v1.AcceleratorExporterBackendStatic) {
+		return nil
+	}
+
+	return exporter
+}
+
+func validAcceleratorExporterProfile(exporter *v1.AcceleratorExporterProfile) bool {
+	return exporter != nil &&
+		strings.TrimSpace(exporter.Name) != "" &&
+		strings.TrimSpace(exporter.Image) != "" &&
+		exporter.Port > 0
+}
+
 func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
@@ -148,8 +166,9 @@ func buildAcceleratorExporterComponent(
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
 		Image:            staticComponentImage(cluster, exporter.Image),
+		Command:          append([]string{}, exporter.Command...),
 		Args:             append([]string{}, exporter.Args...),
-		Env:              copyMetricsStringMap(exporter.Env),
+		Env:              staticExporterEnv(exporter.Env),
 		Volumes:          volumes,
 		VolumeMounts:     volumeMounts,
 		ConfigFiles:      acceleratorExporterComponentConfigFiles(exporter.ConfigFiles),
@@ -162,6 +181,20 @@ func buildAcceleratorExporterComponent(
 			Port:     exporter.Port,
 		},
 	}
+}
+
+func staticExporterEnv(env map[string]string) map[string]string {
+	values := copyMetricsStringMap(env)
+	if len(values) == 0 {
+		return nil
+	}
+
+	delete(values, v1.NodeAgentAdapterProfileKey)
+	if len(values) == 0 {
+		return nil
+	}
+
+	return values
 }
 
 func buildNodeAgentComponent(
@@ -177,6 +210,9 @@ func buildNodeAgentComponent(
 		"--procfs-root=/host/proc",
 		"--cgroupfs-root=/host/sys/fs/cgroup",
 	}
+	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
+		args = append(args, nodeAgentAdapterArgs(profile)...)
+	}
 
 	if node != nil && node.Metadata != nil {
 		args = append(args, "--node="+node.Metadata.Name)
@@ -186,8 +222,8 @@ func buildNodeAgentComponent(
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
 
-	if profile != nil && profile.AcceleratorType != "" {
-		args = append(args, "--accelerator-type="+profile.AcceleratorType)
+	if runtime := nodeAgentRuntime(profile); runtime != nil && profile != nil && profile.AcceleratorType != "" {
+		args = appendNodeAgentAcceleratorType(args, profile.AcceleratorType)
 	}
 
 	return v1.NodeComponentSpec{
@@ -206,6 +242,38 @@ func buildNodeAgentComponent(
 			Port:     defaultNodeAgentPort,
 		},
 	}
+}
+
+func nodeAgentAdapterArgs(profile *v1.AcceleratorProfile) []string {
+	exporter := staticAcceleratorExporterProfile(profile)
+	if profile == nil || exporter == nil || !validAcceleratorExporterProfile(exporter) ||
+		!staticProfileUsesNodeAgentAdapter(exporter) || strings.TrimSpace(profile.AcceleratorType) == "" {
+		return nil
+	}
+
+	return []string{
+		"--accelerator-type=" + profile.AcceleratorType,
+		fmt.Sprintf("--accelerator-exporter-port=%d", exporter.Port),
+		"--accelerator-exporter-metrics-path=" + exporterMetricsPath(exporter),
+	}
+}
+
+func staticProfileUsesNodeAgentAdapter(exporter *v1.AcceleratorExporterProfile) bool {
+	if exporter == nil {
+		return false
+	}
+
+	return strings.EqualFold(strings.TrimSpace(exporter.Env[v1.NodeAgentAdapterProfileKey]), "true")
+}
+
+func appendNodeAgentAcceleratorType(args []string, acceleratorType string) []string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--accelerator-type=") {
+			return args
+		}
+	}
+
+	return append(args, "--accelerator-type="+acceleratorType)
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {

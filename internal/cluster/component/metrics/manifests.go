@@ -345,6 +345,10 @@ spec:
 {{ if .NodeAgent.AcceleratorType }}
         - --accelerator-type={{ .NodeAgent.AcceleratorType }}
 {{ end }}
+{{ if .AcceleratorExporterPort }}
+        - --accelerator-exporter-port={{ .AcceleratorExporterPort }}
+        - --accelerator-exporter-metrics-path={{ .AcceleratorExporterMetricsPath }}
+{{ end }}
         env:
         - name: NODE_NAME
           valueFrom:
@@ -409,11 +413,13 @@ metadata:
   labels:
     app: {{ .AppLabel }}
     neutree.ai/metrics-target: accelerator-exporter
+    neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
     neutree.ai/cluster-version: {{ $.ClusterVersion }}
 spec:
   selector:
     matchLabels:
       app: {{ .AppLabel }}
+      neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
       cluster: {{ $.ClusterName | quote }}
       workspace: {{ $.Workspace | quote }}
   template:
@@ -421,6 +427,7 @@ spec:
       labels:
         app: {{ .AppLabel }}
         neutree.ai/metrics-target: accelerator-exporter
+        neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
         cluster: {{ $.ClusterName | quote }}
         workspace: {{ $.Workspace | quote }}
         neutree.ai/cluster-version: {{ $.ClusterVersion }}

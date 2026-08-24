@@ -36,6 +36,11 @@ type Config struct {
 	// AcceleratorType selects the accelerator adapter from the registry. An
 	// empty type emits only generic node and runtime metrics.
 	AcceleratorType string
+	// AcceleratorExporterPort and AcceleratorExporterMetricsPath are the
+	// profile-derived endpoint for an explicit adapter. Zero values retain the
+	// legacy discovery behavior only when AcceleratorType is empty.
+	AcceleratorExporterPort        int
+	AcceleratorExporterMetricsPath string
 	// Accelerators is the registered accelerator adapter registry used to
 	// resolve AcceleratorType to an adapter.
 	Accelerators map[string]adapter.Accelerator
