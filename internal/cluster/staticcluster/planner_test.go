@@ -307,7 +307,7 @@ func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 }
 
-func TestPlannerRejectsInvalidNodeAgentRuntimeProfile(t *testing.T) {
+func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
 		staticNodeStatusWithAccelerator(
@@ -343,8 +343,7 @@ func TestPlannerRejectsInvalidNodeAgentRuntimeProfile(t *testing.T) {
 
 	_, err := planner.Plan(context.Background(), cluster, currentNodes)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "must have exactly one mount")
+	require.NoError(t, err)
 }
 
 func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {

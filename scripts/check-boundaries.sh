@@ -30,10 +30,7 @@ imports_into() {
 # ─────────────────────────────────────────────────────────────────────────────
 # R1: pkg/ (L1) must not import internal/ (L2).
 # ─────────────────────────────────────────────────────────────────────────────
-# pkg/nodeagent is a documented public process-host facade. Its two private
-# bridge files convert the public adapter contract to the NodeAgent's internal
-# metrics runtime; no other pkg package may import internal code.
-R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' | grep -vE '^pkg/nodeagent/(host|options)(_test)?\.go$' || true)
+R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' || true)
 if [ -n "$R1" ]; then
   echo "$R1" | sed 's/^/   /'
   report \

@@ -114,28 +114,13 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
 
-		nodeAgents, planErr := m.planNodeAgents(ctx)
-		if planErr != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("NodeAgent runtime plan failed: %v", planErr))
+		nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
+		if checkErr != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, checkErr))
 		} else {
-			status.NeutreeNodeAgentMetricsDaemonSetReady = true
-
-			for _, nodeAgent := range nodeAgents {
-				nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, nodeAgent.Name)
-				if checkErr != nil {
-					status.NeutreeNodeAgentMetricsDaemonSetReady = false
-					status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", nodeAgent.Name, checkErr))
-
-					continue
-				}
-
-				if !nodeAgentReady {
-					status.NeutreeNodeAgentMetricsDaemonSetReady = false
-				}
-
-				status.NeutreeNodeAgentMetricsPodsReady += nodeAgentPodsReady
-				status.NeutreeNodeAgentMetricsTotalPods += nodeAgentTotalPods
-			}
+			status.NeutreeNodeAgentMetricsDaemonSetReady = nodeAgentReady
+			status.NeutreeNodeAgentMetricsPodsReady = nodeAgentPodsReady
+			status.NeutreeNodeAgentMetricsTotalPods = nodeAgentTotalPods
 		}
 	}
 

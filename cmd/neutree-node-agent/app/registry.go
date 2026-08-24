@@ -1,4 +1,4 @@
-package nodeagent
+package app
 
 import (
 	"fmt"

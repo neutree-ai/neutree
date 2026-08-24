@@ -1,4 +1,4 @@
-package nodeagent
+package app
 
 import (
 	"fmt"
@@ -64,15 +64,6 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"procfs root used to read Ray actor process environments")
 	fs.StringVar(&o.cgroupFSRoot, "cgroupfs-root", o.cgroupFSRoot,
 		"cgroupfs root used to read Ray actor container CPU and memory usage")
-}
-
-func (o *options) config() (neutreemetrics.Config, error) {
-	registry, err := newAdapterRegistry(DefaultAdapters())
-	if err != nil {
-		return neutreemetrics.Config{}, err
-	}
-
-	return o.configWithRegistry(registry)
 }
 
 func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {

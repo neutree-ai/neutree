@@ -25,8 +25,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			Options:     []string{"--gpus", "all"},
 		},
 		NodeAgentRuntime: &NodeAgentRuntimeProfile{
-			KubernetesProducts: []string{"example-product"},
-			Privileged:         true,
+			Privileged: true,
 			Capabilities: &NodeAgentRuntimeCapabilities{
 				Add: []string{"SYS_ADMIN"},
 			},
@@ -86,7 +85,6 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "nvidia", decoded.EngineRuntime.Runtime)
 	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
 	require.NotNil(t, decoded.NodeAgentRuntime)
-	assert.Equal(t, []string{"example-product"}, decoded.NodeAgentRuntime.KubernetesProducts)
 	assert.True(t, decoded.NodeAgentRuntime.Privileged)
 	require.NotNil(t, decoded.NodeAgentRuntime.Capabilities)
 	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.NodeAgentRuntime.Capabilities.Add)
@@ -130,13 +128,6 @@ func TestAcceleratorExporterProfileJSONRoundTripStructuredRuntime(t *testing.T) 
 			"command":["/usr/local/bin/npu-exporter"],
 			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
 			"port":8082,
-			"readiness":{
-				"http_path":"/metrics",
-				"initial_delay_seconds":15,
-				"period_seconds":5,
-				"timeout_seconds":5,
-				"failure_threshold":3
-			},
 			"runtime":{
 				"privileged":true,
 				"volumes":[

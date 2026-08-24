@@ -43,8 +43,8 @@ type metricsAcceleratorExporter struct {
 	Port            int
 	MetricsPath     string
 
-	ReadinessProbe  *corev1.Probe
-	SecurityContext *corev1.SecurityContext
+	SecurityContext  *corev1.SecurityContext
+	NodeAgentRuntime *v1.NodeAgentRuntimeProfile
 
 	NodeSelector   map[string]string
 	ConfigFileData map[string]string
@@ -133,29 +133,12 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
-	if strings.TrimSpace(exporterProfile.Image) == "" ||
-		exporterProfile.Port <= 0 ||
-		!validAcceleratorExporterName(exporterProfile.Name) {
-		return metricsAcceleratorExporter{}, false, nil
-	}
-
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
 	runtime := exporterProfile.Runtime
 
-	readinessProbe, err := buildExporterReadinessProbe(exporterProfile.Readiness)
-	if err != nil {
-		return metricsAcceleratorExporter{}, false, err
-	}
-
-	runtimeVolumeMounts, runtimeVolumes, err := buildExporterRuntimeVolumes(runtime)
-	if err != nil {
-		return metricsAcceleratorExporter{}, false, err
-	}
+	runtimeVolumeMounts, runtimeVolumes := buildExporterRuntimeVolumes(runtime)
 
 	configFileData, configVolumeMounts, configVolumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
-	if err := validateExporterVolumeCollisions(runtimeVolumeMounts, runtimeVolumes, configVolumeMounts, configVolumes); err != nil {
-		return metricsAcceleratorExporter{}, false, err
-	}
 
 	volumeMounts := append(append([]corev1.VolumeMount{}, configVolumeMounts...), runtimeVolumeMounts...)
 	volumes := append(append([]corev1.Volume{}, configVolumes...), runtimeVolumes...)
@@ -163,22 +146,22 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
-		Name:            name,
-		AcceleratorType: acceleratorType,
-		ExporterName:    exporterProfile.Name,
-		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
-		Command:         append([]string{}, exporterProfile.Command...),
-		Args:            append([]string{}, exporterProfile.Args...),
-		Env:             buildExporterEnv(exporterProfile.Env),
-		Port:            exporterProfile.Port,
-		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		ReadinessProbe:  readinessProbe,
-		SecurityContext: exporterRuntimeSecurityContext(runtime),
-		NodeSelector:    exporterRuntimeNodeSelector(runtime),
-		ConfigFileData:  configFileData,
-		ConfigChecksum:  configChecksum,
-		VolumeMounts:    volumeMounts,
-		Volumes:         volumes,
+		Name:             name,
+		AcceleratorType:  acceleratorType,
+		ExporterName:     exporterProfile.Name,
+		Image:            util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Command:          append([]string{}, exporterProfile.Command...),
+		Args:             append([]string{}, exporterProfile.Args...),
+		Env:              buildExporterEnv(exporterProfile.Env),
+		Port:             exporterProfile.Port,
+		MetricsPath:      exporterMetricsPath(exporterProfile.MetricsPath),
+		SecurityContext:  exporterRuntimeSecurityContext(runtime),
+		NodeAgentRuntime: profile.NodeAgentRuntime,
+		NodeSelector:     exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:   configFileData,
+		ConfigChecksum:   configChecksum,
+		VolumeMounts:     volumeMounts,
+		Volumes:          volumes,
 	}
 
 	return exporter, true, nil
@@ -197,10 +180,6 @@ func acceleratorExporterJobName(acceleratorType string) string {
 	return acceleratorExporterJobPrefix + "-" + name
 }
 
-func validAcceleratorExporterName(exporterName string) bool {
-	return sanitizeKubernetesNameValue(exporterName) != ""
-}
-
 func (m *MetricsComponent) selectClusterAcceleratorExporter(
 	ctx context.Context,
 	candidates []metricsAcceleratorExporter,
@@ -214,15 +193,13 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 		return nil, err
 	}
 
-	matchedExporters := make([]metricsAcceleratorExporter, 0, 1)
-
 	for _, exporter := range candidates {
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
-			matchedExporters = append(matchedExporters, exporter)
+			return []metricsAcceleratorExporter{exporter}, nil
 		}
 	}
 
-	return matchedExporters, nil
+	return nil, nil
 }
 
 func (m *MetricsComponent) clusterNodes(ctx context.Context) ([]corev1.Node, error) {
@@ -296,26 +273,6 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	return envVars
 }
 
-func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter) []corev1.EnvVar {
-	allowed := map[string]struct{}{
-		"NVIDIA_VISIBLE_DEVICES":     {},
-		"NVIDIA_DRIVER_CAPABILITIES": {},
-	}
-	env := map[string]string{}
-
-	for _, exporter := range exporters {
-		for _, item := range exporter.Env {
-			if _, ok := allowed[item.Name]; !ok {
-				continue
-			}
-
-			env[item.Name] = item.Value
-		}
-	}
-
-	return buildExporterEnv(env)
-}
-
 func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) map[string]string {
 	if runtime == nil {
 		return nil
@@ -334,11 +291,6 @@ func exporterRuntimeCapabilities(
 	capabilities := make([]corev1.Capability, 0, len(runtime.Capabilities.Add))
 
 	for _, capability := range runtime.Capabilities.Add {
-		capability = strings.TrimSpace(capability)
-		if capability == "" {
-			continue
-		}
-
 		capabilities = append(capabilities, corev1.Capability(capability))
 	}
 

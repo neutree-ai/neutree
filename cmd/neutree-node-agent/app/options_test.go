@@ -1,4 +1,4 @@
-package nodeagent
+package app
 
 import (
 	"testing"
@@ -21,7 +21,7 @@ func TestOptionsConfigDefaults(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = clusterTypeRay
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.NoError(t, err)
 	assert.Equal(t, ":9101", config.ListenAddress)
@@ -37,7 +37,7 @@ func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 	opts.clusterType = clusterTypeRay
 	opts.metricsMode = neutreemetrics.MetricsModeExternal
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
 	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
@@ -48,16 +48,16 @@ func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
 	opts := newOptions()
 
-	_, err := opts.config()
+	_, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.ErrorContains(t, err, "node name is required")
 }
 
 func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = "ray"
+	opts.clusterType = clusterTypeRay
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.NoError(t, err)
 	assert.Nil(t, config.KubernetesWriter)
@@ -65,12 +65,12 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 
 func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = "ray"
+	opts.clusterType = clusterTypeRay
 	opts.rayDashboardURL = "http://10.0.0.10:8265"
 	opts.node = "head-0"
 	opts.nodeIP = "10.0.0.10"
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
 	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
@@ -134,7 +134,7 @@ func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
 	opts.clusterType = clusterTypeRay
 	opts.acceleratorType = "unknown-accelerator"
 
-	_, err := opts.config()
+	_, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
 }
@@ -158,7 +158,7 @@ func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = clusterTypeRay
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
 	assert.Empty(t, config.AcceleratorType)

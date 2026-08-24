@@ -3,8 +3,6 @@ package metrics
 import (
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
@@ -306,71 +304,48 @@ spec:
           path: /
 {{ end }}
 {{ if .EnableNeutreeNodeAgentMetrics }}
-{{ range .NodeAgents }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ .Name }}
-  namespace: {{ $.Namespace }}
+  name: {{ .NeutreeNodeAgentMetricsName }}
+  namespace: {{ .Namespace }}
   labels:
-    app: {{ .Name }}
+    app: {{ .NeutreeNodeAgentMetricsName }}
     neutree.ai/metrics-target: node-agent
-    neutree.ai/cluster-version: {{ $.ClusterVersion }}
+    neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   selector:
     matchLabels:
-      app: {{ .Name }}
+      app: {{ .NeutreeNodeAgentMetricsName }}
       neutree.ai/metrics-target: node-agent
-      cluster: {{ $.ClusterName | quote }}
-      workspace: {{ $.Workspace | quote }}
+      cluster: {{ .ClusterName | quote }}
+      workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
-        app: {{ .Name }}
+        app: {{ .NeutreeNodeAgentMetricsName }}
         neutree.ai/metrics-target: node-agent
-        cluster: {{ $.ClusterName | quote }}
-        workspace: {{ $.Workspace | quote }}
-        neutree.ai/cluster-version: {{ $.ClusterVersion }}
+        cluster: {{ .ClusterName | quote }}
+        workspace: {{ .Workspace | quote }}
+        neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
-{{ if or .IncludedNodeNames .ExcludedNodeNames }}
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchFields:
-{{ if .IncludedNodeNames }}
-              - key: metadata.name
-                operator: In
-                values:
-{{ .IncludedNodeNames | toYaml | indent 18 }}
-{{ end }}
-{{ if .ExcludedNodeNames }}
-              - key: metadata.name
-                operator: NotIn
-                values:
-{{ .ExcludedNodeNames | toYaml | indent 18 }}
-{{ end }}
-{{ end }}
-      serviceAccountName: {{ $.NeutreeNodeAgentMetricsName }}
+      serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
-      - name: {{ $.ImagePullSecret }}
+      - name: {{ .ImagePullSecret }}
       containers:
       - name: neutree-node-agent
-        image: {{ $.NeutreeNodeAgentMetricsImage }}
+        image: {{ .NeutreeNodeAgentMetricsImage }}
         args:
-        - --listen-address=:{{ $.NeutreeNodeAgentMetricsPort }}
+        - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
         - --cluster-type=kubernetes
-        - --metrics-mode={{ $.MetricsMode }}
+        - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
-{{ if .AcceleratorType }}
-        - --accelerator-type={{ .AcceleratorType }}
+{{ if .NodeAgent.AcceleratorType }}
+        - --accelerator-type={{ .NodeAgent.AcceleratorType }}
 {{ end }}
         env:
-{{ if .Env }}
-{{ .Env | toYaml | indent 8 }}
-{{ end }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:
@@ -381,7 +356,7 @@ spec:
               fieldPath: status.hostIP
         ports:
         - name: metrics
-          containerPort: {{ $.NeutreeNodeAgentMetricsPort }}
+          containerPort: {{ .NeutreeNodeAgentMetricsPort }}
         livenessProbe:
           httpGet:
             path: /health
@@ -394,24 +369,23 @@ spec:
             port: metrics
           initialDelaySeconds: 5
           periodSeconds: 10
-{{ if .SecurityContext }}
+{{ if .NodeAgent.SecurityContext }}
         securityContext:
-{{ .SecurityContext | toYaml | indent 10 }}
+{{ .NodeAgent.SecurityContext | toYaml | indent 10 }}
 {{ end }}
         volumeMounts:
-{{ .VolumeMounts | toYaml | indent 8 }}
+{{ .NodeAgent.VolumeMounts | toYaml | indent 8 }}
         resources:
           limits:
-            {{- range $key, $value := $.NeutreeNodeAgentMetricsResources }}
+            {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
           requests:
-            {{- range $key, $value := $.NeutreeNodeAgentMetricsResources }}
+            {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
             {{ $key }}: {{ $value }}
             {{- end }}
       volumes:
-{{ .Volumes | toYaml | indent 6 }}
-{{ end }}
+{{ .NodeAgent.Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
@@ -484,10 +458,6 @@ spec:
         ports:
         - name: metrics
           containerPort: {{ .Port }}
-{{ if .ReadinessProbe }}
-        readinessProbe:
-{{ .ReadinessProbe | toYaml | indent 10 }}
-{{ end }}
 {{ if .SecurityContext }}
         securityContext:
 {{ .SecurityContext | toYaml | indent 10 }}
@@ -581,8 +551,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsName      string
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
-	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
-	NodeAgents                       []metricsNodeAgent
+	NodeAgent                        metricsNodeAgent
 	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
@@ -643,6 +612,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
 		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
+		NodeAgent:                        defaultMetricsNodeAgent(),
 		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,

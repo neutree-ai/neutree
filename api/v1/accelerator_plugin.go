@@ -102,9 +102,6 @@ type AcceleratorProfile struct {
 // NodeAgentRuntimeProfile declares the backend-specific NodeAgent access
 // contract for an explicit accelerator profile.
 type NodeAgentRuntimeProfile struct {
-	// KubernetesProducts limits Kubernetes NodeAgent placement to parser-confirmed products.
-	// An empty list accepts every product reported for the accelerator type.
-	KubernetesProducts []string `json:"kubernetes_products,omitempty"`
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
 	// Capabilities declares Linux capabilities required by the NodeAgent only.
@@ -138,8 +135,6 @@ type AcceleratorExporterProfile struct {
 	Port int `json:"port,omitempty"`
 	// MetricsPath is the HTTP path scraped by vmagent; it defaults to /metrics when empty.
 	MetricsPath string `json:"metrics_path,omitempty"`
-	// Readiness declares the optional Kubernetes readiness probe for the exporter.
-	Readiness *AcceleratorExporterReadiness `json:"readiness,omitempty"`
 	// Env contains exporter environment variables.
 	Env map[string]string `json:"env,omitempty"`
 	// ConfigFiles declares exporter configuration files that must be materialized before start.
@@ -200,15 +195,6 @@ type AcceleratorExporterRuntimeProfile struct {
 
 type AcceleratorExporterCapabilities struct {
 	Add []string `json:"add,omitempty"`
-}
-
-// AcceleratorExporterReadiness describes the Kubernetes readiness probe for an exporter.
-type AcceleratorExporterReadiness struct {
-	HTTPPath            string `json:"http_path,omitempty"`
-	InitialDelaySeconds int    `json:"initial_delay_seconds,omitempty"`
-	PeriodSeconds       int    `json:"period_seconds,omitempty"`
-	TimeoutSeconds      int    `json:"timeout_seconds,omitempty"`
-	FailureThreshold    int    `json:"failure_threshold,omitempty"`
 }
 
 // ComponentHostPathType is the supported type of a structured host path volume.

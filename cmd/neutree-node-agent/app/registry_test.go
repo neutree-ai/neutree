@@ -1,28 +1,12 @@
-package nodeagent
+package app
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
-
-type registryTestAdapter struct {
-	typ         string
-	descriptors []adapter.MetricDescriptor
-}
-
-func (a registryTestAdapter) Type() string { return a.typ }
-
-func (registryTestAdapter) DiscoverHardware(context.Context) (adapter.HardwareSnapshot, error) {
-	return adapter.HardwareSnapshot{}, nil
-}
-
-func (a registryTestAdapter) MetricDescriptors() []adapter.MetricDescriptor {
-	return adapter.CloneMetricDescriptors(a.descriptors)
-}
 
 func TestNewAdapterRegistryRejectsInvalidAdapterSlices(t *testing.T) {
 	typedNil := (*registryTestAdapter)(nil)
@@ -71,14 +55,4 @@ func TestNewAdapterRegistryRejectsDescriptorConflicts(t *testing.T) {
 	})
 
 	assert.ErrorContains(t, err, `descriptor "neutree_vendor_metric" conflicts`)
-}
-
-func TestDefaultAdaptersReturnsFreshSliceAndInstances(t *testing.T) {
-	first := DefaultAdapters()
-	second := DefaultAdapters()
-
-	assert.Empty(t, first)
-	assert.Empty(t, second)
-	first = append(first, registryTestAdapter{typ: "mutated"})
-	assert.Empty(t, second)
 }

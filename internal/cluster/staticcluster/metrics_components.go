@@ -229,10 +229,7 @@ func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
-			capability = strings.TrimSpace(capability)
-			if capability != "" {
-				options = append(options, "--cap-add="+capability)
-			}
+			options = append(options, "--cap-add="+capability)
 		}
 	}
 
@@ -240,7 +237,7 @@ func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 		options = append(options, "--runtime="+runtime.Runtime)
 	}
 
-	return appendDockerRunOptionsUnique(options, runtime.DockerRunOptions...)
+	return append(options, runtime.DockerRunOptions...)
 }
 
 func nodeAgentRuntime(profile *v1.AcceleratorProfile) *v1.NodeAgentRuntimeProfile {
@@ -268,10 +265,7 @@ func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponen
 	}
 
 	for _, mount := range runtime.VolumeMounts {
-		volume, ok := volumeByName[mount.Name]
-		if !ok || volume.HostPath == nil {
-			continue
-		}
+		volume := volumeByName[mount.Name]
 
 		readOnly := true
 		if mount.ReadOnly != nil {
@@ -279,37 +273,16 @@ func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponen
 		}
 
 		volumes = append(volumes, v1.NodeComponentVolume{
-			Name:      volume.Name,
-			HostPath:  volume.HostPath.Path,
+			Name:      mount.Name,
 			MountPath: mount.MountPath,
 			ReadOnly:  readOnly,
 		})
+		if volume.HostPath != nil {
+			volumes[len(volumes)-1].HostPath = volume.HostPath.Path
+		}
 	}
 
 	return volumes
-}
-
-func appendDockerRunOptionsUnique(options []string, values ...string) []string {
-	seen := make(map[string]struct{}, len(options)+len(values))
-	result := make([]string, 0, len(options)+len(values))
-	merged := append(append([]string{}, options...), values...)
-
-	for _, option := range merged {
-		option = strings.TrimSpace(option)
-		if option == "" {
-			continue
-		}
-
-		if _, ok := seen[option]; ok {
-			continue
-		}
-
-		seen[option] = struct{}{}
-
-		result = append(result, option)
-	}
-
-	return result
 }
 
 func copyMetricsStringMap(values map[string]string) map[string]string {

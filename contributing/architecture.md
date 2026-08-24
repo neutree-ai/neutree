@@ -71,19 +71,11 @@ L0  api/v1/               Pure resource types + scheme registration
 
 > **Note**: `pkg/scheme` is a foundational type-registration framework used by `api/v1` (the Kubernetes-style `apimachinery/runtime` analogue). Treated as Go-runtime-equivalent infrastructure and not part of the layered hierarchy.
 
-> **NodeAgent host exception**: `pkg/nodeagent` is a public process-host facade,
-> not a general utility package. Its private `host.go` and `options.go` bridge the
-> public `pkg/nodeagent/adapter` contract to the NodeAgent metrics runtime under
-> `internal/observability/neutreemetrics`. The bridge must not expose internal
-> types through its public API. Its colocated tests may exercise the same private
-> bridge; no other file under `pkg/` may import `internal/`.
-> `scripts/check-boundaries.sh` enforces this exact exception.
-
 Boundary rules currently enforced (see `scripts/check-boundaries.sh` for the implementation and grandfathered exceptions):
 
 | Rule | Statement |
 |------|-----------|
-| **R1** | `pkg/` (L1) must not import `internal/` (L2), except the documented private `pkg/nodeagent` host bridge. |
+| **R1** | `pkg/` (L1) must not import `internal/` (L2). |
 | **R2** | `api/v1/` (L0) must not import `internal/` (L2) or `controllers/` (L3). |
 | **R3** | `internal/orchestrator/` (L2-domain) must not import `internal/routes/` (L2-edge). |
 | **R4** | `cmd/` files (L4) must stay under 500 lines — entry points are wiring, not business logic. |

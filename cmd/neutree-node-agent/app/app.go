@@ -1,4 +1,4 @@
-package nodeagent
+package app
 
 import (
 	"context"
@@ -20,27 +20,17 @@ type BuildInfo struct {
 	BuildTime string
 }
 
-// Config is the public NodeAgent host configuration. The entrypoint owns the
-// complete adapter slice and passes it explicitly to Run.
-type Config struct {
-	Args     []string
-	Build    BuildInfo
-	Adapters []adapter.Accelerator
+// App is the private NodeAgent application assembled by the entrypoint.
+type App struct {
+	args     []string
+	build    BuildInfo
+	registry adapterRegistry
 }
 
-// Run starts the NodeAgent using the explicitly supplied adapters.
-func Run(ctx context.Context, config Config) error {
-	registry, err := newAdapterRegistry(config.Adapters)
-	if err != nil {
-		return fmt.Errorf("build accelerator adapter registry: %w", err)
-	}
-
-	if err := neutreemetrics.ValidateAdapterMetricDescriptors(registry.descriptorsCopy()); err != nil {
-		return fmt.Errorf("validate accelerator adapter descriptors: %w", err)
-	}
-
-	if isVersionCommand(config.Args) {
-		fmt.Println(formatBuildInfo(config.Build))
+// Run starts the NodeAgent using the Builder-assembled configuration.
+func (a *App) Run(ctx context.Context) error {
+	if isVersionCommand(a.args) {
+		fmt.Println(formatBuildInfo(a.build))
 
 		return nil
 	}
@@ -58,15 +48,15 @@ func Run(ctx context.Context, config Config) error {
 	opts.addFlags(flags)
 	flags.AddGoFlagSet(flag.CommandLine)
 
-	if err := flags.Parse(config.Args); err != nil {
+	if err := flags.Parse(a.args); err != nil {
 		return err
 	}
 
-	if err := validateSelectedAdapterCapability(opts.clusterType, opts.acceleratorType, registry); err != nil {
+	if err := validateSelectedAdapterCapability(opts.clusterType, opts.acceleratorType, a.registry); err != nil {
 		return err
 	}
 
-	serverConfig, err := opts.configWithRegistry(registry)
+	serverConfig, err := opts.configWithRegistry(a.registry)
 	if err != nil {
 		return fmt.Errorf("build neutree-node-agent config: %w", err)
 	}
@@ -86,6 +76,22 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	return server.Run(ctx)
+}
+
+func isVersionCommand(args []string) bool {
+	return len(args) == 1 && (args[0] == "version" || args[0] == "--version")
+}
+
+func formatBuildInfo(info BuildInfo) string {
+	return fmt.Sprintf(
+		"Version: %s\nGit Commit: %s\nBuild Time: %s\nGo Version: %s\nPlatform: %s/%s",
+		info.Version,
+		info.GitCommit,
+		info.BuildTime,
+		runtime.Version(),
+		runtime.GOOS,
+		runtime.GOARCH,
+	)
 }
 
 func validateSelectedAdapterCapability(clusterType, acceleratorType string, registry adapterRegistry) error {
@@ -116,20 +122,4 @@ func validateSelectedAdapterCapability(clusterType, acceleratorType string, regi
 	}
 
 	return nil
-}
-
-func isVersionCommand(args []string) bool {
-	return len(args) == 1 && (args[0] == "version" || args[0] == "--version")
-}
-
-func formatBuildInfo(info BuildInfo) string {
-	return fmt.Sprintf(
-		"Version: %s\nGit Commit: %s\nBuild Time: %s\nGo Version: %s\nPlatform: %s/%s",
-		info.Version,
-		info.GitCommit,
-		info.BuildTime,
-		runtime.Version(),
-		runtime.GOOS,
-		runtime.GOARCH,
-	)
 }

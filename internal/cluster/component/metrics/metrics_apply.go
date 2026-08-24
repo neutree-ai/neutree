@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deploy"
@@ -46,20 +45,8 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		variables.AcceleratorExporters = acceleratorExporters
 	}
 
-	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
 	if variables.EnableNeutreeNodeAgentMetrics {
-		nodeAgents, planErr := m.planNodeAgents(ctx)
-		if planErr != nil {
-			return nil, errors.Wrapf(planErr, "failed to plan NodeAgent runtimes for cluster %s", m.cluster.Metadata.Name)
-		}
-
-		for index := range nodeAgents {
-			if nodeAgents[index].AcceleratorType == "" {
-				nodeAgents[index].Env = append([]corev1.EnvVar(nil), variables.NeutreeNodeAgentMetricsEnv...)
-			}
-		}
-
-		variables.NodeAgents = nodeAgents
+		variables.NodeAgent = selectedMetricsNodeAgent(acceleratorExporters)
 	}
 
 	if variables.EnableVMAgent {
