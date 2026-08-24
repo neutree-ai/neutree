@@ -349,7 +349,9 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	replicas := rayReplicasFromApplications(applications, nodeID)
 
 	return adapter.StaticEvidence{
-		AllocationAvailable: true,
+		// A missing Serve application response cannot distinguish an empty
+		// endpoint set from unavailable allocation evidence.
+		AllocationAvailable: applicationsErr == nil && applications != nil,
 		RayEvidence: adapter.RayEvidence{
 			Actors:         rayActorsFromDashboard(actors),
 			Replicas:       replicas,
