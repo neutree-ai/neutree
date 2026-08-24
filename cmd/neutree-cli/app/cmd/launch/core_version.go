@@ -89,6 +89,18 @@ func isReleaseCLIVersion(cliVersion string) bool {
 	return true
 }
 
+func normalizeControlPlaneRelease(buildIdentity string) (string, error) {
+	if strings.TrimSpace(buildIdentity) != buildIdentity || !strings.HasPrefix(buildIdentity, "v") {
+		return "", fmt.Errorf("invalid control-plane release %q: must use v-prefixed semantic version", buildIdentity)
+	}
+
+	if _, err := semver.StrictNewVersion(strings.TrimPrefix(buildIdentity, "v")); err != nil {
+		return "", fmt.Errorf("invalid control-plane release %q: %w", buildIdentity, err)
+	}
+
+	return buildIdentity, nil
+}
+
 func hasLocalBuildSuffix(cliVersion string) bool {
 	return strings.HasSuffix(cliVersion, "-dirty") || gitDescribeLocalBuildPattern.MatchString(cliVersion)
 }
