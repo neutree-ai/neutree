@@ -24,9 +24,10 @@ type staticNodeRuntimeConfigProvider interface {
 }
 
 type DesiredNodePlan struct {
-	Node             *v1.StaticNode
-	Accelerator      *v1.StaticNodeAcceleratorStatus
-	TargetComponents []v1.NodeComponentSpec
+	Node                           *v1.StaticNode
+	Accelerator                    *v1.StaticNodeAcceleratorStatus
+	AcceleratorExporterMetricsPath string
+	TargetComponents               []v1.NodeComponentSpec
 }
 
 func (r *Planner) Plan(
@@ -121,12 +122,17 @@ func (r *Planner) buildDesiredNodePlans(
 			return nil, err
 		}
 
+		if err := validateStaticRuntimeAccess(profile); err != nil {
+			return nil, fmt.Errorf("validate static accelerator runtime profile for %s: %w", acceleratorStatus.Type, err)
+		}
+
 		components := buildNodeComponents(cluster, desiredNode, profile, r.MetricsRemoteWriteURL)
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
-			Accelerator: acceleratorStatus,
-			Node:        desiredNode,
+			Accelerator:                    acceleratorStatus,
+			AcceleratorExporterMetricsPath: exporterMetricsPath(acceleratorExporterProfile(profile)),
+			Node:                           desiredNode,
 		})
 	}
 
