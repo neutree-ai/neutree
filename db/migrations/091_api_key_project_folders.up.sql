@@ -550,6 +550,4 @@ BEGIN
     RETURN v_key;
 END;
 $$;
-
-NOTIFY pgrst, 'reload schema';
 COMMIT;

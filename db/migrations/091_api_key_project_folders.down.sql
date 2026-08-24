@@ -98,6 +98,4 @@ BEGIN
     RETURN v_result;
 END;
 $$;
-
-NOTIFY pgrst, 'reload schema';
 COMMIT;

@@ -58,6 +58,4 @@ BEGIN
 END;
 $$;
 
-NOTIFY pgrst, 'reload schema';
-
 COMMIT;

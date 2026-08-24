@@ -200,6 +200,4 @@ CREATE FUNCTION api.get_api_key_project_groups(
     ) AS grouped;
 $$;
 
-NOTIFY pgrst, 'reload schema';
-
 COMMIT;
