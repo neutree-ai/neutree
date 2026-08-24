@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 )
@@ -302,24 +303,30 @@ DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",model
 	assert.NotContains(t, output, "neutree_metrics_mapping_supported")
 }
 
-func TestNvidiaAdapterBuildMetricsProducesDeviceSnapshots(t *testing.T) {
-	raw := `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 87
-DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="A100"} 81920
-`
+func TestNvidiaAdapterDiscoverHardwareBuildsInventorySnapshot(t *testing.T) {
+	accelerator := &nvidiaAccelerator{provider: hardware.GPUHardwareInfoProviderFunc(func(context.Context) ([]model.GPUHardwareInfo, error) {
+		return []model.GPUHardwareInfo{{
+			UUID:           "GPU-abc",
+			Index:          "0",
+			Product:        "A100",
+			MemoryTotalMiB: "81920",
+			MinorNumber:    "3",
+			DriverVersion:  "535.104.05",
+		}}, nil
+	})}
 
-	result, err := (&nvidiaAccelerator{}).BuildMetrics(context.Background(), AcceleratorEvidence{
-		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-		ExporterText:    raw,
-		ExporterUp:      true,
-		Labels:          testLabels(),
-	})
+	snapshot, err := accelerator.DiscoverHardware(context.Background())
 	require.NoError(t, err)
 
-	require.Len(t, result.DeviceSnapshots, 1)
-	assert.Equal(t, "GPU-abc", result.DeviceSnapshots[0].UUID)
-	assert.Equal(t, "A100", result.DeviceSnapshots[0].Product)
-	assert.Equal(t, int64(81920), result.DeviceSnapshots[0].MemoryMiB)
-	assert.Equal(t, "head-0", result.DeviceSnapshots[0].NodeID)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), snapshot.Accelerator.Type)
+	require.Len(t, snapshot.Accelerator.Devices, 1)
+	assert.Equal(t, "GPU-abc", snapshot.Accelerator.Devices[0].UUID)
+	assert.Equal(t, "A100", snapshot.Accelerator.Devices[0].ProductModel)
+	assert.Equal(t, int64(81920), snapshot.Accelerator.Devices[0].MemoryMiB)
+	require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
+	assert.Equal(t, 3, *snapshot.Accelerator.Devices[0].MinorNumber)
+	require.Len(t, snapshot.Details, 1)
+	assert.Equal(t, "535.104.05", snapshot.Details[0].DriverVersion)
 }
 
 func TestNvidiaAdapterDerivesEndpointReplicaGPUUsageFromUniqueDCGMAllocation(t *testing.T) {

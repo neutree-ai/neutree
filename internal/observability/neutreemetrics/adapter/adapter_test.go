@@ -25,11 +25,20 @@ type fakeAccelerator struct {
 
 func (f *fakeAccelerator) Type() string { return f.typ }
 
-func (f *fakeAccelerator) BuildMetrics(
-	_ context.Context,
-	_ AcceleratorEvidence,
-) (AcceleratorMetricResult, error) {
-	return AcceleratorMetricResult{}, nil
+func (f *fakeAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	return model.AcceleratorHardwareSnapshot{}, nil
+}
+
+// nonComparableAccelerator exercises registry duplicate handling without
+// relying on interface equality, which panics for values containing slices.
+type nonComparableAccelerator struct {
+	types []string
+}
+
+func (a nonComparableAccelerator) Type() string { return a.types[0] }
+
+func (nonComparableAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	return model.AcceleratorHardwareSnapshot{}, nil
 }
 
 func TestRegistryRegistersAndReturnsLocalAccelerators(t *testing.T) {
@@ -64,6 +73,15 @@ func TestRegistryLookupMissingType(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestNewRegistryRejectsDuplicateAdapterType(t *testing.T) {
+	_, err := NewRegistry(
+		nonComparableAccelerator{types: []string{"duplicate"}},
+		nonComparableAccelerator{types: []string{"duplicate"}},
+	)
+
+	assert.ErrorContains(t, err, `duplicate accelerator adapter "duplicate"`)
+}
+
 func TestNvidiaAcceleratorTypeIsNVIDIAGPU(t *testing.T) {
 	accel := &nvidiaAccelerator{}
 
@@ -80,7 +98,7 @@ func TestNvidiaAcceleratorBuildMetricsEmptyWhenExporterDown(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, result.Samples)
-	assert.Empty(t, result.DeviceSnapshots)
+	assert.Empty(t, result.Allocations)
 }
 
 func TestNvidiaAcceleratorBuildMetricsProducesAcceleratorSamples(t *testing.T) {

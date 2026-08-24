@@ -260,7 +260,15 @@ type failingAccelerator struct{}
 
 func (failingAccelerator) Type() string { return "nvidia_gpu" }
 
-func (failingAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+func (failingAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	return model.AcceleratorHardwareSnapshot{}, nil
+}
+
+func (failingAccelerator) BuildKubernetesMetrics(
+	context.Context,
+	model.AcceleratorHardwareSnapshot,
+	adapter.KubernetesAcceleratorEvidence,
+) (adapter.AcceleratorMetricResult, error) {
 	return adapter.AcceleratorMetricResult{}, fmt.Errorf("adapter boom")
 }
 
@@ -268,8 +276,369 @@ type typedNilAccelerator struct{}
 
 func (*typedNilAccelerator) Type() string { return "unknown-accelerator" }
 
-func (*typedNilAccelerator) BuildMetrics(context.Context, adapter.AcceleratorEvidence) (adapter.AcceleratorMetricResult, error) {
+func (*typedNilAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	return model.AcceleratorHardwareSnapshot{}, nil
+}
+
+type capabilityTestAccelerator struct {
+	typ string
+}
+
+func (a capabilityTestAccelerator) Type() string { return a.typ }
+
+func (capabilityTestAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	return model.AcceleratorHardwareSnapshot{}, nil
+}
+
+type staticCapabilityTestAccelerator struct {
+	capabilityTestAccelerator
+}
+
+func (staticCapabilityTestAccelerator) BuildStaticMetrics(
+	context.Context,
+	model.AcceleratorHardwareSnapshot,
+	adapter.StaticAcceleratorEvidence,
+) (adapter.AcceleratorMetricResult, error) {
 	return adapter.AcceleratorMetricResult{}, nil
+}
+
+type kubernetesCapabilityTestAccelerator struct {
+	capabilityTestAccelerator
+}
+
+func (kubernetesCapabilityTestAccelerator) BuildKubernetesMetrics(
+	context.Context,
+	model.AcceleratorHardwareSnapshot,
+	adapter.KubernetesAcceleratorEvidence,
+) (adapter.AcceleratorMetricResult, error) {
+	return adapter.AcceleratorMetricResult{}, nil
+}
+
+type recordingKubernetesAccelerator struct {
+	capabilityTestAccelerator
+	builds   int
+	hardware model.AcceleratorHardwareSnapshot
+	evidence adapter.KubernetesAcceleratorEvidence
+}
+
+func (a *recordingKubernetesAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	if a.hardware.Accelerator.Type != "" {
+		return a.hardware.Clone(), nil
+	}
+
+	return model.AcceleratorHardwareSnapshot{Accelerator: v1.StaticNodeAcceleratorStatus{Type: a.typ}}, nil
+}
+
+func (a *recordingKubernetesAccelerator) BuildKubernetesMetrics(
+	_ context.Context,
+	_ model.AcceleratorHardwareSnapshot,
+	evidence adapter.KubernetesAcceleratorEvidence,
+) (adapter.AcceleratorMetricResult, error) {
+	a.builds++
+	a.evidence = evidence
+
+	return adapter.AcceleratorMetricResult{}, nil
+}
+
+type recordingStaticAccelerator struct {
+	capabilityTestAccelerator
+	discoveries int
+	builds      int
+	exporterUp  bool
+	hardware    model.AcceleratorHardwareSnapshot
+	allocations []v1.StaticNodeAllocationStatus
+	evidence    adapter.StaticAcceleratorEvidence
+}
+
+func (a *recordingStaticAccelerator) DiscoverHardware(context.Context) (model.AcceleratorHardwareSnapshot, error) {
+	a.discoveries++
+	if a.hardware.Accelerator.Type != "" {
+		return a.hardware.Clone(), nil
+	}
+
+	return model.AcceleratorHardwareSnapshot{Accelerator: v1.StaticNodeAcceleratorStatus{Type: a.typ}}, nil
+}
+
+func (a *recordingStaticAccelerator) BuildStaticMetrics(
+	_ context.Context,
+	_ model.AcceleratorHardwareSnapshot,
+	evidence adapter.StaticAcceleratorEvidence,
+) (adapter.AcceleratorMetricResult, error) {
+	a.builds++
+	a.exporterUp = evidence.Common.ExporterUp
+	a.evidence = evidence
+
+	return adapter.AcceleratorMetricResult{Allocations: a.allocations}, nil
+}
+
+type fakeKubernetesAcceleratorEvidenceProvider struct {
+	evidence adapter.KubernetesAcceleratorEvidence
+	err      error
+}
+
+func (p fakeKubernetesAcceleratorEvidenceProvider) KubernetesAcceleratorEvidence(
+	context.Context,
+) (adapter.KubernetesAcceleratorEvidence, error) {
+	return p.evidence, p.err
+}
+
+type fakeStaticAcceleratorEvidenceProvider struct {
+	evidence adapter.StaticAcceleratorEvidence
+	err      error
+}
+
+func (p fakeStaticAcceleratorEvidenceProvider) StaticAcceleratorEvidence(
+	context.Context,
+) (adapter.StaticAcceleratorEvidence, error) {
+	return p.evidence, p.err
+}
+
+func TestNewServerRejectsAdapterWithoutRequestedClusterCapability(t *testing.T) {
+	testCases := []struct {
+		name        string
+		clusterType string
+		accelerator adapter.Accelerator
+		expected    string
+	}{
+		{
+			name:        "static only on Kubernetes",
+			clusterType: "kubernetes",
+			accelerator: staticCapabilityTestAccelerator{capabilityTestAccelerator{typ: "vendor"}},
+			expected:    "does not implement Kubernetes capability",
+		},
+		{
+			name:        "Kubernetes only on static",
+			clusterType: "ray",
+			accelerator: kubernetesCapabilityTestAccelerator{capabilityTestAccelerator{typ: "vendor"}},
+			expected:    "does not implement static capability",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := NewServer(Config{
+				ClusterType:     testCase.clusterType,
+				AcceleratorType: "vendor",
+				Accelerators: map[string]adapter.Accelerator{
+					"vendor": testCase.accelerator,
+				},
+			})
+
+			assert.ErrorContains(t, err, testCase.expected)
+		})
+	}
+}
+
+func TestServerDiscoversHardwareWhenExplicitStaticExporterIsUnavailable(t *testing.T) {
+	accelerator := &recordingStaticAccelerator{capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"}}
+	server, err := NewServer(Config{
+		ClusterType:     "ray",
+		AcceleratorType: "vendor",
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		ScrapeTargetProvider: staticTestTargetProvider{},
+	})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	response, err := http.Get(httpServer.URL + "/metrics")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = response.Body.Close() })
+
+	assert.Equal(t, http.StatusOK, response.StatusCode)
+	assert.Equal(t, 1, accelerator.discoveries)
+	assert.Equal(t, 1, accelerator.builds)
+	assert.False(t, accelerator.exporterUp)
+}
+
+func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
+	accelerator := &recordingKubernetesAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	server, err := NewServer(Config{
+		ClusterType:     "kubernetes",
+		AcceleratorType: "vendor",
+		Labels:          model.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		KubernetesAcceleratorEvidenceProvider: fakeKubernetesAcceleratorEvidenceProvider{
+			evidence: adapter.KubernetesAcceleratorEvidence{
+				AllocationAvailable: true,
+				PodResources: []model.PodResource{{
+					Namespace: "default",
+					Name:      "pod-a",
+				}},
+				EndpointPods: []adapter.EndpointPodEvidence{{
+					Namespace:   "default",
+					Name:        "pod-a",
+					UID:         "uid-a",
+					NodeName:    "node-a",
+					Labels:      map[string]string{"endpoint": "chat"},
+					Annotations: map[string]string{"hami.io/example": "raw"},
+				}},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
+	require.NoError(t, err)
+
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, accelerator.builds)
+	assert.True(t, accelerator.evidence.AllocationAvailable)
+	require.Len(t, accelerator.evidence.PodResources, 1)
+	assert.Equal(t, "pod-a", accelerator.evidence.PodResources[0].Name)
+	require.Len(t, accelerator.evidence.EndpointPods, 1)
+	assert.Equal(t, "raw", accelerator.evidence.EndpointPods[0].Annotations["hami.io/example"])
+	assert.Equal(t, "kubernetes", accelerator.evidence.Common.Labels.ClusterType)
+}
+
+func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {
+	accelerator := &recordingStaticAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	server, err := NewServer(Config{
+		ClusterType:     "ray",
+		AcceleratorType: "vendor",
+		Labels:          model.CanonicalLabels{ClusterType: "ray", Node: "head-0"},
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		StaticAcceleratorEvidenceProvider: fakeStaticAcceleratorEvidenceProvider{
+			evidence: adapter.StaticAcceleratorEvidence{
+				AllocationAvailable: true,
+				RayEvidence: adapter.RayEvidence{
+					Actors: []adapter.RayActor{{
+						ActorID: "actor-a",
+						PID:     4321,
+					}},
+					ActorProcesses: map[int]adapter.ProcessInfo{
+						4321: {
+							PID:         4321,
+							ParentPID:   1234,
+							Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "0"},
+						},
+					},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
+	require.NoError(t, err)
+
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, accelerator.builds)
+	assert.True(t, accelerator.evidence.AllocationAvailable)
+	require.Len(t, accelerator.evidence.RayEvidence.Actors, 1)
+	assert.Equal(t, "actor-a", accelerator.evidence.RayEvidence.Actors[0].ActorID)
+	assert.Equal(t, "0", accelerator.evidence.RayEvidence.ActorProcesses[4321].Environment["CUDA_VISIBLE_DEVICES"])
+	assert.Equal(t, "ray", accelerator.evidence.Common.Labels.ClusterType)
+}
+
+func TestServerDegradesWhenStaticEvidenceCollectionFails(t *testing.T) {
+	accelerator := &recordingStaticAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	server, err := NewServer(Config{
+		ClusterType:     "ray",
+		AcceleratorType: "vendor",
+		Labels:          model.CanonicalLabels{ClusterType: "ray", Node: "head-0"},
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		StaticAcceleratorEvidenceProvider: fakeStaticAcceleratorEvidenceProvider{
+			err: fmt.Errorf("ray evidence unavailable"),
+		},
+	})
+	require.NoError(t, err)
+
+	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
+	require.NoError(t, err)
+
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, accelerator.builds)
+	assert.False(t, accelerator.evidence.AllocationAvailable)
+	assert.Empty(t, accelerator.evidence.RayEvidence.Actors)
+}
+
+func TestServerDegradesWhenKubernetesEvidenceCollectionFails(t *testing.T) {
+	accelerator := &recordingKubernetesAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	server, err := NewServer(Config{
+		ClusterType:     "kubernetes",
+		AcceleratorType: "vendor",
+		Labels:          model.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		KubernetesAcceleratorEvidenceProvider: fakeKubernetesAcceleratorEvidenceProvider{
+			err: fmt.Errorf("pod resources unavailable"),
+		},
+	})
+	require.NoError(t, err)
+
+	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
+	require.NoError(t, err)
+
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, accelerator.builds)
+	assert.False(t, accelerator.evidence.AllocationAvailable)
+	assert.Empty(t, accelerator.evidence.PodResources)
+	assert.Empty(t, accelerator.evidence.EndpointPods)
+}
+
+func TestServerNodeDeviceSnapshotUsesExplicitAdapterHardwareAndAllocations(t *testing.T) {
+	accelerator := &recordingStaticAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+		hardware: model.AcceleratorHardwareSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: "vendor",
+				Devices: []v1.StaticNodeAcceleratorDeviceStatus{{
+					ID:           "0",
+					UUID:         "vendor-0",
+					ProductName:  "Vendor L20",
+					ProductModel: "Vendor L20",
+					MemoryMiB:    81920,
+					Healthy:      true,
+				}},
+			},
+		},
+		allocations: []v1.StaticNodeAllocationStatus{{
+			WorkloadType: "endpoint",
+			Endpoint:     "chat",
+			ReplicaID:    "replica-0",
+		}},
+	}
+	server, err := NewServer(Config{
+		ClusterType:     "ray",
+		AcceleratorType: "vendor",
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+	})
+	require.NoError(t, err)
+
+	snapshot, err := server.nodeDeviceSnapshot(httptest.NewRequest(http.MethodGet, "/v1/node/device-snapshot", nil))
+	require.NoError(t, err)
+	require.Len(t, snapshot.Accelerator.Devices, 1)
+	require.Len(t, snapshot.Allocations, 1)
+	assert.Equal(t, "vendor", snapshot.Accelerator.Type)
+	assert.Equal(t, "vendor-0", snapshot.Accelerator.Devices[0].UUID)
+	assert.Equal(t, "chat", snapshot.Allocations[0].Endpoint)
+	assert.Equal(t, 1, accelerator.discoveries)
+	assert.Equal(t, 1, accelerator.builds)
 }
 
 func TestServerMetricsIncludesDiscoveredEndpointAllocations(t *testing.T) {
@@ -763,6 +1132,49 @@ func TestServerWriteKubernetesAnnotationsKeepsDeviceAnnotationOnEmptyCPUFallback
 	node := &corev1.Node{}
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
 	assert.Equal(t, devicesAnnotation, node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation])
+}
+
+func TestServerWriteKubernetesAnnotationsClearsDeviceAnnotationOnEmptyExplicitAdapter(t *testing.T) {
+	const devicesAnnotation = `[{"uuid":"GPU-abc","minor_number":0,"memory_mib":81920,"healthy":true}]`
+	accelerator := &recordingKubernetesAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	ctrClient := fake.NewClientBuilder().
+		WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-a",
+				Annotations: map[string]string{
+					resourceparser.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
+				},
+			},
+		}).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", func(object client.Object) []string {
+			pod, ok := object.(*corev1.Pod)
+			if !ok || pod.Spec.NodeName == "" {
+				return nil
+			}
+
+			return []string{pod.Spec.NodeName}
+		}).
+		Build()
+	server, err := NewServer(Config{
+		ClusterType:     "kubernetes",
+		AcceleratorType: "vendor",
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		KubernetesWriter: &metricskubernetes.AnnotationWriter{
+			Client:   ctrClient,
+			NodeName: "node-a",
+		},
+	})
+	require.NoError(t, err)
+
+	server.writeKubernetesAnnotations(context.Background())
+
+	node := &corev1.Node{}
+	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
+	assert.JSONEq(t, `[]`, node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation])
 }
 
 func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {

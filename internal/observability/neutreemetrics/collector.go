@@ -1,8 +1,12 @@
 package neutreemetrics
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 )
 
@@ -81,7 +85,9 @@ var (
 )
 
 type metricsCollector struct {
-	samples []normalizer.Sample
+	samples          []normalizer.Sample
+	descriptors      []*metricDescriptor
+	descriptorByName map[string]*metricDescriptor
 }
 
 // metricDescriptor keeps the native prometheus.Desc with its Neutree sample name
@@ -94,19 +100,39 @@ type metricDescriptor struct {
 	desc         *prometheus.Desc
 }
 
-func newMetricsCollector(samples []normalizer.Sample) *metricsCollector {
-	return &metricsCollector{samples: samples}
+func newMetricsCollector(
+	samples []normalizer.Sample,
+	adapterDescriptorGroups ...[]adapter.MetricDescriptor,
+) *metricsCollector {
+	descriptors := append([]*metricDescriptor{}, metricDescriptors...)
+
+	for _, group := range adapterDescriptorGroups {
+		for _, descriptor := range group {
+			descriptors = append(descriptors, newMetricDescriptor(
+				descriptor.Name,
+				append([]string{}, descriptor.LabelNames...),
+				prometheus.GaugeValue,
+				append([]string{}, descriptor.RequiredLabelNames...),
+			))
+		}
+	}
+
+	return &metricsCollector{
+		samples:          samples,
+		descriptors:      descriptors,
+		descriptorByName: indexMetricDescriptors(descriptors),
+	}
 }
 
 func (c *metricsCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, descriptor := range metricDescriptors {
+	for _, descriptor := range c.descriptors {
 		ch <- descriptor.desc
 	}
 }
 
 func (c *metricsCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, sample := range c.samples {
-		descriptor := metricDescriptorByName[sample.Name]
+		descriptor := c.descriptorByName[sample.Name]
 		if descriptor == nil || !hasRequiredLabels(sample.Labels, descriptor.requiredKeys) {
 			continue
 		}
@@ -118,6 +144,66 @@ func (c *metricsCollector) Collect(ch chan<- prometheus.Metric) {
 			fixedLabelValues(sample.Labels, descriptor.labelNames)...,
 		)
 	}
+}
+
+func validateAdapterMetricDescriptors(descriptors []adapter.MetricDescriptor) error {
+	seenNames := make(map[string]struct{}, len(metricDescriptorByName)+len(descriptors))
+
+	for name := range metricDescriptorByName {
+		seenNames[name] = struct{}{}
+	}
+
+	for _, descriptor := range descriptors {
+		name := strings.TrimSpace(descriptor.Name)
+
+		if name == "" {
+			return fmt.Errorf("accelerator metric descriptor name is required")
+		}
+
+		if _, exists := seenNames[name]; exists {
+			return fmt.Errorf("accelerator metric descriptor %q conflicts with an existing descriptor", name)
+		}
+
+		seenNames[name] = struct{}{}
+
+		labelNames := make(map[string]struct{}, len(descriptor.LabelNames))
+
+		for _, labelName := range descriptor.LabelNames {
+			labelName = strings.TrimSpace(labelName)
+
+			if labelName == "" {
+				return fmt.Errorf("accelerator metric descriptor %q has an empty label name", name)
+			}
+
+			if _, exists := labelNames[labelName]; exists {
+				return fmt.Errorf("accelerator metric descriptor %q has duplicate label %q", name, labelName)
+			}
+
+			labelNames[labelName] = struct{}{}
+		}
+
+		requiredLabelNames := make(map[string]struct{}, len(descriptor.RequiredLabelNames))
+
+		for _, labelName := range descriptor.RequiredLabelNames {
+			labelName = strings.TrimSpace(labelName)
+
+			if labelName == "" {
+				return fmt.Errorf("accelerator metric descriptor %q has an empty required label name", name)
+			}
+
+			if _, exists := labelNames[labelName]; !exists {
+				return fmt.Errorf("accelerator metric descriptor %q requires unknown label %q", name, labelName)
+			}
+
+			if _, exists := requiredLabelNames[labelName]; exists {
+				return fmt.Errorf("accelerator metric descriptor %q has duplicate required label %q", name, labelName)
+			}
+
+			requiredLabelNames[labelName] = struct{}{}
+		}
+	}
+
+	return nil
 }
 
 func fixedLabelValues(labels map[string]string, labelNames []string) []string {

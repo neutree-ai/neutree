@@ -95,6 +95,8 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	require.NoError(t, err)
 	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
 	require.True(t, ok)
+	_, ok = config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
+	require.True(t, ok)
 	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
 	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
@@ -116,7 +118,7 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	opts := newOptions()
 	opts.clusterType = clusterTypeKubernetes
 
-	provider := opts.allocationProvider(writer)
+	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
 
 	multi, ok := provider.(allocation.MultiProvider)
 	require.True(t, ok)
@@ -125,6 +127,9 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	assert.True(t, ok)
 	_, ok = multi.Providers[1].(hami.KubernetesProvider)
 	assert.True(t, ok)
+	_, ok = kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	assert.True(t, ok)
+	assert.Nil(t, staticEvidenceProvider)
 }
 
 func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {

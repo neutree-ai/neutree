@@ -129,8 +129,13 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) config() (neutreemetrics.Config, error) {
+	registry, err := adapter.LocalRegistry()
+	if err != nil {
+		return neutreemetrics.Config{}, fmt.Errorf("build accelerator adapter registry: %w", err)
+	}
+
 	if o.acceleratorType != "" {
-		if _, ok := adapter.GetLocalAccelerators()[o.acceleratorType]; !ok {
+		if _, ok := registry.Get(o.acceleratorType); !ok {
 			return neutreemetrics.Config{}, fmt.Errorf(
 				"accelerator adapter %q is not registered; available adapters: %s",
 				o.acceleratorType,
@@ -146,7 +151,7 @@ func (o *options) config() (neutreemetrics.Config, error) {
 		AcceleratorType:                o.acceleratorType,
 		AcceleratorExporterPort:        o.acceleratorExporterPort,
 		AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
-	}.WithAccelerators(adapter.GetLocalAccelerators())
+	}.WithAcceleratorRegistry(registry)
 
 	writer, err := o.kubernetesWriter()
 	if err != nil {
@@ -155,7 +160,10 @@ func (o *options) config() (neutreemetrics.Config, error) {
 
 	config.KubernetesWriter = writer
 	config.ScrapeTargetProvider = o.scrapeTargetProvider(writer)
-	config.AllocationProvider = o.allocationProvider(writer)
+	allocationProvider, kubernetesEvidenceProvider, staticEvidenceProvider := o.allocationProvider(writer)
+	config.AllocationProvider = allocationProvider
+	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
+	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 
@@ -214,11 +222,15 @@ func (o *options) labels() model.CanonicalLabels {
 
 func (o *options) allocationProvider(
 	writer *metricskubernetes.AnnotationWriter,
-) allocation.Provider {
+) (
+	allocation.Provider,
+	neutreemetrics.KubernetesAcceleratorEvidenceProvider,
+	neutreemetrics.StaticAcceleratorEvidenceProvider,
+) {
 	switch o.clusterType {
 	case clusterTypeKubernetes:
 		if writer == nil {
-			return nil
+			return nil, nil, nil
 		}
 
 		kubernetesProvider := allocation.KubernetesAllocationProvider{
@@ -235,20 +247,22 @@ func (o *options) allocationProvider(
 
 		return allocation.MultiProvider{
 			Providers: []allocation.Provider{kubernetesProvider, hamiProvider},
-		}
+		}, kubernetesProvider, nil
 	case clusterTypeRay:
 		if o.rayDashboardURL == "" {
-			return nil
+			return nil, nil, nil
 		}
 
-		return allocation.RayServeAllocationProvider{
+		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
 			Node:         o.node,
 			NodeIP:       o.nodeIP,
 			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
 		}
+
+		return rayProvider, nil, rayProvider
 	default:
-		return nil
+		return nil, nil, nil
 	}
 }
 

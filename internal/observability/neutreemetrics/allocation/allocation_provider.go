@@ -15,12 +15,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
 )
 
-const endpointWorkloadType = "endpoint"
+const (
+	endpointWorkloadType = "endpoint"
+	defaultProcFSRoot    = "/proc"
+)
 
 type Provider interface {
 	Allocations(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
@@ -79,6 +83,30 @@ type KubernetesAllocationProvider struct {
 	Client       client.Client
 	NodeName     string
 	PodResources PodResourceLister
+}
+
+func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
+	ctx context.Context,
+) (adapter.KubernetesAcceleratorEvidence, error) {
+	if p.Client == nil || p.NodeName == "" || p.PodResources == nil {
+		return adapter.KubernetesAcceleratorEvidence{}, nil
+	}
+
+	podResources, err := p.PodResources.ListPodResources(ctx)
+	if err != nil {
+		return adapter.KubernetesAcceleratorEvidence{}, err
+	}
+
+	pods, err := p.localEndpointPods(ctx)
+	if err != nil {
+		return adapter.KubernetesAcceleratorEvidence{}, err
+	}
+
+	return adapter.KubernetesAcceleratorEvidence{
+		AllocationAvailable: true,
+		PodResources:        append([]model.PodResource{}, podResources...),
+		EndpointPods:        endpointPodEvidence(pods),
+	}, nil
 }
 
 func (p KubernetesAllocationProvider) Allocations(
@@ -154,14 +182,138 @@ func (p KubernetesAllocationProvider) podAllocation(
 	return allocation, true, nil
 }
 
+func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod, error) {
+	podList := &corev1.PodList{}
+	if err := p.Client.List(
+		ctx,
+		podList,
+		client.MatchingFields{"spec.nodeName": p.NodeName},
+		client.MatchingLabels{"app": endpointWorkloadType},
+	); err != nil {
+		return nil, err
+	}
+
+	pods := make([]corev1.Pod, 0)
+
+	for _, pod := range podList.Items {
+		if pod.Spec.NodeName != p.NodeName || terminalPodPhase(pod.Status.Phase) {
+			continue
+		}
+
+		labels := pod.GetLabels()
+		if labels["app"] != endpointWorkloadType || labels["endpoint"] == "" {
+			continue
+		}
+
+		pods = append(pods, pod)
+	}
+
+	sort.SliceStable(pods, func(i, j int) bool {
+		if pods[i].Namespace != pods[j].Namespace {
+			return pods[i].Namespace < pods[j].Namespace
+		}
+
+		return pods[i].Name < pods[j].Name
+	})
+
+	return pods, nil
+}
+
+func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
+	evidence := make([]adapter.EndpointPodEvidence, 0, len(pods))
+	for _, pod := range pods {
+		evidence = append(evidence, adapter.EndpointPodEvidence{
+			Namespace:   pod.Namespace,
+			Name:        pod.Name,
+			UID:         string(pod.UID),
+			NodeName:    pod.Spec.NodeName,
+			Labels:      copyStringMap(pod.Labels),
+			Annotations: copyStringMap(pod.Annotations),
+		})
+	}
+
+	return evidence
+}
+
+func copyStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+
+	result := make(map[string]string, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+
+	return result
+}
+
+func terminalPodPhase(phase corev1.PodPhase) bool {
+	return phase == corev1.PodSucceeded || phase == corev1.PodFailed
+}
+
 type RayServeAllocationProvider struct {
-	Dashboard    dashboard.DashboardService
-	DashboardURL string
-	Node         string
-	NodeIP       string
-	ProcEnv      ProcessEnvReader
-	GPUProcesses GPUProcessReader
-	ProcessTree  ProcessTreeReader
+	Dashboard          dashboard.DashboardService
+	DashboardURL       string
+	Node               string
+	NodeIP             string
+	ProcEnv            ProcessEnvReader
+	GPUProcesses       GPUProcessReader
+	ProcessTree        ProcessTreeReader
+	ProcessDescendants ProcessDescendantReader
+}
+
+func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
+	ctx context.Context,
+) (adapter.StaticAcceleratorEvidence, error) {
+	service := p.dashboardService()
+	if service == nil || p.NodeIP == "" {
+		return adapter.StaticAcceleratorEvidence{}, nil
+	}
+
+	nodeID, err := p.rayNodeID(service)
+	if err != nil || nodeID == "" {
+		return adapter.StaticAcceleratorEvidence{}, err
+	}
+
+	actorsResp, err := service.ListActors(
+		[]dashboard.ActorFilter{{Key: "node_id", Predicate: "=", Value: nodeID}},
+		true,
+		0,
+	)
+	if err != nil {
+		return adapter.StaticAcceleratorEvidence{}, err
+	}
+
+	actors := []dashboard.Actor{}
+	if actorsResp != nil {
+		actors = append(actors, actorsResp.Data.Result.Result...)
+	}
+
+	envReader := p.processEnvReader()
+	descendantReader := p.processDescendantReader()
+	actorProcesses := make(map[int]adapter.ProcessInfo, len(actors))
+
+	for _, actor := range actors {
+		if actor.PID <= 0 {
+			continue
+		}
+
+		info, ok := p.actorProcessInfo(actor.PID, envReader, descendantReader)
+		if !ok {
+			continue
+		}
+
+		actorProcesses[actor.PID] = info
+	}
+
+	return adapter.StaticAcceleratorEvidence{
+		AllocationAvailable: true,
+		RayEvidence: adapter.RayEvidence{
+			Actors:         actors,
+			ActorProcesses: actorProcesses,
+		},
+	}, nil
 }
 
 func (p RayServeAllocationProvider) Allocations(
@@ -276,6 +428,82 @@ func (p RayServeAllocationProvider) processTreeReader() ProcessTreeReader {
 	return ProcFSProcessTreeReader{}
 }
 
+func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantReader {
+	if p.ProcessDescendants != nil {
+		return p.ProcessDescendants
+	}
+
+	return ProcFSProcessTreeReader{Root: p.procFSRoot()}
+}
+
+func (p RayServeAllocationProvider) actorProcessInfo(
+	pid int,
+	envReader ProcessEnvReader,
+	descendantReader ProcessDescendantReader,
+) (adapter.ProcessInfo, bool) {
+	if pid <= 0 {
+		return adapter.ProcessInfo{}, false
+	}
+
+	info := adapter.ProcessInfo{
+		PID:            pid,
+		DescendantPIDs: actorDescendantPIDs(descendantReader, pid),
+	}
+
+	if env, err := envReader.Env(pid); err == nil {
+		info.Environment = env
+	}
+
+	if parentPID, ok, err := processParentPID(p.procFSRoot(), pid); err == nil && ok {
+		info.ParentPID = parentPID
+	}
+
+	return info, true
+}
+
+func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
+	pids := []int{pid}
+	if reader == nil {
+		return pids
+	}
+
+	descendants, err := reader.DescendantPIDs(pid)
+	if err != nil {
+		return pids
+	}
+
+	seen := map[int]struct{}{pid: {}}
+
+	for _, descendant := range descendants {
+		if descendant <= 0 {
+			continue
+		}
+
+		seen[descendant] = struct{}{}
+	}
+
+	pids = pids[:0]
+	for descendant := range seen {
+		pids = append(pids, descendant)
+	}
+
+	sort.Ints(pids)
+
+	return pids
+}
+
+func (p RayServeAllocationProvider) procFSRoot() string {
+	if reader, ok := p.ProcEnv.(ProcFSEnvReader); ok && strings.TrimSpace(reader.Root) != "" {
+		return reader.Root
+	}
+
+	if reader, ok := p.ProcessTree.(ProcFSProcessTreeReader); ok && strings.TrimSpace(reader.Root) != "" {
+		return reader.Root
+	}
+
+	return defaultProcFSRoot
+}
+
 type ProcessEnvReader interface {
 	Env(pid int) (map[string]string, error)
 }
@@ -293,7 +521,7 @@ type ProcFSEnvReader struct {
 func (r ProcFSEnvReader) Env(pid int) (map[string]string, error) {
 	root := r.Root
 	if root == "" {
-		root = "/proc"
+		root = defaultProcFSRoot
 	}
 
 	raw, err := os.ReadFile(filepath.Join(root, strconv.Itoa(pid), "environ"))
@@ -420,6 +648,19 @@ func (f ProcessTreeReaderFunc) IsDescendant(pid, ancestorPID int) (bool, error) 
 	return f(pid, ancestorPID)
 }
 
+// ProcessDescendantReader observes the generic process topology rooted at an
+// actor PID. It deliberately does not interpret accelerator-specific process
+// metadata; adapters use the returned PIDs to join their own exporter data.
+type ProcessDescendantReader interface {
+	DescendantPIDs(ancestorPID int) ([]int, error)
+}
+
+type ProcessDescendantReaderFunc func(ancestorPID int) ([]int, error)
+
+func (f ProcessDescendantReaderFunc) DescendantPIDs(ancestorPID int) ([]int, error) {
+	return f(ancestorPID)
+}
+
 type ProcFSProcessTreeReader struct {
 	Root string
 }
@@ -435,7 +676,7 @@ func (r ProcFSProcessTreeReader) IsDescendant(pid, ancestorPID int) (bool, error
 
 	root := r.Root
 	if root == "" {
-		root = "/proc"
+		root = defaultProcFSRoot
 	}
 
 	seen := map[int]struct{}{}
@@ -461,6 +702,49 @@ func (r ProcFSProcessTreeReader) IsDescendant(pid, ancestorPID int) (bool, error
 	}
 
 	return false, nil
+}
+
+// DescendantPIDs returns the actor PID and all observable descendants beneath
+// it. A process can exit while /proc is being scanned, so individual lookup
+// failures are ignored and callers still receive the usable partial topology.
+func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) {
+	if ancestorPID <= 0 {
+		return nil, nil
+	}
+
+	root := r.Root
+	if root == "" {
+		root = defaultProcFSRoot
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+
+	pids := []int{ancestorPID}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 || pid == ancestorPID {
+			continue
+		}
+
+		isDescendant, err := r.IsDescendant(pid, ancestorPID)
+		if err != nil || !isDescendant {
+			continue
+		}
+
+		pids = append(pids, pid)
+	}
+
+	sort.Ints(pids)
+
+	return pids, nil
 }
 
 func processParentPID(root string, pid int) (int, bool, error) {
