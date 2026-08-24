@@ -8,7 +8,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestValidateClusterVersionEligibility(t *testing.T) {
+func TestValidateClusterVersionCompatibility(t *testing.T) {
 	info := &v1.ReleaseInfo{Spec: &v1.ReleaseInfoSpec{
 		DefaultClusterVersion:      "v1.2.0",
 		CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
@@ -29,7 +29,7 @@ func TestValidateClusterVersionEligibility(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateClusterVersionEligibility(info, tt.version)
+			err := ValidateClusterVersionCompatibility(info, tt.version)
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 				return

@@ -6,9 +6,9 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// ValidateClusterVersionEligibility checks whether one exact Cluster version
-// belongs to the compatibility policy declared by a ReleaseInfo.
-func ValidateClusterVersionEligibility(info *v1.ReleaseInfo, clusterVersion string) error {
+// ValidateClusterVersionCompatibility checks whether one exact Cluster version
+// is compatible with the policy declared by a ReleaseInfo.
+func ValidateClusterVersionCompatibility(info *v1.ReleaseInfo, clusterVersion string) error {
 	if info == nil || info.Spec == nil {
 		return fmt.Errorf("release info spec is required")
 	}

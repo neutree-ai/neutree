@@ -106,7 +106,7 @@ func runNeutreeCorePreflight(rawClusters []json.RawMessage, target *v1.ReleaseIn
 		}
 
 		version := effectivePreflightClusterVersion(&cluster)
-		if err := releaseprofile.ValidateClusterVersionEligibility(target, version); err != nil {
+		if err := releaseprofile.ValidateClusterVersionCompatibility(target, version); err != nil {
 			incompatible++
 			_, _ = fmt.Fprintf(output, "%s: %s (%v)\n", preflightClusterReference(&cluster), preflightVersionForOutput(version), err)
 		}
