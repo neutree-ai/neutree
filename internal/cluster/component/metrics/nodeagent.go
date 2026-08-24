@@ -55,6 +55,7 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 	}
 
 	capabilities := make([]corev1.Capability, 0)
+
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
 			capabilities = append(capabilities, corev1.Capability(capability))
@@ -66,10 +67,12 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 	}
 
 	securityContext := &corev1.SecurityContext{}
+
 	if runtime.Privileged {
 		privileged := true
 		securityContext.Privileged = &privileged
 	}
+
 	if len(capabilities) > 0 {
 		securityContext.Capabilities = &corev1.Capabilities{Add: capabilities}
 	}

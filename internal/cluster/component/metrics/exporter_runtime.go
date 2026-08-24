@@ -27,6 +27,7 @@ func buildComponentVolumes(
 	}
 
 	volumes := make([]corev1.Volume, 0, len(componentVolumes))
+
 	for _, componentVolume := range componentVolumes {
 		volume := corev1.Volume{Name: componentVolume.Name}
 		if hostPath := componentHostPath(componentVolume.HostPath); hostPath != nil {
@@ -37,6 +38,7 @@ func buildComponentVolumes(
 	}
 
 	mounts := make([]corev1.VolumeMount, 0, len(componentMounts))
+
 	for _, componentMount := range componentMounts {
 		readOnly := true
 		if componentMount.ReadOnly != nil {
@@ -59,6 +61,7 @@ func componentHostPath(source *v1.ComponentHostPathVolumeSource) *corev1.HostPat
 	}
 
 	hostPathType := corev1.HostPathType(source.Type)
+
 	switch source.Type {
 	case v1.ComponentHostPathTypeDirectory:
 		hostPathType = corev1.HostPathDirectory

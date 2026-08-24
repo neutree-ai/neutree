@@ -97,11 +97,7 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	candidates := make([]metricsAcceleratorExporter, 0, len(acceleratorTypes))
 
 	for _, acceleratorType := range acceleratorTypes {
-		exporter, ok, err := m.buildAcceleratorExporter(ctx, acceleratorType)
-		if err != nil {
-			return nil, fmt.Errorf("build accelerator exporter for %s: %w", acceleratorType, err)
-		}
-
+		exporter, ok := m.buildAcceleratorExporter(ctx, acceleratorType)
 		if ok {
 			candidates = append(candidates, exporter)
 		}
@@ -121,15 +117,15 @@ func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExport
 func (m *MetricsComponent) buildAcceleratorExporter(
 	ctx context.Context,
 	acceleratorType string,
-) (metricsAcceleratorExporter, bool, error) {
+) (metricsAcceleratorExporter, bool) {
 	profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
 	if err != nil {
 		klog.V(4).Infof("skip accelerator metrics exporter for %s: failed to get accelerator profile: %v", acceleratorType, err)
-		return metricsAcceleratorExporter{}, false, nil
+		return metricsAcceleratorExporter{}, false
 	}
 
 	if profile == nil || profile.MetricsExporter == nil {
-		return metricsAcceleratorExporter{}, false, nil
+		return metricsAcceleratorExporter{}, false
 	}
 
 	exporterProfile := profile.MetricsExporter
@@ -164,7 +160,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Volumes:          volumes,
 	}
 
-	return exporter, true, nil
+	return exporter, true
 }
 
 func acceleratorExporterName(acceleratorType string, exporterName string) string {
