@@ -31,25 +31,6 @@ func NormalizeControlPlaneRelease(buildIdentity string) (string, error) {
 	return buildIdentity, nil
 }
 
-// IsDevelopmentOrDirtyBuild reports whether a build must resolve a persisted
-// baseline instead of using its own identity.
-func IsDevelopmentOrDirtyBuild(buildIdentity string) bool {
-	identity := strings.TrimSpace(buildIdentity)
-	if IsWorkflowShortCommitBuild(identity) {
-		return true
-	}
-
-	for _, part := range strings.FieldsFunc(strings.ToLower(identity), func(r rune) bool {
-		return r == '.' || r == '-' || r == '+'
-	}) {
-		if part == "dev" || part == "dirty" {
-			return true
-		}
-	}
-
-	return false
-}
-
 // IsWorkflowShortCommitBuild reports whether the identity is the release
 // workflow's short-commit build value.
 func IsWorkflowShortCommitBuild(buildIdentity string) bool {

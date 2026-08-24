@@ -53,11 +53,8 @@ func TestCatalogAndBuilderReturnDefensiveCopies(t *testing.T) {
 	assert.Equal(t, "v1.1.1", actual.Spec.Components[v1.SSHClusterType].RayRuntime.Tag)
 }
 
-func TestCatalogBoundaryErrors(t *testing.T) {
-	_, err := NewCatalog(CatalogSpec{})
-	require.Error(t, err)
-
-	_, err = NewBuilderForCatalog(nil)
+func TestBuilderBoundaryErrors(t *testing.T) {
+	_, err := NewBuilderForCatalog(nil)
 	require.ErrorContains(t, err, "catalog is required")
 
 	var catalog *Catalog
@@ -69,7 +66,6 @@ func TestCatalogBoundaryErrors(t *testing.T) {
 	require.ErrorContains(t, err, "builder is required")
 	_, err = builder.BuildClusterProfiles("v1.2.0")
 	require.ErrorContains(t, err, "builder is required")
-
 }
 
 func profileNames(profiles []*v1.ClusterProfile) []string {

@@ -69,14 +69,12 @@ func BuiltinCatalog() *Catalog {
 	return builtinCatalog()
 }
 
-// NewCatalog validates and freezes a release catalog.
+// NewCatalog freezes a release catalog supplied by the Core build.
+//
+// The error return is retained for existing edition injection callers. Catalog
+// contents are owned by the build and are intentionally not revalidated here.
 func NewCatalog(spec CatalogSpec) (*Catalog, error) {
-	catalog := &Catalog{spec: cloneCatalogSpec(spec)}
-	if err := validateCatalog(catalog); err != nil {
-		return nil, err
-	}
-
-	return catalog, nil
+	return &Catalog{spec: cloneCatalogSpec(spec)}, nil
 }
 
 // Spec returns a defensive copy suitable for creating a derived Catalog.
@@ -89,7 +87,7 @@ func (catalog *Catalog) Spec() CatalogSpec {
 }
 
 // InjectCatalog replaces the process catalog during Core initialization.
-// The caller owns injection order and supplies a validated Catalog.
+// The caller owns injection order and supplies the Catalog.
 func InjectCatalog(catalog *Catalog) {
 	processCatalog = catalog
 }
@@ -104,17 +102,12 @@ func builtinCatalog() *Catalog {
 		profiles = append(profiles, builtinClusterProfile(version))
 	}
 
-	catalog, err := NewCatalog(CatalogSpec{
+	return &Catalog{spec: CatalogSpec{
 		CurrentReleaseInfoBaseline: builtinCurrentReleaseInfoBaseline,
 		DefaultClusterVersion:      "v1.2.0",
 		CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
 		ClusterProfiles:            profiles,
-	})
-	if err != nil {
-		panic(fmt.Sprintf("invalid built-in release profile catalog: %v", err))
-	}
-
-	return catalog
+	}}
 }
 
 func builtinClusterProfile(clusterVersion string) *v1.ClusterProfile {
@@ -144,50 +137,6 @@ func builtinClusterProfile(clusterVersion string) *v1.ClusterProfile {
 			},
 		}},
 	}
-}
-
-func validateCatalog(catalog *Catalog) error {
-	if catalog == nil {
-		return fmt.Errorf("release profile catalog is required")
-	}
-
-	info, err := catalog.buildReleaseInfo(catalog.spec.CurrentReleaseInfoBaseline)
-	if err != nil {
-		return err
-	}
-
-	if err := ValidateReleaseInfo(info); err != nil {
-		return err
-	}
-
-	profiles, err := catalog.buildClusterProfiles(catalog.spec.CurrentReleaseInfoBaseline)
-	if err != nil {
-		return err
-	}
-
-	if len(profiles) == 0 {
-		return fmt.Errorf("cluster profile catalog is empty")
-	}
-
-	seen := make(map[string]struct{}, len(profiles))
-	for _, profile := range profiles {
-		if err := ValidateProfileEligibility(info, profile); err != nil {
-			return err
-		}
-
-		name := profile.GetName()
-		if _, found := seen[name]; found {
-			return fmt.Errorf("duplicate cluster profile %q", name)
-		}
-
-		seen[name] = struct{}{}
-	}
-
-	if _, found := seen[info.Spec.DefaultClusterVersion]; !found {
-		return fmt.Errorf("cluster profile catalog is missing default cluster version %q", info.Spec.DefaultClusterVersion)
-	}
-
-	return nil
 }
 
 func (catalog *Catalog) buildReleaseInfo(baseline string) (*v1.ReleaseInfo, error) {
@@ -244,12 +193,7 @@ func cloneCatalog(catalog *Catalog) *Catalog {
 		return nil
 	}
 
-	copy, err := NewCatalog(catalog.Spec())
-	if err != nil {
-		panic(fmt.Sprintf("clone release profile catalog: %v", err))
-	}
-
-	return copy
+	return &Catalog{spec: cloneCatalogSpec(catalog.spec)}
 }
 
 func cloneCatalogSpec(spec CatalogSpec) CatalogSpec {

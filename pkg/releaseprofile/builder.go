@@ -30,10 +30,6 @@ func NewBuilderForCatalog(catalog *Catalog) (Builder, error) {
 		return nil, fmt.Errorf("release profile catalog is required")
 	}
 
-	if err := validateCatalog(catalog); err != nil {
-		return nil, err
-	}
-
 	return &catalogBuilder{catalog: cloneCatalog(catalog)}, nil
 }
 
