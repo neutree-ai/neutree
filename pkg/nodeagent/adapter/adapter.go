@@ -219,6 +219,7 @@ func (s HardwareSnapshot) Clone() HardwareSnapshot {
 
 	if len(s.Details) > 0 {
 		result.Details = make([]HardwareDetails, 0, len(s.Details))
+
 		for _, detail := range s.Details {
 			copied := detail
 			copied.DeviceAliases = append([]string(nil), detail.DeviceAliases...)
