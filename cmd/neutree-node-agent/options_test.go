@@ -45,6 +45,26 @@ func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 	}, config.ScrapeTargetProvider)
 }
 
+func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = v1.AcceleratorTypeNVIDIAGPU.String()
+	opts.acceleratorExporterPort = 8082
+	opts.acceleratorExporterPath = "/custom-metrics"
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Equal(t, clusterTypeRay, config.ClusterType)
+	assert.Equal(t, 8082, config.AcceleratorExporterPort)
+	assert.Equal(t, "/custom-metrics", config.AcceleratorExporterMetricsPath)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		MetricsMode:                    neutreemetrics.MetricsModeManaged,
+		AcceleratorExporterPort:        8082,
+		AcceleratorExporterMetricsPath: "/custom-metrics",
+	}, config.ScrapeTargetProvider)
+}
+
 func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
 	opts := newOptions()
 

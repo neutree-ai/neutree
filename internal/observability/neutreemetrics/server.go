@@ -35,9 +35,18 @@ type Config struct {
 	ListenAddress        string
 	Labels               model.CanonicalLabels
 	ScrapeTargetProvider ScrapeTargetProvider
+	// ClusterType identifies the deployment topology selected by the planner.
+	// It is carried with the explicit accelerator configuration so capability
+	// dispatch can remain topology-aware as adapters evolve.
+	ClusterType string
 	// AcceleratorType selects the accelerator adapter from the registry when
 	// non-empty. Empty keeps the legacy DCGM normalizer path.
 	AcceleratorType string
+	// AcceleratorExporterPort and AcceleratorExporterMetricsPath are the
+	// planner-projected local exporter coordinates for an explicit adapter.
+	// Zero values preserve the legacy target selection behavior.
+	AcceleratorExporterPort        int
+	AcceleratorExporterMetricsPath string
 	// Accelerators is the registered accelerator adapter registry used to
 	// resolve AcceleratorType to an adapter.
 	Accelerators map[string]adapter.Accelerator

@@ -257,7 +257,15 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 
 	keys := make([]string, 0, len(env))
 	for key := range env {
+		if key == v1.NodeAgentAdapterProfileKey {
+			continue
+		}
+
 		keys = append(keys, key)
+	}
+
+	if len(keys) == 0 {
+		return nil
 	}
 
 	sort.Strings(keys)

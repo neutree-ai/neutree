@@ -191,6 +191,8 @@ func buildNodeAgentComponent(
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
 
+	args = append(args, nodeAgentAdapterArgs(cluster, profile)...)
+
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
@@ -221,6 +223,40 @@ func buildNodeAgentComponent(
 	}
 }
 
+func nodeAgentAdapterArgs(
+	cluster *v1.StaticNodeCluster,
+	profile *v1.AcceleratorProfile,
+) []string {
+	if acceleratorExporterMode(cluster) != v1.ClusterAcceleratorExporterModeManaged ||
+		!usesNodeAgentAdapterProfile(profile) {
+		return nil
+	}
+
+	exporter := acceleratorExporterProfile(profile)
+	if profile == nil || strings.TrimSpace(profile.AcceleratorType) == "" ||
+		!validAcceleratorExporterProfile(exporter) {
+		return nil
+	}
+
+	return []string{
+		"--accelerator-type=" + profile.AcceleratorType,
+		fmt.Sprintf("--accelerator-exporter-port=%d", exporter.Port),
+		"--accelerator-exporter-metrics-path=" + exporterMetricsPath(exporter),
+	}
+}
+
+func usesNodeAgentAdapterProfile(profile *v1.AcceleratorProfile) bool {
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil {
+		return false
+	}
+
+	return strings.EqualFold(
+		strings.TrimSpace(exporter.Env[v1.NodeAgentAdapterProfileKey]),
+		"true",
+	)
+}
+
 func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
 	exporter := acceleratorExporterProfile(profile)
 	if exporter == nil || len(exporter.Env) == 0 {
@@ -234,6 +270,10 @@ func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
 	env := map[string]string{}
 
 	for key, value := range exporter.Env {
+		if key == v1.NodeAgentAdapterProfileKey {
+			continue
+		}
+
 		if _, ok := allowed[key]; !ok {
 			continue
 		}
@@ -291,7 +331,15 @@ func copyMetricsStringMap(values map[string]string) map[string]string {
 
 	copied := make(map[string]string, len(values))
 	for key, value := range values {
+		if key == v1.NodeAgentAdapterProfileKey {
+			continue
+		}
+
 		copied[key] = value
+	}
+
+	if len(copied) == 0 {
+		return nil
 	}
 
 	return copied

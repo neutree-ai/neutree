@@ -791,9 +791,10 @@ func TestBuildMetricsResourcesProjectsMatchedExporterEnvToNodeAgent(t *testing.T
 						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
 						Port:  19400,
 						Env: map[string]string{
-							"NVIDIA_VISIBLE_DEVICES":     "all",
-							"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
-							"UNRELATED_EXPORTER_ENV":     "must-not-project",
+							"NVIDIA_VISIBLE_DEVICES":      "all",
+							"NVIDIA_DRIVER_CAPABILITIES":  "utility,compute",
+							"UNRELATED_EXPORTER_ENV":      "must-not-project",
+							v1.NodeAgentAdapterProfileKey: "true",
 						},
 						Runtime: &v1.AcceleratorExporterRuntimeProfile{
 							NodeSelector: map[string]string{
@@ -831,6 +832,7 @@ func TestBuildMetricsResourcesProjectsMatchedExporterEnvToNodeAgent(t *testing.T
 				"NVIDIA_VISIBLE_DEVICES",
 				"NVIDIA_DRIVER_CAPABILITIES",
 				"UNRELATED_EXPORTER_ENV",
+				v1.NodeAgentAdapterProfileKey,
 			} {
 				if _, ok := tc.wantNodeAgentEnv[name]; !ok {
 					assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
@@ -843,6 +845,10 @@ func TestBuildMetricsResourcesProjectsMatchedExporterEnvToNodeAgent(t *testing.T
 				managedExporterFound = managedExporterFound || isManagedExporter
 			}
 			assert.Equal(t, tc.wantManagedExporter, managedExporterFound)
+			if tc.wantManagedExporter {
+				exporter := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+				assert.Assert(t, !hasEnv(exporter.Spec.Template.Spec.Containers[0].Env, v1.NodeAgentAdapterProfileKey))
+			}
 		})
 	}
 }
