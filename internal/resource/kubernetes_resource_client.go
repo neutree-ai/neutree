@@ -517,16 +517,18 @@ func buildKubernetesNeutreeAcceleratorResources(
 		}
 
 		addKubernetesNeutreeProductResource(allocatableGroup, product, 1, allocatable)
+		var availablePool *v1.DeviceResourcePool
+
+		if hasDeviceAvailableCapacity(available) {
+			availablePool = available
+		}
+
 		addKubernetesNeutreeProductResource(
 			availableGroup,
 			product,
 			deviceAvailableEquivalentQuantity(allocatable, available),
-			nil,
+			availablePool,
 		)
-
-		if hasDeviceAvailableCapacity(available) {
-			addKubernetesNeutreeProductResource(availableGroup, product, 0, available)
-		}
 
 		if _, exists := metadata.Products[product]; !exists && allocatable.MemoryMiB > 0 {
 			metadata.Products[product] = &v1.AcceleratorProductMetadata{
