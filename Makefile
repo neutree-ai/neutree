@@ -437,11 +437,12 @@ ENGINE_IMAGES ?= nvidia_gpu:neutree/engine-vllm:$(ENGINE_VLLM_IMAGE_TAG)
 ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
 ENGINE_PACKAGE_MIRROR_REGISTRY ?=
+ENGINE_PACKAGE_URL ?=
 
 .PHONY: build-engine-package
-build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION, ENGINE_PACKAGE_MIRROR_REGISTRY)
+build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION, ENGINE_PACKAGE_MIRROR_REGISTRY, ENGINE_PACKAGE_URL)
 	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
-	bash $(ENGINE_PACKAGE_SCRIPT) \
+	OUTPUT_DIR="$(ENGINE_PACKAGE_OUTPUT_DIR)" bash $(ENGINE_PACKAGE_SCRIPT) \
 		-n $(ENGINE_NAME) \
 		-v $(ENGINE_VERSION) \
 		-i "$(ENGINE_IMAGES)" \
@@ -449,20 +450,28 @@ build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENG
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		$(if $(ENGINE_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(ENGINE_PACKAGE_MIRROR_REGISTRY)) \
+		$(if $(ENGINE_PACKAGE_URL),--package-url "$(ENGINE_PACKAGE_URL)") \
 		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
 		-d "$(ENGINE_DESCRIPTION)"
 
 .PHONY: build-engine-manifest
 build-engine-manifest: ## Build engine manifest only (no Docker image export, configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION)
 	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
-	bash $(ENGINE_PACKAGE_SCRIPT) --manifest-only \
+	OUTPUT_DIR="$(ENGINE_PACKAGE_OUTPUT_DIR)" bash $(ENGINE_PACKAGE_SCRIPT) --manifest-only \
 		-n $(ENGINE_NAME) \
 		-v $(ENGINE_VERSION) \
 		-i "$(ENGINE_IMAGES)" \
 		-s "$(ENGINE_TASKS)" \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
+		$(if $(ENGINE_PACKAGE_URL),--package-url "$(ENGINE_PACKAGE_URL)") \
 		-d "$(ENGINE_DESCRIPTION)"
+
+.PHONY: test-engine-package-builder
+test-engine-package-builder: ## Run deterministic engine package builder tests
+	bash scripts/builder/test-release-engine-package.sh
+	bash scripts/builder/test-publish-engine-package.sh
+	go test ./scripts/builder/verify_engine_package
 
 ##@ Cluster Package
 

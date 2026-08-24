@@ -45,6 +45,26 @@ strip_image_registry() {
     fi
 }
 
+parse_image_spec() {
+    local spec="$1"
+    local image_with_tag
+
+    if [[ "$spec" != *:* ]]; then
+        print_error "Invalid image specification '$spec': expected accelerator:image:tag"
+        exit 1
+    fi
+
+    ACCELERATOR="${spec%%:*}"
+    image_with_tag="${spec#*:}"
+    IMAGE_NAME="${image_with_tag%:*}"
+    IMAGE_TAG="${image_with_tag##*:}"
+
+    if [ -z "$ACCELERATOR" ] || [ -z "$IMAGE_NAME" ] || [ -z "$IMAGE_TAG" ] || [ "$IMAGE_NAME" = "$image_with_tag" ] || [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+        print_error "Invalid image specification '$spec': expected accelerator:image:tag"
+        exit 1
+    fi
+}
+
 image_exists_for_platform() {
     local image="$1"
     local platform="$2"
@@ -217,6 +237,7 @@ Options:
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
+    --package-url URL         URL of the complete archive for standalone manifest imports
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -300,6 +321,7 @@ OUTPUT_FILE=""
 DESCRIPTION=""
 PLATFORM="linux/amd64"
 MIRROR_REGISTRY=""
+PACKAGE_URL=""
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
 # declaring false: an engine version with no capabilities block keeps the
@@ -381,6 +403,14 @@ while [[ $# -gt 0 ]]; do
             MIRROR_REGISTRY="$2"
             shift 2
             ;;
+        --package-url)
+            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
+                print_error "$1 requires a value"
+                exit 1
+            fi
+            PACKAGE_URL="$2"
+            shift 2
+            ;;
         --manifest-only)
             MANIFEST_ONLY="true"
             shift
@@ -418,6 +448,16 @@ if [ -z "$IMAGES" ]; then
     exit 1
 fi
 
+if [ -n "$PACKAGE_URL" ] && [[ ! "$PACKAGE_URL" =~ ^https?://[^[:space:]\"\\]+$ ]]; then
+    print_error "--package-url must be an HTTP(S) URL without whitespace or quotes"
+    exit 1
+fi
+
+if [ -n "$PACKAGE_URL" ] && [ -n "$MANIFEST_TEMPLATE" ]; then
+    print_error "--package-url cannot be combined with --manifest because package URL injection requires the generated manifest"
+    exit 1
+fi
+
 # Set default output file
 if [ -z "$OUTPUT_FILE" ]; then
     OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}.tar.gz"
@@ -441,6 +481,12 @@ fi
 IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
 IMAGE_ENTRIES=""
 
+# Validate image specifications up front so manifest-only mode enforces the
+# same accelerator:image:tag contract as packaged builds.
+for spec in "${IMAGE_SPECS[@]}"; do
+    parse_image_spec "$spec"
+done
+
 if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
@@ -448,10 +494,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Pull the selected platform before collecting images for export
     ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
@@ -509,10 +552,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
     # Build manifest entries with per-image size from docker inspect
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
         INSPECT_SIZE=$(docker image inspect "$FULL_IMAGE" --format '{{.Size}}')
@@ -530,10 +570,7 @@ else
     print_info "Manifest-only mode: skipping Docker image export"
     COMBINED_TAR_BASENAME="${ENGINE_NAME}-${ENGINE_VERSION}-images.tar"
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
@@ -559,10 +596,7 @@ else
     IMAGES_MAP=""
     IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         IMAGES_MAP="${IMAGES_MAP}
       ${ACCELERATOR}:
@@ -749,6 +783,12 @@ ${PLAYGROUND_BODY}"
         # Add your configuration schema here"
     fi
 
+    PACKAGE_URL_SECTION=""
+    if [ -n "$PACKAGE_URL" ]; then
+        PACKAGE_URL_SECTION="
+  package_url: \"${PACKAGE_URL}\""
+    fi
+
     cat > "$PACKAGE_DIR/manifest.yaml" << EOF
 manifest_version: "1.0"
 
@@ -757,6 +797,7 @@ metadata:
   author: "Neutree Team"
   created_at: "$CREATED_AT"
   version: $VERSION
+${PACKAGE_URL_SECTION}
   tags:
     - "engine"
     - "$ENGINE_NAME"

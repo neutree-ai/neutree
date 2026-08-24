@@ -23,7 +23,7 @@ on:
         description: "the ray version branch/tag to build from"
         required: false
         type: string
-        default: "ray-2.53.0-neutree"
+        default: "ray-2.53.0-neutree-fix"
       ray_short_version:
         description: "ray short version for image tag (e.g: ray2.53.0)"
         required: false
@@ -41,11 +41,20 @@ jobs:
     name: build amd64 vllm engine image
     steps:
       - uses: actions/checkout@v2
-      - name: Validate engine_patch_suffix
-        if: ${{ github.event.inputs.engine_patch_suffix != '' }}
+      - name: Validate release inputs
+        shell: bash
+        env:
+          ENGINE_VERSION: ${{ github.event.inputs.engine_version }}
+          BASE_IMAGE_TAG_OVERRIDE: ${{ github.event.inputs.base_image_tag_override }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
         run: |
-          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
-            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
+          set -euo pipefail
+          [[ "$ENGINE_VERSION" =~ ^v[A-Za-z0-9._-]+$ ]] || { echo "engine_version must start with v and match [A-Za-z0-9._-]+"; exit 1; }
+          [[ -z "$ENGINE_PATCH_SUFFIX" || "$ENGINE_PATCH_SUFFIX" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "engine_patch_suffix must match [A-Za-z0-9._-]+"; exit 1; }
+          [[ "$RAY_SHORT_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "ray_short_version must be a Docker tag segment"; exit 1; }
+          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "base_image_tag_override must be a Docker tag when set"; exit 1; }
+          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION".* || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION"-* ]] || { echo "base_image_tag_override must use the same upstream version as engine_version"; exit 1; }
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -108,3 +117,17 @@ jobs:
           ENGINE_VLLM_ROCM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
+
+  release-package:
+    needs:
+      - push-manifests
+    uses: ./.github/workflows/release-engine-package.yaml
+    with:
+      engine: vllm
+      accelerator: ${{ github.event.inputs.accelerator }}
+      engine_version: ${{ github.event.inputs.engine_version }}
+      base_image_tag_override: ${{ github.event.inputs.base_image_tag_override }}
+      ray_short_version: ${{ github.event.inputs.ray_short_version }}
+      engine_patch_suffix: ${{ github.event.inputs.engine_patch_suffix }}
+      file_server_url: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL }}
+    secrets: inherit

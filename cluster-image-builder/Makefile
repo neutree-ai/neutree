@@ -12,7 +12,7 @@ ACCELERATORS ?= gpu amd-gpu
 ALL_ARCH ?= amd64 arm64
 
 RAY_REPO ?= https://github.com/neutree-ai/ray.git
-RAY_VERSION ?= ray-2.53.0-neutree
+RAY_VERSION ?= ray-2.53.0-neutree-fix
 RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head -c 7)
 
 # Engine image build args
@@ -57,6 +57,8 @@ RAY_SHORT_VERSION ?= ray2.53.0
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
 ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-$(strip $(ENGINE_PATCH_SUFFIX)))
+ENGINE_TYPE ?= vllm
+ENGINE_ACCELERATOR ?= nvidia
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
@@ -163,6 +165,17 @@ docker-push-manifest-amd-gpu: ## Push the amd-gpu manifest docker image.
 .PHONY: docker-push-manifest-gpu
 docker-push-manifest-gpu: ## Push the gpu manifest docker image.
 	docker buildx imagetools create -t $(NEUTREE_SERVE_IMAGE):$(IMAGE_TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_SERVE_IMAGE)\-&:$(IMAGE_TAG)~g")
+
+.PHONY: print-engine-image-ref
+print-engine-image-ref: ## Print accelerator:image:tag for a released engine image
+	@case "$(ENGINE_TYPE):$(ENGINE_ACCELERATOR)" in \
+		vllm:nvidia) printf '%s\n' "nvidia_gpu:$(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		vllm:rocm) printf '%s\n' "amd_gpu:$(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		sglang:nvidia) printf '%s\n' "nvidia_gpu:$(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		sglang:rocm) printf '%s\n' "amd_gpu:$(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		llama-cpp:cpu) printf '%s\n' "ssh_cpu:$(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		*) echo "unsupported engine mapping: $(ENGINE_TYPE):$(ENGINE_ACCELERATOR)" >&2; exit 1 ;; \
+	esac
 
 .PHONY: prepare
 prepare: ## Prepare the build context

@@ -1,0 +1,233 @@
+name: release-engine-package
+
+on:
+  workflow_call:
+    inputs:
+      engine:
+        description: "engine name"
+        required: true
+        type: string
+      accelerator:
+        description: "accelerator segment used in the stable package path"
+        required: true
+        type: string
+      engine_version:
+        description: "upstream engine version (for example v0.24.0)"
+        required: true
+        type: string
+      base_image_tag_override:
+        description: "optional upstream base image tag override"
+        required: false
+        default: ""
+        type: string
+      ray_short_version:
+        description: "short ray version used in image tags"
+        required: false
+        default: "ray2.53.0"
+        type: string
+      engine_patch_suffix:
+        description: "optional neutree patch suffix appended to package and image tags"
+        required: false
+        default: ""
+        type: string
+      file_server_url:
+        description: "base URL of the internal engine package file server"
+        required: true
+        type: string
+
+jobs:
+  release-package:
+    runs-on: ["serve-builder", "X64"]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Validate release inputs
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          ACCELERATOR: ${{ inputs.accelerator }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+          BASE_IMAGE_TAG_OVERRIDE: ${{ inputs.base_image_tag_override }}
+          RAY_SHORT_VERSION: ${{ inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
+          FILE_SERVER_URL: ${{ inputs.file_server_url }}
+        run: |
+          set -euo pipefail
+          case "$ENGINE:$ACCELERATOR" in
+            vllm:nvidia|vllm:rocm|sglang:nvidia|sglang:rocm|llama-cpp:cpu)
+              ;;
+            *)
+              echo "unsupported engine and accelerator combination: $ENGINE:$ACCELERATOR" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$ENGINE_VERSION" =~ ^v[A-Za-z0-9._-]+$ ]] || {
+            echo "engine_version must start with v and match [A-Za-z0-9._-]+" >&2
+            exit 1
+          }
+          [[ "$ENGINE_PATCH_SUFFIX" =~ ^[A-Za-z0-9._-]*$ ]] || {
+            echo "engine_patch_suffix must match [A-Za-z0-9._-]*" >&2
+            exit 1
+          }
+          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
+            echo "base_image_tag_override must be a Docker tag when set" >&2
+            exit 1
+          }
+          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION".* || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION"-* ]] || {
+            echo "base_image_tag_override must use the same upstream version as engine_version" >&2
+            exit 1
+          }
+          [[ "$RAY_SHORT_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
+            echo "ray_short_version must be a Docker tag segment" >&2
+            exit 1
+          }
+          [[ "$FILE_SERVER_URL" =~ ^https?://[^[:space:]\"\\]+$ && "$FILE_SERVER_URL" != *\?* && "$FILE_SERVER_URL" != *\#* ]] || {
+            echo "file_server_url must be an HTTP(S) URL without whitespace or quotes" >&2
+            exit 1
+          }
+
+      - name: Resolve package metadata
+        id: package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          ACCELERATOR: ${{ inputs.accelerator }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+          BASE_IMAGE_TAG_OVERRIDE: ${{ inputs.base_image_tag_override }}
+          RAY_SHORT_VERSION: ${{ inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
+          FILE_SERVER_URL: ${{ inputs.file_server_url }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+        run: |
+          set -euo pipefail
+
+          manifest_version="$ENGINE_VERSION"
+          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
+            manifest_version="${ENGINE_VERSION}-neutree${ENGINE_PATCH_SUFFIX}"
+          fi
+
+          make_args=(
+            -s
+            -C cluster-image-builder
+            print-engine-image-ref
+            "ENGINE_TYPE=$ENGINE"
+            "ENGINE_ACCELERATOR=$ACCELERATOR"
+            "IMAGE_REPO=$IMAGE_REPO"
+            "IMAGE_PROJECT=$IMAGE_PROJECT"
+            "RAY_SHORT_VERSION=$RAY_SHORT_VERSION"
+            "ENGINE_PATCH_SUFFIX=$ENGINE_PATCH_SUFFIX"
+          )
+
+          case "$ENGINE:$ACCELERATOR" in
+            vllm:nvidia)
+              make_args+=(
+                "ENGINE_VLLM_VERSION=$ENGINE_VERSION"
+                "ENGINE_VLLM_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
+              )
+              ;;
+            vllm:rocm)
+              make_args+=(
+                "ENGINE_VLLM_VERSION=$ENGINE_VERSION"
+                "ENGINE_VLLM_ROCM_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
+              )
+              ;;
+            sglang:nvidia)
+              make_args+=(
+                "ENGINE_SGLANG_VERSION=$ENGINE_VERSION"
+                "ENGINE_SGLANG_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
+              )
+              ;;
+            sglang:rocm)
+              sglang_rocm_tag="$ENGINE_VERSION-rocm720-mi30x"
+              if [[ -n "$BASE_IMAGE_TAG_OVERRIDE" ]]; then
+                sglang_rocm_tag="$BASE_IMAGE_TAG_OVERRIDE"
+              fi
+              make_args+=(
+                "ENGINE_SGLANG_VERSION=$ENGINE_VERSION"
+                "ENGINE_SGLANG_ROCM_TAG=$sglang_rocm_tag"
+              )
+              ;;
+            llama-cpp:cpu)
+              make_args+=(
+                "ENGINE_LLAMA_CPP_VERSION=$ENGINE_VERSION"
+              )
+              ;;
+          esac
+
+          image_spec="$(make "${make_args[@]}")"
+          image_ref="${image_spec#*:}"
+          image_tag="${image_ref##*:}"
+          archive_name="$ENGINE-$manifest_version.tar.gz"
+          package_url="${FILE_SERVER_URL%/}/engine-packages/$ENGINE/$manifest_version/$ACCELERATOR/$image_tag/$archive_name"
+          output_dir="$RUNNER_TEMP/engine-package"
+          staging_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$ENGINE-$ACCELERATOR"
+
+          mkdir -p "$output_dir"
+          {
+            printf 'manifest_version=%s\n' "$manifest_version"
+            printf 'image_ref=%s\n' "$image_ref"
+            printf 'package_url=%s\n' "$package_url"
+            printf 'output_dir=%s\n' "$output_dir"
+            printf 'staging_id=%s\n' "$staging_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login docker
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Build engine package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          ACCELERATOR: ${{ inputs.accelerator }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
+          IMAGE_REF: ${{ steps.package.outputs.image_ref }}
+          PACKAGE_URL: ${{ steps.package.outputs.package_url }}
+          OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+          command=(
+            scripts/builder/build-release-engine-package.sh
+            --engine "$ENGINE"
+            --engine-version "$ENGINE_VERSION"
+            --accelerator "$ACCELERATOR"
+            --image-ref "$IMAGE_REF"
+            --package-url "$PACKAGE_URL"
+            --output-dir "$OUTPUT_DIR"
+            --neutree-cli "$GITHUB_WORKSPACE/bin/neutree-cli"
+          )
+          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
+            command+=(--engine-patch-suffix "$ENGINE_PATCH_SUFFIX")
+          fi
+          "${command[@]}"
+
+      - name: Publish engine package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_URL: ${{ steps.package.outputs.package_url }}
+          OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
+          STAGING_ID: ${{ steps.package.outputs.staging_id }}
+        run: |
+          set -euo pipefail
+          scripts/builder/publish-engine-package.sh \
+            --package-url "$PACKAGE_URL" \
+            --archive "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz" \
+            --manifest "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml" \
+            --checksum "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz.sha256" \
+            --staging-id "$STAGING_ID"
