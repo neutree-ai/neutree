@@ -189,13 +189,7 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 	require.NotNil(t, allocatableProduct.Virtualization)
 	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
-	availableGroup := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.NotNil(t, availableGroup)
-	// Aggregate availability stays aligned with Ray, while the snapshot exposes
-	// the remaining per-device memory and compute pool.
-	assert.Equal(t, float64(1), availableGroup.Quantity)
-	assert.Equal(t, float64(1), availableGroup.ProductGroups["NVIDIA_Tesla_T4"])
-	assert.Equal(t, float64(1), availableGroup.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Equal(t, float64(1), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	availableProduct := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
@@ -253,7 +247,7 @@ func TestStaticNodeResourceClientCompletesCPUAndMemoryFromBaseResources(t *testi
 	assert.Equal(t, float64(48), resources.Available.Memory)
 }
 
-func TestStaticNodeResourceClientUsesBaseRayQuantitiesAndSnapshotAvailablePools(t *testing.T) {
+func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
 			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
@@ -322,17 +316,14 @@ func TestStaticNodeResourceClientUsesBaseRayQuantitiesAndSnapshotAvailablePools(
 
 	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 	require.NotNil(t, available)
-	// Static cluster quantity retains native Ray's available capacity while the
-	// snapshot supplies actual per-device resource pools.
 	assert.Equal(t, float64(0.5), available.Quantity)
 	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
 	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
-	// Remaining capacity pool still preserves GPU-def's leftover 7680/50.
 	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
 	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
 
-func TestStaticNodeResourceClientRetainsBaseAvailableQuantityWhenAllCardsFullyAllocated(t *testing.T) {
+func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAvailableDevices(t *testing.T) {
 	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
 			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
@@ -391,14 +382,12 @@ func TestStaticNodeResourceClientRetainsBaseAvailableQuantityWhenAllCardsFullyAl
 
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
-	// Even when the snapshot shows no remaining device pool, group quantity keeps
-	// the base Ray availability contract.
-	availableGroup := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.NotNil(t, availableGroup)
-	assert.Equal(t, float64(0.5), availableGroup.Quantity)
-	assert.Equal(t, float64(0.5), availableGroup.ProductGroups["NVIDIA_Tesla_T4"])
-	assert.Equal(t, float64(0.5), availableGroup.Products["NVIDIA_Tesla_T4"].Quantity)
-	assert.Nil(t, availableGroup.Products["NVIDIA_Tesla_T4"].Virtualization)
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, available)
+	assert.Equal(t, float64(0.5), available.Quantity)
+	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Nil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
 }
 
 func TestStaticNodeResourceClientUsesRayProductKeyFromBaseResources(t *testing.T) {

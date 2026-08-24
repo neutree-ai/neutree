@@ -195,9 +195,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 	if acceleratorType == v1.AcceleratorType(v1.StaticNodeAcceleratorTypeCPU) ||
 		len(node.Status.Accelerator.Devices) == 0 {
-		// No device snapshot (or CPU-only): fall back to native Ray resources.
-		// Ray remains the source of aggregate available quantities; snapshots add
-		// per-device pools when they are available.
 		return staticNodeBaseResourceNode(node, base)
 	}
 
@@ -254,14 +251,8 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		}
 
 		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
-			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 0, availablePool)
+			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
 		}
-	}
-
-	// Always surface the available accelerator group so consumers can rely on a
-	// consistent group shape across cluster types.
-	if nodeStatus.Available.AcceleratorGroups[acceleratorType] == nil {
-		nodeStatus.Available.AcceleratorGroups[acceleratorType] = newAcceleratorGroup()
 	}
 
 	if len(nodeStatus.Devices) == 0 {
@@ -337,9 +328,9 @@ func completeStaticNodeAcceleratorQuantities(
 		return
 	}
 
-	// Static clusters retain native Ray quantities, including fractional available
-	// capacity. Device pools and virtualization details continue to come from the
-	// node-agent snapshot.
+	// Static clusters support fractional GPU quantities. Keep the group-level
+	// quantity aligned with the native Ray dashboard resources, while device
+	// pools and virtualization details still come from the node-agent snapshot.
 	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
 	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
 }
@@ -598,7 +589,7 @@ func addStaticNodeAcceleratorResource(
 	quantity float64,
 	pool *v1.DeviceResourcePool,
 ) {
-	if info == nil || acceleratorType == "" || product == "" || (quantity == 0 && pool == nil) {
+	if info == nil || acceleratorType == "" || product == "" || quantity == 0 {
 		return
 	}
 
