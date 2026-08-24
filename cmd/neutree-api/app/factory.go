@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -116,8 +117,9 @@ type ClustersRegisterFunc func(group *gin.RouterGroup, middlewares []gin.Handler
 func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &clusters.Dependencies{
-			Storage:      deps.Config.Storage,
-			ImageService: registry.NewImageService(),
+			Storage:             deps.Config.Storage,
+			ReleaseInfoProvider: releaseprofile.NewProvider(deps.Config.Storage, deps.Config.Storage),
+			ImageService:        registry.NewImageService(),
 		})
 
 		return nil
