@@ -141,7 +141,6 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
 	runtime := exporterProfile.Runtime
-
 	readinessProbe, err := buildExporterReadinessProbe(exporterProfile.Readiness)
 	if err != nil {
 		return metricsAcceleratorExporter{}, false, err
@@ -281,7 +280,6 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	}
 
 	keys := make([]string, 0, len(env))
-
 	for key := range env {
 		if key == v1.NodeAgentAdapterProfileKey {
 			continue

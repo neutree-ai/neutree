@@ -90,7 +90,6 @@ func buildComponentVolumes(
 		}
 
 		volumesByName[componentVolume.Name] = struct{}{}
-
 		volumeNames = append(volumeNames, componentVolume.Name)
 		volumes = append(volumes, corev1.Volume{
 			Name: componentVolume.Name,
@@ -160,7 +159,6 @@ func buildComponentHostPath(componentVolume v1.ComponentVolume) (*corev1.HostPat
 	}
 
 	var hostPathType corev1.HostPathType
-
 	switch componentVolume.HostPath.Type {
 	case v1.ComponentHostPathTypeDirectory:
 		hostPathType = corev1.HostPathDirectory
@@ -219,7 +217,6 @@ func validateExporterVolumeCollisions(
 
 	configMountNames := make(map[string]struct{}, len(configMounts))
 	configMountPaths := make(map[string]struct{}, len(configMounts))
-
 	for _, mount := range configMounts {
 		configMountNames[mount.Name] = struct{}{}
 		configMountPaths[mount.MountPath] = struct{}{}
