@@ -27,8 +27,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
 				Args:  []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 				Env: map[string]string{
-					"NVIDIA_VISIBLE_DEVICES":      "all",
-					v1.NodeAgentAdapterProfileKey: "true",
+					"NVIDIA_VISIBLE_DEVICES": "all",
 				},
 				Port: 19400,
 				ConfigFiles: []v1.AcceleratorExporterConfigFile{
@@ -157,9 +156,6 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
 	assert.Contains(t, nodeAgent.Args, "--node=head-0")
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
-	assert.Contains(t, nodeAgent.Args, "--accelerator-type="+v1.AcceleratorTypeNVIDIAGPU.String())
-	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-port=19400")
-	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=/metrics")
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nodeAgent.Env)
 	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
 	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
@@ -258,87 +254,6 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 
 	cluster.Spec.Version = "mutated"
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
-}
-
-func TestNodeAgentAdapterProfileProjectionBoundaries(t *testing.T) {
-	profile := &v1.AcceleratorProfile{
-		AcceleratorType: "generic-accelerator",
-		MetricsExporter: &v1.AcceleratorExporterProfile{
-			Name:        "generic-exporter",
-			Image:       "registry.example.com/generic-exporter:test",
-			Port:        8082,
-			MetricsPath: "custom-metrics",
-			Env: map[string]string{
-				"VISIBLE_DEVICE_SET":          "all",
-				v1.NodeAgentAdapterProfileKey: "true",
-			},
-		},
-	}
-
-	tests := []struct {
-		name        string
-		mutate      func(*v1.StaticNodeCluster, *v1.AcceleratorProfile)
-		wantArgs    []string
-		wantRuntime map[string]string
-	}{
-		{
-			name: "managed profile enables complete projection",
-			wantArgs: []string{
-				"--accelerator-type=generic-accelerator",
-				"--accelerator-exporter-port=8082",
-				"--accelerator-exporter-metrics-path=/custom-metrics",
-			},
-			wantRuntime: map[string]string{"VISIBLE_DEVICE_SET": "all"},
-		},
-		{
-			name: "false metadata remains planner-only",
-			mutate: func(_ *v1.StaticNodeCluster, profile *v1.AcceleratorProfile) {
-				profile.MetricsExporter.Env[v1.NodeAgentAdapterProfileKey] = "false"
-			},
-			wantRuntime: map[string]string{"VISIBLE_DEVICE_SET": "all"},
-		},
-		{
-			name: "external mode retains legacy target behavior",
-			mutate: func(cluster *v1.StaticNodeCluster, _ *v1.AcceleratorProfile) {
-				cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
-					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
-						Mode: v1.ClusterAcceleratorExporterModeExternal,
-					},
-				}
-			},
-			wantRuntime: map[string]string{"VISIBLE_DEVICE_SET": "all"},
-		},
-		{
-			name: "incomplete profile does not produce partial arguments",
-			mutate: func(_ *v1.StaticNodeCluster, profile *v1.AcceleratorProfile) {
-				profile.MetricsExporter.Port = 0
-			},
-			wantRuntime: map[string]string{"VISIBLE_DEVICE_SET": "all"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cluster := testStaticNodeCluster()
-			resolvedProfile := *profile
-			exporter := *profile.MetricsExporter
-			exporter.Env = make(map[string]string, len(profile.MetricsExporter.Env))
-			for key, value := range profile.MetricsExporter.Env {
-				exporter.Env[key] = value
-			}
-			resolvedProfile.MetricsExporter = &exporter
-			if tt.mutate != nil {
-				tt.mutate(cluster, &resolvedProfile)
-			}
-
-			args := nodeAgentAdapterArgs(cluster, &resolvedProfile)
-			assert.Equal(t, tt.wantArgs, args)
-
-			renderedExporter := buildAcceleratorExporterComponent(cluster, resolvedProfile.MetricsExporter)
-			assert.Equal(t, tt.wantRuntime, renderedExporter.Env)
-			assert.NotContains(t, renderedExporter.Env, v1.NodeAgentAdapterProfileKey)
-		})
-	}
 }
 
 func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {

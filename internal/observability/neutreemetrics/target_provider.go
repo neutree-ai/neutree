@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,41 +38,20 @@ type ScrapeTargetProvider interface {
 }
 
 type StaticScrapeTargetProvider struct {
-	MetricsMode                    string
-	AcceleratorExporterPort        int
-	AcceleratorExporterMetricsPath string
+	MetricsMode string
 }
 
 func (p StaticScrapeTargetProvider) Targets(_ context.Context, targetType string) ([]ScrapeTarget, error) {
-	port, ok := p.targetPort(targetType)
+	port, ok := targetPort(p.metricsMode(), targetType)
 	if !ok {
 		return nil, nil
 	}
 
-	metricsPath := defaultMetricsPath
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorExporterMetricsPath != "" {
-		metricsPath = normalizedTargetMetricsPath(p.AcceleratorExporterMetricsPath)
-	}
-
-	return scrapeTargetsWithPath(
-		targetType,
-		"127.0.0.1",
-		port,
-		targetSchemes(p.metricsMode(), targetType),
-		metricsPath,
-	), nil
+	return scrapeTargets(targetType, "127.0.0.1", port, targetSchemes(p.metricsMode(), targetType)), nil
 }
 
 func (p StaticScrapeTargetProvider) metricsMode() string {
 	return normalizeMetricsMode(p.MetricsMode)
-}
-
-func (p StaticScrapeTargetProvider) targetPort(targetType string) (int, bool) {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorExporterPort > 0 {
-		return p.AcceleratorExporterPort, true
-	}
-
-	return targetPort(p.metricsMode(), targetType)
 }
 
 type KubernetesScrapeTargetProvider struct {
@@ -146,10 +124,6 @@ func targetPort(metricsMode string, targetType string) (int, bool) {
 }
 
 func scrapeTargets(targetType string, host string, port int, schemes []string) []ScrapeTarget {
-	return scrapeTargetsWithPath(targetType, host, port, schemes, defaultMetricsPath)
-}
-
-func scrapeTargetsWithPath(targetType string, host string, port int, schemes []string, metricsPath string) []ScrapeTarget {
 	result := make([]ScrapeTarget, 0, len(schemes))
 	for _, scheme := range schemes {
 		result = append(result, ScrapeTarget{
@@ -157,25 +131,12 @@ func scrapeTargetsWithPath(targetType string, host string, port int, schemes []s
 			URL: (&url.URL{
 				Scheme: scheme,
 				Host:   fmt.Sprintf("%s:%d", host, port),
-				Path:   normalizedTargetMetricsPath(metricsPath),
+				Path:   defaultMetricsPath,
 			}).String(),
 		})
 	}
 
 	return result
-}
-
-func normalizedTargetMetricsPath(metricsPath string) string {
-	metricsPath = strings.TrimSpace(metricsPath)
-	if metricsPath == "" {
-		return defaultMetricsPath
-	}
-
-	if !strings.HasPrefix(metricsPath, "/") {
-		return "/" + metricsPath
-	}
-
-	return metricsPath
 }
 
 func targetSchemes(metricsMode string, targetType string) []string {

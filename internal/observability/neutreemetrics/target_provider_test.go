@@ -31,33 +31,6 @@ func TestStaticScrapeTargetProviderUsesManagedPorts(t *testing.T) {
 	}, acceleratorTargets)
 }
 
-func TestStaticScrapeTargetProviderUsesExplicitAcceleratorTarget(t *testing.T) {
-	provider := StaticScrapeTargetProvider{
-		MetricsMode:                    MetricsModeManaged,
-		AcceleratorExporterPort:        8082,
-		AcceleratorExporterMetricsPath: "custom-metrics",
-	}
-
-	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
-	require.NoError(t, err)
-	assert.Equal(t, []ScrapeTarget{
-		{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://127.0.0.1:8082/custom-metrics"},
-	}, acceleratorTargets)
-}
-
-func TestStaticScrapeTargetProviderUsesDefaultPathForExplicitPort(t *testing.T) {
-	provider := StaticScrapeTargetProvider{
-		MetricsMode:             MetricsModeManaged,
-		AcceleratorExporterPort: 8082,
-	}
-
-	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
-	require.NoError(t, err)
-	assert.Equal(t, []ScrapeTarget{
-		{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://127.0.0.1:8082/metrics"},
-	}, acceleratorTargets)
-}
-
 func TestStaticScrapeTargetProviderKeepsManagedNodeExporterInExternalMode(t *testing.T) {
 	provider := StaticScrapeTargetProvider{MetricsMode: MetricsModeExternal}
 

@@ -22,15 +22,6 @@ const (
 	AcceleratorTypeAMDGPU    AcceleratorType = "amd_gpu"
 )
 
-const (
-	// NodeAgentAdapterProfileKey is planner-only compatibility metadata carried
-	// in MetricsExporter.Env until AcceleratorProfile grows a dedicated field.
-	// When set to "true", planners atomically project --accelerator-type and the
-	// exporter target coordinates into the NodeAgent args, then remove this key
-	// from the rendered runtime environments.
-	NodeAgentAdapterProfileKey = "neutree.ai/node-agent-adapter-profile"
-)
-
 type AcceleratorProduct string
 
 type Accelerator struct {

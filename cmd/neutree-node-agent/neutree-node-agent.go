@@ -87,8 +87,6 @@ type options struct {
 	node                    string
 	nodeIP                  string
 	acceleratorType         string
-	acceleratorExporterPort int
-	acceleratorExporterPath string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -113,10 +111,6 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
 	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
 		"Accelerator type selecting the metrics adapter (for example nvidia_gpu); empty uses the legacy DCGM path")
-	fs.IntVar(&o.acceleratorExporterPort, "accelerator-exporter-port", o.acceleratorExporterPort,
-		"Accelerator exporter metrics port for an explicitly selected accelerator")
-	fs.StringVar(&o.acceleratorExporterPath, "accelerator-exporter-metrics-path", o.acceleratorExporterPath,
-		"Accelerator exporter metrics path for an explicitly selected accelerator")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -145,12 +139,10 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	}
 
 	config := neutreemetrics.Config{
-		ListenAddress:                  o.listenAddress,
-		Labels:                         o.labels(),
-		ClusterType:                    o.clusterType,
-		AcceleratorType:                o.acceleratorType,
-		AcceleratorExporterPort:        o.acceleratorExporterPort,
-		AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
+		ListenAddress:   o.listenAddress,
+		Labels:          o.labels(),
+		ClusterType:     o.clusterType,
+		AcceleratorType: o.acceleratorType,
 	}.WithAcceleratorRegistry(registry)
 
 	writer, err := o.kubernetesWriter()
@@ -203,9 +195,7 @@ func (o *options) scrapeTargetProvider(
 		}
 	case clusterTypeRay:
 		return neutreemetrics.StaticScrapeTargetProvider{
-			MetricsMode:                    o.metricsMode,
-			AcceleratorExporterPort:        o.acceleratorExporterPort,
-			AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
+			MetricsMode: o.metricsMode,
 		}
 	default:
 		return nil
