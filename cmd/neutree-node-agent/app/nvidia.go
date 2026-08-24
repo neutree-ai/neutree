@@ -33,6 +33,70 @@ func DefaultAdapters() []adapter.Accelerator {
 	return []adapter.Accelerator{&nvidiaAccelerator{}}
 }
 
+func internalLabels(labels adapter.CanonicalLabels) model.CanonicalLabels {
+	return model.CanonicalLabels{
+		Workspace:         labels.Workspace,
+		NeutreeCluster:    labels.NeutreeCluster,
+		StaticNodeCluster: labels.StaticNodeCluster,
+		ClusterType:       labels.ClusterType,
+		Node:              labels.Node,
+		NodeIP:            labels.NodeIP,
+		NodeRole:          labels.NodeRole,
+	}
+}
+
+func adapterSamplesFromNormalizer(samples []normalizer.Sample) []adapter.Sample {
+	result := make([]adapter.Sample, 0, len(samples))
+
+	for _, sample := range samples {
+		labels := make(map[string]string, len(sample.Labels))
+		for key, value := range sample.Labels {
+			labels[key] = value
+		}
+
+		result = append(result, adapter.Sample{Name: sample.Name, Labels: labels, Value: sample.Value})
+	}
+
+	return result
+}
+
+func internalEndpointReplicaAcceleratorUsages(
+	usages []adapter.EndpointReplicaAcceleratorUsage,
+) []model.EndpointReplicaGPUUsage {
+	result := make([]model.EndpointReplicaGPUUsage, 0, len(usages))
+
+	for _, usage := range usages {
+		converted := model.EndpointReplicaGPUUsage{
+			Workspace:        usage.Workspace,
+			Cluster:          usage.Cluster,
+			Endpoint:         usage.Endpoint,
+			InstanceID:       usage.InstanceID,
+			ReplicaID:        usage.ReplicaID,
+			NodeID:           usage.NodeID,
+			Container:        usage.Container,
+			GPUUUID:          usage.AcceleratorUUID,
+			AcceleratorType:  usage.AcceleratorType,
+			AcceleratorIndex: usage.AcceleratorIndex,
+			VDeviceIndex:     usage.VDeviceIndex,
+			Product:          usage.Product,
+		}
+
+		if usage.MemoryUsedBytes != nil {
+			memoryUsedBytes := *usage.MemoryUsedBytes
+			converted.MemoryUsedBytes = &memoryUsedBytes
+		}
+
+		if usage.UtilizationRatio != nil {
+			utilizationRatio := *usage.UtilizationRatio
+			converted.UtilizationRatio = &utilizationRatio
+		}
+
+		result = append(result, converted)
+	}
+
+	return result
+}
+
 func (a *nvidiaAccelerator) Type() string {
 	return v1.AcceleratorTypeNVIDIAGPU.String()
 }
@@ -194,6 +258,7 @@ func gpuHardwareInfosFromSnapshot(hardwareSnapshot adapter.HardwareSnapshot) []m
 	}
 
 	detailsByUUID := make(map[string]adapter.HardwareDetails, len(hardwareSnapshot.Details))
+
 	for _, detail := range hardwareSnapshot.Details {
 		if detail.UUID != "" {
 			detailsByUUID[detail.UUID] = detail
@@ -201,6 +266,7 @@ func gpuHardwareInfosFromSnapshot(hardwareSnapshot adapter.HardwareSnapshot) []m
 	}
 
 	result := make([]model.GPUHardwareInfo, 0, len(hardwareSnapshot.Accelerator.Devices))
+
 	for _, device := range hardwareSnapshot.Accelerator.Devices {
 		detail := detailsByUUID[device.UUID]
 		result = append(result, model.GPUHardwareInfo{
@@ -235,6 +301,7 @@ func newNvidiaDeviceLookup(devices []v1.StaticNodeAcceleratorDeviceStatus) nvidi
 		if device.UUID != "" {
 			lookup.byUUID[device.UUID] = device
 		}
+
 		if device.ID != "" {
 			lookup.byID[device.ID] = device
 		}
@@ -324,6 +391,7 @@ func nvidiaStaticAllocations(
 		}
 
 		refs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
+
 		devices := nvidiaAllocationDevices(
 			refs,
 			lookup,
@@ -361,6 +429,7 @@ func nvidiaEndpointAllocations(
 		if allocation.WorkloadType != "" && allocation.WorkloadType != "endpoint" {
 			continue
 		}
+
 		if allocation.Endpoint == "" || len(allocation.Devices) == 0 {
 			continue
 		}
@@ -476,6 +545,7 @@ func parseVisibleDeviceRefs(value string) []string {
 	}
 
 	result := make([]string, 0)
+
 	for _, reference := range strings.Split(value, ",") {
 		if reference = strings.TrimSpace(reference); reference != "" {
 			result = append(result, reference)
@@ -490,6 +560,7 @@ func sortAllocations(allocations []v1.StaticNodeAllocationStatus) {
 		if allocations[i].Workspace != allocations[j].Workspace {
 			return allocations[i].Workspace < allocations[j].Workspace
 		}
+
 		if allocations[i].Endpoint != allocations[j].Endpoint {
 			return allocations[i].Endpoint < allocations[j].Endpoint
 		}
@@ -503,12 +574,15 @@ func sortAllocations(allocations []v1.StaticNodeAllocationStatus) {
 
 func cloneDeviceAllocations(devices []v1.DeviceAllocation) []v1.DeviceAllocation {
 	result := make([]v1.DeviceAllocation, 0, len(devices))
+
 	for _, device := range devices {
 		copied := device
+
 		if device.Order != nil {
 			order := *device.Order
 			copied.Order = &order
 		}
+
 		result = append(result, copied)
 	}
 
