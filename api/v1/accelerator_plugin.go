@@ -109,16 +109,12 @@ type AcceleratorExporterProfile struct {
 	Name string `json:"name,omitempty"`
 	// Image is the exporter container image.
 	Image string `json:"image,omitempty"`
-	// Command overrides the exporter image entrypoint.
-	Command []string `json:"command,omitempty"`
-	// Args are passed to the exporter command or image entrypoint.
+	// Args are passed to the exporter image entrypoint.
 	Args []string `json:"args,omitempty"`
 	// Port is the metrics port exposed by the exporter.
 	Port int `json:"port,omitempty"`
 	// MetricsPath is the HTTP path scraped by vmagent; it defaults to /metrics when empty.
 	MetricsPath string `json:"metrics_path,omitempty"`
-	// Readiness declares the optional Kubernetes readiness probe for the exporter.
-	Readiness *AcceleratorExporterReadiness `json:"readiness,omitempty"`
 	// Env contains exporter environment variables.
 	Env map[string]string `json:"env,omitempty"`
 	// ConfigFiles declares exporter configuration files that must be materialized before start.
@@ -155,59 +151,14 @@ type AcceleratorExporterRuntimeProfile struct {
 	HostPID bool `json:"host_pid,omitempty"`
 	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
 	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
-	// Privileged requests privileged execution on backends that support it.
-	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
-	// Volumes declares structured host volumes required by the exporter runtime.
-	Volumes []ComponentVolume `json:"volumes,omitempty"`
-	// VolumeMounts declares the matching container mounts for Volumes.
-	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
-	// Runtime selects the Docker runtime handler on StaticNode. Kubernetes does
-	// not parse it; an empty value means no special runtime is selected.
-	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 }
 
 type AcceleratorExporterCapabilities struct {
 	Add []string `json:"add,omitempty"`
-}
-
-// AcceleratorExporterReadiness describes the Kubernetes readiness probe for an exporter.
-type AcceleratorExporterReadiness struct {
-	HTTPPath            string `json:"http_path,omitempty"`
-	InitialDelaySeconds int    `json:"initial_delay_seconds,omitempty"`
-	PeriodSeconds       int    `json:"period_seconds,omitempty"`
-	TimeoutSeconds      int    `json:"timeout_seconds,omitempty"`
-	FailureThreshold    int    `json:"failure_threshold,omitempty"`
-}
-
-// ComponentHostPathType is the supported type of a structured host path volume.
-type ComponentHostPathType string
-
-const (
-	ComponentHostPathTypeDirectory ComponentHostPathType = "directory"
-	ComponentHostPathTypeSocket    ComponentHostPathType = "socket"
-)
-
-// ComponentVolume declares a backend-neutral component volume.
-type ComponentVolume struct {
-	Name     string                         `json:"name,omitempty"`
-	HostPath *ComponentHostPathVolumeSource `json:"host_path,omitempty"`
-}
-
-// ComponentHostPathVolumeSource describes a host path exposed to a component.
-type ComponentHostPathVolumeSource struct {
-	Path string                `json:"path,omitempty"`
-	Type ComponentHostPathType `json:"type,omitempty"`
-}
-
-// ComponentVolumeMount declares where a component volume is mounted in a container.
-type ComponentVolumeMount struct {
-	Name      string `json:"name,omitempty"`
-	MountPath string `json:"mount_path,omitempty"`
-	ReadOnly  *bool  `json:"read_only,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {
