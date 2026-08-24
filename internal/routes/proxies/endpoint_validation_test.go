@@ -2305,29 +2305,41 @@ func TestValidateEndpointModelSource(t *testing.T) {
 		}
 	})
 
-	t.Run("requires a registry for an engine Neutree downloads for", func(t *testing.T) {
-		for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
-			store := &fakeModelRegistryStorage{registries: visible}
+	t.Run("requires registry, name and version for an engine Neutree downloads for", func(t *testing.T) {
+		for _, tc := range []struct {
+			missing string
+			model   *v1.ModelSpec
+		}{
+			{"spec.model.registry", &v1.ModelSpec{Name: "qwen3", Version: "latest"}},
+			{"spec.model.name", &v1.ModelSpec{Registry: "hf", Version: "latest"}},
+			{"spec.model.version", &v1.ModelSpec{Registry: "hf", Name: "qwen3"}},
+		} {
+			for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
+				store := &fakeModelRegistryStorage{registries: visible}
 
-			err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
-				&v1.ModelSpec{Name: "qwen3", Version: "latest"}, engine))
+				err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a", tc.model, engine))
 
-			if assert.NotNilf(t, err, "engine %s", engine) {
-				assert.Equal(t, "10229", err.Code)
-				assert.Contains(t, err.Hint, "spec.model.registry is required")
+				if assert.NotNilf(t, err, "engine %s missing %s", engine, tc.missing) {
+					assert.Equal(t, "10229", err.Code)
+					assert.Contains(t, err.Hint, tc.missing+" is required")
+				}
 			}
 		}
 	})
 
-	t.Run("accepts no registry for an engine that ships its own model", func(t *testing.T) {
-		// The Flex case: nothing for Neutree to fetch, so nothing to name. The
-		// store is never consulted.
+	t.Run("accepts an empty model spec for an engine that ships its own model", func(t *testing.T) {
+		// The Flex case: Neutree fetches nothing, so there is no registry, name
+		// or version to give. The store is never consulted.
 		store := &fakeModelRegistryStorage{}
 
-		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
-			&v1.ModelSpec{Name: "packaged-ocr"}, "flex"))
+		for _, model := range []*v1.ModelSpec{
+			{},
+			{Name: "packaged-ocr"},
+			{Name: "packaged-ocr", Version: "v2"},
+		} {
+			assert.Nil(t, validateEndpointModelSource(store, modelSourceEndpoint("ws-a", model, "flex")))
+		}
 
-		assert.Nil(t, err)
 		assert.Empty(t, store.options)
 	})
 
