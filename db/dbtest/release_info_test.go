@@ -107,12 +107,12 @@ func TestReleaseInfoHasMinimalGlobalSchema(t *testing.T) {
 }
 
 func TestReleaseInfoMigrationRoundTripCreatesOnlyFinalSchema(t *testing.T) {
-	upMigration, err := os.ReadFile("../migrations/090_release_info_cluster_profiles.up.sql")
+	upMigration, err := os.ReadFile("../migrations/091_release_info_cluster_profiles.up.sql")
 	if err != nil {
 		t.Fatalf("read forward migration: %v", err)
 	}
 
-	downMigration, err := os.ReadFile("../migrations/090_release_info_cluster_profiles.down.sql")
+	downMigration, err := os.ReadFile("../migrations/091_release_info_cluster_profiles.down.sql")
 	if err != nil {
 		t.Fatalf("read rollback migration: %v", err)
 	}
