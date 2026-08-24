@@ -110,7 +110,7 @@ func resolveAvailableClusterVersions(
 	defaultAvailable := false
 	for index := range target.profiles {
 		profile := &target.profiles[index]
-		if err := releaseprofile.ValidateClusterVersionEligibility(target.releaseInfo, profile.GetName()); err != nil {
+		if err := releaseprofile.ValidateClusterVersionCompatibility(target.releaseInfo, profile.GetName()); err != nil {
 			continue
 		}
 
