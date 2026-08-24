@@ -111,6 +111,15 @@ func TestProfileUpsertRejectsInvalidRequestsBeforeStorage(t *testing.T) {
 			name:    "force update null",
 			payload: map[string]any{"profile": completeProfile("v1.1.1"), "force_update": nil},
 		},
+		{
+			name: "incomplete profile",
+			payload: map[string]any{"profile": &v1.ClusterProfile{
+				APIVersion: "v1",
+				Kind:       v1.ClusterProfileKind,
+				Metadata:   &v1.Metadata{Name: "v1.1.1"},
+				Spec:       &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{}},
+			}},
+		},
 	}
 
 	for _, tt := range tests {

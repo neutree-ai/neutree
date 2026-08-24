@@ -62,16 +62,36 @@ func TestClusterProfileImportValidation(t *testing.T) {
 			wantProfile: "",
 		},
 		{
-			name: "allows domain-invalid profile for API validation",
+			name: "rejects incomplete profile",
 			payload: map[string]any{"profile": &v1.ClusterProfile{
 				APIVersion: "v1",
 				Kind:       v1.ClusterProfileKind,
 				Metadata:   &v1.Metadata{Name: "v1.1.1"},
 				Spec:       &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{}},
 			}},
-			wantStatus:   http.StatusNoContent,
-			wantContinue: true,
-			wantProfile:  "v1.1.1",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "rejects unsupported component matrix type",
+			payload: map[string]any{"profile": func() *v1.ClusterProfile {
+				profile := completeClusterProfile("v1.1.1")
+				profile.Spec.Components["docker"] = v1.ClusterProfileComponents{}
+
+				return profile
+			}()},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "rejects blank required component tag",
+			payload: map[string]any{"profile": func() *v1.ClusterProfile {
+				profile := completeClusterProfile("v1.1.1")
+				ssh := profile.Spec.Components[v1.SSHClusterType]
+				ssh.RayRuntime.Tag = " "
+				profile.Spec.Components[v1.SSHClusterType] = ssh
+
+				return profile
+			}()},
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
