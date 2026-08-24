@@ -47,12 +47,14 @@ type endpointValidationConfig struct {
 var endpointValidationConfigs = map[endpointValidationOperation]endpointValidationConfig{
 	endpointValidationCreate: {
 		Validators: []endpointValidator{
+			validateEndpointCreateModelSource,
 			validateEndpointCreateResourceShape,
 		},
 	},
 	endpointValidationPatch: {
 		Validators: []endpointValidator{
 			validateEndpointPatchClusterImmutable,
+			validateEndpointPatchModelSource,
 			validateEndpointPatchResourceShape,
 		},
 	},
@@ -201,6 +203,108 @@ func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error)
 	}
 
 	return metadata.DeletionTimestamp != "", nil
+}
+
+func validateEndpointCreateModelSource(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.Patch.GetDeletionTimestamp() != "" {
+		return nil
+	}
+
+	return validateEndpointModelSource(store, input.New)
+}
+
+func validateEndpointPatchModelSource(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.New == nil {
+		return nil
+	}
+
+	if !endpointPatchMayAffectModelSourceValidation(&input.Patch) {
+		return nil
+	}
+
+	return validateEndpointModelSource(store, input.New)
+}
+
+// endpointPatchMayAffectModelSourceValidation reports whether a PATCH can change
+// the answer. spec.engine counts alongside spec.model: the engine decides whether
+// a registry is required at all, so repointing an endpoint at another engine has
+// to be re-checked even when spec.model is untouched.
+func endpointPatchMayAffectModelSourceValidation(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil {
+		return false
+	}
+
+	return endpoint.Spec.Model != nil || endpoint.Spec.Engine != nil
+}
+
+// validateEndpointModelSource decides whether an endpoint has to name a model
+// registry, and checks the one it names is real.
+//
+// A registry is required exactly when Neutree downloads the model itself, which
+// v1.IsBuiltInModelDownloaderEngine answers and the orchestrator keys its
+// download step off as well -- keep the two on the same predicate, or validation
+// and deployment will disagree about which endpoints need a registry.
+//
+// A registry that *is* named is resolved against the endpoint's own workspace
+// whichever engine is in play: deps.Storage runs as the service role and does
+// not apply RLS, so a spec naming another workspace's registry would otherwise
+// be honoured.
+func validateEndpointModelSource(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Model == nil {
+		return nil
+	}
+
+	if endpoint.Spec.Model.Registry == "" {
+		if endpointDownloadsModel(endpoint) {
+			return endpointModelSourceError(fmt.Sprintf(
+				"spec.model.registry is required for engine %s, which downloads its own model",
+				endpoint.Spec.Engine.Engine))
+		}
+
+		return nil
+	}
+
+	return validateEndpointModelRegistryVisible(store, endpoint)
+}
+
+// endpointDownloadsModel reports whether Neutree fetches this endpoint's model
+// itself, which is what makes a model registry mandatory.
+func endpointDownloadsModel(endpoint *v1.Endpoint) bool {
+	return endpoint.Spec.Engine != nil &&
+		v1.IsBuiltInModelDownloaderEngine(endpoint.Spec.Engine.Engine)
+}
+
+func validateEndpointModelRegistryVisible(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if store == nil {
+		return internalServerValidationError()
+	}
+
+	workspace := endpointValidationWorkspace(endpoint)
+	registry := endpoint.Spec.Model.Registry
+
+	registries, err := store.ListModelRegistry(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(registry)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	if len(registries) == 0 {
+		return endpointModelSourceError(fmt.Sprintf("model registry %s/%s not found", workspace, registry))
+	}
+
+	return nil
+}
+
+func endpointValidationWorkspace(endpoint *v1.Endpoint) string {
+	if endpoint != nil && endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
+		return endpoint.Metadata.Workspace
+	}
+
+	return defaultWorkspace
 }
 
 func validateEndpointCreateResourceShape(store storage.Storage, input *endpointValidationInput) *validationError {
@@ -520,10 +624,7 @@ func resolveEndpointCluster(store storage.Storage, endpoint *v1.Endpoint) (*v1.C
 		return nil, endpointAcceleratorResourceError(errors.New("spec.cluster is required"))
 	}
 
-	workspace := defaultWorkspace
-	if endpoint.Metadata != nil && endpoint.Metadata.Workspace != "" {
-		workspace = endpoint.Metadata.Workspace
-	}
+	workspace := endpointValidationWorkspace(endpoint)
 
 	clusters, err := store.ListCluster(storage.ListOption{
 		Filters: endpointClusterLookupFilters(clusterName, workspace),
@@ -848,6 +949,14 @@ func endpointResourceValueError(err error) *validationError {
 		Code:    "10216",
 		Message: "invalid endpoint accelerator virtualization resources",
 		Hint:    err.Error(),
+	}
+}
+
+func endpointModelSourceError(hint string) *validationError {
+	return &validationError{
+		Code:    "10229",
+		Message: "invalid endpoint model source",
+		Hint:    hint,
 	}
 }
 

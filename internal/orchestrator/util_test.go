@@ -9,9 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stretchr/testify/mock"
+
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestConverterManager_ConvertToRay_NVIDIA(t *testing.T) {
@@ -447,4 +450,49 @@ func TestGetDeployedModelRealVersion_ModelRegistry(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
 	}
+}
+
+// A nil model registry is a normal state, not a lookup failure, so every
+// registry-shaped helper in the deploy path has to tolerate it.
+func TestModelRegistryOptionalInDeployPath(t *testing.T) {
+	t.Run("resolve returns nil, not an error, when no registry is named", func(t *testing.T) {
+		store := storagemocks.NewMockStorage(t)
+
+		for _, endpoint := range []*v1.Endpoint{
+			{Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "packaged-ocr"}}},
+			{Spec: &v1.EndpointSpec{Model: nil}},
+			{Spec: nil},
+		} {
+			registry, err := resolveEndpointModelRegistry(store, endpoint)
+
+			require.NoError(t, err)
+			assert.Nil(t, registry)
+		}
+
+		// The store is never consulted for an endpoint that names no registry.
+		store.AssertNotCalled(t, "ListModelRegistry", mock.Anything)
+	})
+
+	t.Run("registry type renders empty rather than crashing the template", func(t *testing.T) {
+		assert.Equal(t, "", endpointModelRegistryType(nil))
+		assert.Equal(t, "", endpointModelRegistryType(&v1.ModelRegistry{}))
+		assert.Equal(t, string(v1.HuggingFaceModelRegistryType), endpointModelRegistryType(
+			&v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType}},
+		))
+	})
+
+	t.Run("serve name falls back to the bare model name", func(t *testing.T) {
+		// The version suffix exists to disambiguate versions held by a registry.
+		// With no registry there is nothing to disambiguate against, so appending
+		// it would invent a name the engine does not serve.
+		endpoint := &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Model:  &v1.ModelSpec{Name: "packaged-ocr", Version: "v2"},
+				Engine: &v1.EndpointEngineSpec{Engine: "flex"},
+			},
+		}
+
+		assert.Equal(t, "packaged-ocr", endpointModelServeName(endpoint, nil))
+		assert.Equal(t, "packaged-ocr", endpointModelServeName(endpoint, &v1.ModelRegistry{}))
+	})
 }

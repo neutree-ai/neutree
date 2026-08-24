@@ -2244,3 +2244,136 @@ func TestEndpointPatchMayAffectResourceValidation(t *testing.T) {
 		assert.False(t, endpointPatchMayAffectResourceValidation(&v1.Endpoint{}))
 	})
 }
+
+type fakeModelRegistryStorage struct {
+	*storagemocks.MockStorage
+
+	registries []v1.ModelRegistry
+	listErr    error
+	options    []storage.ListOption
+}
+
+func (s *fakeModelRegistryStorage) ListModelRegistry(option storage.ListOption) ([]v1.ModelRegistry, error) {
+	s.options = append(s.options, option)
+
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+
+	return s.registries, nil
+}
+
+func modelSourceEndpoint(workspace string, model *v1.ModelSpec, engine string) *v1.Endpoint {
+	return &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "ep", Workspace: workspace},
+		Spec: &v1.EndpointSpec{
+			Cluster: "c1",
+			Model:   model,
+			Engine:  &v1.EndpointEngineSpec{Engine: engine, Version: "v1"},
+		},
+	}
+}
+
+func TestValidateEndpointModelSource(t *testing.T) {
+	visible := []v1.ModelRegistry{{Metadata: &v1.Metadata{Name: "hf", Workspace: "ws-a"}}}
+
+	t.Run("accepts a registry-backed model visible in the endpoint workspace", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{registries: visible}
+
+		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Registry: "hf", Name: "qwen3", Version: "latest"}, v1.EngineNameVLLM))
+
+		assert.Nil(t, err)
+		if assert.Len(t, store.options, 1) {
+			assert.Contains(t, store.options[0].Filters, storage.Filter{
+				Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote("ws-a"),
+			})
+		}
+	})
+
+	t.Run("rejects a registry that lives in another workspace", func(t *testing.T) {
+		// The registry exists, just not in ws-a: the lookup is workspace-scoped,
+		// which is the whole point — deps.Storage bypasses RLS.
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Registry: "other-ws-registry", Name: "qwen3", Version: "latest"}, v1.EngineNameVLLM))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10229", err.Code)
+			assert.Contains(t, err.Hint, "ws-a/other-ws-registry")
+		}
+	})
+
+	t.Run("requires a registry for an engine Neutree downloads for", func(t *testing.T) {
+		for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
+			store := &fakeModelRegistryStorage{registries: visible}
+
+			err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+				&v1.ModelSpec{Name: "qwen3", Version: "latest"}, engine))
+
+			if assert.NotNilf(t, err, "engine %s", engine) {
+				assert.Equal(t, "10229", err.Code)
+				assert.Contains(t, err.Hint, "spec.model.registry is required")
+			}
+		}
+	})
+
+	t.Run("accepts no registry for an engine that ships its own model", func(t *testing.T) {
+		// The Flex case: nothing for Neutree to fetch, so nothing to name. The
+		// store is never consulted.
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Name: "packaged-ocr"}, "flex"))
+
+		assert.Nil(t, err)
+		assert.Empty(t, store.options)
+	})
+
+	t.Run("still checks a registry a self-contained engine does name", func(t *testing.T) {
+		// Optional does not mean unchecked: naming another workspace's registry
+		// is refused whichever engine asks.
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Registry: "other-ws-registry", Name: "m"}, "flex"))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10229", err.Code)
+		}
+	})
+
+	t.Run("ignores an endpoint that carries no model spec", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a", nil, "flex"))
+
+		assert.Nil(t, err)
+		assert.Empty(t, store.options)
+	})
+}
+
+func TestEndpointPatchMayAffectModelSourceValidation(t *testing.T) {
+	t.Run("skips a patch that touches neither model nor engine", func(t *testing.T) {
+		replicas := 3
+
+		assert.False(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
+			Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &replicas}},
+		}))
+	})
+
+	t.Run("re-checks a patch that repoints the engine", func(t *testing.T) {
+		// Whether a registry is required at all is the engine's answer, so an
+		// engine change has to be re-checked even with spec.model untouched.
+		assert.True(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
+			Spec: &v1.EndpointSpec{Engine: &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM}},
+		}))
+	})
+
+	t.Run("re-checks a patch that changes the model", func(t *testing.T) {
+		assert.True(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
+			Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "other"}},
+		}))
+	})
+}
