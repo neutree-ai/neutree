@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T) {
@@ -47,11 +48,20 @@ func TestNewReconcileDispatchesStaticNodeBackedSSHClusterByVersion(t *testing.T)
 func TestNewReconcileRejectsInvalidClusterVersion(t *testing.T) {
 	reconciler, err := NewReconcile(&v1.Cluster{
 		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "custom"},
-	}, nil, nil, "")
+	}, nil, storagemocks.NewMockStorage(t), "")
 
 	require.Error(t, err)
 	assert.Nil(t, reconciler)
 	assert.Contains(t, err.Error(), "invalid cluster version")
+}
+
+func TestNewReconcileRequiresStorage(t *testing.T) {
+	reconciler, err := NewReconcile(&v1.Cluster{
+		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType, Version: "v1.0.1"},
+	}, nil, nil, "")
+
+	require.EqualError(t, err, "storage is required to resolve cluster profile")
+	assert.Nil(t, reconciler)
 }
 
 func TestNewDeleteReconcileDoesNotResolveClusterProfile(t *testing.T) {

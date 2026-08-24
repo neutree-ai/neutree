@@ -27,9 +27,7 @@ type ControllerOptions struct {
 type ControllerFactory func(opts *ControllerOptions) (controllers.Controller, error)
 
 func newClusterProfileProvider(store storage.Storage) *releaseprofile.Provider {
-	return releaseprofile.NewClusterProfileProvider(releaseprofile.ClusterProfileReaderFunc(func() ([]v1.ClusterProfile, error) {
-		return store.ListClusterProfile(storage.ListOption{})
-	}))
+	return releaseprofile.NewProvider(store, store)
 }
 
 func NewClusterControllerFactory() ControllerFactory {
