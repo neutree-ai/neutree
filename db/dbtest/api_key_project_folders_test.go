@@ -9,21 +9,44 @@ import (
 func grantWorkspaceRead(t *testing.T, db *sql.DB, userID, suffix string) {
 	t.Helper()
 	roleName := "api-key-project-" + suffix
+
+	// One statement per Exec: a parameterised Exec is sent as a prepared
+	// statement, and PostgreSQL rejects multiple commands in one of those.
 	if _, err := db.Exec(`
 		INSERT INTO api.roles (api_version, kind, metadata, spec)
 		VALUES (
 			'v1', 'Role',
 			ROW($1, NULL, NULL, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
 			ROW(NULL, ARRAY['workspace:read']::api.permission_action[])::api.role_spec
-		);
+		)
+	`, roleName); err != nil {
+		t.Fatalf("grant workspace read (role): %v", err)
+	}
+
+	if _, err := db.Exec(`
 		INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 		VALUES (
 			'v1', 'RoleAssignment',
-			ROW($2, NULL, NULL, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-			ROW($3::uuid, NULL, TRUE, $1)::api.role_assignment_spec
+			ROW($1, NULL, NULL, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
+			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
 		)
-	`, roleName, roleName+"-assignment", userID); err != nil {
-		t.Fatalf("grant workspace read: %v", err)
+	`, roleName+"-assignment", userID, roleName); err != nil {
+		t.Fatalf("grant workspace read (assignment): %v", err)
+	}
+}
+
+// api.create_api_key signs the key value, so any block that creates a key needs
+// the JWT secret in scope as well as the user context. WithUserContext sets only
+// the latter.
+func withKeyOwnerContext(t *testing.T, db *sql.DB, userID string, fn func(*sql.Tx)) {
+	t.Helper()
+	err := execWithContext(
+		t, db,
+		[]SetContextFunc{setUserContext(userID), setJwtSecretContext()},
+		func(tx *sql.Tx) error { fn(tx); return nil },
+	)
+	if err != nil {
+		t.Fatalf("key owner context block: %v", err)
 	}
 }
 
@@ -36,7 +59,7 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 
 	var projectID string
 	var keyID string
-	WithUserContext(t, db, alice.ID, func(tx *sql.Tx) {
+	withKeyOwnerContext(t, db, alice.ID, func(tx *sql.Tx) {
 		if err := tx.QueryRow(`
 			SELECT id FROM api.create_api_key_project('default', '客服系统', '共享文件夹')
 		`).Scan(&projectID); err != nil {
@@ -129,7 +152,7 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 	}
 
 	var bobProjectID string
-	WithUserContext(t, db, bob.ID, func(tx *sql.Tx) {
+	withKeyOwnerContext(t, db, bob.ID, func(tx *sql.Tx) {
 		var visibleCount int
 		if err := tx.QueryRow(`
 			SELECT count(*) FROM api.list_api_key_projects('default')
@@ -186,7 +209,7 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 		t.Fatal("expected assigning an API key to another user's project to fail")
 	}
 
-	WithUserContext(t, db, alice.ID, func(tx *sql.Tx) {
+	withKeyOwnerContext(t, db, alice.ID, func(tx *sql.Tx) {
 		if _, err := tx.Exec(`
 			SELECT api.create_api_key_project('default', 'Support', '')
 		`); err != nil {
@@ -208,4 +231,107 @@ func TestAPIKeyProjectFolders(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Project whose keys have all been soft-deleted reads as empty everywhere in
+// the UI, so deleting it must succeed. Counting soft-deleted keys in the guard
+// made such a Project permanently undeletable.
+func TestDeleteAPIKeyProjectIgnoresSoftDeletedKeys(t *testing.T) {
+	db := GetTestDB(t)
+	user := CreateTestUser(t, "folder-gc", "folder-gc@example.com", "password")
+	grantWorkspaceRead(t, db, user.ID, "gc")
+
+	var projectID, keyID string
+	withKeyOwnerContext(t, db, user.ID, func(tx *sql.Tx) {
+		if err := tx.QueryRow(`
+			SELECT id FROM api.create_api_key_project('default', 'Retired', '')
+		`).Scan(&projectID); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		if err := tx.QueryRow(`
+			SELECT id FROM api.create_api_key(
+				'default', NULL, 0, 'Retired key', NULL, NULL, $1, ''
+			)
+		`, projectID).Scan(&keyID); err != nil {
+			t.Fatalf("create key in project: %v", err)
+		}
+	})
+
+	// A live key still blocks deletion. This runs in its own transaction: the
+	// raised exception aborts whichever transaction it lands in.
+	err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID)}, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`SELECT api.delete_api_key_project($1)`, projectID)
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected a Project holding a live API key to refuse deletion")
+	}
+
+	withKeyOwnerContext(t, db, user.ID, func(tx *sql.Tx) {
+		if _, err := tx.Exec(`
+			UPDATE api.api_keys
+			SET metadata = ROW(
+				(metadata).name, (metadata).display_name, (metadata).workspace,
+				now(), (metadata).creation_timestamp, now(),
+				(metadata).labels, (metadata).annotations
+			)::api.metadata
+			WHERE id = $1
+		`, keyID); err != nil {
+			t.Fatalf("soft delete key: %v", err)
+		}
+
+		var grouped int
+		if err := tx.QueryRow(`
+			SELECT api_key_count
+			FROM api.get_api_key_project_groups('default', NULL, NULL, 1, 50)
+			WHERE project->>'id' = $1
+		`, projectID).Scan(&grouped); err != nil {
+			t.Fatalf("read grouped count: %v", err)
+		}
+		if grouped != 0 {
+			t.Fatalf("grouped count=%d after soft delete, want 0", grouped)
+		}
+
+		if _, err := tx.Exec(`SELECT api.delete_api_key_project($1)`, projectID); err != nil {
+			t.Fatalf("delete Project whose only key is soft-deleted: %v", err)
+		}
+	})
+}
+
+// A search term is a literal, not a LIKE pattern: '%' must match the keys whose
+// text actually contains a percent sign, not every key.
+func TestAPIKeyProjectSearchEscapesWildcards(t *testing.T) {
+	db := GetTestDB(t)
+	user := CreateTestUser(t, "folder-like", "folder-like@example.com", "password")
+	grantWorkspaceRead(t, db, user.ID, "like")
+
+	withKeyOwnerContext(t, db, user.ID, func(tx *sql.Tx) {
+		for _, name := range []string{"Plain project", "100% coverage"} {
+			if _, err := tx.Exec(
+				`SELECT api.create_api_key_project('default', $1, '')`, name,
+			); err != nil {
+				t.Fatalf("create project %q: %v", name, err)
+			}
+		}
+
+		var matched int
+		if err := tx.QueryRow(`
+			SELECT count(*) FROM api.get_api_key_project_groups('default', '%', NULL, 1, 50)
+		`).Scan(&matched); err != nil {
+			t.Fatalf("search for a literal percent: %v", err)
+		}
+		if matched != 1 {
+			t.Fatalf("searching %q matched %d groups, want only the one containing it", "%", matched)
+		}
+
+		var counted int
+		if err := tx.QueryRow(`
+			SELECT api.count_api_key_project_group_api_keys('default', '_', NULL)
+		`).Scan(&counted); err != nil {
+			t.Fatalf("count with a literal underscore: %v", err)
+		}
+		if counted != 0 {
+			t.Fatalf("searching %q counted %d API keys, want 0", "_", counted)
+		}
+	})
 }

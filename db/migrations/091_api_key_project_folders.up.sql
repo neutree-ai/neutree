@@ -55,6 +55,10 @@ $$;
 CREATE INDEX api_keys_project_id_idx ON api.api_keys (((spec).project_id));
 
 ALTER TABLE api.api_key_projects ENABLE ROW LEVEL SECURITY;
+-- SELECT is the only policy on purpose. Every write goes through the
+-- SECURITY DEFINER RPCs below, which enforce ownership, workspace:read and
+-- name uniqueness together; leaving INSERT/UPDATE/DELETE unpolicied means a
+-- direct PostgREST write is denied rather than bypassing those invariants.
 CREATE POLICY api_key_projects_select ON api.api_key_projects FOR SELECT
     USING (
         user_id = auth.uid()
@@ -202,9 +206,13 @@ BEGIN
         RAISE EXCEPTION 'project not found or permission denied' USING ERRCODE = '42501';
     END IF;
 
+    -- Only live keys block deletion. The grouped listing filters soft-deleted
+    -- keys out, so counting them here left a Project the UI shows as empty
+    -- permanently undeletable.
     SELECT count(*) INTO v_count
     FROM api.api_keys
-    WHERE (spec).project_id = p_project_id;
+    WHERE (spec).project_id = p_project_id
+      AND (metadata).deletion_timestamp IS NULL;
 
     IF v_count > 0 THEN
         RAISE EXCEPTION 'Project has % API keys', v_count
@@ -233,9 +241,16 @@ BEGIN
             RAISE EXCEPTION 'target project not found or permission denied' USING ERRCODE = '42501';
         END IF;
     ELSE
+        -- Moving to ungrouped still requires read access to the workspace the
+        -- keys live in, the same check the targeted-project branch performs.
         SELECT (metadata).workspace INTO v_workspace
         FROM api.api_keys
-        WHERE id = p_api_key_ids[1] AND user_id = auth.uid();
+        WHERE id = p_api_key_ids[1]
+          AND user_id = auth.uid()
+          AND (metadata).deletion_timestamp IS NULL;
+        IF NOT FOUND OR NOT api.has_permission(auth.uid(), 'workspace:read', v_workspace) THEN
+            RAISE EXCEPTION 'API key not found or permission denied' USING ERRCODE = '42501';
+        END IF;
     END IF;
 
     IF EXISTS (
@@ -245,6 +260,7 @@ BEGIN
         WHERE k.id IS NULL
            OR k.user_id <> auth.uid()
            OR (k.metadata).workspace <> v_workspace
+           OR (k.metadata).deletion_timestamp IS NOT NULL
     ) THEN
         RAISE EXCEPTION 'API key not found, permission denied, or workspace mismatch'
             USING ERRCODE = '42501';
@@ -260,6 +276,12 @@ BEGIN
     GET DIAGNOSTICS v_count = ROW_COUNT;
     RETURN v_count;
 END;
+$$;
+
+CREATE FUNCTION api.api_key_search_pattern(p_search TEXT)
+RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
+    SELECT '%' || replace(replace(replace(
+        trim(p_search), '\', '\\'), '%', '\%'), '_', '\_') || '%';
 $$;
 
 CREATE FUNCTION api.get_api_key_project_groups(
@@ -319,7 +341,7 @@ CREATE FUNCTION api.get_api_key_project_groups(
     ), matching AS (
         SELECT f.*,
                NULLIF(trim(p_search), '') IS NULL
-                   OR f.project #>> '{metadata,name}' ILIKE '%' || trim(p_search) || '%' AS project_matches
+                   OR f.project #>> '{metadata,name}' ILIKE api.api_key_search_pattern(p_search) AS project_matches
         FROM folders f
         WHERE (
             p_api_key_disabled IS NULL
@@ -337,7 +359,7 @@ CREATE FUNCTION api.get_api_key_project_groups(
         )
         AND (
            NULLIF(trim(p_search), '') IS NULL
-           OR f.project #>> '{metadata,name}' ILIKE '%' || trim(p_search) || '%'
+           OR f.project #>> '{metadata,name}' ILIKE api.api_key_search_pattern(p_search)
            OR EXISTS (
                SELECT 1 FROM api.api_keys k
                WHERE k.user_id = auth.uid()
@@ -346,8 +368,8 @@ CREATE FUNCTION api.get_api_key_project_groups(
                  AND (k.metadata).deletion_timestamp IS NULL
                  AND (
                      COALESCE((k.metadata).display_name, (k.metadata).name)
-                         ILIKE '%' || trim(p_search) || '%'
-                     OR (k.spec).description ILIKE '%' || trim(p_search) || '%'
+                         ILIKE api.api_key_search_pattern(p_search)
+                     OR (k.spec).description ILIKE api.api_key_search_pattern(p_search)
                  )
            ))
     ), visible AS (
@@ -383,8 +405,8 @@ CREATE FUNCTION api.get_api_key_project_groups(
      AND (
          v.project_matches
          OR COALESCE((k.metadata).display_name, (k.metadata).name)
-             ILIKE '%' || trim(p_search) || '%'
-         OR (k.spec).description ILIKE '%' || trim(p_search) || '%'
+             ILIKE api.api_key_search_pattern(p_search)
+         OR (k.spec).description ILIKE api.api_key_search_pattern(p_search)
      )
     GROUP BY v.project, v.workspace, v.created_at, v.project_id, v.total_projects
     ORDER BY v.workspace, v.created_at, v.project_id NULLS FIRST;
@@ -411,10 +433,10 @@ CREATE FUNCTION api.count_api_key_project_group_api_keys(
       )
       AND (
           NULLIF(trim(p_search), '') IS NULL
-          OR (p.metadata).name ILIKE '%' || trim(p_search) || '%'
+          OR (p.metadata).name ILIKE api.api_key_search_pattern(p_search)
           OR COALESCE((k.metadata).display_name, (k.metadata).name)
-              ILIKE '%' || trim(p_search) || '%'
-          OR (k.spec).description ILIKE '%' || trim(p_search) || '%'
+              ILIKE api.api_key_search_pattern(p_search)
+          OR (k.spec).description ILIKE api.api_key_search_pattern(p_search)
       );
 $$;
 
@@ -441,8 +463,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM api.user_profiles WHERE id = p_user_id) THEN
         RAISE EXCEPTION 'User profile not found';
     END IF;
+    -- An API key is always scoped to exactly one workspace.
     IF p_workspace IS NULL OR p_workspace = '' THEN
-        RAISE EXCEPTION 'workspace is required to create an API key' USING ERRCODE = '22023';
+        RAISE sqlstate 'PGRST'
+            USING message = '{"code": "10044","message": "workspace is required to create an API key","hint": "Pass p_workspace with the name of an existing workspace"}',
+                  detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
     IF p_project_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM api.api_key_projects
@@ -515,7 +540,12 @@ BEGIN
         p_project_id, (spec).description
     )::api.api_key_spec
     WHERE id = p_api_key_id;
-    PERFORM api.set_api_key_limits(p_api_key_id, COALESCE(p_limits, '{}'::jsonb));
+    -- NULL means "leave the limits alone". Coalescing to '{}' instead made an
+    -- omitted argument wipe every limit, reset the quota to 0 and drop the
+    -- disabled flag.
+    IF p_limits IS NOT NULL THEN
+        PERFORM api.set_api_key_limits(p_api_key_id, p_limits);
+    END IF;
     SELECT * INTO v_key FROM api.api_keys WHERE id = p_api_key_id;
     RETURN v_key;
 END;

@@ -162,7 +162,7 @@ $$;
 
 -- Wrap the existing grouping implementation so upgraded installations also
 -- receive redacted API key objects. Fresh installations are already redacted
--- by migration 088; applying the operation twice is harmless.
+-- by migration 091; applying the operation twice is harmless.
 ALTER FUNCTION api.get_api_key_project_groups(TEXT, TEXT, BOOLEAN, INTEGER, INTEGER)
     RENAME TO get_api_key_project_groups_unredacted;
 
