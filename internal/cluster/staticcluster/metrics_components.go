@@ -156,10 +156,12 @@ func buildAcceleratorExporterComponent(
 		HTTPPath: exporterMetricsPath(exporter),
 		Port:     exporter.Port,
 	}
+
 	if exporter.Readiness != nil {
 		if exporter.Readiness.HTTPPath != "" {
 			healthCheck.HTTPPath = normalizedMetricsPath(exporter.Readiness.HTTPPath)
 		}
+
 		healthCheck.InitialDelaySec = exporter.Readiness.InitialDelaySeconds
 		healthCheck.IntervalSec = exporter.Readiness.PeriodSeconds
 		healthCheck.TimeoutSec = exporter.Readiness.TimeoutSeconds
@@ -349,20 +351,26 @@ func validateStaticRuntimeVolumes(runtime *v1.AcceleratorExporterRuntimeProfile)
 	}
 
 	volumes := make(map[string]struct{}, len(runtime.Volumes))
+
 	for _, volume := range runtime.Volumes {
 		name := strings.TrimSpace(volume.Name)
+
 		if name == "" {
 			return fmt.Errorf("runtime volume name is required")
 		}
+
 		if _, exists := volumes[name]; exists {
 			return fmt.Errorf("duplicate runtime volume name %q", name)
 		}
+
 		if volume.HostPath == nil {
 			return fmt.Errorf("runtime volume %q host path is required", name)
 		}
+
 		if err := validateStaticRuntimePath(volume.HostPath.Path, "runtime volume host path", true); err != nil {
 			return fmt.Errorf("runtime volume %q: %w", name, err)
 		}
+
 		switch volume.HostPath.Type {
 		case v1.ComponentHostPathTypeDirectory, v1.ComponentHostPathTypeSocket:
 		default:
@@ -374,20 +382,26 @@ func validateStaticRuntimeVolumes(runtime *v1.AcceleratorExporterRuntimeProfile)
 
 	mounts := make(map[string]struct{}, len(runtime.VolumeMounts))
 	mountPaths := make(map[string]struct{}, len(runtime.VolumeMounts))
+
 	for _, mount := range runtime.VolumeMounts {
 		name := strings.TrimSpace(mount.Name)
+
 		if name == "" {
 			return fmt.Errorf("runtime volume mount name is required")
 		}
+
 		if _, exists := volumes[name]; !exists {
 			return fmt.Errorf("runtime volume mount %q does not reference a declared runtime volume", name)
 		}
+
 		if _, exists := mounts[name]; exists {
 			return fmt.Errorf("duplicate runtime volume mount name %q", name)
 		}
+
 		if err := validateStaticRuntimePath(mount.MountPath, "runtime volume mount path", false); err != nil {
 			return fmt.Errorf("runtime volume mount %q: %w", name, err)
 		}
+
 		if _, exists := mountPaths[mount.MountPath]; exists {
 			return fmt.Errorf("duplicate runtime volume mount path %q", mount.MountPath)
 		}
@@ -409,6 +423,7 @@ func validateStaticRuntimePath(value string, field string, allowRoot bool) error
 	if value == "" || strings.TrimSpace(value) != value || !filepath.IsAbs(value) || filepath.Clean(value) != value {
 		return fmt.Errorf("%s must be a non-empty absolute clean path", field)
 	}
+
 	if !allowRoot && value == "/" {
 		return fmt.Errorf("%s must not be the container root", field)
 	}
@@ -421,15 +436,19 @@ func validateStaticRuntimeDockerOptions(runtime *v1.AcceleratorExporterRuntimePr
 	if runtime.HostNetwork {
 		options = append(options, "--net=host")
 	}
+
 	if runtime.HostPID {
 		options = append(options, "--pid=host")
 	}
+
 	if runtime.Privileged {
 		options = append(options, "--privileged")
 	}
+
 	if runtime.Runtime != "" {
 		options = append(options, "--runtime="+runtime.Runtime)
 	}
+
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
 			options = append(options, "--cap-add="+strings.TrimSpace(capability))
@@ -437,11 +456,13 @@ func validateStaticRuntimeDockerOptions(runtime *v1.AcceleratorExporterRuntimePr
 	}
 
 	valuesByKey := map[string]string{}
+
 	for _, raw := range options {
 		option := strings.TrimSpace(raw)
 		if option == "" {
 			continue
 		}
+
 		if isUnstructuredRuntimeAccessOption(option) {
 			return fmt.Errorf("runtime Docker option %q must use structured runtime volumes", option)
 		}
@@ -450,9 +471,11 @@ func validateStaticRuntimeDockerOptions(runtime *v1.AcceleratorExporterRuntimePr
 		if key == "" || isRepeatableDockerRunOption(key) {
 			continue
 		}
+
 		if previous, exists := valuesByKey[key]; exists && previous != value {
 			return fmt.Errorf("conflicting Docker options for %q", key)
 		}
+
 		valuesByKey[key] = value
 	}
 
@@ -466,6 +489,7 @@ func isUnstructuredRuntimeAccessOption(option string) bool {
 	}
 
 	name := fields[0]
+
 	return name == "--device" || name == "--volume" || name == "--mount" || name == "-v" ||
 		strings.HasPrefix(name, "--device=") || strings.HasPrefix(name, "--volume=") ||
 		strings.HasPrefix(name, "--mount=") || strings.HasPrefix(name, "-v")
@@ -504,15 +528,19 @@ func runtimeAccessVolumes(runtime *v1.AcceleratorExporterRuntimeProfile) []v1.No
 	}
 
 	volumes := make([]v1.NodeComponentVolume, 0, len(runtime.Volumes))
+
 	for _, volume := range runtime.Volumes {
 		mount, ok := mounts[volume.Name]
 		if !ok || volume.HostPath == nil {
 			continue
 		}
+
 		readOnly := true
+
 		if mount.ReadOnly != nil {
 			readOnly = *mount.ReadOnly
 		}
+
 		volumes = append(volumes, v1.NodeComponentVolume{
 			Name:      volume.Name,
 			HostPath:  volume.HostPath.Path,
@@ -553,6 +581,7 @@ func copyMetricsStringMap(values map[string]string) map[string]string {
 	}
 
 	copied := make(map[string]string, len(values))
+
 	for key, value := range values {
 		if key == v1.NodeAgentAdapterProfileKey {
 			continue
