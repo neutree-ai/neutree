@@ -1023,12 +1023,12 @@ func TestEndpointRequestsRunningGPU(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "GPU endpoint without accelerator type is not running",
+			name: "legacy GPU endpoint without accelerator type is still running",
 			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
 				Replicas:  v1.ReplicaSpec{Num: replicas(1)},
 				Resources: &v1.ResourceSpec{GPU: pointer.String("1")},
 			}},
-			want: false,
+			want: true,
 		},
 		{
 			name: "running GPU endpoint is detected",
@@ -1100,6 +1100,12 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 			},
 		},
 	}
+	legacyRunningGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas:  v1.ReplicaSpec{Num: pointer.Int(1)},
+			Resources: &v1.ResourceSpec{GPU: pointer.String("1")},
+		},
+	}
 	cpuEndpoint := v1.Endpoint{
 		Spec: &v1.EndpointSpec{
 			Replicas: v1.ReplicaSpec{Num: pointer.Int(2)},
@@ -1121,6 +1127,14 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 		{
 			name:            "rejects enabling when running GPU endpoint references cluster",
 			endpoints:       []v1.Endpoint{runningGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10229",
+			wantMessage:     "cannot enable accelerator virtualization",
+			wantHint:        "1 GPU endpoint(s) still run on this cluster",
+		},
+		{
+			name:            "rejects enabling when legacy GPU endpoint without accelerator metadata still runs",
+			endpoints:       []v1.Endpoint{legacyRunningGPUEndpoint},
 			lookupEndpoints: true,
 			wantCode:        "10229",
 			wantMessage:     "cannot enable accelerator virtualization",

@@ -1047,15 +1047,18 @@ func validateClusterAcceleratorVirtualizationEnableForIdentity(
 	return nil
 }
 
-// endpointRequestsRunningGPU reports whether an endpoint requests accelerator
-// resources (GPU) and is not paused. Pausing an endpoint scales its replicas
-// to zero, so a paused endpoint has replicas == 0.
+// endpointRequestsRunningGPU reports whether an endpoint requests physical GPU
+// cards and is not paused. The enable guard must fail closed for legacy
+// Endpoint rows that still declare spec.resources.gpu without the newer
+// accelerator.type metadata, because enabling HAMi would still disrupt those
+// running workloads. Pausing an endpoint scales its replicas to zero, so a
+// paused endpoint has replicas == 0.
 func endpointRequestsRunningGPU(endpoint *v1.Endpoint) bool {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return false
 	}
 
-	if !endpoint.Spec.Resources.HasAccelerator() {
+	if endpoint.Spec.Resources.GetGPUCount() == 0 {
 		return false
 	}
 
