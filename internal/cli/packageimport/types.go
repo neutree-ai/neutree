@@ -16,6 +16,59 @@ type PackageManifest struct {
 
 	// Engines contains the list of engines need to be imported
 	Engines []*EngineMetadata `json:"engines" yaml:"engines"`
+
+	// ClusterProfile is the exact dual-type Cluster component image matrix
+	// carried by a cluster image package.
+	ClusterProfile *ClusterProfile `json:"cluster_profile,omitempty" yaml:"cluster_profile,omitempty"`
+}
+
+// ClusterProfile is the package representation of one exact Cluster Profile.
+// Semantic validation remains at the API boundary.
+type ClusterProfile struct {
+	Version    string                              `json:"version" yaml:"version"`
+	Components map[string]ClusterProfileComponents `json:"components" yaml:"components"`
+}
+
+type ClusterProfileComponents struct {
+	RayRuntime        ClusterImageRef `json:"ray_runtime" yaml:"ray_runtime"`
+	KubernetesRuntime ClusterImageRef `json:"kubernetes_runtime" yaml:"kubernetes_runtime"`
+	Router            ClusterImageRef `json:"router" yaml:"router"`
+	NodeAgent         ClusterImageRef `json:"node_agent" yaml:"node_agent"`
+	NodeExporter      ClusterImageRef `json:"node_exporter" yaml:"node_exporter"`
+	VMAgent           ClusterImageRef `json:"vmagent" yaml:"vmagent"`
+	KubeStateMetrics  ClusterImageRef `json:"kube_state_metrics" yaml:"kube_state_metrics"`
+}
+
+type ClusterImageRef struct {
+	Image string `json:"image" yaml:"image"`
+	Tag   string `json:"tag" yaml:"tag"`
+}
+
+// ToAPIClusterProfile converts a package payload to the internal API object.
+func (profile *ClusterProfile) ToAPIClusterProfile() *v1.ClusterProfile {
+	if profile == nil {
+		return nil
+	}
+
+	components := make(map[string]v1.ClusterProfileComponents, len(profile.Components))
+	for clusterType, value := range profile.Components {
+		components[clusterType] = v1.ClusterProfileComponents{
+			RayRuntime:        v1.ImageRef{Image: value.RayRuntime.Image, Tag: value.RayRuntime.Tag},
+			KubernetesRuntime: v1.ImageRef{Image: value.KubernetesRuntime.Image, Tag: value.KubernetesRuntime.Tag},
+			Router:            v1.ImageRef{Image: value.Router.Image, Tag: value.Router.Tag},
+			NodeAgent:         v1.ImageRef{Image: value.NodeAgent.Image, Tag: value.NodeAgent.Tag},
+			NodeExporter:      v1.ImageRef{Image: value.NodeExporter.Image, Tag: value.NodeExporter.Tag},
+			VMAgent:           v1.ImageRef{Image: value.VMAgent.Image, Tag: value.VMAgent.Tag},
+			KubeStateMetrics:  v1.ImageRef{Image: value.KubeStateMetrics.Image, Tag: value.KubeStateMetrics.Tag},
+		}
+	}
+
+	return &v1.ClusterProfile{
+		APIVersion: "v1",
+		Kind:       v1.ClusterProfileKind,
+		Metadata:   &v1.Metadata{Name: profile.Version},
+		Spec:       &v1.ClusterProfileSpec{Components: components},
+	}
 }
 
 type EngineMetadata struct {

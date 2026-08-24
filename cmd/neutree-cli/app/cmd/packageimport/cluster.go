@@ -7,7 +7,9 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/global"
 	"github.com/neutree-ai/neutree/internal/cli/packageimport"
+	"github.com/neutree-ai/neutree/pkg/client"
 )
 
 type ClusterImportOptions struct {
@@ -15,6 +17,19 @@ type ClusterImportOptions struct {
 	extractPath string
 	importLocal bool
 }
+
+type clusterPackageImporter interface {
+	Import(context.Context, *packageimport.ImportOptions) (*packageimport.ImportResult, error)
+}
+
+var (
+	clusterImportNewAPIClient = func() (*client.Client, error) {
+		return global.NewClient()
+	}
+	clusterImportNewImporter = func(apiClientFactory packageimport.APIClientFactory) clusterPackageImporter {
+		return packageimport.NewImporterWithAPIClientFactory(apiClientFactory)
+	}
+)
 
 func NewClusterImportCmd() *cobra.Command {
 	opts := &ClusterImportOptions{}
@@ -66,12 +81,12 @@ images:
 func runClusterImport(opts *ClusterImportOptions) error {
 	ctx := context.Background()
 
-	// Cluster no need to create apiclient
-	importer := packageimport.NewImporter(nil)
+	importer := clusterImportNewImporter(clusterImportNewAPIClient)
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
 		PackagePath: opts.packagePath,
+		Workspace:   workspace,
 		ExtractPath: opts.extractPath,
 	}
 
