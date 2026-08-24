@@ -162,11 +162,14 @@ func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 
-	config, err := opts.configWithRegistry(adapterRegistry{})
+	registry, err := newAdapterRegistry(DefaultAdapters())
+	require.NoError(t, err)
+
+	config, err := opts.configWithRegistry(registry)
 
 	require.NoError(t, err)
 	assert.Empty(t, config.AcceleratorType)
-	assert.Empty(t, config.Accelerators)
+	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
 }
 
 func TestOptionsAcceleratorTypeFlagHelpOmitsLegacyFallbackText(t *testing.T) {

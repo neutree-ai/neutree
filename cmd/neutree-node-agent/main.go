@@ -22,6 +22,7 @@ func main() {
 			GitCommit: info.GitCommit,
 			BuildTime: info.BuildTime,
 		}).
+		WithAdapters(nodeagentapp.DefaultAdapters()...).
 		Build()
 	if err == nil {
 		err = application.Run(ctx)

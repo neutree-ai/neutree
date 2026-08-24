@@ -56,3 +56,13 @@ func TestNewAdapterRegistryRejectsDescriptorConflicts(t *testing.T) {
 
 	assert.ErrorContains(t, err, `descriptor "neutree_vendor_metric" conflicts`)
 }
+func TestDefaultAdaptersReturnsFreshSliceAndInstances(t *testing.T) {
+	first := DefaultAdapters()
+	second := DefaultAdapters()
+
+	assert.Len(t, first, 1)
+	assert.Len(t, second, 1)
+	assert.NotSame(t, first[0], second[0])
+	first[0] = registryTestAdapter{typ: "mutated"}
+	assert.NotEqual(t, "mutated", second[0].Type())
+}
