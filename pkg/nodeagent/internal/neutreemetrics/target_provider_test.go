@@ -31,6 +31,32 @@ func TestStaticScrapeTargetProviderUsesManagedPorts(t *testing.T) {
 	}, acceleratorTargets)
 }
 
+func TestStaticScrapeTargetProviderUsesExplicitAcceleratorTarget(t *testing.T) {
+	provider := StaticScrapeTargetProvider{
+		MetricsMode:                    MetricsModeManaged,
+		AcceleratorType:                "npu",
+		AcceleratorExporterPort:        8082,
+		AcceleratorExporterMetricsPath: "custom-metrics",
+	}
+
+	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
+	require.NoError(t, err)
+	assert.Equal(t, []ScrapeTarget{
+		{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://127.0.0.1:8082/custom-metrics"},
+	}, acceleratorTargets)
+}
+
+func TestStaticScrapeTargetProviderDoesNotFallbackForExplicitAdapterWithoutTarget(t *testing.T) {
+	provider := StaticScrapeTargetProvider{
+		MetricsMode:     MetricsModeManaged,
+		AcceleratorType: "npu",
+	}
+
+	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
+	require.NoError(t, err)
+	assert.Empty(t, acceleratorTargets)
+}
+
 func TestStaticScrapeTargetProviderKeepsManagedNodeExporterInExternalMode(t *testing.T) {
 	provider := StaticScrapeTargetProvider{MetricsMode: MetricsModeExternal}
 
@@ -70,6 +96,29 @@ func TestKubernetesScrapeTargetProviderDiscoversManagedPodsOnLocalNode(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, []ScrapeTarget{
 		{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://10.244.0.12:19400/metrics"},
+	}, acceleratorTargets)
+}
+
+func TestKubernetesScrapeTargetProviderUsesExplicitAdapterTarget(t *testing.T) {
+	provider := newKubernetesTargetProvider(t,
+		pod("metrics", "npu-exporter-a", "node-a", "10.244.0.30", map[string]string{
+			"app":                           "npu-npu-exporter",
+			ManagedAcceleratorExporterLabel: ManagedAcceleratorExporterValue,
+		}),
+		pod("metrics", "legacy-dcgm-a", "node-a", "10.244.0.31", map[string]string{
+			"app": "legacy-dcgm-exporter",
+		}),
+	)
+	provider.MetricsMode = MetricsModeManaged
+	provider.NodeName = "node-a"
+	provider.AcceleratorType = "npu"
+	provider.AcceleratorExporterPort = 8082
+	provider.AcceleratorExporterMetricsPath = "npu-metrics"
+
+	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
+	require.NoError(t, err)
+	assert.Equal(t, []ScrapeTarget{
+		{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://10.244.0.30:8082/npu-metrics"},
 	}, acceleratorTargets)
 }
 

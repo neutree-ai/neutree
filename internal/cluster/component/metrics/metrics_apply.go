@@ -43,6 +43,15 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
 		variables.AcceleratorExporters = acceleratorExporters
+
+		nodeAgentTarget, err := nodeAgentAdapterTargetFromExporters(acceleratorExporters)
+		if err != nil {
+			return nil, errors.Wrapf(err, "select node-agent adapter target for cluster %s", m.cluster.Metadata.Name)
+		}
+
+		variables.NeutreeNodeAgentAcceleratorType = nodeAgentTarget.AcceleratorType
+		variables.NeutreeNodeAgentAcceleratorExporterPort = nodeAgentTarget.Port
+		variables.NeutreeNodeAgentAcceleratorExporterMetricsPath = nodeAgentTarget.MetricsPath
 	}
 
 	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)

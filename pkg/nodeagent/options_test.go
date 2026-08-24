@@ -151,6 +151,36 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
 }
 
+func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorType = v1.AcceleratorTypeNVIDIAGPU.String()
+	opts.acceleratorExporterPort = 8082
+	opts.acceleratorExporterPath = "/custom-metrics"
+
+	config, err := opts.config()
+
+	require.NoError(t, err)
+	assert.Equal(t, 8082, config.AcceleratorExporterPort)
+	assert.Equal(t, "/custom-metrics", config.AcceleratorExporterMetricsPath)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		MetricsMode:                    neutreemetrics.MetricsModeManaged,
+		AcceleratorType:                v1.AcceleratorTypeNVIDIAGPU.String(),
+		AcceleratorExporterPort:        8082,
+		AcceleratorExporterMetricsPath: "/custom-metrics",
+	}, config.ScrapeTargetProvider)
+}
+
+func TestOptionsConfigRejectsExporterTargetWithoutExplicitAdapter(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = clusterTypeRay
+	opts.acceleratorExporterPort = 8082
+
+	_, err := opts.config()
+
+	assert.ErrorContains(t, err, "requires --accelerator-type")
+}
+
 func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = clusterTypeRay

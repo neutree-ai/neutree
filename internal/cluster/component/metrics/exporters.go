@@ -33,15 +33,16 @@ const (
 )
 
 type metricsAcceleratorExporter struct {
-	Name            string
-	AcceleratorType string
-	ExporterName    string
-	Image           string
-	Command         []string
-	Args            []string
-	Env             []corev1.EnvVar
-	Port            int
-	MetricsPath     string
+	Name             string
+	AcceleratorType  string
+	ExporterName     string
+	Image            string
+	Command          []string
+	Args             []string
+	Env              []corev1.EnvVar
+	Port             int
+	MetricsPath      string
+	NodeAgentAdapter bool
 
 	ReadinessProbe  *corev1.Probe
 	SecurityContext *corev1.SecurityContext
@@ -133,6 +134,10 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
+	if !exporterProfile.SupportsBackend(v1.AcceleratorExporterBackendKubernetes) {
+		return metricsAcceleratorExporter{}, false, nil
+	}
+
 	if strings.TrimSpace(exporterProfile.Image) == "" ||
 		exporterProfile.Port <= 0 ||
 		!validAcceleratorExporterName(exporterProfile.Name) {
@@ -163,22 +168,23 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
-		Name:            name,
-		AcceleratorType: acceleratorType,
-		ExporterName:    exporterProfile.Name,
-		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
-		Command:         append([]string{}, exporterProfile.Command...),
-		Args:            append([]string{}, exporterProfile.Args...),
-		Env:             buildExporterEnv(exporterProfile.Env),
-		Port:            exporterProfile.Port,
-		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		ReadinessProbe:  readinessProbe,
-		SecurityContext: exporterRuntimeSecurityContext(runtime),
-		NodeSelector:    exporterRuntimeNodeSelector(runtime),
-		ConfigFileData:  configFileData,
-		ConfigChecksum:  configChecksum,
-		VolumeMounts:    volumeMounts,
-		Volumes:         volumes,
+		Name:             name,
+		AcceleratorType:  acceleratorType,
+		ExporterName:     exporterProfile.Name,
+		Image:            util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Command:          append([]string{}, exporterProfile.Command...),
+		Args:             append([]string{}, exporterProfile.Args...),
+		Env:              buildExporterEnv(exporterProfile.Env),
+		Port:             exporterProfile.Port,
+		MetricsPath:      exporterMetricsPath(exporterProfile.MetricsPath),
+		NodeAgentAdapter: usesNodeAgentAdapterProfile(exporterProfile),
+		ReadinessProbe:   readinessProbe,
+		SecurityContext:  exporterRuntimeSecurityContext(runtime),
+		NodeSelector:     exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:   configFileData,
+		ConfigChecksum:   configChecksum,
+		VolumeMounts:     volumeMounts,
+		Volumes:          volumes,
 	}
 
 	return exporter, true, nil
@@ -220,6 +226,18 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
 			matchedExporters = append(matchedExporters, exporter)
 		}
+	}
+
+	if len(matchedExporters) > 1 {
+		types := make([]string, 0, len(matchedExporters))
+		for _, exporter := range matchedExporters {
+			types = append(types, exporter.AcceleratorType)
+		}
+
+		return nil, fmt.Errorf(
+			"multiple accelerator exporter profiles match nodes: %s",
+			strings.Join(types, ", "),
+		)
 	}
 
 	return matchedExporters, nil
@@ -281,8 +299,17 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	}
 
 	keys := make([]string, 0, len(env))
+
 	for key := range env {
+		if key == v1.NodeAgentAdapterProfileKey {
+			continue
+		}
+
 		keys = append(keys, key)
+	}
+
+	if len(keys) == 0 {
+		return nil
 	}
 
 	sort.Strings(keys)
@@ -296,6 +323,42 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	return envVars
 }
 
+func usesNodeAgentAdapterProfile(exporter *v1.AcceleratorExporterProfile) bool {
+	if exporter == nil {
+		return false
+	}
+
+	return strings.EqualFold(strings.TrimSpace(exporter.Env[v1.NodeAgentAdapterProfileKey]), "true")
+}
+
+type nodeAgentAdapterTarget struct {
+	AcceleratorType string
+	Port            int
+	MetricsPath     string
+}
+
+func nodeAgentAdapterTargetFromExporters(
+	exporters []metricsAcceleratorExporter,
+) (nodeAgentAdapterTarget, error) {
+	for _, exporter := range exporters {
+		if !exporter.NodeAgentAdapter {
+			continue
+		}
+
+		if strings.TrimSpace(exporter.AcceleratorType) == "" || exporter.Port <= 0 {
+			return nodeAgentAdapterTarget{}, fmt.Errorf("node-agent adapter profile has an invalid exporter target")
+		}
+
+		return nodeAgentAdapterTarget{
+			AcceleratorType: exporter.AcceleratorType,
+			Port:            exporter.Port,
+			MetricsPath:     exporter.MetricsPath,
+		}, nil
+	}
+
+	return nodeAgentAdapterTarget{}, nil
+}
+
 func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter) []corev1.EnvVar {
 	allowed := map[string]struct{}{
 		"NVIDIA_VISIBLE_DEVICES":     {},
@@ -304,6 +367,10 @@ func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter
 	env := map[string]string{}
 
 	for _, exporter := range exporters {
+		if exporter.NodeAgentAdapter {
+			continue
+		}
+
 		for _, item := range exporter.Env {
 			if _, ok := allowed[item.Name]; !ok {
 				continue

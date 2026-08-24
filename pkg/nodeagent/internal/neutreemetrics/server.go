@@ -41,6 +41,10 @@ type Config struct {
 	// AcceleratorType selects the accelerator adapter from the registry when
 	// non-empty. Empty keeps the legacy DCGM normalizer path.
 	AcceleratorType string
+	// AcceleratorExporterPort and AcceleratorExporterMetricsPath identify the
+	// managed exporter selected with an explicit accelerator adapter.
+	AcceleratorExporterPort        int
+	AcceleratorExporterMetricsPath string
 	// Accelerators is the registered accelerator adapter registry used to
 	// resolve AcceleratorType to an adapter.
 	Accelerators map[string]adapter.Accelerator

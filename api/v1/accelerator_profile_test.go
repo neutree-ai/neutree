@@ -101,6 +101,7 @@ func TestAcceleratorExporterProfileJSONRoundTripStructuredRuntime(t *testing.T) 
 		"metrics_exporter":{
 			"name":"npu-exporter",
 			"image":"example.com/ascend/npu-exporter:test",
+			"backends":["kubernetes"],
 			"command":["/usr/local/bin/npu-exporter"],
 			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
 			"port":8082,

@@ -2,6 +2,7 @@ package staticcluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -325,6 +326,96 @@ func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 			assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
 		})
 	}
+}
+
+func TestPlannerSkipsKubernetesOnlyAcceleratorExporterProfile(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"nvidia_gpu",
+		"metrics_exporter":{
+			"name":"dcgm-exporter",
+			"image":"nvcr.io/nvidia/k8s/dcgm-exporter:test",
+			"backends":["kubernetes"],
+			"port":19400
+		}
+	}`
+
+	profile := &v1.AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(profileJSON), profile))
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): profile,
+			},
+		},
+	}, cluster, currentNodes)
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
+}
+
+func TestPlannerProjectsExplicitNodeAgentTargetWithoutExporterRuntimeInheritance(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			v1.StaticNodeAcceleratorStatus{Type: "custom_accelerator"},
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				"custom_accelerator": {
+					AcceleratorType: "custom_accelerator",
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Name:        "custom-exporter",
+						Image:       "example.com/custom/exporter:test",
+						Port:        18082,
+						MetricsPath: "custom/metrics",
+						Env: map[string]string{
+							v1.NodeAgentAdapterProfileKey: "true",
+							"NVIDIA_VISIBLE_DEVICES":      "all",
+						},
+						Runtime: &v1.AcceleratorExporterRuntimeProfile{
+							Capabilities:     &v1.AcceleratorExporterCapabilities{Add: []string{"SYS_ADMIN"}},
+							DockerRunOptions: []string{"--gpus all"},
+						},
+					},
+				},
+			},
+		},
+	}, cluster, currentNodes)
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
+	require.NotNil(t, exporter)
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=custom_accelerator")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-port=18082")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=/custom/metrics")
+	assert.Empty(t, nodeAgent.Env)
+	assert.NotContains(t, nodeAgent.DockerRunOptions, "--cap-add=SYS_ADMIN")
+	assert.NotContains(t, nodeAgent.DockerRunOptions, "--gpus all")
 }
 
 func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {

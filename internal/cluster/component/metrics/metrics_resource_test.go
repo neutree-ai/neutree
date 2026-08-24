@@ -1022,6 +1022,10 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 			"command":["/usr/local/bin/npu-exporter"],
 			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
 			"port":8082,
+			"env":{
+				"NEUTREE_PROFILE_NODE_AGENT_ADAPTER":"true",
+				"NVIDIA_VISIBLE_DEVICES":"all"
+			},
 			"readiness":{
 				"http_path":"/metrics",
 				"initial_delay_seconds":15,
@@ -1107,6 +1111,58 @@ func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *te
 	assert.Equal(t, corev1.HostPathSocket, *socketVolume.HostPath.Type)
 	socketMount := requireVolumeMount(t, exporter, "containerd-socket", "/run/containerd/containerd.sock")
 	assert.Assert(t, !socketMount.ReadOnly)
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-type=ascend_npu"))
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-exporter-port=8082"))
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-exporter-metrics-path=/metrics"))
+	assert.Equal(t, "", envValue(nodeAgentContainer.Env, v1.NodeAgentAdapterProfileKey))
+	assert.Equal(t, "", envValue(nodeAgentContainer.Env, "NVIDIA_VISIBLE_DEVICES"))
+	assert.Equal(t, "", envValue(container.Env, v1.NodeAgentAdapterProfileKey))
+	assert.Equal(t, "all", envValue(container.Env, "NVIDIA_VISIBLE_DEVICES"))
+}
+
+func TestBuildMetricsResourcesSkipsStaticOnlyAcceleratorExporterProfile(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"custom_accelerator",
+		"metrics_exporter":{
+			"name":"custom-exporter",
+			"image":"example.com/custom/exporter:test",
+			"backends":["static"],
+			"port":19090,
+			"runtime":{"node_selector":{"accelerator.example.com/custom":"true"}}
+		}
+	}`
+
+	profile := &v1.AcceleratorProfile{}
+	assert.NilError(t, json.Unmarshal([]byte(profileJSON), profile))
+
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_accelerator"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_accelerator").Return(profile, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "custom-accelerator-custom-exporter"))
+	}
 }
 
 func TestBuildMetricsResourcesRejectsInvalidStructuredAcceleratorExporterProfile(t *testing.T) {
@@ -1451,7 +1507,7 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterProfileErrors(t *testing.T
 	}
 }
 
-func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *testing.T) {
+func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()})
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
@@ -1497,13 +1553,8 @@ func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *te
 		})).Build(),
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to build metrics resources: %v", err)
-	}
-
-	findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
-	findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	_, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.ErrorContains(t, err, "multiple accelerator exporter profiles match nodes")
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing.T) {
