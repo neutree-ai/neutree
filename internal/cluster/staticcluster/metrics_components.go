@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,35 +151,21 @@ func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
 ) v1.NodeComponentSpec {
-	healthCheck := &v1.NodeComponentHealthCheck{
-		HTTPPath: exporterMetricsPath(exporter),
-		Port:     exporter.Port,
-	}
-	if exporter.Readiness != nil {
-		if exporter.Readiness.HTTPPath != "" {
-			healthCheck.HTTPPath = normalizedMetricsPath(exporter.Readiness.HTTPPath)
-		}
-		healthCheck.InitialDelaySec = exporter.Readiness.InitialDelaySeconds
-		healthCheck.IntervalSec = exporter.Readiness.PeriodSeconds
-		healthCheck.TimeoutSec = exporter.Readiness.TimeoutSeconds
-	}
-
-	volumes := acceleratorExporterConfigVolumes(exporter.ConfigFiles)
-	volumes = append(volumes, runtimeAccessVolumes(exporter.Runtime)...)
-
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
 		Image:            staticComponentImage(cluster, exporter.Image),
-		Command:          append([]string{}, exporter.Command...),
 		Args:             append([]string{}, exporter.Args...),
 		Env:              copyMetricsStringMap(exporter.Env),
-		Volumes:          volumes,
+		Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),
 		ConfigFiles:      acceleratorExporterComponentConfigFiles(exporter.ConfigFiles),
 		DockerRunOptions: acceleratorExporterDockerRunOptions(exporter.Runtime),
 		Ports: []v1.NodeComponentPort{
 			{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 		},
-		HealthCheck: healthCheck,
+		HealthCheck: &v1.NodeComponentHealthCheck{
+			HTTPPath: exporterMetricsPath(exporter),
+			Port:     exporter.Port,
+		},
 	}
 }
 
@@ -208,31 +193,26 @@ func buildNodeAgentComponent(
 
 	args = append(args, nodeAgentAdapterArgs(cluster, profile)...)
 
-	volumes := []v1.NodeComponentVolume{
-		{
-			Name:      "host-proc",
-			HostPath:  "/proc",
-			MountPath: "/host/proc",
-			ReadOnly:  true,
-		},
-		{
-			Name:      "host-cgroup",
-			HostPath:  "/sys/fs/cgroup",
-			MountPath: "/host/sys/fs/cgroup",
-			ReadOnly:  true,
-		},
-	}
-	if usesNodeAgentAdapterProfile(profile) {
-		volumes = append(volumes, runtimeAccessVolumes(acceleratorRuntime(profile))...)
-	}
-
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
 		Args:             args,
 		Env:              nodeAgentEnv(profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
-		Volumes:          volumes,
+		Volumes: []v1.NodeComponentVolume{
+			{
+				Name:      "host-proc",
+				HostPath:  "/proc",
+				MountPath: "/host/proc",
+				ReadOnly:  true,
+			},
+			{
+				Name:      "host-cgroup",
+				HostPath:  "/sys/fs/cgroup",
+				MountPath: "/host/sys/fs/cgroup",
+				ReadOnly:  true,
+			},
+		},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
@@ -319,209 +299,6 @@ func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	// Until AcceleratorProfile exposes a dedicated NodeAgentRuntime, reuse the
 	// metrics exporter runtime because both components need accelerator visibility.
 	return appendDockerRunOptionsUnique(options, acceleratorExporterDockerRunOptions(exporter.Runtime)...)
-}
-
-func acceleratorRuntime(profile *v1.AcceleratorProfile) *v1.AcceleratorExporterRuntimeProfile {
-	exporter := acceleratorExporterProfile(profile)
-	if exporter == nil {
-		return nil
-	}
-
-	return exporter.Runtime
-}
-
-func validateStaticRuntimeAccess(profile *v1.AcceleratorProfile) error {
-	runtime := acceleratorRuntime(profile)
-	if runtime == nil {
-		return nil
-	}
-
-	if err := validateStaticRuntimeVolumes(runtime); err != nil {
-		return err
-	}
-
-	return validateStaticRuntimeDockerOptions(runtime)
-}
-
-func validateStaticRuntimeVolumes(runtime *v1.AcceleratorExporterRuntimeProfile) error {
-	if len(runtime.Volumes) == 0 && len(runtime.VolumeMounts) == 0 {
-		return nil
-	}
-
-	volumes := make(map[string]struct{}, len(runtime.Volumes))
-	for _, volume := range runtime.Volumes {
-		name := strings.TrimSpace(volume.Name)
-		if name == "" {
-			return fmt.Errorf("runtime volume name is required")
-		}
-		if _, exists := volumes[name]; exists {
-			return fmt.Errorf("duplicate runtime volume name %q", name)
-		}
-		if volume.HostPath == nil {
-			return fmt.Errorf("runtime volume %q host path is required", name)
-		}
-		if err := validateStaticRuntimePath(volume.HostPath.Path, "runtime volume host path", true); err != nil {
-			return fmt.Errorf("runtime volume %q: %w", name, err)
-		}
-		switch volume.HostPath.Type {
-		case v1.ComponentHostPathTypeDirectory, v1.ComponentHostPathTypeSocket:
-		default:
-			return fmt.Errorf("runtime volume %q has unsupported host path type %q", name, volume.HostPath.Type)
-		}
-
-		volumes[name] = struct{}{}
-	}
-
-	mounts := make(map[string]struct{}, len(runtime.VolumeMounts))
-	mountPaths := make(map[string]struct{}, len(runtime.VolumeMounts))
-	for _, mount := range runtime.VolumeMounts {
-		name := strings.TrimSpace(mount.Name)
-		if name == "" {
-			return fmt.Errorf("runtime volume mount name is required")
-		}
-		if _, exists := volumes[name]; !exists {
-			return fmt.Errorf("runtime volume mount %q does not reference a declared runtime volume", name)
-		}
-		if _, exists := mounts[name]; exists {
-			return fmt.Errorf("duplicate runtime volume mount name %q", name)
-		}
-		if err := validateStaticRuntimePath(mount.MountPath, "runtime volume mount path", false); err != nil {
-			return fmt.Errorf("runtime volume mount %q: %w", name, err)
-		}
-		if _, exists := mountPaths[mount.MountPath]; exists {
-			return fmt.Errorf("duplicate runtime volume mount path %q", mount.MountPath)
-		}
-
-		mounts[name] = struct{}{}
-		mountPaths[mount.MountPath] = struct{}{}
-	}
-
-	for name := range volumes {
-		if _, exists := mounts[name]; !exists {
-			return fmt.Errorf("runtime volume %q must have one mount", name)
-		}
-	}
-
-	return nil
-}
-
-func validateStaticRuntimePath(value string, field string, allowRoot bool) error {
-	if value == "" || strings.TrimSpace(value) != value || !filepath.IsAbs(value) || filepath.Clean(value) != value {
-		return fmt.Errorf("%s must be a non-empty absolute clean path", field)
-	}
-	if !allowRoot && value == "/" {
-		return fmt.Errorf("%s must not be the container root", field)
-	}
-
-	return nil
-}
-
-func validateStaticRuntimeDockerOptions(runtime *v1.AcceleratorExporterRuntimeProfile) error {
-	options := append([]string{}, runtime.DockerRunOptions...)
-	if runtime.HostNetwork {
-		options = append(options, "--net=host")
-	}
-	if runtime.HostPID {
-		options = append(options, "--pid=host")
-	}
-	if runtime.Privileged {
-		options = append(options, "--privileged")
-	}
-	if runtime.Runtime != "" {
-		options = append(options, "--runtime="+runtime.Runtime)
-	}
-	if runtime.Capabilities != nil {
-		for _, capability := range runtime.Capabilities.Add {
-			options = append(options, "--cap-add="+strings.TrimSpace(capability))
-		}
-	}
-
-	valuesByKey := map[string]string{}
-	for _, raw := range options {
-		option := strings.TrimSpace(raw)
-		if option == "" {
-			continue
-		}
-		if isUnstructuredRuntimeAccessOption(option) {
-			return fmt.Errorf("runtime Docker option %q must use structured runtime volumes", option)
-		}
-
-		key, value := splitDockerRunOption(option)
-		if key == "" || isRepeatableDockerRunOption(key) {
-			continue
-		}
-		if previous, exists := valuesByKey[key]; exists && previous != value {
-			return fmt.Errorf("conflicting Docker options for %q", key)
-		}
-		valuesByKey[key] = value
-	}
-
-	return nil
-}
-
-func isUnstructuredRuntimeAccessOption(option string) bool {
-	fields := strings.Fields(option)
-	if len(fields) == 0 {
-		return false
-	}
-
-	name := fields[0]
-	return name == "--device" || name == "--volume" || name == "--mount" || name == "-v" ||
-		strings.HasPrefix(name, "--device=") || strings.HasPrefix(name, "--volume=") ||
-		strings.HasPrefix(name, "--mount=") || strings.HasPrefix(name, "-v")
-}
-
-func splitDockerRunOption(option string) (string, string) {
-	fields := strings.Fields(option)
-	if len(fields) == 0 {
-		return "", ""
-	}
-
-	if key, value, ok := strings.Cut(fields[0], "="); ok {
-		return key, strings.TrimSpace(value)
-	}
-
-	return fields[0], strings.TrimSpace(strings.TrimPrefix(option, fields[0]))
-}
-
-func isRepeatableDockerRunOption(key string) bool {
-	switch key {
-	case "--add-host", "--cap-add", "--cap-drop", "--device", "--env", "--label", "--mount", "--security-opt", "--volume", "-e", "-v":
-		return true
-	default:
-		return false
-	}
-}
-
-func runtimeAccessVolumes(runtime *v1.AcceleratorExporterRuntimeProfile) []v1.NodeComponentVolume {
-	if runtime == nil || len(runtime.Volumes) == 0 {
-		return nil
-	}
-
-	mounts := make(map[string]v1.ComponentVolumeMount, len(runtime.VolumeMounts))
-	for _, mount := range runtime.VolumeMounts {
-		mounts[mount.Name] = mount
-	}
-
-	volumes := make([]v1.NodeComponentVolume, 0, len(runtime.Volumes))
-	for _, volume := range runtime.Volumes {
-		mount, ok := mounts[volume.Name]
-		if !ok || volume.HostPath == nil {
-			continue
-		}
-		readOnly := true
-		if mount.ReadOnly != nil {
-			readOnly = *mount.ReadOnly
-		}
-		volumes = append(volumes, v1.NodeComponentVolume{
-			Name:      volume.Name,
-			HostPath:  volume.HostPath.Path,
-			MountPath: mount.MountPath,
-			ReadOnly:  readOnly,
-		})
-	}
-
-	return volumes
 }
 
 func appendDockerRunOptionsUnique(options []string, values ...string) []string {
@@ -885,7 +662,10 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 			continue
 		}
 
-		metricsPath := normalizedMetricsPath(plan.AcceleratorExporterMetricsPath)
+		metricsPath := defaultPrometheusHTTPPath
+		if component.HealthCheck != nil {
+			metricsPath = normalizedMetricsPath(component.HealthCheck.HTTPPath)
+		}
 
 		acceleratorType := plan.Accelerator.Type
 		group := groupsByAcceleratorType[acceleratorType]
@@ -1098,10 +878,6 @@ func acceleratorExporterDockerRunOptions(
 		options = append(options, "--pid=host")
 	}
 
-	if runtime.Privileged {
-		options = append(options, "--privileged")
-	}
-
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
 			capability = strings.TrimSpace(capability)
@@ -1111,10 +887,6 @@ func acceleratorExporterDockerRunOptions(
 
 			options = append(options, "--cap-add="+capability)
 		}
-	}
-
-	if runtime.Runtime != "" {
-		options = append(options, "--runtime="+runtime.Runtime)
 	}
 
 	options = append(options, runtime.DockerRunOptions...)
