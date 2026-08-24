@@ -703,6 +703,48 @@ func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
 	return baseline, nil
 }
 
+func clusterAcceleratorVirtualizationDisableRequested(body []byte) (bool, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, err
+	}
+
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return false, nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return false, err
+	}
+
+	acceleratorVirtualizationRaw, ok := spec["accelerator_virtualization"]
+	if !ok {
+		return false, nil
+	}
+
+	var acceleratorVirtualization map[string]json.RawMessage
+	if err := json.Unmarshal(acceleratorVirtualizationRaw, &acceleratorVirtualization); err != nil {
+		return false, err
+	}
+
+	enabledRaw, ok := acceleratorVirtualization["enabled"]
+	if !ok {
+		// The CLI decodes YAML into Cluster and re-marshals JSON before PATCH.
+		// enabled:false is omitted by the API struct tag, yielding
+		// "accelerator_virtualization": {}, which still clears the enabled flag.
+		return true, nil
+	}
+
+	var enabled bool
+	if err := json.Unmarshal(enabledRaw, &enabled); err != nil {
+		return false, err
+	}
+
+	return !enabled, nil
+}
+
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
 	return []storage.Filter{
 		{Column: "metadata->>workspace", Operator: "eq", Value: workspace},

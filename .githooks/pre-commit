@@ -2,12 +2,13 @@
 # Neutree pre-commit hook. Activate once with `make install-hooks`.
 # Gates:
 #   1. controlplane images list    — auto-sync when deploy image sources change
-#   2. gofmt                       — format check
-#   3. go vet                      — static analysis
-#   4. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
-#   5. migration hygiene           — immutable history, pairs, unique versions, seed-owned reload (scripts/check-migrations.sh)
-#   6. golangci-lint (full)        — CI-equivalent lint for non-test/non-mock files
-#   7. go test -short              — affected packages only
+#   2. cluster package artifacts   — generate exact Catalog output; never auto-stage
+#   3. gofmt                       — format check
+#   4. go vet                      — static analysis
+#   5. architecture boundaries     — import-direction rules (scripts/check-boundaries.sh)
+#   6. migration hygiene           — immutable history, pairs, unique versions, seed-owned reload (scripts/check-migrations.sh)
+#   7. golangci-lint (full)        — CI-equivalent lint for non-test/non-mock files
+#   8. go test -short              — affected packages only
 #
 # Skip with `git commit --no-verify` only in emergencies.
 set -e
@@ -16,7 +17,7 @@ ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
 # ── Gate 1: controlplane images list ──
-echo "[1/7] controlplane images list..."
+echo "[1/8] controlplane images list..."
 IMAGE_SOURCE_PATTERN='^(deploy/chart/neutree/.*|scripts/builder/sync-controlplane-images\.sh|scripts/builder/image-lists/controlplane/images\.txt|Makefile)$'
 IMAGE_SOURCE_CHANGES=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E "$IMAGE_SOURCE_PATTERN" || true)
 if [ -n "$IMAGE_SOURCE_CHANGES" ]; then
@@ -42,8 +43,19 @@ else
   echo "   (skipped: no staged deploy image source changes)"
 fi
 
-# ── Gate 2: gofmt ──
-echo "[2/7] gofmt..."
+# ── Gate 2: exact cluster package artifacts ──
+echo "[2/8] cluster package artifacts..."
+CLUSTER_GENERATED_DIR="scripts/builder/image-lists/cluster/generated"
+bash scripts/builder/sync-cluster-image-lists.sh --write
+if ! git diff --quiet -- "$CLUSTER_GENERATED_DIR" || [ -n "$(git ls-files --others --exclude-standard -- "$CLUSTER_GENERATED_DIR")" ]; then
+  echo "❌ generated cluster package artifacts differ from the staged index"
+  echo "   ✅ FIX: run 'make sync-cluster-image-lists', review the result, and stage it with git add"
+  exit 1
+fi
+bash scripts/builder/sync-cluster-image-lists.sh --check
+
+# ── Gate 3: gofmt ──
+echo "[3/8] gofmt..."
 FMT=$(gofmt -l . 2>/dev/null | grep -vE '^(vendor|bin|out|tmp|.*/mocks)/' || true)
 if [ -n "$FMT" ]; then
   echo "❌ gofmt violations:"
@@ -52,8 +64,8 @@ if [ -n "$FMT" ]; then
   exit 1
 fi
 
-# ── Gate 3: go vet ──
-echo "[3/7] go vet..."
+# ── Gate 4: go vet ──
+echo "[4/8] go vet..."
 if ! go vet ./... >/tmp/neutree-vet.log 2>&1; then
   echo "❌ go vet failed:"
   sed 's/^/   /' /tmp/neutree-vet.log
@@ -61,16 +73,16 @@ if ! go vet ./... >/tmp/neutree-vet.log 2>&1; then
   exit 1
 fi
 
-# ── Gate 4: architecture boundaries ──
-echo "[4/7] architecture boundaries..."
+# ── Gate 5: architecture boundaries ──
+echo "[5/8] architecture boundaries..."
 bash scripts/check-boundaries.sh
 
-# ── Gate 5: migration hygiene ──
-echo "[5/7] migration hygiene..."
+# ── Gate 6: migration hygiene ──
+echo "[6/8] migration hygiene..."
 bash scripts/check-migrations.sh
 
-# ── Gate 6: golangci-lint (full) ──
-echo "[6/7] golangci-lint (full)..."
+# ── Gate 7: golangci-lint (full) ──
+echo "[7/8] golangci-lint (full)..."
 CHANGED_GO=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
 CHANGED_LINT_GO=$(echo "$CHANGED_GO" | grep -Ev '(^|/)mock_[^/]*\.go$|_test\.go$' | grep -v '/mocks/' || true)
 if [ -n "$CHANGED_LINT_GO" ]; then
@@ -85,8 +97,8 @@ if [ -n "$CHANGED_LINT_GO" ]; then
   fi
 fi
 
-# ── Gate 7: go test -short on affected packages ──
-echo "[7/7] go test -short on affected packages..."
+# ── Gate 8: go test -short on affected packages ──
+echo "[8/8] go test -short on affected packages..."
 if [ -n "$CHANGED_GO" ]; then
   PKGS=$(echo "$CHANGED_GO" | while IFS= read -r file; do
     [ -z "$file" ] && continue

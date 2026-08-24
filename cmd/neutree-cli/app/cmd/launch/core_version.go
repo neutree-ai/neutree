@@ -8,6 +8,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/neutree-ai/neutree/internal/version"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 const fallbackNeutreeCoreVersion = "v0.0.1"
@@ -44,6 +45,15 @@ func defaultNeutreeCoreVersion() string {
 }
 
 func validateNeutreeCoreVersionCompatibility(cliVersion, targetVersion string) error {
+	targetVersion = strings.TrimSpace(targetVersion)
+	if targetVersion == "" {
+		return fmt.Errorf("neutree core image tag is required")
+	}
+
+	if releaseprofile.IsWorkflowShortCommitBuild(targetVersion) {
+		return nil
+	}
+
 	target, err := semver.NewVersion(targetVersion)
 	if err != nil {
 		return fmt.Errorf("invalid target version %q: %w", targetVersion, err)

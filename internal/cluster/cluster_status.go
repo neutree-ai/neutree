@@ -43,6 +43,12 @@ func needsVersionUpgrade(cluster *v1.Cluster) bool {
 		cluster.Status.Version != cluster.Spec.Version
 }
 
+// NeedsVersionUpgrade reports whether a Cluster's observed version differs
+// from its requested version.
+func NeedsVersionUpgrade(cluster *v1.Cluster) bool {
+	return needsVersionUpgrade(cluster)
+}
+
 // DetermineClusterDeletePhase determines the deletion phase.
 //
 //	isDeleteCompleted || force-delete -> Deleted

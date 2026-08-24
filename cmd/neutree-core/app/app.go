@@ -9,9 +9,12 @@ import (
 
 	"k8s.io/klog/v2"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const (
@@ -27,23 +30,77 @@ const (
 	readHeaderTimeout = 5 * time.Second
 )
 
+type currentBaselineSynchronizer func(
+	releaseprofile.CurrentBaselineStore,
+	string,
+	releaseprofile.Builder,
+) error
+
+type baselineResolution struct {
+	name              string
+	shouldSynchronize bool
+}
+
+type currentBaselineStore struct {
+	storage storage.Storage
+}
+
+func (store currentBaselineStore) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
+	return store.storage.ListReleaseInfo()
+}
+
+func (store currentBaselineStore) CreateReleaseInfo(info *v1.ReleaseInfo) error {
+	return store.storage.CreateReleaseInfo(info)
+}
+
+func (store currentBaselineStore) UpdateReleaseInfo(id string, info *v1.ReleaseInfo) error {
+	return store.storage.UpdateReleaseInfo(id, info)
+}
+
+func (store currentBaselineStore) ListClusterProfile() ([]v1.ClusterProfile, error) {
+	return store.storage.ListClusterProfile(storage.ListOption{})
+}
+
+func (store currentBaselineStore) CreateClusterProfile(profile *v1.ClusterProfile) error {
+	return store.storage.CreateClusterProfile(profile)
+}
+
 // App represents the main application
 type App struct {
-	config      *config.CoreConfig
-	controllers map[string]controllers.Controller
+	config                     *config.CoreConfig
+	controllers                map[string]controllers.Controller
+	releaseProfileBuilder      releaseprofile.Builder
+	synchronizeCurrentBaseline currentBaselineSynchronizer
 }
 
 // NewApp creates a new application instance
 func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller) *App {
 	return &App{
-		config:      c,
-		controllers: controllers,
+		config:                     c,
+		controllers:                controllers,
+		releaseProfileBuilder:      releaseprofile.NewBuilder(),
+		synchronizeCurrentBaseline: releaseprofile.SynchronizeCurrentBaseline,
 	}
 }
 
 // Run starts the application
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
+
+	baseline, err := a.currentControlPlaneBaseline()
+	if err != nil {
+		return err
+	}
+
+	if baseline.shouldSynchronize {
+		if err := a.synchronizeCurrentBaseline(
+			currentBaselineStore{storage: a.config.Storage},
+			baseline.name,
+			a.releaseProfileBuilder,
+		); err != nil {
+			return fmt.Errorf("synchronize current release info: %w", err)
+		}
+	}
 
 	go a.config.ObsCollectConfigManager.Start(ctx)
 
@@ -92,4 +149,43 @@ func (a *App) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func (a *App) currentControlPlaneBaseline() (baselineResolution, error) {
+	infos, err := a.config.Storage.ListReleaseInfo()
+	if err != nil {
+		return baselineResolution{}, fmt.Errorf("list release infos: %w", err)
+	}
+
+	baseline, err := releaseprofile.ResolveCurrentControlPlaneBaseline(a.config.Version, infos)
+	if err == nil {
+		// A development, dirty, or workflow-short-commit binary consumes the
+		// persisted baseline selected above. It must not overwrite it using an
+		// older local catalog that may not support that baseline.
+		return baselineResolution{
+			name:              baseline,
+			shouldSynchronize: !releaseprofile.IsDevelopmentOrDirtyBuild(a.config.Version),
+		}, nil
+	}
+
+	if !releaseprofile.IsDevelopmentOrDirtyBuild(a.config.Version) {
+		return baselineResolution{}, fmt.Errorf("resolve current control-plane baseline: %w", err)
+	}
+
+	if a.releaseProfileBuilder == nil {
+		return baselineResolution{}, fmt.Errorf("resolve current control-plane baseline: %w", err)
+	}
+
+	baseline = a.releaseProfileBuilder.CurrentReleaseInfoBaseline()
+
+	normalizedBaseline, normalizeErr := releaseprofile.NormalizeControlPlaneRelease(baseline)
+	if normalizeErr != nil {
+		return baselineResolution{}, fmt.Errorf("current release info builder baseline %q must be an exact stable release info baseline", baseline)
+	}
+
+	if normalizedBaseline != baseline {
+		return baselineResolution{}, fmt.Errorf("current release info builder baseline %q must be an exact stable release info baseline", baseline)
+	}
+
+	return baselineResolution{name: baseline, shouldSynchronize: true}, nil
 }

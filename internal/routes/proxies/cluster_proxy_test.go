@@ -2864,6 +2864,52 @@ func testValidateClusterVersionNotDowngrade(t *testing.T) {
 	}
 }
 
+func TestClusterAcceleratorVirtualizationDisableRequested(t *testing.T) {
+	t.Run("true when payload explicitly sets enabled false", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {"enabled": false}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+
+	t.Run("true when enabled is omitted from accelerator virtualization patch", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {"config_patch": {"devicePlugin": {}}}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+
+	t.Run("true when accelerator virtualization patch is empty after omitempty marshal", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": {}
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+
+	t.Run("true when accelerator virtualization patch is null", func(t *testing.T) {
+		requested, err := clusterAcceleratorVirtualizationDisableRequested([]byte(`{
+			"spec": {
+				"accelerator_virtualization": null
+			}
+		}`))
+
+		assert.NoError(t, err)
+		assert.True(t, requested)
+	})
+}
+
 func sameFilters(actual, expected []storage.Filter) bool {
 	if len(actual) != len(expected) {
 		return false

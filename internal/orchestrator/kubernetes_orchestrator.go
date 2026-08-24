@@ -29,6 +29,7 @@ import (
 const (
 	annEndpointSpecHash              = "neutree.ai/endpoint-spec-hash"
 	annNeutreeVersion                = "neutree.ai/neutree-version"
+	annNeutreeRuntimeImage           = "neutree.ai/neutree-runtime-image"
 	containerFailureRestartThreshold = 5
 	modelDownloaderInitContainerName = "model-downloader"
 )
@@ -230,12 +231,21 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 	} else if existingDep.Annotations != nil {
 		storedHash := existingDep.Annotations[annEndpointSpecHash]
 		storedVersion := existingDep.Annotations[annNeutreeVersion]
+		storedRuntimeImage := existingDep.Annotations[annNeutreeRuntimeImage]
 
 		// Preserve NeutreeVersion when:
 		// - storedHash == currentSpecHash: endpoint spec unchanged (cluster-only upgrade)
 		// - storedHash == "": legacy endpoint bootstrapped with version but no hash yet
 		if storedVersion != "" && (storedHash == "" || storedHash == currentSpecHash) {
 			renderVars.NeutreeVersion = storedVersion
+			if storedRuntimeImage != "" {
+				renderVars.NeutreeRuntimeImage = storedRuntimeImage
+			} else {
+				renderVars.NeutreeRuntimeImage = util.RewriteImageRef(
+					renderVars.ImagePrefix,
+					"neutree/neutree-runtime:"+storedVersion,
+				)
+			}
 		}
 	}
 
@@ -273,6 +283,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 				ann[annEndpointSpecHash] = currentSpecHash
 				ann[annNeutreeVersion] = renderVars.NeutreeVersion
+				ann[annNeutreeRuntimeImage] = renderVars.NeutreeRuntimeImage
 				obj.SetAnnotations(ann)
 			}
 
@@ -302,7 +313,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		Namespace: namespace,
 		Name:      ctx.Endpoint.Metadata.Name,
 	}, dep); err == nil {
-		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annEndpointSpecHash] == "" {
+		if dep.Annotations == nil || dep.Annotations[annNeutreeVersion] == "" || dep.Annotations[annNeutreeRuntimeImage] == "" || dep.Annotations[annEndpointSpecHash] == "" {
 			patch := client.MergeFrom(dep.DeepCopy())
 
 			if dep.Annotations == nil {
@@ -311,6 +322,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 
 			dep.Annotations[annEndpointSpecHash] = currentSpecHash
 			dep.Annotations[annNeutreeVersion] = renderVars.NeutreeVersion
+			dep.Annotations[annNeutreeRuntimeImage] = renderVars.NeutreeRuntimeImage
 
 			if patchErr := ctx.ctrClient.Patch(context.Background(), dep, patch); patchErr != nil {
 				ctx.logger.Error(patchErr, "Failed to bootstrap deployment annotations")

@@ -20,6 +20,8 @@ import (
 	"github.com/neutree-ai/neutree/internal/cluster"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 const (
@@ -37,27 +39,28 @@ const (
 const startupTimeoutSecondsKey = "startup_timeout_seconds"
 
 type DeploymentManifestVariables struct {
-	EndpointName    string
-	Namespace       string
-	ClusterName     string
-	Workspace       string
-	EngineName      string
-	EngineVersion   string
-	ImagePrefix     string
-	ImageRepo       string
-	ImageTag        string
-	ImagePullSecret string
-	ModelArgs       map[string]interface{}
-	EngineArgs      map[string]interface{}
-	Resources       map[string]string
-	Env             map[string]string
-	Annotations     map[string]string
-	Volumes         []corev1.Volume
-	VolumeMounts    []corev1.VolumeMount
-	RoutingLogic    string
-	Replicas        int32
-	NodeSelector    map[string]string
-	NeutreeVersion  string
+	EndpointName        string
+	Namespace           string
+	ClusterName         string
+	Workspace           string
+	EngineName          string
+	EngineVersion       string
+	ImagePrefix         string
+	ImageRepo           string
+	ImageTag            string
+	ImagePullSecret     string
+	ModelArgs           map[string]interface{}
+	EngineArgs          map[string]interface{}
+	Resources           map[string]string
+	Env                 map[string]string
+	Annotations         map[string]string
+	Volumes             []corev1.Volume
+	VolumeMounts        []corev1.VolumeMount
+	RoutingLogic        string
+	Replicas            int32
+	NodeSelector        map[string]string
+	NeutreeVersion      string
+	NeutreeRuntimeImage string
 	// ProgressDeadlineSeconds bounds how long the Deployment may take to
 	// become available before the controller reports ProgressDeadlineExceeded.
 	// StartupProbeFailureThreshold is the startupProbe failureThreshold; with
@@ -105,6 +108,48 @@ func (k *kubernetesOrchestrator) setDeployImageVariables(data *DeploymentManifes
 
 	data.ImageRepo = imageName
 	data.ImageTag = imageTag
+
+	return nil
+}
+
+// setNeutreeRuntimeImage resolves the model-downloader runtime image from the
+// exact Kubernetes ClusterProfile for the deployed Cluster version.
+func (k *kubernetesOrchestrator) setNeutreeRuntimeImage(
+	data *DeploymentManifestVariables,
+	deployedCluster *v1.Cluster,
+) error {
+	if data == nil {
+		return errors.New("deployment manifest variables are required")
+	}
+
+	if deployedCluster == nil || deployedCluster.Spec == nil {
+		return errors.New("deployed cluster spec is required")
+	}
+
+	version := strings.TrimSpace(deployedCluster.Spec.Version)
+	if version == "" {
+		return errors.New("deployed cluster version is required")
+	}
+
+	if k == nil || k.storage == nil {
+		return errors.New("storage is required to resolve exact Kubernetes cluster profile")
+	}
+
+	components, err := releaseprofile.NewClusterProfileProvider(releaseprofile.ClusterProfileReaderFunc(func() ([]v1.ClusterProfile, error) {
+		return k.storage.ListClusterProfile(storage.ListOption{})
+	})).ComponentsFor(version, v1.KubernetesClusterType)
+	if err != nil {
+		return errors.Wrap(err, "resolve Kubernetes cluster profile")
+	}
+
+	if strings.TrimSpace(components.KubernetesRuntime.Image) == "" || strings.TrimSpace(components.KubernetesRuntime.Tag) == "" {
+		return errors.New("cluster profile component kubernetes_runtime requires image and tag")
+	}
+
+	data.NeutreeRuntimeImage = util.RewriteImageRef(
+		data.ImagePrefix,
+		components.KubernetesRuntime.Image+":"+components.KubernetesRuntime.Tag,
+	)
 
 	return nil
 }
@@ -508,6 +553,10 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 
 	// Set deploy image variables
 	if err := k.setDeployImageVariables(&data, endpoint, engine, imageRegistry); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
+
+	if err := k.setNeutreeRuntimeImage(&data, deployedCluster); err != nil {
 		return DeploymentManifestVariables{}, err
 	}
 

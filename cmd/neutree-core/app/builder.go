@@ -9,6 +9,7 @@ import (
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 // Builder is the application builder
@@ -16,6 +17,8 @@ type Builder struct {
 	controllerInits    map[string]ControllerFactory
 	config             *config.CoreConfig
 	acceleratorPlugins []publicaccelerator.Plugin
+
+	releaseProfileBuilder releaseprofile.Builder
 
 	beforeHooks       map[string][]controllers.HookFunc
 	afterHooks        map[string][]controllers.HookFunc
@@ -26,11 +29,12 @@ type Builder struct {
 // NewBuilder creates a new CLI builder
 func NewBuilder() *Builder {
 	b := &Builder{
-		controllerInits:   make(map[string]ControllerFactory),
-		beforeHooks:       make(map[string][]controllers.HookFunc),
-		afterHooks:        make(map[string][]controllers.HookFunc),
-		globalBeforeHooks: []controllers.HookFunc{},
-		globalAfterHooks:  []controllers.HookFunc{},
+		controllerInits:       make(map[string]ControllerFactory),
+		releaseProfileBuilder: releaseprofile.NewBuilder(),
+		beforeHooks:           make(map[string][]controllers.HookFunc),
+		afterHooks:            make(map[string][]controllers.HookFunc),
+		globalBeforeHooks:     []controllers.HookFunc{},
+		globalAfterHooks:      []controllers.HookFunc{},
 	}
 
 	defaultControllers := map[string]ControllerFactory{
@@ -64,6 +68,19 @@ func (b *Builder) WithConfig(c *config.CoreConfig) *Builder {
 
 func (b *Builder) WithAcceleratorPlugins(plugins ...publicaccelerator.Plugin) *Builder {
 	b.acceleratorPlugins = append(b.acceleratorPlugins, append([]publicaccelerator.Plugin(nil), plugins...)...)
+	return b
+}
+
+// WithReleaseProfileBuilder configures the single catalog-backed builder used
+// for release policy, exact Profiles, and package material.
+func (b *Builder) WithReleaseProfileBuilder(builder releaseprofile.Builder) *Builder {
+	if builder == nil {
+		b.releaseProfileBuilder = releaseprofile.NewBuilder()
+		return b
+	}
+
+	b.releaseProfileBuilder = builder
+
 	return b
 }
 
@@ -158,5 +175,8 @@ func (b *Builder) Build() (*App, error) {
 		registerControllers[name] = ctrl
 	}
 
-	return NewApp(b.config, registerControllers), nil
+	app := NewApp(b.config, registerControllers)
+	app.releaseProfileBuilder = b.releaseProfileBuilder
+
+	return app, nil
 }

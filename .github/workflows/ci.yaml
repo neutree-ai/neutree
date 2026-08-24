@@ -36,6 +36,8 @@ jobs:
 
       - name: Prepare for lint
         run: make prepare-build-cli
+      - name: Check generated cluster package artifacts
+        run: make check-cluster-image-lists
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:

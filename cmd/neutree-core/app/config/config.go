@@ -19,7 +19,6 @@ type ControllerConfig struct {
 }
 
 type ClusterControllerConfig struct {
-	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
 }
 
@@ -44,6 +43,7 @@ type CoreConfig struct {
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 	AuthClient              auth.Client
+	Version                 string
 
 	// global controller configs
 	ControllerConfig *ControllerConfig

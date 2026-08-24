@@ -14,7 +14,10 @@ import (
 
 // GetRouteResources returns all Kubernetes resources for the route component
 func (r *RouterComponent) GetRouteResources() (*unstructured.UnstructuredList, error) {
-	variables := r.buildManifestVariables()
+	variables, err := r.buildManifestVariables()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to build router manifest variables for cluster %s", r.cluster.Metadata.Name)
+	}
 
 	objs, err := util.RenderKubernetesManifest(routerMainifestTemplate, variables)
 	if err != nil {

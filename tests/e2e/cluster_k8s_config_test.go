@@ -153,6 +153,14 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			assertK8sNodeAgentControlPlaneScheduling(context.Background(), k8sH, namespace, cluster.Spec.Version)
 		})
 
+		It("should render the v1.2.0 ClusterProfile image tags", Label("release-profile"), func() {
+			if cluster.Spec.Version != "v1.2.0" {
+				Skip("release profile image assertions require cluster.version=v1.2.0")
+			}
+
+			assertK8sClusterProfileImages(context.Background(), k8sH, namespace)
+		})
+
 		It("should create router resources (SA, Role, RoleBinding, Deployment, Service)", Label("C2612779"), func() {
 			ctx := context.Background()
 
