@@ -237,30 +237,46 @@ func endpointPatchMayAffectModelSourceValidation(endpoint *v1.Endpoint) bool {
 	return endpoint.Spec.Model != nil || endpoint.Spec.Engine != nil
 }
 
-// validateEndpointModelSource decides whether an endpoint has to name a model
-// registry, and checks the one it names is real.
+// validateEndpointModelSource decides which parts of spec.model an endpoint has
+// to fill in, and checks that the registry it names is real.
 //
-// A registry is required exactly when Neutree downloads the model itself, which
-// v1.IsBuiltInModelDownloaderEngine answers and the orchestrator keys its
-// download step off as well -- keep the two on the same predicate, or validation
-// and deployment will disagree about which endpoints need a registry.
+// Registry, model name and version are required exactly when Neutree downloads
+// the model itself, which v1.IsBuiltInModelDownloaderEngine answers and the
+// orchestrator keys its download step off as well -- keep the two on the same
+// predicate, or validation and deployment will disagree about which endpoints
+// need a model at all. An engine that brings its own model has none of these to
+// give, and the database no longer demands them.
 //
 // A registry that *is* named is resolved against the endpoint's own workspace
 // whichever engine is in play: deps.Storage runs as the service role and does
 // not apply RLS, so a spec naming another workspace's registry would otherwise
-// be honoured.
+// be honoured. The name *format*, when a name is given, stays a database
+// concern -- it does not depend on the engine.
 func validateEndpointModelSource(store storage.Storage, endpoint *v1.Endpoint) *validationError {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Model == nil {
 		return nil
 	}
 
-	if endpoint.Spec.Model.Registry == "" {
-		if endpointDownloadsModel(endpoint) {
-			return endpointModelSourceError(fmt.Sprintf(
-				"spec.model.registry is required for engine %s, which downloads its own model",
-				endpoint.Spec.Engine.Engine))
-		}
+	model := endpoint.Spec.Model
 
+	if endpointDownloadsModel(endpoint) {
+		for _, required := range []struct {
+			field string
+			value string
+		}{
+			{"spec.model.registry", model.Registry},
+			{"spec.model.name", model.Name},
+			{"spec.model.version", model.Version},
+		} {
+			if required.value == "" {
+				return endpointModelSourceError(fmt.Sprintf(
+					"%s is required for engine %s, which downloads its own model",
+					required.field, endpoint.Spec.Engine.Engine))
+			}
+		}
+	}
+
+	if model.Registry == "" {
 		return nil
 	}
 
