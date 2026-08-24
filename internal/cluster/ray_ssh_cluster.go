@@ -194,6 +194,11 @@ func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *
 		WriteEarlyDeleting(cluster, c.storage)
 	}
 
+	imageRegistry, err := getUsedImageRegistries(cluster, c.storage)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get used image registry")
+	}
+
 	sshClusterConfig, err := util.ParseSSHClusterConfig(cluster)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse ssh cluster config")
@@ -202,10 +207,11 @@ func (c *sshRayClusterReconciler) ReconcileDelete(ctx context.Context, cluster *
 	reconcileCtx := &ReconcileContext{
 		Ctx:              ctx,
 		Cluster:          cluster,
+		ImageRegistry:    imageRegistry,
 		sshClusterConfig: sshClusterConfig,
 	}
 
-	err = c.generateDeleteConfig(reconcileCtx)
+	err = c.generateConfig(reconcileCtx)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate config")
 	}
@@ -234,30 +240,6 @@ func (c *sshRayClusterReconciler) generateConfig(reconcileCtx *ReconcileContext)
 	if err != nil {
 		return errors.Wrap(err, "failed to generate ray cluster config")
 	}
-
-	return generateRaySSHLocalConfig(reconcileCtx, rayClusterConfig)
-}
-
-func (c *sshRayClusterReconciler) generateDeleteConfig(reconcileCtx *ReconcileContext) error {
-	if reconcileCtx == nil || reconcileCtx.Cluster == nil || reconcileCtx.Cluster.Metadata == nil {
-		return errors.New("cluster metadata is required")
-	}
-
-	if reconcileCtx.sshClusterConfig == nil || reconcileCtx.sshClusterConfig.Provider.HeadIP == "" {
-		return errors.New("head IP can not be empty")
-	}
-
-	// ray down only needs the cluster identity and SSH connection. Deliberately
-	// omit runtime image selection so a missing Profile never prevents cleanup.
-	rayClusterConfig := &v1.RayClusterConfig{
-		ClusterName: reconcileCtx.Cluster.Metadata.Name,
-		Provider:    reconcileCtx.sshClusterConfig.Provider,
-		Auth:        reconcileCtx.sshClusterConfig.Auth,
-		Docker: v1.Docker{
-			ContainerName: "ray_container",
-		},
-	}
-	rayClusterConfig.Provider.Type = "local"
 
 	return generateRaySSHLocalConfig(reconcileCtx, rayClusterConfig)
 }

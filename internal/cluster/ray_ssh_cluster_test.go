@@ -1321,25 +1321,20 @@ func TestNeedsVersionUpgrade(t *testing.T) {
 	}
 }
 
-func TestGenerateDeleteConfigDoesNotRequireProfile(t *testing.T) {
-	reconciler := &sshRayClusterReconciler{}
-	reconcileCtx := &ReconcileContext{
-		Cluster: &v1.Cluster{
-			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
-		},
-		sshClusterConfig: &v1.RaySSHProvisionClusterConfig{
-			Provider: v1.Provider{HeadIP: "127.0.0.1"},
-			Auth:     v1.Auth{SSHPrivateKey: "dGVzdC1rZXk="},
-		},
+func TestReconcileDeleteRequiresImageRegistry(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	store.On("ListImageRegistry", mock.Anything).Return(nil, assert.AnError).Once()
+
+	reconciler := &sshRayClusterReconciler{storage: store}
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "default"},
+		Spec:     &v1.ClusterSpec{ImageRegistry: "registry-a"},
 	}
 
-	err := reconciler.generateDeleteConfig(reconcileCtx)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = reconcileCtx.sshConfigGenerator.Cleanup() })
+	err := reconciler.ReconcileDelete(nil, cluster)
 
-	require.NotNil(t, reconcileCtx.sshRayClusterConfig)
-	assert.Equal(t, "ray_container", reconcileCtx.sshRayClusterConfig.Docker.ContainerName)
-	assert.Empty(t, reconcileCtx.sshRayClusterConfig.Docker.Image)
+	require.ErrorContains(t, err, "failed to get used image registry: failed to list image registry")
+	store.AssertExpectations(t)
 }
 
 func TestUpgradeCluster(t *testing.T) {
