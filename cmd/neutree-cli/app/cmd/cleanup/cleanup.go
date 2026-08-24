@@ -48,9 +48,8 @@ Examples:
 
   # Skip confirmation (for automation)
   neutree-cli cleanup neutree-core --force`,
-		Args:          cobra.ExactArgs(1),
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCleanup(&command.OSExecutor{}, opts, args[0])
 		},

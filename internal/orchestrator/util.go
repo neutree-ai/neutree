@@ -18,6 +18,23 @@ import (
 
 const acceleratorTypeCPU = "cpu"
 
+// errModelScopeDeployNotWiredYet is what both orchestrators answer when asked to
+// build an application from a ModelScope registry.
+//
+// It is a statement about this repository, not about ModelScope. The hub serves
+// both operations a downloader needs — list a revision's files, fetch one by
+// path — and internal/model_registry/model_scope.go names those endpoints. What
+// is missing is the container-side downloader, which today speaks only the
+// Hugging Face Hub API. NEU-689 wires it and deletes this refusal together with
+// the two cases that raise it.
+//
+// Until then the refusal is explicit rather than a fall-through, because falling
+// through the per-kind switch produces an application with no model path at all
+// and fails inside the container with nothing to read.
+var errModelScopeDeployNotWiredYet = errors.New(
+	"cannot deploy a model from a ModelScope registry yet: its models can be browsed and selected, " +
+		"but the inference runtime's downloader does not speak the ModelScope API")
+
 // engineTPArgKey returns the underscore-form engine_args key the engine
 // uses for tensor parallel size. vLLM uses `tensor_parallel_size`; SGLang's
 // ServerArgs dataclass field is `tp_size`. Returns "" when the engine
@@ -38,6 +55,12 @@ func engineTPArgKey(engineName string) string {
 func endpointModelServeName(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) string {
 	serveName := endpoint.Spec.Model.Name
 	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameSGLang {
+		return serveName
+	}
+
+	// No registry means no registry-side version to disambiguate against, so the
+	// bare model name is the served name.
+	if modelRegistry == nil || modelRegistry.Spec == nil {
 		return serveName
 	}
 
@@ -118,6 +141,30 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 	}
 
 	return &engine[0], nil
+}
+
+// resolveEndpointModelRegistry returns the model registry an endpoint deploys
+// from, or nil when it names none.
+//
+// nil is a legitimate state, not a lookup failure: an engine that ships its own
+// weights has nothing to fetch. Callers must handle it.
+func resolveEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
+	if endpoint.Spec == nil || endpoint.Spec.Model == nil || endpoint.Spec.Model.Registry == "" {
+		return nil, nil
+	}
+
+	return getEndpointModelRegistry(s, endpoint)
+}
+
+// endpointModelRegistryType renders the registry type for the deploy template,
+// empty when the endpoint names no registry. The templates branch on this value,
+// so an absent registry has to read as "none" rather than crash the render.
+func endpointModelRegistryType(modelRegistry *v1.ModelRegistry) string {
+	if modelRegistry == nil || modelRegistry.Spec == nil {
+		return ""
+	}
+
+	return string(modelRegistry.Spec.Type)
 }
 
 func getEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {

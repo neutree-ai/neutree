@@ -45,6 +45,10 @@ publicModelRegistries:
     # Address the built-in Hugging Face registry points at. Set this to a mirror
     # reachable from inside the network when the Hub itself is not.
     url: "https://huggingface.co"
+  modelScope:
+    # Address the built-in ModelScope registry points at. Set this to a mirror
+    # reachable from inside the network when the hub itself is not.
+    url: "https://www.modelscope.cn"
 
 metrics:
   # Specify the URL for remote write if using an external metrics storage system.
@@ -52,6 +56,14 @@ metrics:
   # Service and over the vminsert Ingress-derived URL. When this points at a
   # TLS-enabled VMInsert Ingress, use an https:// URL.
   remoteWriteUrl: ""
+
+nodePort:
+  # External host (DNS name, VIP, or load balancer) used to build externally
+  # reachable URLs when any exposed Service uses type: NodePort. Required when
+  # kong.proxyService.type / victoria-metrics-cluster.vminsert.service.type /
+  # grafana.service.type is set to NodePort.
+  # Must be routable outside the cluster; never derive it from a Pod hostIP.
+  externalHost: ""
 
 k8sWaitFor:
   image:

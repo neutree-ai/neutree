@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/nfs"
 )
 
 var (
@@ -17,6 +18,18 @@ var (
 	// ErrNotFound is returned when the registry is reachable but the requested
 	// object is not there.
 	ErrNotFound = errors.New("not found in model registry")
+	// ErrStorageUnavailable is returned when the registry's backing storage went
+	// away underneath a read — an NFS mount that disappeared, most often. It is
+	// deliberately distinct from ErrNotFound and from an empty listing: both of
+	// those are statements about the registry's contents, and reporting a storage
+	// outage as either tells the caller something false about what it holds.
+	// Retrying is the right response.
+	ErrStorageUnavailable = errors.New("model registry storage is temporarily unavailable")
+	// ErrMountBusy is returned when a registry's backing mount could not be torn
+	// down because other clients are still reading through it. Callers that were
+	// tearing it down for their own reasons can carry on; callers that need it
+	// gone should retry.
+	ErrMountBusy = nfs.ErrMountBusy
 )
 
 type ListOption struct {
@@ -121,6 +134,8 @@ func new(registry *v1.ModelRegistry) (ModelRegistry, error) {
 	switch registry.Spec.Type {
 	case v1.HuggingFaceModelRegistryType:
 		return newHuggingFace(registry)
+	case v1.ModelScopeModelRegistryType:
+		return newModelScope(registry)
 	case v1.BentoMLModelRegistryType:
 		return newFileBased(registry)
 	default:

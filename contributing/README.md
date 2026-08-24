@@ -66,5 +66,5 @@ If the component differs between Compose and Helm, document the reason in the PR
 | [`architecture-neutree-cli.md`](architecture-neutree-cli.md) | neutree-cli process role, subcommand groups, authentication, deploy mode, engine package import |
 | [`testing.md`](testing.md) | Unit (testify + mockery), Python co-location, DB integration, E2E (Ginkgo), impl/test file pairs, deploying a build to a running control plane |
 | [`coding-standards.md`](coding-standards.md) | golangci-lint rules, import organization, commit convention, lint fix cheatsheet |
-| [`database.md`](database.md) | PostgREST + RLS model, migration rules (incl. pairing), auth token layers, common errors |
+| [`database.md`](database.md) | PostgREST + RLS model, migration rules (pairing + unique numbering), auth token layers, common errors |
 | [`playbooks.md`](playbooks.md) | Step-by-step checklists — new engine version, new resource type |

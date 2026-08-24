@@ -289,7 +289,7 @@ spec: {}
 				"--timeout", "5s",
 			)
 			ExpectFailed(r)
-			Expect(r.Stdout).To(ContainSubstring("timeout"))
+			Expect(r.Stdout + r.Stderr).To(ContainSubstring("timeout"))
 		})
 	})
 

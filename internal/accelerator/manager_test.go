@@ -28,6 +28,29 @@ func TestManagerGetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 }
 
+func TestManagerGetEngineContainerRunOptionsNVIDIA(t *testing.T) {
+	m := &manager{}
+	m.acceleratorsMap.Store(v1.AcceleratorTypeNVIDIAGPU.String(), registerPlugin{
+		resource: v1.AcceleratorTypeNVIDIAGPU.String(),
+		plugin:   &plugin.GPUAcceleratorPlugin{},
+	})
+
+	opts, err := m.GetEngineContainerRunOptions(v1.AcceleratorTypeNVIDIAGPU.String())
+
+	require.NoError(t, err)
+	assert.Contains(t, opts, "--runtime=nvidia")
+	assert.Contains(t, opts, "--gpus all")
+}
+
+func TestManagerGetEngineContainerRunOptionsEmptyForNoAccelerator(t *testing.T) {
+	m := &manager{}
+
+	opts, err := m.GetEngineContainerRunOptions("")
+
+	assert.NoError(t, err)
+	assert.Nil(t, opts)
+}
+
 func TestManagerGetStaticNodeRuntimeConfig(t *testing.T) {
 	tests := []struct {
 		name    string

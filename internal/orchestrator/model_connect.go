@@ -71,7 +71,12 @@ func (o *RayOrchestrator) connectSSHNodeEndpointModel(config *v1.RaySSHProvision
 	endpoint v1.Endpoint, nodeIP string, op string) error {
 	klog.V(4).Infof("Connect endpoint %s model to node %s", endpoint.Metadata.Name, nodeIP)
 
-	if modelRegistry.Spec.Type == v1.HuggingFaceModelRegistryType {
+	// A public hub is fetched over the network by the container itself, so there
+	// is nothing to attach to the node. Whether the runtime can actually fetch
+	// from it is decided when the application is built, which is where a refusal
+	// carries an explanation; answering it here would report the gap as an
+	// unknown registry kind.
+	if v1.VisibilityForModelRegistryType(modelRegistry.Spec.Type) == v1.ModelRegistryVisibilityPublic {
 		return nil
 	}
 

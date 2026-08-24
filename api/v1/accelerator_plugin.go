@@ -196,8 +196,15 @@ type AcceleratorExporterRuntimeProfile struct {
 	Volumes []ComponentVolume `json:"volumes,omitempty"`
 	// VolumeMounts declares the matching container mounts for Volumes.
 	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
-	// Runtime selects the Docker runtime handler on StaticNode. Kubernetes does
-	// not parse it; an empty value means no special runtime is selected.
+	// Runtime selects the Docker runtime handler (e.g. "nvidia") on StaticNode.
+	// Kubernetes does not parse it. Without this, exporter/node-agent
+	// containers only received `--gpus all` and no `--runtime=`, which left GPU
+	// injection to the default Docker device-request hook instead of the
+	// nvidia runtime. Selecting the handler explicitly keeps device access in
+	// the runtime shim's OCI rewrite (systemd-rebuildable) on modern toolkits.
+	// omitempty is deliberate: unlike RuntimeConfig.Runtime (which is always
+	// set for accelerator runtimes), an empty handler is meaningful: it means
+	// the exporter does not select a special runtime.
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`

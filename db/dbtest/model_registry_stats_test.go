@@ -131,6 +131,9 @@ func TestModelRegistryStatsSurviveConnectivityReconcile(t *testing.T) {
 	// controller into a status write-back.
 	mockRegistry := modelregistrymocks.NewMockModelRegistry(t)
 	mockRegistry.On("Connect").Return(nil)
+	// The reconcile gives its mount lease back on the way out, whether or not the
+	// health check passed.
+	mockRegistry.On("Disconnect").Return(nil)
 	mockRegistry.On("HealthyCheck").Return(assert.AnError)
 
 	original := model_registry.NewModelRegistry

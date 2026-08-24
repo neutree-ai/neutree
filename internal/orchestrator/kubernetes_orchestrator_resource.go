@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -19,6 +21,20 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
+
+const (
+	// defaultStartupTimeoutSeconds is the K8s startup window for an endpoint
+	// when deployment_options.startup_timeout_seconds is unset. Matches the
+	// historical hard-coded progressDeadlineSeconds (1200s = 20 min).
+	defaultStartupTimeoutSeconds = 1200
+	// startupProbePeriodSeconds is the startupProbe periodSeconds used by the
+	// engine K8s templates. failureThreshold = timeout / periodSeconds.
+	startupProbePeriodSeconds = 10
+)
+
+// startupTimeoutSecondsKey is the deployment_options key carrying the
+// per-endpoint K8s startup window.
+const startupTimeoutSecondsKey = "startup_timeout_seconds"
 
 type DeploymentManifestVariables struct {
 	EndpointName    string
@@ -42,6 +58,14 @@ type DeploymentManifestVariables struct {
 	Replicas        int32
 	NodeSelector    map[string]string
 	NeutreeVersion  string
+	// ProgressDeadlineSeconds bounds how long the Deployment may take to
+	// become available before the controller reports ProgressDeadlineExceeded.
+	// StartupProbeFailureThreshold is the startupProbe failureThreshold; with
+	// periodSeconds=10 it bounds how long the kubelet lets the engine start
+	// before killing it. Both are derived from deployment_options
+	// startup_timeout_seconds (default 1200s).
+	ProgressDeadlineSeconds      int
+	StartupProbeFailureThreshold int
 }
 
 func buildDeploymentObjects(deployTemplate string, renderVars DeploymentManifestVariables) (*unstructured.UnstructuredList, error) {
@@ -360,7 +384,7 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 		"file":          endpoint.Spec.Model.File,
 		"task":          endpoint.Spec.Model.Task,
 		"path":          endpoint.Spec.Model.Name, // default to model name
-		"registry_type": string(modelRegistry.Spec.Type),
+		"registry_type": endpointModelRegistryType(modelRegistry),
 	}
 
 	modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
@@ -383,8 +407,10 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		modelCacheRelativePath = modelCaches[0].Name
 	}
 
-	switch modelRegistry.Spec.Type {
-	case v1.BentoMLModelRegistryType:
+	// With no registry there is nothing to place from: the model args keep the
+	// bare name / version the spec carries.
+	switch endpointModelRegistryType(modelRegistry) {
+	case string(v1.BentoMLModelRegistryType):
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
 			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
@@ -415,7 +441,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			})
 		}
 
-	case v1.HuggingFaceModelRegistryType:
+	case string(v1.HuggingFaceModelRegistryType):
 		data.Env[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
@@ -429,6 +455,9 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
 		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+	case v1.ModelScopeModelRegistryType:
+		// Removed by NEU-689, which wires the downloader. See the error's own comment.
+		return errModelScopeDeployNotWiredYet
 	}
 
 	return nil
@@ -459,6 +488,11 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 
 	// Set basic variables
 	k.setBasicVariables(&data, endpoint, deployedCluster, engine)
+
+	// Set startup timeout (progressDeadlineSeconds + startupProbe threshold)
+	if err := k.setStartupTimeoutVariables(&data, endpoint); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
 
 	// Set deploy image variables
 	if err := k.setDeployImageVariables(&data, endpoint, engine, imageRegistry); err != nil {
@@ -658,13 +692,54 @@ func generateModelCacheConfig(modelCaches []v1.ModelCache) ([]corev1.Volume, []c
 
 func newDeploymentManifestVariables() DeploymentManifestVariables {
 	return DeploymentManifestVariables{
-		Resources:    make(map[string]string),
-		NodeSelector: make(map[string]string),
-		Annotations:  make(map[string]string),
-		Env:          make(map[string]string),
-		ModelArgs:    make(map[string]interface{}),
-		EngineArgs:   make(map[string]interface{}),
-		Volumes:      []corev1.Volume{},
-		VolumeMounts: []corev1.VolumeMount{},
+		Resources:                    make(map[string]string),
+		NodeSelector:                 make(map[string]string),
+		Annotations:                  make(map[string]string),
+		Env:                          make(map[string]string),
+		ModelArgs:                    make(map[string]interface{}),
+		EngineArgs:                   make(map[string]interface{}),
+		Volumes:                      []corev1.Volume{},
+		VolumeMounts:                 []corev1.VolumeMount{},
+		ProgressDeadlineSeconds:      defaultStartupTimeoutSeconds,
+		StartupProbeFailureThreshold: defaultStartupTimeoutSeconds / startupProbePeriodSeconds,
 	}
+}
+
+// resolveStartupTimeoutSeconds reads deployment_options.startup_timeout_seconds
+// and returns the K8s startup window in seconds. Only a positive integer or a
+// string that parses to a positive integer is accepted; anything else
+// (non-numeric, zero, negative, sub-second fractional) is an error so the user
+// learns the value did not take effect instead of silently falling back.
+// Unset uses defaultStartupTimeoutSeconds (1200) so the rendered manifest
+// stays byte-identical to the historical hard-coded template. Kubernetes
+// clusters only; the SSH/Ray path never reads this key.
+func resolveStartupTimeoutSeconds(endpoint *v1.Endpoint) (int, error) {
+	if endpoint.Spec.DeploymentOptions != nil {
+		if raw, ok := endpoint.Spec.DeploymentOptions[startupTimeoutSecondsKey]; ok {
+			v, err := strconv.Atoi(fmt.Sprintf("%v", raw))
+			if err != nil || v <= 0 {
+				return 0, errors.Errorf("endpoint %s deployment_options.startup_timeout_seconds must be a positive integer, got %v",
+					endpoint.Metadata.WorkspaceName(), raw)
+			}
+
+			return v, nil
+		}
+	}
+
+	return defaultStartupTimeoutSeconds, nil
+}
+
+// setStartupTimeoutVariables derives the Deployment progress deadline and
+// startupProbe failure threshold from the resolved startup window. Kubernetes
+// clusters only; the SSH/Ray path never calls this.
+func (k *kubernetesOrchestrator) setStartupTimeoutVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint) error {
+	timeout, err := resolveStartupTimeoutSeconds(endpoint)
+	if err != nil {
+		return err
+	}
+
+	data.ProgressDeadlineSeconds = timeout
+	data.StartupProbeFailureThreshold = (timeout + startupProbePeriodSeconds - 1) / startupProbePeriodSeconds
+
+	return nil
 }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
+	"k8s.io/klog/v2"
 	kmount "k8s.io/utils/mount"
 
 	"github.com/pkg/errors"
@@ -91,7 +93,19 @@ func GetNFSVersion(device string, mountPoint string) (string, error) {
 	return "", errors.Errorf("mount %s at %s not found", device, mountPoint)
 }
 
+// MountNFS mounts device at mountPoint if it is not already mounted there. It
+// takes no lease: use AcquireMount when the caller is about to read through the
+// mount and must not have it pulled out from under it.
 func MountNFS(device string, mountPoint string) error {
+	guard := guardFor(mountPoint)
+
+	guard.opMu.Lock()
+	defer guard.opMu.Unlock()
+
+	return mountLocked(device, mountPoint)
+}
+
+func mountLocked(device string, mountPoint string) error {
 	existed, unexpectedDevice, err := findMount(device, mountPoint)
 	if err != nil {
 		return err
@@ -102,7 +116,8 @@ func MountNFS(device string, mountPoint string) error {
 	}
 
 	if unexpectedDevice != "" {
-		return errors.Errorf("mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
+		return errors.Wrapf(ErrUnexpectedMountDevice,
+			"mount point %s is already mounted from unexpected source %s", mountPoint, unexpectedDevice)
 	}
 
 	err = os.MkdirAll(mountPoint, 0o755)
@@ -112,14 +127,34 @@ func MountNFS(device string, mountPoint string) error {
 
 	err = mountInterface.Mount(device, mountPoint, "nfs", defaultNFSMountOptions)
 	if err != nil {
-		_ = os.RemoveAll(mountPoint)
+		// Only the empty directory this call created is cleaned up. A recursive
+		// delete here would erase the remote tree if another goroutine or process
+		// mounted the same point in between.
+		_ = os.Remove(mountPoint)
+
 		return errors.Wrapf(err, "failed to mount nfs %s to %s", device, mountPoint)
 	}
 
 	return nil
 }
 
+// Unmount tears the mount point down. It refuses while any lease taken through
+// AcquireMount is still held: a reader that is halfway through walking the tree
+// must not have the mount removed under it.
 func Unmount(mountPoint string) error {
+	guard := guardFor(mountPoint)
+
+	guard.opMu.Lock()
+	defer guard.opMu.Unlock()
+
+	if guard.held() > 0 {
+		return errors.Wrapf(ErrMountBusy, "cannot unmount %s", mountPoint)
+	}
+
+	return unmountLocked(mountPoint)
+}
+
+func unmountLocked(mountPoint string) error {
 	mountPoints, err := mountInterface.List()
 	if err != nil {
 		return err
@@ -136,8 +171,17 @@ func Unmount(mountPoint string) error {
 		}
 	}
 
-	err = os.RemoveAll(mountPoint)
-	if err != nil {
+	// os.Remove, not os.RemoveAll: the directory is only ours to delete once it is
+	// empty. If the listing above missed a mount that is still live — a concurrent
+	// remount, or a mount made in another process — a recursive delete would walk
+	// into the remote tree and delete models. A non-empty leftover is local junk;
+	// leaving it behind is harmless and the next mount reuses it.
+	if err = os.Remove(mountPoint); err != nil && !os.IsNotExist(err) {
+		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EBUSY) {
+			klog.Warningf("mount point %s is not empty after unmount, leaving it in place: %v", mountPoint, err)
+			return nil
+		}
+
 		return err
 	}
 

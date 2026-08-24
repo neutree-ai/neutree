@@ -27,6 +27,13 @@ jobs:
           TOKEN: ${{ secrets.CI_ACCESS_TOKEN }}
           USERNAME: ${{ secrets.CI_USERNAME }}
         run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
+
+      - name: Migration hygiene (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          bash scripts/check-migrations.sh "origin/${{ github.base_ref }}"
+
       - name: Prepare for lint
         run: make prepare-build-cli
       - name: Run golangci-lint
@@ -46,12 +53,6 @@ jobs:
 
       - name: Architecture boundaries
         run: bash scripts/check-boundaries.sh
-
-      - name: Migration pairs (PR only)
-        if: github.event_name == 'pull_request'
-        run: |
-          git fetch origin "${{ github.base_ref }}" --depth=50
-          bash scripts/check-migration-pairs.sh "origin/${{ github.base_ref }}"
 
       - name: Upload Coverage report to CodeCov
         uses: codecov/codecov-action@v1.0.15

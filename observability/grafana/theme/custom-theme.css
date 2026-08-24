@@ -17,7 +17,7 @@ table,
 /* ---------- Dark Mode ---------- */
 body[class*="theme-dark"],
 body:not([class*="theme-light"]) {
-  --ui-bg: #0b1824;
+  --ui-bg: #08111f;
   --ui-card: #0f1d2a;
   --ui-border: rgba(198, 219, 234, 0.14);
   --ui-input: #20324b;

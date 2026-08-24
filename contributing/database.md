@@ -12,13 +12,17 @@
 
 - Location: `db/migrations/`.
 - Naming: `NNN_<description>.up.sql` + `NNN_<description>.down.sql`.
-- Current highest number: **085** — start new migrations at 086.
+- Numbering: each `NNN` must be unique across the branch. Read the highest number in use rather than trusting a number written down here — `ls db/migrations | sed -E 's/_.*//' | sort -n | tail -1` — and start at the next one.
 - Any migration that touches RLS or permissions must ship with an integration test under `db/dbtest/`.
 - **Redefining an existing function**: `CREATE OR REPLACE` replaces the whole body, so base it on the *latest* migration that defines the function, not the first one you find. `grep -l 'FUNCTION api.<name>' db/migrations/*.up.sql` lists them all — copying an older body silently reverts every change made in between.
+- **Released migrations are immutable**: once a migration file exists on the base branch, do not modify, rename, or delete it. If deployed SQL must be undone, add a later reversible migration instead of rewriting history.
+- **Schema reload belongs to seed SQL**: `db/seed/999_notify_pgrst.sql` sends the PostgREST schema reload notification. New migrations must not add `NOTIFY pgrst, 'reload schema'`.
 
-> ⚠️ **Pair rule (new migrations)**: every new migration must ship `.up.sql` and `.down.sql` together; a missing `.down.sql` breaks rollback. The pre-commit hook (P0-2) enforces this.
+> ⚠️ **Pair rule (new migrations)**: every new migration must ship `.up.sql` and `.down.sql` together; a missing `.down.sql` breaks rollback. `scripts/check-migrations.sh` enforces this together with historical-file immutability, version uniqueness, and the seed-owned schema-reload rule.
 >
 > **Historical exception**: migrations `001_rbac`, `002_user-extend`, `003_resources`, and `005_kong` are bootstrap SQL without rollback files. These pre-date the rule and are grandfathered in; the hook ignores them.
+
+> ⚠️ **Unique version rule**: two migrations may not share a number. Git will not catch it — `085_a.up.sql` and `085_b.up.sql` are two unrelated new files, so two PRs claiming the same number both merge green, and it is golang-migrate that rejects the duplicate source when the deploy runs the migrations. `scripts/check-migrations.sh` enforces this in the pre-commit hook and in CI. If your branch has been open a while, rebase before merging: someone else may have taken your number.
 
 ### Migration skeleton
 

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -38,6 +40,59 @@ func builtinRegistryRow(id int, url string) v1.ModelRegistry {
 	}
 }
 
+func builtinModelScopeRow(id int, url string) v1.ModelRegistry {
+	row := builtinRegistryRow(id, url)
+	row.Metadata.Name = model_registry.BuiltinModelScopeRegistryName
+	row.Spec.Type = v1.ModelScopeModelRegistryType
+
+	return row
+}
+
+// provisionedRows installs a ListModelRegistry mock that honours the name filter
+// the reconcile sends.
+//
+// Provisioning walks every built-in kind and looks each one up by name, so a mock
+// answering every lookup with the same rows would show each kind the other's
+// registry — and the reconcile, seeing the wrong type, would rewrite it. Filtering
+// here is what keeps these tests about the behaviour they name.
+func provisionedRows(mockStorage *storagemocks.MockStorage, rows ...v1.ModelRegistry) {
+	mockStorage.On("ListModelRegistry", mock.Anything).Return(
+		func(option storage.ListOption) []v1.ModelRegistry {
+			wanted := ""
+
+			for _, filter := range option.Filters {
+				if filter.Column == "metadata->name" {
+					wanted = filter.Value
+				}
+			}
+
+			// No name filter means the caller wants the whole workspace, as the
+			// teardown path does.
+			if wanted == "" {
+				return rows
+			}
+
+			matched := []v1.ModelRegistry{}
+
+			for _, row := range rows {
+				if row.Metadata != nil && strconv.Quote(row.Metadata.Name) == wanted {
+					matched = append(matched, row)
+				}
+			}
+
+			return matched
+		}, nil)
+}
+
+// defaultRows is what a workspace looks like once provisioning has run with no
+// mirrors configured: one registry per built-in kind, at the hub's own address.
+func defaultRows() []v1.ModelRegistry {
+	return []v1.ModelRegistry{
+		builtinRegistryRow(4, model_registry.DefaultHuggingFaceEndpoint),
+		builtinModelScopeRow(5, model_registry.DefaultModelScopeEndpoint),
+	}
+}
+
 func workspaceNamed(name string) v1.Workspace {
 	return v1.Workspace{
 		ID:       1,
@@ -48,26 +103,36 @@ func workspaceNamed(name string) v1.Workspace {
 
 func TestSyncWorkspaceModelRegistry_ProvisionsWhenEnabled(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{}, nil)
+	provisionedRows(mockStorage)
 
-	var created *v1.ModelRegistry
+	created := map[string]*v1.ModelRegistry{}
 
 	mockStorage.On("CreateModelRegistry", mock.Anything).Run(func(args mock.Arguments) {
-		created, _ = args.Get(0).(*v1.ModelRegistry)
+		registry, _ := args.Get(0).(*v1.ModelRegistry)
+		created[registry.Metadata.Name] = registry
 	}).Return(nil)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{
 		Enabled:             true,
 		HuggingFaceEndpoint: "https://hf-mirror.example",
+		ModelScopeEndpoint:  "https://ms-mirror.example",
 	})
 
 	require.NoError(t, c.syncWorkspaceModelRegistry(workspaceNamed("default")))
 
-	require.NotNil(t, created)
-	assert.Equal(t, model_registry.BuiltinHuggingFaceRegistryName, created.Metadata.Name)
-	assert.Equal(t, "default", created.Metadata.Workspace)
-	assert.Equal(t, "https://hf-mirror.example", created.Spec.Url)
-	assert.True(t, v1.IsBuiltin(created.Metadata.Annotations))
+	// Every supported public hub, not just the first one.
+	require.Len(t, created, 2)
+
+	for name, wantURL := range map[string]string{
+		model_registry.BuiltinHuggingFaceRegistryName: "https://hf-mirror.example",
+		model_registry.BuiltinModelScopeRegistryName:  "https://ms-mirror.example",
+	} {
+		registry := created[name]
+		require.NotNil(t, registry, "%s was not provisioned", name)
+		assert.Equal(t, "default", registry.Metadata.Workspace)
+		assert.Equal(t, wantURL, registry.Spec.Url)
+		assert.True(t, v1.IsBuiltin(registry.Metadata.Annotations))
+	}
 
 	mockStorage.AssertExpectations(t)
 }
@@ -94,8 +159,7 @@ func TestSyncWorkspaceModelRegistry_ProvisionsNothingWhenDisabled(t *testing.T) 
 // configuration flag flipped during an upgrade is nobody being present.
 func TestSyncWorkspaceModelRegistry_TurningTheSwitchOffLeavesProvisionedRegistries(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).
-		Return([]v1.ModelRegistry{builtinRegistryRow(4, "https://huggingface.co")}, nil).Maybe()
+	mockStorage.On("ListModelRegistry", mock.Anything).Return(defaultRows(), nil).Maybe()
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{})
 
@@ -107,13 +171,14 @@ func TestSyncWorkspaceModelRegistry_TurningTheSwitchOffLeavesProvisionedRegistri
 
 func TestSyncWorkspaceModelRegistry_RepointsAtANewMirror(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).
-		Return([]v1.ModelRegistry{builtinRegistryRow(4, "https://huggingface.co")}, nil)
+	provisionedRows(mockStorage, defaultRows()...)
 
-	var updated *v1.ModelRegistry
+	updated := map[string]*v1.ModelRegistry{}
 
-	mockStorage.On("UpdateModelRegistry", "4", mock.Anything).Run(func(args mock.Arguments) {
-		updated, _ = args.Get(1).(*v1.ModelRegistry)
+	mockStorage.On("UpdateModelRegistry", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		id, _ := args.Get(0).(string)
+		registry, _ := args.Get(1).(*v1.ModelRegistry)
+		updated[id] = registry
 	}).Return(nil)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{
@@ -123,15 +188,16 @@ func TestSyncWorkspaceModelRegistry_RepointsAtANewMirror(t *testing.T) {
 
 	require.NoError(t, c.syncWorkspaceModelRegistry(workspaceNamed("default")))
 
-	require.NotNil(t, updated)
-	assert.Equal(t, "https://hf-mirror.example", updated.Spec.Url)
+	require.NotNil(t, updated["4"])
+	assert.Equal(t, "https://hf-mirror.example", updated["4"].Spec.Url)
+	// Mirroring one hub does not disturb the other.
+	assert.NotContains(t, updated, "5")
 	mockStorage.AssertExpectations(t)
 }
 
 func TestSyncWorkspaceModelRegistry_LeavesAMatchingRegistryAlone(t *testing.T) {
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).
-		Return([]v1.ModelRegistry{builtinRegistryRow(4, "https://huggingface.co")}, nil)
+	provisionedRows(mockStorage, defaultRows()...)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{Enabled: true})
 
@@ -144,15 +210,18 @@ func TestSyncWorkspaceModelRegistry_LeavesAMatchingRegistryAlone(t *testing.T) {
 // Provisioning must never adopt a registry a user created, even one sitting
 // under the name the control plane would have used.
 func TestSyncWorkspaceModelRegistry_NeverTouchesAUserRegistry(t *testing.T) {
-	userOwned := builtinRegistryRow(4, "https://huggingface.co")
-	userOwned.Metadata.Annotations = nil
+	rows := defaultRows()
+	for i := range rows {
+		rows[i].Metadata.Annotations = nil
+	}
 
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{userOwned}, nil)
+	provisionedRows(mockStorage, rows...)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{
 		Enabled:             true,
 		HuggingFaceEndpoint: "https://elsewhere.example",
+		ModelScopeEndpoint:  "https://elsewhere.example",
 	})
 
 	require.NoError(t, c.syncWorkspaceModelRegistry(workspaceNamed("default")))
@@ -163,15 +232,18 @@ func TestSyncWorkspaceModelRegistry_NeverTouchesAUserRegistry(t *testing.T) {
 
 // A row already on its way out is left to the teardown that is under way.
 func TestSyncWorkspaceModelRegistry_SkipsARegistryBeingDeleted(t *testing.T) {
-	deleting := builtinRegistryRow(4, "https://huggingface.co")
-	deleting.Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
+	rows := defaultRows()
+	for i := range rows {
+		rows[i].Metadata.DeletionTimestamp = time.Now().UTC().Format(time.RFC3339)
+	}
 
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{deleting}, nil)
+	provisionedRows(mockStorage, rows...)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{
 		Enabled:             true,
 		HuggingFaceEndpoint: "https://elsewhere.example",
+		ModelScopeEndpoint:  "https://elsewhere.example",
 	})
 
 	require.NoError(t, c.syncWorkspaceModelRegistry(workspaceNamed("default")))
@@ -183,11 +255,11 @@ func TestSyncWorkspaceModelRegistry_SkipsARegistryBeingDeleted(t *testing.T) {
 // Credentials a user attached to the built-in registry are theirs; re-pointing
 // the URL must not take them away.
 func TestSyncWorkspaceModelRegistry_KeepsUserSuppliedCredentials(t *testing.T) {
-	stored := builtinRegistryRow(4, "https://huggingface.co")
-	stored.Spec.Credentials = "hf_token"
+	rows := defaultRows()
+	rows[0].Spec.Credentials = "hf_token"
 
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{stored}, nil)
+	provisionedRows(mockStorage, rows...)
 
 	var updated *v1.ModelRegistry
 
@@ -214,17 +286,20 @@ func TestDeleteWorkspaceModelRegistry(t *testing.T) {
 	userOwned.Metadata.Name = "mine"
 	userOwned.Metadata.Annotations = nil
 
+	rows := append(defaultRows(), userOwned)
+
 	mockStorage := &storagemocks.MockStorage{}
-	mockStorage.On("ListModelRegistry", mock.Anything).
-		Return([]v1.ModelRegistry{builtinRegistryRow(4, "https://huggingface.co"), userOwned}, nil)
+	mockStorage.On("ListModelRegistry", mock.Anything).Return(rows, nil)
 	mockStorage.On("DeleteModelRegistry", "4").Return(nil)
+	// Every provisioned registry, not just the first kind.
+	mockStorage.On("DeleteModelRegistry", "5").Return(nil)
 
 	c := newBuiltinRegistryController(mockStorage, model_registry.BuiltinConfig{Enabled: true})
 
 	workspace := workspaceNamed("default")
 	require.NoError(t, c.DeleteWorkspaceModelRegistry(&workspace))
 
-	// Only the provisioned one. A user's registry is theirs, and workspace
+	// Only the provisioned ones. A user's registry is theirs, and workspace
 	// deletion is already refused while any remain.
 	mockStorage.AssertNotCalled(t, "DeleteModelRegistry", "9")
 	mockStorage.AssertExpectations(t)

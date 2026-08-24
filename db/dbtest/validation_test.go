@@ -797,3 +797,126 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 		t.Log("NULL accelerator accepted successfully")
 	})
 }
+
+// Migration 090: the database no longer requires spec.model.registry. Whether an
+// endpoint needs one is decided by the API, not here.
+func TestEndpointModelRegistryOptional(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	insert := func(registry string, name string) string {
+		return fmt.Sprintf(`
+			INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Endpoint',
+				ROW(
+					'test-cluster',
+					ROW('%s', '%s', '', 'v1', '', NULL)::api.model_spec,
+					ROW('flex', 'v1')::api.endpoint_engine_spec,
+					ROW('4', '2', NULL, '16')::api.resource_spec,
+					ROW(1)::api.replica_spec,
+					NULL,
+					NULL,
+					NULL
+				)::api.endpoint_spec,
+				ROW('test-ep-%s', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`, registry, name, name)
+	}
+
+	t.Run("endpoint without a model registry is accepted", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if _, err = tx.ExecContext(ctx, insert("", "builtin-model")); err != nil {
+			t.Fatalf("expected registry-less endpoint to be accepted, got: %v", err)
+		}
+	})
+
+	t.Run("endpoint with a model registry is still accepted", func(t *testing.T) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if _, err = tx.ExecContext(ctx, insert("test-registry", "registry-model")); err != nil {
+			t.Fatalf("expected registry-backed endpoint to be accepted, got: %v", err)
+		}
+	})
+}
+
+// Migration 091: model name and version follow the registry out of the database.
+// The name *format* stays here -- it does not depend on the engine.
+func TestEndpointModelNameAndVersionOptional(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	insert := func(name, version, suffix string) string {
+		return fmt.Sprintf(`
+			INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+			VALUES (
+				'v1',
+				'Endpoint',
+				ROW(
+					'test-cluster',
+					ROW('', '%s', '', '%s', '', NULL)::api.model_spec,
+					ROW('flex', 'v1')::api.endpoint_engine_spec,
+					ROW('4', '2', NULL, '16')::api.resource_spec,
+					ROW(1)::api.replica_spec,
+					NULL,
+					NULL,
+					NULL
+				)::api.endpoint_spec,
+				ROW('test-ep-%s', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
+			)
+		`, name, version, suffix)
+	}
+
+	run := func(t *testing.T, stmt string) error {
+		t.Helper()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		_, err = tx.ExecContext(ctx, stmt)
+
+		return err
+	}
+
+	t.Run("endpoint with no model name or version is accepted", func(t *testing.T) {
+		if err := run(t, insert("", "", "no-model")); err != nil {
+			t.Fatalf("expected an endpoint without model name/version to be accepted, got: %v", err)
+		}
+	})
+
+	t.Run("a name that is given is still format-checked - error code 10105", func(t *testing.T) {
+		err := run(t, insert("Not A Valid Name", "", "bad-name"))
+		if err == nil {
+			t.Fatal("expected a format error for an invalid model name")
+		}
+
+		if !strings.Contains(err.Error(), `"code": "10105"`) {
+			t.Fatalf("expected error code 10105, got: %v", err)
+		}
+	})
+
+	t.Run("a well-formed name is accepted", func(t *testing.T) {
+		if err := run(t, insert("Qwen/Qwen3-8B", "v1", "good-name")); err != nil {
+			t.Fatalf("expected a well-formed model name to be accepted, got: %v", err)
+		}
+	})
+}

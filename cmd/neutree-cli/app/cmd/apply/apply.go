@@ -34,8 +34,7 @@ Examples:
 
   # Apply with force update for existing resources
   neutree-cli apply -f resources.yaml --server-url https://api.neutree.ai --api-key sk_xxx --force-update`,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runApply(opts)
 		},

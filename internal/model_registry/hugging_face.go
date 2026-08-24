@@ -302,7 +302,7 @@ func (hf *huggingFace) GetModelDetail(name, version string) (*v1.ModelVersion, e
 	}
 
 	return &v1.ModelVersion{
-		Name: reportedVersion(version),
+		Name: reportedVersion(version, defaultRevision),
 		Info: info,
 	}, nil
 }
@@ -395,11 +395,22 @@ func (hf *huggingFace) revision(version string) string {
 // reportedVersion is the version name given back to callers, and it must be the
 // one ListModels emits: a version read from a listing is what a client puts into
 // "model get <name>:<version>" and into a detail URL, so a detail that answered
-// with the hub's own "main" would name a version the listing never shows and
-// that a subsequent lookup would not resolve. The hub's branch name stays on the
-// wire only — see revision.
-func reportedVersion(version string) string {
-	if version == "" || version == defaultRevision {
+// with the registry's own branch name would name a version the listing never
+// shows and that a subsequent lookup would not resolve. The branch name stays on
+// the wire only — see each provider's revision.
+//
+// The rule is one rule and lives here. What a registry calls its default branch
+// is not part of it — it is provider knowledge, and it differs: the Hub's is
+// "main", ModelScope's is "master". Hard-coding either would report a real
+// branch of the other registry as "latest", which is both wrong and a version
+// name that registry would not resolve. Pass "" for a registry with no single
+// name for its default.
+func reportedVersion(version, defaultBranch string) string {
+	if version == "" {
+		return v1.LatestVersion
+	}
+
+	if defaultBranch != "" && version == defaultBranch {
 		return v1.LatestVersion
 	}
 

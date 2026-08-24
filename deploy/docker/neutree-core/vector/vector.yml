@@ -22,7 +22,11 @@ transforms:
           .extracted_data.url_split = split!(.request.uri, "/")
           .extracted_data.workspace = .extracted_data.url_split[2]      # workspace name from /workspace/{workspace}/...
           .extracted_data.endpoint_type = .extracted_data.url_split[3]  # "endpoint" or "external-endpoint"
-          .extracted_data.endpoint_name = .extracted_data.url_split[4]  # endpoint name from /workspace/{workspace}/{type}/{endpoint_name}
+          # The name comes from the raw request URI, so a non-ASCII endpoint name
+          # (external endpoint names are not restricted to ASCII) arrives encoded.
+          # decode_percent is fallible on an `any` argument, and the fallback also
+          # covers a missing segment and an invalid escape -- do not drop it.
+          .extracted_data.endpoint_name = decode_percent(.extracted_data.url_split[4]) ?? .extracted_data.url_split[4]  # endpoint name from /workspace/{workspace}/{type}/{endpoint_name}
       }
 
       if exists(.ai) && exists(.ai."statistics") && exists(.ai."statistics".usage) {

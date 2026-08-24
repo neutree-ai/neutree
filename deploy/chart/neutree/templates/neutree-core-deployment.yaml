@@ -26,6 +26,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if .Values.nodePort.externalHost }}
+            - name: NODEPORT_EXTERNAL_HOST
+              value: {{ .Values.nodePort.externalHost | quote }}
+            {{- end }}
           args:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
@@ -45,6 +49,7 @@ spec:
             {{- if .Values.publicModelRegistries.enabled }}
             - --enable-builtin-public-model-registries
             - --hugging-face-endpoint={{ .Values.publicModelRegistries.huggingFace.url }}
+            - --model-scope-endpoint={{ .Values.publicModelRegistries.modelScope.url }}
             {{- end }}
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.core.image.registry "repository" .Values.core.image.repository "tag" .Values.core.image.tag "defaultTag" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.core.image.pullPolicy }}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -69,9 +68,9 @@ Examples:
 }
 
 func Execute() {
-	err := NewNeutreeCliCommand().Execute()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
+	// Cobra already prints the error to stderr (see Command.ExecuteC); printing
+	// it again here would duplicate every failure message.
+	if err := NewNeutreeCliCommand().Execute(); err != nil {
 		os.Exit(1)
 	}
 }

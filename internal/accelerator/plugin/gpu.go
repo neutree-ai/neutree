@@ -263,6 +263,7 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				NodeSelector: map[string]string{
 					NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
 				},
+				Runtime:          "nvidia",
 				DockerRunOptions: []string{"--gpus all"},
 			},
 		},

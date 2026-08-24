@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/utils/request"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -125,9 +126,7 @@ func guardBuiltinRegistrySpec(c *gin.Context, deps *Dependencies, bodyMap map[st
 	}
 
 	if stringFieldChanged(spec, "url", storedURL(stored)) {
-		abortBuiltinRegistry(c, workspace, name,
-			"the address of a built-in model registry comes from this deployment's configuration "+
-				"(--hugging-face-endpoint); change it there, since the reconcile restores it otherwise")
+		abortBuiltinRegistry(c, workspace, name, builtinRegistryURLRefusal(stored))
 
 		return false
 	}
@@ -224,6 +223,21 @@ func findStoredModelRegistry(s storage.Storage, workspace, name string) (*v1.Mod
 	}
 
 	return &registries[0], nil
+}
+
+// builtinRegistryURLRefusal explains where a built-in registry's address is
+// really set. Each hub has its own setting, so the flag is looked up from the
+// registry's kind rather than written into the sentence: a ModelScope registry
+// that told the operator to edit --hugging-face-endpoint would send them to
+// change a value that has no effect on it.
+func builtinRegistryURLRefusal(stored *v1.ModelRegistry) string {
+	message := "the address of a built-in model registry comes from this deployment's configuration"
+
+	if flag := model_registry.EndpointFlagForModelRegistryType(stored.Spec.Type); flag != "" {
+		message += " (" + flag + ")"
+	}
+
+	return message + "; change it there, since the reconcile restores it otherwise"
 }
 
 // builtinAnnotationChanged reports whether a patch adds or removes the built-in
