@@ -1,4 +1,4 @@
-package resource_test
+package resource
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,7 +71,7 @@ func TestK8sResourceClientListEndpointInstancesReportsEndpointProduct(t *testing
 		WithScheme(scheme).
 		WithObjects(pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	client := NewK8sResourceClient(ctrClient, nil)
 	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
 
 	instances, err := client.ListEndpointInstances(
@@ -86,7 +85,7 @@ func TestK8sResourceClientListEndpointInstancesReportsEndpointProduct(t *testing
 	require.Len(t, instances[0].Devices, 1)
 	require.Equal(t, "NVIDIA-L20", instances[0].Devices[0].Product)
 
-	resources, err := resourceview.NewResourceViewBuilder(client).
+	resources, err := NewResourceViewBuilder(client).
 		BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
 
 	require.NoError(t, err)
@@ -150,7 +149,7 @@ func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocation(t *testing.
 		WithScheme(scheme).
 		WithObjects(pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	client := NewK8sResourceClient(ctrClient, nil)
 	endpoint := endpointForTest("chat")
 
 	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpoint)
@@ -169,7 +168,7 @@ func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocation(t *testing.
 	require.Equal(t, int64(100), instances[0].Devices[0].CoreUnits)
 	require.Equal(t, "gpu-node", instances[0].Devices[0].NodeID)
 
-	resources, err := resourceview.NewResourceViewBuilder(client).
+	resources, err := NewResourceViewBuilder(client).
 		BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
 
 	require.NoError(t, err)
@@ -222,7 +221,7 @@ func TestK8sResourceClientListEndpointInstancesSkipsMalformedNeutreeAllocation(t
 		WithScheme(scheme).
 		WithObjects(goodPod, badPod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	client := NewK8sResourceClient(ctrClient, nil)
 
 	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpointForTest("chat"))
 
@@ -263,7 +262,7 @@ func TestK8sResourceClientListEndpointInstancesWithNeutreeAllocationWhenVirtuali
 		WithScheme(scheme).
 		WithObjects(pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	client := NewK8sResourceClient(ctrClient, nil)
 
 	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpointForTest("chat"))
 
@@ -323,7 +322,7 @@ func TestK8sResourceClientListEndpointInstancesWithMultipleNeutreeAllocations(t 
 		WithScheme(scheme).
 		WithObjects(pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, nil)
+	client := NewK8sResourceClient(ctrClient, nil)
 
 	instances, err := client.ListEndpointInstances(context.Background(), k8sClusterForTest(), endpointForTest("chat"))
 
@@ -386,7 +385,7 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -462,7 +461,7 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQ
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -535,7 +534,7 @@ func TestK8sResourceClientListNodesPartiallyAllocatedDeviceContributesEquivalent
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -677,7 +676,7 @@ func TestK8sResourceClientListNodesAvailableEquivalentCapacityScenarios(t *testi
 				WithScheme(scheme).
 				WithObjects(objects...).
 				Build()
-			client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+			client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 			})
 
@@ -731,7 +730,7 @@ func TestK8sResourceClientListNodesEnhancesBaseResourcesWithoutGPUCountLabel(t *
 		WithScheme(scheme).
 		WithObjects(node).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -796,7 +795,7 @@ func TestK8sResourceClientListNodesUsesStandardParserWithoutNeutreeDeviceAnnotat
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -864,7 +863,7 @@ func TestK8sResourceClientListNodesSubtractsGPURequestsWhenGPUCountLabelExists(t
 		WithScheme(scheme).
 		WithObjects(node, pod).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
@@ -910,7 +909,7 @@ func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnno
 		WithScheme(scheme).
 		WithObjects(node).
 		Build()
-	client := resourceview.NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
 		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
 	})
 
