@@ -18,7 +18,7 @@ def _build_parser():
     p.add_argument("--task", required=False, help="model task (informational)")
     p.add_argument("--registry_path", required=False, help="explicit registry path for the model")
     p.add_argument("--path", required=False, help="target path for the model")
-    p.add_argument("--registry_type", required=True, help="registry type (e.g., hugging-face, bentoml)")
+    p.add_argument("--registry_type", required=True, help="registry type (e.g., hugging-face, model-scope, bentoml)")
 
     return p
 

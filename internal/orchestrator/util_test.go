@@ -412,6 +412,87 @@ func TestGetDeployedModelRealVersion_Huggingface(t *testing.T) {
 	}
 }
 
+// ModelScope's "version" is a git revision, so there is nothing to look up —
+// but unlike Hugging Face, "latest" cannot be passed through. The hub's default
+// branch is "master", and it does not refuse a wrong revision: it answers HTTP
+// 200 with an empty file list, which a downloader would otherwise be free to
+// read as "this model has no files". Normalising to "" makes the downloader omit
+// the Revision parameter entirely and let the hub resolve its own default.
+func TestGetDeployedModelRealVersion_ModelScope(t *testing.T) {
+	tests := []struct {
+		name         string
+		inputVersion string
+		expected     string
+	}{
+		{
+			name:         "latest is normalised away rather than sent as a branch name",
+			inputVersion: "latest",
+			expected:     "",
+		},
+		{
+			name:         "empty version already means the repository default",
+			inputVersion: "",
+			expected:     "",
+		},
+		{
+			name:         "an explicit revision is passed through untouched",
+			inputVersion: "v1.0.0",
+			expected:     "v1.0.0",
+		},
+		{
+			name:         "master is passed through; it is not special-cased here",
+			inputVersion: "master",
+			expected:     "master",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
+				Spec: &v1.ModelRegistrySpec{
+					Type: v1.ModelScopeModelRegistryType,
+				},
+			}, "Qwen/Qwen3-8B", tt.inputVersion)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// The served model id is what a client puts in an OpenAI request. On a hub the
+// "version" is a git revision, so appending it would publish the model under a
+// name nobody would ask for, and under a different name than the identical model
+// deployed from the other hub.
+func TestEndpointModelServeName_HubRegistriesDoNotAppendTheRevision(t *testing.T) {
+	endpoint := func(version string) *v1.Endpoint {
+		return &v1.Endpoint{
+			Spec: &v1.EndpointSpec{
+				Engine: &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM},
+				Model:  &v1.ModelSpec{Name: "Qwen/Qwen3-8B", Version: version},
+			},
+		}
+	}
+	registry := func(kind v1.ModelRegistryType) *v1.ModelRegistry {
+		return &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: kind}}
+	}
+
+	for _, kind := range []v1.ModelRegistryType{
+		v1.HuggingFaceModelRegistryType,
+		v1.ModelScopeModelRegistryType,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			assert.Equal(t, "Qwen/Qwen3-8B",
+				endpointModelServeName(endpoint("master"), registry(kind)))
+		})
+	}
+
+	// BentoML is the contrast: there the version names a distinct stored
+	// artifact, so it belongs in the served name.
+	assert.Equal(t, "Qwen/Qwen3-8B:v3",
+		endpointModelServeName(endpoint("v3"), registry(v1.BentoMLModelRegistryType)))
+}
+
 func TestGetDeployedModelRealVersion_ModelRegistry(t *testing.T) {
 	test := []struct {
 		name          string
