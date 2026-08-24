@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/mock"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	mockstorage "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -33,11 +36,16 @@ func (obsCollectConfigManagerStub) Start(context.Context) {}
 
 func newTestCoreConfig(t *testing.T, port int) *config.CoreConfig {
 	t.Helper()
+	store := mockstorage.NewMockStorage(t)
+	store.On("ListReleaseInfo").Return([]v1.ReleaseInfo{}, nil).Once()
+	store.On("ListClusterProfile", storage.ListOption{}).Return([]v1.ClusterProfile{}, nil).Once()
+	store.On("CreateReleaseInfo", mock.Anything).Return(nil).Once()
+	store.On("CreateClusterProfile", mock.Anything).Return(nil).Times(3)
 
 	return &config.CoreConfig{
 		GinEngine:               gin.New(),
 		ObsCollectConfigManager: obsCollectConfigManagerStub{},
-		Storage:                 mockstorage.NewMockStorage(t),
+		Storage:                 store,
 		ServerConfig:            &config.ServerConfig{Host: testHost, Port: port},
 	}
 }

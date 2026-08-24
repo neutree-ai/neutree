@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/pkg/releaseprofile"
 )
 
 const (
@@ -44,6 +45,10 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 // Run starts the application
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
+
+	if err := releaseprofile.SynchronizeCurrentBaseline(a.config.Storage, a.config.Storage); err != nil {
+		return fmt.Errorf("synchronize current release info: %w", err)
+	}
 
 	go a.config.ObsCollectConfigManager.Start(ctx)
 
