@@ -245,6 +245,7 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 		if descriptor == nil {
 			return fmt.Errorf("accelerator sample %q has no declared descriptor", name)
 		}
+
 		if math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
 			return fmt.Errorf("accelerator sample %q has a non-finite value", name)
 		}
@@ -260,6 +261,7 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 				return fmt.Errorf("accelerator sample %q has undeclared label %q", name, labelName)
 			}
 		}
+
 		if !hasRequiredLabels(sample.Labels, descriptor.requiredKeys) {
 			return fmt.Errorf("accelerator sample %q is missing a required label", name)
 		}

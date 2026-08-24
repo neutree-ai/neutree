@@ -74,6 +74,7 @@ func (r *Planner) runtimeProfile(
 	if err != nil || profile == nil {
 		return nil, err
 	}
+
 	if err := validateStaticNodeAgentRuntimeProfile(profile); err != nil {
 		return nil, fmt.Errorf("validate NodeAgent runtime profile for accelerator %q: %w", accelerator.Type, err)
 	}
@@ -111,12 +112,15 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 		if err := validateStaticComponentVolumeName(volume.Name); err != nil {
 			return err
 		}
+
 		if _, exists := volumeNames[volume.Name]; exists {
 			return fmt.Errorf("component volume name %q must be unique", volume.Name)
 		}
+
 		if volume.HostPath == nil {
 			return fmt.Errorf("component volume %q must declare host_path", volume.Name)
 		}
+
 		if err := validateStaticAbsoluteCleanPath(volume.HostPath.Path, "component volume host_path.path", true); err != nil {
 			return err
 		}
@@ -152,6 +156,7 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 		if err := validateStaticAbsoluteCleanPath(mount.MountPath, "component volume mount path", false); err != nil {
 			return err
 		}
+
 		if _, exists := mountPaths[mount.MountPath]; exists {
 			return fmt.Errorf("component volume mount path %q must be unique", mount.MountPath)
 		}

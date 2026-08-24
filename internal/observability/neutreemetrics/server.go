@@ -339,6 +339,7 @@ func (s *Server) acceleratorSamples(
 		// DCGM.
 		return []metricsnormalizer.Sample{}
 	}
+
 	if err := validateAdapterSamples(result.Samples, s.config.AcceleratorMetricDescriptors); err != nil {
 		klog.V(2).InfoS("Accelerator adapter returned invalid metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
 
@@ -497,6 +498,7 @@ func adapterEndpointReplicaGPUUsages(
 			memoryUsedBytes := *usage.MemoryUsedBytes
 			converted.MemoryUsedBytes = &memoryUsedBytes
 		}
+
 		if usage.UtilizationRatio != nil {
 			utilizationRatio := *usage.UtilizationRatio
 			converted.UtilizationRatio = &utilizationRatio
