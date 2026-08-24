@@ -14,9 +14,10 @@ import (
 	"reflect"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cli/packageimport"
-	"gopkg.in/yaml.v3"
 )
 
 type verifyOptions struct {
@@ -40,6 +41,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "verify engine package:", err)
 		os.Exit(1)
 	}
+
 	if err := verifyPackage(options); err != nil {
 		fmt.Fprintln(os.Stderr, "verify engine package:", err)
 		os.Exit(1)
@@ -64,11 +66,13 @@ func parseOptions(arguments []string) (verifyOptions, error) {
 	flags.StringVar(&options.packageURL, "package-url", "", "expected package URL")
 	flags.StringVar(&options.schemaPath, "schema", "", "expected schema JSON path")
 	flags.StringVar(&options.templateDir, "template-dir", "", "expected template directory")
+
 	if err := flags.Parse(arguments); err != nil {
 		return verifyOptions{}, err
 	}
 
 	options.supportedTasks = splitTasks(tasks)
+
 	return options, nil
 }
 
@@ -81,6 +85,7 @@ func splitTasks(value string) []string {
 	for index := range tasks {
 		tasks[index] = strings.TrimSpace(tasks[index])
 	}
+
 	return tasks
 }
 
@@ -101,13 +106,16 @@ func verifyPackage(options verifyOptions) error {
 
 	archiveManifestPath := filepath.Join(extractDir, packageimport.ManifestFileName)
 	archiveManifest, err := os.ReadFile(archiveManifestPath)
+
 	if err != nil {
 		return fmt.Errorf("read archive manifest: %w", err)
 	}
+
 	standaloneManifest, err := os.ReadFile(options.manifestPath)
 	if err != nil {
 		return fmt.Errorf("read standalone manifest: %w", err)
 	}
+
 	if !bytes.Equal(archiveManifest, standaloneManifest) {
 		return fmt.Errorf("standalone manifest does not match archive manifest")
 	}
@@ -120,13 +128,16 @@ func verifyPackage(options verifyOptions) error {
 	if err != nil {
 		return err
 	}
+
 	engineVersion, err := verifyManifest(manifest, options, extractDir)
 	if err != nil {
 		return err
 	}
+
 	if err := verifySchema(engineVersion.ValuesSchema, options.schemaPath); err != nil {
 		return err
 	}
+
 	return verifyTemplates(engineVersion.DeployTemplate, options.templateDir)
 }
 
@@ -149,9 +160,11 @@ func validateOptions(options verifyOptions) error {
 			return fmt.Errorf("--%s is required", name)
 		}
 	}
+
 	if len(options.supportedTasks) == 0 {
 		return fmt.Errorf("--supported-tasks is required")
 	}
+
 	return nil
 }
 
@@ -160,6 +173,7 @@ func verifyChecksum(packagePath, checksumPath string) error {
 	if err != nil {
 		return fmt.Errorf("read checksum: %w", err)
 	}
+
 	fields := strings.Fields(string(checksumContent))
 	if len(fields) != 2 || filepath.Base(strings.TrimPrefix(fields[1], "*")) != filepath.Base(packagePath) {
 		return fmt.Errorf("invalid checksum file %s", checksumPath)
@@ -169,9 +183,11 @@ func verifyChecksum(packagePath, checksumPath string) error {
 	if err != nil {
 		return fmt.Errorf("hash package: %w", err)
 	}
+
 	if fields[0] != actualChecksum {
 		return fmt.Errorf("checksum does not match package")
 	}
+
 	return nil
 }
 
@@ -186,6 +202,7 @@ func sha256File(path string) (string, error) {
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -194,6 +211,7 @@ func parseManifest(content []byte) (*packageimport.PackageManifest, error) {
 	if err := yaml.Unmarshal(content, manifest); err != nil {
 		return nil, fmt.Errorf("parse package manifest: %w", err)
 	}
+
 	return manifest, nil
 }
 
@@ -201,13 +219,16 @@ func verifyManifest(manifest *packageimport.PackageManifest, options verifyOptio
 	if manifest.Metadata == nil || manifest.Metadata.PackageURL != options.packageURL {
 		return nil, fmt.Errorf("manifest package_url does not match expected URL")
 	}
+
 	if len(manifest.Engines) != 1 || manifest.Engines[0].Name != options.engineName {
 		return nil, fmt.Errorf("manifest engine does not match %s", options.engineName)
 	}
+
 	engine := manifest.Engines[0]
 	if len(engine.EngineVersions) != 1 || engine.EngineVersions[0].Version != options.engineVersion {
 		return nil, fmt.Errorf("manifest engine version does not match %s", options.engineVersion)
 	}
+
 	if !reflect.DeepEqual(engine.EngineVersions[0].SupportedTasks, options.supportedTasks) {
 		return nil, fmt.Errorf("manifest supported_tasks do not match expected tasks")
 	}
@@ -216,9 +237,11 @@ func verifyManifest(manifest *packageimport.PackageManifest, options verifyOptio
 	if !ok || image == nil || image.ImageName != options.imageName || image.Tag != options.imageTag {
 		return nil, fmt.Errorf("manifest image for %s does not match expected image", options.accelerator)
 	}
+
 	if err := verifyImageFiles(manifest.Images, extractDir); err != nil {
 		return nil, err
 	}
+
 	return engine.EngineVersions[0], nil
 }
 
@@ -226,14 +249,17 @@ func verifyImageFiles(images []*packageimport.ImageSpec, extractDir string) erro
 	if len(images) == 0 {
 		return fmt.Errorf("manifest has no package images")
 	}
+
 	for _, image := range images {
 		if image == nil || image.ImageFile == "" {
 			return fmt.Errorf("manifest image file is missing")
 		}
+
 		if _, err := os.Stat(filepath.Join(extractDir, image.ImageFile)); err != nil {
 			return fmt.Errorf("package image file %s is missing: %w", image.ImageFile, err)
 		}
 	}
+
 	return nil
 }
 
@@ -242,26 +268,34 @@ func verifySchema(valuesSchema map[string]interface{}, schemaPath string) error 
 	if !ok {
 		return fmt.Errorf("manifest values schema is not base64 encoded")
 	}
+
 	actualSchema, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return fmt.Errorf("decode manifest values schema: %w", err)
 	}
+
 	expectedSchema, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return fmt.Errorf("read expected schema: %w", err)
 	}
 
-	var actualValue interface{}
-	var expectedValue interface{}
+	var (
+		actualValue   interface{}
+		expectedValue interface{}
+	)
+
 	if err := json.Unmarshal(actualSchema, &actualValue); err != nil {
 		return fmt.Errorf("parse manifest values schema: %w", err)
 	}
+
 	if err := json.Unmarshal(expectedSchema, &expectedValue); err != nil {
 		return fmt.Errorf("parse expected schema: %w", err)
 	}
+
 	if !reflect.DeepEqual(actualValue, expectedValue) {
 		return fmt.Errorf("manifest values schema does not match %s", schemaPath)
 	}
+
 	return nil
 }
 
@@ -270,10 +304,10 @@ func verifyTemplates(templates map[string]map[string]string, templateDir string)
 	if err != nil {
 		return err
 	}
+
 	for clusterType, modes := range expectedTemplates {
 		for mode, expected := range modes {
-			encoded := templates[clusterType][mode]
-			actual, err := base64.StdEncoding.DecodeString(encoded)
+			actual, err := base64.StdEncoding.DecodeString(templates[clusterType][mode])
 			if err != nil {
 				return fmt.Errorf("decode %s/%s template: %w", clusterType, mode, err)
 			}
@@ -284,48 +318,60 @@ func verifyTemplates(templates map[string]map[string]string, templateDir string)
 			}
 		}
 	}
+
 	return nil
 }
 
 func loadTemplates(templateDir string) (map[string]map[string][]byte, error) {
 	templates := make(map[string]map[string][]byte)
 	entries, err := os.ReadDir(templateDir)
+
 	if err != nil {
 		return nil, fmt.Errorf("read template directory: %w", err)
 	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
+
 		modes, err := loadTemplateModes(filepath.Join(templateDir, entry.Name()))
 		if err != nil {
 			return nil, err
 		}
+
 		if len(modes) > 0 {
 			templates[entry.Name()] = modes
 		}
 	}
+
 	if len(templates) == 0 {
 		return nil, fmt.Errorf("no templates found in %s", templateDir)
 	}
+
 	return templates, nil
 }
 
 func loadTemplateModes(clusterTypeDir string) (map[string][]byte, error) {
 	modes := make(map[string][]byte)
 	entries, err := os.ReadDir(clusterTypeDir)
+
 	if err != nil {
 		return nil, fmt.Errorf("read template directory %s: %w", clusterTypeDir, err)
 	}
+
 	for _, entry := range entries {
 		if entry.IsDir() || (filepath.Ext(entry.Name()) != ".yaml" && filepath.Ext(entry.Name()) != ".yml") {
 			continue
 		}
+
 		content, err := os.ReadFile(filepath.Join(clusterTypeDir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read template %s: %w", entry.Name(), err)
 		}
+
 		modes[strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".yaml"), ".yml")] = content
 	}
+
 	return modes, nil
 }
