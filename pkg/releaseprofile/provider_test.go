@@ -12,12 +12,19 @@ import (
 )
 
 func TestProviderResolvesCurrentReleaseAndExactProfile(t *testing.T) {
+	builder, err := NewBuilderForCatalog(BuiltinCatalog())
+	require.NoError(t, err)
+	current, err := builder.BuildReleaseInfo("v1.2.0")
+	require.NoError(t, err)
+	profiles, err := builder.BuildClusterProfiles("v1.2.0")
+	require.NoError(t, err)
+
 	reader := &providerReader{
 		infos: []v1.ReleaseInfo{
-			*releaseInfoForTest("v1.1.0", "v1.1.0", []string{"v1.1"}),
-			*releaseInfoForTest("v1.2.0", "v1.2.0", []string{"v1.1", "v1.2"}),
+			{Metadata: &v1.Metadata{Name: "v1.1.0"}},
+			*current,
 		},
-		profiles: []v1.ClusterProfile{*completeProfileForTest("v1.2.0")},
+		profiles: []v1.ClusterProfile{*profileByName(t, profiles, "v1.2.0")},
 	}
 
 	provider := NewProvider(reader, reader)
@@ -31,10 +38,15 @@ func TestProviderResolvesCurrentReleaseAndExactProfile(t *testing.T) {
 }
 
 func TestClusterProfileProviderDoesNotFallbackFromExactVersion(t *testing.T) {
-	reader := &providerReader{profiles: []v1.ClusterProfile{*completeProfileForTest("v1.2.0")}}
+	builder, err := NewBuilderForCatalog(BuiltinCatalog())
+	require.NoError(t, err)
+	profiles, err := builder.BuildClusterProfiles("v1.2.0")
+	require.NoError(t, err)
+
+	reader := &providerReader{profiles: []v1.ClusterProfile{*profileByName(t, profiles, "v1.2.0")}}
 	provider := NewProvider(reader, reader)
 
-	_, err := provider.ProfileFor("v1.2.0-alpha.1")
+	_, err = provider.ProfileFor("v1.2.0-alpha.1")
 	require.ErrorContains(t, err, "cluster profile v1.2.0-alpha.1 not found")
 }
 

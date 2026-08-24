@@ -39,10 +39,6 @@ func (provider *Provider) Current() (*v1.ReleaseInfo, error) {
 			continue
 		}
 
-		if err := ValidateReleaseInfo(&infos[index]); err != nil {
-			return nil, fmt.Errorf("invalid current release info %q: %w", baseline, err)
-		}
-
 		return cloneReleaseInfo(&infos[index]), nil
 	}
 
@@ -64,10 +60,6 @@ func (provider *Provider) ProfileFor(clusterVersion string) (*v1.ClusterProfile,
 	for index := range profiles {
 		if profiles[index].GetName() != clusterVersion {
 			continue
-		}
-
-		if err := ValidateClusterProfile(&profiles[index]); err != nil {
-			return nil, fmt.Errorf("invalid cluster profile %q: %w", clusterVersion, err)
 		}
 
 		return cloneClusterProfile(&profiles[index]), nil
