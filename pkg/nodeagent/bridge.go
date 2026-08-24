@@ -20,11 +20,13 @@ func internalLabels(labels adapter.CanonicalLabels) model.CanonicalLabels {
 
 func adapterSamplesFromNormalizer(samples []normalizer.Sample) []adapter.Sample {
 	result := make([]adapter.Sample, 0, len(samples))
+
 	for _, sample := range samples {
 		labels := make(map[string]string, len(sample.Labels))
 		for key, value := range sample.Labels {
 			labels[key] = value
 		}
+
 		result = append(result, adapter.Sample{Name: sample.Name, Labels: labels, Value: sample.Value})
 	}
 
@@ -35,6 +37,7 @@ func internalEndpointReplicaAcceleratorUsages(
 	usages []adapter.EndpointReplicaAcceleratorUsage,
 ) []model.EndpointReplicaGPUUsage {
 	result := make([]model.EndpointReplicaGPUUsage, 0, len(usages))
+
 	for _, usage := range usages {
 		converted := model.EndpointReplicaGPUUsage{
 			Workspace:        usage.Workspace,
@@ -50,14 +53,17 @@ func internalEndpointReplicaAcceleratorUsages(
 			VDeviceIndex:     usage.VDeviceIndex,
 			Product:          usage.Product,
 		}
+
 		if usage.MemoryUsedBytes != nil {
 			memoryUsedBytes := *usage.MemoryUsedBytes
 			converted.MemoryUsedBytes = &memoryUsedBytes
 		}
+
 		if usage.UtilizationRatio != nil {
 			utilizationRatio := *usage.UtilizationRatio
 			converted.UtilizationRatio = &utilizationRatio
 		}
+
 		result = append(result, converted)
 	}
 

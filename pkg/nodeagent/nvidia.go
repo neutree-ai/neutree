@@ -101,7 +101,7 @@ func (a *nvidiaAccelerator) BuildKubernetesMetrics(
 	endpointReplicaGPUUsages := internalEndpointReplicaAcceleratorUsages(
 		evidence.Common.EndpointReplicaAcceleratorUsages,
 	)
-	result, err := a.buildMetrics(
+	result := a.buildMetrics(
 		ctx,
 		hardware,
 		evidence.Common,
@@ -110,7 +110,7 @@ func (a *nvidiaAccelerator) BuildKubernetesMetrics(
 	)
 	result.Allocations = allocations
 
-	return result, err
+	return result, nil
 }
 
 func (a *nvidiaAccelerator) BuildStaticMetrics(
@@ -122,7 +122,7 @@ func (a *nvidiaAccelerator) BuildStaticMetrics(
 	endpointReplicaGPUUsages := internalEndpointReplicaAcceleratorUsages(
 		evidence.Common.EndpointReplicaAcceleratorUsages,
 	)
-	result, err := a.buildMetrics(
+	result := a.buildMetrics(
 		ctx,
 		hardware,
 		evidence.Common,
@@ -131,7 +131,7 @@ func (a *nvidiaAccelerator) BuildStaticMetrics(
 	)
 	result.Allocations = allocations
 
-	return result, err
+	return result, nil
 }
 
 func (a *nvidiaAccelerator) buildMetrics(
@@ -140,7 +140,7 @@ func (a *nvidiaAccelerator) buildMetrics(
 	evidence adapter.CommonEvidence,
 	endpointAllocations []model.EndpointAllocation,
 	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
-) (adapter.MetricResult, error) {
+) adapter.MetricResult {
 	labels := internalLabels(evidence.Labels)
 	if !evidence.ExporterUp {
 		return adapter.MetricResult{
@@ -150,7 +150,7 @@ func (a *nvidiaAccelerator) buildMetrics(
 				endpointAllocations,
 				nil,
 			)),
-		}, nil
+		}
 	}
 
 	raw := evidence.ExporterText
@@ -181,7 +181,7 @@ func (a *nvidiaAccelerator) buildMetrics(
 		acceleratorIndexes,
 	)...)
 
-	return adapter.MetricResult{Samples: adapterSamplesFromNormalizer(samples)}, nil
+	return adapter.MetricResult{Samples: adapterSamplesFromNormalizer(samples)}
 }
 
 func gpuHardwareInfosFromSnapshot(hardware adapter.HardwareSnapshot) []model.GPUHardwareInfo {
@@ -228,10 +228,12 @@ func newNvidiaDeviceLookup(devices []v1.StaticNodeAcceleratorDeviceStatus) nvidi
 		byUUID: make(map[string]v1.StaticNodeAcceleratorDeviceStatus, len(devices)),
 		byID:   make(map[string]v1.StaticNodeAcceleratorDeviceStatus, len(devices)),
 	}
+
 	for _, device := range devices {
 		if device.UUID != "" {
 			lookup.byUUID[device.UUID] = device
 		}
+
 		if device.ID != "" {
 			lookup.byID[device.ID] = device
 		}
@@ -252,6 +254,7 @@ func nvidiaKubernetesAllocations(
 	for _, pod := range evidence.EndpointPods {
 		pods[pod.Namespace+"/"+pod.Name] = pod
 	}
+
 	lookup := newNvidiaDeviceLookup(hardware.Accelerator.Devices)
 	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(evidence.PodResources))
 
@@ -260,14 +263,17 @@ func nvidiaKubernetesAllocations(
 		if !ok || pod.Labels["endpoint"] == "" {
 			continue
 		}
+
 		refs := make([]string, 0)
 		for _, container := range podResource.Containers {
 			refs = append(refs, container.DeviceIDs...)
 		}
+
 		devices := nvidiaAllocationDevices(refs, lookup, firstNonEmpty(evidence.Common.Labels.Node, pod.NodeName), 0)
 		if len(devices) == 0 {
 			continue
 		}
+
 		allocations = append(allocations, v1.StaticNodeAllocationStatus{
 			WorkloadType: "endpoint",
 			Workspace:    pod.Labels[v1.NeutreeClusterWorkspaceLabelKey],
@@ -296,6 +302,7 @@ func nvidiaStaticAllocations(
 	for _, actor := range evidence.RayEvidence.Actors {
 		actors[actor.ActorID] = actor
 	}
+
 	lookup := newNvidiaDeviceLookup(hardware.Accelerator.Devices)
 	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(evidence.RayEvidence.Replicas))
 
@@ -304,15 +311,19 @@ func nvidiaStaticAllocations(
 		if !ok || actor.PID <= 0 {
 			continue
 		}
+
 		quantity, quantityKnown := nvidiaGPUQuantity(replica, actor)
 		if quantityKnown && quantity <= 0 {
 			continue
 		}
+
 		process, ok := evidence.RayEvidence.ActorProcesses[actor.PID]
 		if !ok {
 			continue
 		}
+
 		refs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
+
 		devices := nvidiaAllocationDevices(
 			refs,
 			lookup,
@@ -322,6 +333,7 @@ func nvidiaStaticAllocations(
 		if len(devices) == 0 {
 			continue
 		}
+
 		allocations = append(allocations, v1.StaticNodeAllocationStatus{
 			WorkloadType: "endpoint",
 			Workspace:    replica.Workspace,
@@ -344,13 +356,16 @@ func nvidiaEndpointAllocations(
 	allocations []v1.StaticNodeAllocationStatus,
 ) []model.EndpointAllocation {
 	result := make([]model.EndpointAllocation, 0, len(allocations))
+
 	for _, allocation := range allocations {
 		if allocation.WorkloadType != "" && allocation.WorkloadType != "endpoint" {
 			continue
 		}
+
 		if allocation.Endpoint == "" || len(allocation.Devices) == 0 {
 			continue
 		}
+
 		result = append(result, model.EndpointAllocation{
 			Workspace:  firstNonEmpty(allocation.Workspace, labels.Workspace),
 			Cluster:    labels.NeutreeCluster,
@@ -373,17 +388,21 @@ func nvidiaAllocationDevices(
 ) []v1.DeviceAllocation {
 	result := make([]v1.DeviceAllocation, 0, len(references))
 	seen := make(map[string]struct{}, len(references))
+
 	for _, reference := range references {
 		device, ok := lookup.byUUID[reference]
 		if !ok {
 			device, ok = lookup.byID[reference]
 		}
+
 		if !ok || device.UUID == "" {
 			continue
 		}
+
 		if _, exists := seen[device.UUID]; exists {
 			continue
 		}
+
 		seen[device.UUID] = struct{}{}
 
 		memoryMiB, coreUnits := nvidiaAllocationCapacity(device, quantity)
@@ -411,6 +430,7 @@ func nvidiaGPUQuantity(replica adapter.RayReplica, actor adapter.RayActor) (floa
 	if replica.GPUQuantity != 0 {
 		return replica.GPUQuantity, true
 	}
+
 	for resource, quantity := range actor.RequiredResources {
 		if strings.EqualFold(resource, "gpu") {
 			return quantity, true
@@ -425,6 +445,7 @@ func nvidiaVisibleDeviceRefs(environment map[string]string, lookup nvidiaDeviceL
 	if nvidiaVisibleContainsKnownUUIDs(nvidiaVisible, lookup) {
 		return parseVisibleDeviceRefs(nvidiaVisible)
 	}
+
 	if cudaVisible := strings.TrimSpace(environment["CUDA_VISIBLE_DEVICES"]); cudaVisible != "" {
 		return parseVisibleDeviceRefs(cudaVisible)
 	}
@@ -437,6 +458,7 @@ func nvidiaVisibleContainsKnownUUIDs(value string, lookup nvidiaDeviceLookup) bo
 	if len(refs) == 0 {
 		return false
 	}
+
 	for _, reference := range refs {
 		if _, ok := lookup.byUUID[reference]; !ok {
 			return false
@@ -451,12 +473,14 @@ func parseVisibleDeviceRefs(value string) []string {
 	if value == "" {
 		return nil
 	}
+
 	switch strings.ToLower(value) {
 	case "all", "none", "void", "no":
 		return nil
 	}
 
 	result := make([]string, 0)
+
 	for _, reference := range strings.Split(value, ",") {
 		if reference = strings.TrimSpace(reference); reference != "" {
 			result = append(result, reference)
@@ -471,9 +495,11 @@ func sortAllocations(allocations []v1.StaticNodeAllocationStatus) {
 		if allocations[i].Workspace != allocations[j].Workspace {
 			return allocations[i].Workspace < allocations[j].Workspace
 		}
+
 		if allocations[i].Endpoint != allocations[j].Endpoint {
 			return allocations[i].Endpoint < allocations[j].Endpoint
 		}
+
 		if allocations[i].InstanceID != allocations[j].InstanceID {
 			return allocations[i].InstanceID < allocations[j].InstanceID
 		}
@@ -484,12 +510,15 @@ func sortAllocations(allocations []v1.StaticNodeAllocationStatus) {
 
 func cloneDeviceAllocations(devices []v1.DeviceAllocation) []v1.DeviceAllocation {
 	result := make([]v1.DeviceAllocation, 0, len(devices))
+
 	for _, device := range devices {
 		copied := device
+
 		if device.Order != nil {
 			order := *device.Order
 			copied.Order = &order
 		}
+
 		result = append(result, copied)
 	}
 

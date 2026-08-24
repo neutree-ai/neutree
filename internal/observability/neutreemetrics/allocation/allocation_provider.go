@@ -237,15 +237,18 @@ func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
 
 func clonePodResources(input []adapter.PodResource) []adapter.PodResource {
 	result := make([]adapter.PodResource, 0, len(input))
+
 	for _, pod := range input {
 		copied := adapter.PodResource{Namespace: pod.Namespace, Name: pod.Name}
 		copied.Containers = make([]adapter.ContainerDevices, 0, len(pod.Containers))
+
 		for _, container := range pod.Containers {
 			copied.Containers = append(copied.Containers, adapter.ContainerDevices{
 				ResourceName: container.ResourceName,
 				DeviceIDs:    append([]string(nil), container.DeviceIDs...),
 			})
 		}
+
 		result = append(result, copied)
 	}
 
@@ -292,6 +295,7 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	if err != nil || nodeID == "" {
 		return adapter.StaticEvidence{}, err
 	}
+
 	applications, applicationsErr := service.GetServeApplications()
 
 	actorsResp, err := service.ListActors(
@@ -342,11 +346,13 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 
 func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
 	result := make([]adapter.RayActor, 0, len(actors))
+
 	for _, actor := range actors {
 		resources := make(map[string]float64, len(actor.RequiredResources))
 		for name, quantity := range actor.RequiredResources {
 			resources[name] = quantity
 		}
+
 		result = append(result, adapter.RayActor{
 			ActorID:           actor.ActorID,
 			ClassName:         actor.ClassName,
@@ -372,16 +378,20 @@ func rayReplicasFromApplications(
 	}
 
 	result := make([]adapter.RayReplica, 0)
+
 	for _, applicationName := range rayserve.SortedServeApplicationNames(applications) {
 		status := applications.Applications[applicationName]
 		workspace, endpoint := rayserve.ApplicationIdentity(applicationName, status)
+
 		for _, deploymentName := range rayserve.SortedDeploymentNames(status.Deployments) {
 			deployment := status.Deployments[deploymentName]
 			gpuQuantity, _ := rayDeploymentGPUQuantity(status, deploymentName)
+
 			for _, replica := range deployment.Replicas {
 				if replica.NodeID != nodeID || replica.ActorID == "" {
 					continue
 				}
+
 				result = append(result, adapter.RayReplica{
 					Workspace:   workspace,
 					Endpoint:    endpoint,

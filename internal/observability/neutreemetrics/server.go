@@ -339,6 +339,7 @@ func (s *Server) acceleratorSamples(
 		// DCGM.
 		return []metricsnormalizer.Sample{}
 	}
+
 	if err := validateAdapterSamples(result.Samples, s.config.AcceleratorMetricDescriptors); err != nil {
 		klog.V(2).InfoS("Accelerator adapter returned invalid metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
 
@@ -476,6 +477,7 @@ func adapterEndpointReplicaGPUUsages(
 	usages []model.EndpointReplicaGPUUsage,
 ) []adapter.EndpointReplicaAcceleratorUsage {
 	result := make([]adapter.EndpointReplicaAcceleratorUsage, 0, len(usages))
+
 	for _, usage := range usages {
 		converted := adapter.EndpointReplicaAcceleratorUsage{
 			Workspace:        usage.Workspace,
@@ -491,14 +493,17 @@ func adapterEndpointReplicaGPUUsages(
 			VDeviceIndex:     usage.VDeviceIndex,
 			Product:          usage.Product,
 		}
+
 		if usage.MemoryUsedBytes != nil {
 			memoryUsedBytes := *usage.MemoryUsedBytes
 			converted.MemoryUsedBytes = &memoryUsedBytes
 		}
+
 		if usage.UtilizationRatio != nil {
 			utilizationRatio := *usage.UtilizationRatio
 			converted.UtilizationRatio = &utilizationRatio
 		}
+
 		result = append(result, converted)
 	}
 
@@ -507,11 +512,14 @@ func adapterEndpointReplicaGPUUsages(
 
 func normalizerSamplesFromAdapter(samples []adapter.Sample) []metricsnormalizer.Sample {
 	result := make([]metricsnormalizer.Sample, 0, len(samples))
+
 	for _, sample := range samples {
 		labels := make(map[string]string, len(sample.Labels))
+
 		for key, value := range sample.Labels {
 			labels[key] = value
 		}
+
 		result = append(result, metricsnormalizer.Sample{
 			Name:   sample.Name,
 			Labels: labels,

@@ -34,6 +34,7 @@ func Run(ctx context.Context, config Config) error {
 	if err != nil {
 		return fmt.Errorf("build accelerator adapter registry: %w", err)
 	}
+
 	if err := neutreemetrics.ValidateAdapterMetricDescriptors(registry.descriptorsCopy()); err != nil {
 		return fmt.Errorf("validate accelerator adapter descriptors: %w", err)
 	}
@@ -45,18 +46,22 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	klog.InitFlags(nil)
+
 	if err := flag.Set("v", "2"); err != nil {
 		return fmt.Errorf("set default log verbosity: %w", err)
 	}
+
 	defer klog.Flush()
 
 	opts := newOptions()
 	flags := pflag.NewFlagSet("neutree-node-agent", pflag.ContinueOnError)
 	opts.addFlags(flags)
 	flags.AddGoFlagSet(flag.CommandLine)
+
 	if err := flags.Parse(config.Args); err != nil {
 		return err
 	}
+
 	if err := validateSelectedAdapterCapability(opts.clusterType, opts.acceleratorType, registry); err != nil {
 		return err
 	}

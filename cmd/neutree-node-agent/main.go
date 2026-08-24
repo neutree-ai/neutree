@@ -12,11 +12,19 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	info := version.Get()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	err := nodeagent.Run(ctx, nodeagent.Config{
+	return nodeagent.Run(ctx, nodeagent.Config{
 		Args: os.Args[1:],
 		Build: nodeagent.BuildInfo{
 			Version:   info.AppVersion,
@@ -25,8 +33,4 @@ func main() {
 		},
 		Adapters: nodeagent.DefaultAdapters(),
 	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 }

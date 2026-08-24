@@ -199,15 +199,19 @@ func (s HardwareSnapshot) Clone() HardwareSnapshot {
 	result := HardwareSnapshot{Accelerator: s.Accelerator}
 	if len(s.Accelerator.Devices) > 0 {
 		result.Accelerator.Devices = make([]v1.StaticNodeAcceleratorDeviceStatus, 0, len(s.Accelerator.Devices))
+
 		for _, device := range s.Accelerator.Devices {
 			copied := device
+
 			if device.MinorNumber != nil {
 				minor := *device.MinorNumber
 				copied.MinorNumber = &minor
 			}
+
 			result.Accelerator.Devices = append(result.Accelerator.Devices, copied)
 		}
 	}
+
 	result.Details = append([]HardwareDetails(nil), s.Details...)
 
 	return result
@@ -234,17 +238,21 @@ func (e KubernetesEvidence) Clone() KubernetesEvidence {
 		AllocationAvailable: e.AllocationAvailable,
 	}
 	result.PodResources = make([]PodResource, 0, len(e.PodResources))
+
 	for _, pod := range e.PodResources {
 		copied := PodResource{Namespace: pod.Namespace, Name: pod.Name}
 		copied.Containers = make([]ContainerDevices, 0, len(pod.Containers))
+
 		for _, container := range pod.Containers {
 			copied.Containers = append(copied.Containers, ContainerDevices{
 				ResourceName: container.ResourceName,
 				DeviceIDs:    append([]string(nil), container.DeviceIDs...),
 			})
 		}
+
 		result.PodResources = append(result.PodResources, copied)
 	}
+
 	result.EndpointPods = make([]EndpointPodEvidence, 0, len(e.EndpointPods))
 	for _, pod := range e.EndpointPods {
 		result.EndpointPods = append(result.EndpointPods, EndpointPodEvidence{
@@ -284,6 +292,7 @@ func (e StaticEvidence) Clone() StaticEvidence {
 			EndTime:           actor.EndTime,
 		})
 	}
+
 	result.RayEvidence.Replicas = append(result.RayEvidence.Replicas, e.RayEvidence.Replicas...)
 	for pid, process := range e.RayEvidence.ActorProcesses {
 		result.RayEvidence.ActorProcesses[pid] = ProcessInfo{
@@ -330,17 +339,22 @@ func CloneMetricDescriptors(descriptors []MetricDescriptor) []MetricDescriptor {
 
 func cloneAllocations(allocations []v1.StaticNodeAllocationStatus) []v1.StaticNodeAllocationStatus {
 	result := make([]v1.StaticNodeAllocationStatus, 0, len(allocations))
+
 	for _, allocation := range allocations {
 		copied := allocation
 		copied.Devices = make([]v1.DeviceAllocation, 0, len(allocation.Devices))
+
 		for _, device := range allocation.Devices {
 			deviceCopy := device
+
 			if device.Order != nil {
 				order := *device.Order
 				deviceCopy.Order = &order
 			}
+
 			copied.Devices = append(copied.Devices, deviceCopy)
 		}
+
 		result = append(result, copied)
 	}
 
@@ -351,6 +365,7 @@ func copyStringMap(input map[string]string) map[string]string {
 	if len(input) == 0 {
 		return nil
 	}
+
 	result := make(map[string]string, len(input))
 	for key, value := range input {
 		result[key] = value
@@ -363,6 +378,7 @@ func copyFloat64Map(input map[string]float64) map[string]float64 {
 	if len(input) == 0 {
 		return nil
 	}
+
 	result := make(map[string]float64, len(input))
 	for key, value := range input {
 		result[key] = value
@@ -375,16 +391,20 @@ func cloneEndpointReplicaAcceleratorUsages(
 	usages []EndpointReplicaAcceleratorUsage,
 ) []EndpointReplicaAcceleratorUsage {
 	result := make([]EndpointReplicaAcceleratorUsage, 0, len(usages))
+
 	for _, usage := range usages {
 		copied := usage
+
 		if usage.MemoryUsedBytes != nil {
 			memoryUsedBytes := *usage.MemoryUsedBytes
 			copied.MemoryUsedBytes = &memoryUsedBytes
 		}
+
 		if usage.UtilizationRatio != nil {
 			utilizationRatio := *usage.UtilizationRatio
 			copied.UtilizationRatio = &utilizationRatio
 		}
+
 		result = append(result, copied)
 	}
 

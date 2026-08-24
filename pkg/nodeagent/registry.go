@@ -31,19 +31,23 @@ func newAdapterRegistry(accelerators []adapter.Accelerator) (adapterRegistry, er
 		if acceleratorType == "" {
 			return adapterRegistry{}, fmt.Errorf("accelerator adapter type is required")
 		}
+
 		if _, exists := registry.byType[acceleratorType]; exists {
 			return adapterRegistry{}, fmt.Errorf("duplicate accelerator adapter %q", acceleratorType)
 		}
+
 		registry.byType[acceleratorType] = accelerator
 
 		provider, ok := accelerator.(adapter.MetricDescriptorProvider)
 		if !ok {
 			continue
 		}
+
 		for _, descriptor := range provider.MetricDescriptors() {
 			if err := validateAdapterDescriptor(acceleratorType, descriptor); err != nil {
 				return adapterRegistry{}, err
 			}
+
 			name := strings.TrimSpace(descriptor.Name)
 			if owner, exists := descriptorOwners[name]; exists {
 				return adapterRegistry{}, fmt.Errorf(
@@ -53,7 +57,9 @@ func newAdapterRegistry(accelerators []adapter.Accelerator) (adapterRegistry, er
 					acceleratorType,
 				)
 			}
+
 			descriptorOwners[name] = acceleratorType
+
 			registry.descriptors = append(registry.descriptors, adapter.MetricDescriptor{
 				Name:               name,
 				LabelNames:         append([]string(nil), descriptor.LabelNames...),
@@ -87,6 +93,7 @@ func (r adapterRegistry) types() []string {
 	for acceleratorType := range r.byType {
 		types = append(types, acceleratorType)
 	}
+
 	sort.Strings(types)
 
 	return types
@@ -99,29 +106,36 @@ func validateAdapterDescriptor(acceleratorType string, descriptor adapter.Metric
 	}
 
 	labels := make(map[string]struct{}, len(descriptor.LabelNames))
+
 	for _, label := range descriptor.LabelNames {
 		label = strings.TrimSpace(label)
 		if label == "" {
 			return fmt.Errorf("accelerator metric descriptor %q has an empty label name", name)
 		}
+
 		if _, exists := labels[label]; exists {
 			return fmt.Errorf("accelerator metric descriptor %q has duplicate label %q", name, label)
 		}
+
 		labels[label] = struct{}{}
 	}
 
 	required := make(map[string]struct{}, len(descriptor.RequiredLabelNames))
+
 	for _, label := range descriptor.RequiredLabelNames {
 		label = strings.TrimSpace(label)
 		if label == "" {
 			return fmt.Errorf("accelerator metric descriptor %q has an empty required label name", name)
 		}
+
 		if _, exists := labels[label]; !exists {
 			return fmt.Errorf("accelerator metric descriptor %q requires unknown label %q", name, label)
 		}
+
 		if _, exists := required[label]; exists {
 			return fmt.Errorf("accelerator metric descriptor %q has duplicate required label %q", name, label)
 		}
+
 		required[label] = struct{}{}
 	}
 
