@@ -144,7 +144,7 @@ func (catalog *Catalog) buildReleaseInfo(baseline string) (*v1.ReleaseInfo, erro
 		return nil, fmt.Errorf("release profile catalog is required")
 	}
 
-	if err := catalog.validateBaseline(baseline); err != nil {
+	if err := catalog.requireCurrentBaseline(baseline); err != nil {
 		return nil, err
 	}
 
@@ -164,7 +164,7 @@ func (catalog *Catalog) buildClusterProfiles(baseline string) ([]*v1.ClusterProf
 		return nil, fmt.Errorf("release profile catalog is required")
 	}
 
-	if err := catalog.validateBaseline(baseline); err != nil {
+	if err := catalog.requireCurrentBaseline(baseline); err != nil {
 		return nil, err
 	}
 
@@ -176,24 +176,12 @@ func (catalog *Catalog) buildClusterProfiles(baseline string) ([]*v1.ClusterProf
 	return profiles, nil
 }
 
-func (catalog *Catalog) validateBaseline(baseline string) error {
-	if _, err := NormalizeControlPlaneRelease(baseline); err != nil {
-		return err
-	}
-
+func (catalog *Catalog) requireCurrentBaseline(baseline string) error {
 	if baseline != catalog.spec.CurrentReleaseInfoBaseline {
 		return fmt.Errorf("release baseline %q is not supported by catalog", baseline)
 	}
 
 	return nil
-}
-
-func cloneCatalog(catalog *Catalog) *Catalog {
-	if catalog == nil {
-		return nil
-	}
-
-	return &Catalog{spec: cloneCatalogSpec(catalog.spec)}
 }
 
 func cloneCatalogSpec(spec CatalogSpec) CatalogSpec {
