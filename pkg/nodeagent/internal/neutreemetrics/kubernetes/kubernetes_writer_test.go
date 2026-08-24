@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +34,7 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 			Name:      "stale-replica",
 			Namespace: "default",
 			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[{"uuid":"GPU-stale"}]`,
+				accelerator.NeutreeAcceleratorAllocationsAnnotation: `[{"uuid":"GPU-stale"}]`,
 			},
 		},
 		Spec: corev1.PodSpec{NodeName: "node-a"},
@@ -84,7 +84,7 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 
 	var patchedNode corev1.Node
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, &patchedNode))
-	devicesAnnotation := patchedNode.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation]
+	devicesAnnotation := patchedNode.Annotations[accelerator.NeutreeAcceleratorDevicesAnnotation]
 	assert.Contains(t, devicesAnnotation, "GPU-abc")
 	assert.Contains(t, devicesAnnotation, `"minor_number":0`)
 	assert.Contains(t, devicesAnnotation, "GPU-unknown")
@@ -96,11 +96,11 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 
 	var patchedPod corev1.Pod
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "replica-a"}, &patchedPod))
-	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], "GPU-abc")
-	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"vdevice_index":"1"`)
-	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"memory_mib":8192`)
-	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"used_memory_mib":4096`)
-	assert.Contains(t, patchedPod.Annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation], `"core_units":50`)
+	assert.Contains(t, patchedPod.Annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation], "GPU-abc")
+	assert.Contains(t, patchedPod.Annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation], `"vdevice_index":"1"`)
+	assert.Contains(t, patchedPod.Annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation], `"memory_mib":8192`)
+	assert.Contains(t, patchedPod.Annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation], `"used_memory_mib":4096`)
+	assert.Contains(t, patchedPod.Annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation], `"core_units":50`)
 
 	var sameNameOtherNamespacePod corev1.Pod
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Namespace: "other", Name: "replica-a"}, &sameNameOtherNamespacePod))
@@ -112,7 +112,7 @@ func TestAnnotationWriterPatchesOnlyLocalNodeAndPods(t *testing.T) {
 
 	var stalePod corev1.Pod
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "stale-replica"}, &stalePod))
-	assert.NotContains(t, stalePod.Annotations, resourceparser.NeutreeAcceleratorAllocationsAnnotation)
+	assert.NotContains(t, stalePod.Annotations, accelerator.NeutreeAcceleratorAllocationsAnnotation)
 }
 
 func podNodeNameIndex(object client.Object) []string {

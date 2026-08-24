@@ -17,14 +17,14 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
-	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
-	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/allocation"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/devicesnapshot"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/hardware"
+	metricskubernetes "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/kubernetes"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
+	metricsnormalizer "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/runtimeusage"
 )
 
 const (

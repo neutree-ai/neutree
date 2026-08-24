@@ -12,14 +12,14 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
-	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
-	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/allocation"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/hardware"
+	metricskubernetes "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/kubernetes"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
+	metricsnormalizer "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/runtimeusage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -1167,7 +1167,7 @@ func TestServerWriteKubernetesAnnotationsKeepsDeviceAnnotationOnEmptyCPUFallback
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-a",
 			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
+				accelerator.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
 			},
 		},
 	}).Build()
@@ -1184,12 +1184,12 @@ func TestServerWriteKubernetesAnnotationsKeepsDeviceAnnotationOnEmptyCPUFallback
 
 	node := &corev1.Node{}
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
-	assert.Equal(t, devicesAnnotation, node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation])
+	assert.Equal(t, devicesAnnotation, node.Annotations[accelerator.NeutreeAcceleratorDevicesAnnotation])
 }
 
 func TestServerWriteKubernetesAnnotationsClearsDeviceAnnotationOnEmptyExplicitAdapter(t *testing.T) {
 	const devicesAnnotation = `[{"uuid":"GPU-abc","minor_number":0,"memory_mib":81920,"healthy":true}]`
-	accelerator := &recordingKubernetesAccelerator{
+	testAccelerator := &recordingKubernetesAccelerator{
 		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
 	}
 	ctrClient := fake.NewClientBuilder().
@@ -1197,7 +1197,7 @@ func TestServerWriteKubernetesAnnotationsClearsDeviceAnnotationOnEmptyExplicitAd
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "node-a",
 				Annotations: map[string]string{
-					resourceparser.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
+					accelerator.NeutreeAcceleratorDevicesAnnotation: devicesAnnotation,
 				},
 			},
 		}).
@@ -1214,7 +1214,7 @@ func TestServerWriteKubernetesAnnotationsClearsDeviceAnnotationOnEmptyExplicitAd
 		ClusterType:     "kubernetes",
 		AcceleratorType: "vendor",
 		Accelerators: map[string]adapter.Accelerator{
-			"vendor": accelerator,
+			"vendor": testAccelerator,
 		},
 		KubernetesWriter: &metricskubernetes.AnnotationWriter{
 			Client:   ctrClient,
@@ -1227,7 +1227,7 @@ func TestServerWriteKubernetesAnnotationsClearsDeviceAnnotationOnEmptyExplicitAd
 
 	node := &corev1.Node{}
 	require.NoError(t, ctrClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, node))
-	assert.JSONEq(t, `[]`, node.Annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation])
+	assert.JSONEq(t, `[]`, node.Annotations[accelerator.NeutreeAcceleratorDevicesAnnotation])
 }
 
 func TestServerNodeDeviceSnapshotSetsMinorNumberFromHardwareInfo(t *testing.T) {

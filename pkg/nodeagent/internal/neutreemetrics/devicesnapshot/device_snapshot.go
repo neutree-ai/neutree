@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/promtext"
 )
 
 func FromAcceleratorMetrics(raw string) *v1.NodeDeviceSnapshot {

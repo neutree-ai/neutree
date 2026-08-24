@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/devicesnapshot"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/hardware"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

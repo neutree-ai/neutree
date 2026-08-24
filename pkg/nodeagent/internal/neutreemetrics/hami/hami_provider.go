@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/promtext"
 )
 
 const (

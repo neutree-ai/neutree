@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/klog/v2"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics"
 )
 
 // BuildInfo provides the build metadata printed by the version command.

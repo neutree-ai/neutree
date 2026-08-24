@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
+	metricsnormalizer "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
 )
 
 func TestStaticScrapeTargetProviderUsesManagedPorts(t *testing.T) {

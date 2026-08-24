@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

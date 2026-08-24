@@ -10,11 +10,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
-	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/allocation"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/hami"
+	metricskubernetes "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/kubernetes"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
 )
 
 func TestOptionsConfigDefaults(t *testing.T) {

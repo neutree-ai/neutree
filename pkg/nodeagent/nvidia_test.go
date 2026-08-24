@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
 )
 
 func TestNvidiaAdapterBuildsKubernetesAllocationsFromRawEvidence(t *testing.T) {

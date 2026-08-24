@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/ray/dashboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

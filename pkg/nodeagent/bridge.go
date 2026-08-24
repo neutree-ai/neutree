@@ -1,9 +1,9 @@
 package nodeagent
 
 import (
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
 )
 
 func internalLabels(labels adapter.CanonicalLabels) model.CanonicalLabels {

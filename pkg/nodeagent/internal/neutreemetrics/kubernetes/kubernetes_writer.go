@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type AnnotationWriter struct {
@@ -52,11 +52,11 @@ func (w *AnnotationWriter) writeNodeDevices(
 		return err
 	}
 
-	if annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation] == string(value) {
+	if annotations[accelerator.NeutreeAcceleratorDevicesAnnotation] == string(value) {
 		return nil
 	}
 
-	annotations[resourceparser.NeutreeAcceleratorDevicesAnnotation] = string(value)
+	annotations[accelerator.NeutreeAcceleratorDevicesAnnotation] = string(value)
 	node.Annotations = annotations
 
 	return w.Client.Patch(ctx, node, client.MergeFrom(original))
@@ -98,22 +98,22 @@ func (w *AnnotationWriter) writePodAllocations(
 
 		podAllocations := allocationsByPod[key]
 		if len(podAllocations) == 0 {
-			if _, exists := annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation]; !exists {
+			if _, exists := annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation]; !exists {
 				continue
 			}
 
-			delete(annotations, resourceparser.NeutreeAcceleratorAllocationsAnnotation)
+			delete(annotations, accelerator.NeutreeAcceleratorAllocationsAnnotation)
 		} else {
 			value, err := json.Marshal(kubernetesAllocationAnnotations(podAllocations))
 			if err != nil {
 				return err
 			}
 
-			if annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation] == string(value) {
+			if annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation] == string(value) {
 				continue
 			}
 
-			annotations[resourceparser.NeutreeAcceleratorAllocationsAnnotation] = string(value)
+			annotations[accelerator.NeutreeAcceleratorAllocationsAnnotation] = string(value)
 		}
 
 		if reflect.DeepEqual(annotations, pod.Annotations) {

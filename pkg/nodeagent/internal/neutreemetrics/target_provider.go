@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
+	metricsnormalizer "github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/normalizer"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/internal/neutreemetrics/model"
 )
 
 const bytesPerMiB = 1024 * 1024
