@@ -448,9 +448,17 @@ if [ -z "$IMAGES" ]; then
     exit 1
 fi
 
-if [ -n "$PACKAGE_URL" ] && [[ ! "$PACKAGE_URL" =~ ^https?://[^[:space:]\"\\]+$ ]]; then
-    print_error "--package-url must be an HTTP(S) URL without whitespace or quotes"
+if [ -n "$PACKAGE_URL" ] && [[ ! "$PACKAGE_URL" =~ ^https://[^[:space:]\"\\]+$ || "$PACKAGE_URL" == *\?* || "$PACKAGE_URL" == *\#* ]]; then
+    print_error "--package-url must be an HTTPS URL without whitespace or quotes"
     exit 1
+fi
+if [ -n "$PACKAGE_URL" ]; then
+    PACKAGE_URL_AUTHORITY="${PACKAGE_URL#https://}"
+    PACKAGE_URL_AUTHORITY="${PACKAGE_URL_AUTHORITY%%/*}"
+    if [[ "$PACKAGE_URL_AUTHORITY" == *"@"* ]]; then
+        print_error "--package-url must not include URL credentials"
+        exit 1
+    fi
 fi
 
 if [ -n "$PACKAGE_URL" ] && [ -n "$MANIFEST_TEMPLATE" ]; then

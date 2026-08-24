@@ -87,6 +87,7 @@ jobs:
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
 
   release-package:
+    if: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL != '' }}
     needs:
       - push-manifests
     uses: ./.github/workflows/release-engine-package.yaml

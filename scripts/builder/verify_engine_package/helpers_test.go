@@ -35,7 +35,7 @@ func TestParseOptions(t *testing.T) {
 		"--image-name", "registry.internal:5000/release/engine-vllm",
 		"--image-tag", "v0.24.0-neutree1-ray2.53.0",
 		"--supported-tasks", "text-generation, text-embedding",
-		"--package-url", "http://files.internal/package.tar.gz",
+		"--package-url", "https://files.internal/package.tar.gz",
 		"--schema", "schema.json",
 		"--template-dir", "templates",
 	}
@@ -67,6 +67,24 @@ func TestValidateOptions(t *testing.T) {
 	missingTasks.supportedTasks = nil
 	if err := validateOptions(missingTasks); err == nil {
 		t.Fatal("validateOptions() succeeded without supported tasks")
+	}
+
+	insecureURL := valid
+	insecureURL.packageURL = "http://files.internal/package.tar.gz"
+	if err := validateOptions(insecureURL); err == nil {
+		t.Fatal("validateOptions() succeeded with an insecure package URL")
+	}
+
+	missingSchema := valid
+	missingSchema.schemaPath = ""
+	if err := validateOptions(missingSchema); err == nil {
+		t.Fatal("validateOptions() succeeded without a schema path")
+	}
+
+	missingTemplates := valid
+	missingTemplates.templateDir = ""
+	if err := validateOptions(missingTemplates); err == nil {
+		t.Fatal("validateOptions() succeeded without a template directory")
 	}
 }
 
@@ -124,7 +142,7 @@ func TestParseManifest(t *testing.T) {
 	if _, err := parseManifest([]byte("engines: [")); err == nil {
 		t.Fatal("parseManifest() succeeded for invalid YAML")
 	}
-	manifest, err := parseManifest([]byte("metadata:\n  package_url: http://files.internal/package.tar.gz\n"))
+	manifest, err := parseManifest([]byte("metadata:\n  package_url: https://files.internal/package.tar.gz\n"))
 	if err != nil {
 		t.Fatalf("parseManifest() error = %v", err)
 	}
@@ -135,7 +153,7 @@ func TestParseManifest(t *testing.T) {
 
 func TestVerifyManifest(t *testing.T) {
 	tempDir := t.TempDir()
-	imageFile := "images/vllm-images.tar"
+	imageFile := "images/vllm-v0.24.0-neutree1-images.tar"
 	if err := os.MkdirAll(filepath.Join(tempDir, "images"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +168,7 @@ func TestVerifyManifest(t *testing.T) {
 	}
 
 	wrongURL := testManifest(options, imageFile)
-	wrongURL.Metadata.PackageURL = "http://files.internal/other.tar.gz"
+	wrongURL.Metadata.PackageURL = "https://files.internal/other.tar.gz"
 	if _, err := verifyManifest(wrongURL, options, tempDir); err == nil {
 		t.Fatal("verifyManifest() succeeded with a mismatched package URL")
 	}
@@ -165,6 +183,18 @@ func TestVerifyManifest(t *testing.T) {
 	wrongImage.Engines[0].EngineVersions[0].Images[options.accelerator].Tag = "other"
 	if _, err := verifyManifest(wrongImage, options, tempDir); err == nil {
 		t.Fatal("verifyManifest() succeeded with a mismatched image")
+	}
+
+	extraAccelerator := testManifest(options, imageFile)
+	extraAccelerator.Engines[0].EngineVersions[0].Images["amd_gpu"] = &v1.EngineImage{ImageName: "registry.internal/release/engine-vllm-rocm", Tag: "v0.24.0"}
+	if _, err := verifyManifest(extraAccelerator, options, tempDir); err == nil {
+		t.Fatal("verifyManifest() succeeded with an extra accelerator image")
+	}
+
+	extraImage := testManifest(options, imageFile)
+	extraImage.Images = append(extraImage.Images, &packageimport.ImageSpec{ImageName: "registry.internal/release/extra", Tag: "v0.24.0", ImageFile: "images/extra-images.tar"})
+	if _, err := verifyManifest(extraImage, options, tempDir); err == nil {
+		t.Fatal("verifyManifest() succeeded with an extra package image")
 	}
 }
 
@@ -230,6 +260,15 @@ func TestVerifyTemplatesAndLoadTemplates(t *testing.T) {
 	if err := verifyTemplates(templates, templateDir); err != nil {
 		t.Fatalf("verifyTemplates() error = %v", err)
 	}
+	extraTemplate := map[string]map[string]string{
+		"kubernetes": {
+			"default": base64.StdEncoding.EncodeToString(template[:len(template)-1]),
+			"extra":   base64.StdEncoding.EncodeToString(template[:len(template)-1]),
+		},
+	}
+	if err := verifyTemplates(extraTemplate, templateDir); err == nil {
+		t.Fatal("verifyTemplates() succeeded with an extra deploy template")
+	}
 	if err := verifyTemplates(map[string]map[string]string{"kubernetes": {"default": "invalid"}}, templateDir); err == nil {
 		t.Fatal("verifyTemplates() succeeded with invalid base64")
 	}
@@ -258,7 +297,7 @@ func testVerifyOptions(t *testing.T) verifyOptions {
 		imageName:      "registry.internal:5000/release/engine-vllm",
 		imageTag:       "v0.24.0-neutree1-ray2.53.0",
 		supportedTasks: []string{"text-generation", "text-embedding", "text-rerank"},
-		packageURL:     "http://files.internal/vllm-v0.24.0-neutree1.tar.gz",
+		packageURL:     "https://files.internal/vllm-v0.24.0-neutree1.tar.gz",
 		schemaPath:     "schema.json",
 		templateDir:    "templates",
 	}
@@ -267,7 +306,7 @@ func testVerifyOptions(t *testing.T) verifyOptions {
 func testManifest(options verifyOptions, imageFile string) *packageimport.PackageManifest {
 	return &packageimport.PackageManifest{
 		Metadata: &packageimport.PackageMetadata{PackageURL: options.packageURL},
-		Images:   []*packageimport.ImageSpec{{ImageFile: imageFile}},
+		Images:   []*packageimport.ImageSpec{{ImageName: options.imageName, Tag: options.imageTag, ImageFile: imageFile}},
 		Engines: []*packageimport.EngineMetadata{{
 			Name: options.engineName,
 			EngineVersions: []*v1.EngineVersion{{

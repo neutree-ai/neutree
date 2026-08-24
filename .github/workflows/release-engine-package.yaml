@@ -87,8 +87,14 @@ jobs:
             echo "ray_short_version must be a Docker tag segment" >&2
             exit 1
           }
-          [[ "$FILE_SERVER_URL" =~ ^https?://[^[:space:]\"\\]+$ && "$FILE_SERVER_URL" != *\?* && "$FILE_SERVER_URL" != *\#* ]] || {
-            echo "file_server_url must be an HTTP(S) URL without whitespace or quotes" >&2
+          [[ "$FILE_SERVER_URL" =~ ^https://[^[:space:]\"\\]+$ && "$FILE_SERVER_URL" != *\?* && "$FILE_SERVER_URL" != *\#* ]] || {
+            echo "file_server_url must be an HTTPS URL without whitespace or quotes" >&2
+            exit 1
+          }
+          file_server_authority="${FILE_SERVER_URL#https://}"
+          file_server_authority="${file_server_authority%%/*}"
+          [[ "$file_server_authority" != *"@"* ]] || {
+            echo "file_server_url must not include URL credentials" >&2
             exit 1
           }
 

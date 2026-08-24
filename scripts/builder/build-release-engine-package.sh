@@ -93,8 +93,13 @@ fi
 if [[ -n "$engine_patch_suffix" && ! "$engine_patch_suffix" =~ ^[A-Za-z0-9._-]+$ ]]; then
     fail "--engine-patch-suffix must match [A-Za-z0-9._-]+"
 fi
-if [[ ! "$package_url" =~ ^https?://[^[:space:]\"\\]+$ ]]; then
-    fail "--package-url must be an HTTP(S) URL without whitespace or quotes"
+if [[ ! "$package_url" =~ ^https://[^[:space:]\"\\]+$ || "$package_url" == *\?* || "$package_url" == *\#* ]]; then
+    fail "--package-url must be an HTTPS URL without whitespace or quotes"
+fi
+package_url_authority="${package_url#https://}"
+package_url_authority="${package_url_authority%%/*}"
+if [[ "$package_url_authority" == *"@"* ]]; then
+    fail "--package-url must not include URL credentials"
 fi
 
 case "$engine:$accelerator" in
@@ -133,6 +138,9 @@ schema_path="$repo_root/internal/engine/$engine/$base_version/schema.json"
 template_dir="$repo_root/internal/engine/$engine/$base_version/templates"
 [[ -f "$schema_path" ]] || fail "engine schema is missing: $schema_path"
 [[ -d "$template_dir" ]] || fail "engine templates are missing: $template_dir"
+if ! find "$template_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) -print -quit | grep -q .; then
+    fail "engine templates are missing: $template_dir"
+fi
 
 image_name="${image_ref%:*}"
 image_tag="${image_ref##*:}"
@@ -167,19 +175,22 @@ done
 
 (
     cd "$repo_root"
-    go run ./scripts/builder/verify_engine_package \
-        --package "$archive_path" \
-        --manifest "$manifest_path" \
-        --checksum "$checksum_path" \
-        --engine "$engine" \
-        --version "$manifest_version" \
-        --accelerator "$manifest_accelerator" \
-        --image-name "$image_name" \
-        --image-tag "$image_tag" \
-        --supported-tasks "$supported_tasks" \
-        --package-url "$package_url" \
-        --schema "$schema_path" \
+    verify_command=(
+        go run ./scripts/builder/verify_engine_package
+        --package "$archive_path"
+        --manifest "$manifest_path"
+        --checksum "$checksum_path"
+        --engine "$engine"
+        --version "$manifest_version"
+        --accelerator "$manifest_accelerator"
+        --image-name "$image_name"
+        --image-tag "$image_tag"
+        --supported-tasks "$supported_tasks"
+        --package-url "$package_url"
+        --schema "$schema_path"
         --template-dir "$template_dir"
+    )
+    "${verify_command[@]}"
 )
 
 printf 'archive=%s\nmanifest=%s\nchecksum=%s\n' "$archive_path" "$manifest_path" "$checksum_path"

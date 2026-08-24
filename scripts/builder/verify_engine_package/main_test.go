@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,7 +20,7 @@ func TestVerifyPackage(t *testing.T) {
 	packagePath := filepath.Join(tempDir, "vllm-v0.24.0-neutree1.tar.gz")
 	manifestPath := filepath.Join(tempDir, "vllm-v0.24.0-neutree1-manifest.yaml")
 	checksumPath := packagePath + ".sha256"
-	packageURL := "http://files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
+	packageURL := "https://files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
 	imageName := "registry.internal:5000/release/engine-vllm"
 	imageTag := "v0.24.0-neutree1-ray2.53.0"
 	schema := []byte(`{"type":"object","properties":{"max_model_len":{"type":"integer"}}}`)
@@ -98,9 +99,43 @@ engines:
 		t.Fatalf("verifyPackage() error = %v", err)
 	}
 
-	options.packageURL = "http://files.internal/other.tar.gz"
+	options.packageURL = "https://files.internal/other.tar.gz"
 	if err := verifyPackage(options); err == nil {
 		t.Fatal("verifyPackage() succeeded with a mismatched package URL")
+	}
+}
+
+func TestVerifyPackageChecksChecksumBeforeExtracting(t *testing.T) {
+	tempDir := t.TempDir()
+	packagePath := filepath.Join(tempDir, "package.tar.gz")
+	checksumPath := packagePath + ".sha256"
+	manifestPath := filepath.Join(tempDir, "manifest.yaml")
+	if err := os.WriteFile(packagePath, []byte("not a tar archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(checksumPath, []byte("0000000000000000000000000000000000000000000000000000000000000000  package.tar.gz\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, []byte("manifest_version: '1.0'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	options := verifyOptions{
+		packagePath:    packagePath,
+		manifestPath:   manifestPath,
+		checksumPath:   checksumPath,
+		engineName:     "vllm",
+		engineVersion:  "v0.24.0",
+		accelerator:    "nvidia_gpu",
+		imageName:      "registry.internal/release/engine-vllm",
+		imageTag:       "v0.24.0",
+		supportedTasks: []string{"text-generation"},
+		packageURL:     "https://files.internal/engine-packages/vllm/v0.24.0/nvidia/v0.24.0/vllm-v0.24.0.tar.gz",
+		schemaPath:     "schema.json",
+		templateDir:    "templates",
+	}
+	if err := verifyPackage(options); err == nil || !strings.Contains(err.Error(), "checksum does not match package") {
+		t.Fatalf("verifyPackage() error = %v, want checksum validation error", err)
 	}
 }
 

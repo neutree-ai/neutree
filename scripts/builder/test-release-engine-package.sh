@@ -126,7 +126,7 @@ set -euo pipefail
 EOF
 chmod +x "$fake_cli"
 
-package_url="http://files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
+package_url="https://files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
 image_ref="registry.internal:5000/release/engine-vllm:v0.24.0-neutree1-ray2.53.0"
 schema_path="$repo_root/internal/engine/vllm/v0.24.0/schema.json"
 template_dir="$repo_root/internal/engine/vllm/v0.24.0/templates"
@@ -158,6 +158,31 @@ if OUTPUT_DIR="$temp_root/invalid-image-output" bash "$repo_root/scripts/builder
     --template-dir "$template_dir" \
     --package-url "$package_url"; then
     fail "expected an image reference without a tag to fail"
+fi
+
+if OUTPUT_DIR="$temp_root/insecure-url-output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
+    --manifest-only \
+    --name vllm \
+    --version v0.24.0-neutree1 \
+    --images "nvidia_gpu:$image_ref" \
+    --supported-tasks "text-generation,text-embedding,text-rerank" \
+    --schema "$schema_path" \
+    --template-dir "$template_dir" \
+    --package-url "${package_url/https:/http:}"; then
+    fail "expected an insecure package URL to fail"
+fi
+
+credentialed_package_url="https://user:pass@files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
+if OUTPUT_DIR="$temp_root/credentialed-url-output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
+    --manifest-only \
+    --name vllm \
+    --version v0.24.0-neutree1 \
+    --images "nvidia_gpu:$image_ref" \
+    --supported-tasks "text-generation,text-embedding,text-rerank" \
+    --schema "$schema_path" \
+    --template-dir "$template_dir" \
+    --package-url "$credentialed_package_url"; then
+    fail "expected a credentialed package URL to fail"
 fi
 
 make_output=$(make -s --just-print -C "$repo_root" build-engine-manifest \
@@ -233,15 +258,24 @@ assert_file "$package_output/vllm-v0.24.0-neutree1-manifest.yaml"
 assert_file "$package_output/vllm-v0.24.0-neutree1.tar.gz.sha256"
 assert_file_contains "$package_output/vllm-v0.24.0-neutree1-manifest.yaml" "package_url: \"$package_url\""
 
+missing_assets_package_url="https://files.internal/engine-packages/vllm/v9.99.9/nvidia/v9.99.9-ray2.53.0/vllm-v9.99.9.tar.gz"
 if PATH="$fake_bin:$PATH" "$repo_root/scripts/builder/build-release-engine-package.sh" \
     --engine vllm \
     --engine-version v9.99.9 \
     --accelerator nvidia \
     --image-ref "$image_ref" \
-    --package-url "$package_url" \
+    --package-url "$missing_assets_package_url" \
     --output-dir "$temp_root/missing-schema" \
     --neutree-cli "$fake_cli"; then
     fail "expected missing schema/template preflight to fail"
 fi
+
+for workflow in \
+    "$repo_root/.github/workflows/release-engine-image-vllm.yaml" \
+    "$repo_root/.github/workflows/release-engine-image-sglang.yaml" \
+    "$repo_root/.github/workflows/release-engine-image-llama-cpp.yaml"; do
+    grep -Fq "if: \${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL != '' }}" "$workflow" \
+        || fail "expected release package opt-in gate in $workflow"
+done
 
 echo "PASS: release engine package builder"

@@ -43,10 +43,14 @@ trim_cr() {
     tr -d '\r'
 }
 
-validate_http_url() {
+validate_https_url() {
     local value="$1"
+    local authority
 
-    [[ "$value" =~ ^https?://[^[:space:]\"\\]+$ ]] || fail "invalid HTTP(S) URL: $value"
+    [[ "$value" =~ ^https://[^[:space:]\"\\]+$ && "$value" != *\?* && "$value" != *\#* ]] || fail "invalid HTTPS URL: $value"
+    authority="${value#https://}"
+    authority="${authority%%/*}"
+    [[ "$authority" != *"@"* ]] || fail "HTTPS URL must not include credentials: $value"
 }
 
 join_url() {
@@ -60,9 +64,13 @@ delete_url_quietly() {
     local target_url="$1"
     local status
 
-    status=$("$CURL_BIN" --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    status=$(curl_https --silent --show-error --output /dev/null --write-out '%{http_code}' \
         --request DELETE "$target_url")
     [[ "$status" =~ ^(200|204|404)$ ]] || return 1
+}
+
+curl_https() {
+    "$CURL_BIN" --proto '=https' --proto-redir '=https' "$@"
 }
 
 sha256_stream() {
@@ -122,7 +130,7 @@ for option_name in package_url archive_path manifest_path checksum_path staging_
     [[ -n "${!option_name}" ]] || fail "--${option_name//_/-} is required"
 done
 
-validate_http_url "$package_url"
+validate_https_url "$package_url"
 [[ "$staging_id" =~ ^[A-Za-z0-9._-]+$ ]] || fail "--staging-id must match [A-Za-z0-9._-]+"
 
 for local_file in "$archive_path" "$manifest_path" "$checksum_path"; do
@@ -146,7 +154,7 @@ case "$package_url" in
         fail "--package-url must include $release_marker"
         ;;
 esac
-validate_http_url "$file_server_base_url"
+validate_https_url "$file_server_base_url"
 
 staging_dir_url="$(join_url "$file_server_base_url" "engine-packages/.staging/$staging_id")"
 staging_archive_url="$(join_url "$staging_dir_url" "$archive_name")"
@@ -184,7 +192,7 @@ curl_status() {
     local target_url="$2"
     shift 2
 
-    "$CURL_BIN" --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    curl_https --silent --show-error --output /dev/null --write-out '%{http_code}' \
         --request "$method" "$@" "$target_url"
 }
 
@@ -234,7 +242,7 @@ move_file() {
     esac
 }
 
-options_status=$("$CURL_BIN" --silent --show-error --output /dev/null --dump-header "$headers_file" \
+options_status=$(curl_https --silent --show-error --output /dev/null --dump-header "$headers_file" \
     --write-out '%{http_code}' --request OPTIONS "${file_server_base_url%/}/")
 [[ "$options_status" =~ ^(200|204|207)$ ]] || fail "OPTIONS $file_server_base_url failed with HTTP $options_status"
 
@@ -246,17 +254,26 @@ for required_method in MKCOL PUT MOVE DELETE; do
 done
 rm -f "$headers_file"
 
-archive_head_status=$("$CURL_BIN" --silent --show-error --head --output /dev/null --write-out '%{http_code}' "$package_url")
-case "$archive_head_status" in
-    200|204|301|302|303|307|308)
-        fail "stable package already exists: $package_url"
-        ;;
-    404)
-        ;;
-    *)
-        fail "HEAD $package_url returned unexpected HTTP $archive_head_status"
-        ;;
-esac
+ensure_stable_target_absent() {
+    local target_url="$1"
+    local status
+
+    status=$(curl_https --silent --show-error --head --output /dev/null --write-out '%{http_code}' "$target_url")
+    case "$status" in
+        200|204|301|302|303|307|308)
+            fail "stable artifact already exists: $target_url"
+            ;;
+        404)
+            ;;
+        *)
+            fail "HEAD $target_url returned unexpected HTTP $status"
+            ;;
+    esac
+}
+
+for stable_target_url in "$package_url" "$stable_checksum_url" "$stable_manifest_url"; do
+    ensure_stable_target_absent "$stable_target_url"
+done
 
 create_remote_dir "$stable_dir_url"
 create_remote_dir "$staging_dir_url"
@@ -267,7 +284,7 @@ upload_file "$manifest_path" "$staging_manifest_url"
 upload_file "$checksum_path" "$staging_checksum_url"
 
 expected_sha256="$(awk '{print $1}' "$checksum_path")"
-actual_sha256=$("$CURL_BIN" --silent --show-error --fail --location "$staging_archive_url" | sha256_stream | awk '{print $1}')
+actual_sha256=$(curl_https --silent --show-error --fail --location "$staging_archive_url" | sha256_stream | awk '{print $1}')
 [[ "$actual_sha256" == "$expected_sha256" ]] || fail "remote archive checksum mismatch: expected $expected_sha256, got $actual_sha256"
 
 log "Promoting staged artifacts to stable release path"

@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -94,6 +95,10 @@ func verifyPackage(options verifyOptions) error {
 		return err
 	}
 
+	if err := verifyChecksum(options.packagePath, options.checksumPath); err != nil {
+		return err
+	}
+
 	extractDir, err := os.MkdirTemp("", "verify-engine-package-")
 	if err != nil {
 		return fmt.Errorf("create extraction directory: %w", err)
@@ -118,10 +123,6 @@ func verifyPackage(options verifyOptions) error {
 
 	if !bytes.Equal(archiveManifest, standaloneManifest) {
 		return fmt.Errorf("standalone manifest does not match archive manifest")
-	}
-
-	if err := verifyChecksum(options.packagePath, options.checksumPath); err != nil {
-		return err
 	}
 
 	manifest, err := parseManifest(archiveManifest)
@@ -163,6 +164,19 @@ func validateOptions(options verifyOptions) error {
 
 	if len(options.supportedTasks) == 0 {
 		return fmt.Errorf("--supported-tasks is required")
+	}
+
+	if err := validateHTTPSURL(options.packageURL); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateHTTPSURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("--package-url must be an HTTPS URL without credentials, query, or fragment")
 	}
 
 	return nil
@@ -233,16 +247,35 @@ func verifyManifest(manifest *packageimport.PackageManifest, options verifyOptio
 		return nil, fmt.Errorf("manifest supported_tasks do not match expected tasks")
 	}
 
-	image, ok := engine.EngineVersions[0].Images[options.accelerator]
+	engineVersion := engine.EngineVersions[0]
+	if len(engineVersion.Images) != 1 {
+		return nil, fmt.Errorf("manifest engine images must contain only %s", options.accelerator)
+	}
+
+	image, ok := engineVersion.Images[options.accelerator]
 	if !ok || image == nil || image.ImageName != options.imageName || image.Tag != options.imageTag {
 		return nil, fmt.Errorf("manifest image for %s does not match expected image", options.accelerator)
 	}
 
-	if err := verifyImageFiles(manifest.Images, extractDir); err != nil {
+	expectedImageFile := filepath.ToSlash(filepath.Join("images", fmt.Sprintf("%s-%s-images.tar", options.engineName, options.engineVersion)))
+	if err := verifyReleaseImage(manifest.Images, options, expectedImageFile, extractDir); err != nil {
 		return nil, err
 	}
 
-	return engine.EngineVersions[0], nil
+	return engineVersion, nil
+}
+
+func verifyReleaseImage(images []*packageimport.ImageSpec, options verifyOptions, expectedImageFile, extractDir string) error {
+	if len(images) != 1 {
+		return fmt.Errorf("manifest package images must contain exactly one expected image")
+	}
+
+	image := images[0]
+	if image == nil || image.ImageName != options.imageName || image.Tag != options.imageTag || image.ImageFile != expectedImageFile {
+		return fmt.Errorf("manifest package image does not match expected image tuple")
+	}
+
+	return verifyImageFiles(images, extractDir)
 }
 
 func verifyImageFiles(images []*packageimport.ImageSpec, extractDir string) error {
@@ -305,9 +338,23 @@ func verifyTemplates(templates map[string]map[string]string, templateDir string)
 		return err
 	}
 
+	if len(templates) != len(expectedTemplates) {
+		return fmt.Errorf("manifest deploy templates do not match expected template set")
+	}
+
 	for clusterType, modes := range expectedTemplates {
+		actualModes, ok := templates[clusterType]
+		if !ok || len(actualModes) != len(modes) {
+			return fmt.Errorf("manifest deploy templates do not match expected template set")
+		}
+
 		for mode, expected := range modes {
-			actual, err := base64.StdEncoding.DecodeString(templates[clusterType][mode])
+			encoded, ok := actualModes[mode]
+			if !ok {
+				return fmt.Errorf("manifest deploy templates do not match expected template set")
+			}
+
+			actual, err := base64.StdEncoding.DecodeString(encoded)
 			if err != nil {
 				return fmt.Errorf("decode %s/%s template: %w", clusterType, mode, err)
 			}

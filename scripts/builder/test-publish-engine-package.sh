@@ -27,6 +27,19 @@ assert_not_exists() {
     [[ ! -e "$path" ]] || fail "expected path to be absent: $path"
 }
 
+write_checksum() {
+    local archive_path="$1"
+    local checksum_path="$2"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$archive_path" > "$checksum_path"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$archive_path" > "$checksum_path"
+    else
+        fail "sha256sum or shasum is required"
+    fi
+}
+
 fake_bin="$temp_root/bin"
 remote_root="$temp_root/remote"
 mkdir -p "$fake_bin" "$remote_root"
@@ -53,6 +66,9 @@ while [[ $# -gt 0 ]]; do
         --silent|--show-error|--location)
             [[ "$1" == "--location" ]] && location_follow="true"
             shift
+            ;;
+        --proto|--proto-redir)
+            shift 2
             ;;
         --fail)
             fail_on_http="true"
@@ -238,11 +254,32 @@ manifest="$temp_root/vllm-v0.24.0-neutree1-manifest.yaml"
 checksum="$archive.sha256"
 printf 'package archive\n' > "$archive"
 printf 'manifest body\n' > "$manifest"
-sha256sum "$archive" > "$checksum"
+write_checksum "$archive" "$checksum"
 
-file_server_base_url="http://files.internal/packages"
+file_server_base_url="https://files.internal/packages"
 package_url="$file_server_base_url/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
 stable_dir="$remote_root/packages/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0"
+
+if TEST_WEBDAV_ROOT="$remote_root" CURL_BIN="$fake_bin/curl" \
+    "$repo_root/scripts/builder/publish-engine-package.sh" \
+    --package-url "${package_url/https:/http:}" \
+    --archive "$archive" \
+    --manifest "$manifest" \
+    --checksum "$checksum" \
+    --staging-id insecure-url; then
+    fail "expected an insecure package URL to fail"
+fi
+
+credentialed_package_url="https://user:pass@files.internal/packages/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
+if TEST_WEBDAV_ROOT="$remote_root" CURL_BIN="$fake_bin/curl" \
+    "$repo_root/scripts/builder/publish-engine-package.sh" \
+    --package-url "$credentialed_package_url" \
+    --archive "$archive" \
+    --manifest "$manifest" \
+    --checksum "$checksum" \
+    --staging-id credentialed-url; then
+    fail "expected a credentialed package URL to fail"
+fi
 
 TEST_WEBDAV_ROOT="$remote_root" CURL_BIN="$fake_bin/curl" \
     "$repo_root/scripts/builder/publish-engine-package.sh" \
@@ -269,6 +306,22 @@ if TEST_WEBDAV_ROOT="$remote_root" CURL_BIN="$fake_bin/curl" \
     fail "expected duplicate stable archive to fail"
 fi
 [[ "$(cat "$duplicate_archive")" == "do not overwrite" ]] || fail "stable archive was overwritten"
+
+rm -rf "$stable_dir"
+mkdir -p "$stable_dir"
+stale_manifest="$stable_dir/$(basename "$manifest")"
+printf 'stale manifest\n' > "$stale_manifest"
+if TEST_WEBDAV_ROOT="$remote_root" CURL_BIN="$fake_bin/curl" \
+    "$repo_root/scripts/builder/publish-engine-package.sh" \
+    --package-url "$package_url" \
+    --archive "$archive" \
+    --manifest "$manifest" \
+    --checksum "$checksum" \
+    --staging-id stale-sidecar; then
+    fail "expected an existing stable sidecar to fail preflight"
+fi
+assert_not_exists "$stable_dir/$(basename "$archive")"
+[[ "$(cat "$stale_manifest")" == "stale manifest" ]] || fail "stable sidecar was modified"
 
 rm -rf "$stable_dir"
 if TEST_WEBDAV_ROOT="$remote_root" TEST_FAIL_MOVE_ON_BASENAME="$(basename "$manifest")" CURL_BIN="$fake_bin/curl" \
