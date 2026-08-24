@@ -74,6 +74,9 @@ Neutree configures the admission webhook (in Go, not in this chart) to:
   scheduler and bypass the HAMi global device view when the scheduler webhook
   is unreachable.
 
+Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
+disabled through `accelerator_virtualization.config_patch`.
+
 Because the Fail policy is scoped to the cluster namespace, a scheduler
 rollout or leader-pod restart (during which the webhook Service may briefly
 have no endpoints) cannot block pod creation in other namespaces.

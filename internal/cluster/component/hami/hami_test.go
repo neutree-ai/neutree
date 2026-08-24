@@ -405,6 +405,25 @@ func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
 	assert.True(t, namespaceMatchFound, "webhook namespaceSelector must pin the cluster namespace")
 }
 
+func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+		"scheduler": map[string]interface{}{
+			"admissionWebhook": map[string]interface{}{"enabled": false},
+		},
+	}
+
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["enabled"])
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+	assertHasObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+}
+
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
 	const deviceConfigChecksumAnnotation = "checksum/hami-scheduler-device-config"
 

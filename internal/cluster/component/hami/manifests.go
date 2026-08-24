@@ -67,6 +67,8 @@ const protectedChartValuesYAML = `
 dra:
   enabled: false
 scheduler:
+  admissionWebhook:
+    enabled: true
   patch:
     enabled: false
   certManager:
