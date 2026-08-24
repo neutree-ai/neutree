@@ -19,7 +19,7 @@ report() {
   FAIL=1
 }
 
-# Helper: list every Go file (excluding tests) under $1 that imports any path matching $2.
+# Helper: list every Go file under $1 that imports any path matching $2.
 # Uses grep -lE on full import lines so a comment containing the string isn't matched.
 imports_into() {
   local from_dir="$1"
@@ -30,7 +30,10 @@ imports_into() {
 # ─────────────────────────────────────────────────────────────────────────────
 # R1: pkg/ (L1) must not import internal/ (L2).
 # ─────────────────────────────────────────────────────────────────────────────
-R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' || true)
+# pkg/nodeagent is a documented public process-host facade. Its two private
+# bridge files convert the public adapter contract to the NodeAgent's internal
+# metrics runtime; no other pkg package may import internal code.
+R1=$(imports_into pkg/ 'github\.com/neutree-ai/neutree/internal/' | grep -vE '^pkg/nodeagent/(host|options)(_test)?\.go$' || true)
 if [ -n "$R1" ]; then
   echo "$R1" | sed 's/^/   /'
   report \
