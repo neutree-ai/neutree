@@ -217,6 +217,7 @@ func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
+
 	runtime := nodeAgentRuntime(profile)
 	if runtime == nil {
 		return options
@@ -255,6 +256,7 @@ func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponen
 		{Name: "host-proc", HostPath: "/proc", MountPath: "/host/proc", ReadOnly: true},
 		{Name: "host-cgroup", HostPath: "/sys/fs/cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: true},
 	}
+
 	runtime := nodeAgentRuntime(profile)
 	if runtime == nil {
 		return volumes
@@ -275,6 +277,7 @@ func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponen
 		if mount.ReadOnly != nil {
 			readOnly = *mount.ReadOnly
 		}
+
 		volumes = append(volumes, v1.NodeComponentVolume{
 			Name:      volume.Name,
 			HostPath:  volume.HostPath.Path,

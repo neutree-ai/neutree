@@ -476,6 +476,7 @@ func adapterEndpointReplicaGPUUsages(
 	usages []model.EndpointReplicaGPUUsage,
 ) []adapter.EndpointReplicaAcceleratorUsage {
 	result := make([]adapter.EndpointReplicaAcceleratorUsage, 0, len(usages))
+
 	for _, usage := range usages {
 		converted := adapter.EndpointReplicaAcceleratorUsage{
 			Workspace:        usage.Workspace,
@@ -491,6 +492,7 @@ func adapterEndpointReplicaGPUUsages(
 			VDeviceIndex:     usage.VDeviceIndex,
 			Product:          usage.Product,
 		}
+
 		if usage.MemoryUsedBytes != nil {
 			memoryUsedBytes := *usage.MemoryUsedBytes
 			converted.MemoryUsedBytes = &memoryUsedBytes
@@ -499,6 +501,7 @@ func adapterEndpointReplicaGPUUsages(
 			utilizationRatio := *usage.UtilizationRatio
 			converted.UtilizationRatio = &utilizationRatio
 		}
+
 		result = append(result, converted)
 	}
 
@@ -507,11 +510,13 @@ func adapterEndpointReplicaGPUUsages(
 
 func normalizerSamplesFromAdapter(samples []adapter.Sample) []metricsnormalizer.Sample {
 	result := make([]metricsnormalizer.Sample, 0, len(samples))
+
 	for _, sample := range samples {
 		labels := make(map[string]string, len(sample.Labels))
 		for key, value := range sample.Labels {
 			labels[key] = value
 		}
+
 		result = append(result, metricsnormalizer.Sample{
 			Name:   sample.Name,
 			Labels: labels,

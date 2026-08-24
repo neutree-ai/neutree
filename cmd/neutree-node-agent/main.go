@@ -14,7 +14,6 @@ import (
 func main() {
 	info := version.Get()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	err := nodeagent.Run(ctx, nodeagent.Config{
 		Args: os.Args[1:],
@@ -25,6 +24,9 @@ func main() {
 		},
 		Adapters: nodeagent.DefaultAdapters(),
 	})
+
+	cancel()
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

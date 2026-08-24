@@ -106,6 +106,7 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 	runtime := profile.NodeAgentRuntime
 	volumeNames := make(map[string]struct{}, len(runtime.Volumes))
 	volumeOrder := make([]string, 0, len(runtime.Volumes))
+
 	for _, volume := range runtime.Volumes {
 		if err := validateStaticComponentVolumeName(volume.Name); err != nil {
 			return err
@@ -119,6 +120,7 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 		if err := validateStaticAbsoluteCleanPath(volume.HostPath.Path, "component volume host_path.path", true); err != nil {
 			return err
 		}
+
 		switch volume.HostPath.Type {
 		case v1.ComponentHostPathTypeDirectory, v1.ComponentHostPathTypeSocket:
 		default:
@@ -126,22 +128,27 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 		}
 
 		volumeNames[volume.Name] = struct{}{}
+
 		volumeOrder = append(volumeOrder, volume.Name)
 	}
 
 	mountNames := make(map[string]struct{}, len(runtime.VolumeMounts))
 	mountPaths := make(map[string]struct{}, len(runtime.VolumeMounts))
 	mountCounts := make(map[string]int, len(runtime.VolumeMounts))
+
 	for _, mount := range runtime.VolumeMounts {
 		if err := validateStaticComponentVolumeName(mount.Name); err != nil {
 			return fmt.Errorf("component volume mount: %w", err)
 		}
+
 		if _, exists := mountNames[mount.Name]; exists {
 			return fmt.Errorf("component volume mount name %q must be unique", mount.Name)
 		}
+
 		if _, exists := volumeNames[mount.Name]; !exists {
 			return fmt.Errorf("component volume mount %q does not reference a declared component volume", mount.Name)
 		}
+
 		if err := validateStaticAbsoluteCleanPath(mount.MountPath, "component volume mount path", false); err != nil {
 			return err
 		}
@@ -165,6 +172,7 @@ func validateStaticNodeAgentRuntimeProfile(profile *v1.AcceleratorProfile) error
 			return fmt.Errorf("component volume name %q conflicts with a NodeAgent host volume", name)
 		}
 	}
+
 	for _, mountPath := range []string{"/host/proc", "/host/sys/fs/cgroup"} {
 		if _, exists := mountPaths[mountPath]; exists {
 			return fmt.Errorf("component volume mount path %q conflicts with a NodeAgent host mount", mountPath)
@@ -186,9 +194,11 @@ func validateStaticAbsoluteCleanPath(value string, field string, allowRoot bool)
 	if value == "" || strings.TrimSpace(value) != value {
 		return fmt.Errorf("%s must be a non-empty absolute clean path", field)
 	}
+
 	if !path.IsAbs(value) || path.Clean(value) != value {
 		return fmt.Errorf("%s must be an absolute clean path", field)
 	}
+
 	if !allowRoot && value == "/" {
 		return fmt.Errorf("%s must not be the container root", field)
 	}

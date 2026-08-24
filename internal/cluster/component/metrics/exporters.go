@@ -141,6 +141,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
 	runtime := exporterProfile.Runtime
+
 	readinessProbe, err := buildExporterReadinessProbe(exporterProfile.Readiness)
 	if err != nil {
 		return metricsAcceleratorExporter{}, false, err

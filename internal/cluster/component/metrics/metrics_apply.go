@@ -52,11 +52,13 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		if planErr != nil {
 			return nil, errors.Wrapf(planErr, "failed to plan NodeAgent runtimes for cluster %s", m.cluster.Metadata.Name)
 		}
+
 		for index := range nodeAgents {
 			if nodeAgents[index].AcceleratorType == "" {
 				nodeAgents[index].Env = append([]corev1.EnvVar(nil), variables.NeutreeNodeAgentMetricsEnv...)
 			}
 		}
+
 		variables.NodeAgents = nodeAgents
 	}
 

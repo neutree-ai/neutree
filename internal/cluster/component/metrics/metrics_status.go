@@ -119,6 +119,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.Errors = append(status.Errors, fmt.Sprintf("NodeAgent runtime plan failed: %v", planErr))
 		} else {
 			status.NeutreeNodeAgentMetricsDaemonSetReady = true
+
 			for _, nodeAgent := range nodeAgents {
 				nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, nodeAgent.Name)
 				if checkErr != nil {

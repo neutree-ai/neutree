@@ -71,6 +71,7 @@ func (m *MetricsComponent) planNodeAgents(ctx context.Context) ([]metricsNodeAge
 		if matchErr != nil {
 			return nil, matchErr
 		}
+
 		if len(matchedNodeNames) == 0 {
 			continue
 		}
@@ -82,12 +83,14 @@ func (m *MetricsComponent) planNodeAgents(ctx context.Context) ([]metricsNodeAge
 	if len(matchedCandidates) == 0 {
 		return []metricsNodeAgent{general}, nil
 	}
+
 	if len(matchedCandidates) > 1 {
 		return nil, fmt.Errorf("at most one explicit NodeAgent runtime profile may match a Kubernetes cluster, got %d", len(matchedCandidates))
 	}
 
 	candidate := matchedCandidates[0]
 	matchedNodeNames := matchedNodeNamesByType[candidate.AcceleratorType]
+
 	adapterNameSuffix := sanitizeKubernetesNameValue(candidate.AcceleratorType)
 	if adapterNameSuffix == "" {
 		return nil, fmt.Errorf("NodeAgent runtime accelerator type %q has no valid Kubernetes name", candidate.AcceleratorType)
@@ -95,6 +98,7 @@ func (m *MetricsComponent) planNodeAgents(ctx context.Context) ([]metricsNodeAge
 
 	adapter := defaultMetricsNodeAgent(neutreeNodeAgentMetricsName + "-" + adapterNameSuffix)
 	adapter.AcceleratorType = candidate.AcceleratorType
+
 	adapter.IncludedNodeNames = append([]string(nil), matchedNodeNames...)
 	adapter.SecurityContext = nodeAgentRuntimeSecurityContext(candidate.Runtime)
 
@@ -115,6 +119,7 @@ func (m *MetricsComponent) nodeAgentRuntimeCandidates(ctx context.Context) ([]no
 	sort.Strings(acceleratorTypes)
 
 	candidates := make([]nodeAgentRuntimeCandidate, 0, 1)
+
 	for _, acceleratorType := range acceleratorTypes {
 		profile, err := m.acceleratorMgr.GetAcceleratorProfile(ctx, acceleratorType)
 		if err != nil {
@@ -174,6 +179,7 @@ func nodeAgentRuntimeNodeNames(
 	}
 
 	nodeNames := make([]string, 0, len(nodes))
+
 	for _, node := range nodes {
 		resourceInfo, err := parser.ParseFromKubernetes(node.Status.Allocatable, node.Labels)
 		if err != nil {
@@ -201,6 +207,7 @@ func nodeAgentRuntimeNodeNames(
 
 func normalizedRuntimeProducts(runtime *v1.NodeAgentRuntimeProfile) (map[v1.AcceleratorProduct]struct{}, error) {
 	products := make(map[v1.AcceleratorProduct]struct{}, len(runtime.KubernetesProducts))
+
 	for _, product := range runtime.KubernetesProducts {
 		product = strings.TrimSpace(product)
 		if product == "" {
@@ -266,6 +273,7 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 	}
 
 	capabilities := make([]corev1.Capability, 0)
+
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
 			capability = strings.TrimSpace(capability)
@@ -280,10 +288,12 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 	}
 
 	context := &corev1.SecurityContext{}
+
 	if runtime.Privileged {
 		privileged := true
 		context.Privileged = &privileged
 	}
+
 	if len(capabilities) > 0 {
 		context.Capabilities = &corev1.Capabilities{Add: capabilities}
 	}
@@ -301,6 +311,7 @@ func validateNodeAgentRuntimeVolumeCollisions(
 	for _, volume := range baseVolumes {
 		baseVolumeNames[volume.Name] = struct{}{}
 	}
+
 	for _, volume := range runtimeVolumes {
 		if _, exists := baseVolumeNames[volume.Name]; exists {
 			return fmt.Errorf("component volume name %q conflicts with a NodeAgent host volume", volume.Name)
@@ -309,14 +320,17 @@ func validateNodeAgentRuntimeVolumeCollisions(
 
 	baseMountNames := make(map[string]struct{}, len(baseMounts))
 	baseMountPaths := make(map[string]struct{}, len(baseMounts))
+
 	for _, mount := range baseMounts {
 		baseMountNames[mount.Name] = struct{}{}
 		baseMountPaths[mount.MountPath] = struct{}{}
 	}
+
 	for _, mount := range runtimeMounts {
 		if _, exists := baseMountNames[mount.Name]; exists {
 			return fmt.Errorf("component volume mount name %q conflicts with a NodeAgent host mount", mount.Name)
 		}
+
 		if _, exists := baseMountPaths[mount.MountPath]; exists {
 			return fmt.Errorf("component volume mount path %q conflicts with a NodeAgent host mount", mount.MountPath)
 		}

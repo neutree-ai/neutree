@@ -223,6 +223,7 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 	for name, descriptor := range metricDescriptorByName {
 		descriptors[name] = descriptor
 	}
+
 	for _, descriptor := range extensionDescriptors {
 		descriptors[descriptor.Name] = newMetricDescriptor(
 			descriptor.Name,
@@ -233,11 +234,13 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 	}
 
 	seen := make(map[string]struct{}, len(samples))
+
 	for _, sample := range samples {
 		name := strings.TrimSpace(sample.Name)
 		if name == "" {
 			return fmt.Errorf("accelerator sample name is required")
 		}
+
 		descriptor := descriptors[name]
 		if descriptor == nil {
 			return fmt.Errorf("accelerator sample %q has no declared descriptor", name)
@@ -247,9 +250,11 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 		}
 
 		allowedLabels := make(map[string]struct{}, len(descriptor.labelNames))
+
 		for _, labelName := range descriptor.labelNames {
 			allowedLabels[labelName] = struct{}{}
 		}
+
 		for labelName := range sample.Labels {
 			if _, ok := allowedLabels[labelName]; !ok {
 				return fmt.Errorf("accelerator sample %q has undeclared label %q", name, labelName)
@@ -263,6 +268,7 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 		if _, exists := seen[key]; exists {
 			return fmt.Errorf("duplicate accelerator sample %q", key)
 		}
+
 		seen[key] = struct{}{}
 	}
 
@@ -274,10 +280,12 @@ func adapterSampleKey(name string, labels map[string]string) string {
 	for key := range labels {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	var builder strings.Builder
 	builder.WriteString(name)
+
 	for _, key := range keys {
 		builder.WriteByte('\x00')
 		builder.WriteString(key)
