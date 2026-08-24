@@ -2,8 +2,6 @@ package releaseprofile
 
 import (
 	"fmt"
-	"sort"
-	"sync"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -15,6 +13,8 @@ const (
 	builtinVMAgentTag            = "v1.115.0"
 	builtinKubeStateMetricsImage = "registry.k8s.io/kube-state-metrics/kube-state-metrics"
 	builtinKubeStateMetricsTag   = "v2.15.0"
+
+	builtinCurrentReleaseInfoBaseline = "v1.2.0"
 )
 
 // CatalogSpec is the immutable source for the current control-plane policy and
@@ -32,37 +32,36 @@ type Catalog struct {
 }
 
 type builtinProfileMaterial struct {
-	runtimeTag   string
-	routerTag    string
-	nodeAgentTag string
+	rayRuntime        v1.ImageRef
+	kubernetesRuntime v1.ImageRef
+	routerTag         string
+	nodeAgentTag      string
 }
 
 var builtinProfileMaterials = map[string]builtinProfileMaterial{
 	"v1.1.0": {
-		runtimeTag:   "v1.1.0",
-		routerTag:    "v1.1.0",
-		nodeAgentTag: "v1.1.0-alpha.8",
+		rayRuntime:        v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.0"},
+		kubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.0"},
+		routerTag:         "v1.1.0",
+		nodeAgentTag:      "v1.1.0-alpha.8",
 	},
 	"v1.1.1": {
-		runtimeTag:   "v1.1.1",
-		routerTag:    "v1.1.1",
-		nodeAgentTag: "v1.1.0-rc.1",
+		rayRuntime:        v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+		kubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"},
+		routerTag:         "v1.1.1",
+		nodeAgentTag:      "v1.1.0-rc.1",
 	},
 	"v1.2.0": {
-		runtimeTag:   "v1.1.1",
-		routerTag:    "v1.1.1",
-		nodeAgentTag: "v1.1.0-rc.1",
+		rayRuntime:        v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"},
+		kubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"},
+		routerTag:         "v1.1.1",
+		nodeAgentTag:      "v1.1.0-rc.1",
 	},
 }
 
 var builtinProfileVersions = []string{"v1.1.0", "v1.1.1", "v1.2.0"}
 
-var defaultCatalogState = struct {
-	mu       sync.Mutex
-	catalog  *Catalog
-	consumed bool
-	injected bool
-}{}
+var processCatalog = builtinCatalog()
 
 // BuiltinCatalog returns an independent copy of the Core default Catalog. The
 // name deliberately describes behavior rather than a product edition.
@@ -89,50 +88,14 @@ func (catalog *Catalog) Spec() CatalogSpec {
 	return cloneCatalogSpec(catalog.spec)
 }
 
-// InjectCatalog replaces the process default before the first default Builder
-// is created. Enterprise uses this to supply edition-specific image material
-// while retaining the same version eligibility as BuiltinCatalog.
-func InjectCatalog(catalog *Catalog) error {
-	if catalog == nil {
-		return fmt.Errorf("release profile catalog is required")
-	}
-
-	if err := validateCatalog(catalog); err != nil {
-		return fmt.Errorf("invalid injected release profile catalog: %w", err)
-	}
-
-	if err := validateCatalogEligibility(builtinCatalog(), catalog); err != nil {
-		return err
-	}
-
-	defaultCatalogState.mu.Lock()
-	defer defaultCatalogState.mu.Unlock()
-
-	if defaultCatalogState.consumed {
-		return fmt.Errorf("release profile catalog was already consumed")
-	}
-
-	if defaultCatalogState.injected {
-		return fmt.Errorf("release profile catalog was already injected")
-	}
-
-	defaultCatalogState.catalog = cloneCatalog(catalog)
-	defaultCatalogState.injected = true
-
-	return nil
+// InjectCatalog replaces the process catalog during Core initialization.
+// The caller owns injection order and supplies a validated Catalog.
+func InjectCatalog(catalog *Catalog) {
+	processCatalog = catalog
 }
 
 func defaultCatalog() *Catalog {
-	defaultCatalogState.mu.Lock()
-	defer defaultCatalogState.mu.Unlock()
-
-	if defaultCatalogState.catalog == nil {
-		defaultCatalogState.catalog = builtinCatalog()
-	}
-
-	defaultCatalogState.consumed = true
-
-	return cloneCatalog(defaultCatalogState.catalog)
+	return processCatalog
 }
 
 func builtinCatalog() *Catalog {
@@ -142,7 +105,7 @@ func builtinCatalog() *Catalog {
 	}
 
 	catalog, err := NewCatalog(CatalogSpec{
-		CurrentReleaseInfoBaseline: "v1.2.0",
+		CurrentReleaseInfoBaseline: builtinCurrentReleaseInfoBaseline,
 		DefaultClusterVersion:      "v1.2.0",
 		CompatibleClusterBaselines: []string{"v1.1", "v1.2"},
 		ClusterProfiles:            profiles,
@@ -166,13 +129,13 @@ func builtinClusterProfile(clusterVersion string) *v1.ClusterProfile {
 		Metadata:   &v1.Metadata{Name: clusterVersion},
 		Spec: &v1.ClusterProfileSpec{Components: map[string]v1.ClusterProfileComponents{
 			v1.SSHClusterType: {
-				RayRuntime:   v1.ImageRef{Image: "neutree/neutree-serve", Tag: material.runtimeTag},
+				RayRuntime:   material.rayRuntime,
 				NodeAgent:    v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: material.nodeAgentTag},
 				NodeExporter: v1.ImageRef{Image: builtinNodeExporterImage, Tag: builtinNodeExporterTag},
 				VMAgent:      v1.ImageRef{Image: builtinVMAgentImage, Tag: builtinVMAgentTag},
 			},
 			v1.KubernetesClusterType: {
-				KubernetesRuntime: v1.ImageRef{Image: "neutree/neutree-runtime", Tag: material.runtimeTag},
+				KubernetesRuntime: material.kubernetesRuntime,
 				Router:            v1.ImageRef{Image: "neutree/router", Tag: material.routerTag},
 				NodeAgent:         v1.ImageRef{Image: "neutree/neutree-node-agent", Tag: material.nodeAgentTag},
 				NodeExporter:      v1.ImageRef{Image: builtinNodeExporterImage, Tag: builtinNodeExporterTag},
@@ -222,29 +185,6 @@ func validateCatalog(catalog *Catalog) error {
 
 	if _, found := seen[info.Spec.DefaultClusterVersion]; !found {
 		return fmt.Errorf("cluster profile catalog is missing default cluster version %q", info.Spec.DefaultClusterVersion)
-	}
-
-	return nil
-}
-
-func validateCatalogEligibility(builtin, candidate *Catalog) error {
-	builtinSpec := builtin.Spec()
-	candidateSpec := candidate.Spec()
-
-	if builtinSpec.CurrentReleaseInfoBaseline != candidateSpec.CurrentReleaseInfoBaseline {
-		return fmt.Errorf("injected release profile catalog current release baseline differs from BuiltinCatalog")
-	}
-
-	if builtinSpec.DefaultClusterVersion != candidateSpec.DefaultClusterVersion {
-		return fmt.Errorf("injected release profile catalog default cluster version differs from BuiltinCatalog")
-	}
-
-	if !sameStringSet(builtinSpec.CompatibleClusterBaselines, candidateSpec.CompatibleClusterBaselines) {
-		return fmt.Errorf("injected release profile catalog compatible cluster baselines differ from BuiltinCatalog")
-	}
-
-	if !sameStringSet(profileNamesForCatalog(builtinSpec.ClusterProfiles), profileNamesForCatalog(candidateSpec.ClusterProfiles)) {
-		return fmt.Errorf("injected release profile catalog eligible cluster profile versions differ from BuiltinCatalog")
 	}
 
 	return nil
@@ -325,40 +265,4 @@ func cloneCatalogSpec(spec CatalogSpec) CatalogSpec {
 	}
 
 	return copy
-}
-
-func profileNamesForCatalog(profiles []*v1.ClusterProfile) []string {
-	names := make([]string, 0, len(profiles))
-	for _, profile := range profiles {
-		if profile != nil {
-			names = append(names, profile.GetName())
-		}
-	}
-
-	sort.Strings(names)
-
-	return names
-}
-
-func sameStringSet(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-
-	values := make(map[string]struct{}, len(left))
-	for _, value := range left {
-		if _, found := values[value]; found {
-			return false
-		}
-
-		values[value] = struct{}{}
-	}
-
-	for _, value := range right {
-		if _, found := values[value]; !found {
-			return false
-		}
-	}
-
-	return true
 }

@@ -18,14 +18,13 @@ type catalogBuilder struct {
 	catalog *Catalog
 }
 
-// NewBuilder creates a Builder from the process default. Its first call closes
-// the InjectCatalog window for this process.
+// NewBuilder creates a Builder from the process catalog.
 func NewBuilder() Builder {
 	return &catalogBuilder{catalog: defaultCatalog()}
 }
 
-// NewBuilderForCatalog creates a deterministic Builder without consuming or
-// altering the process default. Tests and catalog generators use this form.
+// NewBuilderForCatalog creates a deterministic Builder without reading or
+// altering the process catalog. Tests and catalog generators use this form.
 func NewBuilderForCatalog(catalog *Catalog) (Builder, error) {
 	if catalog == nil {
 		return nil, fmt.Errorf("release profile catalog is required")
