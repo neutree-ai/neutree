@@ -91,24 +91,28 @@ Examples:
 		},
 	}
 
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
+	// Install settings stay local so the explicit preflight child does not
+	// inherit options that are meaningful only for deployment.
+	flags := neutreeCoreInstallCmd.Flags()
+	flags.StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
+	flags.StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
+	flags.StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
+	flags.StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
+	flags.StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
+	flags.StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
 		defaultVictoriaLogsRetentionPeriod, "VictoriaLogs log retention period (e.g. 30d, 90d, 1y)")
-	neutreeCoreInstallCmd.PersistentFlags().BoolVar(&options.enablePublicModelRegistries, "enable-public-model-registries", false,
+	flags.BoolVar(&options.enablePublicModelRegistries, "enable-public-model-registries", false,
 		"provision built-in read-only model registries for the supported public hubs")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.huggingFaceEndpoint, "hugging-face-endpoint",
+	flags.StringVar(&options.huggingFaceEndpoint, "hugging-face-endpoint",
 		model_registry.DefaultHuggingFaceEndpoint,
 		"address the built-in Hugging Face registry points at, e.g. an in-network mirror")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.modelScopeEndpoint, "model-scope-endpoint",
+	flags.StringVar(&options.modelScopeEndpoint, "model-scope-endpoint",
 		model_registry.DefaultModelScopeEndpoint,
 		"address the built-in ModelScope registry points at, e.g. an in-network mirror")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
+	flags.StringVar(&options.adminPassword, "admin-password", "", "the password for the neutree admin user."+
 		"it is valid when starting neutree core for the first time. "+
 		"It is recommended to change it quickly after installation.")
+	neutreeCoreInstallCmd.AddCommand(NewNeutreeCorePreflightCmd())
 
 	return neutreeCoreInstallCmd
 }
