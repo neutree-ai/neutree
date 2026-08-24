@@ -190,6 +190,7 @@ func staticExporterEnv(env map[string]string) map[string]string {
 	}
 
 	delete(values, v1.NodeAgentAdapterProfileKey)
+
 	if len(values) == 0 {
 		return nil
 	}

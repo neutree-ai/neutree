@@ -281,6 +281,7 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	}
 
 	keys := make([]string, 0, len(env))
+
 	for key := range env {
 		keys = append(keys, key)
 	}
