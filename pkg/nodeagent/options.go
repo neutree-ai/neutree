@@ -1,84 +1,28 @@
-package main
+package nodeagent
 
 import (
-	"context"
-	"flag"
 	"fmt"
-	"os"
-	"os/signal"
-	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
-	"github.com/neutree-ai/neutree/internal/version"
 )
 
 const (
 	clusterTypeKubernetes = "kubernetes"
 	clusterTypeRay        = "ray"
 )
-
-func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		info := version.Get()
-		fmt.Println(info.String())
-		os.Exit(0)
-	}
-
-	klog.InitFlags(nil)
-
-	if err := flag.Set("v", "2"); err != nil {
-		klog.Fatalf("Failed to set default log verbosity: %v", err)
-	}
-
-	defer klog.Flush()
-
-	opts := newOptions()
-	opts.addFlags(pflag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
-
-	config, err := opts.config()
-	if err != nil {
-		klog.Fatalf("Failed to build neutree-node-agent config: %v", err)
-	}
-
-	klog.V(2).InfoS(
-		"Built neutree-node-agent config",
-		"listen_address", opts.listenAddress,
-		"cluster_type", opts.clusterType,
-		"metrics_mode", opts.metricsMode,
-		"node", opts.node,
-		"node_ip", opts.nodeIP,
-	)
-
-	server, err := neutreemetrics.NewServer(config)
-	if err != nil {
-		klog.Fatalf("Failed to create neutree-node-agent server: %v", err)
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	if err := server.Run(ctx); err != nil {
-		klog.Fatalf("Failed to run neutree-node-agent: %v", err)
-	}
-}
 
 type options struct {
 	listenAddress           string
@@ -123,17 +67,21 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) config() (neutreemetrics.Config, error) {
-	registry, err := adapter.LocalRegistry()
+	registry, err := newAdapterRegistry(DefaultAdapters())
 	if err != nil {
-		return neutreemetrics.Config{}, fmt.Errorf("build accelerator adapter registry: %w", err)
+		return neutreemetrics.Config{}, err
 	}
 
+	return o.configWithRegistry(registry)
+}
+
+func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
 	if o.acceleratorType != "" {
-		if _, ok := registry.Get(o.acceleratorType); !ok {
+		if _, ok := registry.byType[o.acceleratorType]; !ok {
 			return neutreemetrics.Config{}, fmt.Errorf(
 				"accelerator adapter %q is not registered; available adapters: %s",
 				o.acceleratorType,
-				registeredAdapterTypes(),
+				registeredAdapterTypes(registry),
 			)
 		}
 	}
@@ -143,7 +91,7 @@ func (o *options) config() (neutreemetrics.Config, error) {
 		Labels:          o.labels(),
 		ClusterType:     o.clusterType,
 		AcceleratorType: o.acceleratorType,
-	}.WithAcceleratorRegistry(registry)
+	}.WithAccelerators(registry.accelerators()).WithAcceleratorMetricDescriptors(registry.descriptorsCopy())
 
 	writer, err := o.kubernetesWriter()
 	if err != nil {
@@ -168,15 +116,8 @@ func (o *options) config() (neutreemetrics.Config, error) {
 	return config, nil
 }
 
-func registeredAdapterTypes() string {
-	types := make([]string, 0, len(adapter.GetLocalAccelerators()))
-	for typ := range adapter.GetLocalAccelerators() {
-		types = append(types, typ)
-	}
-
-	sort.Strings(types)
-
-	return strings.Join(types, ", ")
+func registeredAdapterTypes(registry adapterRegistry) string {
+	return strings.Join(registry.types(), ", ")
 }
 
 func (o *options) scrapeTargetProvider(

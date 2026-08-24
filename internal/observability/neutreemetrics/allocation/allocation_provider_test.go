@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 func TestMultiProviderMergesAllocations(t *testing.T) {
@@ -97,12 +97,12 @@ func TestKubernetesAllocationProviderMapsPodResourcesToExactDeviceUUIDs(t *testi
 	provider := KubernetesAllocationProvider{
 		Client:   kubernetesClient,
 		NodeName: "node-a",
-		PodResources: PodResourceListerFunc(func(_ context.Context) ([]model.PodResource, error) {
-			return []model.PodResource{
+		PodResources: PodResourceListerFunc(func(_ context.Context) ([]adapter.PodResource, error) {
+			return []adapter.PodResource{
 				{
 					Namespace: "default",
 					Name:      "chat-pod",
-					Containers: []model.ContainerDevices{
+					Containers: []adapter.ContainerDevices{
 						{
 							ResourceName: "nvidia.com/gpu",
 							DeviceIDs:    []string{"0", "GPU-def", "not-a-known-device"},
@@ -112,7 +112,7 @@ func TestKubernetesAllocationProviderMapsPodResourcesToExactDeviceUUIDs(t *testi
 				{
 					Namespace: "default",
 					Name:      "remote-pod",
-					Containers: []model.ContainerDevices{
+					Containers: []adapter.ContainerDevices{
 						{ResourceName: "nvidia.com/gpu", DeviceIDs: []string{"GPU-remote"}},
 					},
 				},
@@ -168,11 +168,11 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 			WithIndex(&corev1.Pod{}, "spec.nodeName", podNodeNameIndex).
 			Build(),
 		NodeName: "node-a",
-		PodResources: PodResourceListerFunc(func(_ context.Context) ([]model.PodResource, error) {
-			return []model.PodResource{{
+		PodResources: PodResourceListerFunc(func(_ context.Context) ([]adapter.PodResource, error) {
+			return []adapter.PodResource{{
 				Namespace: "default",
 				Name:      "chat-pod",
-				Containers: []model.ContainerDevices{{
+				Containers: []adapter.ContainerDevices{{
 					ResourceName: "vendor.example/accelerator",
 					DeviceIDs:    []string{"device-0"},
 				}},
@@ -287,6 +287,7 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 	require.Len(t, evidence.RayEvidence.Actors, 1)
 	assert.Equal(t, "actor-a", evidence.RayEvidence.Actors[0].ActorID)
 	assert.Equal(t, 1.0, evidence.RayEvidence.Actors[0].RequiredResources["NPU"])
+	assert.Empty(t, evidence.RayEvidence.Replicas)
 	assert.Equal(t, 1234, evidence.RayEvidence.ActorProcesses[1234].PID)
 	assert.Equal(t, []int{1234, 2345}, evidence.RayEvidence.ActorProcesses[1234].DescendantPIDs)
 	assert.Equal(t, "0", evidence.RayEvidence.ActorProcesses[1234].Environment["ASCEND_VISIBLE_DEVICES"])

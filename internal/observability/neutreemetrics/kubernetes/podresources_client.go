@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	podresourcesv1 "k8s.io/kubelet/pkg/apis/podresources/v1"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 const DefaultKubeletPodResourcesSocket = "/var/lib/kubelet/pod-resources/kubelet.sock"
@@ -21,7 +21,7 @@ type KubeletPodResourceLister struct {
 	Timeout    time.Duration
 }
 
-func (l KubeletPodResourceLister) ListPodResources(ctx context.Context) ([]model.PodResource, error) {
+func (l KubeletPodResourceLister) ListPodResources(ctx context.Context) ([]adapter.PodResource, error) {
 	socketPath := l.SocketPath
 	if socketPath == "" {
 		socketPath = DefaultKubeletPodResourcesSocket
@@ -57,15 +57,15 @@ func (l KubeletPodResourceLister) ListPodResources(ctx context.Context) ([]model
 	return podResourcesFromKubelet(response.GetPodResources()), nil
 }
 
-func podResourcesFromKubelet(input []*podresourcesv1.PodResources) []model.PodResource {
-	result := make([]model.PodResource, 0, len(input))
+func podResourcesFromKubelet(input []*podresourcesv1.PodResources) []adapter.PodResource {
+	result := make([]adapter.PodResource, 0, len(input))
 
 	for _, pod := range input {
 		if pod == nil {
 			continue
 		}
 
-		containers := make([]model.ContainerDevices, 0, len(pod.GetContainers()))
+		containers := make([]adapter.ContainerDevices, 0, len(pod.GetContainers()))
 
 		for _, container := range pod.GetContainers() {
 			if container == nil {
@@ -77,14 +77,14 @@ func podResourcesFromKubelet(input []*podresourcesv1.PodResources) []model.PodRe
 					continue
 				}
 
-				containers = append(containers, model.ContainerDevices{
+				containers = append(containers, adapter.ContainerDevices{
 					ResourceName: device.GetResourceName(),
 					DeviceIDs:    append([]string{}, device.GetDeviceIds()...),
 				})
 			}
 		}
 
-		result = append(result, model.PodResource{
+		result = append(result, adapter.PodResource{
 			Namespace:  pod.GetNamespace(),
 			Name:       pod.GetName(),
 			Containers: containers,

@@ -17,7 +17,6 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/devicesnapshot"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hardware"
@@ -25,6 +24,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	metricsnormalizer "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 const (
@@ -35,6 +35,9 @@ type Config struct {
 	ListenAddress        string
 	Labels               model.CanonicalLabels
 	ScrapeTargetProvider ScrapeTargetProvider
+	// ClusterType identifies the topology used to select an optional adapter
+	// capability. It remains internal host configuration, not adapter state.
+	ClusterType string
 	// AcceleratorType selects the accelerator adapter from the registry when
 	// non-empty. Empty keeps the legacy DCGM normalizer path.
 	AcceleratorType string
@@ -58,19 +61,21 @@ type Config struct {
 	HTTPClient                            *http.Client
 }
 
-// WithAccelerators returns a copy of the config carrying the given accelerator
-// adapter registry, mirroring how NodeAgent assembles adapters via the plugin
-// injection pattern.
+// WithAccelerators returns a copy of the config carrying the host-owned,
+// immutable accelerator lookup table.
 func (c Config) WithAccelerators(accelerators map[string]adapter.Accelerator) Config {
-	c.Accelerators = accelerators
+	c.Accelerators = make(map[string]adapter.Accelerator, len(accelerators))
+	for typ, accel := range accelerators {
+		c.Accelerators[typ] = accel
+	}
+
 	return c
 }
 
-// WithAcceleratorRegistry carries both adapter instances and their
-// adapter-owned Prometheus descriptors into the NodeAgent server.
-func (c Config) WithAcceleratorRegistry(registry adapter.Registry) Config {
-	c.Accelerators = registry.Accelerators()
-	c.AcceleratorMetricDescriptors = registry.MetricDescriptors()
+// WithAcceleratorMetricDescriptors returns a copy of the adapter descriptors
+// that have already been validated and frozen by the public NodeAgent host.
+func (c Config) WithAcceleratorMetricDescriptors(descriptors []adapter.MetricDescriptor) Config {
+	c.AcceleratorMetricDescriptors = adapter.CloneMetricDescriptors(descriptors)
 
 	return c
 }
@@ -86,11 +91,11 @@ type EndpointGPUUsageProvider interface {
 }
 
 type KubernetesAcceleratorEvidenceProvider interface {
-	KubernetesAcceleratorEvidence(ctx context.Context) (adapter.KubernetesAcceleratorEvidence, error)
+	KubernetesAcceleratorEvidence(ctx context.Context) (adapter.KubernetesEvidence, error)
 }
 
 type StaticAcceleratorEvidenceProvider interface {
-	StaticAcceleratorEvidence(ctx context.Context) (adapter.StaticAcceleratorEvidence, error)
+	StaticAcceleratorEvidence(ctx context.Context) (adapter.StaticEvidence, error)
 }
 
 func NewServer(config Config) (*Server, error) {
@@ -267,17 +272,23 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.NormalizeRequest {
+	endpointReplicaGPUUsages := s.endpointReplicaGPUUsages(ctx)
 	normalizeReq := metricsnormalizer.NormalizeRequest{
 		Labels:                       s.config.Labels,
 		NodeExporter:                 s.scrapeFirstTarget(ctx, metricsnormalizer.TargetNodeExporter),
 		EndpointReplicaRuntimeUsages: s.endpointReplicaRuntimeUsages(ctx),
-		EndpointReplicaGPUUsages:     s.endpointReplicaGPUUsages(ctx),
+		EndpointReplicaGPUUsages:     endpointReplicaGPUUsages,
 	}
 
 	acceleratorExporter := s.scrapeAcceleratorExporters(ctx)
 	if accel := s.selectedAccelerator(); accel != nil {
 		normalizeReq.AcceleratorExporter = acceleratorExporter
-		normalizeReq.AcceleratorSamples = s.acceleratorSamples(ctx, accel, acceleratorExporter)
+		normalizeReq.AcceleratorSamples = s.acceleratorSamples(
+			ctx,
+			accel,
+			acceleratorExporter,
+			endpointReplicaGPUUsages,
+		)
 
 		return normalizeReq
 	}
@@ -304,6 +315,7 @@ func (s *Server) acceleratorSamples(
 	ctx context.Context,
 	accel adapter.Accelerator,
 	acceleratorExporter *model.ScrapeResult,
+	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
 ) []metricsnormalizer.Sample {
 	hardware, err := s.discoverAdapterHardware(ctx, accel)
 	if err != nil {
@@ -312,13 +324,24 @@ func (s *Server) acceleratorSamples(
 		return []metricsnormalizer.Sample{}
 	}
 
-	result, err := s.adapterMetricResult(ctx, accel, hardware, acceleratorExporter)
+	result, err := s.adapterMetricResult(
+		ctx,
+		accel,
+		hardware,
+		acceleratorExporter,
+		endpointReplicaGPUUsages,
+	)
 	if err != nil {
 		klog.V(2).InfoS("Accelerator adapter failed to build metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
 		// An adapter that fails must not silently fall back to the legacy DCGM
 		// path: a configured accelerator type without accelerator samples is a
 		// degraded (but explicit) state, not a reason to parse vendor text as
 		// DCGM.
+		return []metricsnormalizer.Sample{}
+	}
+	if err := validateAdapterSamples(result.Samples, s.config.AcceleratorMetricDescriptors); err != nil {
+		klog.V(2).InfoS("Accelerator adapter returned invalid metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
+
 		return []metricsnormalizer.Sample{}
 	}
 
@@ -329,13 +352,13 @@ func (s *Server) acceleratorSamples(
 		return []metricsnormalizer.Sample{}
 	}
 
-	return result.Samples
+	return normalizerSamplesFromAdapter(result.Samples)
 }
 
 func (s *Server) discoverAdapterHardware(
 	ctx context.Context,
 	accel adapter.Accelerator,
-) (model.AcceleratorHardwareSnapshot, error) {
+) (adapter.HardwareSnapshot, error) {
 	hardwareCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
 	defer cancel()
 
@@ -345,10 +368,14 @@ func (s *Server) discoverAdapterHardware(
 func (s *Server) adapterMetricResult(
 	ctx context.Context,
 	accel adapter.Accelerator,
-	hardware model.AcceleratorHardwareSnapshot,
+	hardware adapter.HardwareSnapshot,
 	acceleratorExporter *model.ScrapeResult,
-) (adapter.AcceleratorMetricResult, error) {
-	common := adapter.CommonAcceleratorEvidence{Labels: s.config.Labels}
+	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
+) (adapter.MetricResult, error) {
+	common := adapter.CommonEvidence{
+		Labels:                           adapterLabels(s.config.Labels),
+		EndpointReplicaAcceleratorUsages: adapterEndpointReplicaGPUUsages(endpointReplicaGPUUsages),
+	}
 	if acceleratorExporter != nil {
 		common.ExporterText = acceleratorExporter.Body
 		common.ExporterUp = acceleratorExporter.Up
@@ -361,39 +388,43 @@ func (s *Server) adapterMetricResult(
 	case "kubernetes":
 		kubernetesAccelerator, ok := accel.(adapter.KubernetesAccelerator)
 		if !ok {
-			return adapter.AcceleratorMetricResult{}, fmt.Errorf("accelerator adapter does not implement Kubernetes capability")
+			return adapter.MetricResult{}, fmt.Errorf("accelerator adapter does not implement Kubernetes capability")
 		}
 
 		evidence := s.kubernetesAcceleratorEvidence(buildCtx, common)
 
-		return kubernetesAccelerator.BuildKubernetesMetrics(
+		result, err := kubernetesAccelerator.BuildKubernetesMetrics(
 			buildCtx,
 			hardware.Clone(),
-			evidence,
+			evidence.Clone(),
 		)
+
+		return result.Clone(), err
 	case "ray":
 		staticAccelerator, ok := accel.(adapter.StaticAccelerator)
 		if !ok {
-			return adapter.AcceleratorMetricResult{}, fmt.Errorf("accelerator adapter does not implement static capability")
+			return adapter.MetricResult{}, fmt.Errorf("accelerator adapter does not implement static capability")
 		}
 
 		evidence := s.staticAcceleratorEvidence(buildCtx, common)
 
-		return staticAccelerator.BuildStaticMetrics(
+		result, err := staticAccelerator.BuildStaticMetrics(
 			buildCtx,
 			hardware.Clone(),
-			evidence,
+			evidence.Clone(),
 		)
+
+		return result.Clone(), err
 	default:
-		return adapter.AcceleratorMetricResult{}, fmt.Errorf("unsupported cluster type %q", s.config.ClusterType)
+		return adapter.MetricResult{}, fmt.Errorf("unsupported cluster type %q", s.config.ClusterType)
 	}
 }
 
 func (s *Server) kubernetesAcceleratorEvidence(
 	ctx context.Context,
-	common adapter.CommonAcceleratorEvidence,
-) adapter.KubernetesAcceleratorEvidence {
-	evidence := adapter.KubernetesAcceleratorEvidence{Common: common}
+	common adapter.CommonEvidence,
+) adapter.KubernetesEvidence {
+	evidence := adapter.KubernetesEvidence{Common: common}
 	if s.config.KubernetesAcceleratorEvidenceProvider == nil {
 		return evidence
 	}
@@ -406,14 +437,14 @@ func (s *Server) kubernetesAcceleratorEvidence(
 
 	raw.Common = common
 
-	return raw
+	return raw.Clone()
 }
 
 func (s *Server) staticAcceleratorEvidence(
 	ctx context.Context,
-	common adapter.CommonAcceleratorEvidence,
-) adapter.StaticAcceleratorEvidence {
-	evidence := adapter.StaticAcceleratorEvidence{Common: common}
+	common adapter.CommonEvidence,
+) adapter.StaticEvidence {
+	evidence := adapter.StaticEvidence{Common: common}
 	if s.config.StaticAcceleratorEvidenceProvider == nil {
 		return evidence
 	}
@@ -426,7 +457,69 @@ func (s *Server) staticAcceleratorEvidence(
 
 	raw.Common = common
 
-	return raw
+	return raw.Clone()
+}
+
+func adapterLabels(labels model.CanonicalLabels) adapter.CanonicalLabels {
+	return adapter.CanonicalLabels{
+		Workspace:         labels.Workspace,
+		NeutreeCluster:    labels.NeutreeCluster,
+		StaticNodeCluster: labels.StaticNodeCluster,
+		ClusterType:       labels.ClusterType,
+		Node:              labels.Node,
+		NodeIP:            labels.NodeIP,
+		NodeRole:          labels.NodeRole,
+	}
+}
+
+func adapterEndpointReplicaGPUUsages(
+	usages []model.EndpointReplicaGPUUsage,
+) []adapter.EndpointReplicaAcceleratorUsage {
+	result := make([]adapter.EndpointReplicaAcceleratorUsage, 0, len(usages))
+	for _, usage := range usages {
+		converted := adapter.EndpointReplicaAcceleratorUsage{
+			Workspace:        usage.Workspace,
+			Cluster:          usage.Cluster,
+			Endpoint:         usage.Endpoint,
+			InstanceID:       usage.InstanceID,
+			ReplicaID:        usage.ReplicaID,
+			NodeID:           usage.NodeID,
+			Container:        usage.Container,
+			AcceleratorUUID:  usage.GPUUUID,
+			AcceleratorType:  usage.AcceleratorType,
+			AcceleratorIndex: usage.AcceleratorIndex,
+			VDeviceIndex:     usage.VDeviceIndex,
+			Product:          usage.Product,
+		}
+		if usage.MemoryUsedBytes != nil {
+			memoryUsedBytes := *usage.MemoryUsedBytes
+			converted.MemoryUsedBytes = &memoryUsedBytes
+		}
+		if usage.UtilizationRatio != nil {
+			utilizationRatio := *usage.UtilizationRatio
+			converted.UtilizationRatio = &utilizationRatio
+		}
+		result = append(result, converted)
+	}
+
+	return result
+}
+
+func normalizerSamplesFromAdapter(samples []adapter.Sample) []metricsnormalizer.Sample {
+	result := make([]metricsnormalizer.Sample, 0, len(samples))
+	for _, sample := range samples {
+		labels := make(map[string]string, len(sample.Labels))
+		for key, value := range sample.Labels {
+			labels[key] = value
+		}
+		result = append(result, metricsnormalizer.Sample{
+			Name:   sample.Name,
+			Labels: labels,
+			Value:  sample.Value,
+		})
+	}
+
+	return result
 }
 
 func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []model.EndpointReplicaRuntimeUsage {
@@ -492,7 +585,7 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, er
 			return &v1.NodeDeviceSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}, nil
 		}
 
-		result, err := s.adapterMetricResult(ctx, accel, hardware, s.scrapeAcceleratorExporters(ctx))
+		result, err := s.adapterMetricResult(ctx, accel, hardware, s.scrapeAcceleratorExporters(ctx), nil)
 		if err != nil {
 			klog.V(2).InfoS("Accelerator adapter failed to build device snapshot allocations", "accelerator_type", s.config.AcceleratorType, "error", err)
 		}

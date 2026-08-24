@@ -101,7 +101,7 @@ build-neutree-api:
 	$(GO) build ${GO_BUILD_ARGS} -o bin/neutree-api ./cmd/neutree-api/neutree-api.go
 
 build-neutree-node-agent:
-	$(GO) build ${NODE_AGENT_GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/neutree-node-agent.go
+	$(GO) build ${NODE_AGENT_GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/main.go
 
 # Choice of images to build/push
 ALL_DOCKER_BUILD ?= core api db-scripts

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

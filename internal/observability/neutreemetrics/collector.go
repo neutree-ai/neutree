@@ -2,12 +2,14 @@ package neutreemetrics
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 const missingLabelValue = "unknown"
@@ -204,6 +206,86 @@ func validateAdapterMetricDescriptors(descriptors []adapter.MetricDescriptor) er
 	}
 
 	return nil
+}
+
+// ValidateAdapterMetricDescriptors validates extension descriptors against the
+// built-in NodeAgent descriptor set. The public host calls this before parsing
+// runtime options so an invalid adapter image fails fast.
+func ValidateAdapterMetricDescriptors(descriptors []adapter.MetricDescriptor) error {
+	return validateAdapterMetricDescriptors(descriptors)
+}
+
+// validateAdapterSamples validates adapter output before it is converted to
+// internal normalizer samples. Adapters may emit built-in descriptors or their
+// declared extension descriptors, but cannot introduce an undeclared series.
+func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []adapter.MetricDescriptor) error {
+	descriptors := make(map[string]*metricDescriptor, len(metricDescriptorByName)+len(extensionDescriptors))
+	for name, descriptor := range metricDescriptorByName {
+		descriptors[name] = descriptor
+	}
+	for _, descriptor := range extensionDescriptors {
+		descriptors[descriptor.Name] = newMetricDescriptor(
+			descriptor.Name,
+			append([]string(nil), descriptor.LabelNames...),
+			prometheus.GaugeValue,
+			append([]string(nil), descriptor.RequiredLabelNames...),
+		)
+	}
+
+	seen := make(map[string]struct{}, len(samples))
+	for _, sample := range samples {
+		name := strings.TrimSpace(sample.Name)
+		if name == "" {
+			return fmt.Errorf("accelerator sample name is required")
+		}
+		descriptor := descriptors[name]
+		if descriptor == nil {
+			return fmt.Errorf("accelerator sample %q has no declared descriptor", name)
+		}
+		if math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
+			return fmt.Errorf("accelerator sample %q has a non-finite value", name)
+		}
+
+		allowedLabels := make(map[string]struct{}, len(descriptor.labelNames))
+		for _, labelName := range descriptor.labelNames {
+			allowedLabels[labelName] = struct{}{}
+		}
+		for labelName := range sample.Labels {
+			if _, ok := allowedLabels[labelName]; !ok {
+				return fmt.Errorf("accelerator sample %q has undeclared label %q", name, labelName)
+			}
+		}
+		if !hasRequiredLabels(sample.Labels, descriptor.requiredKeys) {
+			return fmt.Errorf("accelerator sample %q is missing a required label", name)
+		}
+
+		key := adapterSampleKey(name, sample.Labels)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate accelerator sample %q", key)
+		}
+		seen[key] = struct{}{}
+	}
+
+	return nil
+}
+
+func adapterSampleKey(name string, labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	builder.WriteString(name)
+	for _, key := range keys {
+		builder.WriteByte('\x00')
+		builder.WriteString(key)
+		builder.WriteByte('=')
+		builder.WriteString(labels[key])
+	}
+
+	return builder.String()
 }
 
 func fixedLabelValues(labels map[string]string, labelNames []string) []string {

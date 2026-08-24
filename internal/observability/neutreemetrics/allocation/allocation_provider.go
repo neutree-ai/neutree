@@ -15,10 +15,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 const (
@@ -66,12 +66,12 @@ func (p MultiProvider) Allocations(
 }
 
 type PodResourceLister interface {
-	ListPodResources(ctx context.Context) ([]model.PodResource, error)
+	ListPodResources(ctx context.Context) ([]adapter.PodResource, error)
 }
 
-type PodResourceListerFunc func(ctx context.Context) ([]model.PodResource, error)
+type PodResourceListerFunc func(ctx context.Context) ([]adapter.PodResource, error)
 
-func (f PodResourceListerFunc) ListPodResources(ctx context.Context) ([]model.PodResource, error) {
+func (f PodResourceListerFunc) ListPodResources(ctx context.Context) ([]adapter.PodResource, error) {
 	return f(ctx)
 }
 
@@ -87,24 +87,24 @@ type KubernetesAllocationProvider struct {
 
 func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
 	ctx context.Context,
-) (adapter.KubernetesAcceleratorEvidence, error) {
+) (adapter.KubernetesEvidence, error) {
 	if p.Client == nil || p.NodeName == "" || p.PodResources == nil {
-		return adapter.KubernetesAcceleratorEvidence{}, nil
+		return adapter.KubernetesEvidence{}, nil
 	}
 
 	podResources, err := p.PodResources.ListPodResources(ctx)
 	if err != nil {
-		return adapter.KubernetesAcceleratorEvidence{}, err
+		return adapter.KubernetesEvidence{}, err
 	}
 
 	pods, err := p.localEndpointPods(ctx)
 	if err != nil {
-		return adapter.KubernetesAcceleratorEvidence{}, err
+		return adapter.KubernetesEvidence{}, err
 	}
 
-	return adapter.KubernetesAcceleratorEvidence{
+	return adapter.KubernetesEvidence{
 		AllocationAvailable: true,
-		PodResources:        append([]model.PodResource{}, podResources...),
+		PodResources:        clonePodResources(podResources),
 		EndpointPods:        endpointPodEvidence(pods),
 	}, nil
 }
@@ -143,7 +143,7 @@ func (p KubernetesAllocationProvider) Allocations(
 
 func (p KubernetesAllocationProvider) podAllocation(
 	ctx context.Context,
-	podResource model.PodResource,
+	podResource adapter.PodResource,
 	deviceLookup acceleratorDeviceLookup,
 ) (v1.StaticNodeAllocationStatus, bool, error) {
 	devices := allocationDevicesFromRefs(
@@ -235,6 +235,23 @@ func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
 	return evidence
 }
 
+func clonePodResources(input []adapter.PodResource) []adapter.PodResource {
+	result := make([]adapter.PodResource, 0, len(input))
+	for _, pod := range input {
+		copied := adapter.PodResource{Namespace: pod.Namespace, Name: pod.Name}
+		copied.Containers = make([]adapter.ContainerDevices, 0, len(pod.Containers))
+		for _, container := range pod.Containers {
+			copied.Containers = append(copied.Containers, adapter.ContainerDevices{
+				ResourceName: container.ResourceName,
+				DeviceIDs:    append([]string(nil), container.DeviceIDs...),
+			})
+		}
+		result = append(result, copied)
+	}
+
+	return result
+}
+
 func copyStringMap(input map[string]string) map[string]string {
 	if len(input) == 0 {
 		return nil
@@ -265,16 +282,17 @@ type RayServeAllocationProvider struct {
 
 func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	ctx context.Context,
-) (adapter.StaticAcceleratorEvidence, error) {
+) (adapter.StaticEvidence, error) {
 	service := p.dashboardService()
 	if service == nil || p.NodeIP == "" {
-		return adapter.StaticAcceleratorEvidence{}, nil
+		return adapter.StaticEvidence{}, nil
 	}
 
 	nodeID, err := p.rayNodeID(service)
 	if err != nil || nodeID == "" {
-		return adapter.StaticAcceleratorEvidence{}, err
+		return adapter.StaticEvidence{}, err
 	}
+	applications, applicationsErr := service.GetServeApplications()
 
 	actorsResp, err := service.ListActors(
 		[]dashboard.ActorFilter{{Key: "node_id", Predicate: "=", Value: nodeID}},
@@ -282,7 +300,7 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		0,
 	)
 	if err != nil {
-		return adapter.StaticAcceleratorEvidence{}, err
+		return adapter.StaticEvidence{}, err
 	}
 
 	actors := []dashboard.Actor{}
@@ -307,13 +325,77 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		actorProcesses[actor.PID] = info
 	}
 
-	return adapter.StaticAcceleratorEvidence{
+	var replicas []adapter.RayReplica
+	if applicationsErr == nil {
+		replicas = rayReplicasFromApplications(applications, nodeID)
+	}
+
+	return adapter.StaticEvidence{
 		AllocationAvailable: true,
 		RayEvidence: adapter.RayEvidence{
-			Actors:         actors,
+			Actors:         rayActorsFromDashboard(actors),
+			Replicas:       replicas,
 			ActorProcesses: actorProcesses,
 		},
 	}, nil
+}
+
+func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
+	result := make([]adapter.RayActor, 0, len(actors))
+	for _, actor := range actors {
+		resources := make(map[string]float64, len(actor.RequiredResources))
+		for name, quantity := range actor.RequiredResources {
+			resources[name] = quantity
+		}
+		result = append(result, adapter.RayActor{
+			ActorID:           actor.ActorID,
+			ClassName:         actor.ClassName,
+			State:             actor.State,
+			Name:              actor.Name,
+			NodeID:            actor.NodeID,
+			PID:               actor.PID,
+			RequiredResources: resources,
+			StartTime:         actor.StartTime,
+			EndTime:           actor.EndTime,
+		})
+	}
+
+	return result
+}
+
+func rayReplicasFromApplications(
+	applications *dashboard.RayServeApplicationsResponse,
+	nodeID string,
+) []adapter.RayReplica {
+	if applications == nil {
+		return nil
+	}
+
+	result := make([]adapter.RayReplica, 0)
+	for _, applicationName := range rayserve.SortedServeApplicationNames(applications) {
+		status := applications.Applications[applicationName]
+		workspace, endpoint := rayserve.ApplicationIdentity(applicationName, status)
+		for _, deploymentName := range rayserve.SortedDeploymentNames(status.Deployments) {
+			deployment := status.Deployments[deploymentName]
+			gpuQuantity, _ := rayDeploymentGPUQuantity(status, deploymentName)
+			for _, replica := range deployment.Replicas {
+				if replica.NodeID != nodeID || replica.ActorID == "" {
+					continue
+				}
+				result = append(result, adapter.RayReplica{
+					Workspace:   workspace,
+					Endpoint:    endpoint,
+					Deployment:  deploymentName,
+					ActorID:     replica.ActorID,
+					ReplicaID:   replica.ReplicaID,
+					NodeID:      replica.NodeID,
+					GPUQuantity: gpuQuantity,
+				})
+			}
+		}
+	}
+
+	return result
 }
 
 func (p RayServeAllocationProvider) Allocations(
@@ -800,7 +882,7 @@ func newDeviceLookup(devices []v1.StaticNodeAcceleratorDeviceStatus) accelerator
 	return lookup
 }
 
-func containerDeviceRefs(containers []model.ContainerDevices) []string {
+func containerDeviceRefs(containers []adapter.ContainerDevices) []string {
 	refs := make([]string, 0)
 	for _, container := range containers {
 		refs = append(refs, container.DeviceIDs...)
