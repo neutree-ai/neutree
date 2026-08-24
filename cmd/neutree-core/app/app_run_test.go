@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/mock"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
-	"github.com/neutree-ai/neutree/pkg/releaseprofile"
+	"github.com/neutree-ai/neutree/pkg/storage"
 	mockstorage "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -37,13 +38,15 @@ func newTestCoreConfig(t *testing.T, port int) *config.CoreConfig {
 	t.Helper()
 	store := mockstorage.NewMockStorage(t)
 	store.On("ListReleaseInfo").Return([]v1.ReleaseInfo{}, nil).Once()
+	store.On("ListClusterProfile", storage.ListOption{}).Return([]v1.ClusterProfile{}, nil).Once()
+	store.On("CreateReleaseInfo", mock.Anything).Return(nil).Once()
+	store.On("CreateClusterProfile", mock.Anything).Return(nil).Times(3)
 
 	return &config.CoreConfig{
 		GinEngine:               gin.New(),
 		ObsCollectConfigManager: obsCollectConfigManagerStub{},
 		Storage:                 store,
 		ServerConfig:            &config.ServerConfig{Host: testHost, Port: port},
-		Version:                 "v1.2.0",
 	}
 }
 
@@ -56,14 +59,6 @@ func newTestCoreApp(t *testing.T, port int) *App {
 	app, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
-	}
-
-	app.synchronizeCurrentBaseline = func(
-		_ releaseprofile.CurrentBaselineStore,
-		_ string,
-		_ releaseprofile.Builder,
-	) error {
-		return nil
 	}
 
 	return app
@@ -302,14 +297,6 @@ func TestAppRunWithInjectedPluginShutsDownOnCancel(t *testing.T) {
 	app, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build() with injected plugin error = %v", err)
-	}
-
-	app.synchronizeCurrentBaseline = func(
-		_ releaseprofile.CurrentBaselineStore,
-		_ string,
-		_ releaseprofile.Builder,
-	) error {
-		return nil
 	}
 
 	cancel, done := startTestApp(t, app, addr)

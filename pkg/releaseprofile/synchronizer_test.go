@@ -7,14 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 func TestSynchronizeCurrentBaselineCreatesReleaseInfoAndProfiles(t *testing.T) {
-	builder, err := NewBuilderForCatalog(BuiltinCatalog())
-	require.NoError(t, err)
 	store := &baselineMemoryStore{}
 
-	require.NoError(t, SynchronizeCurrentBaseline(store, "v1.2.0", builder))
+	require.NoError(t, SynchronizeCurrentBaseline(store, store))
 	require.Len(t, store.createdReleaseInfos, 1)
 	require.Empty(t, store.updatedReleaseInfos)
 	require.Len(t, store.createdClusterProfiles, 3)
@@ -22,44 +21,36 @@ func TestSynchronizeCurrentBaselineCreatesReleaseInfoAndProfiles(t *testing.T) {
 	assert.ElementsMatch(t, []string{"v1.1.0", "v1.1.1", "v1.2.0"}, profileNames(store.createdClusterProfiles))
 }
 
-func TestSynchronizeCurrentBaselineUpdatesCurrentReleaseButNeverProfileDrift(t *testing.T) {
+func TestSynchronizeCurrentBaselineOverwritesExistingReleaseInfoAndProfiles(t *testing.T) {
 	builder, err := NewBuilderForCatalog(BuiltinCatalog())
 	require.NoError(t, err)
 	profiles, err := builder.BuildClusterProfiles("v1.2.0")
 	require.NoError(t, err)
 
-	matching := make([]v1.ClusterProfile, 0, len(profiles))
-	for _, profile := range profiles {
-		matching = append(matching, *cloneClusterProfile(profile))
+	existingProfiles := make([]v1.ClusterProfile, 0, len(profiles))
+	for index, profile := range profiles {
+		existing := cloneClusterProfile(profile)
+		existing.ID = index + 1
+		existingProfiles = append(existingProfiles, *existing)
 	}
+	ssh := existingProfiles[0].Spec.Components[v1.SSHClusterType]
+	ssh.RayRuntime.Tag = "drifted"
+	existingProfiles[0].Spec.Components[v1.SSHClusterType] = ssh
 
 	store := &baselineMemoryStore{
 		releaseInfos:    []v1.ReleaseInfo{{ID: 7, Metadata: &v1.Metadata{Name: "v1.2.0"}}},
-		clusterProfiles: matching,
+		clusterProfiles: existingProfiles,
 	}
-	require.NoError(t, SynchronizeCurrentBaseline(store, "v1.2.0", builder))
+	require.NoError(t, SynchronizeCurrentBaseline(store, store))
 	require.Len(t, store.updatedReleaseInfos, 1)
+	require.Len(t, store.updatedClusterProfiles, 3)
 	require.Empty(t, store.createdClusterProfiles)
-
-	drifted := cloneClusterProfile(profiles[0])
-	ssh := drifted.Spec.Components[v1.SSHClusterType]
-	ssh.RayRuntime.Tag = "drifted"
-	drifted.Spec.Components[v1.SSHClusterType] = ssh
-
-	driftStore := &baselineMemoryStore{clusterProfiles: []v1.ClusterProfile{*drifted}}
-	err = SynchronizeCurrentBaseline(driftStore, "v1.2.0", builder)
-	require.ErrorContains(t, err, "content drift")
-	assert.Empty(t, driftStore.createdReleaseInfos)
-	assert.Empty(t, driftStore.updatedReleaseInfos)
-	assert.Empty(t, driftStore.createdClusterProfiles)
+	assert.Equal(t, profiles[0].Spec.Components[v1.SSHClusterType].RayRuntime.Tag, store.updatedClusterProfiles[0].Spec.Components[v1.SSHClusterType].RayRuntime.Tag)
 }
 
-func TestSynchronizeCurrentBaselineRejectsInvalidDependenciesAndPersistedIdentifier(t *testing.T) {
+func TestSynchronizeCurrentBaselineRejectsPersistedRecordWithoutIdentifier(t *testing.T) {
 	builder, err := NewBuilderForCatalog(BuiltinCatalog())
 	require.NoError(t, err)
-
-	require.ErrorContains(t, SynchronizeCurrentBaseline(nil, "v1.2.0", builder), "store is required")
-	require.ErrorContains(t, SynchronizeCurrentBaseline(&baselineMemoryStore{}, "v1.2.0", nil), "builder is required")
 
 	profiles, err := builder.BuildClusterProfiles("v1.2.0")
 	require.NoError(t, err)
@@ -72,7 +63,7 @@ func TestSynchronizeCurrentBaselineRejectsInvalidDependenciesAndPersistedIdentif
 		releaseInfos:    []v1.ReleaseInfo{{Metadata: &v1.Metadata{Name: "v1.2.0"}}},
 		clusterProfiles: persisted,
 	}
-	require.ErrorContains(t, SynchronizeCurrentBaseline(store, "v1.2.0", builder), "has no identifier")
+	require.ErrorContains(t, SynchronizeCurrentBaseline(store, store), "has no identifier")
 }
 
 type baselineMemoryStore struct {
@@ -82,6 +73,7 @@ type baselineMemoryStore struct {
 	createdReleaseInfos    []*v1.ReleaseInfo
 	updatedReleaseInfos    []*v1.ReleaseInfo
 	createdClusterProfiles []*v1.ClusterProfile
+	updatedClusterProfiles []*v1.ClusterProfile
 }
 
 func (store *baselineMemoryStore) ListReleaseInfo() ([]v1.ReleaseInfo, error) {
@@ -98,11 +90,16 @@ func (store *baselineMemoryStore) UpdateReleaseInfo(_ string, info *v1.ReleaseIn
 	return nil
 }
 
-func (store *baselineMemoryStore) ListClusterProfile() ([]v1.ClusterProfile, error) {
+func (store *baselineMemoryStore) ListClusterProfile(storage.ListOption) ([]v1.ClusterProfile, error) {
 	return store.clusterProfiles, nil
 }
 
 func (store *baselineMemoryStore) CreateClusterProfile(profile *v1.ClusterProfile) error {
 	store.createdClusterProfiles = append(store.createdClusterProfiles, profile)
+	return nil
+}
+
+func (store *baselineMemoryStore) UpdateClusterProfile(_ string, profile *v1.ClusterProfile) error {
+	store.updatedClusterProfiles = append(store.updatedClusterProfiles, profile)
 	return nil
 }

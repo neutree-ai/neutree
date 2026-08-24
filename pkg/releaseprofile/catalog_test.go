@@ -22,6 +22,10 @@ func TestBuiltinCatalogBuildsCurrentReleaseAndExactProfiles(t *testing.T) {
 	profiles, err := builder.BuildClusterProfiles("v1.2.0")
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"v1.1.0", "v1.1.1", "v1.2.0"}, profileNames(profiles))
+
+	profile := profileByName(t, profiles, "v1.2.0")
+	assert.Equal(t, v1.ImageRef{Image: "neutree/neutree-serve", Tag: "v1.1.1"}, profile.Spec.Components[v1.SSHClusterType].RayRuntime)
+	assert.Equal(t, v1.ImageRef{Image: "neutree/neutree-runtime", Tag: "v1.1.1"}, profile.Spec.Components[v1.KubernetesClusterType].KubernetesRuntime)
 }
 
 func TestBuilderRejectsForeignControlPlaneBaseline(t *testing.T) {
@@ -49,57 +53,6 @@ func TestCatalogAndBuilderReturnDefensiveCopies(t *testing.T) {
 	assert.Equal(t, "v1.1.1", actual.Spec.Components[v1.SSHClusterType].RayRuntime.Tag)
 }
 
-func TestInjectCatalogRequiresEquivalentEligibilityAndEarlyUse(t *testing.T) {
-	t.Run("accepts equivalent profile material", func(t *testing.T) {
-		resetDefaultCatalogForTest(t)
-
-		spec := BuiltinCatalog().Spec()
-		profile := profileByName(t, spec.ClusterProfiles, "v1.1.0")
-		ssh := profile.Spec.Components[v1.SSHClusterType]
-		ssh.NodeAgent.Tag = "enterprise-node-agent"
-		profile.Spec.Components[v1.SSHClusterType] = ssh
-
-		catalog, err := NewCatalog(spec)
-		require.NoError(t, err)
-		require.NoError(t, InjectCatalog(catalog))
-
-		profiles, err := NewBuilder().BuildClusterProfiles("v1.2.0")
-		require.NoError(t, err)
-		assert.Equal(t, "enterprise-node-agent", profileByName(t, profiles, "v1.1.0").Spec.Components[v1.SSHClusterType].NodeAgent.Tag)
-	})
-
-	t.Run("rejects a changed profile set", func(t *testing.T) {
-		resetDefaultCatalogForTest(t)
-
-		spec := BuiltinCatalog().Spec()
-		spec.ClusterProfiles = []*v1.ClusterProfile{spec.ClusterProfiles[0], spec.ClusterProfiles[2]}
-		catalog, err := NewCatalog(spec)
-		require.NoError(t, err)
-		require.ErrorContains(t, InjectCatalog(catalog), "eligible cluster profile versions")
-	})
-
-	t.Run("rejects a changed current release baseline", func(t *testing.T) {
-		resetDefaultCatalogForTest(t)
-
-		spec := BuiltinCatalog().Spec()
-		spec.CurrentReleaseInfoBaseline = "v1.2.0-rc.1"
-		catalog, err := NewCatalog(spec)
-		require.NoError(t, err)
-		require.ErrorContains(t, InjectCatalog(catalog), "current release baseline")
-	})
-
-	t.Run("rejects late and repeated injection", func(t *testing.T) {
-		resetDefaultCatalogForTest(t)
-
-		require.NoError(t, InjectCatalog(BuiltinCatalog()))
-		require.ErrorContains(t, InjectCatalog(BuiltinCatalog()), "already injected")
-
-		resetDefaultCatalogForTest(t)
-		_ = NewBuilder()
-		require.ErrorContains(t, InjectCatalog(BuiltinCatalog()), "already consumed")
-	})
-}
-
 func TestCatalogBoundaryErrors(t *testing.T) {
 	_, err := NewCatalog(CatalogSpec{})
 	require.Error(t, err)
@@ -117,8 +70,6 @@ func TestCatalogBoundaryErrors(t *testing.T) {
 	_, err = builder.BuildClusterProfiles("v1.2.0")
 	require.ErrorContains(t, err, "builder is required")
 
-	resetDefaultCatalogForTest(t)
-	require.ErrorContains(t, InjectCatalog(nil), "catalog is required")
 }
 
 func profileNames(profiles []*v1.ClusterProfile) []string {
@@ -142,25 +93,4 @@ func profileByName(t *testing.T, profiles []*v1.ClusterProfile, name string) *v1
 	t.Fatalf("cluster profile %q not found", name)
 
 	return nil
-}
-
-func resetDefaultCatalogForTest(t *testing.T) {
-	t.Helper()
-
-	defaultCatalogState.mu.Lock()
-	previousCatalog := defaultCatalogState.catalog
-	previousConsumed := defaultCatalogState.consumed
-	previousInjected := defaultCatalogState.injected
-	defaultCatalogState.catalog = nil
-	defaultCatalogState.consumed = false
-	defaultCatalogState.injected = false
-	defaultCatalogState.mu.Unlock()
-
-	t.Cleanup(func() {
-		defaultCatalogState.mu.Lock()
-		defaultCatalogState.catalog = previousCatalog
-		defaultCatalogState.consumed = previousConsumed
-		defaultCatalogState.injected = previousInjected
-		defaultCatalogState.mu.Unlock()
-	})
 }

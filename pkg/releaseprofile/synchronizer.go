@@ -4,40 +4,21 @@ import (
 	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// CurrentBaselineStore is the narrow write boundary used by Core startup.
-type CurrentBaselineStore interface {
-	ListReleaseInfo() ([]v1.ReleaseInfo, error)
-	CreateReleaseInfo(*v1.ReleaseInfo) error
-	UpdateReleaseInfo(id string, info *v1.ReleaseInfo) error
-	ListClusterProfile() ([]v1.ClusterProfile, error)
-	CreateClusterProfile(*v1.ClusterProfile) error
-}
-
-// SynchronizeCurrentBaseline updates the running control-plane ReleaseInfo and
-// creates missing exact Profiles. Existing Profiles are immutable: an
-// identical replay is a no-op and any content drift fails before a write.
-func SynchronizeCurrentBaseline(store CurrentBaselineStore, baseline string, builder Builder) error {
-	if store == nil {
-		return fmt.Errorf("current baseline store is required")
-	}
-
-	if builder == nil {
-		return fmt.Errorf("release profile builder is required")
-	}
+// SynchronizeCurrentBaseline makes the process Catalog authoritative for its
+// current ReleaseInfo and exact ClusterProfiles.
+func SynchronizeCurrentBaseline(
+	releaseInfoStorage storage.ReleaseInfoStorage,
+	clusterProfileStorage storage.ClusterProfileStorage,
+) error {
+	builder := NewBuilder()
+	baseline := builder.CurrentReleaseInfoBaseline()
 
 	info, err := builder.BuildReleaseInfo(baseline)
 	if err != nil {
 		return fmt.Errorf("build release info: %w", err)
-	}
-
-	if err := ValidateReleaseInfo(info); err != nil {
-		return fmt.Errorf("invalid release info builder output: %w", err)
-	}
-
-	if info.GetName() != baseline {
-		return fmt.Errorf("release info builder output name %q must match requested baseline %q", info.GetName(), baseline)
 	}
 
 	profiles, err := builder.BuildClusterProfiles(baseline)
@@ -45,16 +26,12 @@ func SynchronizeCurrentBaseline(store CurrentBaselineStore, baseline string, bui
 		return fmt.Errorf("build cluster profile catalog: %w", err)
 	}
 
-	if err := validateCurrentClusterProfiles(info, profiles); err != nil {
-		return err
-	}
-
-	infos, err := store.ListReleaseInfo()
+	infos, err := releaseInfoStorage.ListReleaseInfo()
 	if err != nil {
 		return fmt.Errorf("list release infos: %w", err)
 	}
 
-	persistedProfiles, err := store.ListClusterProfile()
+	persistedProfiles, err := clusterProfileStorage.ListClusterProfile(storage.ListOption{})
 	if err != nil {
 		return fmt.Errorf("list cluster profiles: %w", err)
 	}
@@ -64,19 +41,8 @@ func SynchronizeCurrentBaseline(store CurrentBaselineStore, baseline string, bui
 		return err
 	}
 
-	for _, profile := range profiles {
-		existing := existingProfiles[profile.GetName()]
-		if existing == nil {
-			continue
-		}
-
-		if !ClusterProfilesSemanticallyEqual(existing, profile) {
-			return fmt.Errorf("cluster profile %s content drift", profile.GetName())
-		}
-	}
-
 	if existing := releaseInfoByName(infos, baseline); existing == nil {
-		if err := store.CreateReleaseInfo(cloneReleaseInfo(info)); err != nil {
+		if err := releaseInfoStorage.CreateReleaseInfo(cloneReleaseInfo(info)); err != nil {
 			return fmt.Errorf("create release info: %w", err)
 		}
 	} else {
@@ -84,45 +50,28 @@ func SynchronizeCurrentBaseline(store CurrentBaselineStore, baseline string, bui
 			return fmt.Errorf("persisted release info %q has no identifier", baseline)
 		}
 
-		if err := store.UpdateReleaseInfo(existing.GetID(), cloneReleaseInfo(info)); err != nil {
+		if err := releaseInfoStorage.UpdateReleaseInfo(existing.GetID(), cloneReleaseInfo(info)); err != nil {
 			return fmt.Errorf("update release info: %w", err)
 		}
 	}
 
 	for _, profile := range profiles {
-		if existingProfiles[profile.GetName()] != nil {
+		existing := existingProfiles[profile.GetName()]
+		if existing == nil {
+			if err := clusterProfileStorage.CreateClusterProfile(cloneClusterProfile(profile)); err != nil {
+				return fmt.Errorf("create cluster profile %s: %w", profile.GetName(), err)
+			}
+
 			continue
 		}
 
-		if err := store.CreateClusterProfile(cloneClusterProfile(profile)); err != nil {
-			return fmt.Errorf("create cluster profile %s: %w", profile.GetName(), err)
-		}
-	}
-
-	return nil
-}
-
-func validateCurrentClusterProfiles(info *v1.ReleaseInfo, profiles []*v1.ClusterProfile) error {
-	if len(profiles) == 0 {
-		return fmt.Errorf("cluster profile catalog is empty")
-	}
-
-	seen := make(map[string]struct{}, len(profiles))
-	for _, profile := range profiles {
-		if err := ValidateProfileEligibility(info, profile); err != nil {
-			return fmt.Errorf("invalid cluster profile builder output: %w", err)
+		if existing.GetID() == "" || existing.GetID() == "0" {
+			return fmt.Errorf("persisted cluster profile %q has no identifier", profile.GetName())
 		}
 
-		name := profile.GetName()
-		if _, found := seen[name]; found {
-			return fmt.Errorf("duplicate cluster profile builder output %q", name)
+		if err := clusterProfileStorage.UpdateClusterProfile(existing.GetID(), cloneClusterProfile(profile)); err != nil {
+			return fmt.Errorf("update cluster profile %s: %w", profile.GetName(), err)
 		}
-
-		seen[name] = struct{}{}
-	}
-
-	if _, found := seen[info.Spec.DefaultClusterVersion]; !found {
-		return fmt.Errorf("cluster profile catalog is missing default cluster version %q", info.Spec.DefaultClusterVersion)
 	}
 
 	return nil

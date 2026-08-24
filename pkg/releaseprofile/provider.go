@@ -4,59 +4,35 @@ import (
 	"fmt"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-// ReleaseInfoReader is the narrow read boundary for current policy resolution.
-type ReleaseInfoReader interface {
-	ListReleaseInfo() ([]v1.ReleaseInfo, error)
-}
-
-// ClusterProfileReader is the narrow read boundary for exact Profile
-// resolution. It intentionally does not depend on pkg/storage.
-type ClusterProfileReader interface {
-	ListClusterProfile() ([]v1.ClusterProfile, error)
-}
-
-// ClusterProfileReaderFunc adapts a composition-root query to the narrow
-// ClusterProfileReader boundary.
-type ClusterProfileReaderFunc func() ([]v1.ClusterProfile, error)
-
-func (reader ClusterProfileReaderFunc) ListClusterProfile() ([]v1.ClusterProfile, error) {
-	return reader()
-}
 
 // Provider resolves persisted ReleaseInfo records and exact component matrices.
 type Provider struct {
-	releaseInfoReader    ReleaseInfoReader
-	clusterProfileReader ClusterProfileReader
-	buildIdentity        string
+	releaseInfoStorage    storage.ReleaseInfoStorage
+	clusterProfileStorage storage.ClusterProfileStorage
 }
 
-// NewReleaseInfoProvider creates a Provider for Current policy resolution.
-func NewReleaseInfoProvider(reader ReleaseInfoReader, buildIdentity string) *Provider {
-	return &Provider{releaseInfoReader: reader, buildIdentity: buildIdentity}
-}
-
-// NewClusterProfileProvider creates a Provider for exact Profile resolution.
-func NewClusterProfileProvider(reader ClusterProfileReader) *Provider {
-	return &Provider{clusterProfileReader: reader}
+// NewProvider creates a Provider with the storage required for both current
+// policy and exact component resolution.
+func NewProvider(
+	releaseInfoStorage storage.ReleaseInfoStorage,
+	clusterProfileStorage storage.ClusterProfileStorage,
+) *Provider {
+	return &Provider{
+		releaseInfoStorage:    releaseInfoStorage,
+		clusterProfileStorage: clusterProfileStorage,
+	}
 }
 
 // Current returns the ReleaseInfo selected for the running control plane.
 func (provider *Provider) Current() (*v1.ReleaseInfo, error) {
-	if provider == nil || provider.releaseInfoReader == nil {
-		return nil, fmt.Errorf("release info reader is required")
-	}
-
-	infos, err := provider.releaseInfoReader.ListReleaseInfo()
+	infos, err := provider.releaseInfoStorage.ListReleaseInfo()
 	if err != nil {
 		return nil, fmt.Errorf("list release infos: %w", err)
 	}
 
-	baseline, err := ResolveCurrentControlPlaneBaseline(provider.buildIdentity, infos)
-	if err != nil {
-		return nil, err
-	}
+	baseline := NewBuilder().CurrentReleaseInfoBaseline()
 
 	for index := range infos {
 		if infos[index].GetName() != baseline {
@@ -76,15 +52,11 @@ func (provider *Provider) Current() (*v1.ReleaseInfo, error) {
 // ProfileFor returns an exact Profile. It never falls back to a minor line or
 // another cluster type.
 func (provider *Provider) ProfileFor(clusterVersion string) (*v1.ClusterProfile, error) {
-	if provider == nil || provider.clusterProfileReader == nil {
-		return nil, fmt.Errorf("cluster profile reader is required")
-	}
-
 	if _, err := parseExactVPrefixedSemVer(clusterVersion); err != nil {
 		return nil, fmt.Errorf("invalid cluster version %q: %w", clusterVersion, err)
 	}
 
-	profiles, err := provider.clusterProfileReader.ListClusterProfile()
+	profiles, err := provider.clusterProfileStorage.ListClusterProfile(storage.ListOption{})
 	if err != nil {
 		return nil, fmt.Errorf("list cluster profiles: %w", err)
 	}
