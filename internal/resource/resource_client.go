@@ -44,8 +44,26 @@ func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNo
 	}
 }
 
+// hasDeviceAvailableCapacity reports whether a device still has schedulable
+// capacity in BOTH dimensions. A card contributes to the remaining capacity
+// pool only when it retains both memory and compute; vGPU slices require both,
+// so a card with one dimension exhausted contributes nothing.
 func hasDeviceAvailableCapacity(pool *v1.DeviceResourcePool) bool {
 	return pool != nil && pool.MemoryMiB > 0 && pool.CoreUnits > 0
+}
+
+// deviceAvailableEquivalentQuantity returns the fraction of a physical device
+// that remains schedulable. Both memory and compute are required, so the
+// smaller remaining proportion determines the contribution.
+func deviceAvailableEquivalentQuantity(allocatable, available *v1.DeviceResourcePool) float64 {
+	if allocatable == nil || available == nil || allocatable.MemoryMiB <= 0 || allocatable.CoreUnits <= 0 {
+		return 0
+	}
+
+	memoryRatio := math.Min(math.Max(float64(available.MemoryMiB)/float64(allocatable.MemoryMiB), 0), 1)
+	coreRatio := math.Min(math.Max(float64(available.CoreUnits)/float64(allocatable.CoreUnits), 0), 1)
+
+	return math.Min(memoryRatio, coreRatio)
 }
 
 func memoryBytesToGiB(value float64) float64 {

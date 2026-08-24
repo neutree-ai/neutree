@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"time"
 
@@ -249,6 +250,24 @@ func expectNVIDIAVirtualizedClusterResources(cluster v1.Cluster) string {
 	deviceCount := expectClusterProductDevices(resources.NodeResources, productName)
 	ExpectWithOffset(1, allocatableProduct.Quantity).To(Equal(float64(deviceCount)))
 
+	equivalentAvailableCapacity := expectClusterProductEquivalentAvailableCapacity(
+		resources.NodeResources,
+		productName,
+	)
+	groupEquivalentAvailableCapacity := 0.0
+	for product := range allocatableGroup.Products {
+		groupEquivalentAvailableCapacity += expectClusterProductEquivalentAvailableCapacity(
+			resources.NodeResources,
+			string(product),
+		)
+	}
+	ExpectWithOffset(1, availableGroup.Quantity).To(
+		BeNumerically("~", groupEquivalentAvailableCapacity, 1e-9))
+	ExpectWithOffset(1, availableGroup.ProductGroups[v1.AcceleratorProduct(productName)]).To(
+		BeNumerically("~", equivalentAvailableCapacity, 1e-9))
+	ExpectWithOffset(1, availableProduct.Quantity).To(
+		BeNumerically("~", equivalentAvailableCapacity, 1e-9))
+
 	return productName
 }
 
@@ -290,6 +309,40 @@ func expectClusterProductDevices(nodes map[string]*v1.NodeResourceStatus, produc
 	ExpectWithOffset(1, count).To(BeNumerically(">", 0))
 
 	return count
+}
+
+func expectClusterProductEquivalentAvailableCapacity(
+	nodes map[string]*v1.NodeResourceStatus,
+	productName string,
+) float64 {
+	total := 0.0
+
+	for _, node := range nodes {
+		for _, device := range node.Devices {
+			if device.Product != productName {
+				continue
+			}
+
+			ExpectWithOffset(1, device.Health).To(BeTrue())
+			ExpectWithOffset(1, device.Allocatable).NotTo(BeNil())
+			ExpectWithOffset(1, device.Available).NotTo(BeNil())
+
+			total += math.Min(
+				clampEquivalentRatio(device.Available.MemoryMiB, device.Allocatable.MemoryMiB),
+				clampEquivalentRatio(device.Available.CoreUnits, device.Allocatable.CoreUnits),
+			)
+		}
+	}
+
+	return total
+}
+
+func clampEquivalentRatio(available, allocatable int64) float64 {
+	if allocatable <= 0 {
+		return 0
+	}
+
+	return math.Min(math.Max(float64(available)/float64(allocatable), 0), 1)
 }
 
 func expectNVIDIAProductMemoryMiB(cluster v1.Cluster, productName string) int64 {

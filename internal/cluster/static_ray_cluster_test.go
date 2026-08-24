@@ -450,6 +450,8 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshots(t *t
 	assert.Equal(t, float64(30720), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(200), allocatableProduct.Virtualization.CoreUnits)
 	require.Contains(t, resources.Available.AcceleratorGroups, v1.AcceleratorTypeNVIDIAGPU)
+	// Aggregate available quantity preserves Ray's native capacity, while the
+	// device snapshot separately shows GPU-abc exhausted and GPU-def fully free.
 	assert.Equal(t, float64(2), resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	assert.Equal(t, float64(2),
 		resources.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].ProductGroups["NVIDIA_Tesla_T4"])
