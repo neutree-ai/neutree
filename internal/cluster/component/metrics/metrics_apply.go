@@ -46,7 +46,12 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableNeutreeNodeAgentMetrics {
-		variables.NodeAgent = selectedMetricsNodeAgent(acceleratorExporters)
+		nodeAgent, err := selectedMetricsNodeAgent(acceleratorExporters)
+		if err != nil {
+			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
+		}
+
+		variables.NodeAgent = nodeAgent
 	}
 
 	if variables.EnableVMAgent {

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var (
@@ -308,6 +309,8 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NotNil(t, profile)
 	require.NotNil(t, profile.ClusterRuntime)
 	require.NotNil(t, profile.EngineRuntime)
+	require.NotNil(t, profile.NodeAgentRuntime)
+	require.NotNil(t, profile.VirtualizationMonitor)
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
@@ -319,6 +322,15 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	containerRuntime, err := p.GetContainerRuntimeConfig()
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
+	assert.True(t, profile.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, profile.NodeAgentRuntime.Env)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.NodeAgentRuntime.DockerRunOptions)
+	assert.Equal(t, "kube-system", profile.VirtualizationMonitor.Namespace)
+	assert.Equal(t, map[string]string{"app.kubernetes.io/component": "hami-device-plugin"}, profile.VirtualizationMonitor.PodSelector)
+	assert.Equal(t, 9394, profile.VirtualizationMonitor.Port)
+	assert.Equal(t, "/metrics", profile.VirtualizationMonitor.MetricsPath)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
@@ -334,7 +346,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NotNil(t, profile.MetricsExporter.Runtime)
 	assert.True(t, profile.MetricsExporter.Runtime.HostNetwork)
 	require.NotNil(t, profile.MetricsExporter.Runtime.Capabilities)
-	assert.Equal(t, []string{"SYS_ADMIN"}, profile.MetricsExporter.Runtime.Capabilities.Add)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.MetricsExporter.Runtime.Capabilities.Add)
 	assert.Equal(t,
 		map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
 		profile.MetricsExporter.Runtime.NodeSelector)

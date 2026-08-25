@@ -67,6 +67,8 @@ func componentHostPath(source *v1.ComponentHostPathVolumeSource) *corev1.HostPat
 		hostPathType = corev1.HostPathDirectory
 	case v1.ComponentHostPathTypeSocket:
 		hostPathType = corev1.HostPathSocket
+	case v1.ComponentHostPathTypeFile:
+		hostPathType = corev1.HostPathFile
 	}
 
 	return &corev1.HostPathVolumeSource{
@@ -76,17 +78,25 @@ func componentHostPath(source *v1.ComponentHostPathVolumeSource) *corev1.HostPat
 }
 
 func exporterRuntimeSecurityContext(runtime *v1.AcceleratorExporterRuntimeProfile) *corev1.SecurityContext {
-	capabilities := exporterRuntimeCapabilities(runtime)
-	if (runtime == nil || !runtime.Privileged) && len(capabilities) == 0 {
+	if runtime == nil {
+		return nil
+	}
+
+	var capabilities *corev1.Capabilities
+	if runtime.Capabilities != nil {
+		capabilities = runtime.Capabilities.DeepCopy()
+	}
+
+	if !runtime.Privileged && capabilities == nil {
 		return nil
 	}
 
 	securityContext := &corev1.SecurityContext{}
-	if len(capabilities) > 0 {
-		securityContext.Capabilities = &corev1.Capabilities{Add: capabilities}
+	if capabilities != nil {
+		securityContext.Capabilities = capabilities
 	}
 
-	if runtime != nil && runtime.Privileged {
+	if runtime.Privileged {
 		privileged := true
 		securityContext.Privileged = &privileged
 	}

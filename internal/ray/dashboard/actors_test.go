@@ -134,6 +134,56 @@ func TestClient_ListActors_OnlyParsesRequiredResourcesWithDetail(t *testing.T) {
 	assert.Equal(t, map[string]float64{"NPU": 1}, withDetail.Data.Result.Result[0].RequiredResources)
 }
 
+func TestClient_ListActors_ParsesStateAPIDetailResourceEnvelope(t *testing.T) {
+	// This fixture mirrors the detail=true State API envelope observed from a
+	// Ray Dashboard. /logical/actors exposes an equivalent camelCase view, but
+	// allocation needs the State API's node filter and therefore keeps this
+	// two-level data.result.result shape as its contract.
+	const body = `{
+		"result": true,
+		"msg": "",
+		"data": {
+			"result": {
+				"total": 1,
+				"num_after_truncation": 1,
+				"num_filtered": 1,
+				"result": [{
+					"actor_id": "actor-t4",
+					"class_name": "ServeReplica:default_endpoint:deployment",
+					"node_id": "node-t4",
+					"pid": 4242,
+					"required_resources": {
+						"CPU": 2,
+						"GPU": 1,
+						"NVIDIA_Tesla_T4": 1,
+						"memory": 8589934592
+					}
+				}]
+			}
+		}
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "true", r.URL.Query().Get("detail"))
+		assert.Equal(t, []string{"node_id"}, r.URL.Query()["filter_keys"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{dashboardURL: srv.URL, client: &http.Client{}}
+	response, err := c.ListActors([]ActorFilter{{Key: "node_id", Predicate: "=", Value: "node-t4"}}, true, 100)
+
+	require.NoError(t, err)
+	require.Len(t, response.Data.Result.Result, 1)
+	assert.Equal(t, map[string]float64{
+		"CPU":             2,
+		"GPU":             1,
+		"NVIDIA_Tesla_T4": 1,
+		"memory":          8589934592,
+	}, response.Data.Result.Result[0].RequiredResources)
+}
+
 func TestClient_ListActors_NonOKStatusReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

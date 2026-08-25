@@ -969,6 +969,7 @@ func TestReconcilerReconcileComponentsUsesLocalImageWithoutPull(t *testing.T) {
 
 func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
+	readOnly := true
 	node := &v1.StaticNode{
 		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
@@ -992,13 +993,15 @@ func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 							CreateParent: true,
 						},
 					},
-					Volumes: []v1.NodeComponentVolume{
-						{
-							HostPath:  testRayConfigPath,
-							MountPath: testRayConfigPath,
-							ReadOnly:  true,
-						},
-					},
+					Volumes: []v1.ComponentVolume{{
+						Name:     "ray-config",
+						HostPath: &v1.ComponentHostPathVolumeSource{Path: testRayConfigPath, Type: v1.ComponentHostPathTypeFile},
+					}},
+					VolumeMounts: []v1.ComponentVolumeMount{{
+						Name:      "ray-config",
+						MountPath: testRayConfigPath,
+						ReadOnly:  &readOnly,
+					}},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultHealthHTTPPath,
 						Port:     healthPort,

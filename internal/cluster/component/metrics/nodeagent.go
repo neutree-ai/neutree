@@ -1,6 +1,9 @@
 package metrics
 
 import (
+	"encoding/json"
+	"sort"
+
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -10,25 +13,81 @@ import (
 // runtime comes from the selected accelerator Profile, not exporter metadata.
 type metricsNodeAgent struct {
 	AcceleratorType string
+	Env             []corev1.EnvVar
 	SecurityContext *corev1.SecurityContext
 	VolumeMounts    []corev1.VolumeMount
 	Volumes         []corev1.Volume
 }
 
-func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) metricsNodeAgent {
+func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNodeAgent, error) {
 	nodeAgent := defaultMetricsNodeAgent()
-	if len(exporters) == 0 || exporters[0].NodeAgentRuntime == nil {
-		return nodeAgent
+	if len(exporters) == 0 {
+		return nodeAgent, nil
 	}
 
-	runtime := exporters[0].NodeAgentRuntime
-	nodeAgent.AcceleratorType = exporters[0].AcceleratorType
+	selected := exporters[0]
+	nodeAgent.AcceleratorType = selected.AcceleratorType
+	var runtimeEnv map[string]string
+	if selected.NodeAgentRuntime != nil {
+		runtimeEnv = selected.NodeAgentRuntime.Env
+	}
+
+	env, err := nodeAgentRuntimeEnv(runtimeEnv, selected.VirtualizationMonitor)
+	if err != nil {
+		return metricsNodeAgent{}, err
+	}
+	nodeAgent.Env = env
+
+	runtime := selected.NodeAgentRuntime
+	if runtime == nil {
+		return nodeAgent, nil
+	}
+
 	nodeAgent.SecurityContext = nodeAgentRuntimeSecurityContext(runtime)
 	runtimeMounts, runtimeVolumes := buildComponentVolumes(runtime.Volumes, runtime.VolumeMounts)
 	nodeAgent.VolumeMounts = append(nodeAgent.VolumeMounts, runtimeMounts...)
 	nodeAgent.Volumes = append(nodeAgent.Volumes, runtimeVolumes...)
 
-	return nodeAgent
+	return nodeAgent, nil
+}
+
+// nodeAgentRuntimeEnv keeps Profile runtime variables isolated from exporter
+// variables and projects the complete selected monitor declaration as one
+// reserved JSON document for the generic Kubernetes collector.
+func nodeAgentRuntimeEnv(
+	runtimeEnv map[string]string,
+	virtualizationMonitor *v1.VirtualizationMonitorProfile,
+) ([]corev1.EnvVar, error) {
+	values := make(map[string]string, len(runtimeEnv)+1)
+	for key, value := range runtimeEnv {
+		values[key] = value
+	}
+
+	if virtualizationMonitor != nil {
+		encoded, err := json.Marshal(virtualizationMonitor)
+		if err != nil {
+			return nil, err
+		}
+
+		values[v1.VirtualizationMonitorProfileEnvKey] = string(encoded)
+	}
+
+	if len(values) == 0 {
+		return nil, nil
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]corev1.EnvVar, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, corev1.EnvVar{Name: key, Value: values[key]})
+	}
+
+	return result, nil
 }
 
 func defaultMetricsNodeAgent() metricsNodeAgent {
@@ -54,15 +113,12 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 		return nil
 	}
 
-	capabilities := make([]corev1.Capability, 0)
-
+	var capabilities *corev1.Capabilities
 	if runtime.Capabilities != nil {
-		for _, capability := range runtime.Capabilities.Add {
-			capabilities = append(capabilities, corev1.Capability(capability))
-		}
+		capabilities = runtime.Capabilities.DeepCopy()
 	}
 
-	if !runtime.Privileged && len(capabilities) == 0 {
+	if !runtime.Privileged && capabilities == nil {
 		return nil
 	}
 
@@ -73,8 +129,8 @@ func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev
 		securityContext.Privileged = &privileged
 	}
 
-	if len(capabilities) > 0 {
-		securityContext.Capabilities = &corev1.Capabilities{Add: capabilities}
+	if capabilities != nil {
+		securityContext.Capabilities = capabilities
 	}
 
 	return securityContext

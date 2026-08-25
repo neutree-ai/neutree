@@ -232,6 +232,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	promhttp.HandlerFor(registry, promhttp.HandlerOpts{}).ServeHTTP(w, r)
 }
 
+// normalizeRequest is the host-side boundary between collection and metric
+// semantics. A selected adapter receives only raw evidence, so Ascend/NPU and
+// future accelerators can add allocation rules without adding vendor branches
+// to the shared normalizer.
 func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.NormalizeRequest {
 	endpointReplicaGPUUsages := s.endpointReplicaGPUUsages(ctx)
 	normalizeReq := metricsnormalizer.NormalizeRequest{
@@ -265,7 +269,8 @@ func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.Normali
 }
 
 // selectedAccelerator resolves the management-plane-selected adapter without
-// making metric collection depend on a vendor-specific implementation.
+// making collection depend on a vendor-specific implementation. The selected
+// adapter owns the NPU/GPU resource-name and device-ID interpretation.
 func (s *Server) selectedAccelerator() adapter.Accelerator {
 	if s.config.AcceleratorType == "" {
 		return nil
@@ -325,6 +330,8 @@ func (s *Server) acceleratorSamples(
 
 // discoverAdapterHardware applies the host collection deadline to an adapter's
 // physical inventory discovery and isolates its returned snapshot per cycle.
+// This is the extension point for vendor SDK-backed discovery such as Ascend
+// DCMI; the host only consumes the canonical snapshot.
 func (s *Server) discoverAdapterHardware(
 	ctx context.Context,
 	accel adapter.Accelerator,
@@ -337,7 +344,9 @@ func (s *Server) discoverAdapterHardware(
 
 // adapterMetricResult converts common host facts into the public adapter
 // evidence model, then selects the Kubernetes or static capability by cluster
-// type. Vendor-specific rendering remains wholly inside the adapter.
+// type. It deliberately passes PodResources, HAMi monitor text, Ray actors,
+// and processes through unchanged: vendor-specific allocation and metric
+// semantics remain wholly inside the adapter.
 func (s *Server) adapterMetricResult(
 	ctx context.Context,
 	accel adapter.Accelerator,
@@ -394,7 +403,9 @@ func (s *Server) adapterMetricResult(
 }
 
 // kubernetesAcceleratorEvidence merges best-effort raw Kubernetes topology
-// into the per-request common evidence passed to an adapter.
+// into the per-request common evidence passed to an adapter. It does not
+// decode HAMi annotations or resource names, which lets NVIDIA and Ascend use
+// their own virtualization conventions over the same evidence shape.
 func (s *Server) kubernetesAcceleratorEvidence(
 	ctx context.Context,
 	common adapter.CommonEvidence,
@@ -416,7 +427,8 @@ func (s *Server) kubernetesAcceleratorEvidence(
 }
 
 // staticAcceleratorEvidence merges best-effort raw Ray/process topology into
-// the per-request common evidence passed to an adapter.
+// the per-request common evidence passed to an adapter. The adapter decides
+// how Ray RequiredResources and local process observations map to its devices.
 func (s *Server) staticAcceleratorEvidence(
 	ctx context.Context,
 	common adapter.CommonEvidence,
@@ -492,7 +504,9 @@ func adapterEndpointReplicaGPUUsages(
 }
 
 // normalizerSamplesFromAdapter is the final host-side conversion after the
-// adapter has produced validated canonical metric samples.
+// adapter has produced validated canonical metric samples. Keeping this small
+// conversion outside adapters lets all vendors share the existing Prometheus
+// exposition path without importing internal normalizer types.
 func normalizerSamplesFromAdapter(samples []adapter.Sample) []metricsnormalizer.Sample {
 	result := make([]metricsnormalizer.Sample, 0, len(samples))
 

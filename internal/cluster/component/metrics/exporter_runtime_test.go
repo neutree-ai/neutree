@@ -71,5 +71,5 @@ func TestSelectClusterAcceleratorExporterRejectsMultipleMatches(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "multiple accelerator exporters match cluster nodes")
+	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }

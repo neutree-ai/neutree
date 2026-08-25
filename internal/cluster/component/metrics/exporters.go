@@ -43,8 +43,9 @@ type metricsAcceleratorExporter struct {
 	Port            int
 	MetricsPath     string
 
-	SecurityContext  *corev1.SecurityContext
-	NodeAgentRuntime *v1.NodeAgentRuntimeProfile
+	SecurityContext       *corev1.SecurityContext
+	NodeAgentRuntime      *v1.NodeAgentRuntimeProfile
+	VirtualizationMonitor *v1.VirtualizationMonitorProfile
 
 	NodeSelector   map[string]string
 	ConfigFileData map[string]string
@@ -142,22 +143,23 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
-		Name:             name,
-		AcceleratorType:  acceleratorType,
-		ExporterName:     exporterProfile.Name,
-		Image:            util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
-		Command:          append([]string{}, exporterProfile.Command...),
-		Args:             append([]string{}, exporterProfile.Args...),
-		Env:              buildExporterEnv(exporterProfile.Env),
-		Port:             exporterProfile.Port,
-		MetricsPath:      exporterMetricsPath(exporterProfile.MetricsPath),
-		SecurityContext:  exporterRuntimeSecurityContext(runtime),
-		NodeAgentRuntime: profile.NodeAgentRuntime,
-		NodeSelector:     exporterRuntimeNodeSelector(runtime),
-		ConfigFileData:   configFileData,
-		ConfigChecksum:   configChecksum,
-		VolumeMounts:     volumeMounts,
-		Volumes:          volumes,
+		Name:                  name,
+		AcceleratorType:       acceleratorType,
+		ExporterName:          exporterProfile.Name,
+		Image:                 util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Command:               append([]string{}, exporterProfile.Command...),
+		Args:                  append([]string{}, exporterProfile.Args...),
+		Env:                   buildExporterEnv(exporterProfile.Env),
+		Port:                  exporterProfile.Port,
+		MetricsPath:           exporterMetricsPath(exporterProfile.MetricsPath),
+		SecurityContext:       exporterRuntimeSecurityContext(runtime),
+		NodeAgentRuntime:      profile.NodeAgentRuntime,
+		VirtualizationMonitor: cloneVirtualizationMonitor(profile.VirtualizationMonitor),
+		NodeSelector:          exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:        configFileData,
+		ConfigChecksum:        configChecksum,
+		VolumeMounts:          volumeMounts,
+		Volumes:               volumes,
 	}
 
 	return exporter, true
@@ -203,13 +205,24 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 	case 1:
 		return matches, nil
 	default:
-		names := make([]string, 0, len(matches))
-		for _, exporter := range matches {
-			names = append(names, exporter.AcceleratorType)
-		}
-
-		return nil, fmt.Errorf("multiple accelerator exporters match cluster nodes: %s", strings.Join(names, ", "))
+		return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
 	}
+}
+
+func cloneVirtualizationMonitor(profile *v1.VirtualizationMonitorProfile) *v1.VirtualizationMonitorProfile {
+	if profile == nil {
+		return nil
+	}
+
+	copy := *profile
+	if len(profile.PodSelector) > 0 {
+		copy.PodSelector = make(map[string]string, len(profile.PodSelector))
+		for key, value := range profile.PodSelector {
+			copy.PodSelector[key] = value
+		}
+	}
+
+	return &copy
 }
 
 func (m *MetricsComponent) clusterNodes(ctx context.Context) ([]corev1.Node, error) {
@@ -289,22 +302,6 @@ func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) 
 	}
 
 	return copyStringMap(runtime.NodeSelector)
-}
-
-func exporterRuntimeCapabilities(
-	runtime *v1.AcceleratorExporterRuntimeProfile,
-) []corev1.Capability {
-	if runtime == nil || runtime.Capabilities == nil {
-		return nil
-	}
-
-	capabilities := make([]corev1.Capability, 0, len(runtime.Capabilities.Add))
-
-	for _, capability := range runtime.Capabilities.Add {
-		capabilities = append(capabilities, corev1.Capability(capability))
-	}
-
-	return capabilities
 }
 
 func copyStringMap(values map[string]string) map[string]string {

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,26 +29,30 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 			Labels: map[string]string{"example.com/accelerator": "present"},
 		},
 	}).Build()
-	profile := &v1.AcceleratorProfile{
-		AcceleratorType: "ascend_npu",
-		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-			Privileged:   true,
-			Capabilities: &v1.NodeAgentRuntimeCapabilities{Add: []string{"SYS_ADMIN"}},
-			Volumes: []v1.ComponentVolume{{
-				Name:     "ascend-driver",
-				HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/ascend/driver", Type: v1.ComponentHostPathTypeDirectory},
-			}},
-			VolumeMounts: []v1.ComponentVolumeMount{{Name: "ascend-driver", MountPath: "/opt/ascend/driver"}},
+	const profileJSON = `{
+		"accelerator_type":"ascend_npu",
+		"virtualization_monitor":{
+			"namespace":"kube-system",
+			"pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},
+			"port":9395,
+			"metrics_path":"/metrics"
 		},
-		MetricsExporter: &v1.AcceleratorExporterProfile{
-			Name:  "npu-exporter",
-			Image: "registry.example/npu-exporter:v1.0.0",
-			Port:  8082,
-			Runtime: &v1.AcceleratorExporterRuntimeProfile{
-				NodeSelector: map[string]string{"example.com/accelerator": "present"},
-			},
+		"node_agent_runtime":{
+			"privileged":true,
+			"env":{"ASCEND_VISIBLE_DEVICES":"all","NEUTREE_VIRTUALIZATION_MONITOR_PROFILE":"stale"},
+			"capabilities":{"add":["SYS_ADMIN"]},
+			"volumes":[{"name":"ascend-driver","host_path":{"path":"/opt/ascend/driver","type":"directory"}}],
+			"volume_mounts":[{"name":"ascend-driver","mount_path":"/opt/ascend/driver"}]
 		},
-	}
+		"metrics_exporter":{
+			"name":"npu-exporter",
+			"image":"registry.example/npu-exporter:v1.0.0",
+			"port":8082,
+			"runtime":{"node_selector":{"example.com/accelerator":"present"}}
+		}
+	}`
+	profile := &v1.AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(profileJSON), profile))
 	acceleratorMgr := acceleratormocks.NewMockManager(t)
 	acceleratorMgr.EXPECT().SupportPlugins().Return([]string{"ascend_npu"}).Maybe()
 	acceleratorMgr.EXPECT().GetAcceleratorProfile(mock.Anything, "ascend_npu").Return(profile, nil).Maybe()
@@ -75,7 +80,29 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	assert.True(t, *container.SecurityContext.Privileged)
 	assert.Contains(t, container.SecurityContext.Capabilities.Add, corev1.Capability("SYS_ADMIN"))
 	assert.Contains(t, daemonSetHostPathNames(nodeAgent), "ascend-driver")
+	assert.Equal(t, "all", envValue(container.Env, "ASCEND_VISIBLE_DEVICES"))
+	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},"port":9395,"metrics_path":"/metrics"}`,
+		envValue(container.Env, v1.VirtualizationMonitorProfileEnvKey))
 	assert.False(t, hasMetricsDaemonSet(objects, neutreeNodeAgentMetricsName+"-ascend-npu"))
+}
+
+func TestSelectedMetricsNodeAgentProjectsVirtualizationMonitorWithoutRuntime(t *testing.T) {
+	nodeAgent, err := selectedMetricsNodeAgent([]metricsAcceleratorExporter{{
+		AcceleratorType: "npu",
+		VirtualizationMonitor: &v1.VirtualizationMonitorProfile{
+			Namespace: "kube-system",
+			PodSelector: map[string]string{
+				"app.kubernetes.io/component": "hami-ascend-device-plugin",
+			},
+			Port:        9395,
+			MetricsPath: "/metrics",
+		},
+	}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "npu", nodeAgent.AcceleratorType)
+	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},"port":9395,"metrics_path":"/metrics"}`,
+		envValue(nodeAgent.Env, v1.VirtualizationMonitorProfileEnvKey))
 }
 
 func TestCheckResourcesStatusChecksSingleNodeAgent(t *testing.T) {

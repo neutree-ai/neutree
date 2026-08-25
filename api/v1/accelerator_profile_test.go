@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
@@ -30,9 +31,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 				"NVIDIA_VISIBLE_DEVICES":     "all",
 				"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
 			},
-			Capabilities: &NodeAgentRuntimeCapabilities{
-				Add: []string{"SYS_ADMIN"},
-			},
+			Capabilities: &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 			Volumes: []ComponentVolume{{
 				Name:     "vendor-driver",
 				HostPath: &ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: ComponentHostPathTypeDirectory},
@@ -40,6 +39,14 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 			VolumeMounts:     []ComponentVolumeMount{{Name: "vendor-driver", MountPath: "/opt/vendor/driver"}},
 			Runtime:          "vendor-runtime",
 			DockerRunOptions: []string{"--device=/dev/vendor0"},
+		},
+		VirtualizationMonitor: &VirtualizationMonitorProfile{
+			Namespace: "kube-system",
+			PodSelector: map[string]string{
+				"app.kubernetes.io/component": "hami-device-plugin",
+			},
+			Port:        9394,
+			MetricsPath: "/metrics",
 		},
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
@@ -54,10 +61,8 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 				},
 			},
 			Runtime: &AcceleratorExporterRuntimeProfile{
-				HostNetwork: true,
-				Capabilities: &AcceleratorExporterCapabilities{
-					Add: []string{"SYS_ADMIN"},
-				},
+				HostNetwork:  true,
+				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 				NodeSelector: map[string]string{
 					"nvidia.com/gpu.present": "true",
 				},
@@ -72,6 +77,7 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Contains(t, string(data), `"cluster_runtime"`)
 	assert.Contains(t, string(data), `"engine_runtime"`)
 	assert.Contains(t, string(data), `"node_agent_runtime"`)
+	assert.Contains(t, string(data), `"virtualization_monitor"`)
 	assert.Contains(t, string(data), `"metrics_exporter"`)
 	assert.Contains(t, string(data), `"name":"dcgm-exporter"`)
 	assert.NotContains(t, string(data), `"resource_defaults"`)
@@ -95,11 +101,16 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
 	}, decoded.NodeAgentRuntime.Env)
 	require.NotNil(t, decoded.NodeAgentRuntime.Capabilities)
-	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, decoded.NodeAgentRuntime.Capabilities.Add)
 	assert.Equal(t, "vendor-runtime", decoded.NodeAgentRuntime.Runtime)
 	assert.Equal(t, []string{"--device=/dev/vendor0"}, decoded.NodeAgentRuntime.DockerRunOptions)
 	require.Len(t, decoded.NodeAgentRuntime.Volumes, 1)
 	require.Len(t, decoded.NodeAgentRuntime.VolumeMounts, 1)
+	require.NotNil(t, decoded.VirtualizationMonitor)
+	assert.Equal(t, "kube-system", decoded.VirtualizationMonitor.Namespace)
+	assert.Equal(t, map[string]string{"app.kubernetes.io/component": "hami-device-plugin"}, decoded.VirtualizationMonitor.PodSelector)
+	assert.Equal(t, 9394, decoded.VirtualizationMonitor.Port)
+	assert.Equal(t, "/metrics", decoded.VirtualizationMonitor.MetricsPath)
 	require.NotNil(t, decoded.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", decoded.MetricsExporter.Name)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.MetricsExporter.Args)
@@ -109,10 +120,29 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.MetricsExporter.Runtime)
 	assert.True(t, decoded.MetricsExporter.Runtime.HostNetwork)
 	require.NotNil(t, decoded.MetricsExporter.Runtime.Capabilities)
-	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.MetricsExporter.Runtime.Capabilities.Add)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, decoded.MetricsExporter.Runtime.Capabilities.Add)
 	assert.Equal(t, map[string]string{"nvidia.com/gpu.present": "true"}, decoded.MetricsExporter.Runtime.NodeSelector)
 	assert.Equal(t, "nvidia", decoded.MetricsExporter.Runtime.Runtime)
 	assert.Equal(t, []string{"--gpus all"}, decoded.MetricsExporter.Runtime.DockerRunOptions)
+}
+
+func TestAcceleratorProfileJSONRoundTripPreservesVirtualizationMonitor(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"npu",
+		"virtualization_monitor":{
+			"namespace":"kube-system",
+			"pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},
+			"port":9395,
+			"metrics_path":"/metrics"
+		}
+	}`
+
+	profile := AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(profileJSON), &profile))
+
+	data, err := json.Marshal(profile)
+	require.NoError(t, err)
+	assert.JSONEq(t, profileJSON, string(data))
 }
 
 func TestGetAcceleratorProfileResponse(t *testing.T) {

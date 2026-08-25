@@ -95,9 +95,35 @@ type AcceleratorProfile struct {
 	// NodeAgent. It is intentionally independent from MetricsExporter.Runtime
 	// so renderers cannot inherit exporter privilege or mounts implicitly.
 	NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
+	// VirtualizationMonitor identifies the vendor-managed monitor whose raw
+	// metrics can be collected for accelerator virtualization. Renderers and
+	// generic collectors consume this declaration without branching on vendor
+	// names, selectors, or ports.
+	VirtualizationMonitor *VirtualizationMonitorProfile `json:"virtualization_monitor,omitempty"`
 	// MetricsExporter describes the optional metrics exporter used for accelerator observability.
 	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
 }
+
+// VirtualizationMonitorProfile declares a Kubernetes-local monitor endpoint.
+// The selected accelerator Profile owns the monitor identity because HAMi
+// implementations use different device-plugin selectors and ports.
+type VirtualizationMonitorProfile struct {
+	// Namespace scopes Kubernetes Pod discovery. Empty preserves the backend
+	// default namespace behavior.
+	Namespace string `json:"namespace,omitempty"`
+	// PodSelector identifies monitor Pods on a node.
+	PodSelector map[string]string `json:"pod_selector,omitempty"`
+	// Port is the monitor metrics port.
+	Port int `json:"port,omitempty"`
+	// MetricsPath is the monitor HTTP path, defaulting to /metrics when empty.
+	MetricsPath string `json:"metrics_path,omitempty"`
+}
+
+// VirtualizationMonitorProfileEnvKey is the reserved NodeAgent environment
+// variable carrying the selected Profile's complete monitor configuration.
+// It remains one JSON document so NodeAgent and vmagent cannot independently
+// lower individual selector, namespace, port, or path fields.
+const VirtualizationMonitorProfileEnvKey = "NEUTREE_VIRTUALIZATION_MONITOR_PROFILE"
 
 // NodeAgentRuntimeProfile declares the backend-specific NodeAgent access
 // contract for an explicit accelerator profile.
@@ -108,7 +134,7 @@ type NodeAgentRuntimeProfile struct {
 	// variables are not implicitly inherited by the NodeAgent.
 	Env map[string]string `json:"env,omitempty"`
 	// Capabilities declares Linux capabilities required by the NodeAgent only.
-	Capabilities *NodeAgentRuntimeCapabilities `json:"capabilities,omitempty"`
+	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
 	// Volumes declares structured host volumes required by the NodeAgent runtime.
 	Volumes []ComponentVolume `json:"volumes,omitempty"`
 	// VolumeMounts declares the matching container mounts for Volumes.
@@ -117,12 +143,6 @@ type NodeAgentRuntimeProfile struct {
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions are StaticNode-only Docker options; Kubernetes does not parse them.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
-}
-
-// NodeAgentRuntimeCapabilities declares Linux capabilities required by a
-// NodeAgent runtime profile.
-type NodeAgentRuntimeCapabilities struct {
-	Add []string `json:"add,omitempty"`
 }
 
 type AcceleratorExporterProfile struct {
@@ -173,7 +193,7 @@ type AcceleratorExporterRuntimeProfile struct {
 	// HostPID is supported by StaticNode and Kubernetes when the backend has an equivalent.
 	HostPID bool `json:"host_pid,omitempty"`
 	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
-	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
+	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
@@ -196,16 +216,13 @@ type AcceleratorExporterRuntimeProfile struct {
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 }
 
-type AcceleratorExporterCapabilities struct {
-	Add []string `json:"add,omitempty"`
-}
-
 // ComponentHostPathType is the supported type of a structured host path volume.
 type ComponentHostPathType string
 
 const (
 	ComponentHostPathTypeDirectory ComponentHostPathType = "directory"
 	ComponentHostPathTypeSocket    ComponentHostPathType = "socket"
+	ComponentHostPathTypeFile      ComponentHostPathType = "file"
 )
 
 // ComponentVolume declares a backend-neutral component volume.

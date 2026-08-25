@@ -338,7 +338,7 @@ spec:
         image: {{ .NeutreeNodeAgentMetricsImage }}
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
-        - --cluster-type=kubernetes
+        - --cluster-type={{ .NodeAgentClusterType }}
         - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
@@ -354,6 +354,9 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+{{ if .NodeAgent.Env }}
+{{ .NodeAgent.Env | toYaml | indent 8 }}
+{{ end }}
         ports:
         - name: metrics
           containerPort: {{ .NeutreeNodeAgentMetricsPort }}
@@ -545,6 +548,7 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsName      string
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
+	NodeAgentClusterType             string
 	NodeAgent                        metricsNodeAgent
 	KubeStateMetricsImage            string
 	ClusterVersion                   string
@@ -606,6 +610,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
 		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
+		NodeAgentClusterType:             v1.KubernetesClusterType,
 		NodeAgent:                        defaultMetricsNodeAgent(),
 		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
