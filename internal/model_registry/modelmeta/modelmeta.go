@@ -46,6 +46,11 @@ var configFields = allFields[:len(allFields)-1]
 // hfConfig is the subset of config.json this package reads. Every scalar is a
 // pointer so that a key present with value 0 is distinguishable from an absent
 // key — the difference between "the checkpoint says zero" and "we don't know".
+//
+// One value of it describes one model, which for a composite checkpoint means
+// the merge of the section describing the language model with the levels above
+// it — see decodeConfig. The rest of the package therefore reads a single flat
+// config and never has to know which layout it came from.
 type hfConfig struct {
 	Architectures         []string            `json:"architectures"`
 	NumHiddenLayers       *int                `json:"num_hidden_layers"`
@@ -55,10 +60,24 @@ type hfConfig struct {
 	HiddenSize            *int                `json:"hidden_size"`
 	MaxPositionEmbeddings *int                `json:"max_position_embeddings"`
 	TorchDtype            string              `json:"torch_dtype"`
+	Dtype                 string              `json:"dtype"`
 	NumLocalExperts       *int                `json:"num_local_experts"`
 	NumExperts            *int                `json:"num_experts"`
 	NumExpertsPerTok      *int                `json:"num_experts_per_tok"`
 	QuantizationConfig    *quantizationConfig `json:"quantization_config"`
+}
+
+// dtype reports the weight dtype the config states. transformers renamed the key
+// from torch_dtype to dtype in 4.56 and writes only the new spelling now, so a
+// parser that reads one of the two reports the precision of old checkpoints and
+// nothing about current ones. Both are read, the older spelling first, because
+// where a config carries both it is the one transformers itself still honours.
+func (c *hfConfig) dtype() string {
+	if c.TorchDtype != "" {
+		return c.TorchDtype
+	}
+
+	return c.Dtype
 }
 
 // quantizationConfig covers the shapes transformers writes for the quantizers
@@ -141,17 +160,124 @@ func ParseConfig(raw []byte) *v1.ModelInfo {
 	return info
 }
 
+// nestedConfigKeys names, in order, the keys a composite config.json puts the
+// language model's own config under. A multimodal or speech checkpoint is a
+// wrapper: architectures stays at the top while layers, heads and experts move a
+// level down, so reading only the top level reports a model whose name is known
+// and whose every shape parameter is not.
+//
+// This is a list of keys rather than of architectures on purpose. The file
+// states its own layout, and switching on the architecture string would be the
+// guessing this package refuses to do everywhere else — a new
+// "…ForConditionalGeneration" lands every few weeks, and each one would be
+// unreadable until someone added it here.
+var nestedConfigKeys = []string{"text_config", "thinker_config", "llm_config"}
+
+// maxNestedConfigDepth bounds the descent. Qwen3-Omni nests two deep
+// (thinker_config → text_config), which is the deepest layout in the wild; the
+// limit is what stops a hand-written or hostile config from recursing without
+// end.
+const maxNestedConfigDepth = 3
+
 func decodeConfig(raw []byte) *hfConfig {
 	if len(raw) == 0 {
 		return nil
 	}
 
-	var cfg hfConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	var outer hfConfig
+	if err := json.Unmarshal(raw, &outer); err != nil {
 		return nil
 	}
 
-	return &cfg
+	merged := decodeNestedConfig(raw, 0)
+	if merged == nil {
+		return &outer
+	}
+
+	merged.fillFrom(&outer)
+
+	// The wrapper names the model that is actually served —
+	// Qwen3_5MoeForConditionalGeneration, not the plain causal-LM the text
+	// section names — and that is the name a reader is looking for. It is the one
+	// field the outer level wins outright.
+	if len(outer.Architectures) > 0 {
+		merged.Architectures = outer.Architectures
+	}
+
+	return merged
+}
+
+// decodeNestedConfig returns the language model's own config out of a composite
+// config.json, or nil when the file is flat and the top level is all there is.
+func decodeNestedConfig(raw []byte, depth int) *hfConfig {
+	if depth >= maxNestedConfigDepth {
+		return nil
+	}
+
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &sections); err != nil {
+		return nil
+	}
+
+	for _, key := range nestedConfigKeys {
+		section, ok := sections[key]
+		if !ok {
+			continue
+		}
+
+		var cfg hfConfig
+		if err := json.Unmarshal(section, &cfg); err != nil {
+			continue
+		}
+
+		if deeper := decodeNestedConfig(section, depth+1); deeper != nil {
+			deeper.fillFrom(&cfg)
+			cfg = *deeper
+		}
+
+		return &cfg
+	}
+
+	return nil
+}
+
+// fillFrom takes from the level above everything this config does not state
+// itself.
+//
+// The nested config wins wherever both state a key. A wrapper's own shape keys
+// describe the composite and can just as well belong to the vision tower, while
+// the section this was decoded from is unambiguously the language model — so it
+// is the authority on the language model's shape, and the outer level only fills
+// the gaps it leaves, as Qwen3-Omni's top-level dtype does.
+func (c *hfConfig) fillFrom(outer *hfConfig) {
+	fillPointer(&c.NumHiddenLayers, outer.NumHiddenLayers)
+	fillPointer(&c.NumAttentionHeads, outer.NumAttentionHeads)
+	fillPointer(&c.NumKeyValueHeads, outer.NumKeyValueHeads)
+	fillPointer(&c.HeadDim, outer.HeadDim)
+	fillPointer(&c.HiddenSize, outer.HiddenSize)
+	fillPointer(&c.MaxPositionEmbeddings, outer.MaxPositionEmbeddings)
+	fillPointer(&c.NumLocalExperts, outer.NumLocalExperts)
+	fillPointer(&c.NumExperts, outer.NumExperts)
+	fillPointer(&c.NumExpertsPerTok, outer.NumExpertsPerTok)
+	fillPointer(&c.QuantizationConfig, outer.QuantizationConfig)
+
+	if c.TorchDtype == "" {
+		c.TorchDtype = outer.TorchDtype
+	}
+
+	if c.Dtype == "" {
+		c.Dtype = outer.Dtype
+	}
+
+	if len(c.Architectures) == 0 {
+		c.Architectures = outer.Architectures
+	}
+}
+
+func fillPointer[T any](dst **T, src *T) {
+	if *dst == nil {
+		*dst = src
+	}
 }
 
 func applyConfig(info *v1.ModelInfo, cfg *hfConfig) {
@@ -185,8 +311,8 @@ func applyConfig(info *v1.ModelInfo, cfg *hfConfig) {
 
 	recordAuto(info, v1.ModelInfoFieldContextLength, cfg.MaxPositionEmbeddings != nil)
 
-	info.ParameterDtype = cfg.TorchDtype
-	recordAuto(info, v1.ModelInfoFieldParameterDtype, cfg.TorchDtype != "")
+	info.ParameterDtype = cfg.dtype()
+	recordAuto(info, v1.ModelInfoFieldParameterDtype, info.ParameterDtype != "")
 
 	applyExperts(info, cfg)
 	applyQuantization(info, cfg)
