@@ -88,6 +88,32 @@ func TestKubernetesAllocationProviderWithoutDependenciesReturnsEmptyEvidence(t *
 	assert.Equal(t, adapter.KubernetesEvidence{}, evidence)
 }
 
+func TestKubernetesAllocationProviderFiltersNonLocalAndTerminalPods(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	pods := []client.Object{
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "remote", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-b"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "terminal", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "missing-endpoint", Labels: map[string]string{"app": endpointWorkloadType}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-b", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-a", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+	}
+	provider := KubernetesAllocationProvider{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(pods...).
+			WithIndex(&corev1.Pod{}, "spec.nodeName", podNodeNameIndex).
+			Build(),
+		NodeName: "node-a",
+	}
+
+	result, err := provider.localEndpointPods(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, []string{"chat-a", "chat-b"}, []string{result[0].Name, result[1].Name})
+}
+
 func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
@@ -178,6 +204,42 @@ func TestProcFSEnvReaderReadsProcessEnvironment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "bar", environment["FOO"])
 	assert.Equal(t, "", environment["EMPTY"])
+}
+
+func TestRayEvidenceHelpersHandleSupportedValuesAndProcRoots(t *testing.T) {
+	for _, testCase := range []struct {
+		value    interface{}
+		expected float64
+		ok       bool
+	}{
+		{value: float32(0.5), expected: 0.5, ok: true},
+		{value: int64(2), expected: 2, ok: true},
+		{value: uint(3), expected: 3, ok: true},
+		{value: "1", ok: false},
+	} {
+		value, ok := numberAsFloat64(testCase.value)
+		assert.Equal(t, testCase.ok, ok)
+		assert.Equal(t, testCase.expected, value)
+	}
+
+	quantity, ok := rayDeploymentGPUQuantity(dashboard.RayServeApplicationStatus{
+		DeployedAppConfig: &dashboard.RayServeApplication{Args: map[string]interface{}{
+			"deployment_options": map[string]interface{}{
+				"backend": map[string]interface{}{"num_gpus": int64(2)},
+			},
+		}},
+	}, "BACKEND")
+	assert.True(t, ok)
+	assert.Equal(t, 2.0, quantity)
+
+	provider := RayServeAllocationProvider{
+		ProcEnv:            ProcFSEnvReader{Root: "/custom/proc"},
+		ProcessDescendants: ProcFSProcessTreeReader{Root: "/custom/descendants"},
+	}
+	assert.Equal(t, "/custom/proc", provider.procFSRoot())
+	assert.NotNil(t, provider.processEnvReader())
+	assert.NotNil(t, provider.processDescendantReader())
+	assert.Nil(t, (RayServeAllocationProvider{}).dashboardService())
 }
 
 func TestProcFSProcessTreeReaderFindsDescendantPIDs(t *testing.T) {

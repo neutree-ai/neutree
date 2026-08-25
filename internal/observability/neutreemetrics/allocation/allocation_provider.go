@@ -454,16 +454,6 @@ func (r ProcFSEnvReader) Env(pid int) (map[string]string, error) {
 	return env, nil
 }
 
-type ProcessTreeReader interface {
-	IsDescendant(pid, ancestorPID int) (bool, error)
-}
-
-type ProcessTreeReaderFunc func(pid, ancestorPID int) (bool, error)
-
-func (f ProcessTreeReaderFunc) IsDescendant(pid, ancestorPID int) (bool, error) {
-	return f(pid, ancestorPID)
-}
-
 // ProcessDescendantReader observes the generic process topology rooted at an
 // actor PID. It deliberately does not interpret accelerator-specific process
 // metadata; adapters use the returned PIDs to join their own exporter data.
@@ -481,18 +471,13 @@ type ProcFSProcessTreeReader struct {
 	Root string
 }
 
-func (r ProcFSProcessTreeReader) IsDescendant(pid, ancestorPID int) (bool, error) {
+func isDescendant(root string, pid, ancestorPID int) (bool, error) {
 	if pid <= 0 || ancestorPID <= 0 {
 		return false, nil
 	}
 
 	if pid == ancestorPID {
 		return true, nil
-	}
-
-	root := r.Root
-	if root == "" {
-		root = defaultProcFSRoot
 	}
 
 	seen := map[int]struct{}{}
@@ -550,7 +535,7 @@ func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) 
 			continue
 		}
 
-		isDescendant, err := r.IsDescendant(pid, ancestorPID)
+		isDescendant, err := isDescendant(root, pid, ancestorPID)
 		if err != nil || !isDescendant {
 			continue
 		}

@@ -218,6 +218,41 @@ func TestKubernetesProviderPropagatesMonitorErrors(t *testing.T) {
 	assert.Nil(t, usages)
 }
 
+func TestKubernetesProviderFiltersLocalPodsAndUsesDefaultClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	pods := []client.Object{
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "remote", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-b"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "terminal", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}, Status: corev1.PodStatus{Phase: corev1.PodFailed}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "missing-endpoint", Labels: map[string]string{"app": "inference"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-b", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-a", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+	}
+	provider := KubernetesProvider{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(pods...).
+			WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
+			Build(),
+		NodeName: "node-a",
+	}
+
+	result, err := provider.localEndpointPods(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, []string{"chat-a", "chat-b"}, []string{result[0].Name, result[1].Name})
+	assert.NotNil(t, provider.httpClient())
+	monitor, ok, err := provider.localMonitorPod(context.Background())
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, monitor.Name)
+
+	metrics, err := provider.scrapeMonitor(context.Background(), "")
+	require.NoError(t, err)
+	assert.Empty(t, metrics)
+}
+
 func hamiPodNodeNameIndex(object client.Object) []string {
 	pod, ok := object.(*corev1.Pod)
 	if !ok || pod.Spec.NodeName == "" {
