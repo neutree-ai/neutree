@@ -285,6 +285,7 @@ func nodeAgentComponentEnv(profile *v1.AcceleratorProfile) map[string]string {
 	if env == nil {
 		env = map[string]string{}
 	}
+
 	env[v1.VirtualizationMonitorProfileEnvKey] = string(encoded)
 
 	return env
@@ -883,6 +884,7 @@ func acceleratorExporterConfigVolumes(
 			Name:     name,
 			HostPath: &v1.ComponentHostPathVolumeSource{Path: configFile.Path, Type: v1.ComponentHostPathTypeFile},
 		})
+
 		mounts = append(mounts, v1.ComponentVolumeMount{
 			Name:      name,
 			MountPath: configFile.Path,

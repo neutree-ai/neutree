@@ -27,6 +27,7 @@ func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNo
 
 	selected := exporters[0]
 	nodeAgent.AcceleratorType = selected.AcceleratorType
+
 	var runtimeEnv map[string]string
 	if selected.NodeAgentRuntime != nil {
 		runtimeEnv = selected.NodeAgentRuntime.Env
@@ -36,6 +37,7 @@ func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNo
 	if err != nil {
 		return metricsNodeAgent{}, err
 	}
+
 	nodeAgent.Env = env
 
 	runtime := selected.NodeAgentRuntime
@@ -80,6 +82,7 @@ func nodeAgentRuntimeEnv(
 	for key := range values {
 		keys = append(keys, key)
 	}
+
 	sort.Strings(keys)
 
 	result := make([]corev1.EnvVar, 0, len(keys))
