@@ -350,6 +350,9 @@ spec:
         - --accelerator-exporter-metrics-path={{ .NodeAgent.AcceleratorExporterMetricsPath }}
 {{ end }}
         env:
+{{ if .NodeAgent.Env }}
+{{ .NodeAgent.Env | toYaml | indent 8 }}
+{{ end }}
         - name: NODE_NAME
           valueFrom:
             fieldRef:

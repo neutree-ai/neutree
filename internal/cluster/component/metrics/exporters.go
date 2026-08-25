@@ -153,7 +153,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Image:                 util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
 		Command:               append([]string{}, exporterProfile.Command...),
 		Args:                  append([]string{}, exporterProfile.Args...),
-		Env:                   buildExporterEnv(exporterProfile.Env),
+		Env:                   buildEnvironmentVariables(exporterProfile.Env),
 		Port:                  exporterProfile.Port,
 		MetricsPath:           exporterMetricsPath(exporterProfile.MetricsPath),
 		SecurityContext:       exporterRuntimeSecurityContext(runtime),
@@ -195,22 +195,18 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 		return nil, err
 	}
 
-	matches := make([]metricsAcceleratorExporter, 0, len(candidates))
+	var matching []metricsAcceleratorExporter
 
 	for _, exporter := range candidates {
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
-			matches = append(matches, exporter)
+			matching = append(matching, exporter)
+			if len(matching) > 1 {
+				return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
+			}
 		}
 	}
 
-	switch len(matches) {
-	case 0:
-		return nil, nil
-	case 1:
-		return matches, nil
-	default:
-		return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
-	}
+	return matching, nil
 }
 
 func cloneVirtualizationMonitor(profile *v1.VirtualizationMonitorProfile) *v1.VirtualizationMonitorProfile {
@@ -279,7 +275,7 @@ func exporterMetricsPath(metricsPath string) string {
 	return metricsPath
 }
 
-func buildExporterEnv(env map[string]string) []corev1.EnvVar {
+func buildEnvironmentVariables(env map[string]string) []corev1.EnvVar {
 	if len(env) == 0 {
 		return nil
 	}

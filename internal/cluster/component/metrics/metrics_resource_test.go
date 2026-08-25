@@ -1527,7 +1527,6 @@ func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *tes
 			"accelerator.example.com/enabled": "true",
 		})).Build(),
 	}
-
 	_, err := metricsCmpt.GetMetricsResources(context.Background())
 	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }

@@ -39,7 +39,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 		},
 		"node_agent_runtime":{
 			"privileged":true,
-			"env":{"ASCEND_VISIBLE_DEVICES":"all","NEUTREE_VIRTUALIZATION_MONITOR_PROFILE":"stale"},
+			"env":{"ASCEND_VISIBLE_DEVICES":"all","NODE_AGENT_MODE":"npu","NEUTREE_VIRTUALIZATION_MONITOR_PROFILE":"stale"},
 			"capabilities":{"add":["SYS_ADMIN"]},
 			"volumes":[{"name":"ascend-driver","host_path":{"path":"/opt/ascend/driver","type":"directory"}}],
 			"volume_mounts":[{"name":"ascend-driver","mount_path":"/opt/ascend/driver"}]
@@ -49,6 +49,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 			"image":"registry.example/npu-exporter:v1.0.0",
 			"port":8082,
 			"metrics_path":"npu-metrics",
+			"env":{"EXPORTER_ONLY":"not-for-node-agent"},
 			"runtime":{"node_selector":{"example.com/accelerator":"present"}}
 		}
 	}`
@@ -78,6 +79,8 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	assert.Contains(t, container.Args, "--accelerator-type=ascend_npu")
 	assert.Contains(t, container.Args, "--accelerator-exporter-port=8082")
 	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=/npu-metrics")
+	assert.Equal(t, "npu", envValue(container.Env, "NODE_AGENT_MODE"))
+	assert.False(t, hasEnv(container.Env, "EXPORTER_ONLY"))
 	assert.Nil(t, nodeAgent.Spec.Template.Spec.Affinity)
 	require.NotNil(t, container.SecurityContext)
 	assert.True(t, *container.SecurityContext.Privileged)

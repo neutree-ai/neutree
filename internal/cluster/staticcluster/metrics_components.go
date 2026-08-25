@@ -837,7 +837,7 @@ func vmagentTargetLabels(
 		"workspace":           cluster.Metadata.Workspace,
 		"neutree_cluster":     cluster.Metadata.Name,
 		"static_node_cluster": cluster.Metadata.Name,
-		"cluster_type":        "ray",
+		"cluster_type":        v1.SSHClusterType,
 		"node":                node.Metadata.Name,
 		"node_ip":             node.Spec.IP,
 		"node_role":           string(node.Spec.Role),
