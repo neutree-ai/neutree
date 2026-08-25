@@ -222,19 +222,37 @@ func validateEndpointPatchModelSource(store storage.Storage, input *endpointVali
 		return nil
 	}
 
+	// Pausing (zero replicas) skips the model source check, exactly as it skips
+	// the resource shape check in validateEndpointResourceShape: an endpoint that
+	// runs nothing sources nothing. The UI pauses by resending the whole spec
+	// with replicas.num set to 0, so without this a pause would be rejected for
+	// a model field it is not changing and does not need -- and an endpoint
+	// whose spec.model.version is empty could never be paused at all (NEU-715).
+	//
+	// The check comes back on the way up: resuming or scaling out puts the
+	// replica count above zero, and the merged spec is validated then.
+	if endpointReplicaCount(input.New.Spec) == 0 {
+		return nil
+	}
+
 	return validateEndpointModelSource(store, input.New)
 }
 
 // endpointPatchMayAffectModelSourceValidation reports whether a PATCH can change
 // the answer. spec.engine counts alongside spec.model: the engine decides whether
 // a registry is required at all, so repointing an endpoint at another engine has
-// to be re-checked even when spec.model is untouched.
+// to be re-checked even when spec.model is untouched. The replica count counts
+// too, for the same reason it counts in endpointPatchMayAffectResourceValidation:
+// it is what decides whether the check applies, so a patch that raises the count
+// off zero has to be checked even though it names no model.
 func endpointPatchMayAffectModelSourceValidation(endpoint *v1.Endpoint) bool {
 	if endpoint == nil || endpoint.Spec == nil {
 		return false
 	}
 
-	return endpoint.Spec.Model != nil || endpoint.Spec.Engine != nil
+	return endpoint.Spec.Model != nil ||
+		endpoint.Spec.Engine != nil ||
+		endpoint.Spec.Replicas.Num != nil
 }
 
 // validateEndpointModelSource decides which parts of spec.model an endpoint has
