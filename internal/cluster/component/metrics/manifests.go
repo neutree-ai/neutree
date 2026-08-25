@@ -345,7 +345,7 @@ spec:
 {{ if .NodeAgent.AcceleratorType }}
         - --accelerator-type={{ .NodeAgent.AcceleratorType }}
 {{ end }}
-{{ if .NodeAgent.AcceleratorExporterPort }}
+{{ if .NodeAgent.HasAcceleratorExporterTarget }}
         - --accelerator-exporter-port={{ .NodeAgent.AcceleratorExporterPort }}
         - --accelerator-exporter-metrics-path={{ .NodeAgent.AcceleratorExporterMetricsPath }}
 {{ end }}

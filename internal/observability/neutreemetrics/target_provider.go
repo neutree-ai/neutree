@@ -56,7 +56,7 @@ func (p StaticScrapeTargetProvider) Targets(_ context.Context, targetType string
 		targetType,
 		"127.0.0.1",
 		port,
-		targetSchemes(p.metricsMode(), targetType, p.AcceleratorType != ""),
+		targetSchemes(p.metricsMode(), targetType, p.hasExplicitAcceleratorTarget(targetType)),
 		p.metricsPath(targetType),
 	), nil
 }
@@ -66,11 +66,7 @@ func (p StaticScrapeTargetProvider) metricsMode() string {
 }
 
 func (p StaticScrapeTargetProvider) targetPort(targetType string) (int, bool) {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorType != "" {
-		if p.AcceleratorExporterPort <= 0 {
-			return 0, false
-		}
-
+	if p.hasExplicitAcceleratorTarget(targetType) {
 		return p.AcceleratorExporterPort, true
 	}
 
@@ -78,7 +74,7 @@ func (p StaticScrapeTargetProvider) targetPort(targetType string) (int, bool) {
 }
 
 func (p StaticScrapeTargetProvider) metricsPath(targetType string) string {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorType != "" {
+	if p.hasExplicitAcceleratorTarget(targetType) {
 		return normalizedTargetMetricsPath(p.AcceleratorExporterMetricsPath)
 	}
 
@@ -140,7 +136,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 			targetType,
 			host,
 			port,
-			targetSchemes(mode, targetType, p.AcceleratorType != ""),
+			targetSchemes(mode, targetType, p.hasExplicitAcceleratorTarget(targetType)),
 			p.metricsPath(targetType),
 		)...)
 	}
@@ -149,11 +145,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 }
 
 func (p KubernetesScrapeTargetProvider) targetPort(targetType string) (int, bool) {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorType != "" {
-		if p.AcceleratorExporterPort <= 0 {
-			return 0, false
-		}
-
+	if p.hasExplicitAcceleratorTarget(targetType) {
 		return p.AcceleratorExporterPort, true
 	}
 
@@ -161,7 +153,7 @@ func (p KubernetesScrapeTargetProvider) targetPort(targetType string) (int, bool
 }
 
 func (p KubernetesScrapeTargetProvider) metricsPath(targetType string) string {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorType != "" {
+	if p.hasExplicitAcceleratorTarget(targetType) {
 		return normalizedTargetMetricsPath(p.AcceleratorExporterMetricsPath)
 	}
 
@@ -173,12 +165,36 @@ func (p KubernetesScrapeTargetProvider) matchesTargetPod(
 	targetType string,
 	labels map[string]string,
 ) bool {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter && p.AcceleratorType != "" {
+	if p.hasExplicitAcceleratorTarget(targetType) {
 		return labels[ManagedAcceleratorExporterLabel] == ManagedAcceleratorExporterValue &&
 			labels[ManagedAcceleratorExporterTypeLabel] == p.AcceleratorType
 	}
 
 	return matchesTargetPod(metricsMode, targetType, labels)
+}
+
+func (p StaticScrapeTargetProvider) hasExplicitAcceleratorTarget(targetType string) bool {
+	return hasExplicitAcceleratorTarget(
+		targetType,
+		p.AcceleratorType,
+		p.AcceleratorExporterPort,
+		p.AcceleratorExporterMetricsPath,
+	)
+}
+
+func (p KubernetesScrapeTargetProvider) hasExplicitAcceleratorTarget(targetType string) bool {
+	return hasExplicitAcceleratorTarget(
+		targetType,
+		p.AcceleratorType,
+		p.AcceleratorExporterPort,
+		p.AcceleratorExporterMetricsPath,
+	)
+}
+
+func hasExplicitAcceleratorTarget(targetType, acceleratorType string, port int, metricsPath string) bool {
+	return targetType == metricsnormalizer.TargetAcceleratorExporter &&
+		acceleratorType != "" &&
+		(port != 0 || strings.TrimSpace(metricsPath) != "")
 }
 
 func targetPort(metricsMode string, targetType string) (int, bool) {
@@ -225,9 +241,9 @@ func normalizedTargetMetricsPath(metricsPath string) string {
 	return metricsPath
 }
 
-func targetSchemes(metricsMode string, targetType string, explicitAcceleratorType bool) []string {
+func targetSchemes(metricsMode string, targetType string, explicitAcceleratorTarget bool) []string {
 	if targetType == metricsnormalizer.TargetAcceleratorExporter &&
-		metricsMode == MetricsModeExternal && !explicitAcceleratorType {
+		metricsMode == MetricsModeExternal && !explicitAcceleratorTarget {
 		return []string{"http", "https"}
 	}
 

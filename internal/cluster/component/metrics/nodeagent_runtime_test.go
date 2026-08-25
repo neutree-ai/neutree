@@ -79,6 +79,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	assert.Contains(t, container.Args, "--accelerator-type=ascend_npu")
 	assert.Contains(t, container.Args, "--accelerator-exporter-port=8082")
 	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=/npu-metrics")
+	assert.Nil(t, container.ReadinessProbe)
 	assert.Equal(t, "npu", envValue(container.Env, "NODE_AGENT_MODE"))
 	assert.False(t, hasEnv(container.Env, "EXPORTER_ONLY"))
 	assert.Nil(t, nodeAgent.Spec.Template.Spec.Affinity)
@@ -92,9 +93,11 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	assert.False(t, hasMetricsDaemonSet(objects, neutreeNodeAgentMetricsName+"-ascend-npu"))
 }
 
-func TestSelectedMetricsNodeAgentProjectsVirtualizationMonitorWithoutRuntime(t *testing.T) {
+func TestSelectedMetricsNodeAgentProjectsProfileTargetWithoutRuntime(t *testing.T) {
 	nodeAgent, err := selectedMetricsNodeAgent([]metricsAcceleratorExporter{{
 		AcceleratorType: "npu",
+		Port:            8082,
+		MetricsPath:     "/metrics",
 		VirtualizationMonitor: &v1.VirtualizationMonitorProfile{
 			Namespace: "kube-system",
 			PodSelector: map[string]string{
@@ -107,6 +110,9 @@ func TestSelectedMetricsNodeAgentProjectsVirtualizationMonitorWithoutRuntime(t *
 
 	require.NoError(t, err)
 	assert.Equal(t, "npu", nodeAgent.AcceleratorType)
+	assert.True(t, nodeAgent.HasAcceleratorExporterTarget)
+	assert.Equal(t, 8082, nodeAgent.AcceleratorExporterPort)
+	assert.Equal(t, "/metrics", nodeAgent.AcceleratorExporterMetricsPath)
 	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},"port":9395,"metrics_path":"/metrics"}`,
 		envValue(nodeAgent.Env, v1.VirtualizationMonitorProfileEnvKey))
 }

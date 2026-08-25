@@ -14,6 +14,7 @@ import (
 // runtime metadata is not inherited.
 type metricsNodeAgent struct {
 	AcceleratorType                string
+	HasAcceleratorExporterTarget   bool
 	AcceleratorExporterPort        int
 	AcceleratorExporterMetricsPath string
 	Env                            []corev1.EnvVar
@@ -30,6 +31,9 @@ func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNo
 
 	selected := exporters[0]
 	nodeAgent.AcceleratorType = selected.AcceleratorType
+	nodeAgent.HasAcceleratorExporterTarget = true
+	nodeAgent.AcceleratorExporterPort = selected.Port
+	nodeAgent.AcceleratorExporterMetricsPath = selected.MetricsPath
 
 	var runtimeEnv map[string]string
 	if selected.NodeAgentRuntime != nil {
@@ -47,8 +51,6 @@ func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNo
 	if runtime == nil {
 		return nodeAgent, nil
 	}
-	nodeAgent.AcceleratorExporterPort = selected.Port
-	nodeAgent.AcceleratorExporterMetricsPath = selected.MetricsPath
 	nodeAgent.SecurityContext = nodeAgentRuntimeSecurityContext(runtime)
 	runtimeMounts, runtimeVolumes := buildComponentVolumes(runtime.Volumes, runtime.VolumeMounts)
 	nodeAgent.VolumeMounts = append(nodeAgent.VolumeMounts, runtimeMounts...)
