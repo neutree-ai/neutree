@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -29,6 +30,7 @@ type neutreeCoreInstallOptions struct {
 	adminPassword         string
 
 	victorialogsRetentionPeriod string
+	kongWorkerProcesses         string
 
 	// enablePublicModelRegistries provisions the built-in public model
 	// registries. Off by default so an air-gapped install does not ship a
@@ -38,10 +40,18 @@ type neutreeCoreInstallOptions struct {
 	modelScopeEndpoint          string
 }
 
-// defaultVictoriaLogsRetentionPeriod is the default VictoriaLogs log retention
-// period rendered into the neutree-core compose file. Overridable at deploy time
-// via --victorialogs-retention-period.
-const defaultVictoriaLogsRetentionPeriod = "30d"
+const (
+	// defaultVictoriaLogsRetentionPeriod is the default VictoriaLogs log retention
+	// period rendered into the neutree-core compose file. Overridable at deploy time
+	// via --victorialogs-retention-period.
+	defaultVictoriaLogsRetentionPeriod = "30d"
+
+	// defaultKongWorkerProcesses keeps Kong's PostgreSQL connection demand from
+	// scaling with host CPU count unless an operator explicitly opts in to auto.
+	defaultKongWorkerProcesses = "2"
+)
+
+var kongWorkerProcessesPattern = regexp.MustCompile(`^(auto|[1-9][0-9]*)$`)
 
 func NewNeutreeCoreInstallCmd(exector command.Executor, commonOptions *commonOptions) *cobra.Command {
 	options := neutreeCoreInstallOptions{
@@ -62,6 +72,7 @@ Configuration Options:
   --jwt-secret             JWT secret for authentication
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
+  --kong-worker-processes  Kong Nginx workers: positive integer or auto; auto follows host CPU and can increase PostgreSQL connection pressure
   --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
   --victorialogs-retention-period VictoriaLogs log retention period (default: 30d; e.g. 30d, 90d, 1y)
   --enable-public-model-registries Provision built-in read-only public model registries (default: false)
@@ -82,6 +93,10 @@ Examples:
 				return fmt.Errorf("--jwt-secret is required")
 			}
 
+			if _, err := normalizeKongWorkerProcesses(options.kongWorkerProcesses, false); err != nil {
+				return err
+			}
+
 			err := resolveNodeIP(cmd.OutOrStdout(), options.commonOptions, util.GetHostIP)
 			if err != nil {
 				return err
@@ -95,6 +110,8 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.kongWorkerProcesses, "kong-worker-processes", defaultKongWorkerProcesses,
+		`Kong Nginx worker processes ("auto" or a positive integer; "auto" follows host CPU and can increase PostgreSQL connection pressure)`)
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.victorialogsRetentionPeriod, "victorialogs-retention-period",
 		defaultVictoriaLogsRetentionPeriod, "VictoriaLogs log retention period (e.g. 30d, 90d, 1y)")
@@ -179,6 +196,11 @@ func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
 }
 
 func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, outputWorkDir string) error {
+	kongWorkerProcesses, err := normalizeKongWorkerProcesses(options.kongWorkerProcesses, true)
+	if err != nil {
+		return err
+	}
+
 	renderedCoreWorkDir := filepath.Join(outputWorkDir, "neutree-core")
 
 	// extract neutree core deploy manifests
@@ -248,6 +270,7 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		"JwtToken":                     *jwtToken,
 		"VectorVersion":                componentversion.Vector,
 		"KongVersion":                  componentversion.Kong,
+		"KongWorkerProcesses":          kongWorkerProcesses,
 		"KongPluginGatewayChecksum":    pluginChecksums["neutree-ai-gateway"],
 		"KongPluginStatisticsChecksum": pluginChecksums["neutree-ai-statistics"],
 		"KongPluginAccessChecksum":     pluginChecksums["neutree-ai-access"],
@@ -272,4 +295,16 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 
 	return nil
+}
+
+func normalizeKongWorkerProcesses(value string, defaultWhenEmpty bool) (string, error) {
+	if value == "" && defaultWhenEmpty {
+		value = defaultKongWorkerProcesses
+	}
+
+	if !kongWorkerProcessesPattern.MatchString(value) {
+		return "", fmt.Errorf("invalid --kong-worker-processes value %q: must be \"auto\" or a positive integer", value)
+	}
+
+	return value, nil
 }

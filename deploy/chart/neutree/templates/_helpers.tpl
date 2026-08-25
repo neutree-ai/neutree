@@ -96,6 +96,17 @@ Get the JWT secret with validation.
 {{- end -}}
 
 {{/*
+Validate the Kong Nginx worker process value shared by every Kong workload.
+*/}}
+{{- define "neutree.kong.workerProcesses" -}}
+{{- $value := toString .Values.kong.workerProcesses -}}
+{{- if not (regexMatch "^(auto|[1-9][0-9]*)$" $value) -}}
+{{- fail (printf "kong.workerProcesses must be \"auto\" or a positive integer (got %q)" $value) -}}
+{{- end -}}
+{{- $value -}}
+{{- end -}}
+
+{{/*
 Resolve the AI inference trace store (VictoriaLogs) base URL.
 Returns the in-cluster VictoriaLogs service when victorialogs.enabled is true,
 otherwise the externally configured system.aiTraceStoreUrl. Empty when neither

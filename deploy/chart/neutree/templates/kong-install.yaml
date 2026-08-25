@@ -76,7 +76,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST
@@ -212,7 +212,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST
@@ -394,7 +394,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST
@@ -472,7 +472,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST
@@ -568,7 +568,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST
@@ -767,7 +767,7 @@ spec:
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
-          value: "2"
+          value: {{ include "neutree.kong.workerProcesses" . | quote }}
         - name: KONG_PG_DATABASE
           value: "neutree"
         - name: KONG_PG_HOST

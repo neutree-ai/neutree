@@ -237,6 +237,9 @@ vmagent:
       - ReadWriteOnce
 
 kong:
+  # Use "auto" only after confirming that host CPU count and PostgreSQL
+  # connection capacity can support the resulting Kong worker count.
+  workerProcesses: "2"
   image:
     registry: ""
     repository: kong/kong

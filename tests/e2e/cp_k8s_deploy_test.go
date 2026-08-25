@@ -55,6 +55,10 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 			}, 15*time.Minute, 10*time.Second).Should(Succeed(),
 				"all resources should be healthy")
 		})
+
+		It("should render the default Kong worker process count in every Kong workload", Label("kong-worker-processes"), func() {
+			expectRenderedKongWorkerProcesses(h.HelmTemplate(baseValues...), "2")
+		})
 	})
 
 	// --- Custom install: LB + private registry + custom DB in one deploy ---
@@ -81,6 +85,7 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 				"api.service.type=LoadBalancer",
 				"global.imagePullSecrets[0].name=" + secretName,
 				"db.password=" + customPwd,
+				"kong.workerProcesses=3",
 			}, helmMirrorRegistrySetValues()...)
 			setValues = append(baseValues, customValues...)
 
@@ -242,5 +247,54 @@ var _ = Describe("K8s Control Plane Deploy", Ordered, Label("control-plane", "k8
 			}, 1*time.Minute, 3*time.Second).Should(Succeed(),
 				"API should be accessible with custom db.password")
 		})
+
+		It("should render the custom Kong worker process count in every Kong workload", Label("kong-worker-processes"), func() {
+			expectRenderedKongWorkerProcesses(resources, "3")
+		})
 	})
 })
+
+func expectRenderedKongWorkerProcesses(resources []unstructured.Unstructured, expected string) {
+	var actual []string
+
+	for _, resource := range resources {
+		containers, found, err := unstructured.NestedSlice(resource.Object, "spec", "template", "spec", "containers")
+		Expect(err).NotTo(HaveOccurred())
+		if !found {
+			continue
+		}
+
+		for _, container := range containers {
+			containerMap, ok := container.(map[string]interface{})
+			Expect(ok).To(BeTrue(), "rendered container should be an object")
+			if !ok {
+				continue
+			}
+
+			env, found, err := unstructured.NestedSlice(containerMap, "env")
+			Expect(err).NotTo(HaveOccurred())
+			if !found {
+				continue
+			}
+
+			for _, entry := range env {
+				entryMap, ok := entry.(map[string]interface{})
+				Expect(ok).To(BeTrue(), "rendered environment entry should be an object")
+				if !ok {
+					continue
+				}
+
+				if entryMap["name"] == "KONG_NGINX_WORKER_PROCESSES" {
+					value, ok := entryMap["value"].(string)
+					Expect(ok).To(BeTrue(), "Kong worker process value should be a string")
+					actual = append(actual, value)
+				}
+			}
+		}
+	}
+
+	Expect(actual).To(HaveLen(6), "all six Kong workloads should set worker processes")
+	for _, value := range actual {
+		Expect(value).To(Equal(expected))
+	}
+}
