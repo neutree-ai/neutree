@@ -955,57 +955,37 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 func TestValidateClusterAcceleratorVirtualization(t *testing.T) {
 	t.Run("body", testValidateClusterAcceleratorVirtualizationBody)
-	t.Run("identity", testResolveCurrentClusterIdentityForAcceleratorVirtualization)
+	t.Run("identity", testValidateClusterAcceleratorVirtualizationPatchIdentity)
 	t.Run("enable", testValidateClusterAcceleratorVirtualizationEnable)
 	t.Run("disable", testValidateClusterAcceleratorVirtualizationDisable)
 	t.Run("middleware", testValidateClusterAcceleratorVirtualizationMiddleware)
 }
 
-func testResolveCurrentClusterIdentityForAcceleratorVirtualization(t *testing.T) {
+func testValidateClusterAcceleratorVirtualizationPatchIdentity(t *testing.T) {
 	tests := []struct {
-		name                string
-		current             *v1.Cluster
-		patch               v1.Cluster
-		missingIdentityHint string
-		wantWorkspace       string
-		wantName            string
-		wantHint            string
+		name     string
+		target   *v1.Metadata
+		patch    *v1.Metadata
+		wantHint string
 	}{
 		{
-			name: "returns the current target when the patch omits metadata",
-			current: &v1.Cluster{
-				Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
-			},
-			missingIdentityHint: "cluster identity is required when enabling accelerator virtualization",
-			wantWorkspace:       "default",
-			wantName:            "cluster",
+			name:   "allows omitted patch metadata",
+			target: &v1.Metadata{Workspace: "default", Name: "cluster"},
 		},
 		{
-			name: "rejects mismatched patch body identity",
-			current: &v1.Cluster{
-				Metadata: &v1.Metadata{Workspace: "default", Name: "cluster"},
-			},
-			patch:               v1.Cluster{Metadata: &v1.Metadata{Workspace: "default", Name: "other-cluster"}},
-			missingIdentityHint: "cluster identity is required when enabling accelerator virtualization",
-			wantHint:            "cluster metadata in patch body does not match patch target",
-		},
-		{
-			name:                "rejects missing cluster identity with transition-specific hint",
-			current:             &v1.Cluster{},
-			missingIdentityHint: "cluster identity is required when disabling accelerator virtualization",
-			wantHint:            "cluster identity is required when disabling accelerator virtualization",
+			name:     "rejects mismatched patch body identity",
+			target:   &v1.Metadata{Workspace: "default", Name: "cluster"},
+			patch:    &v1.Metadata{Workspace: "default", Name: "other-cluster"},
+			wantHint: "cluster metadata in patch body does not match patch target",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			workspace, name, validationErr := resolveCurrentClusterIdentityForAcceleratorVirtualization(
-				tt.current, tt.patch, tt.missingIdentityHint)
+			validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(tt.target, tt.patch)
 
 			if tt.wantHint == "" {
 				assert.Nil(t, validationErr)
-				assert.Equal(t, tt.wantWorkspace, workspace)
-				assert.Equal(t, tt.wantName, name)
 
 				return
 			}
@@ -1228,7 +1208,7 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 				}).Return(tt.endpoints, tt.endpointErr).Once()
 			}
 
-			err := validateClusterAcceleratorVirtualizationEnableForIdentity(
+			err := validateClusterAcceleratorVirtualizationEnable(
 				mockStorage, "default", "gpu-cluster")
 			if tt.wantCode == "" {
 				assert.Nil(t, err)
@@ -1433,7 +1413,7 @@ func testValidateClusterAcceleratorVirtualizationDisable(t *testing.T) {
 				Filters: clusterEndpointReferenceFilters("default", "gpu-cluster"),
 			}).Return(tt.endpoints, tt.endpointErr).Once()
 
-			err := validateClusterAcceleratorVirtualizationDisableForIdentity(
+			err := validateClusterAcceleratorVirtualizationDisable(
 				mockStorage, "default", "gpu-cluster")
 			if tt.wantCode == "" {
 				assert.Nil(t, err)

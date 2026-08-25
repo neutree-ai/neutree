@@ -729,7 +729,7 @@ func countClusterEndpoints(
 	return count, nil
 }
 
-func validateClusterAcceleratorVirtualizationDisableForIdentity(
+func validateClusterAcceleratorVirtualizationDisable(
 	s storage.Storage, workspace, name string,
 ) *validationError {
 	vGPUEndpointCount, err := countClusterEndpoints(s, workspace, name, endpointRequestsVirtualization)
@@ -775,13 +775,13 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		return nil
 	}
 
-	workspace, name, validationErr := resolveCurrentClusterIdentityForAcceleratorVirtualization(
-		current, patch, "cluster identity is required when switching accelerator virtualization mode")
-	if validationErr != nil {
+	if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
+		current.Metadata, patch.Metadata); validationErr != nil {
 		return validationErr
 	}
 
-	vGPUEndpointCount, err := countClusterEndpoints(s, workspace, name, endpointRequestsVirtualization)
+	vGPUEndpointCount, err := countClusterEndpoints(
+		s, current.Metadata.Workspace, current.Metadata.Name, endpointRequestsVirtualization)
 	if err != nil {
 		return &validationError{
 			Code:    "10228",
@@ -792,8 +792,12 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 
 	if vGPUEndpointCount > 0 {
 		return &validationError{
-			Code:    "10228",
-			Message: fmt.Sprintf("cannot switch cluster accelerator virtualization mode for cluster '%s/%s'", workspace, name),
+			Code: "10228",
+			Message: fmt.Sprintf(
+				"cannot switch cluster accelerator virtualization mode for cluster '%s/%s'",
+				current.Metadata.Workspace,
+				current.Metadata.Name,
+			),
 			Hint: fmt.Sprintf(
 				"%d vGPU endpoint(s) still use accelerator virtualization; disable virtualization on the endpoints before switching",
 				vGPUEndpointCount,
@@ -826,28 +830,20 @@ func endpointRequestsVirtualization(endpoint *v1.Endpoint) bool {
 	return endpoint.Spec.Resources.HasAcceleratorVirtualization()
 }
 
-func resolveCurrentClusterIdentityForAcceleratorVirtualization(
-	current *v1.Cluster, patch v1.Cluster, missingIdentityHint string,
-) (string, string, *validationError) {
-	if current == nil || current.Metadata == nil || current.Metadata.Workspace == "" || current.Metadata.Name == "" {
-		return "", "", &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    missingIdentityHint,
-		}
-	}
-
-	if patch.Metadata != nil &&
-		((patch.Metadata.Workspace != "" && patch.Metadata.Workspace != current.Metadata.Workspace) ||
-			(patch.Metadata.Name != "" && patch.Metadata.Name != current.Metadata.Name)) {
-		return "", "", &validationError{
+func validateClusterAcceleratorVirtualizationPatchIdentity(
+	target, patch *v1.Metadata,
+) *validationError {
+	if patch != nil &&
+		((patch.Workspace != "" && patch.Workspace != target.Workspace) ||
+			(patch.Name != "" && patch.Name != target.Name)) {
+		return &validationError{
 			Code:    "10209",
 			Message: "failed to validate cluster accelerator virtualization",
 			Hint:    "cluster metadata in patch body does not match patch target",
 		}
 	}
 
-	return current.Metadata.Workspace, current.Metadata.Name, nil
+	return nil
 }
 
 func validateClusterAcceleratorVirtualizationInput(
@@ -895,23 +891,23 @@ func validateClusterAcceleratorVirtualizationTransition(
 		// behavior. Running inference endpoints would be disrupted by the
 		// scheduler/webhook takeover, so the enable transition is gated on the
 		// cluster having no running GPU endpoints.
-		workspace, name, validationErr := resolveCurrentClusterIdentityForAcceleratorVirtualization(
-			input.Current, input.Patch, "cluster identity is required when enabling accelerator virtualization")
-		if validationErr != nil {
+		if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
+			input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
 			return validationErr
 		}
 
-		return validateClusterAcceleratorVirtualizationEnableForIdentity(s, workspace, name)
+		return validateClusterAcceleratorVirtualizationEnable(
+			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
 
 	case currentEnabled && !newEnabled:
 		// Disabling removes HAMi while vGPU endpoints still reference it.
-		workspace, name, validationErr := resolveCurrentClusterIdentityForAcceleratorVirtualization(
-			input.Current, input.Patch, "cluster identity is required when disabling accelerator virtualization")
-		if validationErr != nil {
+		if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
+			input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
 			return validationErr
 		}
 
-		return validateClusterAcceleratorVirtualizationDisableForIdentity(s, workspace, name)
+		return validateClusterAcceleratorVirtualizationDisable(
+			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
 
 	case currentEnabled && newEnabled:
 		// Mode-switch guard decides internally whether the mode actually
@@ -924,7 +920,7 @@ func validateClusterAcceleratorVirtualizationTransition(
 	}
 }
 
-func validateClusterAcceleratorVirtualizationEnableForIdentity(
+func validateClusterAcceleratorVirtualizationEnable(
 	s storage.Storage, workspace, name string,
 ) *validationError {
 	runningGPUEndpointCount, err := countClusterEndpoints(s, workspace, name, endpointRequestsRunningGPU)
