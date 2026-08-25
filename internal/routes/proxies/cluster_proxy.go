@@ -758,7 +758,7 @@ func validateClusterAcceleratorVirtualizationDisable(
 // When the mode is unchanged, or virtualization is not enabled on the target
 // cluster, the gate is skipped.
 func validateClusterAcceleratorVirtualizationModeSwitch(
-	s storage.Storage, current, next *v1.Cluster, patch v1.Cluster,
+	s storage.Storage, current, next *v1.Cluster,
 ) *validationError {
 	if next == nil || next.Spec == nil || !next.Spec.AcceleratorVirtualizationEnabled() {
 		return nil
@@ -773,11 +773,6 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 
 	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
 		return nil
-	}
-
-	if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
-		current.Metadata, patch.Metadata); validationErr != nil {
-		return validationErr
 	}
 
 	vGPUEndpointCount, err := countClusterEndpoints(
@@ -885,39 +880,36 @@ func validateClusterAcceleratorVirtualizationTransition(
 	currentEnabled := input.Current.Spec.AcceleratorVirtualizationEnabled()
 	newEnabled := input.New.Spec.AcceleratorVirtualizationEnabled()
 
+	modeChanged := currentEnabled && newEnabled &&
+		currentSpecMode(input.Current) != currentSpecMode(input.New)
+	if currentEnabled == newEnabled && !modeChanged {
+		return nil
+	}
+
+	if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
+		input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
+		return validationErr
+	}
+
 	switch {
 	case !currentEnabled && newEnabled:
 		// Enabling changes the cluster's GPU scheduling and device-plugin
 		// behavior. Running inference endpoints would be disrupted by the
 		// scheduler/webhook takeover, so the enable transition is gated on the
 		// cluster having no running GPU endpoints.
-		if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
-			input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
-			return validationErr
-		}
-
 		return validateClusterAcceleratorVirtualizationEnable(
 			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
 
 	case currentEnabled && !newEnabled:
 		// Disabling removes HAMi while vGPU endpoints still reference it.
-		if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
-			input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
-			return validationErr
-		}
-
 		return validateClusterAcceleratorVirtualizationDisable(
 			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
 
 	case currentEnabled && newEnabled:
-		// Mode-switch guard decides internally whether the mode actually
-		// changed; unchanged mode runs no guard.
-		return validateClusterAcceleratorVirtualizationModeSwitch(s, input.Current, input.New, input.Patch)
-
-	default:
-		// Virtualization stays disabled.
-		return nil
+		return validateClusterAcceleratorVirtualizationModeSwitch(s, input.Current, input.New)
 	}
+
+	return nil
 }
 
 func validateClusterAcceleratorVirtualizationEnable(

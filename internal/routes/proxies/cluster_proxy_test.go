@@ -1470,7 +1470,7 @@ func TestValidateClusterModeSwitchToTemplateBlockedByVGPUEndpoints(t *testing.T)
 		},
 	}, nil).Once()
 
-	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next, v1.Cluster{})
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
 	assert.NotNil(t, err)
 	assert.Equal(t, "10228", err.Code)
@@ -1516,7 +1516,7 @@ func TestValidateClusterModeSwitchFromTemplateToCoreBlockedByVGPUEndpoints(t *te
 		},
 	}, nil).Once()
 
-	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next, v1.Cluster{})
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
 	assert.NotNil(t, err)
 	assert.Equal(t, "10228", err.Code)
@@ -1549,7 +1549,7 @@ func TestValidateClusterModeSwitchSkippedWhenModeUnchanged(t *testing.T) {
 		},
 	}
 
-	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next, v1.Cluster{})
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
 	assert.Nil(t, err)
 	mockStorage.AssertNotCalled(t, "ListEndpoint")
@@ -1580,7 +1580,7 @@ func TestValidateClusterModeSwitchSkippedWhenVirtualizationDisabled(t *testing.T
 		},
 	}
 
-	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next, v1.Cluster{})
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
 	assert.Nil(t, err)
 	mockStorage.AssertNotCalled(t, "ListEndpoint")
@@ -1633,7 +1633,7 @@ func TestValidateClusterModeSwitchToTemplateAllowedWithoutVGPUEndpoints(t *testi
 		},
 	}, nil).Once()
 
-	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next, v1.Cluster{})
+	err := validateClusterAcceleratorVirtualizationModeSwitch(mockStorage, current, next)
 
 	assert.Nil(t, err)
 	mockStorage.AssertExpectations(t)
@@ -1684,13 +1684,14 @@ func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T
 			},
 		},
 	}
-	mismatchedModeSwitchInput := validationInput(
-		transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
-		transitionCluster(true, v1.AcceleratorVirtualizationModeTemplate),
-	)
-	mismatchedModeSwitchInput.Patch.Metadata = &v1.Metadata{
-		Workspace: "default",
-		Name:      "other-cluster",
+	mismatchedIdentityInput := func(current, next *v1.Cluster) *ValidationInput[v1.Cluster] {
+		input := validationInput(current, next)
+		input.Patch.Metadata = &v1.Metadata{
+			Workspace: "default",
+			Name:      "other-cluster",
+		}
+
+		return input
 	}
 
 	tests := []struct {
@@ -1702,6 +1703,24 @@ func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T
 		wantNoEndpointLookup bool
 		wantNoGuard          bool
 	}{
+		{
+			name: "enable rejects mismatched patch body identity",
+			input: mismatchedIdentityInput(
+				transitionCluster(false, ""),
+				transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
+			),
+			wantCode:             "10209",
+			wantNoEndpointLookup: true,
+		},
+		{
+			name: "disable rejects mismatched patch body identity",
+			input: mismatchedIdentityInput(
+				transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
+				transitionCluster(false, ""),
+			),
+			wantCode:             "10209",
+			wantNoEndpointLookup: true,
+		},
 		{
 			name:         "enable transition routes to enable guard",
 			input:        validationInput(transitionCluster(false, ""), transitionCluster(true, v1.AcceleratorVirtualizationModeCore)),
@@ -1724,8 +1743,11 @@ func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T
 			wantCode:     "10228",
 		},
 		{
-			name:                 "mode switch rejects mismatched patch body identity",
-			input:                mismatchedModeSwitchInput,
+			name: "mode switch rejects mismatched patch body identity",
+			input: mismatchedIdentityInput(
+				transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
+				transitionCluster(true, v1.AcceleratorVirtualizationModeTemplate),
+			),
 			wantCode:             "10209",
 			wantNoEndpointLookup: true,
 		},
@@ -1736,9 +1758,25 @@ func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T
 			wantNoGuard: true,
 		},
 		{
+			name: "unchanged mode ignores mismatched patch body identity",
+			input: mismatchedIdentityInput(
+				transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
+				transitionCluster(true, v1.AcceleratorVirtualizationModeCore),
+			),
+			wantNoGuard: true,
+		},
+		{
 			name:        "virtualization stays disabled runs no guard",
 			input:       validationInput(transitionCluster(false, ""), transitionCluster(false, "")),
 			endpoints:   []v1.Endpoint{runningGPUEndpoint},
+			wantNoGuard: true,
+		},
+		{
+			name: "disabled virtualization ignores mismatched patch body identity",
+			input: mismatchedIdentityInput(
+				transitionCluster(false, ""),
+				transitionCluster(false, ""),
+			),
 			wantNoGuard: true,
 		},
 	}
