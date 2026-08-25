@@ -88,17 +88,6 @@ func (r adapterRegistry) descriptorsCopy() []adapter.MetricDescriptor {
 	return adapter.CloneMetricDescriptors(r.descriptors)
 }
 
-func (r adapterRegistry) types() []string {
-	types := make([]string, 0, len(r.byType))
-	for acceleratorType := range r.byType {
-		types = append(types, acceleratorType)
-	}
-
-	sort.Strings(types)
-
-	return types
-}
-
 func validateAdapterDescriptor(acceleratorType string, descriptor adapter.MetricDescriptor) error {
 	name := strings.TrimSpace(descriptor.Name)
 	if name == "" {

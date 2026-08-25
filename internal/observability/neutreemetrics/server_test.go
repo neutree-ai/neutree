@@ -91,7 +91,7 @@ DCGM_FI_CUDA_DRIVER_VERSION{gpu="0",UUID="GPU-abc",modelName="A100"} 12020
 	assert.Contains(t, body, `neutree_node_accelerator_nvidia_info{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",architecture="unknown",cluster_type="kubernetes",cuda_capability="unknown",cuda_driver_version="12.2",driver_version="535.104.05",node="node-a",nvlink="unknown",nvswitch="unknown",product="A100"} 1`)
 }
 
-func TestNewServerRejectsUnregisteredAcceleratorType(t *testing.T) {
+func TestNewServerAllowsUnregisteredAcceleratorType(t *testing.T) {
 	testCases := []struct {
 		name         string
 		accelerators map[string]adapter.Accelerator
@@ -115,12 +115,13 @@ func TestNewServerRejectsUnregisteredAcceleratorType(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := NewServer(Config{
+			server, err := NewServer(Config{
 				AcceleratorType: "unknown-accelerator",
 				Accelerators:    testCase.accelerators,
 			})
 
-			assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+			require.NoError(t, err)
+			assert.NotNil(t, server)
 		})
 	}
 }
