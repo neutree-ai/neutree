@@ -26,6 +26,13 @@ type StaticAccelerator interface {
 	BuildStaticMetrics(context.Context, HardwareSnapshot, StaticEvidence) (MetricResult, error)
 }
 
+// EndpointReplicaAcceleratorUsageConsumer declares that an adapter needs the
+// host's raw per-replica accelerator usage evidence. Adapters that do not
+// implement it are never coupled to a vendor-specific usage collector.
+type EndpointReplicaAcceleratorUsageConsumer interface {
+	NeedsEndpointReplicaAcceleratorUsages() bool
+}
+
 // MetricDescriptorProvider optionally declares adapter-owned metric series.
 type MetricDescriptorProvider interface {
 	MetricDescriptors() []MetricDescriptor

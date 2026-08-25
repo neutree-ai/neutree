@@ -11,17 +11,17 @@ import (
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
-// nvidiaAccelerator is the reference Community adapter. It reuses the legacy
-// DCGM normalization helpers so the explicit adapter path stays byte-identical
-// to the historical NVIDIA metrics output.
+// nvidiaAccelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
+// discovery, allocation resolution, and DCGM metric conversion.
 type nvidiaAccelerator struct {
 	provider hardware.GPUHardwareInfoProvider
 }
 
 var (
-	_ adapter.Accelerator           = (*nvidiaAccelerator)(nil)
-	_ adapter.KubernetesAccelerator = (*nvidiaAccelerator)(nil)
-	_ adapter.StaticAccelerator     = (*nvidiaAccelerator)(nil)
+	_ adapter.Accelerator                             = (*nvidiaAccelerator)(nil)
+	_ adapter.KubernetesAccelerator                   = (*nvidiaAccelerator)(nil)
+	_ adapter.StaticAccelerator                       = (*nvidiaAccelerator)(nil)
+	_ adapter.EndpointReplicaAcceleratorUsageConsumer = (*nvidiaAccelerator)(nil)
 )
 
 // NewNVIDIAAdapter creates the Community NVIDIA adapter.
@@ -95,6 +95,10 @@ func internalEndpointReplicaAcceleratorUsages(
 
 func (a *nvidiaAccelerator) Type() string {
 	return v1.AcceleratorTypeNVIDIAGPU.String()
+}
+
+func (*nvidiaAccelerator) NeedsEndpointReplicaAcceleratorUsages() bool {
+	return true
 }
 
 func (a *nvidiaAccelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSnapshot, error) {

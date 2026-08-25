@@ -2,20 +2,15 @@ package allocation
 
 import (
 	"context"
-	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
@@ -26,45 +21,6 @@ const (
 	defaultProcFSRoot    = "/proc"
 )
 
-type Provider interface {
-	Allocations(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
-}
-
-type ProviderFunc func(ctx context.Context, snapshot *v1.NodeDeviceSnapshot) ([]v1.StaticNodeAllocationStatus, error)
-
-func (f ProviderFunc) Allocations(
-	ctx context.Context,
-	snapshot *v1.NodeDeviceSnapshot,
-) ([]v1.StaticNodeAllocationStatus, error) {
-	return f(ctx, snapshot)
-}
-
-type MultiProvider struct {
-	Providers []Provider
-}
-
-func (p MultiProvider) Allocations(
-	ctx context.Context,
-	snapshot *v1.NodeDeviceSnapshot,
-) ([]v1.StaticNodeAllocationStatus, error) {
-	allocations := make([]v1.StaticNodeAllocationStatus, 0)
-
-	for _, provider := range p.Providers {
-		if provider == nil {
-			continue
-		}
-
-		providerAllocations, err := provider.Allocations(ctx, snapshot)
-		if err != nil {
-			return nil, err
-		}
-
-		allocations = append(allocations, providerAllocations...)
-	}
-
-	return allocations, nil
-}
-
 type PodResourceLister interface {
 	ListPodResources(ctx context.Context) ([]adapter.PodResource, error)
 }
@@ -73,10 +29,6 @@ type PodResourceListerFunc func(ctx context.Context) ([]adapter.PodResource, err
 
 func (f PodResourceListerFunc) ListPodResources(ctx context.Context) ([]adapter.PodResource, error) {
 	return f(ctx)
-}
-
-func firstNonEmpty(values ...string) string {
-	return model.FirstNonEmpty(values...)
 }
 
 type KubernetesAllocationProvider struct {
@@ -111,79 +63,6 @@ func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
 		PodResources:        clonePodResources(podResources),
 		EndpointPods:        endpointPodEvidence(pods),
 	}, nil
-}
-
-func (p KubernetesAllocationProvider) Allocations(
-	ctx context.Context,
-	snapshot *v1.NodeDeviceSnapshot,
-) ([]v1.StaticNodeAllocationStatus, error) {
-	if p.Client == nil || p.NodeName == "" || p.PodResources == nil || snapshot == nil {
-		return nil, nil
-	}
-
-	podResources, err := p.PodResources.ListPodResources(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	deviceLookup := newDeviceLookup(snapshot.Accelerator.Devices)
-	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(podResources))
-
-	for _, podResource := range podResources {
-		allocation, ok, err := p.podAllocation(ctx, podResource, deviceLookup)
-		if err != nil {
-			return nil, err
-		}
-
-		if ok {
-			allocations = append(allocations, allocation)
-		}
-	}
-
-	sortStaticNodeAllocations(allocations)
-
-	return allocations, nil
-}
-
-func (p KubernetesAllocationProvider) podAllocation(
-	ctx context.Context,
-	podResource adapter.PodResource,
-	deviceLookup acceleratorDeviceLookup,
-) (v1.StaticNodeAllocationStatus, bool, error) {
-	devices := allocationDevicesFromRefs(
-		containerDeviceRefs(podResource.Containers),
-		deviceLookup,
-		p.NodeName,
-	)
-	if len(devices) == 0 {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	pod := &corev1.Pod{}
-	if err := p.Client.Get(ctx, client.ObjectKey{Namespace: podResource.Namespace, Name: podResource.Name}, pod); err != nil {
-		if apierrors.IsNotFound(err) {
-			return v1.StaticNodeAllocationStatus{}, false, nil
-		}
-
-		return v1.StaticNodeAllocationStatus{}, false, err
-	}
-
-	if pod.Spec.NodeName != p.NodeName {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	labels := pod.GetLabels()
-	allocation := v1.StaticNodeAllocationStatus{
-		WorkloadType: endpointWorkloadType,
-		Workspace:    labels[v1.NeutreeClusterWorkspaceLabelKey],
-		Endpoint:     labels["endpoint"],
-		InstanceID:   podResource.Name,
-		ReplicaID:    podResource.Name,
-		RuntimeID:    podResource.Namespace + "/" + podResource.Name,
-		Devices:      devices,
-	}
-
-	return allocation, true, nil
 }
 
 func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod, error) {
@@ -283,11 +162,8 @@ func terminalPodPhase(phase corev1.PodPhase) bool {
 type RayServeAllocationProvider struct {
 	Dashboard          dashboard.DashboardService
 	DashboardURL       string
-	Node               string
 	NodeIP             string
 	ProcEnv            ProcessEnvReader
-	GPUProcesses       GPUProcessReader
-	ProcessTree        ProcessTreeReader
 	ProcessDescendants ProcessDescendantReader
 }
 
@@ -430,78 +306,6 @@ func rayReplicasFromApplications(
 	return result
 }
 
-func (p RayServeAllocationProvider) Allocations(
-	ctx context.Context,
-	snapshot *v1.NodeDeviceSnapshot,
-) ([]v1.StaticNodeAllocationStatus, error) {
-	if snapshot == nil {
-		return nil, nil
-	}
-
-	service := p.dashboardService()
-	if service == nil || p.NodeIP == "" {
-		return nil, nil
-	}
-
-	nodeID, err := p.rayNodeID(service)
-	if err != nil || nodeID == "" {
-		return nil, err
-	}
-
-	applications, err := service.GetServeApplications()
-	if err != nil {
-		return nil, err
-	}
-
-	deviceLookup := newDeviceLookup(snapshot.Accelerator.Devices)
-	envReader := p.processEnvReader()
-
-	gpuProcesses, err := p.gpuProcessReader().GPUProcesses(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	processTree := p.processTreeReader()
-	nodeLabel := firstNonEmpty(p.Node, p.NodeIP, nodeID)
-	allocations := make([]v1.StaticNodeAllocationStatus, 0)
-
-	for _, appName := range rayserve.SortedServeApplicationNames(applications) {
-		status := applications.Applications[appName]
-		for _, deploymentName := range rayserve.SortedDeploymentNames(status.Deployments) {
-			deployment := status.Deployments[deploymentName]
-			for _, replica := range deployment.Replicas {
-				if replica.NodeID != nodeID || replica.ActorID == "" {
-					continue
-				}
-
-				allocation, ok, err := rayReplicaAllocation(
-					service,
-					envReader,
-					appName,
-					status,
-					deploymentName,
-					replica,
-					deviceLookup,
-					nodeLabel,
-					gpuProcesses,
-					processTree,
-				)
-				if err != nil {
-					return nil, err
-				}
-
-				if ok {
-					allocations = append(allocations, allocation)
-				}
-			}
-		}
-	}
-
-	sortStaticNodeAllocations(allocations)
-
-	return allocations, nil
-}
-
 func (p RayServeAllocationProvider) dashboardService() dashboard.DashboardService {
 	if p.Dashboard != nil {
 		return p.Dashboard
@@ -524,22 +328,6 @@ func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
 	}
 
 	return ProcFSEnvReader{}
-}
-
-func (p RayServeAllocationProvider) gpuProcessReader() GPUProcessReader {
-	if p.GPUProcesses != nil {
-		return p.GPUProcesses
-	}
-
-	return NvidiaSMIGPUProcessReader{}
-}
-
-func (p RayServeAllocationProvider) processTreeReader() ProcessTreeReader {
-	if p.ProcessTree != nil {
-		return p.ProcessTree
-	}
-
-	return ProcFSProcessTreeReader{}
 }
 
 func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantReader {
@@ -616,7 +404,7 @@ func (p RayServeAllocationProvider) procFSRoot() string {
 		return reader.Root
 	}
 
-	if reader, ok := p.ProcessTree.(ProcFSProcessTreeReader); ok && strings.TrimSpace(reader.Root) != "" {
+	if reader, ok := p.ProcessDescendants.(ProcFSProcessTreeReader); ok && strings.TrimSpace(reader.Root) != "" {
 		return reader.Root
 	}
 
@@ -664,97 +452,6 @@ func (r ProcFSEnvReader) Env(pid int) (map[string]string, error) {
 	}
 
 	return env, nil
-}
-
-type GPUProcessReader interface {
-	GPUProcesses(ctx context.Context) ([]GPUProcess, error)
-}
-
-type GPUProcessReaderFunc func(ctx context.Context) ([]GPUProcess, error)
-
-func (f GPUProcessReaderFunc) GPUProcesses(ctx context.Context) ([]GPUProcess, error) {
-	return f(ctx)
-}
-
-type GPUProcess struct {
-	UUID          string
-	PID           int
-	UsedMemoryMiB int64
-}
-
-type NvidiaSMIGPUProcessReader struct {
-	Command string
-}
-
-func (r NvidiaSMIGPUProcessReader) GPUProcesses(ctx context.Context) ([]GPUProcess, error) {
-	command := r.Command
-	if command == "" {
-		command = "nvidia-smi"
-	}
-
-	out, err := exec.CommandContext(
-		ctx,
-		command,
-		"--query-compute-apps=gpu_uuid,pid,used_memory",
-		"--format=csv,noheader,nounits",
-	).Output()
-	if err != nil {
-		return nil, nil
-	}
-
-	return parseNvidiaSMIComputeProcesses(string(out)), nil
-}
-
-func parseNvidiaSMIComputeProcesses(raw string) []GPUProcess {
-	processes := make([]GPUProcess, 0)
-
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		parts := strings.Split(line, ",")
-		if len(parts) < 2 {
-			continue
-		}
-
-		uuid := strings.TrimSpace(parts[0])
-		if uuid == "" {
-			continue
-		}
-
-		pid, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if err != nil || pid <= 0 {
-			continue
-		}
-
-		process := GPUProcess{UUID: uuid, PID: pid}
-
-		if len(parts) >= 3 {
-			if usedMemoryMiB, ok := parseFirstInt64(parts[2]); ok {
-				process.UsedMemoryMiB = usedMemoryMiB
-			}
-		}
-
-		processes = append(processes, process)
-	}
-
-	return processes
-}
-
-func parseFirstInt64(value string) (int64, bool) {
-	fields := strings.Fields(strings.TrimSpace(value))
-	if len(fields) == 0 {
-		return 0, false
-	}
-
-	parsed, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil {
-		return 0, false
-	}
-
-	return parsed, true
 }
 
 type ProcessTreeReader interface {
@@ -893,293 +590,6 @@ func processParentPID(root string, pid int) (int, bool, error) {
 	return 0, false, nil
 }
 
-type acceleratorDeviceLookup struct {
-	byUUID map[string]v1.StaticNodeAcceleratorDeviceStatus
-	byID   map[string]v1.StaticNodeAcceleratorDeviceStatus
-	all    []v1.StaticNodeAcceleratorDeviceStatus
-}
-
-func newDeviceLookup(devices []v1.StaticNodeAcceleratorDeviceStatus) acceleratorDeviceLookup {
-	lookup := acceleratorDeviceLookup{
-		byUUID: map[string]v1.StaticNodeAcceleratorDeviceStatus{},
-		byID:   map[string]v1.StaticNodeAcceleratorDeviceStatus{},
-		all:    append([]v1.StaticNodeAcceleratorDeviceStatus{}, devices...),
-	}
-
-	for _, device := range devices {
-		if device.UUID != "" {
-			lookup.byUUID[device.UUID] = device
-		}
-
-		if device.ID != "" {
-			lookup.byID[device.ID] = device
-		}
-	}
-
-	return lookup
-}
-
-func containerDeviceRefs(containers []adapter.ContainerDevices) []string {
-	refs := make([]string, 0)
-	for _, container := range containers {
-		refs = append(refs, container.DeviceIDs...)
-	}
-
-	return refs
-}
-
-func rayReplicaAllocation(
-	service dashboard.DashboardService,
-	envReader ProcessEnvReader,
-	appName string,
-	status dashboard.RayServeApplicationStatus,
-	deploymentName string,
-	replica dashboard.Replica,
-	deviceLookup acceleratorDeviceLookup,
-	nodeLabel string,
-	gpuProcesses []GPUProcess,
-	processTree ProcessTreeReader,
-) (v1.StaticNodeAllocationStatus, bool, error) {
-	actor, err := rayserve.ActorByID(service, replica.ActorID)
-	if err != nil {
-		return v1.StaticNodeAllocationStatus{}, false, err
-	}
-
-	if actor == nil || actor.PID <= 0 {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	env, err := envReader.Env(actor.PID)
-	if err != nil {
-		return v1.StaticNodeAllocationStatus{}, false, err
-	}
-
-	gpuQuantity, hasGPUQuantity := rayDeploymentGPUQuantity(status, deploymentName)
-	if hasGPUQuantity && gpuQuantity <= 0 {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	devices := allocationDevicesFromRefsWithQuantity(visibleDeviceRefs(env, deviceLookup), deviceLookup, nodeLabel, gpuQuantity)
-
-	if processTree != nil {
-		processDevices, err := allocationDevicesFromGPUProcesses(
-			gpuProcesses,
-			processTree,
-			actor.PID,
-			deviceLookup,
-			nodeLabel,
-			gpuQuantity,
-		)
-		if err != nil {
-			return v1.StaticNodeAllocationStatus{}, false, err
-		}
-
-		if len(processDevices) > 0 {
-			devices = mergeAllocationDeviceUsage(devices, processDevices)
-		}
-	}
-
-	if len(devices) == 0 {
-		return v1.StaticNodeAllocationStatus{}, false, nil
-	}
-
-	workspace, endpoint := rayserve.ApplicationIdentity(appName, status)
-	replicaID := firstNonEmpty(replica.ReplicaID, replica.ActorID)
-
-	return v1.StaticNodeAllocationStatus{
-		WorkloadType: endpointWorkloadType,
-		Workspace:    workspace,
-		Endpoint:     endpoint,
-		InstanceID:   replica.ActorID,
-		ReplicaID:    replicaID,
-		RuntimeID:    replica.ActorID,
-		PID:          actor.PID,
-		Devices:      devices,
-	}, true, nil
-}
-
-func mergeAllocationDeviceUsage(
-	allocatedDevices []v1.DeviceAllocation,
-	processDevices []v1.DeviceAllocation,
-) []v1.DeviceAllocation {
-	if len(allocatedDevices) == 0 {
-		return processDevices
-	}
-
-	usedMemoryMiBByUUID := make(map[string]int64, len(processDevices))
-
-	for _, device := range processDevices {
-		if device.UUID == "" {
-			continue
-		}
-
-		usedMemoryMiBByUUID[device.UUID] += device.UsedMemoryMiB
-	}
-
-	for i := range allocatedDevices {
-		if allocatedDevices[i].UUID == "" {
-			continue
-		}
-
-		allocatedDevices[i].UsedMemoryMiB = usedMemoryMiBByUUID[allocatedDevices[i].UUID]
-	}
-
-	return allocatedDevices
-}
-
-func visibleDeviceRefs(env map[string]string, deviceLookup acceleratorDeviceLookup) []string {
-	nvidiaVisibleDevices := strings.TrimSpace(env["NVIDIA_VISIBLE_DEVICES"])
-	if hasExactVisibleDeviceUUIDs(nvidiaVisibleDevices, deviceLookup) {
-		return parseVisibleDevices(nvidiaVisibleDevices)
-	}
-
-	if value := strings.TrimSpace(env["CUDA_VISIBLE_DEVICES"]); value != "" {
-		return parseVisibleDevices(value)
-	}
-
-	return parseVisibleDevices(nvidiaVisibleDevices)
-}
-
-func hasExactVisibleDeviceUUIDs(value string, deviceLookup acceleratorDeviceLookup) bool {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-
-	switch strings.ToLower(value) {
-	case "all", "none", "void", "no":
-		return false
-	}
-
-	for _, ref := range strings.Split(value, ",") {
-		ref = strings.TrimSpace(ref)
-		if ref == "" {
-			continue
-		}
-
-		if _, ok := deviceLookup.byUUID[ref]; !ok {
-			return false
-		}
-	}
-
-	return true
-}
-
-func parseVisibleDevices(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-
-	switch strings.ToLower(value) {
-	case "all", "none", "void", "no":
-		return nil
-	}
-
-	parts := strings.Split(value, ",")
-	refs := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			refs = append(refs, part)
-		}
-	}
-
-	return refs
-}
-
-func allocationDevicesFromRefs(
-	refs []string,
-	deviceLookup acceleratorDeviceLookup,
-	nodeID string,
-) []v1.DeviceAllocation {
-	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, nil, 0)
-}
-
-func allocationDevicesFromRefsWithQuantity(
-	refs []string,
-	deviceLookup acceleratorDeviceLookup,
-	nodeID string,
-	gpuQuantity float64,
-) []v1.DeviceAllocation {
-	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, nil, gpuQuantity)
-}
-
-func allocationDevicesFromRefsWithUsageAndQuantity(
-	refs []string,
-	deviceLookup acceleratorDeviceLookup,
-	nodeID string,
-	usedMemoryMiBByUUID map[string]int64,
-	gpuQuantity float64,
-) []v1.DeviceAllocation {
-	devices := make([]v1.DeviceAllocation, 0, len(refs))
-	seen := map[string]struct{}{}
-
-	for _, ref := range refs {
-		device, ok := deviceFromRef(ref, deviceLookup)
-		if !ok || device.UUID == "" {
-			continue
-		}
-
-		if _, exists := seen[device.UUID]; exists {
-			continue
-		}
-
-		seen[device.UUID] = struct{}{}
-		memoryMiB, coreUnits := allocationDeviceCapacity(device, gpuQuantity)
-
-		allocation := v1.DeviceAllocation{
-			UUID:      device.UUID,
-			Product:   firstNonEmpty(device.ProductModel, device.ProductName),
-			MemoryMiB: memoryMiB,
-			CoreUnits: coreUnits,
-			NodeID:    nodeID,
-		}
-		if usedMemoryMiBByUUID != nil {
-			allocation.UsedMemoryMiB = usedMemoryMiBByUUID[device.UUID]
-		}
-
-		devices = append(devices, allocation)
-	}
-
-	return devices
-}
-
-func allocationDevicesFromGPUProcesses(
-	gpuProcesses []GPUProcess,
-	processTree ProcessTreeReader,
-	actorPID int,
-	deviceLookup acceleratorDeviceLookup,
-	nodeID string,
-	gpuQuantity float64,
-) ([]v1.DeviceAllocation, error) {
-	refs := make([]string, 0, len(gpuProcesses))
-	usedMemoryMiBByUUID := map[string]int64{}
-
-	for _, gpuProcess := range gpuProcesses {
-		descendant, err := processTree.IsDescendant(gpuProcess.PID, actorPID)
-		if err != nil {
-			return nil, err
-		}
-
-		if descendant {
-			refs = append(refs, gpuProcess.UUID)
-			usedMemoryMiBByUUID[gpuProcess.UUID] += gpuProcess.UsedMemoryMiB
-		}
-	}
-
-	return allocationDevicesFromRefsWithUsageAndQuantity(refs, deviceLookup, nodeID, usedMemoryMiBByUUID, gpuQuantity), nil
-}
-
-func allocationDeviceCapacity(device v1.StaticNodeAcceleratorDeviceStatus, gpuQuantity float64) (int64, int64) {
-	if gpuQuantity > 0 && gpuQuantity < 1 {
-		return int64(math.Round(float64(device.MemoryMiB) * gpuQuantity)), int64(math.Round(100 * gpuQuantity))
-	}
-
-	return device.MemoryMiB, 100
-}
-
 func rayDeploymentGPUQuantity(status dashboard.RayServeApplicationStatus, deploymentName string) (float64, bool) {
 	if status.DeployedAppConfig == nil || status.DeployedAppConfig.Args == nil || deploymentName == "" {
 		return 0, false
@@ -1229,70 +639,4 @@ func numberAsFloat64(value interface{}) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func deviceFromRef(
-	ref string,
-	deviceLookup acceleratorDeviceLookup,
-) (v1.StaticNodeAcceleratorDeviceStatus, bool) {
-	if ref == "" {
-		return v1.StaticNodeAcceleratorDeviceStatus{}, false
-	}
-
-	if device, ok := deviceLookup.byUUID[ref]; ok {
-		return device, true
-	}
-
-	if device, ok := deviceLookup.byID[ref]; ok {
-		return device, true
-	}
-
-	return v1.StaticNodeAcceleratorDeviceStatus{}, false
-}
-
-func sortStaticNodeAllocations(allocations []v1.StaticNodeAllocationStatus) {
-	sort.SliceStable(allocations, func(i, j int) bool {
-		if allocations[i].Workspace != allocations[j].Workspace {
-			return allocations[i].Workspace < allocations[j].Workspace
-		}
-
-		if allocations[i].Endpoint != allocations[j].Endpoint {
-			return allocations[i].Endpoint < allocations[j].Endpoint
-		}
-
-		if allocations[i].InstanceID != allocations[j].InstanceID {
-			return allocations[i].InstanceID < allocations[j].InstanceID
-		}
-
-		return allocations[i].RuntimeID < allocations[j].RuntimeID
-	})
-}
-
-func EndpointAllocationsFromStaticNodeAllocations(
-	labels model.CanonicalLabels,
-	allocations []v1.StaticNodeAllocationStatus,
-) []model.EndpointAllocation {
-	result := make([]model.EndpointAllocation, 0, len(allocations))
-
-	for _, allocation := range allocations {
-		if allocation.WorkloadType != "" && allocation.WorkloadType != endpointWorkloadType {
-			continue
-		}
-
-		if allocation.Endpoint == "" || len(allocation.Devices) == 0 {
-			continue
-		}
-
-		result = append(result, model.EndpointAllocation{
-			Workspace:  firstNonEmpty(allocation.Workspace, labels.Workspace),
-			Cluster:    labels.NeutreeCluster,
-			Endpoint:   allocation.Endpoint,
-			InstanceID: allocation.InstanceID,
-			ReplicaID:  allocation.ReplicaID,
-			NodeID:     firstNonEmpty(labels.Node, labels.NodeIP),
-			Devices:    append([]v1.DeviceAllocation{}, allocation.Devices...),
-		})
-	}
-
-	return result
 }

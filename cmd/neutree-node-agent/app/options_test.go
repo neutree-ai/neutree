@@ -65,7 +65,7 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 	assert.Nil(t, config.KubernetesWriter)
 }
 
-func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
+func TestOptionsConfigEnablesRayAcceleratorEvidenceProvider(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 	opts.rayDashboardURL = "http://10.0.0.10:8265"
@@ -75,12 +75,9 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
-	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
-	require.True(t, ok)
-	_, ok = config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
+	provider, ok := config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
 	require.True(t, ok)
 	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
-	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
 	assert.Equal(t, model.CanonicalLabels{
 		ClusterType: v1.SSHClusterType,
@@ -89,7 +86,7 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	}, config.Labels)
 }
 
-func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.T) {
+func TestOptionsAcceleratorEvidenceProviderUsesKubernetesRawEvidence(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -100,16 +97,9 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	opts := newOptions()
 	opts.clusterType = v1.KubernetesClusterType
 
-	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
+	kubernetesEvidenceProvider, staticEvidenceProvider := opts.acceleratorEvidenceProviders(writer)
 
-	multi, ok := provider.(allocation.MultiProvider)
-	require.True(t, ok)
-	require.Len(t, multi.Providers, 2)
-	_, ok = multi.Providers[0].(allocation.KubernetesAllocationProvider)
-	assert.True(t, ok)
-	_, ok = multi.Providers[1].(hami.KubernetesProvider)
-	assert.True(t, ok)
-	_, ok = kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	_, ok := kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
 	assert.True(t, ok)
 	assert.Nil(t, staticEvidenceProvider)
 }
@@ -158,7 +148,7 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 	assert.Contains(t, config.Accelerators, "fixture")
 }
 
-func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
+func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 

@@ -76,8 +76,7 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 
 	config.KubernetesWriter = writer
 	config.ScrapeTargetProvider = o.scrapeTargetProvider(writer)
-	allocationProvider, kubernetesEvidenceProvider, staticEvidenceProvider := o.allocationProvider(writer)
-	config.AllocationProvider = allocationProvider
+	kubernetesEvidenceProvider, staticEvidenceProvider := o.acceleratorEvidenceProviders(writer)
 	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
 	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
@@ -123,17 +122,16 @@ func (o *options) labels() model.CanonicalLabels {
 	}
 }
 
-func (o *options) allocationProvider(
+func (o *options) acceleratorEvidenceProviders(
 	writer *metricskubernetes.AnnotationWriter,
 ) (
-	allocation.Provider,
 	neutreemetrics.KubernetesAcceleratorEvidenceProvider,
 	neutreemetrics.StaticAcceleratorEvidenceProvider,
 ) {
 	switch o.clusterType {
 	case v1.KubernetesClusterType:
 		if writer == nil {
-			return nil, nil, nil
+			return nil, nil
 		}
 
 		kubernetesProvider := allocation.KubernetesAllocationProvider{
@@ -143,29 +141,21 @@ func (o *options) allocationProvider(
 				SocketPath: o.kubeletPodResourcesSock,
 			},
 		}
-		hamiProvider := hami.KubernetesProvider{
-			Client:   writer.Client,
-			NodeName: writer.NodeName,
-		}
-
-		return allocation.MultiProvider{
-			Providers: []allocation.Provider{kubernetesProvider, hamiProvider},
-		}, kubernetesProvider, nil
+		return kubernetesProvider, nil
 	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
-			return nil, nil, nil
+			return nil, nil
 		}
 
 		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
-			Node:         o.node,
 			NodeIP:       o.nodeIP,
 			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
 		}
 
-		return rayProvider, nil, rayProvider
+		return nil, rayProvider
 	default:
-		return nil, nil, nil
+		return nil, nil
 	}
 }
 

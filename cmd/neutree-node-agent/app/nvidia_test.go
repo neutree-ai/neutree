@@ -369,7 +369,7 @@ func TestSortNvidiaAllocations(t *testing.T) {
 	})
 }
 
-func TestNvidiaAdapterPreservesLegacySamplesWithEndpointUsage(t *testing.T) {
+func TestNvidiaAdapterPreservesCompatibilitySamplesWithEndpointUsage(t *testing.T) {
 	memoryUsedBytes := 4096.0 * 1024 * 1024
 	utilizationRatio := 0.75
 	evidence := adapter.KubernetesEvidence{

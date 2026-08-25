@@ -25,16 +25,14 @@ const (
 )
 
 type NormalizeRequest struct {
-	Labels                       model.CanonicalLabels
-	NodeExporter                 model.ScrapeResult
+	Labels       model.CanonicalLabels
+	NodeExporter model.ScrapeResult
+	// AcceleratorExporter is the adapter-selected exporter scrape result. The
+	// normalizer reports its health but never interprets its vendor payload.
 	AcceleratorExporter          *model.ScrapeResult
-	EndpointAllocations          []model.EndpointAllocation
-	GPUHardwareInfos             []model.GPUHardwareInfo
 	EndpointReplicaRuntimeUsages []model.EndpointReplicaRuntimeUsage
-	EndpointReplicaGPUUsages     []model.EndpointReplicaGPUUsage
-	// AcceleratorSamples are pre-computed accelerator samples from the selected
-	// adapter (--accelerator-type set). When non-nil, Samples() emits them
-	// instead of computing accelerator samples from the legacy DCGM functions.
+	// AcceleratorSamples are the adapter-owned accelerator samples. The shared
+	// normalizer preserves them without applying a vendor fallback.
 	AcceleratorSamples []Sample
 }
 
@@ -48,7 +46,6 @@ type Sample struct {
 
 func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 	var samples []Sample
-	acceleratorIndexes := acceleratorIndexesByUUIDFromRequest(req)
 
 	samples = append(samples, nodeReadySample(req.Labels))
 	samples = append(samples, scrapeUpSample(req.Labels, TargetNodeExporter, req.NodeExporter.Up))
@@ -61,56 +58,14 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
 	}
 
-	switch {
-	case req.AcceleratorSamples != nil:
-		// Adapter path: the selected adapter already produced all accelerator
-		// samples from raw evidence. They are merged after the generic
-		// node/runtime samples and before the per-replica runtime usage samples.
-		samples = append(samples, req.AcceleratorSamples...)
-	case req.AcceleratorExporter != nil && req.AcceleratorExporter.Up:
-		samples = append(samples, NormalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
-		samples = append(samples, NormalizeNodeGPUSamples(
-			req.Labels,
-			req.AcceleratorExporter.Body,
-			req.EndpointAllocations,
-		)...)
-		samples = append(samples, NormalizeGPUHardwareInfoSamples(
-			req.Labels,
-			req.GPUHardwareInfos,
-			req.AcceleratorExporter.Body,
-		)...)
-		samples = append(samples, NormalizeEndpointAllocationSamples(
-			req.Labels,
-			req.EndpointAllocations,
-			req.EndpointReplicaGPUUsages,
-			acceleratorIndexes,
-			req.AcceleratorExporter.Body,
-		)...)
-	default:
-		samples = append(samples, NormalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
-	}
-
-	if req.AcceleratorSamples == nil && req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
-		samples = append(samples, NormalizeEndpointReplicaGPUUsageFromDCGMSamples(
-			req.Labels,
-			req.AcceleratorExporter.Body,
-			req.EndpointAllocations,
-			req.EndpointReplicaGPUUsages,
-		)...)
-	}
+	// The selected adapter has already converted accelerator evidence. Keep the
+	// host neutral by only merging its declared samples.
+	samples = append(samples, req.AcceleratorSamples...)
 
 	samples = append(samples, normalizeEndpointReplicaRuntimeUsageSamples(
 		req.Labels,
 		req.EndpointReplicaRuntimeUsages,
 	)...)
-	if req.AcceleratorSamples == nil {
-		samples = append(samples, NormalizeEndpointReplicaGPUUsageSamples(
-			req.Labels,
-			req.EndpointReplicaGPUUsages,
-			req.EndpointAllocations,
-			acceleratorIndexes,
-		)...)
-	}
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].Name == samples[j].Name {
@@ -187,9 +142,9 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 	return result
 }
 
-// NormalizeAcceleratorSamples is the legacy NVIDIA/DCGM rendering helper used
-// by the in-tree NVIDIA reference adapter. Other accelerator adapters emit
-// adapter.Sample directly and do not need to parse DCGM text.
+// NormalizeAcceleratorSamples is the compatibility NVIDIA/DCGM converter used
+// by the bundled NVIDIA adapter. Normalizer.Samples never invokes it directly
+// from a raw exporter scrape.
 func NormalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sample {
 	parsed := promtext.ParseVector(raw)
 	result := make([]Sample, 0)
@@ -1056,14 +1011,6 @@ func endpointReplicaGPUUsageLabels(
 		usage.VDeviceIndex,
 		usage.Product,
 	)
-}
-
-func acceleratorIndexesByUUIDFromRequest(req NormalizeRequest) map[string]string {
-	if req.AcceleratorExporter == nil || !req.AcceleratorExporter.Up {
-		return nil
-	}
-
-	return AcceleratorIndexesByUUID(req.AcceleratorExporter.Body, req.GPUHardwareInfos)
 }
 
 func nodeReadySample(labels model.CanonicalLabels) Sample {
