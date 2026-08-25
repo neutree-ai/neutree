@@ -74,7 +74,7 @@ func (e metricsAcceleratorExporter) ConfigMapName() string {
 }
 
 func (e metricsAcceleratorExporter) HasCustomMetricsPath() bool {
-	return strings.TrimSpace(e.MetricsPath) != "" && e.MetricsPath != defaultMetricsPath
+	return e.MetricsPath != defaultMetricsPath
 }
 
 func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metricsAcceleratorExporter, error) {
@@ -242,13 +242,8 @@ func nodeMatchesSelector(node corev1.Node, selector map[string]string) bool {
 }
 
 func exporterMetricsPath(metricsPath string) string {
-	metricsPath = strings.TrimSpace(metricsPath)
 	if metricsPath == "" {
 		return defaultMetricsPath
-	}
-
-	if !strings.HasPrefix(metricsPath, "/") {
-		return "/" + metricsPath
 	}
 
 	return metricsPath

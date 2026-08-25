@@ -283,7 +283,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
 }
 
-func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
+func TestPlannerDoesNotBackfillStaticNodeAgentAcceleratorType(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	profiles := map[string]*v1.AcceleratorProfile{
 		v1.AcceleratorTypeNVIDIAGPU.String(): {
@@ -314,7 +314,7 @@ func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
 	require.NotNil(t, head.Spec)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 }
 
 func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
@@ -423,14 +423,14 @@ func TestPlannerProjectsMalformedAcceleratorExporterProfile(t *testing.T) {
 	require.Len(t, exporter.Ports, 1)
 	assert.Equal(t, 0, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
-	assert.Equal(t, "/trusted/metrics", exporter.HealthCheck.HTTPPath)
+	assert.Equal(t, "trusted/metrics", exporter.HealthCheck.HTTPPath)
 	assert.Equal(t, 0, exporter.HealthCheck.Port)
 
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
 	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-port=0")
-	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=/trusted/metrics")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=trusted/metrics")
 }
 
 func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {

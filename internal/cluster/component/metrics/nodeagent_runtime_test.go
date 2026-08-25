@@ -78,7 +78,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 
 	assert.Contains(t, container.Args, "--accelerator-type=ascend_npu")
 	assert.Contains(t, container.Args, "--accelerator-exporter-port=8082")
-	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=/npu-metrics")
+	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=npu-metrics")
 	assert.Nil(t, container.ReadinessProbe)
 	assert.Equal(t, "npu", envValue(container.Env, "NODE_AGENT_MODE"))
 	assert.False(t, hasEnv(container.Env, "EXPORTER_ONLY"))

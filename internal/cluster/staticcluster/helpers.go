@@ -71,21 +71,17 @@ func (r *Planner) runtimeProfile(
 		return nil, err
 	}
 
-	resolvedProfile := *profile
-	if resolvedProfile.AcceleratorType == "" {
-		resolvedProfile.AcceleratorType = accelerator.Type
-	}
-
 	provider, ok := r.AcceleratorProfileProvider.(staticNodeRuntimeConfigProvider)
 	if !ok {
-		return &resolvedProfile, nil
+		return profile, nil
 	}
 
 	runtimeConfig, err := provider.GetStaticNodeRuntimeConfig(ctx, &accelerator)
 	if err != nil || runtimeConfig == nil {
-		return &resolvedProfile, err
+		return profile, err
 	}
 
+	resolvedProfile := *profile
 	resolvedProfile.ClusterRuntime = mergeRuntimeConfig(profile.ClusterRuntime, runtimeConfig)
 
 	return &resolvedProfile, nil

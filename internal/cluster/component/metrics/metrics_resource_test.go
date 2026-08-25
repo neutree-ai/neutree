@@ -1407,7 +1407,7 @@ func TestBuildMetricsResourcesDoesNotParseDockerRunOptions(t *testing.T) {
 	assert.Assert(t, exporter.Spec.Template.Spec.Containers[0].SecurityContext == nil)
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, strings.Contains(vmagentConfig, "metrics_path: /custom/metrics"))
+	assert.Assert(t, strings.Contains(vmagentConfig, "metrics_path: custom/metrics"))
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutMatchingNode(t *testing.T) {

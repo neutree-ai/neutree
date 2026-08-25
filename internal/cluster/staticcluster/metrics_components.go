@@ -187,10 +187,6 @@ func buildNodeAgentComponent(
 		args = append(args, "--node-ip="+node.Spec.IP)
 	}
 
-	if runtime := nodeAgentRuntime(profile); runtime != nil && profile != nil && profile.AcceleratorType != "" {
-		args = appendNodeAgentAcceleratorType(args, profile.AcceleratorType)
-	}
-
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
 		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
@@ -210,26 +206,20 @@ func buildNodeAgentComponent(
 }
 
 func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
-	exporter := acceleratorExporterProfile(profile)
-	if profile == nil || exporter == nil || strings.TrimSpace(profile.AcceleratorType) == "" {
+	if profile == nil || profile.AcceleratorType == "" {
 		return nil
 	}
 
-	return []string{
-		"--accelerator-type=" + profile.AcceleratorType,
+	args := []string{"--accelerator-type=" + profile.AcceleratorType}
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil {
+		return args
+	}
+
+	return append(args,
 		fmt.Sprintf("--accelerator-exporter-port=%d", exporter.Port),
-		"--accelerator-exporter-metrics-path=" + exporterMetricsPath(exporter),
-	}
-}
-
-func appendNodeAgentAcceleratorType(args []string, acceleratorType string) []string {
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "--accelerator-type=") {
-			return args
-		}
-	}
-
-	return append(args, "--accelerator-type="+acceleratorType)
+		"--accelerator-exporter-metrics-path="+exporterMetricsPath(exporter),
+	)
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
@@ -736,23 +726,11 @@ func vmagentTargetLabels(
 }
 
 func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
-	if exporter == nil {
+	if exporter == nil || exporter.MetricsPath == "" {
 		return defaultPrometheusHTTPPath
 	}
 
-	return normalizedMetricsPath(exporter.MetricsPath)
-}
-
-func normalizedMetricsPath(path string) string {
-	if path == "" {
-		return defaultPrometheusHTTPPath
-	}
-
-	if !strings.HasPrefix(path, "/") {
-		return "/" + path
-	}
-
-	return path
+	return exporter.MetricsPath
 }
 
 func acceleratorExporterDockerRunOptions(
