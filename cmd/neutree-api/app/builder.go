@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/clusters"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
+	"github.com/neutree-ai/neutree/internal/routes/images"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
@@ -60,6 +61,7 @@ func NewBuilder() *Builder {
 		"rest/user-profiles":        ProxiesRouteFactory(proxies.RegisterUserProfileRoutes),
 		"rest/clusters":             ProxiesRouteFactory(proxies.RegisterClusterRoutes),
 		"clusters":                  ClustersRouteFactory(clusters.RegisterClusterRoutes),
+		"images":                    ImagesRouteFactory(images.RegisterImageRoutes),
 		"rest/static-node-clusters": ProxiesRouteFactory(proxies.RegisterStaticNodeClusterRoutes),
 		"rest/static-nodes":         ProxiesRouteFactory(proxies.RegisterStaticNodeRoutes),
 		"rest/image-registries":     ProxiesRouteFactory(proxies.RegisterImageRegistryRoutes),
@@ -102,6 +104,7 @@ func NewBuilder() *Builder {
 		"rest/user-profiles":        {"auth"},
 		"rest/clusters":             {"auth"},
 		"clusters":                  {"auth"},
+		"images":                    {"auth"},
 		"rest/static-node-clusters": {"auth"},
 		"rest/static-nodes":         {"auth"},
 		"rest/image-registries":     {"auth"},

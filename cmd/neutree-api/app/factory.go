@@ -11,6 +11,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/auth"
 	"github.com/neutree-ai/neutree/internal/routes/clusters"
 	"github.com/neutree-ai/neutree/internal/routes/credentials"
+	"github.com/neutree-ai/neutree/internal/routes/images"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
@@ -112,6 +113,19 @@ func CredentialsRouteFactory(register CredentialsRegisterFunc) RouteFactory {
 }
 
 type ClustersRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *clusters.Dependencies)
+
+type ImagesRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *images.Dependencies)
+
+func ImagesRouteFactory(register ImagesRegisterFunc) RouteFactory {
+	return func(deps *RouteOptions) error {
+		register(deps.Group, deps.Middlewares, &images.Dependencies{
+			Storage:      deps.Config.Storage,
+			ImageService: registry.NewImageService(),
+		})
+
+		return nil
+	}
+}
 
 func ClustersRouteFactory(register ClustersRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
