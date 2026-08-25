@@ -345,9 +345,9 @@ spec:
 {{ if .NodeAgent.AcceleratorType }}
         - --accelerator-type={{ .NodeAgent.AcceleratorType }}
 {{ end }}
-{{ if .AcceleratorExporterPort }}
-        - --accelerator-exporter-port={{ .AcceleratorExporterPort }}
-        - --accelerator-exporter-metrics-path={{ .AcceleratorExporterMetricsPath }}
+{{ if .NodeAgent.AcceleratorExporterPort }}
+        - --accelerator-exporter-port={{ .NodeAgent.AcceleratorExporterPort }}
+        - --accelerator-exporter-metrics-path={{ .NodeAgent.AcceleratorExporterMetricsPath }}
 {{ end }}
         env:
         - name: NODE_NAME

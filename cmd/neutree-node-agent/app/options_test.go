@@ -169,7 +169,7 @@ func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
 		AcceleratorType:                "fixture",
 		AcceleratorExporterPort:        8082,
 		AcceleratorExporterMetricsPath: "/npu-metrics",
-		}, config.ScrapeTargetProvider)
+	}, config.ScrapeTargetProvider)
 }
 
 func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {

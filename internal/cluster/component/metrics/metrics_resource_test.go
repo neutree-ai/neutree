@@ -1150,6 +1150,43 @@ func TestBuildMetricsResourcesProjectsUnvalidatedStructuredAcceleratorExporterPr
 	requireVolume(t, exporter, "ascend-driver")
 }
 
+func TestBuildMetricsResourcesSkipsStaticOnlyAcceleratorExporterProfile(t *testing.T) {
+	profile := &v1.AcceleratorProfile{
+		AcceleratorType: "custom_accelerator",
+		MetricsExporter: &v1.AcceleratorExporterProfile{
+			Name:     "custom-exporter",
+			Image:    "example.com/custom/exporter:test",
+			Port:     19090,
+			Backends: []v1.AcceleratorExporterBackend{v1.AcceleratorExporterBackendStatic},
+			Runtime: &v1.AcceleratorExporterRuntimeProfile{
+				NodeSelector: map[string]string{"accelerator.example.com/custom": "true"},
+			},
+		},
+	}
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_accelerator"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_accelerator").Return(profile, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objects, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+	assert.Assert(t, !hasMetricsDaemonSet(objects, "custom-accelerator-custom-exporter"))
+}
+
 func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFiles(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})

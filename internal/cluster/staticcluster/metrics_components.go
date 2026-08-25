@@ -88,7 +88,7 @@ func buildMetricsComponents(
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
-		if exporter := staticAcceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
+		if exporter := staticAcceleratorExporterProfile(profile); exporter != nil {
 			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 		}
 	}
@@ -149,14 +149,6 @@ func staticAcceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.Accele
 
 	return exporter
 }
-
-func validAcceleratorExporterProfile(exporter *v1.AcceleratorExporterProfile) bool {
-	return exporter != nil &&
-		strings.TrimSpace(exporter.Name) != "" &&
-		strings.TrimSpace(exporter.Image) != "" &&
-		exporter.Port > 0
-}
-
 func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
@@ -168,7 +160,7 @@ func buildAcceleratorExporterComponent(
 		Image:            staticComponentImage(cluster, exporter.Image),
 		Command:          append([]string{}, exporter.Command...),
 		Args:             append([]string{}, exporter.Args...),
-		Env:              staticExporterEnv(exporter.Env),
+		Env:              copyMetricsStringMap(exporter.Env),
 		Volumes:          volumes,
 		VolumeMounts:     volumeMounts,
 		ConfigFiles:      acceleratorExporterComponentConfigFiles(exporter.ConfigFiles),
@@ -181,21 +173,6 @@ func buildAcceleratorExporterComponent(
 			Port:     exporter.Port,
 		},
 	}
-}
-
-func staticExporterEnv(env map[string]string) map[string]string {
-	values := copyMetricsStringMap(env)
-	if len(values) == 0 {
-		return nil
-	}
-
-	delete(values, v1.NodeAgentAdapterProfileKey)
-
-	if len(values) == 0 {
-		return nil
-	}
-
-	return values
 }
 
 func buildNodeAgentComponent(
@@ -212,7 +189,7 @@ func buildNodeAgentComponent(
 		"--cgroupfs-root=/host/sys/fs/cgroup",
 	}
 	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
-		args = append(args, nodeAgentAdapterArgs(profile)...)
+		args = append(args, nodeAgentProfileTargetArgs(profile)...)
 	}
 
 	if node != nil && node.Metadata != nil {
@@ -245,10 +222,10 @@ func buildNodeAgentComponent(
 	}
 }
 
-func nodeAgentAdapterArgs(profile *v1.AcceleratorProfile) []string {
+func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
 	exporter := staticAcceleratorExporterProfile(profile)
-	if profile == nil || exporter == nil || !validAcceleratorExporterProfile(exporter) ||
-		!staticProfileUsesNodeAgentAdapter(exporter) || strings.TrimSpace(profile.AcceleratorType) == "" {
+	if profile == nil || exporter == nil ||
+		nodeAgentRuntime(profile) == nil || strings.TrimSpace(profile.AcceleratorType) == "" {
 		return nil
 	}
 
@@ -257,14 +234,6 @@ func nodeAgentAdapterArgs(profile *v1.AcceleratorProfile) []string {
 		fmt.Sprintf("--accelerator-exporter-port=%d", exporter.Port),
 		"--accelerator-exporter-metrics-path=" + exporterMetricsPath(exporter),
 	}
-}
-
-func staticProfileUsesNodeAgentAdapter(exporter *v1.AcceleratorExporterProfile) bool {
-	if exporter == nil {
-		return false
-	}
-
-	return strings.EqualFold(strings.TrimSpace(exporter.Env[v1.NodeAgentAdapterProfileKey]), "true")
 }
 
 func appendNodeAgentAcceleratorType(args []string, acceleratorType string) []string {

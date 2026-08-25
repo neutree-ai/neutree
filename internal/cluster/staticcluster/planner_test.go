@@ -356,76 +356,56 @@ func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestPlannerProjectsUnvalidatedAcceleratorExporterProfiles(t *testing.T) {
-	tests := []struct {
-		name     string
-		exporter *v1.AcceleratorExporterProfile
-	}{
-		{
-			name: "empty name",
-			exporter: &v1.AcceleratorExporterProfile{
-				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-				Port:  9400,
-			},
-		},
-		{
-			name: "empty image",
-			exporter: &v1.AcceleratorExporterProfile{
-				Name: "dcgm-exporter",
-				Port: 9400,
-			},
-		},
-		{
-			name: "invalid port",
-			exporter: &v1.AcceleratorExporterProfile{
-				Name:  "dcgm-exporter",
-				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-			},
-		},
+func TestPlannerProjectsMalformedAcceleratorExporterProfile(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cluster := testStaticNodeCluster()
-			currentNodes := []*v1.StaticNode{
-				staticNodeStatusWithAccelerator(
-					"head-0",
-					v1.StaticNodeRoleHead,
-					v1.StaticNodePhaseReady,
-					true,
-					nvidiaAcceleratorStatus(),
-					nil,
-				),
-				staticNodeStatusWithAccelerator(
-					"worker-0",
-					v1.StaticNodeRoleWorker,
-					v1.StaticNodePhaseReady,
-					true,
-					cpuAcceleratorStatus(),
-					nil,
-				),
-			}
-
-			nodes := plannedStaticNodes(t, &Planner{
-				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
-					profiles: map[string]*v1.AcceleratorProfile{
-						v1.AcceleratorTypeNVIDIAGPU.String(): {
-							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-							MetricsExporter: tt.exporter,
-						},
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType:  v1.AcceleratorTypeNVIDIAGPU.String(),
+					NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{},
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						MetricsPath: "trusted/metrics",
 					},
 				},
-				MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
-			}, cluster, currentNodes)
+			},
+		},
+	}, cluster, currentNodes)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
+	require.NotNil(t, exporter)
+	assert.Empty(t, exporter.Image)
+	require.Len(t, exporter.Ports, 1)
+	assert.Equal(t, 0, exporter.Ports[0].Port)
+	require.NotNil(t, exporter.HealthCheck)
+	assert.Equal(t, "/trusted/metrics", exporter.HealthCheck.HTTPPath)
+	assert.Equal(t, 0, exporter.HealthCheck.Port)
 
-			head := findStaticNode(nodes, "head-0")
-			require.NotNil(t, head)
-			exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
-			require.NotNil(t, exporter)
-			assert.Equal(t, staticComponentImage(cluster, tt.exporter.Image), exporter.Image)
-			assert.Equal(t, tt.exporter.Port, exporter.Ports[0].Port)
-		})
-	}
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-port=0")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=/trusted/metrics")
 }
 
 func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {

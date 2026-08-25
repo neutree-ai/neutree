@@ -22,14 +22,6 @@ const (
 	AcceleratorTypeAMDGPU    AcceleratorType = "amd_gpu"
 )
 
-const (
-	// NodeAgentAdapterProfileKey is planner-only compatibility metadata carried
-	// in MetricsExporter.Env until AcceleratorProfile grows a dedicated link
-	// between an exporter target and NodeAgent. Renderers must remove it before
-	// constructing a container environment.
-	NodeAgentAdapterProfileKey = "NEUTREE_PROFILE_NODE_AGENT_ADAPTER"
-)
-
 type AcceleratorProduct string
 
 type Accelerator struct {

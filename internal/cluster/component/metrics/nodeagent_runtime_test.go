@@ -48,6 +48,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 			"name":"npu-exporter",
 			"image":"registry.example/npu-exporter:v1.0.0",
 			"port":8082,
+			"metrics_path":"npu-metrics",
 			"runtime":{"node_selector":{"example.com/accelerator":"present"}}
 		}
 	}`
@@ -75,6 +76,8 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	container := nodeAgent.Spec.Template.Spec.Containers[0]
 
 	assert.Contains(t, container.Args, "--accelerator-type=ascend_npu")
+	assert.Contains(t, container.Args, "--accelerator-exporter-port=8082")
+	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=/npu-metrics")
 	assert.Nil(t, nodeAgent.Spec.Template.Spec.Affinity)
 	require.NotNil(t, container.SecurityContext)
 	assert.True(t, *container.SecurityContext.Privileged)

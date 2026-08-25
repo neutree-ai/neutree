@@ -9,14 +9,17 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-// metricsNodeAgent is the single NodeAgent rendered for a cluster. Its
-// runtime comes from the selected accelerator Profile, not exporter metadata.
+// metricsNodeAgent is the single NodeAgent rendered for a cluster. Its runtime
+// and scrape target come from the selected accelerator Profile; exporter
+// runtime metadata is not inherited.
 type metricsNodeAgent struct {
-	AcceleratorType string
-	Env             []corev1.EnvVar
-	SecurityContext *corev1.SecurityContext
-	VolumeMounts    []corev1.VolumeMount
-	Volumes         []corev1.Volume
+	AcceleratorType                string
+	AcceleratorExporterPort        int
+	AcceleratorExporterMetricsPath string
+	Env                            []corev1.EnvVar
+	SecurityContext                *corev1.SecurityContext
+	VolumeMounts                   []corev1.VolumeMount
+	Volumes                        []corev1.Volume
 }
 
 func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNodeAgent, error) {
@@ -44,7 +47,8 @@ func selectedMetricsNodeAgent(exporters []metricsAcceleratorExporter) (metricsNo
 	if runtime == nil {
 		return nodeAgent, nil
 	}
-
+	nodeAgent.AcceleratorExporterPort = selected.Port
+	nodeAgent.AcceleratorExporterMetricsPath = selected.MetricsPath
 	nodeAgent.SecurityContext = nodeAgentRuntimeSecurityContext(runtime)
 	runtimeMounts, runtimeVolumes := buildComponentVolumes(runtime.Volumes, runtime.VolumeMounts)
 	nodeAgent.VolumeMounts = append(nodeAgent.VolumeMounts, runtimeMounts...)

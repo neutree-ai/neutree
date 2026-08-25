@@ -130,6 +130,10 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
+	if !exporterProfile.SupportsBackend(v1.AcceleratorExporterBackendKubernetes) {
+		return metricsAcceleratorExporter{}, false
+	}
+
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
 	runtime := exporterProfile.Runtime
 
