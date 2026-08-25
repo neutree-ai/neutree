@@ -109,6 +109,31 @@ func TestClient_ListActors_OmitsDetailWhenFalse(t *testing.T) {
 	assert.False(t, hasLimit, "limit should not appear in query when 0")
 }
 
+func TestClient_ListActors_OnlyParsesRequiredResourcesWithDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := `{"result":true,"data":{"result":{"result":[{"actor_id":"actor-a"}]}}}`
+		if r.URL.Query().Get("detail") == "true" {
+			body = `{"result":true,"data":{"result":{"result":[{"actor_id":"actor-a","required_resources":{"NPU":1}}]}}}`
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := &Client{dashboardURL: srv.URL, client: &http.Client{}}
+
+	withoutDetail, err := c.ListActors(nil, false, 0)
+	require.NoError(t, err)
+	require.Len(t, withoutDetail.Data.Result.Result, 1)
+	assert.Nil(t, withoutDetail.Data.Result.Result[0].RequiredResources)
+
+	withDetail, err := c.ListActors(nil, true, 0)
+	require.NoError(t, err)
+	require.Len(t, withDetail.Data.Result.Result, 1)
+	assert.Equal(t, map[string]float64{"NPU": 1}, withDetail.Data.Result.Result[0].RequiredResources)
+}
+
 func TestClient_ListActors_NonOKStatusReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

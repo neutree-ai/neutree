@@ -85,6 +85,10 @@ type KubernetesAllocationProvider struct {
 	PodResources PodResourceLister
 }
 
+// KubernetesAcceleratorEvidence copies kubelet PodResources and local endpoint
+// Pod metadata into the public adapter evidence model. The host intentionally
+// leaves resource names, device IDs, labels, and annotations uninterpreted so
+// a vendor adapter, including Ascend NPU, owns allocation semantics.
 func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.KubernetesEvidence, error) {
@@ -219,6 +223,8 @@ func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]
 	return pods, nil
 }
 
+// endpointPodEvidence strips Kubernetes objects down to immutable metadata the
+// adapter may correlate with its own allocation protocol.
 func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
 	evidence := make([]adapter.EndpointPodEvidence, 0, len(pods))
 	for _, pod := range pods {
@@ -235,6 +241,8 @@ func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
 	return evidence
 }
 
+// clonePodResources prevents an adapter from retaining or mutating host-owned
+// kubelet observations across a metrics collection cycle.
 func clonePodResources(input []adapter.PodResource) []adapter.PodResource {
 	result := make([]adapter.PodResource, 0, len(input))
 
@@ -283,6 +291,9 @@ type RayServeAllocationProvider struct {
 	ProcessDescendants ProcessDescendantReader
 }
 
+// StaticAcceleratorEvidence gathers raw Ray and local-process topology for a
+// static-cluster adapter. It does not infer GPU or NPU ownership; the selected
+// adapter joins this evidence with vendor exporter data using its own rules.
 func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.StaticEvidence, error) {
@@ -344,6 +355,9 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}, nil
 }
 
+// rayActorsFromDashboard copies Ray's raw requested resources into the public
+// adapter boundary. detail=true is required by the dashboard client for this
+// map to be present in the state API response.
 func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
 	result := make([]adapter.RayActor, 0, len(actors))
 
@@ -370,6 +384,8 @@ func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
 	return result
 }
 
+// rayReplicasFromApplications projects Ray Serve's replica-to-actor topology
+// into vendor-neutral evidence while preserving deterministic traversal order.
 func rayReplicasFromApplications(
 	applications *dashboard.RayServeApplicationsResponse,
 	nodeID string,
@@ -529,6 +545,9 @@ func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantR
 	return ProcFSProcessTreeReader{Root: p.procFSRoot()}
 }
 
+// actorProcessInfo exposes only generic process identity, environment, and
+// descendant topology. Adapters use it to match their own process-level
+// exporter samples without making the host understand vendor process formats.
 func (p RayServeAllocationProvider) actorProcessInfo(
 	pid int,
 	envReader ProcessEnvReader,
@@ -554,6 +573,8 @@ func (p RayServeAllocationProvider) actorProcessInfo(
 	return info, true
 }
 
+// actorDescendantPIDs returns a stable, de-duplicated actor process tree so an
+// adapter can attribute child worker processes to the owning Ray actor.
 func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
 	pids := []int{pid}
 	if reader == nil {

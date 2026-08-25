@@ -59,7 +59,8 @@ type Actor struct {
 	PID       int    `json:"pid"`
 	// RequiredResources preserves the raw Ray actor resource request for an
 	// accelerator adapter to interpret without coupling the dashboard client to
-	// a vendor-specific resource name.
+	// a vendor-specific resource name. Ray only includes this detail field when
+	// ListActors is called with detail=true.
 	RequiredResources map[string]float64     `json:"required_resources,omitempty"`
 	StartTime         int64                  `json:"start_time"`
 	EndTime           int64                  `json:"end_time"`
@@ -68,7 +69,9 @@ type Actor struct {
 
 // ListActors queries GET /api/v0/actors with the given filters.
 //
-// detail=true asks Ray to populate detail-only fields such as DeathCause.
+// detail=true asks Ray to populate detail-only fields such as DeathCause and
+// RequiredResources. Static accelerator allocation must keep detail enabled;
+// the default response omits required_resources.
 // limit > 0 caps the response; pass 0 to use Ray's default (100).
 func (c *Client) ListActors(filters []ActorFilter, detail bool, limit int) (*ActorsResponse, error) {
 	q := url.Values{}

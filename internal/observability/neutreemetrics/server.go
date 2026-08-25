@@ -90,10 +90,14 @@ type EndpointGPUUsageProvider interface {
 }
 
 type KubernetesAcceleratorEvidenceProvider interface {
+	// KubernetesAcceleratorEvidence provides raw Kubernetes facts for an
+	// accelerator adapter; the server never assigns vendor semantics to them.
 	KubernetesAcceleratorEvidence(ctx context.Context) (adapter.KubernetesEvidence, error)
 }
 
 type StaticAcceleratorEvidenceProvider interface {
+	// StaticAcceleratorEvidence provides raw Ray and process facts for an
+	// accelerator adapter; the server never assigns vendor semantics to them.
 	StaticAcceleratorEvidence(ctx context.Context) (adapter.StaticEvidence, error)
 }
 
@@ -260,6 +264,8 @@ func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.Normali
 	return normalizeReq
 }
 
+// selectedAccelerator resolves the management-plane-selected adapter without
+// making metric collection depend on a vendor-specific implementation.
 func (s *Server) selectedAccelerator() adapter.Accelerator {
 	if s.config.AcceleratorType == "" {
 		return nil
@@ -268,6 +274,10 @@ func (s *Server) selectedAccelerator() adapter.Accelerator {
 	return s.config.Accelerators[s.config.AcceleratorType]
 }
 
+// acceleratorSamples drives the generic adapter lifecycle: discover hardware,
+// collect topology evidence, build adapter metrics, validate them, then return
+// normalizer-owned samples. It deliberately fails closed instead of parsing a
+// configured non-DCGM exporter through the legacy NVIDIA path.
 func (s *Server) acceleratorSamples(
 	ctx context.Context,
 	accel adapter.Accelerator,
@@ -313,6 +323,8 @@ func (s *Server) acceleratorSamples(
 	return normalizerSamplesFromAdapter(result.Samples)
 }
 
+// discoverAdapterHardware applies the host collection deadline to an adapter's
+// physical inventory discovery and isolates its returned snapshot per cycle.
 func (s *Server) discoverAdapterHardware(
 	ctx context.Context,
 	accel adapter.Accelerator,
@@ -323,6 +335,9 @@ func (s *Server) discoverAdapterHardware(
 	return accel.DiscoverHardware(hardwareCtx)
 }
 
+// adapterMetricResult converts common host facts into the public adapter
+// evidence model, then selects the Kubernetes or static capability by cluster
+// type. Vendor-specific rendering remains wholly inside the adapter.
 func (s *Server) adapterMetricResult(
 	ctx context.Context,
 	accel adapter.Accelerator,
@@ -378,6 +393,8 @@ func (s *Server) adapterMetricResult(
 	}
 }
 
+// kubernetesAcceleratorEvidence merges best-effort raw Kubernetes topology
+// into the per-request common evidence passed to an adapter.
 func (s *Server) kubernetesAcceleratorEvidence(
 	ctx context.Context,
 	common adapter.CommonEvidence,
@@ -398,6 +415,8 @@ func (s *Server) kubernetesAcceleratorEvidence(
 	return raw.Clone()
 }
 
+// staticAcceleratorEvidence merges best-effort raw Ray/process topology into
+// the per-request common evidence passed to an adapter.
 func (s *Server) staticAcceleratorEvidence(
 	ctx context.Context,
 	common adapter.CommonEvidence,
@@ -418,6 +437,8 @@ func (s *Server) staticAcceleratorEvidence(
 	return raw.Clone()
 }
 
+// adapterLabels copies canonical host labels into the public adapter boundary
+// without exposing the internal metrics model to vendor implementations.
 func adapterLabels(labels model.CanonicalLabels) adapter.CanonicalLabels {
 	return adapter.CanonicalLabels{
 		Workspace:         labels.Workspace,
@@ -430,6 +451,9 @@ func adapterLabels(labels model.CanonicalLabels) adapter.CanonicalLabels {
 	}
 }
 
+// adapterEndpointReplicaGPUUsages copies generic per-replica usage evidence
+// into the adapter boundary. The selected adapter decides whether its vendor
+// exporter can safely correlate those observations.
 func adapterEndpointReplicaGPUUsages(
 	usages []model.EndpointReplicaGPUUsage,
 ) []adapter.EndpointReplicaAcceleratorUsage {
@@ -467,6 +491,8 @@ func adapterEndpointReplicaGPUUsages(
 	return result
 }
 
+// normalizerSamplesFromAdapter is the final host-side conversion after the
+// adapter has produced validated canonical metric samples.
 func normalizerSamplesFromAdapter(samples []adapter.Sample) []metricsnormalizer.Sample {
 	result := make([]metricsnormalizer.Sample, 0, len(samples))
 

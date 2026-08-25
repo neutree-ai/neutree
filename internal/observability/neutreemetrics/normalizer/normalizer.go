@@ -187,6 +187,9 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 	return result
 }
 
+// NormalizeAcceleratorSamples is the legacy NVIDIA/DCGM rendering helper used
+// by the in-tree NVIDIA reference adapter. Other accelerator adapters emit
+// adapter.Sample directly and do not need to parse DCGM text.
 func NormalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sample {
 	parsed := promtext.ParseVector(raw)
 	result := make([]Sample, 0)
@@ -245,6 +248,8 @@ func NormalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sam
 	return result
 }
 
+// NormalizeNodeGPUSamples is the NVIDIA/DCGM reference helper for node GPU
+// capacity metrics. It is not a generic adapter API.
 func NormalizeNodeGPUSamples(
 	labels model.CanonicalLabels,
 	raw string,
@@ -322,6 +327,8 @@ func NormalizeNodeGPUSamples(
 	return result
 }
 
+// NormalizeGPUHardwareInfoSamples is the NVIDIA/DCGM reference helper for GPU
+// inventory labels. Vendor adapters provide their own hardware rendering.
 func NormalizeGPUHardwareInfoSamples(labels model.CanonicalLabels, infos []model.GPUHardwareInfo, raw string) []Sample {
 	discoveredUUIDs := discoveredGPUUUIDs(raw)
 	if len(discoveredUUIDs) == 0 {
@@ -397,6 +404,8 @@ func discoveredGPUUUIDs(raw string) map[string]struct{} {
 	return result
 }
 
+// NormalizeEndpointAllocationSamples is the NVIDIA/DCGM reference helper for
+// endpoint allocation metrics. Vendor allocation rules remain adapter-owned.
 func NormalizeEndpointAllocationSamples(
 	labels model.CanonicalLabels,
 	allocations []model.EndpointAllocation,
@@ -595,6 +604,8 @@ func gpuUsageSnapshotByUUID(samples prommodel.Vector) map[string]gpuUsageSnapsho
 	return result
 }
 
+// AcceleratorIndexesByUUID derives DCGM GPU indices for the in-tree NVIDIA
+// reference adapter. It does not define an identity rule for other vendors.
 func AcceleratorIndexesByUUID(raw string, infos []model.GPUHardwareInfo) map[string]string {
 	result := map[string]string{}
 
@@ -852,6 +863,8 @@ func endpointReplicaRuntimeUsageLabels(
 	return metricLabels
 }
 
+// NormalizeEndpointReplicaGPUUsageSamples is the NVIDIA/DCGM reference helper
+// for per-replica usage samples when no DCGM process match is available.
 func NormalizeEndpointReplicaGPUUsageSamples(
 	labels model.CanonicalLabels,
 	usages []model.EndpointReplicaGPUUsage,
@@ -979,6 +992,8 @@ func endpointReplicaGPUUsageKeyFromUsage(
 	}
 }
 
+// NormalizeEndpointReplicaGPUUsageFromDCGMSamples is the NVIDIA/DCGM
+// reference helper for process-attributed per-replica usage samples.
 func NormalizeEndpointReplicaGPUUsageFromDCGMSamples(
 	labels model.CanonicalLabels,
 	raw string,

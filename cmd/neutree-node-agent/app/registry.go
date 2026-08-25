@@ -9,8 +9,10 @@ import (
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
-// adapterRegistry is intentionally private. It freezes the entrypoint's
-// adapter slice into a lookup table before the NodeAgent starts.
+// adapterRegistry is intentionally private to the NodeAgent application
+// assembly. pkg/nodeagent/adapter is the reusable accelerator contract;
+// registry construction, descriptor ownership checks, and immutable startup
+// wiring are process-local concerns and must not become a public pkg API.
 type adapterRegistry struct {
 	byType      map[string]adapter.Accelerator
 	descriptors []adapter.MetricDescriptor

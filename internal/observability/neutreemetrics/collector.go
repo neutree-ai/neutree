@@ -102,6 +102,9 @@ type metricDescriptor struct {
 	desc         *prometheus.Desc
 }
 
+// newMetricsCollector combines the fixed Neutree descriptor set with the
+// descriptor contract declared by the selected accelerator adapter. Samples
+// remain host-rendered Prometheus metrics after adapter validation.
 func newMetricsCollector(
 	samples []normalizer.Sample,
 	adapterDescriptorGroups ...[]adapter.MetricDescriptor,
@@ -148,6 +151,8 @@ func (c *metricsCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
+// validateAdapterMetricDescriptors protects the shared Prometheus collector
+// from adapter-owned descriptor collisions before any vendor code is invoked.
 func validateAdapterMetricDescriptors(descriptors []adapter.MetricDescriptor) error {
 	seenNames := make(map[string]struct{}, len(metricDescriptorByName)+len(descriptors))
 
@@ -277,6 +282,8 @@ func validateAdapterSamples(samples []adapter.Sample, extensionDescriptors []ada
 	return nil
 }
 
+// adapterSampleKey gives validation a deterministic identity for one adapter
+// sample, independent of Go map iteration order.
 func adapterSampleKey(name string, labels map[string]string) string {
 	keys := make([]string, 0, len(labels))
 	for key := range labels {
