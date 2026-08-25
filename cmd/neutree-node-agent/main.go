@@ -22,7 +22,7 @@ func main() {
 			GitCommit: info.GitCommit,
 			BuildTime: info.BuildTime,
 		}).
-		WithAdapters(nodeagentapp.DefaultAdapters()...).
+		WithAdapters(nodeagentapp.NewNVIDIAAdapter()).
 		Build()
 	if err == nil {
 		err = application.Run(ctx)

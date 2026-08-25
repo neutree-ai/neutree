@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
@@ -56,13 +57,11 @@ func TestNewAdapterRegistryRejectsDescriptorConflicts(t *testing.T) {
 
 	assert.ErrorContains(t, err, `descriptor "neutree_vendor_metric" conflicts`)
 }
-func TestDefaultAdaptersReturnsFreshSliceAndInstances(t *testing.T) {
-	first := DefaultAdapters()
-	second := DefaultAdapters()
+func TestNewNVIDIAAdapterReturnsFreshInstances(t *testing.T) {
+	first := NewNVIDIAAdapter()
+	second := NewNVIDIAAdapter()
 
-	assert.Len(t, first, 1)
-	assert.Len(t, second, 1)
-	assert.NotSame(t, first[0], second[0])
-	first[0] = registryTestAdapter{typ: "mutated"}
-	assert.NotEqual(t, "mutated", second[0].Type())
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), first.Type())
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), second.Type())
+	assert.NotSame(t, first, second)
 }

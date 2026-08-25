@@ -162,7 +162,7 @@ func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 
-	registry, err := newAdapterRegistry(DefaultAdapters())
+	registry, err := newAdapterRegistry([]adapter.Accelerator{NewNVIDIAAdapter()})
 	require.NoError(t, err)
 
 	config, err := opts.configWithRegistry(registry)
