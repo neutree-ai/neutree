@@ -308,6 +308,12 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	applications, applicationsErr := service.GetServeApplications()
+	if applicationsErr != nil {
+		// Replicas establish the endpoint-to-actor identity required for a
+		// complete allocation view. Let the host degrade AllocationAvailable
+		// rather than publish actor-only evidence as complete.
+		return adapter.StaticEvidence{}, applicationsErr
+	}
 
 	actorsResp, err := service.ListActors(
 		[]dashboard.ActorFilter{{Key: "node_id", Predicate: "=", Value: nodeID}},
@@ -340,10 +346,7 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		actorProcesses[actor.PID] = info
 	}
 
-	var replicas []adapter.RayReplica
-	if applicationsErr == nil {
-		replicas = rayReplicasFromApplications(applications, nodeID)
-	}
+	replicas := rayReplicasFromApplications(applications, nodeID)
 
 	return adapter.StaticEvidence{
 		AllocationAvailable: true,

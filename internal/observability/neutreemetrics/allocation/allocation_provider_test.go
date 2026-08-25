@@ -293,6 +293,26 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 	assert.Equal(t, "0", evidence.RayEvidence.ActorProcesses[1234].Environment["ASCEND_VISIBLE_DEVICES"])
 }
 
+func TestRayServeAllocationProviderStaticEvidenceFailsWhenServeApplicationsUnavailable(t *testing.T) {
+	expectedErr := errors.New("Ray Serve applications unavailable")
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{
+				{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}},
+			},
+			applicationsErr: expectedErr,
+		},
+		NodeIP: "10.0.0.10",
+	}
+
+	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
+
+	require.ErrorIs(t, err, expectedErr)
+	assert.False(t, evidence.AllocationAvailable)
+	assert.Empty(t, evidence.RayEvidence.Actors)
+	assert.Empty(t, evidence.RayEvidence.Replicas)
+}
+
 func TestRayServeAllocationProviderKeepsEvidenceWhenOneActorProcessIsUnavailable(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
@@ -783,9 +803,10 @@ GPU-skip, not-a-pid, 128
 }
 
 type fakeRayDashboardService struct {
-	nodes        []v1.NodeSummary
-	applications *dashboard.RayServeApplicationsResponse
-	actors       map[string]dashboard.Actor
+	nodes           []v1.NodeSummary
+	applications    *dashboard.RayServeApplicationsResponse
+	applicationsErr error
+	actors          map[string]dashboard.Actor
 }
 
 func (f *fakeRayDashboardService) GetClusterMetadata() (*dashboard.ClusterMetadataResponse, error) {
@@ -801,7 +822,7 @@ func (f *fakeRayDashboardService) GetClusterStatus() (v1.RayAPIClusterStatus, er
 }
 
 func (f *fakeRayDashboardService) GetServeApplications() (*dashboard.RayServeApplicationsResponse, error) {
-	return f.applications, nil
+	return f.applications, f.applicationsErr
 }
 
 func (f *fakeRayDashboardService) UpdateServeApplications(_ dashboard.RayServeApplicationsRequest) error {
@@ -814,7 +835,7 @@ func (f *fakeRayDashboardService) GetActorLog(_, _ string, _ int) (string, error
 
 func (f *fakeRayDashboardService) ListActors(
 	filters []dashboard.ActorFilter,
-	_ bool,
+	detail bool,
 	_ int,
 ) (*dashboard.ActorsResponse, error) {
 	actorID := ""
@@ -832,7 +853,7 @@ func (f *fakeRayDashboardService) ListActors(
 		actors := make([]dashboard.Actor, 0)
 		for _, actor := range f.actors {
 			if actor.NodeID == nodeID {
-				actors = append(actors, actor)
+				actors = append(actors, actorWithDetail(actor, detail))
 			}
 		}
 
@@ -853,10 +874,29 @@ func (f *fakeRayDashboardService) ListActors(
 		Result: true,
 		Data: dashboard.ActorsResponseData{
 			Result: dashboard.ActorsListResult{
-				Result: []dashboard.Actor{actor},
+				Result: []dashboard.Actor{actorWithDetail(actor, detail)},
 			},
 		},
 	}, nil
+}
+
+// actorWithDetail mirrors the Ray State API contract: required_resources is
+// present only on a detailed actor response. This makes the static-evidence
+// test fail if the production request stops asking for detail=true.
+func actorWithDetail(actor dashboard.Actor, detail bool) dashboard.Actor {
+	result := actor
+	if !detail || len(actor.RequiredResources) == 0 {
+		result.RequiredResources = nil
+
+		return result
+	}
+
+	result.RequiredResources = make(map[string]float64, len(actor.RequiredResources))
+	for resource, quantity := range actor.RequiredResources {
+		result.RequiredResources[resource] = quantity
+	}
+
+	return result
 }
 
 func podNodeNameIndex(object client.Object) []string {
