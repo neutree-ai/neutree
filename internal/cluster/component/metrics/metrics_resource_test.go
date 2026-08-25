@@ -1005,6 +1005,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
+	assert.Assert(t, nodeAgent.Spec.Template.Spec.Containers[0].ReadinessProbe == nil)
 }
 
 func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *testing.T) {
@@ -1431,7 +1432,7 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterProfileErrors(t *testing.T
 	}
 }
 
-func TestBuildMetricsResourcesSelectsOneMatchingAcceleratorExporter(t *testing.T) {
+func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()})
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
@@ -1477,13 +1478,8 @@ func TestBuildMetricsResourcesSelectsOneMatchingAcceleratorExporter(t *testing.T
 		})).Build(),
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to build metrics resources: %v", err)
-	}
-
-	findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
-	assert.Assert(t, !hasMetricsDaemonSet(objs, "nvidia-gpu-dcgm-exporter"))
+	_, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.ErrorContains(t, err, "multiple accelerator exporters match cluster nodes")
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing.T) {

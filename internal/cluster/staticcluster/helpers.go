@@ -111,10 +111,6 @@ func mergeRuntimeConfig(base, override *v1.RuntimeConfig) *v1.RuntimeConfig {
 		}
 
 		for key, value := range override.Env {
-			if value == "" {
-				continue
-			}
-
 			result.Env[key] = value
 		}
 	}

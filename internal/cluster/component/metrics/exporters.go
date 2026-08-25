@@ -189,13 +189,27 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 		return nil, err
 	}
 
+	matches := make([]metricsAcceleratorExporter, 0, len(candidates))
+
 	for _, exporter := range candidates {
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
-			return []metricsAcceleratorExporter{exporter}, nil
+			matches = append(matches, exporter)
 		}
 	}
 
-	return nil, nil
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return matches, nil
+	default:
+		names := make([]string, 0, len(matches))
+		for _, exporter := range matches {
+			names = append(names, exporter.AcceleratorType)
+		}
+
+		return nil, fmt.Errorf("multiple accelerator exporters match cluster nodes: %s", strings.Join(names, ", "))
+	}
 }
 
 func (m *MetricsComponent) clusterNodes(ctx context.Context) ([]corev1.Node, error) {

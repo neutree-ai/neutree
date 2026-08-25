@@ -49,7 +49,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
 	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
-		"Accelerator type selecting the metrics adapter (for example nvidia_gpu); empty uses the legacy DCGM path")
+		"Accelerator type selecting the metrics adapter (for example nvidia_gpu)")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")

@@ -1,11 +1,14 @@
 package metrics
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
@@ -44,4 +47,29 @@ func TestBuildExporterRuntimeVolumesProjectsNilRuntime(t *testing.T) {
 
 	assert.Nil(t, mounts)
 	assert.Nil(t, volumes)
+}
+
+func TestSelectClusterAcceleratorExporterRejectsMultipleMatches(t *testing.T) {
+	component := &MetricsComponent{
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-a",
+				Labels: map[string]string{"vendor.example/gpu": "true", "vendor.example/npu": "true"},
+			},
+		}).Build(),
+	}
+
+	_, err := component.selectClusterAcceleratorExporter(context.Background(), []metricsAcceleratorExporter{
+		{
+			AcceleratorType: "nvidia_gpu",
+			NodeSelector:    map[string]string{"vendor.example/gpu": "true"},
+		},
+		{
+			AcceleratorType: "ascend_npu",
+			NodeSelector:    map[string]string{"vendor.example/npu": "true"},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple accelerator exporters match cluster nodes")
 }

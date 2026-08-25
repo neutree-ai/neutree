@@ -1683,14 +1683,14 @@ func TestMergeRuntimeConfigDoesNotClearBaseOptions(t *testing.T) {
 	assert.Equal(t, []string{"--profile"}, merged.Options)
 }
 
-func TestMergeRuntimeConfigDoesNotClearBaseEnvValue(t *testing.T) {
+func TestMergeRuntimeConfigAllowsEmptyEnvOverride(t *testing.T) {
 	merged := mergeRuntimeConfig(
 		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": "true"}},
 		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": ""}},
 	)
 
 	require.NotNil(t, merged)
-	assert.Equal(t, "true", merged.Env["PROFILE_ONLY"])
+	assert.Equal(t, "", merged.Env["PROFILE_ONLY"])
 }
 
 type staticNodeRuntimeConfigProfileProvider struct {

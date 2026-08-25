@@ -3,6 +3,7 @@ package app
 import (
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -166,4 +167,15 @@ func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, config.AcceleratorType)
 	assert.Empty(t, config.Accelerators)
+}
+
+func TestOptionsAcceleratorTypeFlagHelpOmitsLegacyFallbackText(t *testing.T) {
+	opts := newOptions()
+	flags := pflag.NewFlagSet("neutree-node-agent", pflag.ContinueOnError)
+
+	opts.addFlags(flags)
+
+	flag := flags.Lookup("accelerator-type")
+	require.NotNil(t, flag)
+	assert.NotContains(t, flag.Usage, "legacy DCGM path")
 }

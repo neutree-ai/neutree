@@ -363,12 +363,6 @@ spec:
             port: metrics
           initialDelaySeconds: 10
           periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: metrics
-          initialDelaySeconds: 5
-          periodSeconds: 10
 {{ if .NodeAgent.SecurityContext }}
         securityContext:
 {{ .NodeAgent.SecurityContext | toYaml | indent 10 }}
