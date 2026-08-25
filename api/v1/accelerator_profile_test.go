@@ -26,6 +26,10 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		},
 		NodeAgentRuntime: &NodeAgentRuntimeProfile{
 			Privileged: true,
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES":     "all",
+				"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
+			},
 			Capabilities: &NodeAgentRuntimeCapabilities{
 				Add: []string{"SYS_ADMIN"},
 			},
@@ -86,6 +90,10 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, []string{"--gpus", "all"}, decoded.EngineRuntime.Options)
 	require.NotNil(t, decoded.NodeAgentRuntime)
 	assert.True(t, decoded.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{
+		"NVIDIA_VISIBLE_DEVICES":     "all",
+		"NVIDIA_DRIVER_CAPABILITIES": "utility,compute",
+	}, decoded.NodeAgentRuntime.Env)
 	require.NotNil(t, decoded.NodeAgentRuntime.Capabilities)
 	assert.Equal(t, []string{"SYS_ADMIN"}, decoded.NodeAgentRuntime.Capabilities.Add)
 	assert.Equal(t, "vendor-runtime", decoded.NodeAgentRuntime.Runtime)

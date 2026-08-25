@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
@@ -19,7 +20,7 @@ import (
 
 func TestOptionsConfigDefaults(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 
 	config, err := opts.configWithRegistry(adapterRegistry{})
 
@@ -28,13 +29,13 @@ func TestOptionsConfigDefaults(t *testing.T) {
 	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
 		MetricsMode: neutreemetrics.MetricsModeManaged,
 	}, config.ScrapeTargetProvider)
-	assert.Equal(t, model.CanonicalLabels{ClusterType: clusterTypeRay}, config.Labels)
+	assert.Equal(t, model.CanonicalLabels{ClusterType: v1.SSHClusterType}, config.Labels)
 	assert.Nil(t, config.KubernetesWriter)
 }
 
 func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 	opts.metricsMode = neutreemetrics.MetricsModeExternal
 
 	config, err := opts.configWithRegistry(adapterRegistry{})
@@ -55,7 +56,7 @@ func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
 
 func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 
 	config, err := opts.configWithRegistry(adapterRegistry{})
 
@@ -65,7 +66,7 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 
 func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 	opts.rayDashboardURL = "http://10.0.0.10:8265"
 	opts.node = "head-0"
 	opts.nodeIP = "10.0.0.10"
@@ -81,7 +82,7 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
 	assert.Equal(t, model.CanonicalLabels{
-		ClusterType: clusterTypeRay,
+		ClusterType: v1.SSHClusterType,
 		Node:        "head-0",
 		NodeIP:      "10.0.0.10",
 	}, config.Labels)
@@ -96,7 +97,7 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 		NodeName: "node-a",
 	}
 	opts := newOptions()
-	opts.clusterType = clusterTypeKubernetes
+	opts.clusterType = v1.KubernetesClusterType
 
 	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
 
@@ -121,7 +122,7 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 		NodeName: "node-a",
 	}
 	opts := newOptions()
-	opts.clusterType = clusterTypeKubernetes
+	opts.clusterType = v1.KubernetesClusterType
 
 	provider := opts.endpointGPUUsageProvider(writer)
 
@@ -129,14 +130,16 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
+func TestOptionsConfigAllowsUnregisteredAcceleratorType(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 	opts.acceleratorType = "unknown-accelerator"
 
-	_, err := opts.configWithRegistry(adapterRegistry{})
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
-	assert.ErrorContains(t, err, "accelerator adapter \"unknown-accelerator\" is not registered")
+	assert.NoError(t, err)
+	assert.Equal(t, "unknown-accelerator", config.AcceleratorType)
+	assert.Empty(t, config.Accelerators)
 }
 
 func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
@@ -144,7 +147,7 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 	require.NoError(t, err)
 
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 	opts.acceleratorType = "fixture"
 
 	config, err := opts.configWithRegistry(registry)
@@ -156,7 +159,7 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 
 func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 
 	config, err := opts.configWithRegistry(adapterRegistry{})
 

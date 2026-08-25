@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -103,18 +102,8 @@ func NewServer(config Config) (*Server, error) {
 		return nil, err
 	}
 
-	if config.AcceleratorType != "" && isNilAccelerator(config.Accelerators[config.AcceleratorType]) {
-		return nil, fmt.Errorf("accelerator adapter %q is not registered", config.AcceleratorType)
-	}
-
 	if config.ClusterType == "" {
 		config.ClusterType = config.Labels.ClusterType
-	}
-
-	if config.AcceleratorType != "" {
-		if err := validateAcceleratorCapability(config.ClusterType, config.Accelerators[config.AcceleratorType]); err != nil {
-			return nil, fmt.Errorf("accelerator adapter %q: %w", config.AcceleratorType, err)
-		}
 	}
 
 	if config.HTTPClient == nil {
@@ -130,38 +119,6 @@ func NewServer(config Config) (*Server, error) {
 		httpClient: config.HTTPClient,
 		normalizer: &metricsnormalizer.Normalizer{},
 	}, nil
-}
-
-func validateAcceleratorCapability(clusterType string, accel adapter.Accelerator) error {
-	switch clusterType {
-	case "kubernetes":
-		if _, ok := accel.(adapter.KubernetesAccelerator); !ok {
-			return fmt.Errorf("does not implement Kubernetes capability")
-		}
-	case "ray":
-		if _, ok := accel.(adapter.StaticAccelerator); !ok {
-			return fmt.Errorf("does not implement static capability")
-		}
-	default:
-		return fmt.Errorf("cluster type %q is unsupported for accelerator adapter dispatch", clusterType)
-	}
-
-	return nil
-}
-
-// isNilAccelerator also rejects typed-nil values stored in the adapter interface.
-func isNilAccelerator(accel adapter.Accelerator) bool {
-	if accel == nil {
-		return true
-	}
-
-	value := reflect.ValueOf(accel)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -386,7 +343,7 @@ func (s *Server) adapterMetricResult(
 	defer cancel()
 
 	switch s.config.ClusterType {
-	case "kubernetes":
+	case v1.KubernetesClusterType:
 		kubernetesAccelerator, ok := accel.(adapter.KubernetesAccelerator)
 		if !ok {
 			return adapter.MetricResult{}, fmt.Errorf("accelerator adapter does not implement Kubernetes capability")
@@ -401,7 +358,7 @@ func (s *Server) adapterMetricResult(
 		)
 
 		return result.Clone(), err
-	case "ray":
+	case v1.SSHClusterType:
 		staticAccelerator, ok := accel.(adapter.StaticAccelerator)
 		if !ok {
 			return adapter.MetricResult{}, fmt.Errorf("accelerator adapter does not implement static capability")

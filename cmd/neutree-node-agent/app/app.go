@@ -10,7 +10,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
-	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 // BuildInfo provides the build metadata printed by the version command.
@@ -52,10 +51,6 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := validateSelectedAdapterCapability(opts.clusterType, opts.acceleratorType, a.registry); err != nil {
-		return err
-	}
-
 	serverConfig, err := opts.configWithRegistry(a.registry)
 	if err != nil {
 		return fmt.Errorf("build neutree-node-agent config: %w", err)
@@ -92,34 +87,4 @@ func formatBuildInfo(info BuildInfo) string {
 		runtime.GOOS,
 		runtime.GOARCH,
 	)
-}
-
-func validateSelectedAdapterCapability(clusterType, acceleratorType string, registry adapterRegistry) error {
-	if acceleratorType == "" {
-		return nil
-	}
-
-	accelerator, ok := registry.byType[acceleratorType]
-	if !ok {
-		return fmt.Errorf(
-			"accelerator adapter %q is not registered; available adapters: %s",
-			acceleratorType,
-			registeredAdapterTypes(registry),
-		)
-	}
-
-	switch clusterType {
-	case clusterTypeKubernetes:
-		if _, ok := accelerator.(adapter.KubernetesAccelerator); !ok {
-			return fmt.Errorf("accelerator adapter %q does not implement Kubernetes capability", acceleratorType)
-		}
-	case clusterTypeRay:
-		if _, ok := accelerator.(adapter.StaticAccelerator); !ok {
-			return fmt.Errorf("accelerator adapter %q does not implement static capability", acceleratorType)
-		}
-	default:
-		return fmt.Errorf("cluster type %q is unsupported for accelerator adapter dispatch", clusterType)
-	}
-
-	return nil
 }

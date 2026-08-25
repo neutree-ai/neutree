@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
@@ -11,17 +10,13 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
-)
-
-const (
-	clusterTypeKubernetes = "kubernetes"
-	clusterTypeRay        = "ray"
 )
 
 type options struct {
@@ -40,7 +35,7 @@ type options struct {
 func newOptions() *options {
 	return &options{
 		listenAddress: ":9101",
-		clusterType:   clusterTypeKubernetes,
+		clusterType:   v1.KubernetesClusterType,
 		metricsMode:   neutreemetrics.MetricsModeManaged,
 		procFSRoot:    "/proc",
 		cgroupFSRoot:  "/sys/fs/cgroup",
@@ -67,16 +62,6 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
-	if o.acceleratorType != "" {
-		if _, ok := registry.byType[o.acceleratorType]; !ok {
-			return neutreemetrics.Config{}, fmt.Errorf(
-				"accelerator adapter %q is not registered; available adapters: %s",
-				o.acceleratorType,
-				registeredAdapterTypes(registry),
-			)
-		}
-	}
-
 	config := neutreemetrics.Config{
 		ListenAddress:   o.listenAddress,
 		Labels:          o.labels(),
@@ -107,15 +92,11 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 	return config, nil
 }
 
-func registeredAdapterTypes(registry adapterRegistry) string {
-	return strings.Join(registry.types(), ", ")
-}
-
 func (o *options) scrapeTargetProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) neutreemetrics.ScrapeTargetProvider {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil
 		}
@@ -125,7 +106,7 @@ func (o *options) scrapeTargetProvider(
 			MetricsMode: o.metricsMode,
 			NodeName:    writer.NodeName,
 		}
-	case clusterTypeRay:
+	case v1.SSHClusterType:
 		return neutreemetrics.StaticScrapeTargetProvider{
 			MetricsMode: o.metricsMode,
 		}
@@ -150,7 +131,7 @@ func (o *options) allocationProvider(
 	neutreemetrics.StaticAcceleratorEvidenceProvider,
 ) {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil, nil, nil
 		}
@@ -170,7 +151,7 @@ func (o *options) allocationProvider(
 		return allocation.MultiProvider{
 			Providers: []allocation.Provider{kubernetesProvider, hamiProvider},
 		}, kubernetesProvider, nil
-	case clusterTypeRay:
+	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
 			return nil, nil, nil
 		}
@@ -192,7 +173,7 @@ func (o *options) endpointGPUUsageProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) neutreemetrics.EndpointGPUUsageProvider {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil
 		}
@@ -210,7 +191,7 @@ func (o *options) runtimeUsageProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) (runtimeusage.Provider, error) {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil, nil
 		}
@@ -233,7 +214,7 @@ func (o *options) runtimeUsageProvider(
 				NodeName:   writer.NodeName,
 			},
 		}, nil
-	case clusterTypeRay:
+	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
 			return nil, nil
 		}
@@ -253,7 +234,7 @@ func (o *options) runtimeUsageProvider(
 }
 
 func (o *options) kubernetesWriter() (*metricskubernetes.AnnotationWriter, error) {
-	if o.clusterType != clusterTypeKubernetes {
+	if o.clusterType != v1.KubernetesClusterType {
 		return nil, nil
 	}
 

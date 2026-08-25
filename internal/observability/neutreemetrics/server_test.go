@@ -438,30 +438,27 @@ func (p fakeStaticAcceleratorEvidenceProvider) StaticAcceleratorEvidence(
 	return p.evidence, p.err
 }
 
-func TestNewServerRejectsAdapterWithoutRequestedClusterCapability(t *testing.T) {
+func TestNewServerAllowsAdapterWithoutRequestedClusterCapability(t *testing.T) {
 	testCases := []struct {
 		name        string
 		clusterType string
 		accelerator adapter.Accelerator
-		expected    string
 	}{
 		{
 			name:        "static only on Kubernetes",
-			clusterType: "kubernetes",
+			clusterType: v1.KubernetesClusterType,
 			accelerator: staticCapabilityTestAccelerator{capabilityTestAccelerator{typ: "vendor"}},
-			expected:    "does not implement Kubernetes capability",
 		},
 		{
 			name:        "Kubernetes only on static",
-			clusterType: "ray",
+			clusterType: v1.SSHClusterType,
 			accelerator: kubernetesCapabilityTestAccelerator{capabilityTestAccelerator{typ: "vendor"}},
-			expected:    "does not implement static capability",
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := NewServer(Config{
+			server, err := NewServer(Config{
 				ClusterType:     testCase.clusterType,
 				AcceleratorType: "vendor",
 				Accelerators: map[string]adapter.Accelerator{
@@ -469,7 +466,8 @@ func TestNewServerRejectsAdapterWithoutRequestedClusterCapability(t *testing.T) 
 				},
 			})
 
-			assert.ErrorContains(t, err, testCase.expected)
+			assert.NoError(t, err)
+			assert.NotNil(t, server)
 		})
 	}
 }
@@ -477,7 +475,7 @@ func TestNewServerRejectsAdapterWithoutRequestedClusterCapability(t *testing.T) 
 func TestServerDiscoversHardwareWhenExplicitStaticExporterIsUnavailable(t *testing.T) {
 	accelerator := &recordingStaticAccelerator{capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"}}
 	server, err := NewServer(Config{
-		ClusterType:     "ray",
+		ClusterType:     v1.SSHClusterType,
 		AcceleratorType: "vendor",
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
@@ -504,9 +502,9 @@ func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
 		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
 	}
 	server, err := NewServer(Config{
-		ClusterType:     "kubernetes",
+		ClusterType:     v1.KubernetesClusterType,
 		AcceleratorType: "vendor",
-		Labels:          model.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		Labels:          model.CanonicalLabels{ClusterType: v1.KubernetesClusterType, Node: "node-a"},
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
 		},
@@ -546,7 +544,7 @@ func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
 	assert.Equal(t, "pod-a", accelerator.evidence.PodResources[0].Name)
 	require.Len(t, accelerator.evidence.EndpointPods, 1)
 	assert.Equal(t, "raw", accelerator.evidence.EndpointPods[0].Annotations["hami.io/example"])
-	assert.Equal(t, "kubernetes", accelerator.evidence.Common.Labels.ClusterType)
+	assert.Equal(t, v1.KubernetesClusterType, accelerator.evidence.Common.Labels.ClusterType)
 	require.Len(t, accelerator.evidence.Common.EndpointReplicaAcceleratorUsages, 1)
 	assert.Equal(t, "GPU-abc", accelerator.evidence.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
 	assert.Equal(t, 1024.0, *accelerator.evidence.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
@@ -557,9 +555,9 @@ func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {
 		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
 	}
 	server, err := NewServer(Config{
-		ClusterType:     "ray",
+		ClusterType:     v1.SSHClusterType,
 		AcceleratorType: "vendor",
-		Labels:          model.CanonicalLabels{ClusterType: "ray", Node: "head-0"},
+		Labels:          model.CanonicalLabels{ClusterType: v1.SSHClusterType, Node: "head-0"},
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
 		},
@@ -594,7 +592,7 @@ func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {
 	require.Len(t, accelerator.evidence.RayEvidence.Actors, 1)
 	assert.Equal(t, "actor-a", accelerator.evidence.RayEvidence.Actors[0].ActorID)
 	assert.Equal(t, "0", accelerator.evidence.RayEvidence.ActorProcesses[4321].Environment["CUDA_VISIBLE_DEVICES"])
-	assert.Equal(t, "ray", accelerator.evidence.Common.Labels.ClusterType)
+	assert.Equal(t, v1.SSHClusterType, accelerator.evidence.Common.Labels.ClusterType)
 }
 
 func TestServerDegradesWhenStaticEvidenceCollectionFails(t *testing.T) {
@@ -602,9 +600,9 @@ func TestServerDegradesWhenStaticEvidenceCollectionFails(t *testing.T) {
 		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
 	}
 	server, err := NewServer(Config{
-		ClusterType:     "ray",
+		ClusterType:     v1.SSHClusterType,
 		AcceleratorType: "vendor",
-		Labels:          model.CanonicalLabels{ClusterType: "ray", Node: "head-0"},
+		Labels:          model.CanonicalLabels{ClusterType: v1.SSHClusterType, Node: "head-0"},
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
 		},
@@ -629,9 +627,9 @@ func TestServerDegradesWhenKubernetesEvidenceCollectionFails(t *testing.T) {
 		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
 	}
 	server, err := NewServer(Config{
-		ClusterType:     "kubernetes",
+		ClusterType:     v1.KubernetesClusterType,
 		AcceleratorType: "vendor",
-		Labels:          model.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		Labels:          model.CanonicalLabels{ClusterType: v1.KubernetesClusterType, Node: "node-a"},
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
 		},
@@ -675,7 +673,7 @@ func TestServerNodeDeviceSnapshotUsesExplicitAdapterHardwareAndAllocations(t *te
 		}},
 	}
 	server, err := NewServer(Config{
-		ClusterType:     "ray",
+		ClusterType:     v1.SSHClusterType,
 		AcceleratorType: "vendor",
 		Accelerators: map[string]adapter.Accelerator{
 			"vendor": accelerator,
@@ -714,7 +712,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 			Workspace:         "default",
 			NeutreeCluster:    "static-a",
 			StaticNodeCluster: "static-a",
-			ClusterType:       "ray",
+			ClusterType:       v1.SSHClusterType,
 			Node:              "head-0",
 			NodeIP:            "10.0.0.10",
 			NodeRole:          "head",
@@ -761,11 +759,11 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	assert.Contains(t, body, `neutree_node_accelerator_total{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 1`)
-	assert.Contains(t, body, `neutree_node_accelerator_allocated{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 1`)
-	assert.Contains(t, body, `neutree_node_accelerator_free{accelerator_type="nvidia_gpu",cluster_type="ray",node="head-0",product="A100"} 0`)
-	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="actor-a",node="head-0",product="NVIDIA_A100",replica="replica-a",vdevice_index="0"`
-	allocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ray",endpoint="chat",instance_id="actor-a",node="head-0",physical_vram_usage="unknown",product="NVIDIA_A100",replica="replica-a",vdevice_index="0",vram_usage="4 GiB / 80 GiB"`
+	assert.Contains(t, body, `neutree_node_accelerator_total{accelerator_type="nvidia_gpu",cluster_type="ssh",node="head-0",product="A100"} 1`)
+	assert.Contains(t, body, `neutree_node_accelerator_allocated{accelerator_type="nvidia_gpu",cluster_type="ssh",node="head-0",product="A100"} 1`)
+	assert.Contains(t, body, `neutree_node_accelerator_free{accelerator_type="nvidia_gpu",cluster_type="ssh",node="head-0",product="A100"} 0`)
+	allocationLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ssh",endpoint="chat",instance_id="actor-a",node="head-0",product="NVIDIA_A100",replica="replica-a",vdevice_index="0"`
+	allocationInfoLabels := `accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="ssh",endpoint="chat",instance_id="actor-a",node="head-0",physical_vram_usage="unknown",product="NVIDIA_A100",replica="replica-a",vdevice_index="0",vram_usage="4 GiB / 80 GiB"`
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_allocation{`+allocationInfoLabels+`} 1`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_allocated_bytes{`+allocationLabels+`}`)
 	assert.Contains(t, body, `neutree_endpoint_replica_accelerator_memory_used_bytes{`+allocationLabels+`}`)
@@ -785,7 +783,7 @@ node_memory_MemAvailable_bytes 6442450944
 			Workspace:         "default",
 			NeutreeCluster:    "static-a",
 			StaticNodeCluster: "static-a",
-			ClusterType:       "ray",
+			ClusterType:       v1.SSHClusterType,
 			Node:              "head-0",
 			NodeIP:            "10.0.0.10",
 			NodeRole:          "head",
@@ -821,7 +819,7 @@ node_memory_MemAvailable_bytes 6442450944
 	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
 
 	body := readResponseBody(t, metricsResp)
-	runtimeLabels := `cluster_type="ray",container="engine",container_id="docker-abc",` +
+	runtimeLabels := `cluster_type="ssh",container="engine",container_id="docker-abc",` +
 		`endpoint="chat",engine="unknown",engine_version="unknown",instance_id="actor-a",` +
 		`node="head-0",node_ip="10.0.0.10",node_role="head",replica="replica-a",` +
 		`source="neutree-node-agent",workload_role="backend"`

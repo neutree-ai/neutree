@@ -104,6 +104,9 @@ type AcceleratorProfile struct {
 type NodeAgentRuntimeProfile struct {
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
+	// Env declares NodeAgent-only environment variables. Exporter environment
+	// variables are not implicitly inherited by the NodeAgent.
+	Env map[string]string `json:"env,omitempty"`
 	// Capabilities declares Linux capabilities required by the NodeAgent only.
 	Capabilities *NodeAgentRuntimeCapabilities `json:"capabilities,omitempty"`
 	// Volumes declares structured host volumes required by the NodeAgent runtime.
