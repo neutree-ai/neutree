@@ -1004,7 +1004,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Assert(t, strings.Contains(vmagentConfig, "label: app=nvidia-gpu-dcgm-exporter"))
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
-	assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
+	assert.Equal(t, "all", envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
 	assert.Assert(t, nodeAgent.Spec.Template.Spec.Containers[0].ReadinessProbe == nil)
 }
 
@@ -1479,7 +1479,7 @@ func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *tes
 	}
 
 	_, err := metricsCmpt.GetMetricsResources(context.Background())
-	assert.ErrorContains(t, err, "multiple accelerator exporters match cluster nodes")
+	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing.T) {
