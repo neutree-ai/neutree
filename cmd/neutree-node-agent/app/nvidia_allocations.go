@@ -37,31 +37,52 @@ func newNvidiaDeviceLookup(devices []v1.StaticNodeAcceleratorDeviceStatus) nvidi
 func nvidiaKubernetesAllocations(
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.KubernetesEvidence,
-) []v1.StaticNodeAllocationStatus {
+) ([]v1.StaticNodeAllocationStatus, error) {
 	if !evidence.AllocationAvailable {
-		return nil
+		return nil, nil
 	}
 
-	pods := make(map[string]adapter.EndpointPodEvidence, len(evidence.EndpointPods))
-	for _, pod := range evidence.EndpointPods {
-		pods[pod.Namespace+"/"+pod.Name] = pod
+	podResources := make(map[string]adapter.PodResource, len(evidence.PodResources))
+	for _, podResource := range evidence.PodResources {
+		podResources[podResource.Namespace+"/"+podResource.Name] = podResource
 	}
 
 	lookup := newNvidiaDeviceLookup(hardwareSnapshot.Accelerator.Devices)
-	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(evidence.PodResources))
+	products, err := nvidiaHAMiDeviceProducts(evidence, hardwareSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	allocations := make([]v1.StaticNodeAllocationStatus, 0, len(evidence.EndpointPods))
 
-	for _, podResource := range evidence.PodResources {
-		pod, ok := pods[podResource.Namespace+"/"+podResource.Name]
-		if !ok || pod.Labels["endpoint"] == "" {
+	for _, pod := range evidence.EndpointPods {
+		if pod.Labels["endpoint"] == "" {
 			continue
 		}
 
-		refs := make([]string, 0)
-		for _, container := range podResource.Containers {
-			refs = append(refs, container.DeviceIDs...)
+		nodeID := firstNonEmpty(evidence.Common.Labels.Node, pod.NodeName)
+		devices, err := nvidiaHAMiDeviceAllocations(
+			pod.Annotations[nvidiaHAMiVGPUDevicesAllocated],
+			nodeID,
+			products,
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		devices := nvidiaAllocationDevices(refs, lookup, firstNonEmpty(evidence.Common.Labels.Node, pod.NodeName), 0)
+		if len(devices) == 0 {
+			podResource, ok := podResources[pod.Namespace+"/"+pod.Name]
+			if !ok {
+				continue
+			}
+
+			refs := make([]string, 0)
+			for _, container := range podResource.Containers {
+				refs = append(refs, container.DeviceIDs...)
+			}
+
+			devices = nvidiaAllocationDevices(refs, lookup, nodeID, 0)
+		}
+
 		if len(devices) == 0 {
 			continue
 		}
@@ -70,16 +91,16 @@ func nvidiaKubernetesAllocations(
 			WorkloadType: "endpoint",
 			Workspace:    pod.Labels[v1.NeutreeClusterWorkspaceLabelKey],
 			Endpoint:     pod.Labels["endpoint"],
-			InstanceID:   podResource.Name,
-			ReplicaID:    podResource.Name,
-			RuntimeID:    podResource.Namespace + "/" + podResource.Name,
+			InstanceID:   pod.Name,
+			ReplicaID:    pod.Name,
+			RuntimeID:    pod.Namespace + "/" + pod.Name,
 			Devices:      devices,
 		})
 	}
 
 	sortAllocations(allocations)
 
-	return allocations
+	return allocations, nil
 }
 
 func nvidiaStaticAllocations(
@@ -115,6 +136,9 @@ func nvidiaStaticAllocations(
 		}
 
 		refs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
+		if len(refs) == 0 {
+			refs = nvidiaProcessDeviceRefs(process, evidence.RayEvidence.AcceleratorProcesses)
+		}
 
 		devices := nvidiaAllocationDevices(
 			refs,
@@ -141,6 +165,37 @@ func nvidiaStaticAllocations(
 	sortAllocations(allocations)
 
 	return allocations
+}
+
+func nvidiaProcessDeviceRefs(
+	process adapter.ProcessInfo,
+	acceleratorProcesses []adapter.AcceleratorProcess,
+) []string {
+	pids := make(map[int]struct{}, len(process.DescendantPIDs)+1)
+	if process.PID > 0 {
+		pids[process.PID] = struct{}{}
+	}
+	for _, pid := range process.DescendantPIDs {
+		if pid > 0 {
+			pids[pid] = struct{}{}
+		}
+	}
+
+	refs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, acceleratorProcess := range acceleratorProcesses {
+		if _, ok := pids[acceleratorProcess.PID]; !ok || acceleratorProcess.DeviceID == "" {
+			continue
+		}
+		if _, ok := seen[acceleratorProcess.DeviceID]; ok {
+			continue
+		}
+
+		seen[acceleratorProcess.DeviceID] = struct{}{}
+		refs = append(refs, acceleratorProcess.DeviceID)
+	}
+
+	return refs
 }
 
 func nvidiaEndpointAllocations(

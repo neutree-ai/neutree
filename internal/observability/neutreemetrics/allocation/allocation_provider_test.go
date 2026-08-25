@@ -29,7 +29,7 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 			Namespace:   "default",
 			Name:        "chat-pod",
 			UID:         "pod-uid",
-			Labels:      map[string]string{"app": endpointWorkloadType, "endpoint": "chat"},
+			Labels:      map[string]string{"app": endpointPodAppLabelValue, "endpoint": "chat"},
 			Annotations: map[string]string{"vendor.example/devices": "raw"},
 		},
 		Spec: corev1.PodSpec{NodeName: "node-a"},
@@ -37,7 +37,14 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 	provider := KubernetesAllocationProvider{
 		Client: fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(endpointPod).
+			WithObjects(
+				endpointPod,
+				&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name:        "node-a",
+					Labels:      map[string]string{"vendor.example/model": "raw-model"},
+					Annotations: map[string]string{"vendor.example/metadata": "raw"},
+				}},
+			).
 			WithIndex(&corev1.Pod{}, "spec.nodeName", podNodeNameIndex).
 			Build(),
 		NodeName: "node-a",
@@ -62,6 +69,8 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 	require.Len(t, evidence.EndpointPods, 1)
 	assert.Equal(t, "pod-uid", evidence.EndpointPods[0].UID)
 	assert.Equal(t, "raw", evidence.EndpointPods[0].Annotations["vendor.example/devices"])
+	assert.Equal(t, "raw-model", evidence.NodeLabels["vendor.example/model"])
+	assert.Equal(t, "raw", evidence.NodeAnnotations["vendor.example/metadata"])
 }
 
 func TestKubernetesAllocationProviderPropagatesPodResourceErrors(t *testing.T) {
@@ -92,11 +101,11 @@ func TestKubernetesAllocationProviderFiltersNonLocalAndTerminalPods(t *testing.T
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	pods := []client.Object{
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "remote", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-b"}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "terminal", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "missing-endpoint", Labels: map[string]string{"app": endpointWorkloadType}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-b", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-a", Labels: map[string]string{"app": endpointWorkloadType, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "remote", Labels: map[string]string{"app": endpointPodAppLabelValue, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-b"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "terminal", Labels: map[string]string{"app": endpointPodAppLabelValue, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "missing-endpoint", Labels: map[string]string{"app": endpointPodAppLabelValue}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-b", Labels: map[string]string{"app": endpointPodAppLabelValue, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-a", Labels: map[string]string{"app": endpointPodAppLabelValue, "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
 	}
 	provider := KubernetesAllocationProvider{
 		Client: fake.NewClientBuilder().

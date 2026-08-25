@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -17,8 +18,8 @@ import (
 )
 
 const (
-	endpointWorkloadType = "endpoint"
-	defaultProcFSRoot    = "/proc"
+	endpointPodAppLabelValue = "inference"
+	defaultProcFSRoot        = "/proc"
 )
 
 type PodResourceLister interface {
@@ -57,11 +58,17 @@ func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
 	if err != nil {
 		return adapter.KubernetesEvidence{}, err
 	}
+	nodeLabels, nodeAnnotations, err := p.localNodeMetadata(ctx)
+	if err != nil {
+		return adapter.KubernetesEvidence{}, err
+	}
 
 	return adapter.KubernetesEvidence{
 		AllocationAvailable: true,
 		PodResources:        clonePodResources(podResources),
 		EndpointPods:        endpointPodEvidence(pods),
+		NodeLabels:          nodeLabels,
+		NodeAnnotations:     nodeAnnotations,
 	}, nil
 }
 
@@ -71,7 +78,7 @@ func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]
 		ctx,
 		podList,
 		client.MatchingFields{"spec.nodeName": p.NodeName},
-		client.MatchingLabels{"app": endpointWorkloadType},
+		client.MatchingLabels{"app": endpointPodAppLabelValue},
 	); err != nil {
 		return nil, err
 	}
@@ -84,7 +91,7 @@ func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]
 		}
 
 		labels := pod.GetLabels()
-		if labels["app"] != endpointWorkloadType || labels["endpoint"] == "" {
+		if labels["app"] != endpointPodAppLabelValue || labels["endpoint"] == "" {
 			continue
 		}
 
@@ -102,8 +109,18 @@ func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]
 	return pods, nil
 }
 
-// endpointPodEvidence strips Kubernetes objects down to immutable metadata the
-// adapter may correlate with its own allocation protocol.
+func (p KubernetesAllocationProvider) localNodeMetadata(ctx context.Context) (map[string]string, map[string]string, error) {
+	node := &corev1.Node{}
+	if err := p.Client.Get(ctx, client.ObjectKey{Name: p.NodeName}, node); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil, nil
+		}
+
+		return nil, nil, err
+	}
+
+	return copyStringMap(node.Labels), copyStringMap(node.Annotations), nil
+}
 func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
 	evidence := make([]adapter.EndpointPodEvidence, 0, len(pods))
 	for _, pod := range pods {
@@ -184,12 +201,6 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	applications, applicationsErr := service.GetServeApplications()
-	if applicationsErr != nil {
-		// Replicas establish the endpoint-to-actor identity required for a
-		// complete allocation view. Let the host degrade AllocationAvailable
-		// rather than publish actor-only evidence as complete.
-		return adapter.StaticEvidence{}, applicationsErr
-	}
 
 	actorsResp, err := service.ListActors(
 		[]dashboard.ActorFilter{{Key: "node_id", Predicate: "=", Value: nodeID}},
@@ -222,7 +233,10 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		actorProcesses[actor.PID] = info
 	}
 
-	replicas := rayReplicasFromApplications(applications, nodeID)
+	var replicas []adapter.RayReplica
+	if applicationsErr == nil {
+		replicas = rayReplicasFromApplications(applications, nodeID)
+	}
 
 	return adapter.StaticEvidence{
 		// A missing Serve application response cannot distinguish an empty

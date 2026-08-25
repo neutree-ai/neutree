@@ -112,6 +112,41 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`,
 	assert.Contains(t, sampleNames(result.Samples), "neutree_endpoint_replica_accelerator_allocation")
 }
 
+func TestNvidiaAdapterBuildsHAMiAllocationsFromRawEvidence(t *testing.T) {
+	accelerator := &nvidiaAccelerator{}
+	result, err := accelerator.BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
+		Common:              adapter.CommonEvidence{Labels: adapter.CanonicalLabels{Node: "node-a"}},
+		AllocationAvailable: true,
+		NodeLabels:          map[string]string{nvidiaGPUProductLabel: "Tesla-T4"},
+		NodeAnnotations: map[string]string{
+			nvidiaHAMiNodeNvidiaRegister: `[{"id":"GPU-abc","type":"NVIDIA-Tesla T4"}]`,
+		},
+		EndpointPods: []adapter.EndpointPodEvidence{{
+			Namespace: "default",
+			Name:      "chat-a",
+			NodeName:  "node-a",
+			Labels: map[string]string{
+				"endpoint":                         "chat",
+				v1.NeutreeClusterWorkspaceLabelKey: "default",
+			},
+			Annotations: map[string]string{
+				nvidiaHAMiVGPUDevicesAllocated: ";GPU-abc,NVIDIA,4096,50:GPU-abc,NVIDIA,8192,50:;",
+			},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Allocations, 1)
+	require.Len(t, result.Allocations[0].Devices, 2)
+	assert.Equal(t, "GPU-abc", result.Allocations[0].Devices[0].UUID)
+	assert.Equal(t, "0", result.Allocations[0].Devices[0].VDeviceIndex)
+	assert.Equal(t, int64(4096), result.Allocations[0].Devices[0].MemoryMiB)
+	assert.Equal(t, int64(50), result.Allocations[0].Devices[0].CoreUnits)
+	assert.Equal(t, "Tesla-T4", result.Allocations[0].Devices[0].Product)
+	assert.Equal(t, "1", result.Allocations[0].Devices[1].VDeviceIndex)
+	assert.Equal(t, int64(8192), result.Allocations[0].Devices[1].MemoryMiB)
+}
+
 func TestNvidiaAdapterBuildsStaticAllocationFromRawRayEvidence(t *testing.T) {
 	accelerator := &nvidiaAccelerator{}
 	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
@@ -238,6 +273,47 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 	}
 }
 
+func TestNvidiaStaticAllocationsUseAdapterProcessEvidenceWhenVisibilityIsUnset(t *testing.T) {
+	allocations := nvidiaStaticAllocations(testNvidiaHardware(), adapter.StaticEvidence{
+		Common:              adapter.CommonEvidence{Labels: adapter.CanonicalLabels{Node: "head-0"}},
+		AllocationAvailable: true,
+		RayEvidence: adapter.RayEvidence{
+			Actors: []adapter.RayActor{{ActorID: "actor-a", PID: 123, RequiredResources: map[string]float64{"GPU": 1}}},
+			Replicas: []adapter.RayReplica{{
+				Workspace: "default",
+				Endpoint:  "chat",
+				ActorID:   "actor-a",
+				ReplicaID: "replica-a",
+			}},
+			ActorProcesses: map[int]adapter.ProcessInfo{
+				123: {PID: 123, DescendantPIDs: []int{123, 456}, Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "all"}},
+			},
+			AcceleratorProcesses: []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}},
+		},
+	})
+
+	require.Len(t, allocations, 1)
+	require.Len(t, allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
+}
+
+func TestNvidiaAdapterEnrichesStaticEvidenceWithAdapterProcessObservations(t *testing.T) {
+	accelerator := &nvidiaAccelerator{
+		processReader: nvidiaProcessReaderFunc(func(context.Context) ([]adapter.AcceleratorProcess, error) {
+			return []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}}, nil
+		}),
+	}
+	evidence := adapter.StaticEvidence{RayEvidence: adapter.RayEvidence{
+		ActorProcesses: map[int]adapter.ProcessInfo{123: {PID: 123}},
+	}}
+
+	enriched, err := accelerator.EnrichStaticEvidence(context.Background(), evidence)
+
+	require.NoError(t, err)
+	assert.Equal(t, []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}}, enriched.RayEvidence.AcceleratorProcesses)
+	assert.Empty(t, evidence.RayEvidence.AcceleratorProcesses)
+}
+
 func TestNvidiaVisibleDeviceRefs(t *testing.T) {
 	lookup := newNvidiaDeviceLookup([]v1.StaticNodeAcceleratorDeviceStatus{
 		{ID: "0", UUID: "GPU-abc"},
@@ -272,6 +348,15 @@ func TestNvidiaVisibleDeviceRefs(t *testing.T) {
 			assert.Equal(t, testCase.expected, nvidiaVisibleDeviceRefs(testCase.environment, lookup))
 		})
 	}
+}
+
+func TestParseNvidiaSMIAcceleratorProcesses(t *testing.T) {
+	processes := parseNvidiaSMIAcceleratorProcesses("GPU-def, 456\ninvalid\nGPU-abc, 123\nGPU-missing, no\n")
+
+	assert.Equal(t, []adapter.AcceleratorProcess{
+		{DeviceID: "GPU-abc", PID: 123},
+		{DeviceID: "GPU-def", PID: 456},
+	}, processes)
 }
 
 func TestGPUHardwareInfosFromSnapshotRetainsImmutableDetails(t *testing.T) {
@@ -418,7 +503,8 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`,
 	actual, err := (&nvidiaAccelerator{}).BuildKubernetesMetrics(context.Background(), hardware, evidence)
 	require.NoError(t, err)
 
-	allocations := nvidiaKubernetesAllocations(hardware, evidence)
+	allocations, err := nvidiaKubernetesAllocations(hardware, evidence)
+	require.NoError(t, err)
 	endpointAllocations := nvidiaEndpointAllocations(evidence.Common.Labels, allocations)
 	endpointReplicaGPUUsages := internalEndpointReplicaAcceleratorUsages(
 		evidence.Common.EndpointReplicaAcceleratorUsages,

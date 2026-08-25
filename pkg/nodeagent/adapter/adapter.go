@@ -26,6 +26,13 @@ type StaticAccelerator interface {
 	BuildStaticMetrics(context.Context, HardwareSnapshot, StaticEvidence) (MetricResult, error)
 }
 
+// StaticEvidenceEnricher optionally appends adapter-owned raw observations to
+// static evidence before that adapter resolves allocations. The host never
+// interprets the appended data.
+type StaticEvidenceEnricher interface {
+	EnrichStaticEvidence(context.Context, StaticEvidence) (StaticEvidence, error)
+}
+
 // EndpointReplicaAcceleratorUsageConsumer declares that an adapter needs the
 // host's raw per-replica accelerator usage evidence. Adapters that do not
 // implement it are never coupled to a vendor-specific usage collector.
@@ -115,6 +122,8 @@ type KubernetesEvidence struct {
 	// VirtualizationMonitorUp distinguishes an unavailable local monitor from
 	// an empty but successful exposition.
 	VirtualizationMonitorUp bool
+	NodeLabels          map[string]string
+	NodeAnnotations     map[string]string
 }
 
 // PodResource is a raw kubelet PodResources observation.
@@ -151,9 +160,10 @@ type StaticEvidence struct {
 
 // RayEvidence contains raw actor and process topology observations.
 type RayEvidence struct {
-	Actors         []RayActor
-	Replicas       []RayReplica
-	ActorProcesses map[int]ProcessInfo
+	Actors               []RayActor
+	Replicas             []RayReplica
+	ActorProcesses       map[int]ProcessInfo
+	AcceleratorProcesses []AcceleratorProcess
 }
 
 // RayActor is the public subset of a Ray Dashboard actor observation needed
@@ -188,6 +198,13 @@ type ProcessInfo struct {
 	ParentPID      int
 	DescendantPIDs []int
 	Environment    map[string]string
+}
+
+// AcceleratorProcess is a raw device-to-process observation collected by an
+// adapter. DeviceID remains opaque to the host.
+type AcceleratorProcess struct {
+	DeviceID string
+	PID      int
 }
 
 // MetricResult is the only adapter output accepted by the host. Inventory is
@@ -292,6 +309,8 @@ func (e KubernetesEvidence) Clone() KubernetesEvidence {
 			Annotations: copyStringMap(pod.Annotations),
 		})
 	}
+	result.NodeLabels = copyStringMap(e.NodeLabels)
+	result.NodeAnnotations = copyStringMap(e.NodeAnnotations)
 
 	return result
 }
@@ -302,9 +321,10 @@ func (e StaticEvidence) Clone() StaticEvidence {
 		Common:              e.Common.Clone(),
 		AllocationAvailable: e.AllocationAvailable,
 		RayEvidence: RayEvidence{
-			Actors:         make([]RayActor, 0, len(e.RayEvidence.Actors)),
-			Replicas:       make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
-			ActorProcesses: make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
+			Actors:               make([]RayActor, 0, len(e.RayEvidence.Actors)),
+			Replicas:             make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
+			ActorProcesses:       make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
+			AcceleratorProcesses: append([]AcceleratorProcess(nil), e.RayEvidence.AcceleratorProcesses...),
 		},
 	}
 	for _, actor := range e.RayEvidence.Actors {

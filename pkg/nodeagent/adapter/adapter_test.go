@@ -30,17 +30,23 @@ func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 			Labels:      map[string]string{"endpoint": "chat"},
 			Annotations: map[string]string{"vendor.example/raw": "value"},
 		}},
+		NodeLabels:      map[string]string{"vendor.example/model": "raw-model"},
+		NodeAnnotations: map[string]string{"vendor.example/metadata": "raw"},
 	}
 
 	cloned := original.Clone()
 	cloned.PodResources[0].Containers[0].DeviceIDs[0] = "mutated"
 	cloned.EndpointPods[0].Labels["endpoint"] = "changed"
 	cloned.EndpointPods[0].Annotations["vendor.example/raw"] = "changed"
+	cloned.NodeLabels["vendor.example/model"] = "changed"
+	cloned.NodeAnnotations["vendor.example/metadata"] = "changed"
 	*cloned.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes = 2048
 
 	assert.Equal(t, "device-a", original.PodResources[0].Containers[0].DeviceIDs[0])
 	assert.Equal(t, "chat", original.EndpointPods[0].Labels["endpoint"])
 	assert.Equal(t, "value", original.EndpointPods[0].Annotations["vendor.example/raw"])
+	assert.Equal(t, "raw-model", original.NodeLabels["vendor.example/model"])
+	assert.Equal(t, "raw", original.NodeAnnotations["vendor.example/metadata"])
 	assert.Equal(t, 1024.0, *original.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
 	assert.True(t, cloned.VirtualizationMonitorUp)
 	assert.Equal(t, original.VirtualizationMonitorText, cloned.VirtualizationMonitorText)
@@ -63,14 +69,17 @@ func TestStaticEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 				Environment:    map[string]string{"CUDA_VISIBLE_DEVICES": "0"},
 			},
 		},
+		AcceleratorProcesses: []AcceleratorProcess{{DeviceID: "GPU-abc", PID: 124}},
 	}}
 
 	cloned := original.Clone()
 	cloned.RayEvidence.Actors[0].RequiredResources["GPU"] = 0.5
 	cloned.RayEvidence.ActorProcesses[123] = ProcessInfo{Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "1"}}
+	cloned.RayEvidence.AcceleratorProcesses[0].DeviceID = "GPU-def"
 
 	assert.Equal(t, 1.0, original.RayEvidence.Actors[0].RequiredResources["GPU"])
 	assert.Equal(t, "0", original.RayEvidence.ActorProcesses[123].Environment["CUDA_VISIBLE_DEVICES"])
+	assert.Equal(t, "GPU-abc", original.RayEvidence.AcceleratorProcesses[0].DeviceID)
 }
 
 func TestMetricResultCloneDoesNotShareDevicesOrLabels(t *testing.T) {

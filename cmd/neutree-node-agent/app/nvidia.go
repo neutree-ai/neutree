@@ -14,13 +14,15 @@ import (
 // nvidiaAccelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
 // discovery, allocation resolution, and DCGM metric conversion.
 type nvidiaAccelerator struct {
-	provider hardware.GPUHardwareInfoProvider
+	provider      hardware.GPUHardwareInfoProvider
+	processReader nvidiaProcessReader
 }
 
 var (
 	_ adapter.Accelerator                             = (*nvidiaAccelerator)(nil)
 	_ adapter.KubernetesAccelerator                   = (*nvidiaAccelerator)(nil)
 	_ adapter.StaticAccelerator                       = (*nvidiaAccelerator)(nil)
+	_ adapter.StaticEvidenceEnricher                  = (*nvidiaAccelerator)(nil)
 	_ adapter.EndpointReplicaAcceleratorUsageConsumer = (*nvidiaAccelerator)(nil)
 )
 
@@ -165,7 +167,10 @@ func (a *nvidiaAccelerator) BuildKubernetesMetrics(
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.KubernetesEvidence,
 ) (adapter.MetricResult, error) {
-	allocations := nvidiaKubernetesAllocations(hardwareSnapshot, evidence)
+	allocations, err := nvidiaKubernetesAllocations(hardwareSnapshot, evidence)
+	if err != nil {
+		return adapter.MetricResult{}, err
+	}
 	endpointReplicaGPUUsages := internalEndpointReplicaAcceleratorUsages(
 		evidence.Common.EndpointReplicaAcceleratorUsages,
 	)

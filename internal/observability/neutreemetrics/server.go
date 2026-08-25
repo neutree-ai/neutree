@@ -378,6 +378,14 @@ func (s *Server) adapterMetricResult(
 		}
 
 		evidence := s.staticAcceleratorEvidence(buildCtx, common)
+		if enricher, ok := accel.(adapter.StaticEvidenceEnricher); ok {
+			enriched, err := enricher.EnrichStaticEvidence(buildCtx, evidence.Clone())
+			if err != nil {
+				return adapter.MetricResult{}, err
+			}
+
+			evidence = enriched.Clone()
+		}
 
 		result, err := staticAccelerator.BuildStaticMetrics(
 			buildCtx,
