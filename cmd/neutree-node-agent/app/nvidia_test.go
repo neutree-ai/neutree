@@ -94,6 +94,31 @@ func TestNvidiaAdapterDeclaresNVIDIAInfoDescriptor(t *testing.T) {
 	assert.Equal(t, []string{"accelerator_uuid"}, descriptors[0].RequiredLabelNames)
 }
 
+func TestNvidiaAdapterEnrichesKubernetesEvidenceWithAdapterOwnedUsage(t *testing.T) {
+	usedBytes := 1024.0
+	accelerator := &nvidiaAccelerator{
+		endpointUsageProvider: nvidiaEndpointUsageProviderFunc(func(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error) {
+			return []adapter.EndpointReplicaAcceleratorUsage{{
+				Endpoint:        "chat",
+				AcceleratorUUID: "GPU-abc",
+				MemoryUsedBytes: &usedBytes,
+			}}, nil
+		}),
+	}
+	evidence := adapter.KubernetesEvidence{Common: adapter.CommonEvidence{
+		Labels: adapter.CanonicalLabels{Node: "node-a"},
+	}}
+
+	enriched, err := accelerator.EnrichKubernetesEvidence(context.Background(), evidence)
+
+	require.NoError(t, err)
+	assert.Empty(t, evidence.Common.EndpointReplicaAcceleratorUsages)
+	require.Len(t, enriched.Common.EndpointReplicaAcceleratorUsages, 1)
+	assert.Equal(t, "GPU-abc", enriched.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
+	require.NotNil(t, enriched.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
+	assert.Equal(t, 1024.0, *enriched.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
+}
+
 func TestNvidiaAdapterBuildsKubernetesAllocationsFromRawEvidence(t *testing.T) {
 	accelerator := &nvidiaAccelerator{}
 	result, err := accelerator.BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
@@ -596,4 +621,12 @@ func sampleNames(samples []adapter.Sample) map[string]struct{} {
 	}
 
 	return result
+}
+
+type nvidiaEndpointUsageProviderFunc func(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error)
+
+func (f nvidiaEndpointUsageProviderFunc) Usages(
+	ctx context.Context,
+) ([]adapter.EndpointReplicaAcceleratorUsage, error) {
+	return f(ctx)
 }

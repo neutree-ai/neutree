@@ -14,17 +14,22 @@ import (
 // nvidiaAccelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
 // discovery, allocation resolution, and DCGM metric conversion.
 type nvidiaAccelerator struct {
-	provider      hardware.GPUHardwareInfoProvider
-	processReader nvidiaProcessReader
+	provider              hardware.GPUHardwareInfoProvider
+	processReader         nvidiaProcessReader
+	endpointUsageProvider nvidiaEndpointUsageProvider
+}
+
+type nvidiaEndpointUsageProvider interface {
+	Usages(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error)
 }
 
 var (
-	_ adapter.Accelerator                             = (*nvidiaAccelerator)(nil)
-	_ adapter.KubernetesAccelerator                   = (*nvidiaAccelerator)(nil)
-	_ adapter.StaticAccelerator                       = (*nvidiaAccelerator)(nil)
-	_ adapter.StaticEvidenceEnricher                  = (*nvidiaAccelerator)(nil)
-	_ adapter.EndpointReplicaAcceleratorUsageConsumer = (*nvidiaAccelerator)(nil)
-	_ adapter.MetricDescriptorProvider                = (*nvidiaAccelerator)(nil)
+	_ adapter.Accelerator                = (*nvidiaAccelerator)(nil)
+	_ adapter.KubernetesAccelerator      = (*nvidiaAccelerator)(nil)
+	_ adapter.KubernetesEvidenceEnricher = (*nvidiaAccelerator)(nil)
+	_ adapter.StaticAccelerator          = (*nvidiaAccelerator)(nil)
+	_ adapter.StaticEvidenceEnricher     = (*nvidiaAccelerator)(nil)
+	_ adapter.MetricDescriptorProvider   = (*nvidiaAccelerator)(nil)
 )
 
 // NewNVIDIAAdapter creates the Community NVIDIA adapter.
@@ -123,8 +128,30 @@ func (*nvidiaAccelerator) MetricDescriptors() []adapter.MetricDescriptor {
 	}}
 }
 
-func (*nvidiaAccelerator) NeedsEndpointReplicaAcceleratorUsages() bool {
-	return true
+// EnrichKubernetesEvidence adds the NVIDIA adapter's optional HAMi
+// observations without exposing HAMi collection to the generic metrics host.
+// Failure is best effort, matching the prior behavior where the base DCGM
+// metrics remained available when the HAMi monitor was unavailable.
+func (a *nvidiaAccelerator) EnrichKubernetesEvidence(
+	ctx context.Context,
+	evidence adapter.KubernetesEvidence,
+) (adapter.KubernetesEvidence, error) {
+	result := evidence.Clone()
+	if a.endpointUsageProvider == nil {
+		return result, nil
+	}
+
+	usages, err := a.endpointUsageProvider.Usages(ctx)
+	if err != nil {
+		return result, nil
+	}
+
+	result.Common.EndpointReplicaAcceleratorUsages = append(
+		result.Common.EndpointReplicaAcceleratorUsages,
+		usages...,
+	)
+
+	return result, nil
 }
 
 func (a *nvidiaAccelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSnapshot, error) {

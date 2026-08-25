@@ -385,6 +385,27 @@ type recordingKubernetesAccelerator struct {
 	evidence adapter.KubernetesEvidence
 }
 
+type enrichingKubernetesAccelerator struct {
+	*recordingKubernetesAccelerator
+	enrichments int
+}
+
+func (a *enrichingKubernetesAccelerator) EnrichKubernetesEvidence(
+	_ context.Context,
+	evidence adapter.KubernetesEvidence,
+) (adapter.KubernetesEvidence, error) {
+	a.enrichments++
+	enriched := evidence.Clone()
+	usedBytes := 1024.0
+	enriched.Common.EndpointReplicaAcceleratorUsages = []adapter.EndpointReplicaAcceleratorUsage{{
+		Endpoint:        "chat",
+		AcceleratorUUID: "GPU-abc",
+		MemoryUsedBytes: &usedBytes,
+	}}
+
+	return enriched, nil
+}
+
 func (a *recordingKubernetesAccelerator) DiscoverHardware(context.Context) (adapter.HardwareSnapshot, error) {
 	if a.hardware.Accelerator.Type != "" {
 		return a.hardware.Clone(), nil
@@ -549,13 +570,8 @@ func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
 
 	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
 	require.NoError(t, err)
-	usedBytes := 1024.0
 
-	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil, []model.EndpointReplicaGPUUsage{{
-		Endpoint:        "chat",
-		GPUUUID:         "GPU-abc",
-		MemoryUsedBytes: &usedBytes,
-	}})
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, accelerator.builds)
 	assert.True(t, accelerator.evidence.AllocationAvailable)
@@ -564,9 +580,38 @@ func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
 	require.Len(t, accelerator.evidence.EndpointPods, 1)
 	assert.Equal(t, "raw", accelerator.evidence.EndpointPods[0].Annotations["hami.io/example"])
 	assert.Equal(t, v1.KubernetesClusterType, accelerator.evidence.Common.Labels.ClusterType)
-	require.Len(t, accelerator.evidence.Common.EndpointReplicaAcceleratorUsages, 1)
-	assert.Equal(t, "GPU-abc", accelerator.evidence.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
-	assert.Equal(t, 1024.0, *accelerator.evidence.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
+	assert.Empty(t, accelerator.evidence.Common.EndpointReplicaAcceleratorUsages)
+}
+
+func TestServerLetsKubernetesAdapterEnrichRawEvidence(t *testing.T) {
+	recording := &recordingKubernetesAccelerator{
+		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
+	}
+	accelerator := &enrichingKubernetesAccelerator{recordingKubernetesAccelerator: recording}
+	server, err := NewServer(Config{
+		ClusterType:     v1.KubernetesClusterType,
+		AcceleratorType: "vendor",
+		Labels:          model.CanonicalLabels{ClusterType: v1.KubernetesClusterType, Node: "node-a"},
+		Accelerators: map[string]adapter.Accelerator{
+			"vendor": accelerator,
+		},
+		KubernetesAcceleratorEvidenceProvider: fakeKubernetesAcceleratorEvidenceProvider{
+			evidence: adapter.KubernetesEvidence{
+				AllocationAvailable: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
+	require.NoError(t, err)
+
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, accelerator.enrichments)
+	require.Len(t, recording.evidence.Common.EndpointReplicaAcceleratorUsages, 1)
+	assert.Equal(t, "GPU-abc", recording.evidence.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
+	assert.True(t, recording.evidence.AllocationAvailable)
 }
 
 func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {
@@ -604,7 +649,7 @@ func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {
 	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
 	require.NoError(t, err)
 
-	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil, nil)
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, accelerator.builds)
 	assert.True(t, accelerator.evidence.AllocationAvailable)
@@ -634,7 +679,7 @@ func TestServerDegradesWhenStaticEvidenceCollectionFails(t *testing.T) {
 	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
 	require.NoError(t, err)
 
-	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil, nil)
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, accelerator.builds)
 	assert.False(t, accelerator.evidence.AllocationAvailable)
@@ -661,7 +706,7 @@ func TestServerDegradesWhenKubernetesEvidenceCollectionFails(t *testing.T) {
 	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
 	require.NoError(t, err)
 
-	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil, nil)
+	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, accelerator.builds)
 	assert.False(t, accelerator.evidence.AllocationAvailable)
@@ -767,100 +812,6 @@ node_memory_MemAvailable_bytes 6442450944
 		`source="neutree-node-agent",workload_role="backend"`
 	assert.Contains(t, body, `neutree_endpoint_replica_cpu_usage_seconds_total{`+runtimeLabels+`} 12.5`)
 	assert.Contains(t, body, `neutree_endpoint_replica_memory_working_set_bytes{`+runtimeLabels+`} 512`)
-}
-
-func TestServerWithoutAdapterSkipsEndpointReplicaGPUUsage(t *testing.T) {
-	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184
-node_memory_MemAvailable_bytes 6442450944
-`))
-	}))
-	t.Cleanup(nodeExporter.Close)
-
-	usedBytes := 4096.0 * 1024 * 1024
-	utilization := 0.75
-	endpointUsageRequests := 0
-	server, err := NewServer(Config{
-		Labels: model.CanonicalLabels{
-			Workspace:      "default",
-			NeutreeCluster: "k8s-a",
-			ClusterType:    "kubernetes",
-			Node:           "node-a",
-			NodeIP:         "10.0.0.10",
-		},
-		ScrapeTargetProvider: testTargetProvider(nodeExporter.URL + "/metrics"),
-		HTTPClient:           nodeExporter.Client(),
-		EndpointGPUUsageProvider: fakeEndpointGPUUsageProvider{
-			calls: &endpointUsageRequests,
-			usages: []model.EndpointReplicaGPUUsage{
-				{
-					Workspace:        "default",
-					Cluster:          "k8s-a",
-					Endpoint:         "chat",
-					InstanceID:       "chat-abc",
-					ReplicaID:        "chat-abc",
-					NodeID:           "node-a",
-					Container:        "engine",
-					GPUUUID:          "GPU-abc",
-					Product:          "NVIDIA_A100",
-					MemoryUsedBytes:  &usedBytes,
-					UtilizationRatio: &utilization,
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	httpServer := httptest.NewServer(server.Handler())
-	t.Cleanup(httpServer.Close)
-
-	metricsResp, err := http.Get(httpServer.URL + "/metrics")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = metricsResp.Body.Close() })
-	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
-
-	body := readResponseBody(t, metricsResp)
-	assert.Zero(t, endpointUsageRequests)
-	assert.NotContains(t, body, "neutree_endpoint_replica_accelerator_")
-}
-
-func TestServerDoesNotCollectNVIDIAUsageForAdapterWithoutUsageCapability(t *testing.T) {
-	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`node_memory_MemTotal_bytes 17179869184
-`))
-	}))
-	t.Cleanup(nodeExporter.Close)
-
-	endpointUsageRequests := 0
-	server, err := NewServer(Config{
-		Labels: model.CanonicalLabels{
-			Workspace:      "default",
-			NeutreeCluster: "k8s-a",
-			ClusterType:    v1.KubernetesClusterType,
-			Node:           "node-a",
-			NodeIP:         "10.0.0.10",
-		},
-		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-		Accelerators: map[string]adapter.Accelerator{
-			v1.AcceleratorTypeNVIDIAGPU.String(): sampleKubernetesAccelerator{},
-		},
-		ScrapeTargetProvider: testTargetProvider(nodeExporter.URL + "/metrics"),
-		HTTPClient:           nodeExporter.Client(),
-		EndpointGPUUsageProvider: fakeEndpointGPUUsageProvider{
-			calls: &endpointUsageRequests,
-		},
-	})
-	require.NoError(t, err)
-
-	httpServer := httptest.NewServer(server.Handler())
-	t.Cleanup(httpServer.Close)
-
-	metricsResp, err := http.Get(httpServer.URL + "/metrics")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = metricsResp.Body.Close() })
-
-	assert.Equal(t, http.StatusOK, metricsResp.StatusCode)
-	assert.Zero(t, endpointUsageRequests)
 }
 
 func TestServerMetricsKeepsSuccessfulAcceleratorExporterWhenAnotherFails(t *testing.T) {
@@ -1134,20 +1085,6 @@ func readResponseBody(t *testing.T, resp *http.Response) string {
 	require.NoError(t, err)
 
 	return string(buffer)
-}
-
-type fakeEndpointGPUUsageProvider struct {
-	usages []model.EndpointReplicaGPUUsage
-	err    error
-	calls  *int
-}
-
-func (p fakeEndpointGPUUsageProvider) Usages(context.Context) ([]model.EndpointReplicaGPUUsage, error) {
-	if p.calls != nil {
-		*p.calls = *p.calls + 1
-	}
-
-	return p.usages, p.err
 }
 
 type staticTestTargetProvider map[string][]ScrapeTarget

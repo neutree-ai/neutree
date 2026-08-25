@@ -1,4 +1,4 @@
-package hami
+package app
 
 import (
 	"context"
@@ -13,24 +13,47 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/promtext"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 const (
-	endpointWorkloadType       = "endpoint"
 	hamiDevicePluginComponent  = "hami-device-plugin"
 	hamiMonitorPort            = 9394
 	defaultHAMiHTTPTimeout     = 5 * time.Second
-	hamiMemoryBytesPerMiB      = 1024 * 1024
 	hamiMetricMemoryUsedBytes  = "hami_vgpu_memory_used_bytes"
 	hamiMetricUtilizationRatio = "hami_container_device_utilization_ratio"
 )
 
-type KubernetesProvider struct {
+// nvidiaHAMiKubernetesUsageProvider collects NVIDIA virtual-device usage from
+// the local HAMi device-plugin monitor. It is private to the NVIDIA adapter.
+type nvidiaHAMiKubernetesUsageProvider struct {
 	Client     client.Client
 	NodeName   string
 	HTTPClient *http.Client
+}
+
+// configureNVIDIAKubernetesUsage binds optional HAMi collection to the
+// NVIDIA adapter during application assembly. The generic metrics host only
+// sees the adapter's evidence-enrichment capability.
+func configureNVIDIAKubernetesUsage(
+	registry adapterRegistry,
+	writer *metricskubernetes.AnnotationWriter,
+) {
+	if writer == nil {
+		return
+	}
+
+	accelerator, ok := registry.byType[v1.AcceleratorTypeNVIDIAGPU.String()].(*nvidiaAccelerator)
+	if !ok {
+		return
+	}
+
+	accelerator.endpointUsageProvider = nvidiaHAMiKubernetesUsageProvider{
+		Client:   writer.Client,
+		NodeName: writer.NodeName,
+	}
 }
 
 type podKey struct {
@@ -54,7 +77,7 @@ type gpuUsageKey struct {
 	node         string
 }
 
-func (p KubernetesProvider) Usages(ctx context.Context) ([]model.EndpointReplicaGPUUsage, error) {
+func (p nvidiaHAMiKubernetesUsageProvider) Usages(ctx context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error) {
 	if p.Client == nil || p.NodeName == "" {
 		return nil, nil
 	}
@@ -78,10 +101,10 @@ func (p KubernetesProvider) Usages(ctx context.Context) ([]model.EndpointReplica
 		return nil, err
 	}
 
-	return endpointGPUUsagesFromHAMiMetrics(raw, podIdentities(pods)), nil
+	return nvidiaHAMiEndpointReplicaUsagesFromMetrics(raw, podIdentities(pods)), nil
 }
 
-func (p KubernetesProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod, error) {
+func (p nvidiaHAMiKubernetesUsageProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	if err := p.Client.List(
 		ctx,
@@ -118,7 +141,7 @@ func (p KubernetesProvider) localEndpointPods(ctx context.Context) ([]corev1.Pod
 	return pods, nil
 }
 
-func (p KubernetesProvider) localMonitorPod(ctx context.Context) (corev1.Pod, bool, error) {
+func (p nvidiaHAMiKubernetesUsageProvider) localMonitorPod(ctx context.Context) (corev1.Pod, bool, error) {
 	podList := &corev1.PodList{}
 	if err := p.Client.List(
 		ctx,
@@ -144,7 +167,7 @@ func (p KubernetesProvider) localMonitorPod(ctx context.Context) (corev1.Pod, bo
 	return corev1.Pod{}, false, nil
 }
 
-func (p KubernetesProvider) scrapeMonitor(ctx context.Context, podIP string) (string, error) {
+func (p nvidiaHAMiKubernetesUsageProvider) scrapeMonitor(ctx context.Context, podIP string) (string, error) {
 	if strings.TrimSpace(podIP) == "" {
 		return "", nil
 	}
@@ -175,7 +198,7 @@ func (p KubernetesProvider) scrapeMonitor(ctx context.Context, podIP string) (st
 	return string(body), nil
 }
 
-func (p KubernetesProvider) httpClient() *http.Client {
+func (p nvidiaHAMiKubernetesUsageProvider) httpClient() *http.Client {
 	if p.HTTPClient != nil {
 		return p.HTTPClient
 	}
@@ -189,7 +212,7 @@ func podIdentities(pods []corev1.Pod) map[podKey]podIdentity {
 	for _, pod := range pods {
 		labels := pod.GetLabels()
 		identities[podKey{namespace: pod.Namespace, name: pod.Name}] = podIdentity{
-			workspace: endpointWorkspace(labels),
+			workspace: nvidiaHAMiEndpointWorkspace(labels),
 			cluster:   labels[v1.NeutreeClusterLabelKey],
 			endpoint:  labels["endpoint"],
 			node:      pod.Spec.NodeName,
@@ -199,11 +222,11 @@ func podIdentities(pods []corev1.Pod) map[podKey]podIdentity {
 	return identities
 }
 
-func endpointGPUUsagesFromHAMiMetrics(
+func nvidiaHAMiEndpointReplicaUsagesFromMetrics(
 	raw string,
 	pods map[podKey]podIdentity,
-) []model.EndpointReplicaGPUUsage {
-	index := map[gpuUsageKey]*model.EndpointReplicaGPUUsage{}
+) []adapter.EndpointReplicaAcceleratorUsage {
+	index := map[gpuUsageKey]*adapter.EndpointReplicaAcceleratorUsage{}
 
 	for _, sample := range promtext.ParseVector(raw) {
 		key := gpuUsageKey{
@@ -225,7 +248,7 @@ func endpointGPUUsagesFromHAMiMetrics(
 
 		usage := index[key]
 		if usage == nil {
-			usage = &model.EndpointReplicaGPUUsage{
+			usage = &adapter.EndpointReplicaAcceleratorUsage{
 				Workspace:       identity.workspace,
 				Cluster:         identity.cluster,
 				Endpoint:        identity.endpoint,
@@ -233,7 +256,7 @@ func endpointGPUUsagesFromHAMiMetrics(
 				ReplicaID:       key.pod,
 				NodeID:          firstNonEmpty(key.node, identity.node),
 				Container:       key.container,
-				GPUUUID:         key.deviceUUID,
+				AcceleratorUUID: key.deviceUUID,
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 				VDeviceIndex:    key.vdeviceIndex,
 				Product: firstNonEmpty(
@@ -255,7 +278,7 @@ func endpointGPUUsagesFromHAMiMetrics(
 		}
 	}
 
-	result := make([]model.EndpointReplicaGPUUsage, 0, len(index))
+	result := make([]adapter.EndpointReplicaAcceleratorUsage, 0, len(index))
 	for _, usage := range index {
 		result = append(result, *usage)
 	}
@@ -273,13 +296,13 @@ func endpointGPUUsagesFromHAMiMetrics(
 			return result[i].Container < result[j].Container
 		}
 
-		return result[i].GPUUUID < result[j].GPUUUID
+		return result[i].AcceleratorUUID < result[j].AcceleratorUUID
 	})
 
 	return result
 }
 
-func endpointWorkspace(labels map[string]string) string {
+func nvidiaHAMiEndpointWorkspace(labels map[string]string) string {
 	return firstNonEmpty(labels["workspace"], labels[v1.NeutreeClusterWorkspaceLabelKey])
 }
 
@@ -313,8 +336,4 @@ func normalizedRatio(value float64) float64 {
 	}
 
 	return value
-}
-
-func firstNonEmpty(values ...string) string {
-	return model.FirstNonEmpty(values...)
 }

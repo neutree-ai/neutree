@@ -13,7 +13,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
@@ -79,7 +78,7 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 	kubernetesEvidenceProvider, staticEvidenceProvider := o.acceleratorEvidenceProviders(writer)
 	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
 	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
-	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
+	configureNVIDIAKubernetesUsage(registry, writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 
 	if err != nil {
@@ -156,24 +155,6 @@ func (o *options) acceleratorEvidenceProviders(
 		return nil, rayProvider
 	default:
 		return nil, nil
-	}
-}
-
-func (o *options) endpointGPUUsageProvider(
-	writer *metricskubernetes.AnnotationWriter,
-) neutreemetrics.EndpointGPUUsageProvider {
-	switch o.clusterType {
-	case v1.KubernetesClusterType:
-		if writer == nil {
-			return nil
-		}
-
-		return hami.KubernetesProvider{
-			Client:   writer.Client,
-			NodeName: writer.NodeName,
-		}
-	default:
-		return nil
 	}
 }
 

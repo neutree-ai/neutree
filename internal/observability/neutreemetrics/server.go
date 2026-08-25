@@ -45,7 +45,6 @@ type Config struct {
 	// DeviceSnapshotProvider is the external device snapshot provider.
 	DeviceSnapshotProvider                model.DeviceSnapshotProvider
 	RuntimeUsageProvider                  runtimeusage.Provider
-	EndpointGPUUsageProvider              EndpointGPUUsageProvider
 	KubernetesAcceleratorEvidenceProvider KubernetesAcceleratorEvidenceProvider
 	StaticAcceleratorEvidenceProvider     StaticAcceleratorEvidenceProvider
 	AllocationTimeout                     time.Duration
@@ -77,10 +76,6 @@ type Server struct {
 	config     Config
 	httpClient *http.Client
 	normalizer *metricsnormalizer.Normalizer
-}
-
-type EndpointGPUUsageProvider interface {
-	Usages(ctx context.Context) ([]model.EndpointReplicaGPUUsage, error)
 }
 
 type KubernetesAcceleratorEvidenceProvider interface {
@@ -243,18 +238,12 @@ func (s *Server) normalizeRequest(ctx context.Context) metricsnormalizer.Normali
 	}
 
 	acceleratorExporter := s.scrapeAcceleratorExporters(ctx)
-	var endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage
-	if consumer, ok := accel.(adapter.EndpointReplicaAcceleratorUsageConsumer); ok &&
-		consumer.NeedsEndpointReplicaAcceleratorUsages() {
-		endpointReplicaGPUUsages = s.endpointReplicaGPUUsages(ctx)
-	}
 
 	normalizeReq.AcceleratorExporter = acceleratorExporter
 	normalizeReq.AcceleratorSamples = s.acceleratorSamples(
 		ctx,
 		accel,
 		acceleratorExporter,
-		endpointReplicaGPUUsages,
 	)
 
 	return normalizeReq
@@ -273,13 +262,12 @@ func (s *Server) selectedAccelerator() adapter.Accelerator {
 
 // acceleratorSamples drives the generic adapter lifecycle: discover hardware,
 // collect topology evidence, build adapter metrics, validate them, then return
-// normalizer-owned samples. It deliberately fails closed instead of parsing a
-// configured non-DCGM exporter through the legacy NVIDIA path.
+// normalizer-owned samples. It deliberately fails closed instead of parsing an
+// adapter-owned exporter body in the generic host.
 func (s *Server) acceleratorSamples(
 	ctx context.Context,
 	accel adapter.Accelerator,
 	acceleratorExporter *model.ScrapeResult,
-	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
 ) []metricsnormalizer.Sample {
 	hardware, err := s.discoverAdapterHardware(ctx, accel)
 	if err != nil {
@@ -293,7 +281,6 @@ func (s *Server) acceleratorSamples(
 		accel,
 		hardware,
 		acceleratorExporter,
-		endpointReplicaGPUUsages,
 	)
 	if err != nil {
 		klog.V(2).InfoS("Accelerator adapter failed to build metrics", "accelerator_type", s.config.AcceleratorType, "error", err)
@@ -341,11 +328,9 @@ func (s *Server) adapterMetricResult(
 	accel adapter.Accelerator,
 	hardware adapter.HardwareSnapshot,
 	acceleratorExporter *model.ScrapeResult,
-	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
 ) (adapter.MetricResult, error) {
 	common := adapter.CommonEvidence{
-		Labels:                           adapterLabels(s.config.Labels),
-		EndpointReplicaAcceleratorUsages: adapterEndpointReplicaGPUUsages(endpointReplicaGPUUsages),
+		Labels: adapterLabels(s.config.Labels),
 	}
 	if acceleratorExporter != nil {
 		common.ExporterText = acceleratorExporter.Body
@@ -363,6 +348,14 @@ func (s *Server) adapterMetricResult(
 		}
 
 		evidence := s.kubernetesAcceleratorEvidence(buildCtx, common)
+		if enricher, ok := accel.(adapter.KubernetesEvidenceEnricher); ok {
+			enriched, err := enricher.EnrichKubernetesEvidence(buildCtx, evidence.Clone())
+			if err != nil {
+				return adapter.MetricResult{}, err
+			}
+
+			evidence = enriched.Clone()
+		}
 
 		result, err := kubernetesAccelerator.BuildKubernetesMetrics(
 			buildCtx,
@@ -460,46 +453,6 @@ func adapterLabels(labels model.CanonicalLabels) adapter.CanonicalLabels {
 	}
 }
 
-// adapterEndpointReplicaGPUUsages copies generic per-replica usage evidence
-// into the adapter boundary. The selected adapter decides whether its vendor
-// exporter can safely correlate those observations.
-func adapterEndpointReplicaGPUUsages(
-	usages []model.EndpointReplicaGPUUsage,
-) []adapter.EndpointReplicaAcceleratorUsage {
-	result := make([]adapter.EndpointReplicaAcceleratorUsage, 0, len(usages))
-
-	for _, usage := range usages {
-		converted := adapter.EndpointReplicaAcceleratorUsage{
-			Workspace:        usage.Workspace,
-			Cluster:          usage.Cluster,
-			Endpoint:         usage.Endpoint,
-			InstanceID:       usage.InstanceID,
-			ReplicaID:        usage.ReplicaID,
-			NodeID:           usage.NodeID,
-			Container:        usage.Container,
-			AcceleratorUUID:  usage.GPUUUID,
-			AcceleratorType:  usage.AcceleratorType,
-			AcceleratorIndex: usage.AcceleratorIndex,
-			VDeviceIndex:     usage.VDeviceIndex,
-			Product:          usage.Product,
-		}
-
-		if usage.MemoryUsedBytes != nil {
-			memoryUsedBytes := *usage.MemoryUsedBytes
-			converted.MemoryUsedBytes = &memoryUsedBytes
-		}
-
-		if usage.UtilizationRatio != nil {
-			utilizationRatio := *usage.UtilizationRatio
-			converted.UtilizationRatio = &utilizationRatio
-		}
-
-		result = append(result, converted)
-	}
-
-	return result
-}
-
 // normalizerSamplesFromAdapter is the final host-side conversion after the
 // adapter has produced validated canonical metric samples. Keeping this small
 // conversion outside adapters lets all vendors share the existing Prometheus
@@ -539,22 +492,6 @@ func (s *Server) endpointReplicaRuntimeUsages(ctx context.Context) []model.Endpo
 	return usages
 }
 
-func (s *Server) endpointReplicaGPUUsages(ctx context.Context) []model.EndpointReplicaGPUUsage {
-	if s.config.EndpointGPUUsageProvider == nil {
-		return nil
-	}
-
-	usageCtx, cancel := context.WithTimeout(ctx, s.allocationTimeout())
-	defer cancel()
-
-	usages, err := s.config.EndpointGPUUsageProvider.Usages(usageCtx)
-	if err != nil {
-		return nil
-	}
-
-	return usages
-}
-
 func (s *Server) handleNodeDeviceSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := s.nodeDeviceSnapshot(r)
 	if err != nil {
@@ -586,7 +523,7 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, er
 			return &v1.NodeDeviceSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}, nil
 		}
 
-		result, err := s.adapterMetricResult(ctx, accel, hardware, s.scrapeAcceleratorExporters(ctx), nil)
+		result, err := s.adapterMetricResult(ctx, accel, hardware, s.scrapeAcceleratorExporters(ctx))
 		if err != nil {
 			klog.V(2).InfoS("Accelerator adapter failed to build device snapshot allocations", "accelerator_type", s.config.AcceleratorType, "error", err)
 		}

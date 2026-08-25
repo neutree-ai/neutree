@@ -1,4 +1,4 @@
-package hami
+package app
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestEndpointGPUUsagesFromHAMiMetrics(t *testing.T) {
+func TestNvidiaHAMiEndpointReplicaUsagesFromMetrics(t *testing.T) {
 	raw := `
 hami_vgpu_memory_limit_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 8589934592
 hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a",device_name="NVIDIA_A100"} 4294967296
@@ -34,7 +34,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 		},
 	}
 
-	usages := endpointGPUUsagesFromHAMiMetrics(raw, pods)
+	usages := nvidiaHAMiEndpointReplicaUsagesFromMetrics(raw, pods)
 
 	require.Len(t, usages, 1)
 	assert.Equal(t, "team-a", usages[0].Workspace)
@@ -42,7 +42,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 	assert.Equal(t, "chat", usages[0].Endpoint)
 	assert.Equal(t, "chat-abc", usages[0].InstanceID)
 	assert.Equal(t, "node-a", usages[0].NodeID)
-	assert.Equal(t, "GPU-abc", usages[0].GPUUUID)
+	assert.Equal(t, "GPU-abc", usages[0].AcceleratorUUID)
 	assert.Equal(t, "0", usages[0].VDeviceIndex)
 	require.NotNil(t, usages[0].MemoryUsedBytes)
 	assert.Equal(t, 4294967296.0, *usages[0].MemoryUsedBytes)
@@ -50,7 +50,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 	assert.Equal(t, 0.75, *usages[0].UtilizationRatio)
 }
 
-func TestEndpointGPUUsagesFromHAMiMetricsAggregatesUsageAndNormalizesPercentages(t *testing.T) {
+func TestNvidiaHAMiEndpointReplicaUsagesAggregatesUsageAndNormalizesPercentages(t *testing.T) {
 	raw := `
 hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 100
 hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 200
@@ -62,7 +62,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine
 		{namespace: "default", name: "chat-abc"}: {endpoint: "chat"},
 	}
 
-	usages := endpointGPUUsagesFromHAMiMetrics(raw, pods)
+	usages := nvidiaHAMiEndpointReplicaUsagesFromMetrics(raw, pods)
 
 	require.Len(t, usages, 1)
 	require.NotNil(t, usages[0].MemoryUsedBytes)
@@ -71,7 +71,7 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine
 	assert.Equal(t, 0.75, *usages[0].UtilizationRatio)
 }
 
-func TestKubernetesProviderScrapesLocalHAMiMonitor(t *testing.T) {
+func TestNvidiaHAMiKubernetesUsageProviderScrapesLocalMonitor(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -110,7 +110,7 @@ func TestKubernetesProviderScrapesLocalHAMiMonitor(t *testing.T) {
 		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
 		WithObjects(endpointPod, monitorPod, remoteMonitorPod).
 		Build()
-	provider := KubernetesProvider{
+	provider := nvidiaHAMiKubernetesUsageProvider{
 		Client:   ctrClient,
 		NodeName: "node-a",
 		HTTPClient: roundTripClient(func(req *http.Request) (*http.Response, error) {
@@ -127,10 +127,10 @@ hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",conta
 	require.NoError(t, err)
 	require.Len(t, usages, 1)
 	assert.Equal(t, "chat", usages[0].Endpoint)
-	assert.Equal(t, "GPU-abc", usages[0].GPUUUID)
+	assert.Equal(t, "GPU-abc", usages[0].AcceleratorUUID)
 }
 
-func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {
+func TestNvidiaHAMiKubernetesUsageProviderReturnsNilWhenMonitorIsMissing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -138,7 +138,7 @@ func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {
 		WithScheme(scheme).
 		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
 		Build()
-	provider := KubernetesProvider{Client: ctrClient, NodeName: "node-a"}
+	provider := nvidiaHAMiKubernetesUsageProvider{Client: ctrClient, NodeName: "node-a"}
 
 	usages, err := provider.Usages(context.Background())
 
@@ -146,7 +146,7 @@ func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {
 	assert.Nil(t, usages)
 }
 
-func TestKubernetesProviderReturnsNilWhenEndpointHasNoLocalMonitor(t *testing.T) {
+func TestNvidiaHAMiKubernetesUsageProviderReturnsNilWhenEndpointHasNoLocalMonitor(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -173,13 +173,13 @@ func TestKubernetesProviderReturnsNilWhenEndpointHasNoLocalMonitor(t *testing.T)
 		WithObjects(endpointPod, remoteMonitor).
 		Build()
 
-	usages, err := (KubernetesProvider{Client: ctrClient, NodeName: "node-a"}).Usages(context.Background())
+	usages, err := (nvidiaHAMiKubernetesUsageProvider{Client: ctrClient, NodeName: "node-a"}).Usages(context.Background())
 
 	require.NoError(t, err)
 	assert.Nil(t, usages)
 }
 
-func TestKubernetesProviderPropagatesMonitorErrors(t *testing.T) {
+func TestNvidiaHAMiKubernetesUsageProviderPropagatesMonitorErrors(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	endpointPod := &corev1.Pod{
@@ -204,7 +204,7 @@ func TestKubernetesProviderPropagatesMonitorErrors(t *testing.T) {
 		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
 		WithObjects(endpointPod, monitorPod).
 		Build()
-	provider := KubernetesProvider{
+	provider := nvidiaHAMiKubernetesUsageProvider{
 		Client:   ctrClient,
 		NodeName: "node-a",
 		HTTPClient: roundTripClient(func(*http.Request) (*http.Response, error) {
@@ -218,7 +218,7 @@ func TestKubernetesProviderPropagatesMonitorErrors(t *testing.T) {
 	assert.Nil(t, usages)
 }
 
-func TestKubernetesProviderFiltersLocalPodsAndUsesDefaultClient(t *testing.T) {
+func TestNvidiaHAMiKubernetesUsageProviderFiltersLocalPodsAndUsesDefaultClient(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	pods := []client.Object{
@@ -228,7 +228,7 @@ func TestKubernetesProviderFiltersLocalPodsAndUsesDefaultClient(t *testing.T) {
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-b", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "chat-a", Labels: map[string]string{"app": "inference", "endpoint": "chat"}}, Spec: corev1.PodSpec{NodeName: "node-a"}},
 	}
-	provider := KubernetesProvider{
+	provider := nvidiaHAMiKubernetesUsageProvider{
 		Client: fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(pods...).

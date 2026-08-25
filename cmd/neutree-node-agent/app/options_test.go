@@ -13,7 +13,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
@@ -104,7 +103,7 @@ func TestOptionsAcceleratorEvidenceProviderUsesKubernetesRawEvidence(t *testing.
 	assert.Nil(t, staticEvidenceProvider)
 }
 
-func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
+func TestConfigureNVIDIAKubernetesUsageBindsHAMiProviderToAdapter(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -112,12 +111,14 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
 		NodeName: "node-a",
 	}
-	opts := newOptions()
-	opts.clusterType = v1.KubernetesClusterType
+	registry, err := newAdapterRegistry([]adapter.Accelerator{NewNVIDIAAdapter()})
+	require.NoError(t, err)
 
-	provider := opts.endpointGPUUsageProvider(writer)
+	configureNVIDIAKubernetesUsage(registry, writer)
 
-	_, ok := provider.(hami.KubernetesProvider)
+	nvidia, ok := registry.byType[v1.AcceleratorTypeNVIDIAGPU.String()].(*nvidiaAccelerator)
+	assert.True(t, ok)
+	_, ok = nvidia.endpointUsageProvider.(nvidiaHAMiKubernetesUsageProvider)
 	assert.True(t, ok)
 }
 

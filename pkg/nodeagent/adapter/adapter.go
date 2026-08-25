@@ -33,11 +33,11 @@ type StaticEvidenceEnricher interface {
 	EnrichStaticEvidence(context.Context, StaticEvidence) (StaticEvidence, error)
 }
 
-// EndpointReplicaAcceleratorUsageConsumer declares that an adapter needs the
-// host's raw per-replica accelerator usage evidence. Adapters that do not
-// implement it are never coupled to a vendor-specific usage collector.
-type EndpointReplicaAcceleratorUsageConsumer interface {
-	NeedsEndpointReplicaAcceleratorUsages() bool
+// KubernetesEvidenceEnricher optionally appends adapter-owned raw
+// observations to Kubernetes evidence before that adapter resolves
+// allocations. The host never interprets the appended data.
+type KubernetesEvidenceEnricher interface {
+	EnrichKubernetesEvidence(context.Context, KubernetesEvidence) (KubernetesEvidence, error)
 }
 
 // MetricDescriptorProvider optionally declares adapter-owned metric series.
