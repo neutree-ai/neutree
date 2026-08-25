@@ -50,6 +50,27 @@ hami_vgpu_memory_used_bytes{namespace="default",pod="sidecar",container="debug",
 	assert.Equal(t, 0.75, *usages[0].UtilizationRatio)
 }
 
+func TestEndpointGPUUsagesFromHAMiMetricsAggregatesUsageAndNormalizesPercentages(t *testing.T) {
+	raw := `
+hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 100
+hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 200
+hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 75
+hami_container_device_utilization_ratio{namespace="default",pod="chat-abc",container="engine",device_uuid="GPU-abc",vdevice_index="0"} 0.5
+hami_vgpu_memory_used_bytes{namespace="default",pod="chat-abc",container="engine"} 300
+`
+	pods := map[podKey]podIdentity{
+		{namespace: "default", name: "chat-abc"}: {endpoint: "chat"},
+	}
+
+	usages := endpointGPUUsagesFromHAMiMetrics(raw, pods)
+
+	require.Len(t, usages, 1)
+	require.NotNil(t, usages[0].MemoryUsedBytes)
+	assert.Equal(t, 300.0, *usages[0].MemoryUsedBytes)
+	require.NotNil(t, usages[0].UtilizationRatio)
+	assert.Equal(t, 0.75, *usages[0].UtilizationRatio)
+}
+
 func TestKubernetesProviderScrapesLocalHAMiMonitor(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -125,6 +146,78 @@ func TestKubernetesProviderReturnsNilWhenHAMiMonitorIsMissing(t *testing.T) {
 	assert.Nil(t, usages)
 }
 
+func TestKubernetesProviderReturnsNilWhenEndpointHasNoLocalMonitor(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	endpointPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "chat-abc",
+			Labels:    map[string]string{"app": "inference", "endpoint": "chat"},
+		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
+	}
+	remoteMonitor := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "kube-system",
+			Name:      "hami-device-plugin-node-b",
+			Labels:    map[string]string{"app.kubernetes.io/component": hamiDevicePluginComponent},
+		},
+		Spec:   corev1.PodSpec{NodeName: "node-b"},
+		Status: corev1.PodStatus{PodIP: "10.0.0.3"},
+	}
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
+		WithObjects(endpointPod, remoteMonitor).
+		Build()
+
+	usages, err := (KubernetesProvider{Client: ctrClient, NodeName: "node-a"}).Usages(context.Background())
+
+	require.NoError(t, err)
+	assert.Nil(t, usages)
+}
+
+func TestKubernetesProviderPropagatesMonitorErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	endpointPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "chat-abc",
+			Labels:    map[string]string{"app": "inference", "endpoint": "chat"},
+		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
+	}
+	monitorPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "kube-system",
+			Name:      "hami-device-plugin-node-a",
+			Labels:    map[string]string{"app.kubernetes.io/component": hamiDevicePluginComponent},
+		},
+		Spec:   corev1.PodSpec{NodeName: "node-a"},
+		Status: corev1.PodStatus{PodIP: "10.0.0.2"},
+	}
+	ctrClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", hamiPodNodeNameIndex).
+		WithObjects(endpointPod, monitorPod).
+		Build()
+	provider := KubernetesProvider{
+		Client:   ctrClient,
+		NodeName: "node-a",
+		HTTPClient: roundTripClient(func(*http.Request) (*http.Response, error) {
+			return textResponseWithStatus(http.StatusServiceUnavailable, "unavailable"), nil
+		}),
+	}
+
+	usages, err := provider.Usages(context.Background())
+
+	require.Error(t, err)
+	assert.Nil(t, usages)
+}
+
 func hamiPodNodeNameIndex(object client.Object) []string {
 	pod, ok := object.(*corev1.Pod)
 	if !ok || pod.Spec.NodeName == "" {
@@ -145,8 +238,12 @@ func roundTripClient(fn roundTripperFunc) *http.Client {
 }
 
 func textResponse(body string) *http.Response {
+	return textResponseWithStatus(http.StatusOK, body)
+}
+
+func textResponseWithStatus(status int, body string) *http.Response {
 	return &http.Response{
-		StatusCode: http.StatusOK,
+		StatusCode: status,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     make(http.Header),
 	}

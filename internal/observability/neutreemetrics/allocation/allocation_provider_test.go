@@ -64,6 +64,30 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 	assert.Equal(t, "raw", evidence.EndpointPods[0].Annotations["vendor.example/devices"])
 }
 
+func TestKubernetesAllocationProviderPropagatesPodResourceErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	provider := KubernetesAllocationProvider{
+		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
+		NodeName: "node-a",
+		PodResources: PodResourceListerFunc(func(context.Context) ([]adapter.PodResource, error) {
+			return nil, errors.New("pod resources unavailable")
+		}),
+	}
+
+	evidence, err := provider.KubernetesAcceleratorEvidence(context.Background())
+
+	require.Error(t, err)
+	assert.Equal(t, adapter.KubernetesEvidence{}, evidence)
+}
+
+func TestKubernetesAllocationProviderWithoutDependenciesReturnsEmptyEvidence(t *testing.T) {
+	evidence, err := (KubernetesAllocationProvider{}).KubernetesAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, adapter.KubernetesEvidence{}, evidence)
+}
+
 func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
@@ -135,6 +159,27 @@ func TestRayServeAllocationProviderKeepsActorEvidenceWhenApplicationsFail(t *tes
 	assert.Empty(t, evidence.RayEvidence.ActorProcesses[1234].Environment)
 }
 
+func TestRayServeAllocationProviderWithoutNodeIPReturnsEmptyEvidence(t *testing.T) {
+	evidence, err := (RayServeAllocationProvider{Dashboard: &fakeRayDashboardService{}}).
+		StaticAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, adapter.StaticEvidence{}, evidence)
+}
+
+func TestProcFSEnvReaderReadsProcessEnvironment(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "1234")
+	require.NoError(t, os.MkdirAll(directory, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "environ"), []byte("FOO=bar\x00EMPTY=\x00ignored"), 0o600))
+
+	environment, err := (ProcFSEnvReader{Root: root}).Env(1234)
+
+	require.NoError(t, err)
+	assert.Equal(t, "bar", environment["FOO"])
+	assert.Equal(t, "", environment["EMPTY"])
+}
+
 func TestProcFSProcessTreeReaderFindsDescendantPIDs(t *testing.T) {
 	root := t.TempDir()
 	writeProcStatus := func(pid, parentPID int) {
@@ -153,6 +198,7 @@ func TestProcFSProcessTreeReaderFindsDescendantPIDs(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []int{100, 200, 300}, pids)
+
 }
 
 type fakeRayDashboardService struct {
