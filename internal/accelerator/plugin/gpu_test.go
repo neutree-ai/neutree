@@ -431,6 +431,9 @@ func TestGPUAcceleratorPluginProfileNodeAgentRuntimeExplicit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, profile.NodeAgentRuntime)
 	assert.True(t, profile.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{
+		"NVIDIA_VISIBLE_DEVICES": "all",
+	}, profile.NodeAgentRuntime.Env)
 	require.NotNil(t, profile.NodeAgentRuntime.Capabilities)
 	assert.Equal(t, []string{"SYS_ADMIN"}, profile.NodeAgentRuntime.Capabilities.Add)
 	assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime)
