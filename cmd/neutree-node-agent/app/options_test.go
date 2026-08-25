@@ -26,24 +26,18 @@ func TestOptionsConfigDefaults(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, ":9101", config.ListenAddress)
-	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
-		MetricsMode: neutreemetrics.MetricsModeManaged,
-	}, config.ScrapeTargetProvider)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{}, config.ScrapeTargetProvider)
 	assert.Equal(t, model.CanonicalLabels{ClusterType: v1.SSHClusterType}, config.Labels)
 	assert.Nil(t, config.KubernetesWriter)
 }
 
-func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
+func TestOptionsDoesNotExposeMetricsMode(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = v1.SSHClusterType
-	opts.metricsMode = neutreemetrics.MetricsModeExternal
+	flags := pflag.NewFlagSet("node-agent", pflag.ContinueOnError)
 
-	config, err := opts.configWithRegistry(adapterRegistry{})
+	opts.addFlags(flags)
 
-	require.NoError(t, err)
-	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
-		MetricsMode: neutreemetrics.MetricsModeExternal,
-	}, config.ScrapeTargetProvider)
+	assert.Nil(t, flags.Lookup("metrics-mode"))
 }
 
 func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
@@ -165,7 +159,6 @@ func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
 	assert.Equal(t, 8082, config.AcceleratorExporterPort)
 	assert.Equal(t, "/npu-metrics", config.AcceleratorExporterMetricsPath)
 	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
-		MetricsMode:                    neutreemetrics.MetricsModeManaged,
 		AcceleratorType:                "fixture",
 		AcceleratorExporterPort:        8082,
 		AcceleratorExporterMetricsPath: "/npu-metrics",

@@ -857,7 +857,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 	assert.Contains(t, body, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 0.87`)
 }
 
-func TestServerSkipsAcceleratorHTTPSFallbackWhenHTTPAlreadySucceeded(t *testing.T) {
+func TestServerSkipsSecondAcceleratorTargetWhenFirstSucceeds(t *testing.T) {
 	httpsRequests := 0
 	client := &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -892,8 +892,8 @@ func TestServerSkipsAcceleratorHTTPSFallbackWhenHTTPAlreadySucceeded(t *testing.
 		},
 		ScrapeTargetProvider: staticTestTargetProvider{
 			metricsnormalizer.TargetAcceleratorExporter: {
-				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://exporter.local:9400/metrics"},
-				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "https://exporter.local:9400/metrics"},
+				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "http://exporter.local:19400/metrics"},
+				{TargetType: metricsnormalizer.TargetAcceleratorExporter, URL: "https://exporter.local:19400/metrics"},
 			},
 		},
 		HTTPClient: client,

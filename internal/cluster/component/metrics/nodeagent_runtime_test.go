@@ -117,6 +117,21 @@ func TestSelectedMetricsNodeAgentProjectsProfileTargetWithoutRuntime(t *testing.
 		envValue(nodeAgent.Env, v1.VirtualizationMonitorProfileEnvKey))
 }
 
+func TestSelectedMetricsNodeAgentProjectsTargetWithoutRuntimeProfile(t *testing.T) {
+	nodeAgent, err := selectedMetricsNodeAgent([]metricsAcceleratorExporter{{
+		AcceleratorType: "ascend_npu",
+		Port:            8082,
+		MetricsPath:     "/npu-metrics",
+	}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ascend_npu", nodeAgent.AcceleratorType)
+	assert.True(t, nodeAgent.HasAcceleratorExporterTarget)
+	assert.Equal(t, 8082, nodeAgent.AcceleratorExporterPort)
+	assert.Equal(t, "/npu-metrics", nodeAgent.AcceleratorExporterMetricsPath)
+	assert.Empty(t, nodeAgent.Env)
+}
+
 func TestCheckResourcesStatusChecksSingleNodeAgent(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(
 		readyMetricsDeployment("neutree-kube-state-metrics"),

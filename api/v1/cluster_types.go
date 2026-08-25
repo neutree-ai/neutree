@@ -108,7 +108,9 @@ type ClusterMetricsConfig struct {
 type ClusterAcceleratorExporterConfig struct {
 	// Mode controls accelerator exporter ownership.
 	// managed installs and scrapes the Neutree-managed exporter when the cluster version supports it.
-	// external skips exporter installation and scrapes an existing dcgm-exporter with the legacy k8s config.
+	// external skips exporter installation. Its upstream orchestration layer
+	// must provide the profile-defined exporter target with the standard target
+	// labels; Neutree does not retain a vendor-specific discovery fallback.
 	Mode ClusterAcceleratorExporterMode `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 

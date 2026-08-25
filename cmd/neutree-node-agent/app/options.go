@@ -21,7 +21,6 @@ import (
 type options struct {
 	listenAddress           string
 	clusterType             string
-	metricsMode             string
 	node                    string
 	nodeIP                  string
 	acceleratorType         string
@@ -37,7 +36,6 @@ func newOptions() *options {
 	return &options{
 		listenAddress: ":9101",
 		clusterType:   v1.KubernetesClusterType,
-		metricsMode:   neutreemetrics.MetricsModeManaged,
 		procFSRoot:    "/proc",
 		cgroupFSRoot:  "/sys/fs/cgroup",
 	}
@@ -46,7 +44,6 @@ func newOptions() *options {
 func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.listenAddress, "listen-address", o.listenAddress, "HTTP listen address")
 	fs.StringVar(&o.clusterType, "cluster-type", o.clusterType, "Cluster type used to select allocation and runtime providers")
-	fs.StringVar(&o.metricsMode, "metrics-mode", o.metricsMode, "Metrics exporter mode: managed or external")
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
 	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
@@ -109,7 +106,6 @@ func (o *options) scrapeTargetProvider(
 
 		return neutreemetrics.KubernetesScrapeTargetProvider{
 			Client:                         writer.Client,
-			MetricsMode:                    o.metricsMode,
 			NodeName:                       writer.NodeName,
 			AcceleratorType:                o.acceleratorType,
 			AcceleratorExporterPort:        o.acceleratorExporterPort,
@@ -117,7 +113,6 @@ func (o *options) scrapeTargetProvider(
 		}
 	case v1.SSHClusterType:
 		return neutreemetrics.StaticScrapeTargetProvider{
-			MetricsMode:                    o.metricsMode,
 			AcceleratorType:                o.acceleratorType,
 			AcceleratorExporterPort:        o.acceleratorExporterPort,
 			AcceleratorExporterMetricsPath: o.acceleratorExporterPath,

@@ -339,7 +339,6 @@ spec:
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
         - --cluster-type={{ .NodeAgentClusterType }}
-        - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
 {{ if .NodeAgent.AcceleratorType }}
@@ -563,7 +562,6 @@ type MetricsManifestVariables struct {
 	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
-	MetricsMode                      string
 	Replicas                         int
 	Resources                        map[string]string
 	NeutreeNodeAgentMetricsResources map[string]string
@@ -573,8 +571,8 @@ type MetricsManifestVariables struct {
 	EnableKubeStateMetrics           bool
 	EnableNeutreeNodeAgentMetrics    bool
 	EnableNodeExporter               bool
-	EnableExternalDCGMScrape         bool
 	AcceleratorExporters             []metricsAcceleratorExporter
+	AcceleratorExporterScrapeTargets []metricsAcceleratorExporter
 	EnableVMAgent                    bool
 	VMAgentConfig                    string
 
@@ -625,7 +623,6 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
-		MetricsMode:                      string(m.acceleratorExporterMode()),
 		Replicas:                         replicas,
 		Resources:                        resources,
 		NeutreeNodeAgentMetricsResources: neutreeNodeAgentMetricsResources,

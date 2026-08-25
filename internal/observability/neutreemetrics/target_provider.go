@@ -14,20 +14,17 @@ import (
 )
 
 const (
-	MetricsModeManaged  = "managed"
-	MetricsModeExternal = "external"
+	defaultMetricsPath      = "/metrics"
+	managedNodeExporterPort = 19100
+	managedNodeExporterApp  = "neutree-node-exporter"
 
-	defaultMetricsPath = "/metrics"
-
-	managedNodeExporterPort             = 19100
-	managedAcceleratorExporterPort      = 19400
-	externalAcceleratorExporterPort     = 9400
-	ManagedAcceleratorExporterLabel     = "neutree.ai/metrics-target"
-	ManagedAcceleratorExporterValue     = "accelerator-exporter"
-	ManagedAcceleratorExporterTypeLabel = "neutree.ai/accelerator-type"
-	managedNodeExporterApp              = "neutree-node-exporter"
-	managedAcceleratorExporterSuffix    = "-dcgm-exporter"
-	externalAcceleratorExporterApp      = "nvidia-dcgm-exporter"
+	// AcceleratorExporterTargetLabel and AcceleratorExporterTypeLabel are the
+	// orchestration-owned discovery contract for every accelerator exporter.
+	// Managed and external workloads use the same labels; the NodeAgent never
+	// infers a vendor-specific legacy target.
+	AcceleratorExporterTargetLabel = "neutree.ai/metrics-target"
+	AcceleratorExporterTargetValue = "accelerator-exporter"
+	AcceleratorExporterTypeLabel   = "neutree.ai/accelerator-type"
 )
 
 type ScrapeTarget struct {
@@ -40,7 +37,6 @@ type ScrapeTargetProvider interface {
 }
 
 type StaticScrapeTargetProvider struct {
-	MetricsMode                    string
 	AcceleratorType                string
 	AcceleratorExporterPort        int
 	AcceleratorExporterMetricsPath string
@@ -56,21 +52,22 @@ func (p StaticScrapeTargetProvider) Targets(_ context.Context, targetType string
 		targetType,
 		"127.0.0.1",
 		port,
-		targetSchemes(p.metricsMode(), targetType, p.hasExplicitAcceleratorTarget(targetType)),
+		[]string{"http"},
 		p.metricsPath(targetType),
 	), nil
 }
 
-func (p StaticScrapeTargetProvider) metricsMode() string {
-	return normalizeMetricsMode(p.MetricsMode)
-}
-
 func (p StaticScrapeTargetProvider) targetPort(targetType string) (int, bool) {
-	if p.hasExplicitAcceleratorTarget(targetType) {
-		return p.AcceleratorExporterPort, true
+	switch targetType {
+	case metricsnormalizer.TargetNodeExporter:
+		return managedNodeExporterPort, true
+	case metricsnormalizer.TargetAcceleratorExporter:
+		if p.hasExplicitAcceleratorTarget(targetType) {
+			return p.AcceleratorExporterPort, true
+		}
 	}
 
-	return targetPort(p.metricsMode(), targetType)
+	return 0, false
 }
 
 func (p StaticScrapeTargetProvider) metricsPath(targetType string) string {
@@ -83,7 +80,6 @@ func (p StaticScrapeTargetProvider) metricsPath(targetType string) string {
 
 type KubernetesScrapeTargetProvider struct {
 	Client                         client.Client
-	MetricsMode                    string
 	NodeName                       string
 	AcceleratorType                string
 	AcceleratorExporterPort        int
@@ -95,9 +91,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 		return nil, nil
 	}
 
-	mode := normalizeMetricsMode(p.MetricsMode)
 	port, ok := p.targetPort(targetType)
-
 	if !ok {
 		return nil, nil
 	}
@@ -115,7 +109,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 			continue
 		}
 
-		if !p.matchesTargetPod(mode, targetType, pod.Labels) {
+		if !p.matchesTargetPod(targetType, pod.Labels) {
 			continue
 		}
 
@@ -124,7 +118,6 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 		}
 
 		seen[pod.Status.PodIP] = struct{}{}
-
 		hosts = append(hosts, pod.Status.PodIP)
 	}
 
@@ -136,7 +129,7 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 			targetType,
 			host,
 			port,
-			targetSchemes(mode, targetType, p.hasExplicitAcceleratorTarget(targetType)),
+			[]string{"http"},
 			p.metricsPath(targetType),
 		)...)
 	}
@@ -145,11 +138,16 @@ func (p KubernetesScrapeTargetProvider) Targets(ctx context.Context, targetType 
 }
 
 func (p KubernetesScrapeTargetProvider) targetPort(targetType string) (int, bool) {
-	if p.hasExplicitAcceleratorTarget(targetType) {
-		return p.AcceleratorExporterPort, true
+	switch targetType {
+	case metricsnormalizer.TargetNodeExporter:
+		return managedNodeExporterPort, true
+	case metricsnormalizer.TargetAcceleratorExporter:
+		if p.hasExplicitAcceleratorTarget(targetType) {
+			return p.AcceleratorExporterPort, true
+		}
 	}
 
-	return targetPort(normalizeMetricsMode(p.MetricsMode), targetType)
+	return 0, false
 }
 
 func (p KubernetesScrapeTargetProvider) metricsPath(targetType string) string {
@@ -160,17 +158,17 @@ func (p KubernetesScrapeTargetProvider) metricsPath(targetType string) string {
 	return defaultMetricsPath
 }
 
-func (p KubernetesScrapeTargetProvider) matchesTargetPod(
-	metricsMode string,
-	targetType string,
-	labels map[string]string,
-) bool {
-	if p.hasExplicitAcceleratorTarget(targetType) {
-		return labels[ManagedAcceleratorExporterLabel] == ManagedAcceleratorExporterValue &&
-			labels[ManagedAcceleratorExporterTypeLabel] == p.AcceleratorType
+func (p KubernetesScrapeTargetProvider) matchesTargetPod(targetType string, labels map[string]string) bool {
+	switch targetType {
+	case metricsnormalizer.TargetNodeExporter:
+		return labels["app"] == managedNodeExporterApp
+	case metricsnormalizer.TargetAcceleratorExporter:
+		return p.hasExplicitAcceleratorTarget(targetType) &&
+			labels[AcceleratorExporterTargetLabel] == AcceleratorExporterTargetValue &&
+			labels[AcceleratorExporterTypeLabel] == p.AcceleratorType
+	default:
+		return false
 	}
-
-	return matchesTargetPod(metricsMode, targetType, labels)
 }
 
 func (p StaticScrapeTargetProvider) hasExplicitAcceleratorTarget(targetType string) bool {
@@ -195,21 +193,6 @@ func hasExplicitAcceleratorTarget(targetType, acceleratorType string, port int, 
 	return targetType == metricsnormalizer.TargetAcceleratorExporter &&
 		acceleratorType != "" &&
 		(port != 0 || strings.TrimSpace(metricsPath) != "")
-}
-
-func targetPort(metricsMode string, targetType string) (int, bool) {
-	switch targetType {
-	case metricsnormalizer.TargetNodeExporter:
-		return managedNodeExporterPort, true
-	case metricsnormalizer.TargetAcceleratorExporter:
-		if metricsMode == MetricsModeExternal {
-			return externalAcceleratorExporterPort, true
-		}
-
-		return managedAcceleratorExporterPort, true
-	default:
-		return 0, false
-	}
 }
 
 func scrapeTargetsWithPath(targetType string, host string, port int, schemes []string, metricsPath string) []ScrapeTarget {
@@ -239,57 +222,4 @@ func normalizedTargetMetricsPath(metricsPath string) string {
 	}
 
 	return metricsPath
-}
-
-func targetSchemes(metricsMode string, targetType string, explicitAcceleratorTarget bool) []string {
-	if targetType == metricsnormalizer.TargetAcceleratorExporter &&
-		metricsMode == MetricsModeExternal && !explicitAcceleratorTarget {
-		return []string{"http", "https"}
-	}
-
-	return []string{"http"}
-}
-
-func normalizeMetricsMode(metricsMode string) string {
-	if metricsMode == MetricsModeExternal {
-		return MetricsModeExternal
-	}
-
-	return MetricsModeManaged
-}
-
-func matchesTargetPod(metricsMode string, targetType string, labels map[string]string) bool {
-	switch targetType {
-	case metricsnormalizer.TargetNodeExporter:
-		return matchesNodeExporterPod(metricsMode, labels)
-	case metricsnormalizer.TargetAcceleratorExporter:
-		return matchesAcceleratorExporterPod(metricsMode, labels)
-	default:
-		return false
-	}
-}
-
-func matchesNodeExporterPod(_ string, labels map[string]string) bool {
-	return labels["app"] == managedNodeExporterApp
-}
-
-func matchesAcceleratorExporterPod(metricsMode string, labels map[string]string) bool {
-	app := labels["app"]
-	if metricsMode == MetricsModeExternal {
-		return app == externalAcceleratorExporterApp
-	}
-
-	if labels[ManagedAcceleratorExporterLabel] == ManagedAcceleratorExporterValue {
-		return true
-	}
-
-	return app != "" && hasSuffix(app, managedAcceleratorExporterSuffix)
-}
-
-func hasSuffix(value string, suffix string) bool {
-	if len(value) < len(suffix) {
-		return false
-	}
-
-	return value[len(value)-len(suffix):] == suffix
 }

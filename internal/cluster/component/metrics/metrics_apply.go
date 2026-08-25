@@ -34,14 +34,15 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
-	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
-	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
-	}
+	acceleratorExporters := []metricsAcceleratorExporter(nil)
+	if enableManagedMetricsExporters {
+		acceleratorExporters, err = m.planAcceleratorExporters(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
+		}
 
-	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
+		variables.AcceleratorExporterScrapeTargets = acceleratorExporters
 		variables.AcceleratorExporters = acceleratorExporters
 	}
 

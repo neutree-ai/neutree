@@ -100,7 +100,8 @@ type AcceleratorProfile struct {
 	// generic collectors consume this declaration without branching on vendor
 	// names, selectors, or ports.
 	VirtualizationMonitor *VirtualizationMonitorProfile `json:"virtualization_monitor,omitempty"`
-	// MetricsExporter describes the optional metrics exporter used for accelerator observability.
+	// MetricsExporter describes the optional metrics exporter used for accelerator
+	// observability on Kubernetes and StaticNode clusters.
 	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
 }
 
@@ -150,9 +151,6 @@ type AcceleratorExporterProfile struct {
 	Name string `json:"name,omitempty"`
 	// Image is the exporter container image.
 	Image string `json:"image,omitempty"`
-	// Backends limits this exporter profile to the declared deployment backends.
-	// An empty list preserves compatibility with profiles that support every backend.
-	Backends []AcceleratorExporterBackend `json:"backends,omitempty"`
 	// Command overrides the exporter image entrypoint.
 	Command []string `json:"command,omitempty"`
 	// Args are passed to the exporter command or image entrypoint.
@@ -167,36 +165,6 @@ type AcceleratorExporterProfile struct {
 	ConfigFiles []AcceleratorExporterConfigFile `json:"config_files,omitempty"`
 	// Runtime declares backend-specific runtime requirements for running the exporter.
 	Runtime *AcceleratorExporterRuntimeProfile `json:"runtime,omitempty"`
-}
-
-// AcceleratorExporterBackend identifies a deployment backend for an exporter profile.
-type AcceleratorExporterBackend string
-
-const (
-	// AcceleratorExporterBackendKubernetes renders a managed Kubernetes exporter.
-	AcceleratorExporterBackendKubernetes AcceleratorExporterBackend = "kubernetes"
-	// AcceleratorExporterBackendStatic renders a static-node Docker exporter.
-	AcceleratorExporterBackendStatic AcceleratorExporterBackend = "static"
-)
-
-// SupportsBackend reports whether this profile is declared for a deployment backend.
-// Profiles created before backend-specific variants remain usable on every backend.
-func (p *AcceleratorExporterProfile) SupportsBackend(backend AcceleratorExporterBackend) bool {
-	if p == nil {
-		return false
-	}
-
-	if len(p.Backends) == 0 {
-		return true
-	}
-
-	for _, candidate := range p.Backends {
-		if candidate == backend {
-			return true
-		}
-	}
-
-	return false
 }
 
 type AcceleratorExporterConfigFile struct {

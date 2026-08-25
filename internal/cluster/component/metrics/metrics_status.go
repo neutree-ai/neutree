@@ -124,7 +124,7 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 		}
 	}
 
-	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
+	if nodeExporterRequired {
 		acceleratorExporters, err := m.planAcceleratorExporters(ctx)
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))

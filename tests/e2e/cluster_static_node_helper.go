@@ -283,6 +283,11 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 		if node.Status.Accelerator != nil &&
 			node.Status.Accelerator.Type == v1.AcceleratorTypeNVIDIAGPU.String() {
 			gpuNodeIPs = append(gpuNodeIPs, node.Spec.IP)
+			nodeAgent := requireStaticNodeComponent(node, "neutree-node-agent")
+			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--metrics-mode=")))
+			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-type=nvidia_gpu"))
+			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-port=19400"))
+			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-metrics-path=/metrics"))
 		}
 	}
 
@@ -295,19 +300,19 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
 
 	if len(gpuNodeIPs) == 0 {
-		ExpectWithOffset(1, vmagentConfig.Content).NotTo(ContainSubstring("job_name: static-node-accelerator-exporter"))
+		ExpectWithOffset(1, vmagentConfig.Content).NotTo(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
 		return
 	}
 
-	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-accelerator-exporter"))
+	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
 
 	acceleratorTargets := requireStaticNodeComponentConfigFile(
 		vmagent,
-		"/etc/neutree/vmagent/file_sd/accelerator-exporter.json",
+		"/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json",
 	)
 
 	for _, ip := range gpuNodeIPs {
-		ExpectWithOffset(1, acceleratorTargets.Content).To(ContainSubstring(fmt.Sprintf(`"%s:9400"`, ip)))
+		ExpectWithOffset(1, acceleratorTargets.Content).To(ContainSubstring(fmt.Sprintf(`"%s:19400"`, ip)))
 	}
 }
 

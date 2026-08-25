@@ -24,9 +24,10 @@ type staticNodeRuntimeConfigProvider interface {
 }
 
 type DesiredNodePlan struct {
-	Node             *v1.StaticNode
-	Accelerator      *v1.StaticNodeAcceleratorStatus
-	TargetComponents []v1.NodeComponentSpec
+	Node               *v1.StaticNode
+	Accelerator        *v1.StaticNodeAcceleratorStatus
+	AcceleratorProfile *v1.AcceleratorProfile
+	TargetComponents   []v1.NodeComponentSpec
 }
 
 func (r *Planner) Plan(
@@ -125,8 +126,9 @@ func (r *Planner) buildDesiredNodePlans(
 		desiredNode.Spec.Warm = buildNodeWarmSpec(components)
 		desiredNode.Spec.Components = components
 		plans = append(plans, DesiredNodePlan{
-			Accelerator: acceleratorStatus,
-			Node:        desiredNode,
+			Accelerator:        acceleratorStatus,
+			AcceleratorProfile: profile,
+			Node:               desiredNode,
 		})
 	}
 

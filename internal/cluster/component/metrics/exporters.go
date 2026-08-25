@@ -23,7 +23,6 @@ const (
 	neutreeNodeAgentMetricsName = "neutree-node-agent"
 	neutreeNodeAgentImageName   = "neutree/neutree-node-agent"
 	neutreeNodeAgentMetricsPort = 19101
-	externalDCGMExporterPort    = 9400
 
 	defaultNodeExporterImage     = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
 	defaultKubeStateMetricsImage = "registry.k8s.io/kube-state-metrics/kube-state-metrics:" + componentversion.KubeStateMetrics
@@ -79,15 +78,6 @@ func (e metricsAcceleratorExporter) HasCustomMetricsPath() bool {
 }
 
 func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metricsAcceleratorExporter, error) {
-	supported, err := m.supportsManagedMetricsExporters()
-	if err != nil {
-		return nil, err
-	}
-
-	if !supported {
-		return nil, nil
-	}
-
 	if m.acceleratorMgr == nil {
 		return nil, nil
 	}
@@ -107,14 +97,6 @@ func (m *MetricsComponent) planAcceleratorExporters(ctx context.Context) ([]metr
 	return m.selectClusterAcceleratorExporter(ctx, candidates)
 }
 
-func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
-	if m.cluster == nil || m.cluster.Spec == nil {
-		return v1.ClusterAcceleratorExporterModeManaged
-	}
-
-	return m.cluster.Spec.Config.AcceleratorExporterMode()
-}
-
 func (m *MetricsComponent) buildAcceleratorExporter(
 	ctx context.Context,
 	acceleratorType string,
@@ -130,9 +112,6 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
-	if !exporterProfile.SupportsBackend(v1.AcceleratorExporterBackendKubernetes) {
-		return metricsAcceleratorExporter{}, false
-	}
 
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
 	runtime := exporterProfile.Runtime

@@ -60,7 +60,6 @@ func (a *App) Run(ctx context.Context) error {
 		"Built neutree-node-agent config",
 		"listen_address", opts.listenAddress,
 		"cluster_type", opts.clusterType,
-		"metrics_mode", opts.metricsMode,
 		"node", opts.node,
 		"node_ip", opts.nodeIP,
 	)

@@ -51,7 +51,6 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 		MetricsExporter: &AcceleratorExporterProfile{
 			Name:        "dcgm-exporter",
 			Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
-			Backends:    []AcceleratorExporterBackend{AcceleratorExporterBackendKubernetes, AcceleratorExporterBackendStatic},
 			Args:        []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"},
 			Port:        19400,
 			MetricsPath: "/metrics",
@@ -114,7 +113,6 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "/metrics", decoded.VirtualizationMonitor.MetricsPath)
 	require.NotNil(t, decoded.MetricsExporter)
 	assert.Equal(t, "dcgm-exporter", decoded.MetricsExporter.Name)
-	assert.Equal(t, []AcceleratorExporterBackend{AcceleratorExporterBackendKubernetes, AcceleratorExporterBackendStatic}, decoded.MetricsExporter.Backends)
 	assert.Equal(t, []string{"--collectors", "/etc/neutree/dcgm-exporter/default-counters.csv"}, decoded.MetricsExporter.Args)
 	assert.Equal(t, 19400, decoded.MetricsExporter.Port)
 	require.Len(t, decoded.MetricsExporter.ConfigFiles, 1)
@@ -146,20 +144,6 @@ func TestAcceleratorProfileJSONRoundTripPreservesVirtualizationMonitor(t *testin
 	require.NoError(t, err)
 	assert.JSONEq(t, profileJSON, string(data))
 }
-
-func TestAcceleratorExporterProfileSupportsBackend(t *testing.T) {
-	legacy := &AcceleratorExporterProfile{}
-	assert.True(t, legacy.SupportsBackend(AcceleratorExporterBackendKubernetes))
-	assert.True(t, legacy.SupportsBackend(AcceleratorExporterBackendStatic))
-
-	kubernetesOnly := &AcceleratorExporterProfile{
-		Backends: []AcceleratorExporterBackend{AcceleratorExporterBackendKubernetes},
-	}
-	assert.True(t, kubernetesOnly.SupportsBackend(AcceleratorExporterBackendKubernetes))
-	assert.False(t, kubernetesOnly.SupportsBackend(AcceleratorExporterBackendStatic))
-	assert.False(t, (*AcceleratorExporterProfile)(nil).SupportsBackend(AcceleratorExporterBackendKubernetes))
-}
-
 func TestGetAcceleratorProfileResponse(t *testing.T) {
 	response := GetAcceleratorProfileResponse{
 		Profile: AcceleratorProfile{
