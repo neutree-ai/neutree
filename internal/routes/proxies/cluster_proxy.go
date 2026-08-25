@@ -719,6 +719,7 @@ func countClusterEndpoints(
 	}
 
 	count := 0
+
 	for i := range endpoints {
 		if matches(&endpoints[i]) {
 			count++
