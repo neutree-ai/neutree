@@ -62,24 +62,18 @@ keeps the spread intent on multi-node clusters while allowing co-location when
 no other node is available. Leader election still guards against two active
 schedulers during the brief rollout overlap.
 
-## Webhook namespace scoping and failure policy
+## Webhook failure policy
 
-Neutree configures the admission webhook (in Go, not in this chart) to:
-
-- scope its `namespaceSelector` to the owning cluster's namespace
-  (`kubernetes.io/metadata.name In [<cluster-namespace>]`) so the webhook only
-  intercepts pods created inside that namespace — not every namespace on the
-  cluster; and
-- set `failurePolicy: Fail`, so GPU pods cannot fall through to the default
-  scheduler and bypass the HAMi global device view when the scheduler webhook
-  is unreachable.
+Neutree configures the admission webhook (in Go, not in this chart) with
+`failurePolicy: Fail`, so GPU pods cannot fall through to the default scheduler
+and bypass the HAMi global device view when the scheduler webhook is
+unreachable. It intentionally does not override the chart's
+`namespaceSelector`, so matching admission requests are not limited to the
+owning cluster namespace. The HAMi chart still emits its default selector,
+which excludes namespaces marked `hami.io/webhook: ignore`.
 
 Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
 disabled through `accelerator_virtualization.config_patch`.
-
-Because the Fail policy is scoped to the cluster namespace, a scheduler
-rollout or leader-pod restart (during which the webhook Service may briefly
-have no endpoints) cannot block pod creation in other namespaces.
 
 ## Verification
 

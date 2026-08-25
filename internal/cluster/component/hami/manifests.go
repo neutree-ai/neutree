@@ -183,18 +183,7 @@ func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
 				// Reject pod admission when the HAMi scheduler webhook is
 				// unavailable instead of letting GPU pods fall through to the
 				// default scheduler and bypass the HAMi global device view.
-				// The webhook is scoped to this cluster's namespace so the Fail
-				// policy cannot block pod creation in other namespaces.
 				"failurePolicy": "Fail",
-				"namespaceSelector": map[string]interface{}{
-					"matchExpressions": []interface{}{
-						map[string]interface{}{
-							"key":      "kubernetes.io/metadata.name",
-							"operator": "In",
-							"values":   []interface{}{h.namespace},
-						},
-					},
-				},
 			},
 		},
 		"devicePlugin": map[string]interface{}{

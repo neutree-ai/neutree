@@ -359,11 +359,15 @@ func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
 	assert.False(t, hasRequired, "scheduler anti-affinity must not be hard-required")
 }
 
-func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
+func TestHAMiComponentWebhookFailurePolicyFailWithoutNamespaceOverride(t *testing.T) {
 	const clusterNamespace = "neutree-system"
 
 	component := NewHAMiComponent(newTestCluster(), clusterNamespace, "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+	protectedValues := component.protectedChartValues()
+	_, found, err := unstructured.NestedMap(protectedValues, "scheduler", "admissionWebhook", "namespaceSelector")
+	require.NoError(t, err)
+	assert.False(t, found, "Neutree must not override the chart namespaceSelector")
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
 	require.NoError(t, err)
@@ -380,29 +384,41 @@ func TestHAMiComponentWebhookFailurePolicyFail(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "Fail", first["failurePolicy"])
 
-	// The Fail policy must not leak to other namespaces: scope the webhook to
-	// the owning cluster's namespace so a webhook outage during scheduler
-	// rollout cannot block pod creation across the whole cluster.
-	namespaceSelector, ok := first["namespaceSelector"].(map[string]interface{})
-	require.True(t, ok)
+	// The HAMi chart always emits its default namespaceSelector. Neutree must
+	// not replace it with an owning-namespace-only selector.
+	namespaceSelector, found, err := unstructured.NestedMap(first, "namespaceSelector")
+	require.NoError(t, err)
+	require.True(t, found)
 
-	expressions, ok := namespaceSelector["matchExpressions"].([]interface{})
-	require.True(t, ok)
+	expressions, found, err := unstructured.NestedSlice(namespaceSelector, "matchExpressions")
+	require.NoError(t, err)
+	require.True(t, found)
 
-	namespaceMatchFound := false
-	for _, expr := range expressions {
-		m, ok := expr.(map[string]interface{})
-		if !ok || m["key"] != "kubernetes.io/metadata.name" {
+	defaultIgnoreSelectorFound := false
+	for _, expression := range expressions {
+		match, ok := expression.(map[string]interface{})
+		require.True(t, ok)
+
+		if match["key"] == "hami.io/webhook" && match["operator"] == "NotIn" {
+			values, ok := match["values"].([]interface{})
+			require.True(t, ok)
+			assert.Equal(t, []interface{}{"ignore"}, values)
+			defaultIgnoreSelectorFound = true
 			continue
 		}
 
-		namespaceMatchFound = true
-		values, ok := m["values"].([]interface{})
+		if match["key"] != "kubernetes.io/metadata.name" || match["operator"] != "In" {
+			continue
+		}
+
+		values, ok := match["values"].([]interface{})
 		require.True(t, ok)
-		assert.Equal(t, []interface{}{clusterNamespace}, values)
+		assert.NotEqual(t, []interface{}{clusterNamespace}, values,
+			"webhook must not be restricted to the owning cluster namespace")
 	}
 
-	assert.True(t, namespaceMatchFound, "webhook namespaceSelector must pin the cluster namespace")
+	assert.True(t, defaultIgnoreSelectorFound,
+		"webhook must preserve the chart default selector for hami.io/webhook=ignore")
 }
 
 func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
