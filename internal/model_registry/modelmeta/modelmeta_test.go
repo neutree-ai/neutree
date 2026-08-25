@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -251,6 +252,96 @@ func TestParse_NeverInfersFromNames(t *testing.T) {
 	}
 }
 
+// A composite config carries shape keys at more than one level. The section the
+// language model is described in is the one that has to win: a wrapper's own
+// keys can belong to the vision tower, and reading a head count off the wrong
+// tower produces a number that looks measured and is wrong.
+func TestParseConfig_CompositeConfigPrefersTheLanguageModelSection(t *testing.T) {
+	const config = `{
+		"architectures": ["Qwen3_5MoeForConditionalGeneration"],
+		"num_hidden_layers": 99,
+		"torch_dtype": "float32",
+		"text_config": {
+			"num_hidden_layers": 40,
+			"num_attention_heads": 16,
+			"head_dim": 256,
+			"max_position_embeddings": 262144,
+			"num_experts": 256
+		},
+		"vision_config": {"num_hidden_layers": 27, "hidden_size": 1152, "torch_dtype": "float16"}
+	}`
+
+	info := ParseConfig([]byte(config))
+
+	// From the text section, not from the wrapper's stray key.
+	assert.Equal(t, 40, *info.NumHiddenLayers)
+	// The wrapper names the model that is served, so the architecture stays its.
+	assert.Equal(t, "Qwen3_5MoeForConditionalGeneration", info.Architecture)
+	// Stated only by the wrapper: the outer level fills the gaps, it just does
+	// not overrule.
+	assert.Equal(t, "float32", info.ParameterDtype)
+	// vision_config is not a section the parser descends into at all.
+	assert.NotEqual(t, 1152, deref(info.HeadDim))
+	assert.Equal(t, 256, *info.HeadDim)
+	assert.True(t, *info.IsMoE)
+	assert.Equal(t, 256, *info.NumExperts)
+}
+
+// transformers renamed torch_dtype to dtype in 4.56, so both spellings are in
+// the wild and a checkpoint saved by a current release states only the new one.
+func TestParseConfig_ReadsBothDtypeSpellings(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{name: "torch_dtype", config: `{"torch_dtype":"bfloat16"}`, want: "bfloat16"},
+		{name: "dtype", config: `{"dtype":"bfloat16"}`, want: "bfloat16"},
+		{name: "both", config: `{"torch_dtype":"float16","dtype":"bfloat16"}`, want: "float16"},
+		{name: "neither", config: `{"num_hidden_layers":1}`, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ParseConfig([]byte(tt.config))
+
+			assert.Equal(t, tt.want, info.ParameterDtype)
+
+			if tt.want == "" {
+				assert.Contains(t, info.MissingFields, v1.ModelInfoFieldParameterDtype)
+
+				return
+			}
+
+			assert.Equal(t, v1.ModelInfoSourceAuto, info.FieldSources[v1.ModelInfoFieldParameterDtype])
+		})
+	}
+}
+
+// Nesting is bounded, and a config that nests past the bound still parses into
+// whatever the levels above it stated rather than hanging or panicking.
+func TestParseConfig_NestingIsBounded(t *testing.T) {
+	config := `{"architectures":["Deep"],"num_hidden_layers":1`
+	for range 8 {
+		config += `,"text_config":{"num_hidden_layers":2`
+	}
+
+	config += strings.Repeat("}", 8) + "}"
+
+	info := ParseConfig([]byte(config))
+
+	assert.Equal(t, "Deep", info.Architecture)
+	assert.NotNil(t, info.NumHiddenLayers)
+}
+
+func deref(v *int) int {
+	if v == nil {
+		return 0
+	}
+
+	return *v
+}
+
 // backingKeys names the config.json keys a field may legitimately be read from.
 // A nil entry means the field does not come from a config key: is_moe is settled
 // by the config being readable at all, and parameter_count comes from the weight
@@ -263,7 +354,7 @@ var backingKeys = map[string][]string{
 	v1.ModelInfoFieldHeadDim:               {"head_dim", "hidden_size"},
 	v1.ModelInfoFieldMaxPositionEmbeddings: {"max_position_embeddings"},
 	v1.ModelInfoFieldContextLength:         {"max_position_embeddings"},
-	v1.ModelInfoFieldParameterDtype:        {"torch_dtype"},
+	v1.ModelInfoFieldParameterDtype:        {"torch_dtype", "dtype"},
 	v1.ModelInfoFieldNumExperts:            {"num_local_experts", "num_experts"},
 	v1.ModelInfoFieldNumExpertsPerToken:    {"num_experts_per_tok"},
 	v1.ModelInfoFieldQuantizationBits:      {"quantization_config"},
@@ -311,9 +402,21 @@ func TestParse_FixturesOnlyPopulateWhatTheConfigStates(t *testing.T) {
 	}
 }
 
+// A composite checkpoint states the language model's shape one level down, so
+// the search follows the same nesting the parser does. Only the sections the
+// parser descends into count: a value that could only have come from
+// vision_config is a value read off the wrong tower, and this has to keep
+// catching that.
 func statesAnyKey(stated map[string]any, keys []string) bool {
 	for _, key := range keys {
 		if _, ok := stated[key]; ok {
+			return true
+		}
+	}
+
+	for _, section := range nestedConfigKeys {
+		nested, ok := stated[section].(map[string]any)
+		if ok && statesAnyKey(nested, keys) {
 			return true
 		}
 	}
