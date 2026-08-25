@@ -5,8 +5,11 @@ import (
 )
 
 type ApiKeySpec struct {
-	Quota  int64         `json:"quota,omitempty"`
-	Limits *ApiKeyLimits `json:"limits,omitempty"`
+	Quota       int64         `json:"quota,omitempty"`
+	ExpiresIn   *int          `json:"expires_in,omitempty"`
+	Limits      *ApiKeyLimits `json:"limits,omitempty"`
+	ProjectID   string        `json:"project_id,omitempty"`
+	Description string        `json:"description,omitempty"`
 }
 
 // ApiKeyLimits is the limit configuration carried on the API key itself. It
