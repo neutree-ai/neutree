@@ -273,17 +273,44 @@ func nvidiaAllocationCapacity(device v1.StaticNodeAcceleratorDeviceStatus, quant
 }
 
 func nvidiaGPUQuantity(replica adapter.RayReplica, actor adapter.RayActor) (float64, bool) {
-	if replica.GPUQuantity != 0 {
-		return replica.GPUQuantity, true
-	}
-
 	for resource, quantity := range actor.RequiredResources {
 		if strings.EqualFold(resource, "gpu") {
 			return quantity, true
 		}
 	}
 
-	return 0, false
+	return nvidiaDeploymentGPUQuantity(replica.DeploymentOptions)
+}
+
+func nvidiaDeploymentGPUQuantity(options map[string]interface{}) (float64, bool) {
+	if len(options) == 0 {
+		return 0, false
+	}
+
+	return nvidiaNumberAsFloat64(options["num_gpus"])
+}
+
+func nvidiaNumberAsFloat64(value interface{}) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case uint:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case uint32:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func nvidiaVisibleDeviceRefs(environment map[string]string, lookup nvidiaDeviceLookup) []string {

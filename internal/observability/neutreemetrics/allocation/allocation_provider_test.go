@@ -161,7 +161,9 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 	require.Len(t, evidence.RayEvidence.Actors, 1)
 	assert.Equal(t, 1.0, evidence.RayEvidence.Actors[0].RequiredResources["NPU"])
 	require.Len(t, evidence.RayEvidence.Replicas, 1)
-	assert.Equal(t, 0.5, evidence.RayEvidence.Replicas[0].GPUQuantity)
+	assert.Equal(t, "actor-a", evidence.RayEvidence.Replicas[0].ActorID)
+	assert.Equal(t, map[string]interface{}{"num_gpus": 0.5}, evidence.RayEvidence.Replicas[0].DeploymentOptions)
+	assert.Zero(t, evidence.RayEvidence.Replicas[0].GPUQuantity)
 	assert.Equal(t, []int{1234, 2345}, evidence.RayEvidence.ActorProcesses[1234].DescendantPIDs)
 	assert.Equal(t, "0", evidence.RayEvidence.ActorProcesses[1234].Environment["ASCEND_VISIBLE_DEVICES"])
 }
@@ -215,32 +217,7 @@ func TestProcFSEnvReaderReadsProcessEnvironment(t *testing.T) {
 	assert.Equal(t, "", environment["EMPTY"])
 }
 
-func TestRayEvidenceHelpersHandleSupportedValuesAndProcRoots(t *testing.T) {
-	for _, testCase := range []struct {
-		value    interface{}
-		expected float64
-		ok       bool
-	}{
-		{value: float32(0.5), expected: 0.5, ok: true},
-		{value: int64(2), expected: 2, ok: true},
-		{value: uint(3), expected: 3, ok: true},
-		{value: "1", ok: false},
-	} {
-		value, ok := numberAsFloat64(testCase.value)
-		assert.Equal(t, testCase.ok, ok)
-		assert.Equal(t, testCase.expected, value)
-	}
-
-	quantity, ok := rayDeploymentGPUQuantity(dashboard.RayServeApplicationStatus{
-		DeployedAppConfig: &dashboard.RayServeApplication{Args: map[string]interface{}{
-			"deployment_options": map[string]interface{}{
-				"backend": map[string]interface{}{"num_gpus": int64(2)},
-			},
-		}},
-	}, "BACKEND")
-	assert.True(t, ok)
-	assert.Equal(t, 2.0, quantity)
-
+func TestRayEvidenceHelpersHandleProcRoots(t *testing.T) {
 	provider := RayServeAllocationProvider{
 		ProcEnv:            ProcFSEnvReader{Root: "/custom/proc"},
 		ProcessDescendants: ProcFSProcessTreeReader{Root: "/custom/descendants"},

@@ -183,12 +183,16 @@ type RayActor struct {
 // RayReplica preserves the Ray Serve replica-to-actor association observed by
 // the host. Accelerator allocation semantics are still adapter owned.
 type RayReplica struct {
-	Workspace   string
-	Endpoint    string
-	Deployment  string
-	ActorID     string
-	ReplicaID   string
-	NodeID      string
+	Workspace         string
+	Endpoint          string
+	Deployment        string
+	ActorID           string
+	ReplicaID         string
+	NodeID            string
+	DeploymentOptions map[string]interface{}
+	// GPUQuantity is retained only for source compatibility with existing
+	// out-of-tree adapters. New adapters must interpret DeploymentOptions and
+	// the actor's RequiredResources themselves.
 	GPUQuantity float64
 }
 
@@ -341,7 +345,11 @@ func (e StaticEvidence) Clone() StaticEvidence {
 		})
 	}
 
-	result.RayEvidence.Replicas = append(result.RayEvidence.Replicas, e.RayEvidence.Replicas...)
+	for _, replica := range e.RayEvidence.Replicas {
+		copied := replica
+		copied.DeploymentOptions = copyRawMap(replica.DeploymentOptions)
+		result.RayEvidence.Replicas = append(result.RayEvidence.Replicas, copied)
+	}
 	for pid, process := range e.RayEvidence.ActorProcesses {
 		result.RayEvidence.ActorProcesses[pid] = ProcessInfo{
 			PID:            process.PID,
@@ -433,6 +441,39 @@ func copyFloat64Map(input map[string]float64) map[string]float64 {
 	}
 
 	return result
+}
+
+func copyRawMap(input map[string]interface{}) map[string]interface{} {
+	if len(input) == 0 {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		result[key] = copyRawValue(value)
+	}
+
+	return result
+}
+
+func copyRawValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return copyRawMap(typed)
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = copyRawValue(item)
+		}
+
+		return result
+	case map[string]string:
+		return copyStringMap(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
 }
 
 func cloneEndpointReplicaAcceleratorUsages(

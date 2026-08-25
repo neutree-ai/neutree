@@ -297,7 +297,7 @@ func rayReplicasFromApplications(
 
 		for _, deploymentName := range rayserve.SortedDeploymentNames(status.Deployments) {
 			deployment := status.Deployments[deploymentName]
-			gpuQuantity, _ := rayDeploymentGPUQuantity(status, deploymentName)
+			deploymentOptions := rayDeploymentOptions(status, deploymentName)
 
 			for _, replica := range deployment.Replicas {
 				if replica.NodeID != nodeID || replica.ActorID == "" {
@@ -305,19 +305,79 @@ func rayReplicasFromApplications(
 				}
 
 				result = append(result, adapter.RayReplica{
-					Workspace:   workspace,
-					Endpoint:    endpoint,
-					Deployment:  deploymentName,
-					ActorID:     replica.ActorID,
-					ReplicaID:   replica.ReplicaID,
-					NodeID:      replica.NodeID,
-					GPUQuantity: gpuQuantity,
+					Workspace:         workspace,
+					Endpoint:          endpoint,
+					Deployment:        deploymentName,
+					ActorID:           replica.ActorID,
+					ReplicaID:         replica.ReplicaID,
+					NodeID:            replica.NodeID,
+					DeploymentOptions: cloneDeploymentOptions(deploymentOptions),
 				})
 			}
 		}
 	}
 
 	return result
+}
+
+// rayDeploymentOptions copies the untyped Ray Serve options for one
+// deployment. The provider does not interpret accelerator keys; adapters do.
+func rayDeploymentOptions(
+	status dashboard.RayServeApplicationStatus,
+	deploymentName string,
+) map[string]interface{} {
+	if status.DeployedAppConfig == nil || status.DeployedAppConfig.Args == nil || deploymentName == "" {
+		return nil
+	}
+
+	rawOptions, ok := status.DeployedAppConfig.Args["deployment_options"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	for name, raw := range rawOptions {
+		if !strings.EqualFold(name, deploymentName) {
+			continue
+		}
+
+		options, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+
+		return cloneDeploymentOptions(options)
+	}
+
+	return nil
+}
+
+func cloneDeploymentOptions(input map[string]interface{}) map[string]interface{} {
+	if len(input) == 0 {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		result[key] = cloneDeploymentOptionValue(value)
+	}
+
+	return result
+}
+
+func cloneDeploymentOptionValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneDeploymentOptions(typed)
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = cloneDeploymentOptionValue(item)
+		}
+
+		return result
+	default:
+		return value
+	}
 }
 
 func (p RayServeAllocationProvider) dashboardService() dashboard.DashboardService {
@@ -587,55 +647,4 @@ func processParentPID(root string, pid int) (int, bool, error) {
 	}
 
 	return 0, false, nil
-}
-
-func rayDeploymentGPUQuantity(status dashboard.RayServeApplicationStatus, deploymentName string) (float64, bool) {
-	if status.DeployedAppConfig == nil || status.DeployedAppConfig.Args == nil || deploymentName == "" {
-		return 0, false
-	}
-
-	options, ok := status.DeployedAppConfig.Args["deployment_options"].(map[string]interface{})
-	if !ok {
-		return 0, false
-	}
-
-	for name, raw := range options {
-		if !strings.EqualFold(name, deploymentName) {
-			continue
-		}
-
-		deploymentOptions, ok := raw.(map[string]interface{})
-		if !ok {
-			return 0, false
-		}
-
-		quantity, ok := numberAsFloat64(deploymentOptions["num_gpus"])
-
-		return quantity, ok
-	}
-
-	return 0, false
-}
-
-func numberAsFloat64(value interface{}) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case uint:
-		return float64(typed), true
-	case uint64:
-		return float64(typed), true
-	case uint32:
-		return float64(typed), true
-	default:
-		return 0, false
-	}
 }

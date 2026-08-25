@@ -70,6 +70,30 @@ func TestNvidiaAdapterDiscoversHardware(t *testing.T) {
 	}
 }
 
+func TestNvidiaAdapterDeclaresNVIDIAInfoDescriptor(t *testing.T) {
+	provider, ok := NewNVIDIAAdapter().(adapter.MetricDescriptorProvider)
+	require.True(t, ok)
+
+	descriptors := provider.MetricDescriptors()
+	require.Len(t, descriptors, 1)
+	assert.Equal(t, "neutree_node_accelerator_nvidia_info", descriptors[0].Name)
+	assert.Equal(t, []string{
+		"cluster_type",
+		"node",
+		"accelerator_type",
+		"accelerator_uuid",
+		"accelerator_index",
+		"product",
+		"architecture",
+		"cuda_capability",
+		"driver_version",
+		"cuda_driver_version",
+		"nvlink",
+		"nvswitch",
+	}, descriptors[0].LabelNames)
+	assert.Equal(t, []string{"accelerator_uuid"}, descriptors[0].RequiredLabelNames)
+}
+
 func TestNvidiaAdapterBuildsKubernetesAllocationsFromRawEvidence(t *testing.T) {
 	accelerator := &nvidiaAccelerator{}
 	result, err := accelerator.BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
@@ -162,12 +186,11 @@ func TestNvidiaAdapterBuildsStaticAllocationFromRawRayEvidence(t *testing.T) {
 		RayEvidence: adapter.RayEvidence{
 			Actors: []adapter.RayActor{{ActorID: "actor-a", PID: 123, RequiredResources: map[string]float64{"GPU": 0.5}}},
 			Replicas: []adapter.RayReplica{{
-				Workspace:   "default",
-				Endpoint:    "chat",
-				ActorID:     "actor-a",
-				ReplicaID:   "replica-a",
-				NodeID:      "node-a",
-				GPUQuantity: 0.5,
+				Workspace: "default",
+				Endpoint:  "chat",
+				ActorID:   "actor-a",
+				ReplicaID: "replica-a",
+				NodeID:    "node-a",
 			}},
 			ActorProcesses: map[int]adapter.ProcessInfo{
 				123: {PID: 123, Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "0"}},
@@ -193,8 +216,8 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 	testCases := []struct {
 		name              string
 		available         bool
-		replicaQuantity   float64
 		requiredResources map[string]float64
+		deploymentOptions map[string]interface{}
 		environment       map[string]string
 		expectedUUID      string
 		expectedCoreUnits int64
@@ -202,8 +225,7 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 		{
 			name:              "exact nvidia uuid wins over cuda index",
 			available:         true,
-			replicaQuantity:   0.5,
-			requiredResources: map[string]float64{"GPU": 1},
+			requiredResources: map[string]float64{"GPU": 0.5},
 			environment: map[string]string{
 				"NVIDIA_VISIBLE_DEVICES": "GPU-def",
 				"CUDA_VISIBLE_DEVICES":   "0",
@@ -221,6 +243,14 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 			},
 			expectedUUID:      "GPU-abc",
 			expectedCoreUnits: 100,
+		},
+		{
+			name:              "deployment options preserve fractional GPU when actor detail is absent",
+			available:         true,
+			deploymentOptions: map[string]interface{}{"num_gpus": 0.5},
+			environment:       map[string]string{"CUDA_VISIBLE_DEVICES": "0"},
+			expectedUUID:      "GPU-abc",
+			expectedCoreUnits: 50,
 		},
 		{
 			name:              "zero gpu resources are skipped",
@@ -248,11 +278,11 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 						RequiredResources: testCase.requiredResources,
 					}},
 					Replicas: []adapter.RayReplica{{
-						Workspace:   "default",
-						Endpoint:    "chat",
-						ActorID:     "actor-a",
-						ReplicaID:   "replica-a",
-						GPUQuantity: testCase.replicaQuantity,
+						Workspace:         "default",
+						Endpoint:          "chat",
+						ActorID:           "actor-a",
+						ReplicaID:         "replica-a",
+						DeploymentOptions: testCase.deploymentOptions,
 					}},
 					ActorProcesses: map[int]adapter.ProcessInfo{
 						123: {PID: 123, Environment: testCase.environment},

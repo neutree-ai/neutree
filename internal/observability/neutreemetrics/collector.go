@@ -74,14 +74,6 @@ var (
 		"pcie_width",
 		"numa_node",
 	)
-	nvidiaInfoLabelNames = appendLabels(physicalAcceleratorLabelNames,
-		"architecture",
-		"cuda_capability",
-		"driver_version",
-		"cuda_driver_version",
-		"nvlink",
-		"nvswitch",
-	)
 	metricDescriptors      = newMetricDescriptors()
 	metricDescriptorByName = indexMetricDescriptors(metricDescriptors)
 )
@@ -357,8 +349,6 @@ func newMetricDescriptors() []*metricDescriptor {
 		newMetricDescriptor("neutree_node_accelerator_allocated", nodeAcceleratorProductLabelNames, prometheus.GaugeValue, nil),
 		newMetricDescriptor("neutree_node_accelerator_free", nodeAcceleratorProductLabelNames, prometheus.GaugeValue, nil),
 		newMetricDescriptor("neutree_node_accelerator_hardware_info", hardwareInfoLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-		newMetricDescriptor("neutree_node_accelerator_nvidia_info", nvidiaInfoLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
-
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_allocation", endpointAcceleratorAllocationLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_allocated_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),
 		newMetricDescriptor("neutree_endpoint_replica_accelerator_memory_used_bytes", endpointAcceleratorLabelNames, prometheus.GaugeValue, []string{"accelerator_uuid"}),

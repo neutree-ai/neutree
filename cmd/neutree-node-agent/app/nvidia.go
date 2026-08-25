@@ -24,6 +24,7 @@ var (
 	_ adapter.StaticAccelerator                       = (*nvidiaAccelerator)(nil)
 	_ adapter.StaticEvidenceEnricher                  = (*nvidiaAccelerator)(nil)
 	_ adapter.EndpointReplicaAcceleratorUsageConsumer = (*nvidiaAccelerator)(nil)
+	_ adapter.MetricDescriptorProvider                = (*nvidiaAccelerator)(nil)
 )
 
 // NewNVIDIAAdapter creates the Community NVIDIA adapter.
@@ -97,6 +98,29 @@ func internalEndpointReplicaAcceleratorUsages(
 
 func (a *nvidiaAccelerator) Type() string {
 	return v1.AcceleratorTypeNVIDIAGPU.String()
+}
+
+// MetricDescriptors declares the NVIDIA-only metric contract. Generic
+// accelerator metric families remain owned by the shared renderer.
+func (*nvidiaAccelerator) MetricDescriptors() []adapter.MetricDescriptor {
+	return []adapter.MetricDescriptor{{
+		Name: "neutree_node_accelerator_nvidia_info",
+		LabelNames: []string{
+			"cluster_type",
+			"node",
+			"accelerator_type",
+			"accelerator_uuid",
+			"accelerator_index",
+			"product",
+			"architecture",
+			"cuda_capability",
+			"driver_version",
+			"cuda_driver_version",
+			"nvlink",
+			"nvswitch",
+		},
+		RequiredLabelNames: []string{"accelerator_uuid"},
+	}}
 }
 
 func (*nvidiaAccelerator) NeedsEndpointReplicaAcceleratorUsages() bool {
