@@ -1059,6 +1059,16 @@ func TestEndpointRequestsRunningGPU(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "custom GPU resource endpoint is still running",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Replicas: v1.ReplicaSpec{Num: replicas(1)},
+				Resources: &v1.ResourceSpec{Accelerator: map[string]string{
+					"nvidia.com/gpu": "1",
+				}},
+			}},
+			want: true,
+		},
+		{
 			name: "running GPU endpoint is detected",
 			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
 				Replicas: v1.ReplicaSpec{Num: replicas(1)},
@@ -1134,6 +1144,14 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 			Resources: &v1.ResourceSpec{GPU: pointer.String("1")},
 		},
 	}
+	customResourceRunningGPUEndpoint := v1.Endpoint{
+		Spec: &v1.EndpointSpec{
+			Replicas: v1.ReplicaSpec{Num: pointer.Int(1)},
+			Resources: &v1.ResourceSpec{Accelerator: map[string]string{
+				"nvidia.com/gpu": "1",
+			}},
+		},
+	}
 	cpuEndpoint := v1.Endpoint{
 		Spec: &v1.EndpointSpec{
 			Replicas: v1.ReplicaSpec{Num: pointer.Int(2)},
@@ -1163,6 +1181,14 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 		{
 			name:            "rejects enabling when legacy GPU endpoint without accelerator metadata still runs",
 			endpoints:       []v1.Endpoint{legacyRunningGPUEndpoint},
+			lookupEndpoints: true,
+			wantCode:        "10229",
+			wantMessage:     "cannot enable accelerator virtualization",
+			wantHint:        "1 GPU endpoint(s) still run on this cluster",
+		},
+		{
+			name:            "rejects enabling when custom GPU resource endpoint still runs",
+			endpoints:       []v1.Endpoint{customResourceRunningGPUEndpoint},
 			lookupEndpoints: true,
 			wantCode:        "10229",
 			wantMessage:     "cannot enable accelerator virtualization",
@@ -1935,7 +1961,7 @@ func testBuildPostgrestClusterPatchValidationNew(t *testing.T) {
 func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	t.Run("rejects enable patch before proxy handler when running GPU endpoint references cluster", func(t *testing.T) {
+	t.Run("rejects enable patch before proxy handler when custom GPU resource endpoint references cluster", func(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "gpu-cluster"},
@@ -1951,12 +1977,9 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 			{
 				Spec: &v1.EndpointSpec{
 					Replicas: v1.ReplicaSpec{Num: pointer.Int(1)},
-					Resources: &v1.ResourceSpec{
-						GPU: pointer.String("1"),
-						Accelerator: map[string]string{
-							v1.AcceleratorTypeKey: string(v1.AcceleratorTypeNVIDIAGPU),
-						},
-					},
+					Resources: &v1.ResourceSpec{Accelerator: map[string]string{
+						"nvidia.com/gpu": "1",
+					}},
 				},
 			},
 		}, nil)

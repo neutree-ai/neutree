@@ -948,20 +948,43 @@ func validateClusterAcceleratorVirtualizationEnableForIdentity(
 
 // endpointRequestsRunningGPU reports whether an endpoint requests physical GPU
 // cards and is not paused. The enable guard must fail closed for legacy
-// Endpoint rows that still declare spec.resources.gpu without the newer
-// accelerator.type metadata, because enabling HAMi would still disrupt those
-// running workloads. Pausing an endpoint scales its replicas to zero, so a
-// paused endpoint has replicas == 0.
+// Endpoint rows that declare either spec.resources.gpu or a Kubernetes GPU
+// extended resource without the newer accelerator.type metadata, because
+// enabling HAMi would still disrupt those running workloads. Pausing an
+// endpoint scales its replicas to zero, so a paused endpoint has replicas == 0.
 func endpointRequestsRunningGPU(endpoint *v1.Endpoint) bool {
 	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
 		return false
 	}
 
-	if endpoint.Spec.Resources.GetGPUCount() == 0 {
+	if !resourceSpecRequestsPhysicalGPU(endpoint.Spec.Resources) {
 		return false
 	}
 
 	return endpointReplicaCount(endpoint.Spec) > 0
+}
+
+func resourceSpecRequestsPhysicalGPU(resources *v1.ResourceSpec) bool {
+	if resources == nil {
+		return false
+	}
+
+	if resources.GetGPUCount() > 0 {
+		return true
+	}
+
+	for resourceName, quantity := range resources.GetCustomResources() {
+		if !strings.HasSuffix(resourceName, "/gpu") {
+			continue
+		}
+
+		gpuCount, err := strconv.ParseFloat(quantity, 64)
+		if err == nil && gpuCount > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func validateClusterAcceleratorVirtualizationCluster(cluster v1.Cluster) *validationError {
