@@ -9,6 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestSelectClusterAcceleratorExporterRejectsMultipleMatches(t *testing.T) {
@@ -28,4 +30,17 @@ func TestSelectClusterAcceleratorExporterRejectsMultipleMatches(t *testing.T) {
 
 	assert.Nil(t, exporters)
 	require.ErrorContains(t, err, "currently supports only one")
+}
+
+func TestBuildExporterConfigVolumesProjectsUnvalidatedProfileEntries(t *testing.T) {
+	configFileData, mounts, volumes, checksum := buildExporterConfigVolumes("test-exporter", []v1.AcceleratorExporterConfigFile{
+		{Path: "", Content: "empty-path"},
+		{Path: "relative/config.yaml", Content: "relative-path"},
+	})
+
+	assert.Equal(t, "empty-path", configFileData["config"])
+	assert.Equal(t, "relative-path", configFileData["config.yaml"])
+	assert.Len(t, mounts, 2)
+	assert.Len(t, volumes, 2)
+	assert.NotEmpty(t, checksum)
 }

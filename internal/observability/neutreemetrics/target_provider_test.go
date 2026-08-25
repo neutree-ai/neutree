@@ -29,7 +29,7 @@ func TestStaticScrapeTargetProviderRequiresProfileTargetForAcceleratorExporter(t
 	assert.Empty(t, acceleratorTargets)
 }
 
-func TestStaticScrapeTargetProviderUsesExplicitAcceleratorTarget(t *testing.T) {
+func TestStaticScrapeTargetProviderUsesProfileAcceleratorTarget(t *testing.T) {
 	provider := StaticScrapeTargetProvider{
 		AcceleratorType:                "ascend_npu",
 		AcceleratorExporterPort:        8082,
@@ -45,7 +45,7 @@ func TestStaticScrapeTargetProviderUsesExplicitAcceleratorTarget(t *testing.T) {
 	}}, targets)
 }
 
-func TestStaticScrapeTargetProviderPassesThroughExplicitZeroPort(t *testing.T) {
+func TestStaticScrapeTargetProviderPassesThroughProfileZeroPort(t *testing.T) {
 	provider := StaticScrapeTargetProvider{
 		AcceleratorType:                "ascend_npu",
 		AcceleratorExporterMetricsPath: "npu-metrics",
@@ -60,7 +60,7 @@ func TestStaticScrapeTargetProviderPassesThroughExplicitZeroPort(t *testing.T) {
 	}}, targets)
 }
 
-func TestStaticScrapeTargetProviderSkipsAdapterWithoutProfileTarget(t *testing.T) {
+func TestStaticScrapeTargetProviderUsesDefaultProfilePath(t *testing.T) {
 	provider := StaticScrapeTargetProvider{
 		AcceleratorType: "nvidia_gpu",
 	}
@@ -73,7 +73,10 @@ func TestStaticScrapeTargetProviderSkipsAdapterWithoutProfileTarget(t *testing.T
 
 	acceleratorTargets, err := provider.Targets(context.Background(), metricsnormalizer.TargetAcceleratorExporter)
 	require.NoError(t, err)
-	assert.Empty(t, acceleratorTargets)
+	assert.Equal(t, []ScrapeTarget{{
+		TargetType: metricsnormalizer.TargetAcceleratorExporter,
+		URL:        "http://127.0.0.1:0/metrics",
+	}}, acceleratorTargets)
 }
 
 func TestKubernetesScrapeTargetProviderDiscoversManagedPodsOnLocalNode(t *testing.T) {
@@ -98,7 +101,7 @@ func TestKubernetesScrapeTargetProviderDiscoversManagedPodsOnLocalNode(t *testin
 	assert.Empty(t, acceleratorTargets)
 }
 
-func TestKubernetesScrapeTargetProviderUsesExplicitAdapterTarget(t *testing.T) {
+func TestKubernetesScrapeTargetProviderUsesProfileAdapterTarget(t *testing.T) {
 	provider := newKubernetesTargetProvider(t,
 		pod("metrics", "npu-exporter-a", "node-a", "10.244.0.30", map[string]string{
 			"app":                          "ascend-npu-exporter",
@@ -128,7 +131,7 @@ func TestKubernetesScrapeTargetProviderUsesExplicitAdapterTarget(t *testing.T) {
 	}}, targets)
 }
 
-func TestKubernetesScrapeTargetProviderPassesThroughExplicitZeroPort(t *testing.T) {
+func TestKubernetesScrapeTargetProviderPassesThroughProfileZeroPort(t *testing.T) {
 	provider := newKubernetesTargetProvider(t,
 		pod("metrics", "npu-exporter-a", "node-a", "10.244.0.30", map[string]string{
 			"app":                          "ascend-npu-exporter",

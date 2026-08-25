@@ -110,7 +110,6 @@ func TestSelectedMetricsNodeAgentProjectsProfileTargetWithoutRuntime(t *testing.
 
 	require.NoError(t, err)
 	assert.Equal(t, "npu", nodeAgent.AcceleratorType)
-	assert.True(t, nodeAgent.HasAcceleratorExporterTarget)
 	assert.Equal(t, 8082, nodeAgent.AcceleratorExporterPort)
 	assert.Equal(t, "/metrics", nodeAgent.AcceleratorExporterMetricsPath)
 	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"hami-ascend-device-plugin"},"port":9395,"metrics_path":"/metrics"}`,
@@ -126,7 +125,6 @@ func TestSelectedMetricsNodeAgentProjectsTargetWithoutRuntimeProfile(t *testing.
 
 	require.NoError(t, err)
 	assert.Equal(t, "ascend_npu", nodeAgent.AcceleratorType)
-	assert.True(t, nodeAgent.HasAcceleratorExporterTarget)
 	assert.Equal(t, 8082, nodeAgent.AcceleratorExporterPort)
 	assert.Equal(t, "/npu-metrics", nodeAgent.AcceleratorExporterMetricsPath)
 	assert.Empty(t, nodeAgent.Env)

@@ -343,8 +343,6 @@ spec:
         - --node-ip=$(NODE_IP)
 {{ if .NodeAgent.AcceleratorType }}
         - --accelerator-type={{ .NodeAgent.AcceleratorType }}
-{{ end }}
-{{ if .NodeAgent.HasAcceleratorExporterTarget }}
         - --accelerator-exporter-port={{ .NodeAgent.AcceleratorExporterPort }}
         - --accelerator-exporter-metrics-path={{ .NodeAgent.AcceleratorExporterMetricsPath }}
 {{ end }}

@@ -307,11 +307,6 @@ func buildExporterConfigVolumes(
 
 	volumeName := sanitizeKubernetesName(exporterName + "-config")
 
-	configFiles = validExporterConfigFiles(configFiles)
-	if len(configFiles) == 0 {
-		return nil, nil, nil, ""
-	}
-
 	baseNameCounts := map[string]int{}
 	for _, configFile := range configFiles {
 		baseNameCounts[configFileKey(configFile.Path)]++
@@ -379,25 +374,6 @@ func buildExporterConfigVolumes(
 	}
 
 	return configFileData, volumeMounts, volumes, checksum.sum()
-}
-
-func validExporterConfigFiles(configFiles []v1.AcceleratorExporterConfigFile) []v1.AcceleratorExporterConfigFile {
-	valid := make([]v1.AcceleratorExporterConfigFile, 0, len(configFiles))
-
-	for _, configFile := range configFiles {
-		if configFile.Path == "" {
-			continue
-		}
-
-		mountDir := path.Dir(configFile.Path)
-		if mountDir == "." || mountDir == "/" || mountDir == "" {
-			continue
-		}
-
-		valid = append(valid, configFile)
-	}
-
-	return valid
 }
 
 type exporterConfigChecksum struct {
