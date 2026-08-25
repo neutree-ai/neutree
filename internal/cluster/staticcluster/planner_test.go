@@ -356,6 +356,31 @@ func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAcceleratorExporterConfigVolumesProjectUnvalidatedProfileEntries(t *testing.T) {
+	volumes, mounts := acceleratorExporterConfigVolumes([]v1.AcceleratorExporterConfigFile{
+		{Path: "", Content: "empty-path"},
+		{Path: "relative/exporter.yaml", Content: "relative-path"},
+	})
+
+	require.Len(t, volumes, 2)
+	require.NotNil(t, volumes[0].HostPath)
+	assert.Equal(t, "accelerator-exporter-config-0", volumes[0].Name)
+	assert.Empty(t, volumes[0].HostPath.Path)
+	require.NotNil(t, volumes[1].HostPath)
+	assert.Equal(t, "relative/exporter.yaml", volumes[1].HostPath.Path)
+	require.Len(t, mounts, 2)
+	assert.Equal(t, "", mounts[0].MountPath)
+	assert.Equal(t, "relative/exporter.yaml", mounts[1].MountPath)
+}
+
+func TestAcceleratorExporterDockerRunOptionsProjectUnvalidatedCapabilities(t *testing.T) {
+	options := acceleratorExporterDockerRunOptions(&v1.AcceleratorExporterRuntimeProfile{
+		Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"", "SYS_ADMIN"}},
+	})
+
+	assert.Equal(t, []string{"--cap-add=", "--cap-add=SYS_ADMIN"}, options)
+}
+
 func TestPlannerProjectsMalformedAcceleratorExporterProfile(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{

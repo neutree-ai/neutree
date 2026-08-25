@@ -417,10 +417,10 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 	})
 
 	groups := acceleratorExporterTargetGroups(plans)
-	for i, group := range groups {
+	for _, group := range groups {
 		scrapeConfig := staticVMAgentScrapeConfig{
-			JobName:    acceleratorExporterTargetGroupJobName(group, len(groups), i),
-			FileSDPath: strconv.Quote(acceleratorExporterTargetGroupFileSDPath(group)),
+			JobName:    group.JobName,
+			FileSDPath: strconv.Quote(vmagentFileSDDir + "/" + group.JobName + ".json"),
 		}
 		if group.MetricsPath != defaultPrometheusHTTPPath {
 			scrapeConfig.MetricsPath = strconv.Quote(group.MetricsPath)
@@ -468,7 +468,7 @@ func renderVMAgentFileSDConfigFiles(
 
 	for _, group := range acceleratorExporterTargetGroups(plans) {
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
-			acceleratorExporterTargetGroupFileSDPath(group),
+			vmagentFileSDDir+"/"+group.JobName+".json",
 			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
 		))
 	}
@@ -684,29 +684,6 @@ func sortedAcceleratorExporterTargetGroups(
 	return groups
 }
 
-func acceleratorExporterJobName(metricsPath string, _ int, index int) string {
-	if metricsPath == defaultPrometheusHTTPPath {
-		return "static-node-accelerator-exporter"
-	}
-
-	name := strings.Trim(metricsPath, "/")
-	name = strings.ReplaceAll(name, "/", "-")
-
-	if name == "" {
-		name = strconv.Itoa(index)
-	}
-
-	return "static-node-accelerator-exporter-" + name
-}
-
-func acceleratorExporterTargetGroupJobName(group acceleratorExporterTargetGroup, groupCount int, index int) string {
-	if group.JobName != "" {
-		return group.JobName
-	}
-
-	return acceleratorExporterJobName(group.MetricsPath, groupCount, index)
-}
-
 func acceleratorExporterMetricsJobName(acceleratorType string) string {
 	name := sanitizeStaticMetricsName(acceleratorType)
 	if name == "" {
@@ -714,18 +691,6 @@ func acceleratorExporterMetricsJobName(acceleratorType string) string {
 	}
 
 	return acceleratorExporterJobPrefix + "-" + name
-}
-
-func acceleratorExporterTargetGroupFileSDPath(group acceleratorExporterTargetGroup) string {
-	if group.JobName != "" {
-		return vmagentFileSDDir + "/" + group.JobName + ".json"
-	}
-
-	return acceleratorExporterFileSDPath(group.MetricsPath)
-}
-
-func acceleratorExporterFileSDPath(metricsPath string) string {
-	return vmagentFileSDDir + "/" + strings.TrimPrefix(acceleratorExporterJobName(metricsPath, 2, 0), "static-node-") + ".json"
 }
 
 func sanitizeStaticMetricsName(value string) string {
@@ -808,12 +773,7 @@ func acceleratorExporterDockerRunOptions(
 
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
-			capabilityValue := strings.TrimSpace(string(capability))
-			if capabilityValue == "" {
-				continue
-			}
-
-			options = append(options, "--cap-add="+capabilityValue)
+			options = append(options, "--cap-add="+string(capability))
 		}
 	}
 
@@ -839,10 +799,6 @@ func acceleratorExporterConfigVolumes(
 	mounts := make([]v1.ComponentVolumeMount, 0, len(configFiles))
 
 	for i, configFile := range configFiles {
-		if configFile.Path == "" {
-			continue
-		}
-
 		name := "accelerator-exporter-config-" + strconv.Itoa(i)
 		volumes = append(volumes, v1.ComponentVolume{
 			Name:     name,
