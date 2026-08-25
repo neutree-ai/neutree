@@ -31,11 +31,12 @@ func RegisterExternalEndpointRoutes(group *gin.RouterGroup, middlewares []gin.Ha
 	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.ExternalEndpoint](deps, storage.EXTERNAL_ENDPOINT_TABLE)
+	externalEndpointValidation := validateExternalEndpoint()
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
-	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.POST("", externalEndpointValidation, handler)
+	proxyGroup.PATCH("", externalEndpointValidation, handler)
 
 	// Test connectivity endpoint
 	proxyGroup.POST("/test_connectivity", handleTestConnectivity(deps))
