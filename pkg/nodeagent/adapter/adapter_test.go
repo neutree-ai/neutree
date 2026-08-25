@@ -11,6 +11,8 @@ import (
 
 func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 	original := KubernetesEvidence{
+		VirtualizationMonitorText: "hami_vgpu_memory_used_bytes{pod=\"chat-a\"} 1024\n",
+		VirtualizationMonitorUp:   true,
 		Common: CommonEvidence{EndpointReplicaAcceleratorUsages: []EndpointReplicaAcceleratorUsage{{
 			AcceleratorUUID: "device-a",
 			MemoryUsedBytes: float64Pointer(1024),
@@ -40,6 +42,8 @@ func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 	assert.Equal(t, "chat", original.EndpointPods[0].Labels["endpoint"])
 	assert.Equal(t, "value", original.EndpointPods[0].Annotations["vendor.example/raw"])
 	assert.Equal(t, 1024.0, *original.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
+	assert.True(t, cloned.VirtualizationMonitorUp)
+	assert.Equal(t, original.VirtualizationMonitorText, cloned.VirtualizationMonitorText)
 }
 
 func float64Pointer(value float64) *float64 {

@@ -102,6 +102,12 @@ type KubernetesEvidence struct {
 	AllocationAvailable bool
 	PodResources        []PodResource
 	EndpointPods        []EndpointPodEvidence
+	// VirtualizationMonitorText is unparsed exposition from the local monitor
+	// selected by the management-plane profile. The adapter owns its semantics.
+	VirtualizationMonitorText string
+	// VirtualizationMonitorUp distinguishes an unavailable local monitor from
+	// an empty but successful exposition.
+	VirtualizationMonitorUp bool
 }
 
 // PodResource is a raw kubelet PodResources observation.
@@ -247,8 +253,10 @@ func (e CommonEvidence) Clone() CommonEvidence {
 // Clone returns a deep copy of Kubernetes evidence.
 func (e KubernetesEvidence) Clone() KubernetesEvidence {
 	result := KubernetesEvidence{
-		Common:              e.Common.Clone(),
-		AllocationAvailable: e.AllocationAvailable,
+		Common:                    e.Common.Clone(),
+		AllocationAvailable:       e.AllocationAvailable,
+		VirtualizationMonitorText: e.VirtualizationMonitorText,
+		VirtualizationMonitorUp:   e.VirtualizationMonitorUp,
 	}
 	result.PodResources = make([]PodResource, 0, len(e.PodResources))
 
