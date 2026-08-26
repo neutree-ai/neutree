@@ -918,6 +918,11 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	dcgm := findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
 	assert.Equal(t, "nvidia-gpu-dcgm-exporter", dcgm.Labels["app"])
+	assert.DeepEqual(t, map[string]string{
+		"app":       "nvidia-gpu-dcgm-exporter",
+		"cluster":   "test-cluster",
+		"workspace": "test-workspace",
+	}, dcgm.Spec.Selector.MatchLabels)
 	assert.Equal(t, "accelerator-exporter", dcgm.Labels["neutree.ai/metrics-target"])
 	assert.Equal(t, "accelerator-exporter", dcgm.Spec.Template.Labels["neutree.ai/metrics-target"])
 	assert.Equal(t, "test-image-prefix/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",

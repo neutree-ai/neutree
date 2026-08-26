@@ -415,7 +415,6 @@ spec:
   selector:
     matchLabels:
       app: {{ .AppLabel }}
-      neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
       cluster: {{ $.ClusterName | quote }}
       workspace: {{ $.Workspace | quote }}
   template:
