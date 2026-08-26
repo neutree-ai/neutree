@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -318,6 +319,95 @@ func TestParseConfig_ReadsBothDtypeSpellings(t *testing.T) {
 	}
 }
 
+// The MLA widths decide which cache layout a reader may assume, and a
+// checkpoint that uses MLA also states num_key_value_heads and head_dim. So they
+// have to be reported when stated and left alone when not: inventing them makes
+// a head-based model look latent, and dropping them makes a latent model look
+// head-based.
+func TestParseConfig_LatentAttentionIsReportedOnlyWhenStated(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      string
+		wantRank    *int
+		wantRope    *int
+		wantMissing []string
+	}{
+		{
+			name:   "head-based config states neither",
+			config: `{"num_attention_heads":28,"num_key_value_heads":4,"head_dim":128}`,
+		},
+		{
+			name:     "latent config states both",
+			config:   `{"num_attention_heads":128,"num_key_value_heads":128,"kv_lora_rank":512,"qk_rope_head_dim":64}`,
+			wantRank: ptr(512),
+			wantRope: ptr(64),
+		},
+		{
+			name:        "half a latent config leaves the other half missing",
+			config:      `{"num_attention_heads":16,"num_key_value_heads":16,"kv_lora_rank":512}`,
+			wantRank:    ptr(512),
+			wantMissing: []string{v1.ModelInfoFieldQKRopeHeadDim},
+		},
+		{
+			// A rope width with no rank at all is still treated as a half-stated
+			// MLA layer, because that is what it looks like and there is no other
+			// reading of it. The refusal this produces downstream is the point.
+			name:        "a rope width with no rank leaves the rank missing",
+			config:      `{"num_attention_heads":16,"num_key_value_heads":16,"qk_rope_head_dim":64}`,
+			wantRope:    ptr(64),
+			wantMissing: []string{v1.ModelInfoFieldKVLoraRank},
+		},
+		{
+			// DeepSeek V4 states the same rope width and no rank, and is not
+			// half-stated: compress_ratios says it is the V4 layout, whose cache
+			// is head_dim wide with the rope slice inside it. Reporting
+			// kv_lora_rank missing here invents a gap and refuses a model that
+			// has told us everything.
+			name: "the V4 layout states a rope width and no rank without a gap",
+			config: `{"num_attention_heads":128,"num_key_value_heads":1,"head_dim":512,` +
+				`"qk_rope_head_dim":64,"num_hidden_layers":2,"compress_ratios":[128,4],` +
+				`"index_head_dim":128,"sliding_window":128}`,
+			wantRope: ptr(64),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := ParseConfig([]byte(tt.config))
+
+			assert.Equal(t, tt.wantRank, info.KVLoraRank)
+			assert.Equal(t, tt.wantRope, info.QKRopeHeadDim)
+
+			for _, field := range []string{v1.ModelInfoFieldKVLoraRank, v1.ModelInfoFieldQKRopeHeadDim} {
+				assert.Equal(t, slices.Contains(tt.wantMissing, field), slices.Contains(info.MissingFields, field),
+					"unexpected missing_fields entry for %q", field)
+			}
+
+			if tt.wantRank != nil {
+				assert.Equal(t, v1.ModelInfoSourceAuto, info.FieldSources[v1.ModelInfoFieldKVLoraRank])
+			}
+		})
+	}
+}
+
+// layer_types is passed through as the file states it. Names outside the
+// vocabulary of any architecture we have seen must survive unchanged, because
+// what a reader does with the list — deciding whether every layer is alike —
+// does not depend on recognizing the names.
+func TestParseConfig_LayerTypesArePassedThroughVerbatim(t *testing.T) {
+	info := ParseConfig([]byte(`{"num_hidden_layers":4,"layer_types":["mamba","attention","mamba","something_new"]}`))
+
+	assert.Equal(t, []string{"mamba", "attention", "mamba", "something_new"}, info.LayerTypes)
+	assert.Equal(t, v1.ModelInfoSourceAuto, info.FieldSources[v1.ModelInfoFieldLayerTypes])
+
+	// A config that says nothing about its layers is not evidence that they are
+	// uniform, so the field is neither populated nor reported as a known gap.
+	plain := ParseConfig([]byte(`{"num_hidden_layers":4}`))
+
+	assert.Nil(t, plain.LayerTypes)
+	assert.NotContains(t, plain.MissingFields, v1.ModelInfoFieldLayerTypes)
+}
+
 // Nesting is bounded, and a config that nests past the bound still parses into
 // whatever the levels above it stated rather than hanging or panicking.
 func TestParseConfig_NestingIsBounded(t *testing.T) {
@@ -332,6 +422,10 @@ func TestParseConfig_NestingIsBounded(t *testing.T) {
 
 	assert.Equal(t, "Deep", info.Architecture)
 	assert.NotNil(t, info.NumHiddenLayers)
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
 
 func deref(v *int) int {
@@ -352,6 +446,21 @@ var backingKeys = map[string][]string{
 	v1.ModelInfoFieldNumAttentionHeads:     {"num_attention_heads"},
 	v1.ModelInfoFieldNumKeyValueHeads:      {"num_key_value_heads"},
 	v1.ModelInfoFieldHeadDim:               {"head_dim", "hidden_size"},
+	v1.ModelInfoFieldKVLoraRank:            {"kv_lora_rank"},
+	v1.ModelInfoFieldQKRopeHeadDim:         {"qk_rope_head_dim"},
+	v1.ModelInfoFieldLayerTypes:            {"layer_types"},
+	v1.ModelInfoFieldSlidingWindow:         {"sliding_window"},
+	v1.ModelInfoFieldLinearConvKernelDim:   {"linear_conv_kernel_dim"},
+	v1.ModelInfoFieldLinearNumKeyHeads:     {"linear_num_key_heads"},
+	v1.ModelInfoFieldLinearKeyHeadDim:      {"linear_key_head_dim"},
+	v1.ModelInfoFieldLinearNumValueHeads:   {"linear_num_value_heads"},
+	v1.ModelInfoFieldLinearValueHeadDim:    {"linear_value_head_dim"},
+	v1.ModelInfoFieldRecurrentStateDtype:   {"mamba_ssm_dtype"},
+	v1.ModelInfoFieldCompressRatios:        {"compress_ratios"},
+	v1.ModelInfoFieldIndexNumHeads:         {"index_n_heads"},
+	v1.ModelInfoFieldIndexHeadDim:          {"index_head_dim"},
+	v1.ModelInfoFieldIndexTopK:             {"index_topk"},
+	v1.ModelInfoFieldMTPNumLayers:          {"num_nextn_predict_layers", "mtp_num_hidden_layers"},
 	v1.ModelInfoFieldMaxPositionEmbeddings: {"max_position_embeddings"},
 	v1.ModelInfoFieldContextLength:         {"max_position_embeddings"},
 	v1.ModelInfoFieldParameterDtype:        {"torch_dtype", "dtype"},
