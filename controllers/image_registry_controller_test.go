@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -489,4 +490,74 @@ func TestImageRegistryController_Reconcile(t *testing.T) {
 			mockStorage.AssertExpectations(t)
 		})
 	}
+}
+
+func TestImageRegistryController_DetectCapabilities(t *testing.T) {
+	registryWith := func(capability v1.ListRepositoriesCapability) *v1.ImageRegistry {
+		obj := &v1.ImageRegistry{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ImageRegistrySpec{URL: "https://registry.example.com", Repository: "team"},
+		}
+
+		if capability != "" {
+			obj.Status = &v1.ImageRegistryStatus{
+				Capabilities: &v1.ImageRegistryCapabilities{ListRepositories: capability},
+			}
+		}
+
+		return obj
+	}
+
+	t.Run("records what the registry turned out to support", func(t *testing.T) {
+		// Established here rather than when a user is waiting on a listing.
+		repositoryService := registrymocks.NewMockRepositoryService(t)
+		repositoryService.
+			On("DetectListRepositoriesCapability", mock.Anything).
+			Return(v1.ListRepositoriesHarborProjects, nil)
+
+		controller := &ImageRegistryController{repositoryService: repositoryService}
+		capabilities := controller.detectCapabilities(registryWith(""))
+
+		assert.Equal(t, v1.ListRepositoriesHarborProjects, capabilities.ListRepositories)
+	})
+
+	t.Run("re-establishes it every reconcile", func(t *testing.T) {
+		// Credentials get rotated and permissions get changed, so a recorded
+		// capability is never taken as still true.
+		repositoryService := registrymocks.NewMockRepositoryService(t)
+		repositoryService.
+			On("DetectListRepositoriesCapability", mock.Anything).
+			Return(v1.ListRepositoriesHarborProjects, nil)
+
+		controller := &ImageRegistryController{repositoryService: repositoryService}
+		capabilities := controller.detectCapabilities(registryWith(v1.ListRepositoriesUnauthorized))
+
+		assert.Equal(t, v1.ListRepositoriesHarborProjects, capabilities.ListRepositories)
+	})
+
+	t.Run("keeps what is known when the registry says nothing", func(t *testing.T) {
+		// A timeout is not an answer about what a registry supports. Writing
+		// "unsupported" here would take browsing away from a working registry
+		// after one bad minute, and leave it away until somebody noticed.
+		repositoryService := registrymocks.NewMockRepositoryService(t)
+		repositoryService.
+			On("DetectListRepositoriesCapability", mock.Anything).
+			Return(v1.ListRepositoriesCapability(""), errors.New("dial tcp: i/o timeout"))
+
+		controller := &ImageRegistryController{repositoryService: repositoryService}
+		capabilities := controller.detectCapabilities(registryWith(v1.ListRepositoriesHarborProjects))
+
+		assert.Equal(t, v1.ListRepositoriesHarborProjects, capabilities.ListRepositories)
+	})
+
+	t.Run("leaves it unestablished when nothing was ever established", func(t *testing.T) {
+		repositoryService := registrymocks.NewMockRepositoryService(t)
+		repositoryService.
+			On("DetectListRepositoriesCapability", mock.Anything).
+			Return(v1.ListRepositoriesCapability(""), errors.New("dial tcp: i/o timeout"))
+
+		controller := &ImageRegistryController{repositoryService: repositoryService}
+
+		assert.Nil(t, controller.detectCapabilities(registryWith("")))
+	})
 }

@@ -7,3 +7,4 @@ packages:
   github.com/neutree-ai/neutree/internal/registry:
     interfaces:
       ImageService:
+      RepositoryService:
