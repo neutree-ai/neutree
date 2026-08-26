@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -35,6 +36,21 @@ var infoFields = []infoField{
 	{v1.ModelInfoFieldNumAttentionHeads, func(i *v1.ModelInfo) string { return formatInt(i.NumAttentionHeads) }},
 	{v1.ModelInfoFieldNumKeyValueHeads, func(i *v1.ModelInfo) string { return formatInt(i.NumKeyValueHeads) }},
 	{v1.ModelInfoFieldHeadDim, func(i *v1.ModelInfo) string { return formatInt(i.HeadDim) }},
+	{v1.ModelInfoFieldKVLoraRank, func(i *v1.ModelInfo) string { return formatInt(i.KVLoraRank) }},
+	{v1.ModelInfoFieldQKRopeHeadDim, func(i *v1.ModelInfo) string { return formatInt(i.QKRopeHeadDim) }},
+	{v1.ModelInfoFieldLayerTypes, func(i *v1.ModelInfo) string { return formatLayerTypes(i.LayerTypes) }},
+	{v1.ModelInfoFieldSlidingWindow, func(i *v1.ModelInfo) string { return formatInt(i.SlidingWindow) }},
+	{v1.ModelInfoFieldLinearConvKernelDim, func(i *v1.ModelInfo) string { return formatInt(i.LinearConvKernelDim) }},
+	{v1.ModelInfoFieldLinearNumKeyHeads, func(i *v1.ModelInfo) string { return formatInt(i.LinearNumKeyHeads) }},
+	{v1.ModelInfoFieldLinearKeyHeadDim, func(i *v1.ModelInfo) string { return formatInt(i.LinearKeyHeadDim) }},
+	{v1.ModelInfoFieldLinearNumValueHeads, func(i *v1.ModelInfo) string { return formatInt(i.LinearNumValueHeads) }},
+	{v1.ModelInfoFieldLinearValueHeadDim, func(i *v1.ModelInfo) string { return formatInt(i.LinearValueHeadDim) }},
+	{v1.ModelInfoFieldRecurrentStateDtype, func(i *v1.ModelInfo) string { return i.RecurrentStateDtype }},
+	{v1.ModelInfoFieldCompressRatios, func(i *v1.ModelInfo) string { return formatCompressRatios(i.CompressRatios) }},
+	{v1.ModelInfoFieldIndexNumHeads, func(i *v1.ModelInfo) string { return formatInt(i.IndexNumHeads) }},
+	{v1.ModelInfoFieldIndexHeadDim, func(i *v1.ModelInfo) string { return formatInt(i.IndexHeadDim) }},
+	{v1.ModelInfoFieldIndexTopK, func(i *v1.ModelInfo) string { return formatInt(i.IndexTopK) }},
+	{v1.ModelInfoFieldMTPNumLayers, func(i *v1.ModelInfo) string { return formatInt(i.MTPNumLayers) }},
 	{v1.ModelInfoFieldMaxPositionEmbeddings, func(i *v1.ModelInfo) string { return formatInt(i.MaxPositionEmbeddings) }},
 	{v1.ModelInfoFieldIsMoE, func(i *v1.ModelInfo) string { return formatBool(i.IsMoE) }},
 	{v1.ModelInfoFieldNumExperts, func(i *v1.ModelInfo) string { return formatInt(i.NumExperts) }},
@@ -216,6 +232,66 @@ func formatInt(value *int) string {
 	}
 
 	return strconv.Itoa(*value)
+}
+
+// formatLayerTypes renders the per-layer attention kinds as a count per kind,
+// in the order the kinds first appear. A model states one entry per layer, which
+// is dozens of repeated names on one terminal line; the counts carry the same
+// information — which kinds occur and how often — in a line a reader can take
+// in. Rendered as "full_attention x12, sliding_attention x12".
+func formatLayerTypes(types []string) string {
+	var (
+		order  []string
+		counts = map[string]int{}
+	)
+
+	for _, layer := range types {
+		if counts[layer] == 0 {
+			order = append(order, layer)
+		}
+
+		counts[layer]++
+	}
+
+	parts := make([]string, 0, len(order))
+	for _, layer := range order {
+		parts = append(parts, fmt.Sprintf("%s x%d", layer, counts[layer]))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// formatCompressRatios renders the per-layer compression schedule the same way
+// formatLayerTypes renders layer kinds, and for the same reason: it holds one
+// entry per layer, which is dozens of repeated numbers on one terminal line. The
+// counts are shown per distinct rate, in the order the rates first appear, with
+// the total length last because that length is itself a fact — a schedule longer
+// than num_hidden_layers is how the checkpoint states its draft modules.
+// Rendered as "128 x31, 4 x30, 0 x3 (64 entries)".
+func formatCompressRatios(ratios []int) string {
+	if len(ratios) == 0 {
+		return ""
+	}
+
+	var (
+		order  []int
+		counts = map[int]int{}
+	)
+
+	for _, ratio := range ratios {
+		if counts[ratio] == 0 {
+			order = append(order, ratio)
+		}
+
+		counts[ratio]++
+	}
+
+	parts := make([]string, 0, len(order))
+	for _, ratio := range order {
+		parts = append(parts, fmt.Sprintf("%d x%d", ratio, counts[ratio]))
+	}
+
+	return fmt.Sprintf("%s (%d entries)", strings.Join(parts, ", "), len(ratios))
 }
 
 func formatBool(value *bool) string {

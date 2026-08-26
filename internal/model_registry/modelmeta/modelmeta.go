@@ -29,6 +29,21 @@ var allFields = []string{
 	v1.ModelInfoFieldNumAttentionHeads,
 	v1.ModelInfoFieldNumKeyValueHeads,
 	v1.ModelInfoFieldHeadDim,
+	v1.ModelInfoFieldKVLoraRank,
+	v1.ModelInfoFieldQKRopeHeadDim,
+	v1.ModelInfoFieldLayerTypes,
+	v1.ModelInfoFieldSlidingWindow,
+	v1.ModelInfoFieldLinearConvKernelDim,
+	v1.ModelInfoFieldLinearNumKeyHeads,
+	v1.ModelInfoFieldLinearKeyHeadDim,
+	v1.ModelInfoFieldLinearNumValueHeads,
+	v1.ModelInfoFieldLinearValueHeadDim,
+	v1.ModelInfoFieldRecurrentStateDtype,
+	v1.ModelInfoFieldCompressRatios,
+	v1.ModelInfoFieldIndexNumHeads,
+	v1.ModelInfoFieldIndexHeadDim,
+	v1.ModelInfoFieldIndexTopK,
+	v1.ModelInfoFieldMTPNumLayers,
 	v1.ModelInfoFieldMaxPositionEmbeddings,
 	v1.ModelInfoFieldContextLength,
 	v1.ModelInfoFieldParameterDtype,
@@ -57,6 +72,23 @@ type hfConfig struct {
 	NumAttentionHeads     *int                `json:"num_attention_heads"`
 	NumKeyValueHeads      *int                `json:"num_key_value_heads"`
 	HeadDim               *int                `json:"head_dim"`
+	KVLoraRank            *int                `json:"kv_lora_rank"`
+	QKRopeHeadDim         *int                `json:"qk_rope_head_dim"`
+	LayerTypes            []string            `json:"layer_types"`
+	SlidingWindow         *int                `json:"sliding_window"`
+	UseSlidingWindow      *bool               `json:"use_sliding_window"`
+	LinearConvKernelDim   *int                `json:"linear_conv_kernel_dim"`
+	LinearNumKeyHeads     *int                `json:"linear_num_key_heads"`
+	LinearKeyHeadDim      *int                `json:"linear_key_head_dim"`
+	LinearNumValueHeads   *int                `json:"linear_num_value_heads"`
+	LinearValueHeadDim    *int                `json:"linear_value_head_dim"`
+	MambaSSMDtype         string              `json:"mamba_ssm_dtype"`
+	CompressRatios        []int               `json:"compress_ratios"`
+	IndexNumHeads         *int                `json:"index_n_heads"`
+	IndexHeadDim          *int                `json:"index_head_dim"`
+	IndexTopK             *int                `json:"index_topk"`
+	NumNextNPredictLayers *int                `json:"num_nextn_predict_layers"`
+	MTPNumHiddenLayers    *int                `json:"mtp_num_hidden_layers"`
 	HiddenSize            *int                `json:"hidden_size"`
 	MaxPositionEmbeddings *int                `json:"max_position_embeddings"`
 	TorchDtype            string              `json:"torch_dtype"`
@@ -254,6 +286,20 @@ func (c *hfConfig) fillFrom(outer *hfConfig) {
 	fillPointer(&c.NumAttentionHeads, outer.NumAttentionHeads)
 	fillPointer(&c.NumKeyValueHeads, outer.NumKeyValueHeads)
 	fillPointer(&c.HeadDim, outer.HeadDim)
+	fillPointer(&c.KVLoraRank, outer.KVLoraRank)
+	fillPointer(&c.QKRopeHeadDim, outer.QKRopeHeadDim)
+	fillPointer(&c.SlidingWindow, outer.SlidingWindow)
+	fillPointer(&c.UseSlidingWindow, outer.UseSlidingWindow)
+	fillPointer(&c.LinearConvKernelDim, outer.LinearConvKernelDim)
+	fillPointer(&c.LinearNumKeyHeads, outer.LinearNumKeyHeads)
+	fillPointer(&c.LinearKeyHeadDim, outer.LinearKeyHeadDim)
+	fillPointer(&c.LinearNumValueHeads, outer.LinearNumValueHeads)
+	fillPointer(&c.LinearValueHeadDim, outer.LinearValueHeadDim)
+	fillPointer(&c.IndexNumHeads, outer.IndexNumHeads)
+	fillPointer(&c.IndexHeadDim, outer.IndexHeadDim)
+	fillPointer(&c.IndexTopK, outer.IndexTopK)
+	fillPointer(&c.NumNextNPredictLayers, outer.NumNextNPredictLayers)
+	fillPointer(&c.MTPNumHiddenLayers, outer.MTPNumHiddenLayers)
 	fillPointer(&c.HiddenSize, outer.HiddenSize)
 	fillPointer(&c.MaxPositionEmbeddings, outer.MaxPositionEmbeddings)
 	fillPointer(&c.NumLocalExperts, outer.NumLocalExperts)
@@ -267,6 +313,18 @@ func (c *hfConfig) fillFrom(outer *hfConfig) {
 
 	if c.Dtype == "" {
 		c.Dtype = outer.Dtype
+	}
+
+	if c.MambaSSMDtype == "" {
+		c.MambaSSMDtype = outer.MambaSSMDtype
+	}
+
+	if len(c.LayerTypes) == 0 {
+		c.LayerTypes = outer.LayerTypes
+	}
+
+	if len(c.CompressRatios) == 0 {
+		c.CompressRatios = outer.CompressRatios
 	}
 
 	if len(c.Architectures) == 0 {
@@ -301,6 +359,12 @@ func applyConfig(info *v1.ModelInfo, cfg *hfConfig) {
 	recordAuto(info, v1.ModelInfoFieldNumKeyValueHeads, cfg.NumKeyValueHeads != nil)
 
 	applyHeadDim(info, cfg)
+	applyLatentAttention(info, cfg)
+	applyLayerTypes(info, cfg)
+	applySlidingWindow(info, cfg)
+	applyLinearAttention(info, cfg)
+	applySparseAttention(info, cfg)
+	applyMTP(info, cfg)
 
 	info.MaxPositionEmbeddings = cfg.MaxPositionEmbeddings
 	recordAuto(info, v1.ModelInfoFieldMaxPositionEmbeddings, cfg.MaxPositionEmbeddings != nil)
@@ -345,6 +409,68 @@ func applyHeadDim(info *v1.ModelInfo, cfg *hfConfig) {
 	derived := *cfg.HiddenSize / *cfg.NumAttentionHeads
 	info.HeadDim = &derived
 	info.SetFieldSource(v1.ModelInfoFieldHeadDim, v1.ModelInfoSourceDerived)
+}
+
+// applyLatentAttention reads the two widths that describe an MLA layer's cache.
+// A checkpoint that states neither is simply not an MLA model, which is an
+// answer rather than a gap, so nothing is reported missing in that case.
+//
+// One without the other is different: the checkpoint is describing latent
+// attention and half the description is unreadable. The absent half is reported
+// missing so that a reader is told which key it would need, instead of falling
+// through to the head-based layout and computing a number off the wrong shape.
+//
+// DeepSeek V4 is the exception, and it is recognised by architecture rather than
+// by model: its configs state qk_rope_head_dim with no kv_lora_rank at all, and
+// treating that as a half-described V3 layer reports a gap that does not exist.
+// It is not the same layer. V4 states head_dim (512 in both released Pro and
+// Flash checkpoints) and caches exactly that per KV head — the attention
+// projection attn.wkv.weight has 512 output rows and attn.kv_norm.weight is
+// 512 wide — so qk_rope_head_dim names a rotary slice inside head_dim, not a
+// second width added on top of a latent rank. Adding the two the way V3 does
+// would over-state V4's cache by 12.5%.
+//
+// The recognition keys on compress_ratios because that is the one key only this
+// architecture writes, and because it is also what a reader needs in order to
+// size the cache at all. Keying on architectures[0] would be worse in the same
+// way it is everywhere else in this package: DeepseekV4ForCausalLM is one
+// spelling of a family that will be re-spelled, while the layout key is the
+// layout.
+func applyLatentAttention(info *v1.ModelInfo, cfg *hfConfig) {
+	if cfg.KVLoraRank == nil && (cfg.QKRopeHeadDim == nil || len(cfg.CompressRatios) > 0) {
+		if cfg.QKRopeHeadDim != nil {
+			info.QKRopeHeadDim = cfg.QKRopeHeadDim
+			info.SetFieldSource(v1.ModelInfoFieldQKRopeHeadDim, v1.ModelInfoSourceAuto)
+		}
+
+		return
+	}
+
+	info.KVLoraRank = cfg.KVLoraRank
+	recordAuto(info, v1.ModelInfoFieldKVLoraRank, cfg.KVLoraRank != nil)
+
+	info.QKRopeHeadDim = cfg.QKRopeHeadDim
+	recordAuto(info, v1.ModelInfoFieldQKRopeHeadDim, cfg.QKRopeHeadDim != nil)
+}
+
+// applyLayerTypes copies the per-layer attention kinds through untouched. The
+// strings are not mapped onto any classification here: the set is open —
+// "sliding_attention" and "full_attention" from one architecture, "mamba" and
+// "attention" from another — and deciding what an unseen name means is the
+// guessing this package refuses to do.
+//
+// A config that does not state layer_types leaves the field neither sourced nor
+// missing. Its absence is not evidence of uniform layers: an older checkpoint
+// states a hybrid layout through architecture-specific keys instead
+// (sliding_window_pattern, full_attn_mod, no_rope_layers), and those are not
+// read here because each is one architecture's private spelling.
+func applyLayerTypes(info *v1.ModelInfo, cfg *hfConfig) {
+	if len(cfg.LayerTypes) == 0 {
+		return
+	}
+
+	info.LayerTypes = cfg.LayerTypes
+	info.SetFieldSource(v1.ModelInfoFieldLayerTypes, v1.ModelInfoSourceAuto)
 }
 
 // applyExperts decides dense vs. MoE. Reading the config at all settles is_moe,
