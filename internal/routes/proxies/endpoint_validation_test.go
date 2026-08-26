@@ -2367,10 +2367,18 @@ func TestValidateEndpointModelSource(t *testing.T) {
 }
 
 func TestEndpointPatchMayAffectModelSourceValidation(t *testing.T) {
-	t.Run("skips a patch that touches neither model nor engine", func(t *testing.T) {
+	t.Run("skips a patch that touches neither model nor engine nor the replica count", func(t *testing.T) {
+		assert.False(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
+			Spec: &v1.EndpointSpec{Cluster: "c2"},
+		}))
+	})
+
+	t.Run("re-checks a patch that changes the replica count", func(t *testing.T) {
+		// The count decides whether the check applies at all, so raising it off
+		// zero has to be re-checked even though the patch names no model.
 		replicas := 3
 
-		assert.False(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
+		assert.True(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
 			Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &replicas}},
 		}))
 	})
@@ -2387,5 +2395,95 @@ func TestEndpointPatchMayAffectModelSourceValidation(t *testing.T) {
 		assert.True(t, endpointPatchMayAffectModelSourceValidation(&v1.Endpoint{
 			Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "other"}},
 		}))
+	})
+}
+
+// NEU-715: the UI pauses by resending the whole spec with replicas.num set to 0,
+// so the pause carries spec.model and spec.engine and used to be judged on them.
+// An endpoint whose spec.model.version is empty could then never be paused.
+func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
+	zero, one := 0, 1
+
+	// A vLLM endpoint that downloads its own model but has no version recorded --
+	// the shape the issue reproduces on.
+	versionless := func(replicas *int) *v1.Endpoint {
+		endpoint := modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Registry: "hf", Name: "qwen3"}, v1.EngineNameVLLM)
+		endpoint.Spec.Replicas = v1.ReplicaSpec{Num: replicas}
+
+		return endpoint
+	}
+
+	t.Run("lets a full-spec pause through", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+		patch := versionless(&zero)
+
+		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+			Operation: endpointValidationPatch,
+			Patch:     *patch,
+			New:       patch,
+		})
+
+		assert.Nil(t, err)
+		assert.Empty(t, store.options, "a pause must not even look the registry up")
+	})
+
+	t.Run("lets a replicas-only pause through", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+			Operation: endpointValidationPatch,
+			Patch:     v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &zero}}},
+			New:       versionless(&zero),
+		})
+
+		assert.Nil(t, err)
+	})
+
+	t.Run("still rejects a resume that leaves the version empty", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+
+		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+			Operation: endpointValidationPatch,
+			Patch:     v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &one}}},
+			New:       versionless(&one),
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10229", err.Code)
+			assert.Contains(t, err.Hint, "spec.model.version")
+		}
+	})
+
+	t.Run("still rejects a full-spec edit that leaves the version empty", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+		patch := versionless(&one)
+
+		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+			Operation: endpointValidationPatch,
+			Patch:     *patch,
+			New:       patch,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10229", err.Code)
+		}
+	})
+
+	// An endpoint with no explicit replica count runs one replica, not zero, so
+	// it must not fall through the pause exemption.
+	t.Run("still rejects a patch that names no replica count", func(t *testing.T) {
+		store := &fakeModelRegistryStorage{}
+		patch := versionless(nil)
+
+		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+			Operation: endpointValidationPatch,
+			Patch:     *patch,
+			New:       patch,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10229", err.Code)
+		}
 	})
 }
