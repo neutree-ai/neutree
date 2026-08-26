@@ -331,6 +331,7 @@ func (svc *repositoryService) listHarbor(target RepositoryTarget, query Reposito
 	}
 
 	total := -1
+
 	if header := res.header.Get("X-Total-Count"); header != "" {
 		if parsed, convErr := strconv.Atoi(header); convErr == nil {
 			total = parsed
@@ -443,7 +444,9 @@ func (svc *repositoryService) do(method, endpoint string, target RepositoryTarge
 	client := *svc.client
 	client.Timeout = timeout
 
-	res, err := client.Do(request)
+	// The body is handed to the caller, which closes it; bodyclose cannot see
+	// across the return.
+	res, err := client.Do(request) //nolint:bodyclose
 	if err != nil {
 		// Nothing was established. Deliberately not classified: a link that
 		// dropped says nothing about what the registry supports.
