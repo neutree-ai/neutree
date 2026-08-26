@@ -78,6 +78,10 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 		It("should have all obs-stack containers healthy", Label("C2610697"), func() {
 			cph.VerifyDeployed(cph.ParseCompose("obs-stack"))
 		})
+
+		It("should render the default Kong worker process count", Label("kong-worker-processes"), func() {
+			expectComposeKongWorkerProcesses(cph, "2")
+		})
 	})
 
 	// --- Mirror registry deploy: custom registry + custom DB (multiple checks) ---
@@ -102,6 +106,7 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 				"--version", profileCPVersion(),
 				"--admin-password", profile.Auth.Password,
 				"--db-password", customPwd,
+				"--kong-worker-processes", "3",
 				"--metrics-remote-write-url", cph.MetricsRemoteWriteURL(),
 			}, mirrorRegistryArgs()...)
 			r = cph.RunCLI(args...)
@@ -142,6 +147,10 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 			Expect(err).NotTo(HaveOccurred())
 			Expect(jwt).NotTo(BeEmpty(),
 				"admin login should succeed, proving all components connect with custom db-password")
+		})
+
+		It("should render the custom Kong worker process count", Label("kong-worker-processes"), func() {
+			expectComposeKongWorkerProcesses(cph, "3")
 		})
 	})
 
@@ -194,3 +203,19 @@ var _ = Describe("Control Plane Deploy", Ordered, Label("control-plane", "deploy
 		})
 	})
 })
+
+func expectComposeKongWorkerProcesses(cph *CPHelper, expected string) {
+	var actual *string
+	for _, service := range cph.ParseCompose("neutree-core").Services {
+		if service.Name != "kong" {
+			continue
+		}
+
+		actual = service.Environment["KONG_NGINX_WORKER_PROCESSES"]
+
+		break
+	}
+
+	Expect(actual).NotTo(BeNil())
+	Expect(*actual).To(Equal(expected))
+}

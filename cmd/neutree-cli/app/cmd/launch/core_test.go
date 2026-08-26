@@ -35,6 +35,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 			},
 			expectedFields: map[string]string{
 				"jwt-secret":               "",
+				"kong-worker-processes":    defaultKongWorkerProcesses,
 				"metrics-remote-write-url": "",
 				"version":                  "v0.0.1",
 			},
@@ -51,6 +52,7 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 			},
 			expectedFields: map[string]string{
 				"jwt-secret":               "",
+				"kong-worker-processes":    defaultKongWorkerProcesses,
 				"metrics-remote-write-url": "",
 				"version":                  "v0.0.1",
 			},
@@ -80,8 +82,103 @@ func TestNewNeutreeCoreInstallCmd(t *testing.T) {
 				assert.Equal(t, expectedValue, flagValue)
 			}
 
+			kongWorkerProcessesFlag := cmd.PersistentFlags().Lookup("kong-worker-processes")
+			require.NotNil(t, kongWorkerProcessesFlag)
+			assert.Contains(t, kongWorkerProcessesFlag.Usage, "PostgreSQL connection pressure")
+
 			// Verify RunE function is set
 			assert.NotNil(t, cmd.RunE)
+		})
+	}
+}
+
+func TestNewNeutreeCoreInstallCmdRejectsInvalidKongWorkerProcesses(t *testing.T) {
+	cmd := NewNeutreeCoreInstallCmd(&mocks.MockExecutor{}, &commonOptions{
+		workDir:    t.TempDir(),
+		deployType: constants.DeployTypeLocal,
+		deployMode: constants.DeployModeSingle,
+	})
+	cmd.SetArgs([]string{
+		"--jwt-secret", "test-secret",
+		"--kong-worker-processes", "0",
+	})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be \"auto\" or a positive integer")
+}
+
+func TestNormalizeKongWorkerProcesses(t *testing.T) {
+	tests := []struct {
+		name             string
+		value            string
+		defaultWhenEmpty bool
+		want             string
+		wantErr          bool
+	}{
+		{
+			name:             "defaults empty renderer option",
+			defaultWhenEmpty: true,
+			want:             defaultKongWorkerProcesses,
+		},
+		{
+			name:  "accepts positive integer",
+			value: "3",
+			want:  "3",
+		},
+		{
+			name:  "accepts auto",
+			value: "auto",
+			want:  "auto",
+		},
+		{
+			name:    "rejects empty public input",
+			wantErr: true,
+		},
+		{
+			name:    "rejects zero",
+			value:   "0",
+			wantErr: true,
+		},
+		{
+			name:    "rejects leading zero",
+			value:   "01",
+			wantErr: true,
+		},
+		{
+			name:    "rejects negative number",
+			value:   "-1",
+			wantErr: true,
+		},
+		{
+			name:    "rejects decimal",
+			value:   "1.5",
+			wantErr: true,
+		},
+		{
+			name:    "rejects upper case auto",
+			value:   "AUTO",
+			wantErr: true,
+		},
+		{
+			name:    "rejects whitespace",
+			value:   " 2",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeKongWorkerProcesses(tt.value, tt.defaultWhenEmpty)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "must be \"auto\" or a positive integer")
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -204,6 +301,82 @@ func TestPrepareNeutreeCoreDeployConfigRendersKongPluginChecksumLabels(t *testin
 		for label := range expectedLabels {
 			assert.NotContains(t, service.Labels, label, "unexpected Kong plugin checksum label on %s", service.Name)
 		}
+	}
+}
+
+func TestPrepareNeutreeCoreDeployConfigRendersKongWorkerProcesses(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		want        string
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name: "defaults empty option to two",
+			want: defaultKongWorkerProcesses,
+		},
+		{
+			name:  "renders custom positive integer",
+			value: "3",
+			want:  "3",
+		},
+		{
+			name:  "renders auto",
+			value: "auto",
+			want:  "auto",
+		},
+		{
+			name:        "rejects invalid value",
+			value:       "0",
+			wantErr:     true,
+			expectedErr: "must be \"auto\" or a positive integer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			options := neutreeCoreInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    workDir,
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+				jwtSecret:           "test-secret",
+				version:             "v1.0.0",
+				kongWorkerProcesses: tt.value,
+			}
+
+			err := prepareNeutreeCoreDeployConfig(options)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+
+				return
+			}
+
+			require.NoError(t, err)
+			project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
+				ConfigPaths: []string{filepath.Join(workDir, "neutree-core", "docker-compose.yml")},
+			})
+			require.NoError(t, err)
+
+			var actual *string
+			for _, service := range project.Services {
+				if service.Name != "kong" {
+					continue
+				}
+
+				actual = service.Environment["KONG_NGINX_WORKER_PROCESSES"]
+
+				break
+			}
+
+			require.NotNil(t, actual)
+			assert.Equal(t, tt.want, *actual)
+		})
 	}
 }
 
