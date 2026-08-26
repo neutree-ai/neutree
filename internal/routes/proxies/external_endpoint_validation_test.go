@@ -61,6 +61,19 @@ func assertExternalEndpointNameRejected(t *testing.T, recorder *httptest.Respons
 	assert.Contains(t, payload.Hint, "display_name")
 }
 
+func assertExternalEndpointPayloadRejected(t *testing.T, recorder *httptest.ResponseRecorder, reached bool) {
+	t.Helper()
+
+	assert.False(t, reached, "request must not reach the storage proxy")
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+	var payload validationError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+
+	assert.Equal(t, externalEndpointInvalidPayloadCode, payload.Code)
+	assert.Equal(t, "invalid external endpoint payload", payload.Message)
+}
+
 func TestValidateExternalEndpointCreateName(t *testing.T) {
 	// The matrix NEU-714 asks for: a legal ASCII name, an ASCII space, Unicode
 	// without a space, Unicode with a space, and the percent character that a
@@ -184,14 +197,27 @@ func TestValidateExternalEndpointPassesThroughOtherRequests(t *testing.T) {
 		assert.True(t, reached)
 	})
 
+	t.Run("rejects metadata that is not an object", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPatch, `{"metadata": 5}`)
+
+		assertExternalEndpointPayloadRejected(t, recorder, reached)
+	})
+
+	t.Run("rejects a name that is not a string", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `{"metadata":{"name": 5}}`)
+
+		assertExternalEndpointPayloadRejected(t, recorder, reached)
+	})
+
+	t.Run("rejects an array that is not an array of objects", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `["legal-one"]`)
+
+		assertExternalEndpointPayloadRejected(t, recorder, reached)
+	})
+
 	t.Run("rejects a body that is not an object", func(t *testing.T) {
 		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `"not-an-object"`)
 
-		assert.False(t, reached)
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-
-		var payload validationError
-		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
-		assert.Equal(t, externalEndpointInvalidPayloadCode, payload.Code)
+		assertExternalEndpointPayloadRejected(t, recorder, reached)
 	})
 }

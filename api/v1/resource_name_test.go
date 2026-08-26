@@ -40,6 +40,13 @@ func TestValidateResourceName(t *testing.T) {
 			message: "external endpoint name must consist of lowercase alphanumeric characters",
 		},
 		{
+			// 30 runes, 90 bytes. What is wrong with it is the character set, and
+			// a byte-counted length check would report a length it does not have.
+			name:    "faults a long non-ascii name on its characters, not its length",
+			input:   strings.Repeat("外", 30),
+			message: "external endpoint name must consist of lowercase alphanumeric characters",
+		},
+		{
 			name:    "rejects a trailing hyphen",
 			input:   "endpoint-",
 			message: "external endpoint name must consist of lowercase alphanumeric characters",

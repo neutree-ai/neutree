@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const maxResourceNameLength = 63
@@ -30,7 +31,11 @@ func ValidateResourceName(kind, name string) error {
 		return fmt.Errorf("%s name is required", kind)
 	}
 
-	if len(name) > maxResourceNameLength {
+	// Counted in runes, not bytes: a name of non-ASCII runes is rejected either
+	// way, but it is the character set that is wrong with it, and a byte count
+	// would report a length it does not have. Names that pass are ASCII, where
+	// the two counts agree.
+	if utf8.RuneCountInString(name) > maxResourceNameLength {
 		return fmt.Errorf("%s name must be at most %d characters", kind, maxResourceNameLength)
 	}
 
