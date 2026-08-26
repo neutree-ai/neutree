@@ -318,7 +318,6 @@ spec:
   selector:
     matchLabels:
       app: {{ .NeutreeNodeAgentMetricsName }}
-      neutree.ai/metrics-target: node-agent
       cluster: {{ .ClusterName | quote }}
       workspace: {{ .Workspace | quote }}
   template:
