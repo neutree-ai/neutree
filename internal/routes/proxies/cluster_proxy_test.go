@@ -1154,7 +1154,7 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 			name:            "rejects enabling when running GPU endpoint references cluster",
 			endpoints:       []v1.Endpoint{runningGPUEndpoint},
 			lookupEndpoints: true,
-			wantCode:        "10229",
+			wantCode:        "10231",
 			wantMessage:     "cannot enable accelerator virtualization",
 			wantHint:        "1 GPU endpoint(s) still run on this cluster",
 		},
@@ -1162,7 +1162,7 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 			name:            "rejects enabling when legacy GPU endpoint without accelerator metadata still runs",
 			endpoints:       []v1.Endpoint{legacyRunningGPUEndpoint},
 			lookupEndpoints: true,
-			wantCode:        "10229",
+			wantCode:        "10231",
 			wantMessage:     "cannot enable accelerator virtualization",
 			wantHint:        "1 GPU endpoint(s) still run on this cluster",
 		},
@@ -1170,7 +1170,7 @@ func testValidateClusterAcceleratorVirtualizationEnable(t *testing.T) {
 			name:            "rejects enabling when custom GPU resource endpoint still runs",
 			endpoints:       []v1.Endpoint{customResourceRunningGPUEndpoint},
 			lookupEndpoints: true,
-			wantCode:        "10229",
+			wantCode:        "10231",
 			wantMessage:     "cannot enable accelerator virtualization",
 			wantHint:        "1 GPU endpoint(s) still run on this cluster",
 		},
@@ -1726,7 +1726,7 @@ func TestValidateClusterAcceleratorVirtualizationTransitionDispatch(t *testing.T
 			input:        validationInput(transitionCluster(false, ""), transitionCluster(true, v1.AcceleratorVirtualizationModeCore)),
 			endpoints:    []v1.Endpoint{runningGPUEndpoint},
 			wantListCall: true,
-			wantCode:     "10229",
+			wantCode:     "10231",
 		},
 		{
 			name:         "disable transition routes to disable guard",
@@ -2020,7 +2020,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		assert.False(t, proxyCalled)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-		assert.Contains(t, recorder.Body.String(), `"code":"10229"`)
+		assert.Contains(t, recorder.Body.String(), `"code":"10231"`)
 		assert.Contains(t, recorder.Body.String(), "GPU endpoint(s) still run on this cluster")
 		mockStorage.AssertExpectations(t)
 	})

@@ -922,7 +922,7 @@ func validateClusterAcceleratorVirtualizationEnable(
 
 	if runningGPUEndpointCount > 0 {
 		return &validationError{
-			Code:    "10229",
+			Code:    "10231",
 			Message: fmt.Sprintf("cannot enable accelerator virtualization for cluster '%s/%s'", workspace, name),
 			Hint: fmt.Sprintf(
 				"%d GPU endpoint(s) still run on this cluster; pause or delete the GPU endpoints before enabling accelerator virtualization",
