@@ -983,6 +983,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 		"label: neutree.ai/metrics-target=accelerator-exporter,neutree.ai/accelerator-type=nvidia_gpu"))
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	assertUniqueEnvNames(t, nodeAgent.Spec.Template.Spec.Containers[0].Env)
 	assert.Equal(t, "all", envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
 	virtualizationMonitor := &v1.VirtualizationMonitorProfile{}
 	assert.NilError(t, json.Unmarshal(
@@ -1600,6 +1601,18 @@ func envValue(env []corev1.EnvVar, name string) string {
 	}
 
 	return ""
+}
+
+func assertUniqueEnvNames(t *testing.T, env []corev1.EnvVar) {
+	t.Helper()
+
+	seen := make(map[string]struct{}, len(env))
+	for _, item := range env {
+		if _, exists := seen[item.Name]; exists {
+			t.Fatalf("duplicate environment variable %q", item.Name)
+		}
+		seen[item.Name] = struct{}{}
+	}
 }
 
 func hasEnv(env []corev1.EnvVar, name string) bool {

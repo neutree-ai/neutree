@@ -358,9 +358,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
-{{ if .NodeAgent.Env }}
-{{ .NodeAgent.Env | toYaml | indent 8 }}
-{{ end }}
         ports:
         - name: metrics
           containerPort: {{ .NeutreeNodeAgentMetricsPort }}
