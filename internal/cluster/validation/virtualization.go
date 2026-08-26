@@ -129,6 +129,15 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 		}
 	}
 
+	if _, found, err := unstructured.NestedFieldNoCopy(
+		configPatch, "scheduler", "admissionWebhook", "namespaceSelector"); err == nil && found {
+		return &AcceleratorVirtualizationError{
+			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
+			Message: "HAMi scheduler admission webhook namespaceSelector is managed by Neutree and cannot be customized",
+			Hint:    "Remove scheduler.admissionWebhook.namespaceSelector from accelerator_virtualization.config_patch",
+		}
+	}
+
 	return nil
 }
 

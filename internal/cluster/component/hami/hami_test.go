@@ -440,6 +440,71 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	assertHasObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
 }
 
+func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+		"scheduler": map[string]interface{}{
+			"admissionWebhook": map[string]interface{}{
+				"namespaceSelector": map[string]interface{}{
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key":      "kubernetes.io/metadata.name",
+							"operator": "In",
+							"values":   []interface{}{"neutree-system"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
+	require.NoError(t, err)
+	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+	require.NotNil(t, webhook)
+
+	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, webhooks)
+
+	for _, entry := range webhooks {
+		webhookEntry, ok := entry.(map[string]interface{})
+		require.True(t, ok)
+
+		namespaceSelector, found, err := unstructured.NestedMap(webhookEntry, "namespaceSelector")
+		require.NoError(t, err)
+		require.True(t, found)
+
+		expressions, found, err := unstructured.NestedSlice(namespaceSelector, "matchExpressions")
+		require.NoError(t, err)
+		require.True(t, found)
+
+		for _, expression := range expressions {
+			match, ok := expression.(map[string]interface{})
+			require.True(t, ok)
+
+			if match["key"] != "kubernetes.io/metadata.name" || match["operator"] != "In" {
+				continue
+			}
+
+			values, ok := match["values"].([]interface{})
+			require.True(t, ok)
+			assert.NotEqual(t, []interface{}{"neutree-system"}, values,
+				"webhook must not accept a custom owning-namespace selector")
+		}
+	}
+}
+
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
 	const deviceConfigChecksumAnnotation = "checksum/hami-scheduler-device-config"
 
