@@ -1005,6 +1005,19 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Equal(t, "all", envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
+	virtualizationMonitor := &v1.VirtualizationMonitorProfile{}
+	assert.NilError(t, json.Unmarshal(
+		[]byte(envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, v1.VirtualizationMonitorProfileEnvKey)),
+		virtualizationMonitor,
+	))
+	assert.DeepEqual(t, &v1.VirtualizationMonitorProfile{
+		Namespace: "kube-system",
+		PodSelector: map[string]string{
+			"app.kubernetes.io/component": "hami-device-plugin",
+		},
+		Port:        9394,
+		MetricsPath: "/metrics",
+	}, virtualizationMonitor)
 	assert.Assert(t, nodeAgent.Spec.Template.Spec.Containers[0].ReadinessProbe == nil)
 }
 
