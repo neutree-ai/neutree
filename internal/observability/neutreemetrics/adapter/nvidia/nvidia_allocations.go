@@ -1,4 +1,4 @@
-package app
+package nvidia
 
 import (
 	"math"
@@ -136,9 +136,6 @@ func nvidiaStaticAllocations(
 		}
 
 		refs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
-		if len(refs) == 0 {
-			refs = nvidiaProcessDeviceRefs(process, evidence.RayEvidence.AcceleratorProcesses)
-		}
 
 		devices := nvidiaAllocationDevices(
 			refs,
@@ -165,37 +162,6 @@ func nvidiaStaticAllocations(
 	sortAllocations(allocations)
 
 	return allocations
-}
-
-func nvidiaProcessDeviceRefs(
-	process adapter.ProcessInfo,
-	acceleratorProcesses []adapter.AcceleratorProcess,
-) []string {
-	pids := make(map[int]struct{}, len(process.DescendantPIDs)+1)
-	if process.PID > 0 {
-		pids[process.PID] = struct{}{}
-	}
-	for _, pid := range process.DescendantPIDs {
-		if pid > 0 {
-			pids[pid] = struct{}{}
-		}
-	}
-
-	refs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, acceleratorProcess := range acceleratorProcesses {
-		if _, ok := pids[acceleratorProcess.PID]; !ok || acceleratorProcess.DeviceID == "" {
-			continue
-		}
-		if _, ok := seen[acceleratorProcess.DeviceID]; ok {
-			continue
-		}
-
-		seen[acceleratorProcess.DeviceID] = struct{}{}
-		refs = append(refs, acceleratorProcess.DeviceID)
-	}
-
-	return refs
 }
 
 func nvidiaEndpointAllocations(

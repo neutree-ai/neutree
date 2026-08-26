@@ -1,4 +1,5 @@
-package app
+// Package nvidia implements the Community NVIDIA NodeAgent adapter.
+package nvidia
 
 import (
 	"context"
@@ -11,30 +12,22 @@ import (
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
-// nvidiaAccelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
+// accelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
 // discovery, allocation resolution, and DCGM metric conversion.
-type nvidiaAccelerator struct {
-	provider              hardware.GPUHardwareInfoProvider
-	processReader         nvidiaProcessReader
-	endpointUsageProvider nvidiaEndpointUsageProvider
-}
-
-type nvidiaEndpointUsageProvider interface {
-	Usages(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error)
+type accelerator struct {
+	provider hardware.GPUHardwareInfoProvider
 }
 
 var (
-	_ adapter.Accelerator                = (*nvidiaAccelerator)(nil)
-	_ adapter.KubernetesAccelerator      = (*nvidiaAccelerator)(nil)
-	_ adapter.KubernetesEvidenceEnricher = (*nvidiaAccelerator)(nil)
-	_ adapter.StaticAccelerator          = (*nvidiaAccelerator)(nil)
-	_ adapter.StaticEvidenceEnricher     = (*nvidiaAccelerator)(nil)
-	_ adapter.MetricDescriptorProvider   = (*nvidiaAccelerator)(nil)
+	_ adapter.Accelerator              = (*accelerator)(nil)
+	_ adapter.KubernetesAccelerator    = (*accelerator)(nil)
+	_ adapter.StaticAccelerator        = (*accelerator)(nil)
+	_ adapter.MetricDescriptorProvider = (*accelerator)(nil)
 )
 
-// NewNVIDIAAdapter creates the Community NVIDIA adapter.
-func NewNVIDIAAdapter() adapter.Accelerator {
-	return &nvidiaAccelerator{}
+// New creates the Community NVIDIA adapter.
+func New() adapter.Accelerator {
+	return &accelerator{}
 }
 
 func internalLabels(labels adapter.CanonicalLabels) model.CanonicalLabels {
@@ -101,13 +94,13 @@ func internalEndpointReplicaAcceleratorUsages(
 	return result
 }
 
-func (a *nvidiaAccelerator) Type() string {
+func (a *accelerator) Type() string {
 	return v1.AcceleratorTypeNVIDIAGPU.String()
 }
 
 // MetricDescriptors declares the NVIDIA-only metric contract. Generic
 // accelerator metric families remain owned by the shared renderer.
-func (*nvidiaAccelerator) MetricDescriptors() []adapter.MetricDescriptor {
+func (*accelerator) MetricDescriptors() []adapter.MetricDescriptor {
 	return []adapter.MetricDescriptor{{
 		Name: "neutree_node_accelerator_nvidia_info",
 		LabelNames: []string{
@@ -128,33 +121,7 @@ func (*nvidiaAccelerator) MetricDescriptors() []adapter.MetricDescriptor {
 	}}
 }
 
-// EnrichKubernetesEvidence adds the NVIDIA adapter's optional HAMi
-// observations without exposing HAMi collection to the generic metrics host.
-// Failure is best effort, matching the prior behavior where the base DCGM
-// metrics remained available when the HAMi monitor was unavailable.
-func (a *nvidiaAccelerator) EnrichKubernetesEvidence(
-	ctx context.Context,
-	evidence adapter.KubernetesEvidence,
-) (adapter.KubernetesEvidence, error) {
-	result := evidence.Clone()
-	if a.endpointUsageProvider == nil {
-		return result, nil
-	}
-
-	usages, err := a.endpointUsageProvider.Usages(ctx)
-	if err != nil {
-		return result, nil
-	}
-
-	result.Common.EndpointReplicaAcceleratorUsages = append(
-		result.Common.EndpointReplicaAcceleratorUsages,
-		usages...,
-	)
-
-	return result, nil
-}
-
-func (a *nvidiaAccelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSnapshot, error) {
+func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSnapshot, error) {
 	provider := a.provider
 	if provider == nil {
 		provider = hardware.NVMLGPUHardwareInfoProvider{}
@@ -213,7 +180,7 @@ func (a *nvidiaAccelerator) DiscoverHardware(ctx context.Context) (adapter.Hardw
 	return snapshot, nil
 }
 
-func (a *nvidiaAccelerator) BuildKubernetesMetrics(
+func (a *accelerator) BuildKubernetesMetrics(
 	ctx context.Context,
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.KubernetesEvidence,
@@ -222,8 +189,10 @@ func (a *nvidiaAccelerator) BuildKubernetesMetrics(
 	if err != nil {
 		return adapter.MetricResult{}, err
 	}
-	endpointReplicaGPUUsages := internalEndpointReplicaAcceleratorUsages(
-		evidence.Common.EndpointReplicaAcceleratorUsages,
+	endpointReplicaGPUUsages := nvidiaVirtualizationUsages(evidence)
+	endpointReplicaGPUUsages = append(
+		endpointReplicaGPUUsages,
+		internalEndpointReplicaAcceleratorUsages(evidence.Common.EndpointReplicaAcceleratorUsages)...,
 	)
 	result := a.buildMetrics(
 		ctx,
@@ -237,7 +206,7 @@ func (a *nvidiaAccelerator) BuildKubernetesMetrics(
 	return result, nil
 }
 
-func (a *nvidiaAccelerator) BuildStaticMetrics(
+func (a *accelerator) BuildStaticMetrics(
 	ctx context.Context,
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.StaticEvidence,
@@ -258,7 +227,7 @@ func (a *nvidiaAccelerator) BuildStaticMetrics(
 	return result, nil
 }
 
-func (a *nvidiaAccelerator) buildMetrics(
+func (a *accelerator) buildMetrics(
 	_ context.Context,
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.CommonEvidence,

@@ -1,4 +1,4 @@
-package app
+package nvidia
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func TestNvidiaAdapterDiscoversHardware(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			accelerator := &nvidiaAccelerator{provider: hardware.GPUHardwareInfoProviderFunc(
+			accelerator := &accelerator{provider: hardware.GPUHardwareInfoProviderFunc(
 				func(context.Context) ([]model.GPUHardwareInfo, error) {
 					return testCase.infos, testCase.err
 				},
@@ -71,7 +71,7 @@ func TestNvidiaAdapterDiscoversHardware(t *testing.T) {
 }
 
 func TestNvidiaAdapterDeclaresNVIDIAInfoDescriptor(t *testing.T) {
-	provider, ok := NewNVIDIAAdapter().(adapter.MetricDescriptorProvider)
+	provider, ok := New().(adapter.MetricDescriptorProvider)
 	require.True(t, ok)
 
 	descriptors := provider.MetricDescriptors()
@@ -94,33 +94,8 @@ func TestNvidiaAdapterDeclaresNVIDIAInfoDescriptor(t *testing.T) {
 	assert.Equal(t, []string{"accelerator_uuid"}, descriptors[0].RequiredLabelNames)
 }
 
-func TestNvidiaAdapterEnrichesKubernetesEvidenceWithAdapterOwnedUsage(t *testing.T) {
-	usedBytes := 1024.0
-	accelerator := &nvidiaAccelerator{
-		endpointUsageProvider: nvidiaEndpointUsageProviderFunc(func(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error) {
-			return []adapter.EndpointReplicaAcceleratorUsage{{
-				Endpoint:        "chat",
-				AcceleratorUUID: "GPU-abc",
-				MemoryUsedBytes: &usedBytes,
-			}}, nil
-		}),
-	}
-	evidence := adapter.KubernetesEvidence{Common: adapter.CommonEvidence{
-		Labels: adapter.CanonicalLabels{Node: "node-a"},
-	}}
-
-	enriched, err := accelerator.EnrichKubernetesEvidence(context.Background(), evidence)
-
-	require.NoError(t, err)
-	assert.Empty(t, evidence.Common.EndpointReplicaAcceleratorUsages)
-	require.Len(t, enriched.Common.EndpointReplicaAcceleratorUsages, 1)
-	assert.Equal(t, "GPU-abc", enriched.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
-	require.NotNil(t, enriched.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
-	assert.Equal(t, 1024.0, *enriched.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
-}
-
 func TestNvidiaAdapterBuildsKubernetesAllocationsFromRawEvidence(t *testing.T) {
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &accelerator{}
 	result, err := accelerator.BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
 		Common: adapter.CommonEvidence{
 			ExporterUp: true,
@@ -162,7 +137,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`,
 }
 
 func TestNvidiaAdapterBuildsHAMiAllocationsFromRawEvidence(t *testing.T) {
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &accelerator{}
 	result, err := accelerator.BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
 		Common:              adapter.CommonEvidence{Labels: adapter.CanonicalLabels{Node: "node-a"}},
 		AllocationAvailable: true,
@@ -196,8 +171,44 @@ func TestNvidiaAdapterBuildsHAMiAllocationsFromRawEvidence(t *testing.T) {
 	assert.Equal(t, int64(8192), result.Allocations[0].Devices[1].MemoryMiB)
 }
 
+func TestNvidiaAdapterBuildsVirtualizationUsageFromRawEvidence(t *testing.T) {
+	result, err := (&accelerator{}).BuildKubernetesMetrics(context.Background(), testNvidiaHardware(), adapter.KubernetesEvidence{
+		Common: adapter.CommonEvidence{Labels: adapter.CanonicalLabels{
+			ClusterType: "kubernetes",
+			Node:        "node-a",
+		}},
+		AllocationAvailable: true,
+		PodResources: []adapter.PodResource{{
+			Namespace: "default",
+			Name:      "chat-a",
+			Containers: []adapter.ContainerDevices{{
+				ResourceName: "nvidia.com/gpu",
+				DeviceIDs:    []string{"0"},
+			}},
+		}},
+		EndpointPods: []adapter.EndpointPodEvidence{{
+			Namespace: "default",
+			Name:      "chat-a",
+			NodeName:  "node-a",
+			Labels: map[string]string{
+				"endpoint":                         "chat",
+				v1.NeutreeClusterWorkspaceLabelKey: "default",
+			},
+		}},
+		VirtualizationMonitorUp: true,
+		VirtualizationMonitorText: `
+hami_vgpu_memory_used_bytes{namespace="default",pod="chat-a",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a"} 4294967296
+hami_container_device_utilization_ratio{namespace="default",pod="chat-a",container="engine",device_uuid="GPU-abc",vdevice_index="0",node="node-a"} 0.75
+`,
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, sampleNames(result.Samples), "neutree_endpoint_replica_accelerator_memory_used_bytes")
+	assert.Contains(t, sampleNames(result.Samples), "neutree_endpoint_replica_accelerator_utilization_ratio")
+}
+
 func TestNvidiaAdapterBuildsStaticAllocationFromRawRayEvidence(t *testing.T) {
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &accelerator{}
 	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
 		Common: adapter.CommonEvidence{
 			ExporterUp:   true,
@@ -328,47 +339,6 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 	}
 }
 
-func TestNvidiaStaticAllocationsUseAdapterProcessEvidenceWhenVisibilityIsUnset(t *testing.T) {
-	allocations := nvidiaStaticAllocations(testNvidiaHardware(), adapter.StaticEvidence{
-		Common:              adapter.CommonEvidence{Labels: adapter.CanonicalLabels{Node: "head-0"}},
-		AllocationAvailable: true,
-		RayEvidence: adapter.RayEvidence{
-			Actors: []adapter.RayActor{{ActorID: "actor-a", PID: 123, RequiredResources: map[string]float64{"GPU": 1}}},
-			Replicas: []adapter.RayReplica{{
-				Workspace: "default",
-				Endpoint:  "chat",
-				ActorID:   "actor-a",
-				ReplicaID: "replica-a",
-			}},
-			ActorProcesses: map[int]adapter.ProcessInfo{
-				123: {PID: 123, DescendantPIDs: []int{123, 456}, Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "all"}},
-			},
-			AcceleratorProcesses: []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}},
-		},
-	})
-
-	require.Len(t, allocations, 1)
-	require.Len(t, allocations[0].Devices, 1)
-	assert.Equal(t, "GPU-abc", allocations[0].Devices[0].UUID)
-}
-
-func TestNvidiaAdapterEnrichesStaticEvidenceWithAdapterProcessObservations(t *testing.T) {
-	accelerator := &nvidiaAccelerator{
-		processReader: nvidiaProcessReaderFunc(func(context.Context) ([]adapter.AcceleratorProcess, error) {
-			return []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}}, nil
-		}),
-	}
-	evidence := adapter.StaticEvidence{RayEvidence: adapter.RayEvidence{
-		ActorProcesses: map[int]adapter.ProcessInfo{123: {PID: 123}},
-	}}
-
-	enriched, err := accelerator.EnrichStaticEvidence(context.Background(), evidence)
-
-	require.NoError(t, err)
-	assert.Equal(t, []adapter.AcceleratorProcess{{DeviceID: "GPU-abc", PID: 456}}, enriched.RayEvidence.AcceleratorProcesses)
-	assert.Empty(t, evidence.RayEvidence.AcceleratorProcesses)
-}
-
 func TestNvidiaVisibleDeviceRefs(t *testing.T) {
 	lookup := newNvidiaDeviceLookup([]v1.StaticNodeAcceleratorDeviceStatus{
 		{ID: "0", UUID: "GPU-abc"},
@@ -403,15 +373,6 @@ func TestNvidiaVisibleDeviceRefs(t *testing.T) {
 			assert.Equal(t, testCase.expected, nvidiaVisibleDeviceRefs(testCase.environment, lookup))
 		})
 	}
-}
-
-func TestParseNvidiaSMIAcceleratorProcesses(t *testing.T) {
-	processes := parseNvidiaSMIAcceleratorProcesses("GPU-def, 456\ninvalid\nGPU-abc, 123\nGPU-missing, no\n")
-
-	assert.Equal(t, []adapter.AcceleratorProcess{
-		{DeviceID: "GPU-abc", PID: 123},
-		{DeviceID: "GPU-def", PID: 456},
-	}, processes)
 }
 
 func TestGPUHardwareInfosFromSnapshotRetainsImmutableDetails(t *testing.T) {
@@ -555,7 +516,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`,
 	}
 	hardware := testNvidiaHardware()
 
-	actual, err := (&nvidiaAccelerator{}).BuildKubernetesMetrics(context.Background(), hardware, evidence)
+	actual, err := (&accelerator{}).BuildKubernetesMetrics(context.Background(), hardware, evidence)
 	require.NoError(t, err)
 
 	allocations, err := nvidiaKubernetesAllocations(hardware, evidence)
@@ -621,12 +582,4 @@ func sampleNames(samples []adapter.Sample) map[string]struct{} {
 	}
 
 	return result
-}
-
-type nvidiaEndpointUsageProviderFunc func(context.Context) ([]adapter.EndpointReplicaAcceleratorUsage, error)
-
-func (f nvidiaEndpointUsageProviderFunc) Usages(
-	ctx context.Context,
-) ([]adapter.EndpointReplicaAcceleratorUsage, error) {
-	return f(ctx)
 }

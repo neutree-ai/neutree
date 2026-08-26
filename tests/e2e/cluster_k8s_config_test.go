@@ -210,53 +210,6 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 		})
 	})
 
-	Describe("External Accelerator Exporter", Ordered, Label("accelerator-exporter"), func() {
-		var (
-			clusterName string
-			kubeconfig  string
-			k8sH        *K8sHelper
-			namespace   string
-			cluster     v1.Cluster
-		)
-
-		BeforeAll(func() {
-			kubeconfig = requireK8sProfile()
-			clusterName = "e2e-k8s-ext-exp-" + Cfg.RunID
-
-			yaml := renderK8sClusterYAML(map[string]any{
-				"name":                      clusterName,
-				"kubeconfig":                kubeconfig,
-				"accelerator_exporter_mode": string(v1.ClusterAcceleratorExporterModeExternal),
-			})
-
-			r := ClusterH.Apply(yaml)
-			ExpectSuccess(r)
-
-			r = ClusterH.WaitForPhase(clusterName, v1.ClusterPhaseRunning, TerminalPhaseTimeout)
-			ExpectSuccess(r)
-
-			k8sH = NewK8sHelper(kubeconfig)
-
-			r = ClusterH.Get(clusterName)
-			ExpectSuccess(r)
-			cluster = parseClusterJSON(r.Stdout)
-			namespace = ClusterNamespace(cluster.Metadata.Workspace, cluster.Metadata.Name, cluster.ID)
-		})
-
-		AfterAll(func() {
-			ClusterH.EnsureDeleted(clusterName)
-		})
-
-		It("should render the external accelerator exporter target contract", Label("C2732256"), func() {
-			assertK8sExternalAcceleratorExporterResources(
-				context.Background(),
-				k8sH,
-				namespace,
-				cluster.Spec.Version,
-			)
-		})
-	})
-
 	// --- Multi-Cluster Namespace Isolation ---
 
 	Describe("Multi-Cluster Isolation", Label("isolation"), func() {

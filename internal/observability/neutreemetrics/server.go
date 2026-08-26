@@ -37,10 +37,13 @@ type Config struct {
 	// empty type emits only generic node and runtime metrics.
 	AcceleratorType string
 	// AcceleratorExporterPort and AcceleratorExporterMetricsPath are the
-	// profile-derived endpoint. When a profile does not project a target, the
-	// topology-specific default target remains in effect.
+	// profile-derived endpoint.
 	AcceleratorExporterPort        int
 	AcceleratorExporterMetricsPath string
+	// VirtualizationMonitor is the profile-owned Kubernetes monitor endpoint.
+	// The generic host uses it only to obtain raw exposition; vendor adapters
+	// interpret that exposition when building allocations and metrics.
+	VirtualizationMonitor *v1.VirtualizationMonitorProfile
 	// Accelerators is the registered accelerator adapter registry used to
 	// resolve AcceleratorType to an adapter.
 	Accelerators map[string]adapter.Accelerator
@@ -111,6 +114,8 @@ func NewServer(config Config) (*Server, error) {
 	if config.ListenAddress == "" {
 		config.ListenAddress = ":9101"
 	}
+
+	config.VirtualizationMonitor = cloneVirtualizationMonitorProfile(config.VirtualizationMonitor)
 
 	return &Server{
 		config:     config,
@@ -353,14 +358,6 @@ func (s *Server) adapterMetricResult(
 		}
 
 		evidence := s.kubernetesAcceleratorEvidence(buildCtx, common)
-		if enricher, ok := accel.(adapter.KubernetesEvidenceEnricher); ok {
-			enriched, err := enricher.EnrichKubernetesEvidence(buildCtx, evidence.Clone())
-			if err != nil {
-				return adapter.MetricResult{}, err
-			}
-
-			evidence = enriched.Clone()
-		}
 
 		result, err := kubernetesAccelerator.BuildKubernetesMetrics(
 			buildCtx,
@@ -376,14 +373,6 @@ func (s *Server) adapterMetricResult(
 		}
 
 		evidence := s.staticAcceleratorEvidence(buildCtx, common)
-		if enricher, ok := accel.(adapter.StaticEvidenceEnricher); ok {
-			enriched, err := enricher.EnrichStaticEvidence(buildCtx, evidence.Clone())
-			if err != nil {
-				return adapter.MetricResult{}, err
-			}
-
-			evidence = enriched.Clone()
-		}
 
 		result, err := staticAccelerator.BuildStaticMetrics(
 			buildCtx,
@@ -417,8 +406,49 @@ func (s *Server) kubernetesAcceleratorEvidence(
 	}
 
 	raw.Common = common
+	monitorText, monitorUp := s.virtualizationMonitorEvidence(ctx)
+	raw.VirtualizationMonitorText = monitorText
+	raw.VirtualizationMonitorUp = monitorUp
 
 	return raw.Clone()
+}
+
+func (s *Server) virtualizationMonitorEvidence(ctx context.Context) (string, bool) {
+	writer := s.config.KubernetesWriter
+	if writer == nil || s.config.VirtualizationMonitor == nil {
+		return "", false
+	}
+
+	collector := KubernetesVirtualizationMonitorCollector{
+		Client:     writer.Client,
+		NodeName:   writer.NodeName,
+		Profile:    s.config.VirtualizationMonitor,
+		HTTPClient: s.httpClient,
+	}
+	text, up, err := collector.Collect(ctx)
+	if err != nil {
+		klog.V(2).InfoS("Virtualization monitor collection failed", "error", err)
+	}
+
+	return text, up
+}
+
+func cloneVirtualizationMonitorProfile(
+	profile *v1.VirtualizationMonitorProfile,
+) *v1.VirtualizationMonitorProfile {
+	if profile == nil {
+		return nil
+	}
+
+	copy := *profile
+	if len(profile.PodSelector) > 0 {
+		copy.PodSelector = make(map[string]string, len(profile.PodSelector))
+		for key, value := range profile.PodSelector {
+			copy.PodSelector[key] = value
+		}
+	}
+
+	return &copy
 }
 
 // staticAcceleratorEvidence merges best-effort raw Ray/process topology into

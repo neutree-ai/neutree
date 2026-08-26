@@ -1,4 +1,4 @@
-package app
+package nvidia
 
 import (
 	"encoding/json"

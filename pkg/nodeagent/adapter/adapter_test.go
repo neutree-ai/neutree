@@ -73,7 +73,6 @@ func TestStaticEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 				Environment:    map[string]string{"CUDA_VISIBLE_DEVICES": "0"},
 			},
 		},
-		AcceleratorProcesses: []AcceleratorProcess{{DeviceID: "GPU-abc", PID: 124}},
 	}}
 
 	cloned := original.Clone()
@@ -81,13 +80,11 @@ func TestStaticEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 	cloned.RayEvidence.Replicas[0].DeploymentOptions["num_gpus"] = 1.0
 	cloned.RayEvidence.Replicas[0].DeploymentOptions["nested"].(map[string]interface{})["value"] = "changed"
 	cloned.RayEvidence.ActorProcesses[123] = ProcessInfo{Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "1"}}
-	cloned.RayEvidence.AcceleratorProcesses[0].DeviceID = "GPU-def"
 
 	assert.Equal(t, 1.0, original.RayEvidence.Actors[0].RequiredResources["GPU"])
 	assert.Equal(t, 0.5, original.RayEvidence.Replicas[0].DeploymentOptions["num_gpus"])
 	assert.Equal(t, "original", original.RayEvidence.Replicas[0].DeploymentOptions["nested"].(map[string]interface{})["value"])
 	assert.Equal(t, "0", original.RayEvidence.ActorProcesses[123].Environment["CUDA_VISIBLE_DEVICES"])
-	assert.Equal(t, "GPU-abc", original.RayEvidence.AcceleratorProcesses[0].DeviceID)
 }
 
 func TestMetricResultCloneDoesNotShareDevicesOrLabels(t *testing.T) {

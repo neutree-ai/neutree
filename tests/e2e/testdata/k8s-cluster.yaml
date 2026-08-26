@@ -12,11 +12,6 @@ spec:
     enabled: true
 {{- end }}
   config:
-{{- if .CLUSTER_ACCELERATOR_EXPORTER_MODE }}
-    metrics:
-      accelerator_exporter:
-        mode: "{{ .CLUSTER_ACCELERATOR_EXPORTER_MODE }}"
-{{- end }}
     kubernetes_config:
       kubeconfig: {{ .CLUSTER_KUBECONFIG }}
       router:

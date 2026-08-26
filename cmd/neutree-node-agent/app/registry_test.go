@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
+	nvidiaadapter "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter/nvidia"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
@@ -57,11 +57,11 @@ func TestNewAdapterRegistryRejectsDescriptorConflicts(t *testing.T) {
 
 	assert.ErrorContains(t, err, `descriptor "neutree_vendor_metric" conflicts`)
 }
-func TestNewNVIDIAAdapterReturnsFreshInstances(t *testing.T) {
-	first := NewNVIDIAAdapter()
-	second := NewNVIDIAAdapter()
+func TestNVIDIAAdapterReturnsFreshInstances(t *testing.T) {
+	first := nvidiaadapter.New()
+	second := nvidiaadapter.New()
 
-	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), first.Type())
-	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), second.Type())
+	assert.Equal(t, "nvidia_gpu", first.Type())
+	assert.Equal(t, "nvidia_gpu", second.Type())
 	assert.NotSame(t, first, second)
 }

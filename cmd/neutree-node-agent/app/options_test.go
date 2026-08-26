@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
+	nvidiaadapter "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter/nvidia"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
@@ -97,25 +98,6 @@ func TestOptionsAcceleratorEvidenceProviderUsesKubernetesRawEvidence(t *testing.
 	assert.Nil(t, staticEvidenceProvider)
 }
 
-func TestConfigureNVIDIAKubernetesUsageBindsHAMiProviderToAdapter(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	writer := &metricskubernetes.AnnotationWriter{
-		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
-		NodeName: "node-a",
-	}
-	registry, err := newAdapterRegistry([]adapter.Accelerator{NewNVIDIAAdapter()})
-	require.NoError(t, err)
-
-	configureNVIDIAKubernetesUsage(registry, writer)
-
-	nvidia, ok := registry.byType[v1.AcceleratorTypeNVIDIAGPU.String()].(*nvidiaAccelerator)
-	assert.True(t, ok)
-	_, ok = nvidia.endpointUsageProvider.(nvidiaHAMiKubernetesUsageProvider)
-	assert.True(t, ok)
-}
-
 func TestOptionsConfigAllowsUnregisteredAcceleratorType(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
@@ -165,11 +147,32 @@ func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
 	}, config.ScrapeTargetProvider)
 }
 
+func TestOptionsConfigDecodesVirtualizationMonitorProfile(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.virtualizationMonitorJSON = `{
+  "namespace":"kube-system",
+  "pod_selector":{"app.kubernetes.io/component":"hami-device-plugin"},
+  "port":9394,
+  "metrics_path":"/metrics"
+}`
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	require.NoError(t, err)
+	assert.Equal(t, &v1.VirtualizationMonitorProfile{
+		Namespace:   "kube-system",
+		PodSelector: map[string]string{"app.kubernetes.io/component": "hami-device-plugin"},
+		Port:        9394,
+		MetricsPath: "/metrics",
+	}, config.VirtualizationMonitor)
+}
+
 func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 
-	registry, err := newAdapterRegistry([]adapter.Accelerator{NewNVIDIAAdapter()})
+	registry, err := newAdapterRegistry([]adapter.Accelerator{nvidiaadapter.New()})
 	require.NoError(t, err)
 
 	config, err := opts.configWithRegistry(registry)

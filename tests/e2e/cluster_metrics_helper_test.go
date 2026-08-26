@@ -229,57 +229,6 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func assertK8sExternalAcceleratorExporterResources(
-	ctx context.Context,
-	k8sH *K8sHelper,
-	namespace string,
-	clusterVersion string,
-) {
-	// External exporter lifecycle and its target labels are owned by the upstream
-	// orchestrator. This case verifies Neutree's rendered contract only.
-	_, err := k8sH.GetDeployment(ctx, namespace, "vmagent")
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "vmagent deployment should exist")
-
-	vmagentConfig, err := k8sH.GetConfigMap(ctx, namespace, "vmagent-config")
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "vmagent-config ConfigMap should exist")
-
-	_, err = k8sH.GetDaemonSet(ctx, namespace, "nvidia-gpu-dcgm-exporter")
-	ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(),
-		"managed DCGM exporter should not exist in external accelerator exporter mode")
-
-	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'accelerator-exporter-nvidia-gpu'"))
-	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring(
-		"label: neutree.ai/metrics-target=accelerator-exporter,neutree.ai/accelerator-type=nvidia_gpu",
-	))
-	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("replacement: $1:19400"))
-	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'dcgm-exporter'"))
-	ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("nvidia-dcgm-exporter"))
-
-	if clusterVersionSupportsManagedMetricsExporters(clusterVersion) {
-		nodeExporter := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-exporter")
-		ExpectWithOffset(1, nodeExporter.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).To(ContainSubstring("job_name: 'node-exporter-http'"))
-
-		nodeAgent := eventuallyDaemonSetReady(ctx, k8sH, namespace, "neutree-node-agent")
-		ExpectWithOffset(1, nodeAgent.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-		nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
-		ExpectWithOffset(1, nodeAgentContainer.Args).NotTo(ContainElement(ContainSubstring("--metrics-mode=")))
-		ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--accelerator-type=nvidia_gpu"))
-		ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--accelerator-exporter-port=19400"))
-		ExpectWithOffset(1, nodeAgentContainer.Args).To(ContainElement("--accelerator-exporter-metrics-path=/metrics"))
-		ExpectWithOffset(1, nodeAgentContainer.Args).NotTo(ContainElement(
-			ContainSubstring("--accelerator-exporter-url="),
-		))
-	} else {
-		_, err = k8sH.GetDaemonSet(ctx, namespace, "neutree-node-exporter")
-		ExpectWithOffset(1, apierrors.IsNotFound(err)).To(BeTrue(), "node-exporter should not exist before cluster version v1.1.0")
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-http'"))
-		ExpectWithOffset(1, vmagentConfig.Data["prometheus.yml"]).NotTo(ContainSubstring("job_name: 'node-exporter-https'"))
-	}
-
-	assertK8sKubeStateMetricsResources(ctx, k8sH, namespace, clusterVersion)
-}
-
 func assertK8sKubeStateMetricsResources(
 	ctx context.Context,
 	k8sH *K8sHelper,

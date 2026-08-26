@@ -472,7 +472,7 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 			kubeStateMetricsImage: "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
 			vmagentImage:          "victoriametrics/vmagent:v1.115.0",
 			nodeExporterImage:     "quay.io/prometheus/node-exporter:v1.8.2",
-			nodeAgentImage:        "neutree/neutree-node-agent:v1.1.0-rc.1",
+			nodeAgentImage:        "neutree/neutree-node-agent:v1.2.0-rc.1",
 			dcgmImage:             "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		},
 		{
@@ -481,7 +481,7 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 			kubeStateMetricsImage: "registry.example.com/neutree-ai/kube-state-metrics/kube-state-metrics:v2.15.0",
 			vmagentImage:          "registry.example.com/neutree-ai/victoriametrics/vmagent:v1.115.0",
 			nodeExporterImage:     "registry.example.com/neutree-ai/prometheus/node-exporter:v1.8.2",
-			nodeAgentImage:        "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.1.0-rc.1",
+			nodeAgentImage:        "registry.example.com/neutree-ai/neutree/neutree-node-agent:v1.2.0-rc.1",
 			dcgmImage:             "registry.example.com/neutree-ai/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		},
 		{
@@ -490,7 +490,7 @@ func TestBuildMetricsResourcesRewritesImagesByRegistry(t *testing.T) {
 			kubeStateMetricsImage: "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0",
 			vmagentImage:          "victoriametrics/vmagent:v1.115.0",
 			nodeExporterImage:     "quay.io/prometheus/node-exporter:v1.8.2",
-			nodeAgentImage:        "neutree/neutree-node-agent:v1.1.0-rc.1",
+			nodeAgentImage:        "neutree/neutree-node-agent:v1.2.0-rc.1",
 			dcgmImage:             "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless",
 		},
 	}
@@ -605,7 +605,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
 	assert.Equal(t, "test-namespace", nodeAgent.Namespace)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Labels["app"])
-	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.1.0-rc.1",
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.2.0-rc.1",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, !nodeAgent.Spec.Template.Spec.HostNetwork)
@@ -693,7 +693,7 @@ func TestBuildMetricsResourcesDoesNotResolveManagedProfileTargetsBeforeV110(t *t
 	assert.Assert(t, !strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-"))
 }
 
-func TestBuildMetricsResourcesUsesProfileTargetsInExternalMode(t *testing.T) {
+func TestBuildMetricsResourcesUsesProfileTargets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
@@ -701,16 +701,7 @@ func TestBuildMetricsResourcesUsesProfileTargetsInExternalMode(t *testing.T) {
 				Name:      "test-cluster",
 				Workspace: "test-workspace",
 			},
-			Spec: &v1.ClusterSpec{
-				Version: "v1.1.0",
-				Config: &v1.ClusterConfig{
-					Metrics: &v1.ClusterMetricsConfig{
-						AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
-							Mode: v1.ClusterAcceleratorExporterModeExternal,
-						},
-					},
-				},
-			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
 		namespace:             "test-namespace",
 		imagePrefix:           "test-image-prefix",
@@ -727,10 +718,7 @@ func TestBuildMetricsResourcesUsesProfileTargetsInExternalMode(t *testing.T) {
 		t.Fatalf("Failed to build metrics resources: %v", err)
 	}
 
-	for _, obj := range objs.Items {
-		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "nvidia-gpu-dcgm-exporter"))
-		assert.Assert(t, !(obj.GetKind() == "ConfigMap" && obj.GetName() == "nvidia-gpu-dcgm-exporter-config"))
-	}
+	assert.Assert(t, hasMetricsDaemonSet(objs, "nvidia-gpu-dcgm-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objs, "vmagent-config").Data["prometheus.yml"]
 	assertValidPrometheusYAML(t, vmagentConfig)
@@ -761,71 +749,24 @@ func TestBuildMetricsResourcesUsesProfileTargetsInExternalMode(t *testing.T) {
 	assert.Assert(t, !strings.Contains(args, "--accelerator-exporter-url"))
 }
 
-func TestBuildMetricsResourcesUsesExternalProfileTargetsBeforeManagedExporterSupport(t *testing.T) {
-	metricsCmpt := &MetricsComponent{
-		cluster: &v1.Cluster{
-			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
-			Spec: &v1.ClusterSpec{
-				Version: "v1.0.0",
-				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
-					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
-						Mode: v1.ClusterAcceleratorExporterModeExternal,
-					},
-				}},
-			},
-		},
-		namespace:             "test-namespace",
-		imagePrefix:           "test-image-prefix",
-		imagePullSecret:       "test-image-pull-secret",
-		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(),
-		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
-			"nvidia.com/gpu.present": "true",
-		})).Build(),
-	}
-
-	objects, err := metricsCmpt.GetMetricsResources(context.Background())
-	assert.NilError(t, err)
-	assert.Assert(t, !hasMetricsDaemonSet(objects, "nvidia-gpu-dcgm-exporter"))
-	assert.Assert(t, !hasMetricsDaemonSet(objects, neutreeNodeAgentMetricsName))
-
-	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
-	assert.Assert(t, strings.Contains(vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'"))
-	assert.Assert(t, strings.Contains(vmagentConfig, "replacement: $1:19400"))
-}
-
 func TestBuildMetricsResourcesDoesNotProjectExporterEnvToNodeAgent(t *testing.T) {
 	testCases := []struct {
 		name                string
-		mode                v1.ClusterAcceleratorExporterMode
 		nodeLabels          map[string]string
-		wantNodeAgentEnv    map[string]string
 		wantManagedExporter bool
 	}{
 		{
-			name: "managed mode",
-			mode: v1.ClusterAcceleratorExporterModeManaged,
+			name: "matching node",
 			nodeLabels: map[string]string{
 				"accelerator.example.com/nvidia": "true",
 			},
-			wantNodeAgentEnv:    map[string]string{},
 			wantManagedExporter: true,
 		},
 		{
-			name: "external mode",
-			mode: v1.ClusterAcceleratorExporterModeExternal,
-			nodeLabels: map[string]string{
-				"accelerator.example.com/nvidia": "true",
-			},
-			wantNodeAgentEnv: map[string]string{},
-		},
-		{
-			name: "external mode without matching node",
-			mode: v1.ClusterAcceleratorExporterModeExternal,
+			name: "without matching node",
 			nodeLabels: map[string]string{
 				"kubernetes.io/os": "linux",
 			},
-			wantNodeAgentEnv: map[string]string{},
 		},
 	}
 
@@ -856,12 +797,7 @@ func TestBuildMetricsResourcesDoesNotProjectExporterEnvToNodeAgent(t *testing.T)
 			metricsCmpt := &MetricsComponent{
 				cluster: &v1.Cluster{
 					Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
-					Spec: &v1.ClusterSpec{
-						Version: "v1.1.0",
-						Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
-							AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: tc.mode},
-						}},
-					},
+					Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
 				},
 				namespace:      "test-namespace",
 				acceleratorMgr: acceleratorMgr,
@@ -874,17 +810,12 @@ func TestBuildMetricsResourcesDoesNotProjectExporterEnvToNodeAgent(t *testing.T)
 			assert.NilError(t, err)
 
 			nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
-			for name, want := range tc.wantNodeAgentEnv {
-				assert.Equal(t, want, envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
-			}
 			for _, name := range []string{
 				"NVIDIA_VISIBLE_DEVICES",
 				"NVIDIA_DRIVER_CAPABILITIES",
 				"UNRELATED_EXPORTER_ENV",
 			} {
-				if _, ok := tc.wantNodeAgentEnv[name]; !ok {
-					assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
-				}
+				assert.Assert(t, !hasEnv(nodeAgent.Spec.Template.Spec.Containers[0].Env, name))
 			}
 
 			managedExporterFound := false
@@ -897,23 +828,14 @@ func TestBuildMetricsResourcesDoesNotProjectExporterEnvToNodeAgent(t *testing.T)
 	}
 }
 
-func TestBuildMetricsResourcesDoesNotGrantNodeAgentExternalNodeExporterAccess(t *testing.T) {
+func TestBuildMetricsResourcesDoesNotGrantNodeAgentNodeExporterAccess(t *testing.T) {
 	metricsCmpt := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{
 				Name:      "test-cluster",
 				Workspace: "test-workspace",
 			},
-			Spec: &v1.ClusterSpec{
-				Version: "v1.1.0",
-				Config: &v1.ClusterConfig{
-					Metrics: &v1.ClusterMetricsConfig{
-						AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
-							Mode: v1.ClusterAcceleratorExporterModeExternal,
-						},
-					},
-				},
-			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
 		},
 		namespace:       "test-namespace",
 		imagePrefix:     "test-image-prefix",

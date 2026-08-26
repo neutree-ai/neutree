@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	nodeagentapp "github.com/neutree-ai/neutree/cmd/neutree-node-agent/app"
+	nvidiaadapter "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter/nvidia"
 	"github.com/neutree-ai/neutree/internal/version"
 )
 
@@ -22,7 +23,7 @@ func main() {
 			GitCommit: info.GitCommit,
 			BuildTime: info.BuildTime,
 		}).
-		WithAdapters(nodeagentapp.NewNVIDIAAdapter()).
+		WithAdapters(nvidiaadapter.New()).
 		Build()
 	if err == nil {
 		err = application.Run(ctx)

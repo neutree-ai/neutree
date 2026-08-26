@@ -385,27 +385,6 @@ type recordingKubernetesAccelerator struct {
 	evidence adapter.KubernetesEvidence
 }
 
-type enrichingKubernetesAccelerator struct {
-	*recordingKubernetesAccelerator
-	enrichments int
-}
-
-func (a *enrichingKubernetesAccelerator) EnrichKubernetesEvidence(
-	_ context.Context,
-	evidence adapter.KubernetesEvidence,
-) (adapter.KubernetesEvidence, error) {
-	a.enrichments++
-	enriched := evidence.Clone()
-	usedBytes := 1024.0
-	enriched.Common.EndpointReplicaAcceleratorUsages = []adapter.EndpointReplicaAcceleratorUsage{{
-		Endpoint:        "chat",
-		AcceleratorUUID: "GPU-abc",
-		MemoryUsedBytes: &usedBytes,
-	}}
-
-	return enriched, nil
-}
-
 func (a *recordingKubernetesAccelerator) DiscoverHardware(context.Context) (adapter.HardwareSnapshot, error) {
 	if a.hardware.Accelerator.Type != "" {
 		return a.hardware.Clone(), nil
@@ -581,37 +560,6 @@ func TestServerPassesKubernetesRawEvidenceToExplicitAdapter(t *testing.T) {
 	assert.Equal(t, "raw", accelerator.evidence.EndpointPods[0].Annotations["hami.io/example"])
 	assert.Equal(t, v1.KubernetesClusterType, accelerator.evidence.Common.Labels.ClusterType)
 	assert.Empty(t, accelerator.evidence.Common.EndpointReplicaAcceleratorUsages)
-}
-
-func TestServerLetsKubernetesAdapterEnrichRawEvidence(t *testing.T) {
-	recording := &recordingKubernetesAccelerator{
-		capabilityTestAccelerator: capabilityTestAccelerator{typ: "vendor"},
-	}
-	accelerator := &enrichingKubernetesAccelerator{recordingKubernetesAccelerator: recording}
-	server, err := NewServer(Config{
-		ClusterType:     v1.KubernetesClusterType,
-		AcceleratorType: "vendor",
-		Labels:          model.CanonicalLabels{ClusterType: v1.KubernetesClusterType, Node: "node-a"},
-		Accelerators: map[string]adapter.Accelerator{
-			"vendor": accelerator,
-		},
-		KubernetesAcceleratorEvidenceProvider: fakeKubernetesAcceleratorEvidenceProvider{
-			evidence: adapter.KubernetesEvidence{
-				AllocationAvailable: true,
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	hardware, err := server.discoverAdapterHardware(context.Background(), accelerator)
-	require.NoError(t, err)
-
-	_, err = server.adapterMetricResult(context.Background(), accelerator, hardware, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 1, accelerator.enrichments)
-	require.Len(t, recording.evidence.Common.EndpointReplicaAcceleratorUsages, 1)
-	assert.Equal(t, "GPU-abc", recording.evidence.Common.EndpointReplicaAcceleratorUsages[0].AcceleratorUUID)
-	assert.True(t, recording.evidence.AllocationAvailable)
 }
 
 func TestServerPassesStaticRawEvidenceToExplicitAdapter(t *testing.T) {

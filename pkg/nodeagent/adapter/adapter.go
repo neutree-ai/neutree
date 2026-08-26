@@ -26,20 +26,6 @@ type StaticAccelerator interface {
 	BuildStaticMetrics(context.Context, HardwareSnapshot, StaticEvidence) (MetricResult, error)
 }
 
-// StaticEvidenceEnricher optionally appends adapter-owned raw observations to
-// static evidence before that adapter resolves allocations. The host never
-// interprets the appended data.
-type StaticEvidenceEnricher interface {
-	EnrichStaticEvidence(context.Context, StaticEvidence) (StaticEvidence, error)
-}
-
-// KubernetesEvidenceEnricher optionally appends adapter-owned raw
-// observations to Kubernetes evidence before that adapter resolves
-// allocations. The host never interprets the appended data.
-type KubernetesEvidenceEnricher interface {
-	EnrichKubernetesEvidence(context.Context, KubernetesEvidence) (KubernetesEvidence, error)
-}
-
 // MetricDescriptorProvider optionally declares adapter-owned metric series.
 type MetricDescriptorProvider interface {
 	MetricDescriptors() []MetricDescriptor
@@ -122,8 +108,8 @@ type KubernetesEvidence struct {
 	// VirtualizationMonitorUp distinguishes an unavailable local monitor from
 	// an empty but successful exposition.
 	VirtualizationMonitorUp bool
-	NodeLabels          map[string]string
-	NodeAnnotations     map[string]string
+	NodeLabels              map[string]string
+	NodeAnnotations         map[string]string
 }
 
 // PodResource is a raw kubelet PodResources observation.
@@ -160,10 +146,9 @@ type StaticEvidence struct {
 
 // RayEvidence contains raw actor and process topology observations.
 type RayEvidence struct {
-	Actors               []RayActor
-	Replicas             []RayReplica
-	ActorProcesses       map[int]ProcessInfo
-	AcceleratorProcesses []AcceleratorProcess
+	Actors         []RayActor
+	Replicas       []RayReplica
+	ActorProcesses map[int]ProcessInfo
 }
 
 // RayActor is the public subset of a Ray Dashboard actor observation needed
@@ -202,13 +187,6 @@ type ProcessInfo struct {
 	ParentPID      int
 	DescendantPIDs []int
 	Environment    map[string]string
-}
-
-// AcceleratorProcess is a raw device-to-process observation collected by an
-// adapter. DeviceID remains opaque to the host.
-type AcceleratorProcess struct {
-	DeviceID string
-	PID      int
 }
 
 // MetricResult is the only adapter output accepted by the host. Inventory is
@@ -325,10 +303,9 @@ func (e StaticEvidence) Clone() StaticEvidence {
 		Common:              e.Common.Clone(),
 		AllocationAvailable: e.AllocationAvailable,
 		RayEvidence: RayEvidence{
-			Actors:               make([]RayActor, 0, len(e.RayEvidence.Actors)),
-			Replicas:             make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
-			ActorProcesses:       make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
-			AcceleratorProcesses: append([]AcceleratorProcess(nil), e.RayEvidence.AcceleratorProcesses...),
+			Actors:         make([]RayActor, 0, len(e.RayEvidence.Actors)),
+			Replicas:       make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
+			ActorProcesses: make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
 		},
 	}
 	for _, actor := range e.RayEvidence.Actors {

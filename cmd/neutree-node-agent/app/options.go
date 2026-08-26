@@ -1,7 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
@@ -19,25 +22,27 @@ import (
 )
 
 type options struct {
-	listenAddress           string
-	clusterType             string
-	node                    string
-	nodeIP                  string
-	acceleratorType         string
-	acceleratorExporterPort int
-	acceleratorExporterPath string
-	kubeletPodResourcesSock string
-	rayDashboardURL         string
-	procFSRoot              string
-	cgroupFSRoot            string
+	listenAddress             string
+	clusterType               string
+	node                      string
+	nodeIP                    string
+	acceleratorType           string
+	acceleratorExporterPort   int
+	acceleratorExporterPath   string
+	virtualizationMonitorJSON string
+	kubeletPodResourcesSock   string
+	rayDashboardURL           string
+	procFSRoot                string
+	cgroupFSRoot              string
 }
 
 func newOptions() *options {
 	return &options{
-		listenAddress: ":9101",
-		clusterType:   v1.KubernetesClusterType,
-		procFSRoot:    "/proc",
-		cgroupFSRoot:  "/sys/fs/cgroup",
+		listenAddress:             ":9101",
+		clusterType:               v1.KubernetesClusterType,
+		procFSRoot:                "/proc",
+		cgroupFSRoot:              "/sys/fs/cgroup",
+		virtualizationMonitorJSON: os.Getenv(v1.VirtualizationMonitorProfileEnvKey),
 	}
 }
 
@@ -64,6 +69,11 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 }
 
 func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
+	virtualizationMonitor, err := o.virtualizationMonitorProfile()
+	if err != nil {
+		return neutreemetrics.Config{}, err
+	}
+
 	config := neutreemetrics.Config{
 		ListenAddress:                  o.listenAddress,
 		Labels:                         o.labels(),
@@ -71,6 +81,7 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 		AcceleratorType:                o.acceleratorType,
 		AcceleratorExporterPort:        o.acceleratorExporterPort,
 		AcceleratorExporterMetricsPath: o.acceleratorExporterPath,
+		VirtualizationMonitor:          virtualizationMonitor,
 	}.WithAccelerators(registry.accelerators()).WithAcceleratorMetricDescriptors(registry.descriptorsCopy())
 
 	writer, err := o.kubernetesWriter()
@@ -83,7 +94,6 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 	kubernetesEvidenceProvider, staticEvidenceProvider := o.acceleratorEvidenceProviders(writer)
 	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
 	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
-	configureNVIDIAKubernetesUsage(registry, writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 
 	if err != nil {
@@ -93,6 +103,20 @@ func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.C
 	config.RuntimeUsageProvider = runtimeUsageProvider
 
 	return config, nil
+}
+
+func (o *options) virtualizationMonitorProfile() (*v1.VirtualizationMonitorProfile, error) {
+	raw := strings.TrimSpace(o.virtualizationMonitorJSON)
+	if raw == "" {
+		return nil, nil
+	}
+
+	profile := &v1.VirtualizationMonitorProfile{}
+	if err := json.Unmarshal([]byte(raw), profile); err != nil {
+		return nil, fmt.Errorf("decode virtualization monitor profile: %w", err)
+	}
+
+	return profile, nil
 }
 
 func (o *options) scrapeTargetProvider(
