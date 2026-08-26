@@ -1,15 +1,21 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
@@ -82,6 +88,10 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			Expect(component.Version).NotTo(BeEmpty())
 
 			productName = expectNVIDIAVirtualizedClusterResources(cluster)
+		})
+
+		It("should render a fail-closed HAMi admission webhook", func() {
+			assertHAMiAdmissionWebhookFailClosed(clusterName)
 		})
 
 		It("should deploy a vGPU endpoint and expose endpoint resource allocation", func() {
@@ -175,6 +185,14 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 
 			By("Verifying node-agent writes full-card endpoint allocation annotations")
 			assertK8sEndpointAcceleratorAllocationAnnotations(clusterName, fullCardEndpointName)
+
+			By("Verifying full-card endpoint pod bypasses HAMi CUDA control")
+			assertK8sEndpointPodEnvironment(
+				clusterName,
+				fullCardEndpointName,
+				"CUDA_DISABLE_CONTROL",
+				"true",
+			)
 		})
 
 	})
@@ -191,6 +209,185 @@ func requireAcceleratorVirtualizationProfile() {
 	if !supported {
 		Skip(fmt.Sprintf("Cluster version %q does not support accelerator virtualization",
 			profileClusterVersion()))
+	}
+}
+
+func assertHAMiAdmissionWebhookFailClosed(clusterName string) {
+	ctx := context.Background()
+	k8sH := NewK8sHelper(profileKubeconfig())
+	clusterNamespace := k8sClusterNamespace(clusterName)
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		webhook, err := k8sH.GetMutatingWebhookConfiguration(ctx, hami.WebhookName)
+		g.Expect(err).NotTo(HaveOccurred(), "should get HAMi mutating webhook")
+		if err != nil {
+			return
+		}
+
+		g.Expect(webhook.Webhooks).NotTo(BeEmpty(), "HAMi webhook should have entries")
+		if len(webhook.Webhooks) == 0 {
+			return
+		}
+
+		preservesDefaultNamespaceSelector := false
+		restrictedToClusterNamespace := false
+		for _, entry := range webhook.Webhooks {
+			g.Expect(entry.FailurePolicy).NotTo(BeNil(), "HAMi webhook failure policy should be explicit")
+			if entry.FailurePolicy != nil {
+				g.Expect(*entry.FailurePolicy).To(Equal(admissionregistrationv1.Fail))
+			}
+
+			preservesDefaultNamespaceSelector = preservesDefaultNamespaceSelector ||
+				hasHAMiDefaultNamespaceSelector(entry.NamespaceSelector)
+			restrictedToClusterNamespace = restrictedToClusterNamespace ||
+				hasOwningNamespaceSelector(entry.NamespaceSelector, clusterNamespace)
+		}
+
+		g.Expect(preservesDefaultNamespaceSelector).To(BeTrue(),
+			"HAMi webhook should preserve hami.io/webhook NotIn [ignore]")
+		g.Expect(restrictedToClusterNamespace).To(BeFalse(),
+			"HAMi webhook must not be restricted to the owning cluster namespace")
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
+func hasHAMiDefaultNamespaceSelector(selector *metav1.LabelSelector) bool {
+	if selector == nil {
+		return false
+	}
+
+	for _, expression := range selector.MatchExpressions {
+		if expression.Key != "hami.io/webhook" || expression.Operator != metav1.LabelSelectorOpNotIn {
+			continue
+		}
+
+		for _, value := range expression.Values {
+			if value == "ignore" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func hasOwningNamespaceSelector(selector *metav1.LabelSelector, clusterNamespace string) bool {
+	if selector == nil {
+		return false
+	}
+
+	if selector.MatchLabels["kubernetes.io/metadata.name"] == clusterNamespace {
+		return true
+	}
+
+	for _, expression := range selector.MatchExpressions {
+		if expression.Key != "kubernetes.io/metadata.name" || expression.Operator != metav1.LabelSelectorOpIn {
+			continue
+		}
+
+		for _, value := range expression.Values {
+			if value == clusterNamespace {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func assertK8sEndpointPodEnvironment(clusterName, endpointName, name, value string) {
+	ctx := context.Background()
+	k8sH := NewK8sHelper(profileKubeconfig())
+	namespace := k8sClusterNamespace(clusterName)
+	containerName := profileEngineName()
+
+	EventuallyWithOffset(1, func(g Gomega) {
+		pods, err := k8sH.ListPods(ctx, namespace, "endpoint="+endpointName)
+		g.Expect(err).NotTo(HaveOccurred(), "should list endpoint pods")
+		if err != nil {
+			return
+		}
+
+		g.Expect(pods).NotTo(BeEmpty(), "endpoint pods should exist")
+		if len(pods) == 0 {
+			return
+		}
+
+		foundContainer := false
+		foundEnvironment := false
+		for _, pod := range pods {
+			for _, container := range pod.Spec.Containers {
+				if container.Name != containerName {
+					continue
+				}
+
+				foundContainer = true
+				if hasContainerEnvironment(container, name, value) {
+					foundEnvironment = true
+				}
+			}
+		}
+
+		g.Expect(foundContainer).To(BeTrue(),
+			"should find engine container %q in endpoint pods", containerName)
+		g.Expect(foundEnvironment).To(BeTrue(),
+			"engine container should contain %s=%s", name, value)
+	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
+}
+
+func hasContainerEnvironment(container corev1.Container, name, value string) bool {
+	for _, env := range container.Env {
+		if env.Name == name && env.Value == value {
+			return true
+		}
+	}
+
+	return false
+}
+
+func TestHAMiWebhookSelectorPredicates(t *testing.T) {
+	defaultSelector := &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "hami.io/webhook",
+			Operator: metav1.LabelSelectorOpNotIn,
+			Values:   []string{"ignore"},
+		}},
+	}
+
+	if !hasHAMiDefaultNamespaceSelector(defaultSelector) {
+		t.Fatal("expected HAMi default namespace selector to be detected")
+	}
+	if hasOwningNamespaceSelector(defaultSelector, "neutree-system") {
+		t.Fatal("default selector must not be treated as an owning namespace selector")
+	}
+
+	for name, selector := range map[string]*metav1.LabelSelector{
+		"match label": {
+			MatchLabels: map[string]string{"kubernetes.io/metadata.name": "neutree-system"},
+		},
+		"match expression": {
+			MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key:      "kubernetes.io/metadata.name",
+				Operator: metav1.LabelSelectorOpIn,
+				Values:   []string{"neutree-system"},
+			}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !hasOwningNamespaceSelector(selector, "neutree-system") {
+				t.Fatal("expected owning namespace selector to be detected")
+			}
+		})
+	}
+}
+
+func TestHasContainerEnvironment(t *testing.T) {
+	container := corev1.Container{Env: []corev1.EnvVar{{Name: "CUDA_DISABLE_CONTROL", Value: "true"}}}
+
+	if !hasContainerEnvironment(container, "CUDA_DISABLE_CONTROL", "true") {
+		t.Fatal("expected matching container environment to be detected")
+	}
+	if hasContainerEnvironment(container, "CUDA_DISABLE_CONTROL", "false") {
+		t.Fatal("environment value mismatch must not match")
 	}
 }
 

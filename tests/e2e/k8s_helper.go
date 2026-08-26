@@ -9,6 +9,7 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -79,6 +80,14 @@ func (h *K8sHelper) GetDeployment(ctx context.Context, namespace, name string) (
 // GetDaemonSet retrieves a specific daemonset.
 func (h *K8sHelper) GetDaemonSet(ctx context.Context, namespace, name string) (*appsv1.DaemonSet, error) {
 	return h.clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// GetMutatingWebhookConfiguration retrieves a cluster-scoped mutating webhook configuration.
+func (h *K8sHelper) GetMutatingWebhookConfiguration(
+	ctx context.Context,
+	name string,
+) (*admissionregistrationv1.MutatingWebhookConfiguration, error) {
+	return h.clientset.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, name, metav1.GetOptions{})
 }
 
 // ListNodes lists nodes with optional label selector.
