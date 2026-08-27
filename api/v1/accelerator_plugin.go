@@ -22,6 +22,15 @@ const (
 	AcceleratorTypeAMDGPU    AcceleratorType = "amd_gpu"
 )
 
+const (
+	// NodeAgentAdapterProfileKey is planner-only compatibility metadata carried
+	// in MetricsExporter.Env until AcceleratorProfile grows a dedicated field.
+	// When set to "true", planners atomically project the accelerator type and
+	// exporter target into NodeAgent arguments, then remove this key from every
+	// rendered container environment.
+	NodeAgentAdapterProfileKey = "NEUTREE_PROFILE_NODE_AGENT_ADAPTER"
+)
+
 type AcceleratorProduct string
 
 type Accelerator struct {
@@ -100,18 +109,55 @@ type AcceleratorExporterProfile struct {
 	Name string `json:"name,omitempty"`
 	// Image is the exporter container image.
 	Image string `json:"image,omitempty"`
-	// Args are passed to the exporter image entrypoint.
+	// Backends limits this exporter profile to the declared deployment backends.
+	// An empty list preserves compatibility with profiles that support every backend.
+	Backends []AcceleratorExporterBackend `json:"backends,omitempty"`
+	// Command overrides the exporter image entrypoint.
+	Command []string `json:"command,omitempty"`
+	// Args are passed to the exporter command or image entrypoint.
 	Args []string `json:"args,omitempty"`
 	// Port is the metrics port exposed by the exporter.
 	Port int `json:"port,omitempty"`
 	// MetricsPath is the HTTP path scraped by vmagent; it defaults to /metrics when empty.
 	MetricsPath string `json:"metrics_path,omitempty"`
+	// Readiness declares the optional Kubernetes readiness probe for the exporter.
+	Readiness *AcceleratorExporterReadiness `json:"readiness,omitempty"`
 	// Env contains exporter environment variables.
 	Env map[string]string `json:"env,omitempty"`
 	// ConfigFiles declares exporter configuration files that must be materialized before start.
 	ConfigFiles []AcceleratorExporterConfigFile `json:"config_files,omitempty"`
 	// Runtime declares backend-specific runtime requirements for running the exporter.
 	Runtime *AcceleratorExporterRuntimeProfile `json:"runtime,omitempty"`
+}
+
+// AcceleratorExporterBackend identifies a deployment backend for an exporter profile.
+type AcceleratorExporterBackend string
+
+const (
+	// AcceleratorExporterBackendKubernetes renders a managed Kubernetes exporter.
+	AcceleratorExporterBackendKubernetes AcceleratorExporterBackend = "kubernetes"
+	// AcceleratorExporterBackendStatic renders a static-node Docker exporter.
+	AcceleratorExporterBackendStatic AcceleratorExporterBackend = "static"
+)
+
+// SupportsBackend reports whether this profile is declared for a deployment backend.
+// Profiles created before backend-specific variants remain usable on every backend.
+func (p *AcceleratorExporterProfile) SupportsBackend(backend AcceleratorExporterBackend) bool {
+	if p == nil {
+		return false
+	}
+
+	if len(p.Backends) == 0 {
+		return true
+	}
+
+	for _, candidate := range p.Backends {
+		if candidate == backend {
+			return true
+		}
+	}
+
+	return false
 }
 
 type AcceleratorExporterConfigFile struct {
@@ -142,8 +188,14 @@ type AcceleratorExporterRuntimeProfile struct {
 	HostPID bool `json:"host_pid,omitempty"`
 	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
 	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
+	// Privileged requests privileged execution on backends that support it.
+	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// Volumes declares structured host volumes required by the exporter runtime.
+	Volumes []ComponentVolume `json:"volumes,omitempty"`
+	// VolumeMounts declares the matching container mounts for Volumes.
+	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
 	// Runtime selects the Docker runtime handler (e.g. "nvidia") on StaticNode.
 	// Kubernetes does not parse it. Without this, exporter/node-agent
 	// containers only received `--gpus all` and no `--runtime=`, which left GPU
@@ -151,8 +203,8 @@ type AcceleratorExporterRuntimeProfile struct {
 	// nvidia runtime. Selecting the handler explicitly keeps device access in
 	// the runtime shim's OCI rewrite (systemd-rebuildable) on modern toolkits.
 	// omitempty is deliberate: unlike RuntimeConfig.Runtime (which is always
-	// set for accelerator runtimes), an empty handler here is meaningful —
-	// it means the exporter does not select a special runtime.
+	// set for accelerator runtimes), an empty handler is meaningful: it means
+	// the exporter does not select a special runtime.
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions is StaticNode-only Docker fallback; Kubernetes must not parse it.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
@@ -160,6 +212,42 @@ type AcceleratorExporterRuntimeProfile struct {
 
 type AcceleratorExporterCapabilities struct {
 	Add []string `json:"add,omitempty"`
+}
+
+// AcceleratorExporterReadiness describes the Kubernetes readiness probe for an exporter.
+type AcceleratorExporterReadiness struct {
+	HTTPPath            string `json:"http_path,omitempty"`
+	InitialDelaySeconds int    `json:"initial_delay_seconds,omitempty"`
+	PeriodSeconds       int    `json:"period_seconds,omitempty"`
+	TimeoutSeconds      int    `json:"timeout_seconds,omitempty"`
+	FailureThreshold    int    `json:"failure_threshold,omitempty"`
+}
+
+// ComponentHostPathType is the supported type of a structured host path volume.
+type ComponentHostPathType string
+
+const (
+	ComponentHostPathTypeDirectory ComponentHostPathType = "directory"
+	ComponentHostPathTypeSocket    ComponentHostPathType = "socket"
+)
+
+// ComponentVolume declares a backend-neutral component volume.
+type ComponentVolume struct {
+	Name     string                         `json:"name,omitempty"`
+	HostPath *ComponentHostPathVolumeSource `json:"host_path,omitempty"`
+}
+
+// ComponentHostPathVolumeSource describes a host path exposed to a component.
+type ComponentHostPathVolumeSource struct {
+	Path string                `json:"path,omitempty"`
+	Type ComponentHostPathType `json:"type,omitempty"`
+}
+
+// ComponentVolumeMount declares where a component volume is mounted in a container.
+type ComponentVolumeMount struct {
+	Name      string `json:"name,omitempty"`
+	MountPath string `json:"mount_path,omitempty"`
+	ReadOnly  *bool  `json:"read_only,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

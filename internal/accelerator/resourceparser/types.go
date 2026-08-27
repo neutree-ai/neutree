@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	NeutreeAcceleratorDevicesAnnotation     = "neutree.ai/accelerator-devices"
-	NeutreeAcceleratorAllocationsAnnotation = "neutree.ai/accelerator-allocations"
+	NeutreeAcceleratorDevicesAnnotation     = accelerator.NeutreeAcceleratorDevicesAnnotation
+	NeutreeAcceleratorAllocationsAnnotation = accelerator.NeutreeAcceleratorAllocationsAnnotation
 )
 
 // ResourceParser handles standard accelerator resource semantics. Kubernetes

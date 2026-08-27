@@ -341,6 +341,11 @@ spec:
         - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
+{{ if .NeutreeNodeAgentAcceleratorType }}
+        - --accelerator-type={{ .NeutreeNodeAgentAcceleratorType }}
+        - --accelerator-exporter-port={{ .NeutreeNodeAgentAcceleratorExporterPort }}
+        - --accelerator-exporter-metrics-path={{ .NeutreeNodeAgentAcceleratorExporterMetricsPath }}
+{{ end }}
         env:
 {{ if .NeutreeNodeAgentMetricsEnv }}
 {{ .NeutreeNodeAgentMetricsEnv | toYaml | indent 8 }}
@@ -442,6 +447,10 @@ spec:
       containers:
       - name: {{ .ContainerName }}
         image: {{ .Image }}
+{{ if .Command }}
+        command:
+{{ .Command | toYaml | indent 8 }}
+{{ end }}
 {{ if .Args }}
         args:
 {{ .Args | toYaml | indent 8 }}
@@ -453,11 +462,13 @@ spec:
         ports:
         - name: metrics
           containerPort: {{ .Port }}
-{{ if .Capabilities }}
+{{ if .ReadinessProbe }}
+        readinessProbe:
+{{ .ReadinessProbe | toYaml | indent 10 }}
+{{ end }}
+{{ if .SecurityContext }}
         securityContext:
-          capabilities:
-            add:
-{{ .Capabilities | toYaml | indent 12 }}
+{{ .SecurityContext | toYaml | indent 10 }}
 {{ end }}
 {{ if .VolumeMounts }}
         volumeMounts:
@@ -536,36 +547,39 @@ spec:
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
 type MetricsManifestVariables struct {
-	ClusterName                      string
-	Workspace                        string
-	Namespace                        string
-	ImagePullSecret                  string
-	Version                          string
-	VMAgentImage                     string
-	NodeExporterName                 string
-	NodeExporterImage                string
-	NodeExporterPort                 int
-	NeutreeNodeAgentMetricsName      string
-	NeutreeNodeAgentMetricsImage     string
-	NeutreeNodeAgentMetricsPort      int
-	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
-	KubeStateMetricsImage            string
-	ClusterVersion                   string
-	MetricsRemoteWriteURL            string
-	MetricsMode                      string
-	Replicas                         int
-	Resources                        map[string]string
-	NeutreeNodeAgentMetricsResources map[string]string
-	KubeStateMetricsResources        map[string]string
-	HashSuffix                       string
-	EnableHAMiMonitorScrape          bool
-	EnableKubeStateMetrics           bool
-	EnableNeutreeNodeAgentMetrics    bool
-	EnableNodeExporter               bool
-	EnableExternalDCGMScrape         bool
-	AcceleratorExporters             []metricsAcceleratorExporter
-	EnableVMAgent                    bool
-	VMAgentConfig                    string
+	ClusterName                                    string
+	Workspace                                      string
+	Namespace                                      string
+	ImagePullSecret                                string
+	Version                                        string
+	VMAgentImage                                   string
+	NodeExporterName                               string
+	NodeExporterImage                              string
+	NodeExporterPort                               int
+	NeutreeNodeAgentMetricsName                    string
+	NeutreeNodeAgentMetricsImage                   string
+	NeutreeNodeAgentMetricsPort                    int
+	NeutreeNodeAgentMetricsEnv                     []corev1.EnvVar
+	NeutreeNodeAgentAcceleratorType                string
+	NeutreeNodeAgentAcceleratorExporterPort        int
+	NeutreeNodeAgentAcceleratorExporterMetricsPath string
+	KubeStateMetricsImage                          string
+	ClusterVersion                                 string
+	MetricsRemoteWriteURL                          string
+	MetricsMode                                    string
+	Replicas                                       int
+	Resources                                      map[string]string
+	NeutreeNodeAgentMetricsResources               map[string]string
+	KubeStateMetricsResources                      map[string]string
+	HashSuffix                                     string
+	EnableHAMiMonitorScrape                        bool
+	EnableKubeStateMetrics                         bool
+	EnableNeutreeNodeAgentMetrics                  bool
+	EnableNodeExporter                             bool
+	EnableExternalDCGMScrape                       bool
+	AcceleratorExporters                           []metricsAcceleratorExporter
+	EnableVMAgent                                  bool
+	VMAgentConfig                                  string
 
 	// InferenceDefaultPort is the port the neutree-inference job scrapes when an
 	// engine version does not declare a different one.

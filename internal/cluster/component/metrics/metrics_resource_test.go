@@ -1013,6 +1013,218 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Equal(t, "all", envValue(nodeAgent.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
 }
 
+func TestBuildMetricsResourcesProjectsStructuredAcceleratorExporterProfile(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"ascend_npu",
+		"metrics_exporter":{
+			"name":"npu-exporter",
+			"image":"example.com/ascend/npu-exporter:test",
+			"backends":["kubernetes"],
+			"command":["/usr/local/bin/npu-exporter"],
+			"args":["-ip=0.0.0.0","-port=8082","-containerMode=containerd"],
+			"port":8082,
+			"env":{
+				"NEUTREE_PROFILE_NODE_AGENT_ADAPTER":"true"
+			},
+			"readiness":{
+				"http_path":"/metrics",
+				"initial_delay_seconds":15,
+				"period_seconds":5,
+				"timeout_seconds":5,
+				"failure_threshold":3
+			},
+			"runtime":{
+				"privileged":true,
+				"node_selector":{"accelerator.example.com/ascend":"true"},
+				"volumes":[
+					{"name":"ascend-driver","host_path":{"path":"/usr/local/Ascend/driver","type":"directory"}},
+					{"name":"ascend-dcmi","host_path":{"path":"/usr/local/dcmi","type":"directory"}},
+					{"name":"host-sys","host_path":{"path":"/sys","type":"directory"}},
+					{"name":"container-runtime","host_path":{"path":"/run/containerd","type":"directory"}}
+				],
+				"volume_mounts":[
+					{"name":"ascend-driver","mount_path":"/usr/local/Ascend/driver"},
+					{"name":"ascend-dcmi","mount_path":"/usr/local/dcmi"},
+					{"name":"host-sys","mount_path":"/sys"},
+					{"name":"container-runtime","mount_path":"/run/containerd"}
+				]
+			}
+		}
+	}`
+
+	profile := &v1.AcceleratorProfile{}
+	assert.NilError(t, json.Unmarshal([]byte(profileJSON), profile))
+
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"ascend_npu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "ascend_npu").Return(profile, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("ascend-node", map[string]string{
+			"accelerator.example.com/ascend": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+
+	exporter := findMetricsDaemonSet(t, objs, "ascend-npu-npu-exporter")
+	container := exporter.Spec.Template.Spec.Containers[0]
+	assert.DeepEqual(t, []string{"/usr/local/bin/npu-exporter"}, container.Command)
+	assert.DeepEqual(t, []string{"-ip=0.0.0.0", "-port=8082", "-containerMode=containerd"}, container.Args)
+	if container.ReadinessProbe == nil || container.ReadinessProbe.HTTPGet == nil {
+		t.Fatal("expected exporter readiness probe")
+	}
+	assert.Equal(t, "/metrics", container.ReadinessProbe.HTTPGet.Path)
+	assert.Equal(t, "metrics", container.ReadinessProbe.HTTPGet.Port.StrVal)
+	assert.Equal(t, int32(15), container.ReadinessProbe.InitialDelaySeconds)
+	assert.Equal(t, int32(5), container.ReadinessProbe.PeriodSeconds)
+	assert.Equal(t, int32(5), container.ReadinessProbe.TimeoutSeconds)
+	assert.Equal(t, int32(3), container.ReadinessProbe.FailureThreshold)
+	if container.SecurityContext == nil || container.SecurityContext.Privileged == nil {
+		t.Fatal("expected exporter privileged security context")
+	}
+	assert.Equal(t, true, *container.SecurityContext.Privileged)
+
+	driverVolume := requireVolume(t, exporter, "ascend-driver")
+	if driverVolume.HostPath == nil || driverVolume.HostPath.Type == nil {
+		t.Fatal("expected driver host path volume")
+	}
+	assert.Equal(t, "/usr/local/Ascend/driver", driverVolume.HostPath.Path)
+	assert.Equal(t, corev1.HostPathDirectory, *driverVolume.HostPath.Type)
+	driverMount := requireVolumeMount(t, exporter, "ascend-driver", "/usr/local/Ascend/driver")
+	assert.Assert(t, driverMount.ReadOnly)
+
+	for _, expected := range []struct {
+		name string
+		path string
+	}{
+		{name: "ascend-dcmi", path: "/usr/local/dcmi"},
+		{name: "host-sys", path: "/sys"},
+		{name: "container-runtime", path: "/run/containerd"},
+	} {
+		volume := requireVolume(t, exporter, expected.name)
+		if volume.HostPath == nil || volume.HostPath.Type == nil {
+			t.Fatalf("expected %s host path volume", expected.name)
+		}
+		assert.Equal(t, expected.path, volume.HostPath.Path)
+		assert.Equal(t, corev1.HostPathDirectory, *volume.HostPath.Type)
+		mount := requireVolumeMount(t, exporter, expected.name, expected.path)
+		assert.Assert(t, mount.ReadOnly)
+	}
+
+	nodeAgent := findMetricsDaemonSet(t, objs, "neutree-node-agent")
+	nodeAgentContainer := nodeAgent.Spec.Template.Spec.Containers[0]
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-type=ascend_npu"))
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-exporter-port=8082"))
+	assert.Assert(t, strings.Contains(strings.Join(nodeAgentContainer.Args, "\n"), "--accelerator-exporter-metrics-path=/metrics"))
+	assert.Equal(t, "", envValue(nodeAgentContainer.Env, v1.NodeAgentAdapterProfileKey))
+	assert.Equal(t, "", envValue(nodeAgentContainer.Env, "NVIDIA_VISIBLE_DEVICES"))
+	assert.Equal(t, "", envValue(container.Env, v1.NodeAgentAdapterProfileKey))
+	assert.Equal(t, "", envValue(container.Env, "NVIDIA_VISIBLE_DEVICES"))
+}
+
+func TestBuildMetricsResourcesSkipsStaticOnlyAcceleratorExporterProfile(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"custom_accelerator",
+		"metrics_exporter":{
+			"name":"custom-exporter",
+			"image":"example.com/custom/exporter:test",
+			"backends":["static"],
+			"port":19090,
+			"runtime":{"node_selector":{"accelerator.example.com/custom":"true"}}
+		}
+	}`
+
+	profile := &v1.AcceleratorProfile{}
+	assert.NilError(t, json.Unmarshal([]byte(profileJSON), profile))
+
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_accelerator"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_accelerator").Return(profile, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("custom-node", map[string]string{
+			"accelerator.example.com/custom": "true",
+		})).Build(),
+	}
+
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.NilError(t, err)
+
+	for _, obj := range objs.Items {
+		assert.Assert(t, !(obj.GetKind() == "DaemonSet" && obj.GetName() == "custom-accelerator-custom-exporter"))
+	}
+}
+
+func TestBuildMetricsResourcesRejectsInvalidStructuredAcceleratorExporterProfile(t *testing.T) {
+	const profileJSON = `{
+		"accelerator_type":"ascend_npu",
+		"metrics_exporter":{
+			"name":"npu-exporter",
+			"image":"example.com/ascend/npu-exporter:test",
+			"port":8082,
+			"runtime":{
+				"node_selector":{"accelerator.example.com/ascend":"true"},
+				"volumes":[
+					{"name":"ascend-driver","host_path":{"path":"/usr/local/Ascend/driver","type":"directory"}}
+				],
+				"volume_mounts":[]
+			}
+		}
+	}`
+
+	profile := &v1.AcceleratorProfile{}
+	assert.NilError(t, json.Unmarshal([]byte(profileJSON), profile))
+
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"ascend_npu"})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "ascend_npu").Return(profile, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:       "test-namespace",
+		imagePrefix:     "test-image-prefix",
+		imagePullSecret: "test-image-pull-secret",
+		acceleratorMgr:  acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("ascend-node", map[string]string{
+			"accelerator.example.com/ascend": "true",
+		})).Build(),
+	}
+
+	_, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.ErrorContains(t, err, "failed to plan accelerator exporters")
+	assert.ErrorContains(t, err, "component volume")
+}
+
 func TestBuildMetricsResourcesSkipsAcceleratorExporterChecksumForRuntimeConfigFiles(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu"})
@@ -1308,7 +1520,7 @@ func TestBuildMetricsResourcesSkipsAcceleratorExporterProfileErrors(t *testing.T
 	}
 }
 
-func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *testing.T) {
+func TestBuildMetricsResourcesRejectsMultipleMatchingAcceleratorExporters(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"custom_gpu", v1.AcceleratorTypeNVIDIAGPU.String()})
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "custom_gpu").
@@ -1354,13 +1566,8 @@ func TestBuildMetricsResourcesIncludesMultipleMatchingAcceleratorExporters(t *te
 		})).Build(),
 	}
 
-	objs, err := metricsCmpt.GetMetricsResources(context.Background())
-	if err != nil {
-		t.Fatalf("Failed to build metrics resources: %v", err)
-	}
-
-	findMetricsDaemonSet(t, objs, "custom-gpu-custom-exporter")
-	findMetricsDaemonSet(t, objs, "nvidia-gpu-dcgm-exporter")
+	_, err := metricsCmpt.GetMetricsResources(context.Background())
+	assert.ErrorContains(t, err, "multiple accelerator exporter profiles match nodes")
 }
 
 func TestBuildMetricsResourcesSkipsAcceleratorExporterWithoutProvider(t *testing.T) {
