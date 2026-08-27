@@ -988,6 +988,17 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 	maps.Copy(app.Args, endpoint.Spec.Variables)
 
+	if engineArgs, ok := app.Args["engine_args"].(map[string]interface{}); ok {
+		engineArgs = maps.Clone(engineArgs)
+		if endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
+			if err := normalizeVLLMEngineArgs(engineArgs); err != nil {
+				return dashboard.RayServeApplication{}, err
+			}
+		}
+
+		app.Args["engine_args"] = engineArgs
+	}
+
 	setDefaultSGLangEnableMetricsForApplication(endpoint, &app)
 
 	setDefaultTensorParallelSize(endpoint, &app, endpoint.Spec.Resources.GetGPUCount())

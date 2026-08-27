@@ -177,7 +177,7 @@ func setEngineTensorParallelDefault(data *DeploymentManifestVariables, endpoint 
 }
 
 // setEngineArgs sets engine arguments from endpoint variables
-func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) error {
 	// Set engine-specific default arguments first
 	k.setEngineDefaultArgs(data, engine)
 
@@ -195,9 +195,17 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 	// that expose a TP arg (vLLM / SGLang).
 	setEngineTensorParallelDefault(data, endpoint, engine)
 
+	if engine.Metadata.Name == v1.EngineNameVLLM {
+		if err := normalizeVLLMEngineArgs(data.EngineArgs); err != nil {
+			return err
+		}
+	}
+
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
 	prepareEngineArgsForTemplate(data.EngineArgs, engine.Metadata.Name)
+
+	return nil
 }
 
 func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string) {
@@ -228,6 +236,14 @@ func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string
 
 func prepareEngineArgValueForDoubleQuote(v interface{}) interface{} {
 	switch val := v.(type) {
+	case float64:
+		// Numbers decoded into map[string]interface{} become float64. Preserve
+		// integer-valued engine arguments as decimal strings because Go's default
+		// template formatting can emit large floats in scientific notation, which
+		// vLLM's integer parsers reject.
+		if !math.IsNaN(val) && !math.IsInf(val, 0) && math.Trunc(val) == val {
+			return strconv.FormatFloat(val, 'f', -1, 64)
+		}
 	case map[string]interface{}, []interface{}:
 		b, err := json.Marshal(v)
 		if err == nil {
@@ -515,7 +531,9 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.setRoutingLogic(&data, endpoint)
 
 	// Set engine args
-	k.setEngineArgs(&data, endpoint, engine)
+	if err := k.setEngineArgs(&data, endpoint, engine); err != nil {
+		return DeploymentManifestVariables{}, err
+	}
 
 	// Set resource variables
 	if err := k.setResourceVariables(&data, endpoint, deployedCluster); err != nil {
