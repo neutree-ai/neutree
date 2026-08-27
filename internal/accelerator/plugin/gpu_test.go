@@ -423,3 +423,22 @@ func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
 	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
 	assert.Equal(t, []string{"--gpus all"}, profile.EngineRuntime.Options)
 }
+
+func TestGPUAcceleratorPluginProfileNodeAgentExplicit(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile.NodeAgentRuntime)
+	assert.True(t, profile.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{
+		"NVIDIA_VISIBLE_DEVICES": "all",
+	}, profile.NodeAgentRuntime.Env)
+	require.NotNil(t, profile.NodeAgentRuntime.Capabilities)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.NodeAgentRuntime.DockerRunOptions)
+	assert.Empty(t, profile.NodeAgentRuntime.Volumes)
+	assert.Empty(t, profile.NodeAgentRuntime.VolumeMounts)
+}

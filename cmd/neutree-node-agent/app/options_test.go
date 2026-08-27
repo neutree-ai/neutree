@@ -13,7 +13,6 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
-	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
@@ -65,7 +64,7 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 	assert.Nil(t, config.KubernetesWriter)
 }
 
-func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
+func TestOptionsConfigEnablesRayAcceleratorEvidenceProvider(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 	opts.rayDashboardURL = "http://10.0.0.10:8265"
@@ -75,12 +74,9 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
-	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
-	require.True(t, ok)
-	_, ok = config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
+	provider, ok := config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
 	require.True(t, ok)
 	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
-	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
 	assert.Equal(t, model.CanonicalLabels{
 		ClusterType: v1.SSHClusterType,
@@ -89,7 +85,7 @@ func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	}, config.Labels)
 }
 
-func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.T) {
+func TestOptionsAcceleratorEvidenceProviderUsesKubernetesRawEvidence(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 
@@ -100,35 +96,11 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	opts := newOptions()
 	opts.clusterType = v1.KubernetesClusterType
 
-	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
+	kubernetesEvidenceProvider, staticEvidenceProvider := opts.acceleratorEvidenceProviders(writer)
 
-	multi, ok := provider.(allocation.MultiProvider)
-	require.True(t, ok)
-	require.Len(t, multi.Providers, 2)
-	_, ok = multi.Providers[0].(allocation.KubernetesAllocationProvider)
-	assert.True(t, ok)
-	_, ok = multi.Providers[1].(hami.KubernetesProvider)
-	assert.True(t, ok)
-	_, ok = kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	_, ok := kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
 	assert.True(t, ok)
 	assert.Nil(t, staticEvidenceProvider)
-}
-
-func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	writer := &metricskubernetes.AnnotationWriter{
-		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
-		NodeName: "node-a",
-	}
-	opts := newOptions()
-	opts.clusterType = v1.KubernetesClusterType
-
-	provider := opts.endpointGPUUsageProvider(writer)
-
-	_, ok := provider.(hami.KubernetesProvider)
-	assert.True(t, ok)
 }
 
 func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
@@ -156,15 +128,18 @@ func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
 	assert.Contains(t, config.Accelerators, "fixture")
 }
 
-func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
+func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {
 	opts := newOptions()
 	opts.clusterType = v1.SSHClusterType
 
-	config, err := opts.configWithRegistry(adapterRegistry{})
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: v1.AcceleratorTypeNVIDIAGPU.String()}})
+	require.NoError(t, err)
+
+	config, err := opts.configWithRegistry(registry)
 
 	require.NoError(t, err)
 	assert.Empty(t, config.AcceleratorType)
-	assert.Empty(t, config.Accelerators)
+	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
 }
 
 func TestOptionsAcceleratorTypeFlagHelpOmitsLegacyFallbackText(t *testing.T) {

@@ -60,11 +60,15 @@ type HardwareDetails struct {
 	// as a stable identity fallback.
 	DeviceAliases  []string
 	Architecture   string
+	CUDACapability string
 	DriverVersion  string
-	PCIEBusID      string
-	PCIEGeneration string
-	PCIEWidth      string
-	NUMANode       string
+	// CUDADriverVersion is the CUDA driver API version, distinct from the host
+	// driver package version in DriverVersion.
+	CUDADriverVersion string
+	PCIEBusID         string
+	PCIEGeneration    string
+	PCIEWidth         string
+	NUMANode          string
 }
 
 // CommonEvidence is shared by Kubernetes and static topology evidence.
@@ -76,7 +80,7 @@ type CommonEvidence struct {
 }
 
 // EndpointReplicaAcceleratorUsage is a raw per-replica accelerator usage
-// observation. The host preserves this data without interpreting a vendor's
+// observation. The host preserves this data without interpreting vendor
 // allocation or metric semantics.
 type EndpointReplicaAcceleratorUsage struct {
 	Workspace        string
@@ -102,6 +106,8 @@ type KubernetesEvidence struct {
 	AllocationAvailable bool
 	PodResources        []PodResource
 	EndpointPods        []EndpointPodEvidence
+	NodeLabels          map[string]string
+	NodeAnnotations     map[string]string
 	// VirtualizationMonitor is raw exposition from the local monitor selected by
 	// the management-plane profile. Up distinguishes an unavailable monitor from
 	// a reachable monitor with no relevant metrics.
@@ -148,9 +154,10 @@ type StaticEvidence struct {
 
 // RayEvidence contains raw actor and process topology observations.
 type RayEvidence struct {
-	Actors         []RayActor
-	Replicas       []RayReplica
-	ActorProcesses map[int]ProcessInfo
+	Actors               []RayActor
+	Replicas             []RayReplica
+	ActorProcesses       map[int]ProcessInfo
+	AcceleratorProcesses []AcceleratorProcess
 }
 
 // RayActor is the public subset of a Ray Dashboard actor observation needed
@@ -170,13 +177,13 @@ type RayActor struct {
 // RayReplica preserves the Ray Serve replica-to-actor association observed by
 // the host. Accelerator allocation semantics are still adapter owned.
 type RayReplica struct {
-	Workspace   string
-	Endpoint    string
-	Deployment  string
-	ActorID     string
-	ReplicaID   string
-	NodeID      string
-	GPUQuantity float64
+	Workspace         string
+	Endpoint          string
+	Deployment        string
+	ActorID           string
+	ReplicaID         string
+	NodeID            string
+	DeploymentOptions map[string]interface{}
 }
 
 // ProcessInfo is an uninterpreted local process observation.
@@ -185,6 +192,15 @@ type ProcessInfo struct {
 	ParentPID      int
 	DescendantPIDs []int
 	Environment    map[string]string
+}
+
+// AcceleratorProcess is an opaque local device-process observation. The host
+// records only the observed device identifier, PID, and optional memory usage;
+// the selected adapter owns device identity and allocation semantics.
+type AcceleratorProcess struct {
+	DeviceID        string
+	PID             int
+	MemoryUsedBytes *float64
 }
 
 // MetricResult is the only adapter output accepted by the host. Inventory is
@@ -289,6 +305,9 @@ func (e KubernetesEvidence) Clone() KubernetesEvidence {
 		})
 	}
 
+	result.NodeLabels = copyStringMap(e.NodeLabels)
+	result.NodeAnnotations = copyStringMap(e.NodeAnnotations)
+
 	return result
 }
 
@@ -298,9 +317,10 @@ func (e StaticEvidence) Clone() StaticEvidence {
 		Common:              e.Common.Clone(),
 		AllocationAvailable: e.AllocationAvailable,
 		RayEvidence: RayEvidence{
-			Actors:         make([]RayActor, 0, len(e.RayEvidence.Actors)),
-			Replicas:       make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
-			ActorProcesses: make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
+			Actors:               make([]RayActor, 0, len(e.RayEvidence.Actors)),
+			Replicas:             make([]RayReplica, 0, len(e.RayEvidence.Replicas)),
+			ActorProcesses:       make(map[int]ProcessInfo, len(e.RayEvidence.ActorProcesses)),
+			AcceleratorProcesses: cloneAcceleratorProcesses(e.RayEvidence.AcceleratorProcesses),
 		},
 	}
 	for _, actor := range e.RayEvidence.Actors {
@@ -317,7 +337,12 @@ func (e StaticEvidence) Clone() StaticEvidence {
 		})
 	}
 
-	result.RayEvidence.Replicas = append(result.RayEvidence.Replicas, e.RayEvidence.Replicas...)
+	for _, replica := range e.RayEvidence.Replicas {
+		copied := replica
+		copied.DeploymentOptions = copyRawMap(replica.DeploymentOptions)
+		result.RayEvidence.Replicas = append(result.RayEvidence.Replicas, copied)
+	}
+
 	for pid, process := range e.RayEvidence.ActorProcesses {
 		result.RayEvidence.ActorProcesses[pid] = ProcessInfo{
 			PID:            process.PID,
@@ -433,4 +458,53 @@ func cloneEndpointReplicaAcceleratorUsages(
 	}
 
 	return result
+}
+
+func cloneAcceleratorProcesses(processes []AcceleratorProcess) []AcceleratorProcess {
+	result := make([]AcceleratorProcess, 0, len(processes))
+
+	for _, process := range processes {
+		copied := process
+
+		if process.MemoryUsedBytes != nil {
+			memoryUsedBytes := *process.MemoryUsedBytes
+			copied.MemoryUsedBytes = &memoryUsedBytes
+		}
+
+		result = append(result, copied)
+	}
+
+	return result
+}
+func copyRawMap(input map[string]interface{}) map[string]interface{} {
+	if len(input) == 0 {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		result[key] = copyRawValue(value)
+	}
+
+	return result
+}
+
+func copyRawValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return copyRawMap(typed)
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = copyRawValue(item)
+		}
+
+		return result
+	case map[string]string:
+		return copyStringMap(typed)
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
 }

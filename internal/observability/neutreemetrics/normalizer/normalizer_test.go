@@ -12,8 +12,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func normalizeForTest(req NormalizeRequest) string {
-	samples := (&Normalizer{}).Samples(req)
+type normalizerTestRequest struct {
+	Labels                       model.CanonicalLabels
+	NodeExporter                 model.ScrapeResult
+	AcceleratorExporter          *model.ScrapeResult
+	EndpointAllocations          []model.EndpointAllocation
+	GPUHardwareInfos             []model.GPUHardwareInfo
+	EndpointReplicaRuntimeUsages []model.EndpointReplicaRuntimeUsage
+	EndpointReplicaGPUUsages     []model.EndpointReplicaGPUUsage
+	AcceleratorSamples           []Sample
+}
+
+// normalizeForTest deliberately models the selected NVIDIA adapter's
+// compatibility conversion before passing its result to the host normalizer.
+// Production Normalizer.Samples never interprets these vendor fields itself.
+func normalizeForTest(req normalizerTestRequest) string {
+	acceleratorSamples := req.AcceleratorSamples
+	if acceleratorSamples == nil && (req.AcceleratorExporter != nil ||
+		len(req.EndpointAllocations) != 0 || len(req.EndpointReplicaGPUUsages) != 0) {
+		acceleratorSamples = nvidiaCompatibilitySamples(
+			req.Labels,
+			req.AcceleratorExporter,
+			req.GPUHardwareInfos,
+			req.EndpointAllocations,
+			req.EndpointReplicaGPUUsages,
+		)
+	}
+
+	samples := (&Normalizer{}).Samples(NormalizeRequest{
+		Labels:                       req.Labels,
+		NodeExporter:                 req.NodeExporter,
+		AcceleratorExporter:          req.AcceleratorExporter,
+		EndpointReplicaRuntimeUsages: req.EndpointReplicaRuntimeUsages,
+		AcceleratorSamples:           acceleratorSamples,
+	})
 
 	var builder strings.Builder
 	for _, sample := range samples {
@@ -24,8 +56,60 @@ func normalizeForTest(req NormalizeRequest) string {
 	return builder.String()
 }
 
+func nvidiaCompatibilitySamples(
+	labels model.CanonicalLabels,
+	exporter *model.ScrapeResult,
+	hardwareInfos []model.GPUHardwareInfo,
+	endpointAllocations []model.EndpointAllocation,
+	endpointReplicaGPUUsages []model.EndpointReplicaGPUUsage,
+) []Sample {
+	var raw string
+	if exporter != nil && exporter.Up {
+		raw = exporter.Body
+	}
+
+	indexes := AcceleratorIndexesByUUID(raw, hardwareInfos)
+	samples := make([]Sample, 0)
+
+	if raw != "" {
+		samples = append(samples, NormalizeAcceleratorSamples(labels, raw)...)
+		samples = append(samples, NormalizeNodeGPUSamples(labels, raw, endpointAllocations)...)
+		samples = append(samples, NormalizeGPUHardwareInfoSamples(labels, hardwareInfos, raw)...)
+		samples = append(samples, NormalizeEndpointAllocationSamples(
+			labels,
+			endpointAllocations,
+			endpointReplicaGPUUsages,
+			indexes,
+			raw,
+		)...)
+		samples = append(samples, NormalizeEndpointReplicaGPUUsageFromDCGMSamples(
+			labels,
+			raw,
+			endpointAllocations,
+			endpointReplicaGPUUsages,
+		)...)
+	} else {
+		samples = append(samples, NormalizeEndpointAllocationSamples(
+			labels,
+			endpointAllocations,
+			endpointReplicaGPUUsages,
+			nil,
+			"",
+		)...)
+	}
+
+	samples = append(samples, NormalizeEndpointReplicaGPUUsageSamples(
+		labels,
+		endpointReplicaGPUUsages,
+		endpointAllocations,
+		indexes,
+	)...)
+
+	return samples
+}
+
 func TestNormalizerNormalizeNodeMetrics(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		NodeExporter: model.ScrapeResult{
 			Target: TargetNodeExporter,
@@ -51,7 +135,7 @@ node_load1 2.5
 }
 
 func TestNormalizerNormalizesAcceleratorExporterAndEndpointAllocations(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		NodeExporter: model.ScrapeResult{
 			Target: TargetNodeExporter,
@@ -158,7 +242,7 @@ func TestNormalizerUsesPrecomputedAcceleratorSamples(t *testing.T) {
 		},
 	}
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -180,9 +264,31 @@ func TestNormalizerUsesPrecomputedAcceleratorSamples(t *testing.T) {
 
 	assert.Contains(t, output, `neutree_metrics_scrape_up{cluster_type="kubernetes",node="node-a",node_ip="10.0.0.10",source="neutree-node-agent",target="accelerator-exporter"} 1`)
 	assert.Contains(t, output, `neutree_accelerator_utilization_ratio{accelerator_index="0",accelerator_type="vendor_accelerator",accelerator_uuid="vdie-1",cluster_type="kubernetes",node="node-a",product="Vendor-Model-1"} 0.5`)
-	// The pre-computed samples replace the legacy DCGM conversion: a non-DCGM
-	// exporter body must not produce DCGM-derived samples.
+	// The pre-computed samples are adapter-owned: a non-DCGM exporter body
+	// must not produce DCGM-derived samples.
 	assert.NotContains(t, output, `neutree_node_accelerator_total{`)
+}
+
+func TestNormalizerDoesNotInterpretAcceleratorPayload(t *testing.T) {
+	output := (&Normalizer{}).Samples(NormalizeRequest{
+		Labels:       testLabels(),
+		NodeExporter: model.ScrapeResult{Target: TargetNodeExporter},
+		AcceleratorExporter: &model.ScrapeResult{
+			Target: TargetAcceleratorExporter,
+			Up:     true,
+			Body:   `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 87`,
+		},
+	})
+
+	var builder strings.Builder
+	for _, sample := range output {
+		builder.WriteString(formatSample(sample))
+		builder.WriteByte('\n')
+	}
+
+	assert.Contains(t, builder.String(), `target="accelerator-exporter"} 1`)
+	assert.NotContains(t, builder.String(), "neutree_accelerator_")
+	assert.NotContains(t, builder.String(), "neutree_node_accelerator_")
 }
 
 func TestNormalizerNormalizesEndpointReplicaRuntimeUsage(t *testing.T) {
@@ -191,7 +297,7 @@ func TestNormalizerNormalizesEndpointReplicaRuntimeUsage(t *testing.T) {
 	cpuLimitCores := 2.5
 	memoryLimitBytes := 2048.0
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		NodeExporter: model.ScrapeResult{
 			Target: TargetNodeExporter,
@@ -234,7 +340,7 @@ func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
 	usedBytes := 4096.0 * 1024 * 1024
 	utilization := 0.75
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		NodeExporter: model.ScrapeResult{
 			Target: TargetNodeExporter,
@@ -271,7 +377,7 @@ func TestNormalizerNormalizesEndpointReplicaGPURuntimeUsage(t *testing.T) {
 }
 
 func TestNormalizerKeepsRepeatedGPUAllocationsDistinctByVDeviceIndex(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		NodeExporter: model.ScrapeResult{
 			Target: TargetNodeExporter,
@@ -317,7 +423,7 @@ func TestNormalizerKeepsRepeatedGPUAllocationsDistinctByVDeviceIndex(t *testing.
 }
 
 func TestNormalizerDerivesEndpointReplicaGPUUsageFromUniqueDCGMAllocation(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -367,7 +473,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920
 }
 
 func TestNormalizerDoesNotDeriveEndpointReplicaGPUUsageForSharedDCGMAllocation(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -427,7 +533,7 @@ func TestNormalizerUsesExplicitEndpointReplicaGPUUsageForSharedAllocationDisplay
 	chatAUtilization := 0.25
 	chatBUtilization := 0.75
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -527,7 +633,7 @@ func TestNormalizerEnrichesMultiPhysicalGPUUsageWhenVDeviceIndexDiffersFromAlloc
 	firstUsedBytes := 2048.0 * 1024 * 1024
 	secondUsedBytes := 4096.0 * 1024 * 1024
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -592,7 +698,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="1",UUID="GPU-def",modelName="NVIDIA L20"} 46068
 func TestNormalizerMatchesExplicitGPUUsageToAllocationWithNodeFallback(t *testing.T) {
 	usedBytes := 4096.0 * 1024 * 1024
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -639,7 +745,7 @@ func TestNormalizerMatchesExplicitGPUUsageToAllocationWithNodeFallback(t *testin
 func TestNormalizerDerivesAllocationVRAMFromUniqueExplicitGPUUsageWhenVDeviceIndexDiffers(t *testing.T) {
 	usedBytes := 28038.0 * 1024 * 1024
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: model.CanonicalLabels{
 			Workspace:      "default",
 			NeutreeCluster: "k8s-a",
@@ -716,7 +822,7 @@ func TestNormalizerParsesDCGMLabelsWithSpaces(t *testing.T) {
 DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="Tesla T4",Hostname="gpu-node"} 15360
 `
 
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		AcceleratorExporter: &model.ScrapeResult{
 			Target: TargetAcceleratorExporter,
@@ -738,7 +844,7 @@ DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="Tesla T4
 }
 
 func TestNormalizerDoesNotOutputNodeGPUInventoryWithoutGPUUtilGate(t *testing.T) {
-	output := normalizeForTest(NormalizeRequest{
+	output := normalizeForTest(normalizerTestRequest{
 		Labels: testLabels(),
 		AcceleratorExporter: &model.ScrapeResult{
 			Target: TargetAcceleratorExporter,

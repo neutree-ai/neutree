@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
@@ -26,8 +27,11 @@ func TestDefaultAdaptersReturnsFreshSlice(t *testing.T) {
 
 	assert.NotNil(t, first)
 	assert.NotNil(t, second)
-	assert.Empty(t, first)
-	assert.Empty(t, second)
+	require.Len(t, first, 1)
+	require.Len(t, second, 1)
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), first[0].Type())
+	assert.Equal(t, v1.AcceleratorTypeNVIDIAGPU.String(), second[0].Type())
+	assert.NotSame(t, first[0], second[0])
 }
 
 func TestAppAddFlagsUsesCallerFlagSet(t *testing.T) {

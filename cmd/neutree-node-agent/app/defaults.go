@@ -1,9 +1,12 @@
 package app
 
-import "github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+import (
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter/nvidia"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+)
 
-// DefaultAdapters returns a fresh Community adapter slice. Vendor-specific
-// Community and Enterprise entrypoints extend this explicit assembly input.
+// DefaultAdapters returns a fresh Community adapter slice. Enterprise
+// entrypoints extend this explicit assembly input with edition-specific adapters.
 func DefaultAdapters() []adapter.Accelerator {
-	return []adapter.Accelerator{}
+	return []adapter.Accelerator{nvidia.NewNodeAgentAdapter()}
 }
