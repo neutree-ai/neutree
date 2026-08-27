@@ -509,6 +509,42 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	}
 }
 
+func TestHAMiComponentIgnoresAdmissionWebhookFailurePolicyOverride(t *testing.T) {
+	cluster := newTestCluster()
+	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
+		"scheduler": map[string]interface{}{
+			"admissionWebhook": map[string]interface{}{
+				"failurePolicy": "Fail",
+			},
+		},
+	}
+
+	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	_, found, err := unstructured.NestedString(values, "scheduler", "admissionWebhook", "failurePolicy")
+	require.NoError(t, err)
+	assert.False(t, found, "Neutree must not forward a custom failurePolicy override")
+
+	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
+	require.NoError(t, err)
+
+	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
+	require.NotNil(t, webhook)
+
+	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, webhooks)
+
+	for _, entry := range webhooks {
+		webhookEntry, ok := entry.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "Ignore", webhookEntry["failurePolicy"])
+	}
+}
+
 func TestHAMiComponentDeviceConfigChecksumRotation(t *testing.T) {
 	const deviceConfigChecksumAnnotation = "checksum/hami-scheduler-device-config"
 

@@ -138,6 +138,15 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 		}
 	}
 
+	if _, found, err := unstructured.NestedFieldNoCopy(
+		configPatch, "scheduler", "admissionWebhook", "failurePolicy"); err == nil && found {
+		return &AcceleratorVirtualizationError{
+			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
+			Message: "HAMi scheduler admission webhook failurePolicy is managed by the bundled chart and cannot be customized",
+			Hint:    "Remove scheduler.admissionWebhook.failurePolicy from accelerator_virtualization.config_patch",
+		}
+	}
+
 	return nil
 }
 

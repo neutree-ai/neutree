@@ -177,6 +177,17 @@ func TestValidateAcceleratorVirtualizationConfigPatch(t *testing.T) {
 			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
 		},
 		{
+			name: "rejects customizing admission webhook failure policy",
+			configPatch: map[string]interface{}{
+				"scheduler": map[string]interface{}{
+					"admissionWebhook": map[string]interface{}{
+						"failurePolicy": "Fail",
+					},
+				},
+			},
+			reason: AcceleratorVirtualizationManagedAdmissionWebhookReason,
+		},
+		{
 			name: "rejects MIG config as device plugin config",
 			configPatch: map[string]interface{}{
 				"devicePlugin": map[string]interface{}{"migStrategy": "mixed"},

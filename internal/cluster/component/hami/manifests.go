@@ -119,6 +119,7 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 	sanitized := deepCopyChartValues(configPatch)
 	delete(sanitized, "devicePlugin")
 	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "failurePolicy")
 
 	return sanitized
 }
