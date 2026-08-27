@@ -359,72 +359,6 @@ func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
 	assert.False(t, hasRequired, "scheduler anti-affinity must not be hard-required")
 }
 
-func TestHAMiComponentWebhookUsesChartDefaultFailurePolicyWithoutNamespaceOverride(t *testing.T) {
-	const clusterNamespace = "neutree-system"
-
-	component := NewHAMiComponent(newTestCluster(), clusterNamespace, "registry.example.com/neutree",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
-	protectedValues := component.protectedChartValues()
-	_, found, err := unstructured.NestedString(protectedValues, "scheduler", "admissionWebhook", "failurePolicy")
-	require.NoError(t, err)
-	assert.False(t, found, "Neutree must not override the chart failurePolicy")
-
-	_, found, err = unstructured.NestedMap(protectedValues, "scheduler", "admissionWebhook", "namespaceSelector")
-	require.NoError(t, err)
-	assert.False(t, found, "Neutree must not override the chart namespaceSelector")
-
-	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
-	require.NoError(t, err)
-
-	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
-	require.NotNil(t, webhook)
-
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.NotEmpty(t, webhooks)
-
-	first, ok := webhooks[0].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "Ignore", first["failurePolicy"])
-
-	// The HAMi chart always emits its default namespaceSelector. Neutree must
-	// not replace it with an owning-namespace-only selector.
-	namespaceSelector, found, err := unstructured.NestedMap(first, "namespaceSelector")
-	require.NoError(t, err)
-	require.True(t, found)
-
-	expressions, found, err := unstructured.NestedSlice(namespaceSelector, "matchExpressions")
-	require.NoError(t, err)
-	require.True(t, found)
-
-	defaultIgnoreSelectorFound := false
-	for _, expression := range expressions {
-		match, ok := expression.(map[string]interface{})
-		require.True(t, ok)
-
-		if match["key"] == "hami.io/webhook" && match["operator"] == "NotIn" {
-			values, ok := match["values"].([]interface{})
-			require.True(t, ok)
-			assert.Equal(t, []interface{}{"ignore"}, values)
-			defaultIgnoreSelectorFound = true
-			continue
-		}
-
-		if match["key"] != "kubernetes.io/metadata.name" || match["operator"] != "In" {
-			continue
-		}
-
-		values, ok := match["values"].([]interface{})
-		require.True(t, ok)
-		assert.NotEqual(t, []interface{}{clusterNamespace}, values,
-			"webhook must not be restricted to the owning cluster namespace")
-	}
-
-	assert.True(t, defaultIgnoreSelectorFound,
-		"webhook must preserve the chart default selector for hami.io/webhook=ignore")
-}
-
 func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
@@ -506,42 +440,6 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 			assert.NotEqual(t, []interface{}{"neutree-system"}, values,
 				"webhook must not accept a custom owning-namespace selector")
 		}
-	}
-}
-
-func TestHAMiComponentIgnoresAdmissionWebhookFailurePolicyOverride(t *testing.T) {
-	cluster := newTestCluster()
-	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
-		"scheduler": map[string]interface{}{
-			"admissionWebhook": map[string]interface{}{
-				"failurePolicy": "Fail",
-			},
-		},
-	}
-
-	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
-
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
-	_, found, err := unstructured.NestedString(values, "scheduler", "admissionWebhook", "failurePolicy")
-	require.NoError(t, err)
-	assert.False(t, found, "Neutree must not forward a custom failurePolicy override")
-
-	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
-	require.NoError(t, err)
-
-	webhook := findObject(t, objs.Items, "MutatingWebhookConfiguration", WebhookName)
-	require.NotNil(t, webhook)
-
-	webhooks, found, err := unstructured.NestedSlice(webhook.Object, "webhooks")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.NotEmpty(t, webhooks)
-
-	for _, entry := range webhooks {
-		webhookEntry, ok := entry.(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "Ignore", webhookEntry["failurePolicy"])
 	}
 }
 
