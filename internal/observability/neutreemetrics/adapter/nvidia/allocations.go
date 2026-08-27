@@ -109,6 +109,7 @@ func nvidiaKubernetesAllocations(
 func nvidiaStaticAllocations(
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.StaticEvidence,
+	gpuProcesses []nvidiaGPUProcess,
 ) []v1.StaticNodeAllocationStatus {
 	if !evidence.AllocationAvailable {
 		return nil
@@ -138,14 +139,25 @@ func nvidiaStaticAllocations(
 			continue
 		}
 
-		refs := nvidiaStaticDeviceRefs(process, evidence.RayEvidence.AcceleratorProcesses, lookup)
+		nodeID := firstNonEmpty(evidence.Common.Labels.Node, evidence.Common.Labels.NodeIP, replica.NodeID)
+		refs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
 
 		devices := nvidiaAllocationDevices(
 			refs,
 			lookup,
-			firstNonEmpty(evidence.Common.Labels.Node, evidence.Common.Labels.NodeIP, replica.NodeID),
+			nodeID,
 			quantity,
 		)
+		processDevices := nvidiaAllocationDevicesFromGPUProcesses(
+			process,
+			gpuProcesses,
+			lookup,
+			nodeID,
+			quantity,
+		)
+		if len(processDevices) > 0 {
+			devices = mergeNvidiaAllocationDeviceUsage(devices, processDevices)
+		}
 		if len(devices) == 0 {
 			continue
 		}
@@ -167,53 +179,55 @@ func nvidiaStaticAllocations(
 	return allocations
 }
 
-func nvidiaStaticDeviceRefs(
+func nvidiaAllocationDevicesFromGPUProcesses(
 	process adapter.ProcessInfo,
-	acceleratorProcesses []adapter.AcceleratorProcess,
+	gpuProcesses []nvidiaGPUProcess,
 	lookup nvidiaDeviceLookup,
-) []string {
-	visibleRefs := nvidiaVisibleDeviceRefs(process.Environment, lookup)
-	if len(visibleRefs) > 0 {
-		return visibleRefs
+	nodeID string,
+	quantity float64,
+) []v1.DeviceAllocation {
+	pids := nvidiaProcessPIDSet(process)
+	references := make([]string, 0, len(gpuProcesses))
+	usedMemoryMiBByUUID := make(map[string]int64, len(gpuProcesses))
+	for _, gpuProcess := range gpuProcesses {
+		if _, ok := pids[gpuProcess.PID]; !ok || gpuProcess.UUID == "" {
+			continue
+		}
+
+		references = append(references, gpuProcess.UUID)
+		usedMemoryMiBByUUID[gpuProcess.UUID] += gpuProcess.UsedMemoryMiB
 	}
 
-	return nvidiaProcessDeviceRefs(process, acceleratorProcesses, lookup)
+	devices := nvidiaAllocationDevices(references, lookup, nodeID, quantity)
+	for index := range devices {
+		devices[index].UsedMemoryMiB = usedMemoryMiBByUUID[devices[index].UUID]
+	}
+
+	return devices
 }
 
-func nvidiaProcessDeviceRefs(
-	process adapter.ProcessInfo,
-	acceleratorProcesses []adapter.AcceleratorProcess,
-	lookup nvidiaDeviceLookup,
-) []string {
-	pids := nvidiaProcessPIDSet(process)
-	if len(pids) == 0 {
-		return nil
+func mergeNvidiaAllocationDeviceUsage(
+	allocatedDevices []v1.DeviceAllocation,
+	processDevices []v1.DeviceAllocation,
+) []v1.DeviceAllocation {
+	if len(allocatedDevices) == 0 {
+		return processDevices
 	}
 
-	seen := map[string]struct{}{}
-	references := make([]string, 0)
-
-	for _, acceleratorProcess := range acceleratorProcesses {
-		if _, ok := pids[acceleratorProcess.PID]; !ok {
-			continue
+	usedMemoryMiBByUUID := make(map[string]int64, len(processDevices))
+	for _, device := range processDevices {
+		if device.UUID != "" {
+			usedMemoryMiBByUUID[device.UUID] += device.UsedMemoryMiB
 		}
-
-		if _, ok := lookup.byUUID[acceleratorProcess.DeviceID]; !ok {
-			continue
-		}
-
-		if _, ok := seen[acceleratorProcess.DeviceID]; ok {
-			continue
-		}
-
-		seen[acceleratorProcess.DeviceID] = struct{}{}
-
-		references = append(references, acceleratorProcess.DeviceID)
 	}
 
-	sort.Strings(references)
+	for index := range allocatedDevices {
+		if allocatedDevices[index].UUID != "" {
+			allocatedDevices[index].UsedMemoryMiB = usedMemoryMiBByUUID[allocatedDevices[index].UUID]
+		}
+	}
 
-	return references
+	return allocatedDevices
 }
 
 func nvidiaProcessPIDSet(process adapter.ProcessInfo) map[int]struct{} {
@@ -229,79 +243,6 @@ func nvidiaProcessPIDSet(process adapter.ProcessInfo) map[int]struct{} {
 	}
 
 	return pids
-}
-
-func nvidiaStaticEndpointReplicaGPUUsages(
-	labels adapter.CanonicalLabels,
-	evidence adapter.StaticEvidence,
-	allocations []v1.StaticNodeAllocationStatus,
-) []model.EndpointReplicaGPUUsage {
-	usages := make([]model.EndpointReplicaGPUUsage, 0)
-
-	for _, allocation := range allocations {
-		process, ok := evidence.RayEvidence.ActorProcesses[allocation.PID]
-		if !ok {
-			continue
-		}
-
-		pids := nvidiaProcessPIDSet(process)
-		for _, device := range allocation.Devices {
-			memoryUsedBytes, ok := nvidiaProcessMemoryUsedBytes(
-				device.UUID,
-				pids,
-				evidence.RayEvidence.AcceleratorProcesses,
-			)
-			if !ok {
-				continue
-			}
-
-			usages = append(usages, model.EndpointReplicaGPUUsage{
-				Workspace:       firstNonEmpty(allocation.Workspace, labels.Workspace),
-				Cluster:         labels.NeutreeCluster,
-				Endpoint:        allocation.Endpoint,
-				InstanceID:      allocation.InstanceID,
-				ReplicaID:       allocation.ReplicaID,
-				NodeID:          firstNonEmpty(device.NodeID, labels.Node, labels.NodeIP),
-				GPUUUID:         device.UUID,
-				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-				VDeviceIndex:    device.VDeviceIndex,
-				Product:         device.Product,
-				MemoryUsedBytes: &memoryUsedBytes,
-			})
-		}
-	}
-
-	return usages
-}
-
-func nvidiaProcessMemoryUsedBytes(
-	deviceUUID string,
-	pids map[int]struct{},
-	acceleratorProcesses []adapter.AcceleratorProcess,
-) (float64, bool) {
-	seenPIDs := map[int]struct{}{}
-	var memoryUsedBytes float64
-	hasMemory := false
-
-	for _, process := range acceleratorProcesses {
-		if process.DeviceID != deviceUUID || process.MemoryUsedBytes == nil {
-			continue
-		}
-
-		if _, ok := pids[process.PID]; !ok {
-			continue
-		}
-
-		if _, ok := seenPIDs[process.PID]; ok {
-			continue
-		}
-
-		seenPIDs[process.PID] = struct{}{}
-		memoryUsedBytes += *process.MemoryUsedBytes
-		hasMemory = true
-	}
-
-	return memoryUsedBytes, hasMemory
 }
 
 func nvidiaEndpointAllocations(

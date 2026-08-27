@@ -3,7 +3,6 @@ package allocation
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -179,12 +178,11 @@ func terminalPodPhase(phase corev1.PodPhase) bool {
 }
 
 type RayServeAllocationProvider struct {
-	Dashboard                dashboard.DashboardService
-	DashboardURL             string
-	NodeIP                   string
-	ProcEnv                  ProcessEnvReader
-	ProcessDescendants       ProcessDescendantReader
-	AcceleratorProcessReader AcceleratorProcessReader
+	Dashboard          dashboard.DashboardService
+	DashboardURL       string
+	NodeIP             string
+	ProcEnv            ProcessEnvReader
+	ProcessDescendants ProcessDescendantReader
 }
 
 // StaticAcceleratorEvidence gathers raw Ray and local-process topology for a
@@ -236,11 +234,6 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		actorProcesses[actor.PID] = info
 	}
 
-	acceleratorProcesses, err := p.acceleratorProcessReader().AcceleratorProcesses(ctx)
-	if err != nil {
-		acceleratorProcesses = nil
-	}
-
 	var replicas []adapter.RayReplica
 	if applicationsErr == nil {
 		replicas = rayReplicasFromApplications(applications, nodeID)
@@ -251,10 +244,9 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		// endpoint set from unavailable allocation evidence.
 		AllocationAvailable: applicationsErr == nil && applications != nil,
 		RayEvidence: adapter.RayEvidence{
-			Actors:               rayActorsFromDashboard(actors),
-			Replicas:             replicas,
-			ActorProcesses:       actorProcesses,
-			AcceleratorProcesses: acceleratorProcesses,
+			Actors:         rayActorsFromDashboard(actors),
+			Replicas:       replicas,
+			ActorProcesses: actorProcesses,
 		},
 	}, nil
 }
@@ -421,14 +413,6 @@ func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantR
 	return ProcFSProcessTreeReader{Root: p.procFSRoot()}
 }
 
-func (p RayServeAllocationProvider) acceleratorProcessReader() AcceleratorProcessReader {
-	if p.AcceleratorProcessReader != nil {
-		return p.AcceleratorProcessReader
-	}
-
-	return NvidiaSMIAcceleratorProcessReader{}
-}
-
 // actorProcessInfo exposes only generic process identity, environment, and
 // descendant topology. Adapters use it to match their own process-level
 // exporter samples without making the host understand vendor process formats.
@@ -556,92 +540,6 @@ type ProcessDescendantReaderFunc func(ancestorPID int) ([]int, error)
 
 func (f ProcessDescendantReaderFunc) DescendantPIDs(ancestorPID int) ([]int, error) {
 	return f(ancestorPID)
-}
-
-// AcceleratorProcessReader observes process facts without interpreting which
-// device IDs belong to a selected accelerator adapter.
-type AcceleratorProcessReader interface {
-	AcceleratorProcesses(ctx context.Context) ([]adapter.AcceleratorProcess, error)
-}
-
-type AcceleratorProcessReaderFunc func(ctx context.Context) ([]adapter.AcceleratorProcess, error)
-
-func (f AcceleratorProcessReaderFunc) AcceleratorProcesses(
-	ctx context.Context,
-) ([]adapter.AcceleratorProcess, error) {
-	return f(ctx)
-}
-
-// NvidiaSMIAcceleratorProcessReader is a temporary raw-evidence source for
-// static nodes. It intentionally exposes only opaque device, PID, and memory
-// facts; NVIDIA allocation and metric semantics remain in the adapter until a
-// profile-selected cross-accelerator process-monitor contract exists.
-type NvidiaSMIAcceleratorProcessReader struct {
-	Command string
-}
-
-func (r NvidiaSMIAcceleratorProcessReader) AcceleratorProcesses(
-	ctx context.Context,
-) ([]adapter.AcceleratorProcess, error) {
-	command := r.Command
-	if command == "" {
-		command = "nvidia-smi"
-	}
-
-	output, err := exec.CommandContext(
-		ctx,
-		command,
-		"--query-compute-apps=gpu_uuid,pid,used_memory",
-		"--format=csv,noheader,nounits",
-	).Output()
-	if err != nil {
-		return nil, nil
-	}
-
-	return parseNvidiaSMIAcceleratorProcesses(string(output)), nil
-}
-
-func parseNvidiaSMIAcceleratorProcesses(raw string) []adapter.AcceleratorProcess {
-	processes := make([]adapter.AcceleratorProcess, 0)
-
-	for _, line := range strings.Split(raw, "\n") {
-		parts := strings.Split(line, ",")
-		if len(parts) < 2 {
-			continue
-		}
-
-		deviceID := strings.TrimSpace(parts[0])
-		pid, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-
-		if deviceID == "" || err != nil || pid <= 0 {
-			continue
-		}
-
-		process := adapter.AcceleratorProcess{DeviceID: deviceID, PID: pid}
-		if len(parts) > 2 {
-			process.MemoryUsedBytes = nvidiaSMIMemoryUsedBytes(parts[2])
-		}
-
-		processes = append(processes, process)
-	}
-
-	return processes
-}
-
-func nvidiaSMIMemoryUsedBytes(raw string) *float64 {
-	fields := strings.Fields(strings.TrimSpace(raw))
-	if len(fields) == 0 || strings.EqualFold(fields[0], "n/a") {
-		return nil
-	}
-
-	memoryMiB, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil || memoryMiB < 0 {
-		return nil
-	}
-
-	memoryUsedBytes := memoryMiB * 1024 * 1024
-
-	return &memoryUsedBytes
 }
 
 type ProcFSProcessTreeReader struct {

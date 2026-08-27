@@ -14,7 +14,8 @@ import (
 // nvidiaAccelerator is the Community NVIDIA adapter. It owns NVIDIA hardware
 // discovery, allocation resolution, and DCGM metric conversion.
 type nvidiaAccelerator struct {
-	provider hardware.GPUHardwareInfoProvider
+	provider      hardware.GPUHardwareInfoProvider
+	processReader nvidiaGPUProcessReader
 }
 
 var (
@@ -172,18 +173,14 @@ func (a *nvidiaAccelerator) BuildStaticMetrics(
 	hardwareSnapshot adapter.HardwareSnapshot,
 	evidence adapter.StaticEvidence,
 ) (adapter.MetricResult, error) {
-	allocations := nvidiaStaticAllocations(hardwareSnapshot, evidence)
-	endpointReplicaGPUUsages := nvidiaStaticEndpointReplicaGPUUsages(
-		evidence.Common.Labels,
-		evidence,
-		allocations,
-	)
+	gpuProcesses := a.gpuProcesses(ctx)
+	allocations := nvidiaStaticAllocations(hardwareSnapshot, evidence, gpuProcesses)
 	result := a.buildMetrics(
 		ctx,
 		hardwareSnapshot,
 		evidence.Common,
 		nvidiaEndpointAllocations(evidence.Common.Labels, allocations),
-		endpointReplicaGPUUsages,
+		nil,
 	)
 	result.Allocations = allocations
 

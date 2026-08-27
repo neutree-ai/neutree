@@ -246,7 +246,9 @@ func TestNvidiaAdapterBuildsHAMiAllocationsFromRawEvidence(t *testing.T) {
 }
 
 func TestNvidiaAdapterBuildsStaticAllocationFromRawRayEvidence(t *testing.T) {
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &nvidiaAccelerator{processReader: nvidiaGPUProcessReaderFunc(
+		func(context.Context) ([]nvidiaGPUProcess, error) { return nil, nil },
+	)}
 	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
 		Common: adapter.CommonEvidence{
 			ExporterUp:   true,
@@ -279,10 +281,68 @@ func TestNvidiaAdapterBuildsStaticAllocationFromRawRayEvidence(t *testing.T) {
 	assert.Equal(t, "head-0", result.Allocations[0].Devices[0].NodeID)
 }
 
+func TestNvidiaAdapterReadsStaticGPUProcessesInsideAdapter(t *testing.T) {
+	accelerator := &nvidiaAccelerator{
+		processReader: nvidiaGPUProcessReaderFunc(func(context.Context) ([]nvidiaGPUProcess, error) {
+			return []nvidiaGPUProcess{{UUID: "GPU-abc", PID: 456, UsedMemoryMiB: 4096}}, nil
+		}),
+	}
+
+	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
+		Common: adapter.CommonEvidence{
+			ExporterUp: true,
+			ExporterText: `DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",modelName="A100"} 50
+DCGM_FI_DEV_FB_TOTAL{gpu="0",UUID="GPU-abc",modelName="A100"} 81920`,
+			Labels: adapter.CanonicalLabels{
+				ClusterType: v1.SSHClusterType,
+				Node:        "head-0",
+			},
+		},
+		AllocationAvailable: true,
+		RayEvidence: adapter.RayEvidence{
+			Actors: []adapter.RayActor{{
+				ActorID:           "actor-a",
+				PID:               123,
+				RequiredResources: map[string]float64{"GPU": 0.5},
+			}},
+			Replicas: []adapter.RayReplica{{
+				Workspace: "default",
+				Endpoint:  "chat",
+				ActorID:   "actor-a",
+				ReplicaID: "replica-a",
+			}},
+			ActorProcesses: map[int]adapter.ProcessInfo{
+				123: {
+					PID:            123,
+					DescendantPIDs: []int{123, 456},
+					Environment:    map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Allocations, 1)
+	require.Len(t, result.Allocations[0].Devices, 1)
+	assert.Equal(t, "GPU-abc", result.Allocations[0].Devices[0].UUID)
+	assert.Equal(t, int64(4096), result.Allocations[0].Devices[0].UsedMemoryMiB)
+	assert.Equal(t, []float64{4096 * 1024 * 1024}, sampleValues(
+		result.Samples,
+		"neutree_endpoint_replica_accelerator_memory_used_bytes",
+	))
+}
+
 func TestNvidiaAdapterBuildsStaticSharedGPUAllocationsFromRawProcesses(t *testing.T) {
 	firstMemoryUsedBytes := float64(3 * 1024 * 1024 * 1024)
 	secondMemoryUsedBytes := float64(5 * 1024 * 1024 * 1024)
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &nvidiaAccelerator{processReader: nvidiaGPUProcessReaderFunc(
+		func(context.Context) ([]nvidiaGPUProcess, error) {
+			return []nvidiaGPUProcess{
+				{UUID: "GPU-abc", PID: 101, UsedMemoryMiB: int64(firstMemoryUsedBytes / (1024 * 1024))},
+				{UUID: "GPU-abc", PID: 201, UsedMemoryMiB: int64(secondMemoryUsedBytes / (1024 * 1024))},
+			}, nil
+		},
+	)}
 	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
 		Common: adapter.CommonEvidence{
 			ExporterUp: true,
@@ -306,10 +366,6 @@ DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 8589934592`,
 			ActorProcesses: map[int]adapter.ProcessInfo{
 				100: {PID: 100, DescendantPIDs: []int{100, 101}, Environment: map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}},
 				200: {PID: 200, DescendantPIDs: []int{200, 201}, Environment: map[string]string{"NVIDIA_VISIBLE_DEVICES": "void"}},
-			},
-			AcceleratorProcesses: []adapter.AcceleratorProcess{
-				{DeviceID: "GPU-abc", PID: 101, MemoryUsedBytes: &firstMemoryUsedBytes},
-				{DeviceID: "GPU-abc", PID: 201, MemoryUsedBytes: &secondMemoryUsedBytes},
 			},
 		},
 	})
@@ -341,7 +397,11 @@ DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 8589934592`,
 
 func TestNvidiaAdapterRetainsStaticExclusiveGPUUtilizationWithProcessMemory(t *testing.T) {
 	memoryUsedBytes := float64(3 * 1024 * 1024 * 1024)
-	accelerator := &nvidiaAccelerator{}
+	accelerator := &nvidiaAccelerator{processReader: nvidiaGPUProcessReaderFunc(
+		func(context.Context) ([]nvidiaGPUProcess, error) {
+			return []nvidiaGPUProcess{{UUID: "GPU-abc", PID: 101, UsedMemoryMiB: int64(memoryUsedBytes / (1024 * 1024))}}, nil
+		},
+	)}
 	result, err := accelerator.BuildStaticMetrics(context.Background(), testNvidiaHardware(), adapter.StaticEvidence{
 		Common: adapter.CommonEvidence{
 			ExporterUp: true,
@@ -369,11 +429,6 @@ DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",modelName="A100"} 8589934592`,
 			ActorProcesses: map[int]adapter.ProcessInfo{
 				100: {PID: 100, DescendantPIDs: []int{100, 101}, Environment: map[string]string{"CUDA_VISIBLE_DEVICES": "0"}},
 			},
-			AcceleratorProcesses: []adapter.AcceleratorProcess{{
-				DeviceID:        "GPU-abc",
-				PID:             101,
-				MemoryUsedBytes: &memoryUsedBytes,
-			}},
 		},
 	})
 
@@ -418,12 +473,8 @@ func TestNvidiaStaticAllocationsKeepVisibleDevicesWhenProcessEvidenceIsPartial(t
 					Environment:    map[string]string{"CUDA_VISIBLE_DEVICES": "0,1"},
 				},
 			},
-			AcceleratorProcesses: []adapter.AcceleratorProcess{{
-				DeviceID: "GPU-abc",
-				PID:      101,
-			}},
 		},
-	})
+	}, nil)
 
 	require.Len(t, allocations, 1)
 	require.Len(t, allocations[0].Devices, 2)
@@ -516,7 +567,7 @@ func TestNvidiaStaticAllocationsResolveVisibleDevicesConservatively(t *testing.T
 						123: {PID: 123, Environment: testCase.environment},
 					},
 				},
-			})
+			}, nil)
 
 			if testCase.expectedUUID == "" {
 				assert.Empty(t, allocations)
