@@ -122,6 +122,7 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 
 	imageService := registry.NewImageService()
 	c.ImageService = imageService
+	c.RepositoryService = registry.NewRepositoryService()
 
 	gwToken, err := storage.CreateServiceToken(o.Storage.JwtSecret)
 	if err != nil {

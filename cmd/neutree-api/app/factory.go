@@ -119,8 +119,9 @@ type ImagesRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFu
 func ImagesRouteFactory(register ImagesRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &images.Dependencies{
-			Storage:      deps.Config.Storage,
-			ImageService: registry.NewImageService(),
+			Storage:           deps.Config.Storage,
+			ImageService:      registry.NewImageService(),
+			RepositoryService: registry.NewRepositoryService(),
 		})
 
 		return nil

@@ -14,6 +14,10 @@ import (
 type Dependencies struct {
 	Storage      storage.Storage
 	ImageService registry.ImageService
+	// RepositoryService enumerates repositories, which -- unlike tags -- has no
+	// portable answer and so is a separate service speaking each registry's own
+	// dialect.
+	RepositoryService registry.RepositoryService
 }
 
 // RegisterImageRoutes registers the image registry content routes.
@@ -28,5 +32,6 @@ func RegisterImageRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, 
 	workspaces.Use(middlewares...)
 
 	registries := workspaces.Group("/image_registries/:registry")
+	registries.GET("/repositories", listImageRepositories(deps))
 	registries.GET("/repositories/:repository/tags", getImageTags(deps))
 }

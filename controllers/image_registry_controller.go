@@ -15,21 +15,24 @@ import (
 )
 
 type ImageRegistryController struct {
-	storage      storage.Storage
-	imageService registry.ImageService
+	storage           storage.Storage
+	imageService      registry.ImageService
+	repositoryService registry.RepositoryService
 
 	syncHandler func(imageRegistry *v1.ImageRegistry) error
 }
 
 type ImageRegistryControllerOption struct {
-	ImageService registry.ImageService
-	Storage      storage.Storage
+	ImageService      registry.ImageService
+	RepositoryService registry.RepositoryService
+	Storage           storage.Storage
 }
 
 func NewImageRegistryController(option *ImageRegistryControllerOption) (*ImageRegistryController, error) {
 	c := &ImageRegistryController{
-		storage:      option.Storage,
-		imageService: option.ImageService,
+		storage:           option.Storage,
+		imageService:      option.ImageService,
+		repositoryService: option.RepositoryService,
 	}
 
 	c.syncHandler = c.sync
@@ -68,7 +71,7 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		klog.Infof("Deleting image registry %s", obj.Metadata.Name)
 
 		// No cleanup operations needed for image registry deletion
-		updateErr := c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil)
+		updateErr := c.updateStatus(obj, v1.ImageRegistryPhaseDELETED, nil, obj.Status.GetCapabilities())
 		if updateErr != nil {
 			klog.Errorf("failed to update image registry %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -80,6 +83,11 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 		return nil
 	}
 
+	// What this registry turned out to be able to do. Established here rather
+	// than when a user is waiting on a listing, and re-established every
+	// reconcile because credentials get rotated and permissions get changed.
+	capabilities := c.detectCapabilities(obj)
+
 	// Defer block to handle status updates for non-deletion paths
 	defer func() {
 		// Determine phase based on error
@@ -90,11 +98,12 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 
 		// Skip update if already in correct phase and no error change
 		if obj.Status != nil && obj.Status.Phase == phase &&
-			(err != nil) == (obj.Status.ErrorMessage != "") {
+			(err != nil) == (obj.Status.ErrorMessage != "") &&
+			sameCapabilities(obj.Status.Capabilities, capabilities) {
 			return
 		}
 
-		updateErr := c.updateStatus(obj, phase, err)
+		updateErr := c.updateStatus(obj, phase, err, capabilities)
 		if updateErr != nil {
 			klog.Errorf("failed to update image registry %s/%s status: %v",
 				obj.Metadata.Workspace, obj.Metadata.Name, updateErr)
@@ -108,6 +117,46 @@ func (c *ImageRegistryController) sync(obj *v1.ImageRegistry) error {
 	}
 
 	return nil
+}
+
+// detectCapabilities establishes what can be enumerated in this registry.
+//
+// A probe that establishes nothing -- a timeout, a refused connection -- keeps
+// whatever was established before rather than overwriting it. A registry is not
+// unsupported because the link was bad for a minute, and a listing that stopped
+// being offered would stay unoffered until somebody noticed and looked into it.
+func (c *ImageRegistryController) detectCapabilities(obj *v1.ImageRegistry) *v1.ImageRegistryCapabilities {
+	previous := obj.Status.GetCapabilities()
+
+	if c.repositoryService == nil {
+		return previous
+	}
+
+	target, err := registry.TargetFor(obj)
+	if err != nil {
+		klog.V(4).Infof("cannot probe image registry %s capabilities: %v",
+			obj.Metadata.WorkspaceName(), err)
+
+		return previous
+	}
+
+	capability, err := c.repositoryService.DetectListRepositoriesCapability(target)
+	if err != nil {
+		klog.V(4).Infof("image registry %s did not answer a capability probe, keeping what is known: %v",
+			obj.Metadata.WorkspaceName(), err)
+
+		return previous
+	}
+
+	return &v1.ImageRegistryCapabilities{ListRepositories: capability}
+}
+
+func sameCapabilities(a, b *v1.ImageRegistryCapabilities) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.ListRepositories == b.ListRepositories
 }
 
 func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRegistry) error {
@@ -154,11 +203,13 @@ func (c *ImageRegistryController) connectImageRegistry(imageRegistry *v1.ImageRe
 	return nil
 }
 
-func (c *ImageRegistryController) updateStatus(obj *v1.ImageRegistry, phase v1.ImageRegistryPhase, err error) error {
+func (c *ImageRegistryController) updateStatus(obj *v1.ImageRegistry, phase v1.ImageRegistryPhase,
+	err error, capabilities *v1.ImageRegistryCapabilities) error {
 	newStatus := &v1.ImageRegistryStatus{
 		LastTransitionTime: FormatStatusTime(),
 		Phase:              phase,
 		ErrorMessage:       FormatErrorForStatus(err),
+		Capabilities:       capabilities,
 	}
 
 	return c.storage.UpdateImageRegistry(strconv.Itoa(obj.ID), &v1.ImageRegistry{Status: newStatus})

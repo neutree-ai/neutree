@@ -38,6 +38,7 @@ type CoreConfig struct {
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage
 	ImageService            registry.ImageService
+	RepositoryService       registry.RepositoryService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
 	EngineRegistry          engine.Registry

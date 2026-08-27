@@ -203,8 +203,9 @@ func NewApiKeyControllerFactory() ControllerFactory {
 func NewImageRegistryControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		imageRegistryController, err := controllers.NewImageRegistryController(&controllers.ImageRegistryControllerOption{
-			Storage:      opts.config.Storage,
-			ImageService: opts.config.ImageService,
+			Storage:           opts.config.Storage,
+			ImageService:      opts.config.ImageService,
+			RepositoryService: opts.config.RepositoryService,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create image registry controller")
