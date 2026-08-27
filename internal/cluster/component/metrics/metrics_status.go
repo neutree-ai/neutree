@@ -114,13 +114,13 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
 
-		neutreeNodeAgentMetricsReady, neutreeNodeAgentMetricsPodsReady, neutreeNodeAgentMetricsTotalPods, err := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
-		if err != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, err))
+		nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
+		if checkErr != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, checkErr))
 		} else {
-			status.NeutreeNodeAgentMetricsDaemonSetReady = neutreeNodeAgentMetricsReady
-			status.NeutreeNodeAgentMetricsPodsReady = neutreeNodeAgentMetricsPodsReady
-			status.NeutreeNodeAgentMetricsTotalPods = neutreeNodeAgentMetricsTotalPods
+			status.NeutreeNodeAgentMetricsDaemonSetReady = nodeAgentReady
+			status.NeutreeNodeAgentMetricsPodsReady = nodeAgentPodsReady
+			status.NeutreeNodeAgentMetricsTotalPods = nodeAgentTotalPods
 		}
 	}
 

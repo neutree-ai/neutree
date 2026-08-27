@@ -3,8 +3,6 @@ package metrics
 import (
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/internal/semver"
@@ -314,17 +312,20 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
+    neutree.ai/metrics-target: node-agent
     neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   selector:
     matchLabels:
       app: {{ .NeutreeNodeAgentMetricsName }}
+      neutree.ai/metrics-target: node-agent
       cluster: {{ .ClusterName | quote }}
       workspace: {{ .Workspace | quote }}
   template:
     metadata:
       labels:
         app: {{ .NeutreeNodeAgentMetricsName }}
+        neutree.ai/metrics-target: node-agent
         cluster: {{ .ClusterName | quote }}
         workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
@@ -337,14 +338,14 @@ spec:
         image: {{ .NeutreeNodeAgentMetricsImage }}
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
-        - --cluster-type=kubernetes
+        - --cluster-type={{ .NodeAgentClusterType }}
         - --metrics-mode={{ .MetricsMode }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
-        env:
-{{ if .NeutreeNodeAgentMetricsEnv }}
-{{ .NeutreeNodeAgentMetricsEnv | toYaml | indent 8 }}
+{{ if .NodeAgent.AcceleratorType }}
+        - --accelerator-type={{ .NodeAgent.AcceleratorType }}
 {{ end }}
+        env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
@@ -353,6 +354,9 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+{{ if .NodeAgent.Env }}
+{{ .NodeAgent.Env | toYaml | indent 8 }}
+{{ end }}
         ports:
         - name: metrics
           containerPort: {{ .NeutreeNodeAgentMetricsPort }}
@@ -362,15 +366,12 @@ spec:
             port: metrics
           initialDelaySeconds: 10
           periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: metrics
-          initialDelaySeconds: 5
-          periodSeconds: 10
+{{ if .NodeAgent.SecurityContext }}
+        securityContext:
+{{ .NodeAgent.SecurityContext | toYaml | indent 10 }}
+{{ end }}
         volumeMounts:
-        - name: kubelet-pod-resources
-          mountPath: /var/lib/kubelet/pod-resources
+{{ .NodeAgent.VolumeMounts | toYaml | indent 8 }}
         resources:
           limits:
             {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
@@ -381,10 +382,7 @@ spec:
             {{ $key }}: {{ $value }}
             {{- end }}
       volumes:
-      - name: kubelet-pod-resources
-        hostPath:
-          path: /var/lib/kubelet/pod-resources
-          type: DirectoryOrCreate
+{{ .NodeAgent.Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
@@ -442,6 +440,10 @@ spec:
       containers:
       - name: {{ .ContainerName }}
         image: {{ .Image }}
+{{ if .Command }}
+        command:
+{{ .Command | toYaml | indent 8 }}
+{{ end }}
 {{ if .Args }}
         args:
 {{ .Args | toYaml | indent 8 }}
@@ -453,11 +455,9 @@ spec:
         ports:
         - name: metrics
           containerPort: {{ .Port }}
-{{ if .Capabilities }}
+{{ if .SecurityContext }}
         securityContext:
-          capabilities:
-            add:
-{{ .Capabilities | toYaml | indent 12 }}
+{{ .SecurityContext | toYaml | indent 10 }}
 {{ end }}
 {{ if .VolumeMounts }}
         volumeMounts:
@@ -548,7 +548,8 @@ type MetricsManifestVariables struct {
 	NeutreeNodeAgentMetricsName      string
 	NeutreeNodeAgentMetricsImage     string
 	NeutreeNodeAgentMetricsPort      int
-	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
+	NodeAgentClusterType             string
+	NodeAgent                        metricsNodeAgent
 	KubeStateMetricsImage            string
 	ClusterVersion                   string
 	MetricsRemoteWriteURL            string
@@ -609,6 +610,8 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
 		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
+		NodeAgentClusterType:             v1.KubernetesClusterType,
+		NodeAgent:                        defaultMetricsNodeAgent(),
 		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,

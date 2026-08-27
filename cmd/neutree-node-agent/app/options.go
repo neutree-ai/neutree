@@ -1,81 +1,23 @@
-package main
+package app
 
 import (
-	"context"
-	"flag"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
-	"github.com/neutree-ai/neutree/internal/version"
 )
-
-const (
-	clusterTypeKubernetes = "kubernetes"
-	clusterTypeRay        = "ray"
-)
-
-func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		info := version.Get()
-		fmt.Println(info.String())
-		os.Exit(0)
-	}
-
-	klog.InitFlags(nil)
-
-	if err := flag.Set("v", "2"); err != nil {
-		klog.Fatalf("Failed to set default log verbosity: %v", err)
-	}
-
-	defer klog.Flush()
-
-	opts := newOptions()
-	opts.addFlags(pflag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.Parse()
-
-	config, err := opts.config()
-	if err != nil {
-		klog.Fatalf("Failed to build neutree-node-agent config: %v", err)
-	}
-
-	klog.V(2).InfoS(
-		"Built neutree-node-agent config",
-		"listen_address", opts.listenAddress,
-		"cluster_type", opts.clusterType,
-		"metrics_mode", opts.metricsMode,
-		"node", opts.node,
-		"node_ip", opts.nodeIP,
-	)
-
-	server, err := neutreemetrics.NewServer(config)
-	if err != nil {
-		klog.Fatalf("Failed to create neutree-node-agent server: %v", err)
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	if err := server.Run(ctx); err != nil {
-		klog.Fatalf("Failed to run neutree-node-agent: %v", err)
-	}
-}
 
 type options struct {
 	listenAddress           string
@@ -83,6 +25,7 @@ type options struct {
 	metricsMode             string
 	node                    string
 	nodeIP                  string
+	acceleratorType         string
 	kubeletPodResourcesSock string
 	rayDashboardURL         string
 	procFSRoot              string
@@ -92,7 +35,7 @@ type options struct {
 func newOptions() *options {
 	return &options{
 		listenAddress: ":9101",
-		clusterType:   clusterTypeKubernetes,
+		clusterType:   v1.KubernetesClusterType,
 		metricsMode:   neutreemetrics.MetricsModeManaged,
 		procFSRoot:    "/proc",
 		cgroupFSRoot:  "/sys/fs/cgroup",
@@ -105,6 +48,8 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.metricsMode, "metrics-mode", o.metricsMode, "Metrics exporter mode: managed or external")
 	fs.StringVar(&o.node, "node", o.node, "Local node name used by Kubernetes and Ray providers")
 	fs.StringVar(&o.nodeIP, "node-ip", o.nodeIP, "Local node IP used to match the Ray Dashboard node")
+	fs.StringVar(&o.acceleratorType, "accelerator-type", o.acceleratorType,
+		"Accelerator type selecting the metrics adapter (for example nvidia_gpu)")
 	fs.StringVar(&o.kubeletPodResourcesSock, "kubelet-pod-resources-socket",
 		metricskubernetes.DefaultKubeletPodResourcesSocket,
 		"Kubelet pod resources socket path used to discover Kubernetes accelerator allocations")
@@ -116,11 +61,17 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"cgroupfs root used to read Ray actor container CPU and memory usage")
 }
 
-func (o *options) config() (neutreemetrics.Config, error) {
-	config := neutreemetrics.Config{
-		ListenAddress: o.listenAddress,
-		Labels:        o.labels(),
+func (o *options) configWithRegistry(registry adapterRegistry) (neutreemetrics.Config, error) {
+	if err := registry.validateSelection(o.acceleratorType, o.clusterType); err != nil {
+		return neutreemetrics.Config{}, err
 	}
+
+	config := neutreemetrics.Config{
+		ListenAddress:   o.listenAddress,
+		Labels:          o.labels(),
+		ClusterType:     o.clusterType,
+		AcceleratorType: o.acceleratorType,
+	}.WithAccelerators(registry.accelerators()).WithAcceleratorMetricDescriptors(registry.descriptorsCopy())
 
 	writer, err := o.kubernetesWriter()
 	if err != nil {
@@ -129,7 +80,10 @@ func (o *options) config() (neutreemetrics.Config, error) {
 
 	config.KubernetesWriter = writer
 	config.ScrapeTargetProvider = o.scrapeTargetProvider(writer)
-	config.AllocationProvider = o.allocationProvider(writer)
+	allocationProvider, kubernetesEvidenceProvider, staticEvidenceProvider := o.allocationProvider(writer)
+	config.AllocationProvider = allocationProvider
+	config.KubernetesAcceleratorEvidenceProvider = kubernetesEvidenceProvider
+	config.StaticAcceleratorEvidenceProvider = staticEvidenceProvider
 	config.EndpointGPUUsageProvider = o.endpointGPUUsageProvider(writer)
 	runtimeUsageProvider, err := o.runtimeUsageProvider(writer)
 
@@ -146,7 +100,7 @@ func (o *options) scrapeTargetProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) neutreemetrics.ScrapeTargetProvider {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil
 		}
@@ -156,7 +110,7 @@ func (o *options) scrapeTargetProvider(
 			MetricsMode: o.metricsMode,
 			NodeName:    writer.NodeName,
 		}
-	case clusterTypeRay:
+	case v1.SSHClusterType:
 		return neutreemetrics.StaticScrapeTargetProvider{
 			MetricsMode: o.metricsMode,
 		}
@@ -175,11 +129,15 @@ func (o *options) labels() model.CanonicalLabels {
 
 func (o *options) allocationProvider(
 	writer *metricskubernetes.AnnotationWriter,
-) allocation.Provider {
+) (
+	allocation.Provider,
+	neutreemetrics.KubernetesAcceleratorEvidenceProvider,
+	neutreemetrics.StaticAcceleratorEvidenceProvider,
+) {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
-			return nil
+			return nil, nil, nil
 		}
 
 		kubernetesProvider := allocation.KubernetesAllocationProvider{
@@ -196,20 +154,22 @@ func (o *options) allocationProvider(
 
 		return allocation.MultiProvider{
 			Providers: []allocation.Provider{kubernetesProvider, hamiProvider},
-		}
-	case clusterTypeRay:
+		}, kubernetesProvider, nil
+	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
-			return nil
+			return nil, nil, nil
 		}
 
-		return allocation.RayServeAllocationProvider{
+		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
 			Node:         o.node,
 			NodeIP:       o.nodeIP,
 			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
 		}
+
+		return rayProvider, nil, rayProvider
 	default:
-		return nil
+		return nil, nil, nil
 	}
 }
 
@@ -217,7 +177,7 @@ func (o *options) endpointGPUUsageProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) neutreemetrics.EndpointGPUUsageProvider {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil
 		}
@@ -235,7 +195,7 @@ func (o *options) runtimeUsageProvider(
 	writer *metricskubernetes.AnnotationWriter,
 ) (runtimeusage.Provider, error) {
 	switch o.clusterType {
-	case clusterTypeKubernetes:
+	case v1.KubernetesClusterType:
 		if writer == nil {
 			return nil, nil
 		}
@@ -258,7 +218,7 @@ func (o *options) runtimeUsageProvider(
 				NodeName:   writer.NodeName,
 			},
 		}, nil
-	case clusterTypeRay:
+	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
 			return nil, nil
 		}
@@ -278,7 +238,7 @@ func (o *options) runtimeUsageProvider(
 }
 
 func (o *options) kubernetesWriter() (*metricskubernetes.AnnotationWriter, error) {
-	if o.clusterType != clusterTypeKubernetes {
+	if o.clusterType != v1.KubernetesClusterType {
 		return nil, nil
 	}
 

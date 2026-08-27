@@ -19,7 +19,7 @@ report() {
   FAIL=1
 }
 
-# Helper: list every Go file (excluding tests) under $1 that imports any path matching $2.
+# Helper: list every Go file under $1 that imports any path matching $2.
 # Uses grep -lE on full import lines so a comment containing the string isn't matched.
 imports_into() {
   local from_dir="$1"

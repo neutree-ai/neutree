@@ -37,12 +37,15 @@ type metricsAcceleratorExporter struct {
 	AcceleratorType string
 	ExporterName    string
 	Image           string
+	Command         []string
 	Args            []string
 	Env             []corev1.EnvVar
 	Port            int
 	MetricsPath     string
 
-	Capabilities []corev1.Capability
+	SecurityContext       *corev1.SecurityContext
+	NodeAgent             *v1.NodeAgentProfile
+	VirtualizationMonitor *v1.VirtualizationMonitorProfile
 
 	NodeSelector   map[string]string
 	ConfigFileData map[string]string
@@ -127,33 +130,36 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 	}
 
 	exporterProfile := profile.MetricsExporter
-	if strings.TrimSpace(exporterProfile.Image) == "" ||
-		exporterProfile.Port <= 0 ||
-		!validAcceleratorExporterName(exporterProfile.Name) {
-		return metricsAcceleratorExporter{}, false
-	}
-
 	name := acceleratorExporterName(acceleratorType, exporterProfile.Name)
-	configFileData, volumeMounts, volumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
 	runtime := exporterProfile.Runtime
+
+	runtimeVolumeMounts, runtimeVolumes := buildExporterRuntimeVolumes(runtime)
+
+	configFileData, configVolumeMounts, configVolumes, configChecksum := buildExporterConfigVolumes(name, exporterProfile.ConfigFiles)
+
+	volumeMounts := append(append([]corev1.VolumeMount{}, configVolumeMounts...), runtimeVolumeMounts...)
+	volumes := append(append([]corev1.Volume{}, configVolumes...), runtimeVolumes...)
 
 	// Kubernetes managed exporters intentionally do not project host network/PID
 	// flags from the runtime profile; those flags are for static-node runtimes.
 	exporter := metricsAcceleratorExporter{
-		Name:            name,
-		AcceleratorType: acceleratorType,
-		ExporterName:    exporterProfile.Name,
-		Image:           util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
-		Args:            append([]string{}, exporterProfile.Args...),
-		Env:             buildExporterEnv(exporterProfile.Env),
-		Port:            exporterProfile.Port,
-		MetricsPath:     exporterMetricsPath(exporterProfile.MetricsPath),
-		Capabilities:    exporterRuntimeCapabilities(runtime),
-		NodeSelector:    exporterRuntimeNodeSelector(runtime),
-		ConfigFileData:  configFileData,
-		ConfigChecksum:  configChecksum,
-		VolumeMounts:    volumeMounts,
-		Volumes:         volumes,
+		Name:                  name,
+		AcceleratorType:       acceleratorType,
+		ExporterName:          exporterProfile.Name,
+		Image:                 util.RewriteImageRef(m.imagePrefix, exporterProfile.Image),
+		Command:               append([]string{}, exporterProfile.Command...),
+		Args:                  append([]string{}, exporterProfile.Args...),
+		Env:                   buildExporterEnv(exporterProfile.Env),
+		Port:                  exporterProfile.Port,
+		MetricsPath:           exporterMetricsPath(exporterProfile.MetricsPath),
+		SecurityContext:       exporterRuntimeSecurityContext(runtime),
+		NodeAgent:             profile.EffectiveNodeAgentRuntime(),
+		VirtualizationMonitor: cloneVirtualizationMonitor(profile.VirtualizationMonitor),
+		NodeSelector:          exporterRuntimeNodeSelector(runtime),
+		ConfigFileData:        configFileData,
+		ConfigChecksum:        configChecksum,
+		VolumeMounts:          volumeMounts,
+		Volumes:               volumes,
 	}
 
 	return exporter, true
@@ -172,10 +178,6 @@ func acceleratorExporterJobName(acceleratorType string) string {
 	return acceleratorExporterJobPrefix + "-" + name
 }
 
-func validAcceleratorExporterName(exporterName string) bool {
-	return sanitizeKubernetesNameValue(exporterName) != ""
-}
-
 func (m *MetricsComponent) selectClusterAcceleratorExporter(
 	ctx context.Context,
 	candidates []metricsAcceleratorExporter,
@@ -189,15 +191,38 @@ func (m *MetricsComponent) selectClusterAcceleratorExporter(
 		return nil, err
 	}
 
-	matchedExporters := make([]metricsAcceleratorExporter, 0, 1)
+	matches := make([]metricsAcceleratorExporter, 0, len(candidates))
 
 	for _, exporter := range candidates {
 		if acceleratorExporterMatchesAnyNode(exporter, nodes) {
-			matchedExporters = append(matchedExporters, exporter)
+			matches = append(matches, exporter)
 		}
 	}
 
-	return matchedExporters, nil
+	switch len(matches) {
+	case 0:
+		return nil, nil
+	case 1:
+		return matches, nil
+	default:
+		return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
+	}
+}
+
+func cloneVirtualizationMonitor(profile *v1.VirtualizationMonitorProfile) *v1.VirtualizationMonitorProfile {
+	if profile == nil {
+		return nil
+	}
+
+	copy := *profile
+	if len(profile.PodSelector) > 0 {
+		copy.PodSelector = make(map[string]string, len(profile.PodSelector))
+		for key, value := range profile.PodSelector {
+			copy.PodSelector[key] = value
+		}
+	}
+
+	return &copy
 }
 
 func (m *MetricsComponent) clusterNodes(ctx context.Context) ([]corev1.Node, error) {
@@ -271,53 +296,12 @@ func buildExporterEnv(env map[string]string) []corev1.EnvVar {
 	return envVars
 }
 
-func nodeAgentEnvFromAcceleratorExporters(exporters []metricsAcceleratorExporter) []corev1.EnvVar {
-	allowed := map[string]struct{}{
-		"NVIDIA_VISIBLE_DEVICES":     {},
-		"NVIDIA_DRIVER_CAPABILITIES": {},
-	}
-	env := map[string]string{}
-
-	for _, exporter := range exporters {
-		for _, item := range exporter.Env {
-			if _, ok := allowed[item.Name]; !ok {
-				continue
-			}
-
-			env[item.Name] = item.Value
-		}
-	}
-
-	return buildExporterEnv(env)
-}
-
 func exporterRuntimeNodeSelector(runtime *v1.AcceleratorExporterRuntimeProfile) map[string]string {
 	if runtime == nil {
 		return nil
 	}
 
 	return copyStringMap(runtime.NodeSelector)
-}
-
-func exporterRuntimeCapabilities(
-	runtime *v1.AcceleratorExporterRuntimeProfile,
-) []corev1.Capability {
-	if runtime == nil || runtime.Capabilities == nil {
-		return nil
-	}
-
-	capabilities := make([]corev1.Capability, 0, len(runtime.Capabilities.Add))
-
-	for _, capability := range runtime.Capabilities.Add {
-		capability = strings.TrimSpace(capability)
-		if capability == "" {
-			continue
-		}
-
-		capabilities = append(capabilities, corev1.Capability(capability))
-	}
-
-	return capabilities
 }
 
 func copyStringMap(values map[string]string) map[string]string {

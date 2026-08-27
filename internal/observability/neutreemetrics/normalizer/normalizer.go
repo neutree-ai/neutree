@@ -32,6 +32,10 @@ type NormalizeRequest struct {
 	GPUHardwareInfos             []model.GPUHardwareInfo
 	EndpointReplicaRuntimeUsages []model.EndpointReplicaRuntimeUsage
 	EndpointReplicaGPUUsages     []model.EndpointReplicaGPUUsage
+	// AcceleratorSamples are pre-computed accelerator samples from the selected
+	// adapter (--accelerator-type set). When non-nil, Samples() emits them
+	// instead of computing accelerator samples from the legacy DCGM functions.
+	AcceleratorSamples []Sample
 }
 
 type Normalizer struct{}
@@ -55,35 +59,39 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 
 	if req.AcceleratorExporter != nil {
 		samples = append(samples, scrapeUpSample(req.Labels, TargetAcceleratorExporter, req.AcceleratorExporter.Up))
-
-		if req.AcceleratorExporter.Up {
-			samples = append(samples, normalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
-			samples = append(samples, normalizeNodeGPUSamples(
-				req.Labels,
-				req.AcceleratorExporter.Body,
-				req.EndpointAllocations,
-			)...)
-			samples = append(samples, normalizeGPUHardwareInfoSamples(
-				req.Labels,
-				req.GPUHardwareInfos,
-				req.AcceleratorExporter.Body,
-			)...)
-			samples = append(samples, normalizeEndpointAllocationSamples(
-				req.Labels,
-				req.EndpointAllocations,
-				req.EndpointReplicaGPUUsages,
-				acceleratorIndexes,
-				req.AcceleratorExporter.Body,
-			)...)
-		} else {
-			samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
-		}
-	} else {
-		samples = append(samples, normalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
 	}
 
-	if req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
-		samples = append(samples, normalizeEndpointReplicaGPUUsageFromDCGMSamples(
+	switch {
+	case req.AcceleratorSamples != nil:
+		// Adapter path: the selected adapter already produced all accelerator
+		// samples from raw evidence. They are merged after the generic
+		// node/runtime samples and before the per-replica runtime usage samples.
+		samples = append(samples, req.AcceleratorSamples...)
+	case req.AcceleratorExporter != nil && req.AcceleratorExporter.Up:
+		samples = append(samples, NormalizeAcceleratorSamples(req.Labels, req.AcceleratorExporter.Body)...)
+		samples = append(samples, NormalizeNodeGPUSamples(
+			req.Labels,
+			req.AcceleratorExporter.Body,
+			req.EndpointAllocations,
+		)...)
+		samples = append(samples, NormalizeGPUHardwareInfoSamples(
+			req.Labels,
+			req.GPUHardwareInfos,
+			req.AcceleratorExporter.Body,
+		)...)
+		samples = append(samples, NormalizeEndpointAllocationSamples(
+			req.Labels,
+			req.EndpointAllocations,
+			req.EndpointReplicaGPUUsages,
+			acceleratorIndexes,
+			req.AcceleratorExporter.Body,
+		)...)
+	default:
+		samples = append(samples, NormalizeEndpointAllocationSamples(req.Labels, req.EndpointAllocations, req.EndpointReplicaGPUUsages, nil, "")...)
+	}
+
+	if req.AcceleratorSamples == nil && req.AcceleratorExporter != nil && req.AcceleratorExporter.Up {
+		samples = append(samples, NormalizeEndpointReplicaGPUUsageFromDCGMSamples(
 			req.Labels,
 			req.AcceleratorExporter.Body,
 			req.EndpointAllocations,
@@ -95,12 +103,14 @@ func (n *Normalizer) Samples(req NormalizeRequest) []Sample {
 		req.Labels,
 		req.EndpointReplicaRuntimeUsages,
 	)...)
-	samples = append(samples, normalizeEndpointReplicaGPUUsageSamples(
-		req.Labels,
-		req.EndpointReplicaGPUUsages,
-		req.EndpointAllocations,
-		acceleratorIndexes,
-	)...)
+	if req.AcceleratorSamples == nil {
+		samples = append(samples, NormalizeEndpointReplicaGPUUsageSamples(
+			req.Labels,
+			req.EndpointReplicaGPUUsages,
+			req.EndpointAllocations,
+			acceleratorIndexes,
+		)...)
+	}
 
 	sort.SliceStable(samples, func(i, j int) bool {
 		if samples[i].Name == samples[j].Name {
@@ -177,7 +187,10 @@ func normalizeNodeSamples(labels model.CanonicalLabels, raw string) []Sample {
 	return result
 }
 
-func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sample {
+// NormalizeAcceleratorSamples is the legacy NVIDIA/DCGM rendering helper used
+// by the in-tree NVIDIA reference adapter. Other accelerator adapters emit
+// adapter.Sample directly and do not need to parse DCGM text.
+func NormalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sample {
 	parsed := promtext.ParseVector(raw)
 	result := make([]Sample, 0)
 
@@ -235,7 +248,9 @@ func normalizeAcceleratorSamples(labels model.CanonicalLabels, raw string) []Sam
 	return result
 }
 
-func normalizeNodeGPUSamples(
+// NormalizeNodeGPUSamples is the NVIDIA/DCGM reference helper for node GPU
+// capacity metrics. It is not a generic adapter API.
+func NormalizeNodeGPUSamples(
 	labels model.CanonicalLabels,
 	raw string,
 	allocations []model.EndpointAllocation,
@@ -312,7 +327,9 @@ func normalizeNodeGPUSamples(
 	return result
 }
 
-func normalizeGPUHardwareInfoSamples(labels model.CanonicalLabels, infos []model.GPUHardwareInfo, raw string) []Sample {
+// NormalizeGPUHardwareInfoSamples is the NVIDIA/DCGM reference helper for GPU
+// inventory labels. Vendor adapters provide their own hardware rendering.
+func NormalizeGPUHardwareInfoSamples(labels model.CanonicalLabels, infos []model.GPUHardwareInfo, raw string) []Sample {
 	discoveredUUIDs := discoveredGPUUUIDs(raw)
 	if len(discoveredUUIDs) == 0 {
 		return nil
@@ -387,7 +404,9 @@ func discoveredGPUUUIDs(raw string) map[string]struct{} {
 	return result
 }
 
-func normalizeEndpointAllocationSamples(
+// NormalizeEndpointAllocationSamples is the NVIDIA/DCGM reference helper for
+// endpoint allocation metrics. Vendor allocation rules remain adapter-owned.
+func NormalizeEndpointAllocationSamples(
 	labels model.CanonicalLabels,
 	allocations []model.EndpointAllocation,
 	explicitUsages []model.EndpointReplicaGPUUsage,
@@ -585,7 +604,9 @@ func gpuUsageSnapshotByUUID(samples prommodel.Vector) map[string]gpuUsageSnapsho
 	return result
 }
 
-func acceleratorIndexesByUUID(raw string, infos []model.GPUHardwareInfo) map[string]string {
+// AcceleratorIndexesByUUID derives DCGM GPU indices for the in-tree NVIDIA
+// reference adapter. It does not define an identity rule for other vendors.
+func AcceleratorIndexesByUUID(raw string, infos []model.GPUHardwareInfo) map[string]string {
 	result := map[string]string{}
 
 	for _, info := range infos {
@@ -842,7 +863,9 @@ func endpointReplicaRuntimeUsageLabels(
 	return metricLabels
 }
 
-func normalizeEndpointReplicaGPUUsageSamples(
+// NormalizeEndpointReplicaGPUUsageSamples is the NVIDIA/DCGM reference helper
+// for per-replica usage samples when no DCGM process match is available.
+func NormalizeEndpointReplicaGPUUsageSamples(
 	labels model.CanonicalLabels,
 	usages []model.EndpointReplicaGPUUsage,
 	allocations []model.EndpointAllocation,
@@ -969,7 +992,9 @@ func endpointReplicaGPUUsageKeyFromUsage(
 	}
 }
 
-func normalizeEndpointReplicaGPUUsageFromDCGMSamples(
+// NormalizeEndpointReplicaGPUUsageFromDCGMSamples is the NVIDIA/DCGM
+// reference helper for process-attributed per-replica usage samples.
+func NormalizeEndpointReplicaGPUUsageFromDCGMSamples(
 	labels model.CanonicalLabels,
 	raw string,
 	allocations []model.EndpointAllocation,
@@ -1038,7 +1063,7 @@ func acceleratorIndexesByUUIDFromRequest(req NormalizeRequest) map[string]string
 		return nil
 	}
 
-	return acceleratorIndexesByUUID(req.AcceleratorExporter.Body, req.GPUHardwareInfos)
+	return AcceleratorIndexesByUUID(req.AcceleratorExporter.Body, req.GPUHardwareInfos)
 }
 
 func nodeReadySample(labels model.CanonicalLabels) Sample {

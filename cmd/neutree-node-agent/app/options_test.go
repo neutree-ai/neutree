@@ -1,42 +1,45 @@
-package main
+package app
 
 import (
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/hami"
 	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/model"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 func TestOptionsConfigDefaults(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.NoError(t, err)
 	assert.Equal(t, ":9101", config.ListenAddress)
 	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
 		MetricsMode: neutreemetrics.MetricsModeManaged,
 	}, config.ScrapeTargetProvider)
-	assert.Equal(t, model.CanonicalLabels{ClusterType: clusterTypeRay}, config.Labels)
+	assert.Equal(t, model.CanonicalLabels{ClusterType: v1.SSHClusterType}, config.Labels)
 	assert.Nil(t, config.KubernetesWriter)
 }
 
 func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = clusterTypeRay
+	opts.clusterType = v1.SSHClusterType
 	opts.metricsMode = neutreemetrics.MetricsModeExternal
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
 	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
@@ -47,16 +50,16 @@ func TestOptionsConfigUsesExternalMetricsMode(t *testing.T) {
 func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
 	opts := newOptions()
 
-	_, err := opts.config()
+	_, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.ErrorContains(t, err, "node name is required")
 }
 
 func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = "ray"
+	opts.clusterType = v1.SSHClusterType
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	assert.NoError(t, err)
 	assert.Nil(t, config.KubernetesWriter)
@@ -64,21 +67,23 @@ func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
 
 func TestOptionsConfigEnablesRayAllocationProvider(t *testing.T) {
 	opts := newOptions()
-	opts.clusterType = "ray"
+	opts.clusterType = v1.SSHClusterType
 	opts.rayDashboardURL = "http://10.0.0.10:8265"
 	opts.node = "head-0"
 	opts.nodeIP = "10.0.0.10"
 
-	config, err := opts.config()
+	config, err := opts.configWithRegistry(adapterRegistry{})
 
 	require.NoError(t, err)
 	provider, ok := config.AllocationProvider.(allocation.RayServeAllocationProvider)
+	require.True(t, ok)
+	_, ok = config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
 	require.True(t, ok)
 	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
 	assert.Equal(t, "head-0", provider.Node)
 	assert.Equal(t, "10.0.0.10", provider.NodeIP)
 	assert.Equal(t, model.CanonicalLabels{
-		ClusterType: clusterTypeRay,
+		ClusterType: v1.SSHClusterType,
 		Node:        "head-0",
 		NodeIP:      "10.0.0.10",
 	}, config.Labels)
@@ -93,9 +98,9 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 		NodeName: "node-a",
 	}
 	opts := newOptions()
-	opts.clusterType = clusterTypeKubernetes
+	opts.clusterType = v1.KubernetesClusterType
 
-	provider := opts.allocationProvider(writer)
+	provider, kubernetesEvidenceProvider, staticEvidenceProvider := opts.allocationProvider(writer)
 
 	multi, ok := provider.(allocation.MultiProvider)
 	require.True(t, ok)
@@ -104,6 +109,9 @@ func TestOptionsAllocationProviderCombinesKubernetesAndHAMiProviders(t *testing.
 	assert.True(t, ok)
 	_, ok = multi.Providers[1].(hami.KubernetesProvider)
 	assert.True(t, ok)
+	_, ok = kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	assert.True(t, ok)
+	assert.Nil(t, staticEvidenceProvider)
 }
 
 func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
@@ -115,10 +123,57 @@ func TestOptionsEndpointGPUUsageProviderUsesHAMiForKubernetes(t *testing.T) {
 		NodeName: "node-a",
 	}
 	opts := newOptions()
-	opts.clusterType = clusterTypeKubernetes
+	opts.clusterType = v1.KubernetesClusterType
 
 	provider := opts.endpointGPUUsageProvider(writer)
 
 	_, ok := provider.(hami.KubernetesProvider)
 	assert.True(t, ok)
+}
+
+func TestOptionsConfigRejectsUnregisteredAcceleratorType(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "unknown-accelerator"
+
+	_, err := opts.configWithRegistry(adapterRegistry{})
+
+	assert.ErrorContains(t, err, `accelerator adapter "unknown-accelerator" is not registered`)
+}
+
+func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: "fixture"}})
+	require.NoError(t, err)
+
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "fixture"
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Equal(t, "fixture", config.AcceleratorType)
+	assert.Contains(t, config.Accelerators, "fixture")
+}
+
+func TestOptionsConfigKeepsLegacyPathWhenAcceleratorTypeEmpty(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	require.NoError(t, err)
+	assert.Empty(t, config.AcceleratorType)
+	assert.Empty(t, config.Accelerators)
+}
+
+func TestOptionsAcceleratorTypeFlagHelpOmitsLegacyFallbackText(t *testing.T) {
+	opts := newOptions()
+	flags := pflag.NewFlagSet("neutree-node-agent", pflag.ContinueOnError)
+
+	opts.addFlags(flags)
+
+	flag := flags.Lookup("accelerator-type")
+	require.NotNil(t, flag)
+	assert.NotContains(t, flag.Usage, "legacy DCGM path")
 }

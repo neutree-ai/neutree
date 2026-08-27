@@ -13,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/componentversion"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -230,6 +231,24 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
 		ClusterRuntime:  &clusterRuntime,
 		EngineRuntime:   &engineRuntime,
+		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+			Image:      "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent,
+			Privileged: true,
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES": "all",
+			},
+			Capabilities:     &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
+			Runtime:          "nvidia",
+			DockerRunOptions: []string{"--gpus all"},
+		},
+		VirtualizationMonitor: &v1.VirtualizationMonitorProfile{
+			Namespace: "kube-system",
+			PodSelector: map[string]string{
+				"app.kubernetes.io/component": "hami-device-plugin",
+			},
+			Port:        9394,
+			MetricsPath: "/metrics",
+		},
 		MetricsExporter: &v1.AcceleratorExporterProfile{
 			Name:  "dcgm-exporter",
 			Image: nvidiaDCGMExporterImage,
@@ -256,10 +275,8 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				},
 			},
 			Runtime: &v1.AcceleratorExporterRuntimeProfile{
-				HostNetwork: true,
-				Capabilities: &v1.AcceleratorExporterCapabilities{
-					Add: []string{"SYS_ADMIN"},
-				},
+				HostNetwork:  true,
+				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 				NodeSelector: map[string]string{
 					NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
 				},
