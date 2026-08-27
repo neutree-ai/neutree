@@ -73,3 +73,22 @@ func TestSelectClusterAcceleratorExporterRejectsMultipleMatches(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }
+
+func TestSelectClusterAcceleratorExporterSkipsWhenNoMatch(t *testing.T) {
+	component := &MetricsComponent{
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "cpu-node",
+				Labels: map[string]string{"kubernetes.io/os": "linux"},
+			},
+		}).Build(),
+	}
+
+	matches, err := component.selectClusterAcceleratorExporter(context.Background(), []metricsAcceleratorExporter{{
+		AcceleratorType: "nvidia_gpu",
+		NodeSelector:    map[string]string{"vendor.example/gpu": "true"},
+	}})
+
+	require.NoError(t, err)
+	assert.Nil(t, matches)
+}

@@ -180,8 +180,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
 	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 	assert.Equal(t, "all", nodeAgent.Env["NVIDIA_VISIBLE_DEVICES"])
-	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"hami-device-plugin"},"port":9394,"metrics_path":"/metrics"}`,
-		nodeAgent.Env[v1.VirtualizationMonitorProfileEnvKey])
+	assert.Empty(t, nodeAgent.Env[v1.VirtualizationMonitorProfileEnvKey])
 	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
 	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
 	assert.NotContains(t, nodeAgent.Args, "--static-node-cluster=static-a")

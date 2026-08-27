@@ -39,6 +39,8 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 		},
 		"node_agent_runtime":{
 			"privileged":true,
+			"runtime":"nvidia",
+			"docker_run_options":["--gpus all"],
 			"env":{"VENDOR_VISIBLE_DEVICES":"all","NEUTREE_VIRTUALIZATION_MONITOR_PROFILE":"stale"},
 			"capabilities":{"add":["SYS_ADMIN"]},
 			"volumes":[{"name":"vendor-driver","host_path":{"path":"/opt/vendor/driver","type":"directory"}}],
@@ -79,6 +81,8 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 	require.NotNil(t, container.SecurityContext)
 	assert.True(t, *container.SecurityContext.Privileged)
 	assert.Contains(t, container.SecurityContext.Capabilities.Add, corev1.Capability("SYS_ADMIN"))
+	assert.NotContains(t, container.Args, "--runtime=nvidia")
+	assert.NotContains(t, container.Args, "--gpus all")
 	assert.Contains(t, daemonSetHostPathNames(nodeAgent), "vendor-driver")
 	assert.Equal(t, "all", envValue(container.Env, "VENDOR_VISIBLE_DEVICES"))
 	assert.JSONEq(t, `{"namespace":"kube-system","pod_selector":{"app.kubernetes.io/component":"vendor-device-plugin"},"port":9395,"metrics_path":"/metrics"}`,

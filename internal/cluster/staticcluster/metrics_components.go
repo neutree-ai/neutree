@@ -272,23 +272,10 @@ func nodeAgentComponentEnv(profile *v1.AcceleratorProfile) map[string]string {
 		runtimeEnv = runtime.Env
 	}
 
-	env := copyMetricsStringMap(runtimeEnv)
-	if profile == nil || profile.VirtualizationMonitor == nil {
-		return env
-	}
-
-	encoded, err := json.Marshal(profile.VirtualizationMonitor)
-	if err != nil {
-		return env
-	}
-
-	if env == nil {
-		env = map[string]string{}
-	}
-
-	env[v1.VirtualizationMonitorProfileEnvKey] = string(encoded)
-
-	return env
+	// Static NodeAgent has no Kubernetes Pod discovery path. The
+	// VirtualizationMonitor profile is therefore intentionally skipped here;
+	// Kubernetes metrics rendering owns that monitor configuration.
+	return copyMetricsStringMap(runtimeEnv)
 }
 
 func staticComponentReadOnly(value bool) *bool {
