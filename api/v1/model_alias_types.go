@@ -12,7 +12,7 @@ import (
 // maxModelAliasLength bounds the alias in its NFKC-normalized, whitespace-
 // trimmed form -- equivalently its lowercased form, since strings.ToLower maps
 // rune to rune (simple case mapping, no special casing) and so cannot change the
-// count. It is deliberately far above maxModelNameLength: an alias is a display
+// count. It is deliberately far above maxResourceNameLength: an alias is a display
 // name, not a BentoML tag.
 const maxModelAliasLength = 128
 
