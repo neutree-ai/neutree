@@ -67,6 +67,8 @@ const protectedChartValuesYAML = `
 dra:
   enabled: false
 scheduler:
+  admissionWebhook:
+    enabled: true
   patch:
     enabled: false
   certManager:
@@ -114,13 +116,9 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 		return nil
 	}
 
-	sanitized := make(map[string]interface{}, len(configPatch))
-
-	for key, value := range configPatch {
-		if key != "devicePlugin" {
-			sanitized[key] = value
-		}
-	}
+	sanitized := deepCopyChartValues(configPatch)
+	delete(sanitized, "devicePlugin")
+	unstructured.RemoveNestedField(sanitized, "scheduler", "admissionWebhook", "namespaceSelector")
 
 	return sanitized
 }

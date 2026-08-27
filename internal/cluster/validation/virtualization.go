@@ -15,12 +15,13 @@ const MinVirtualizationClusterVersion = "v1.1.0"
 type AcceleratorVirtualizationErrorReason string
 
 const (
-	AcceleratorVirtualizationInvalidVersionReason     AcceleratorVirtualizationErrorReason = "invalid_version"
-	AcceleratorVirtualizationUnsupportedClusterReason AcceleratorVirtualizationErrorReason = "unsupported_cluster"
-	AcceleratorVirtualizationUnsupportedVersionReason AcceleratorVirtualizationErrorReason = "unsupported_version"
-	AcceleratorVirtualizationUnsupportedConfigReason  AcceleratorVirtualizationErrorReason = "unsupported_config"
-	AcceleratorVirtualizationManagedSchedulerReason   AcceleratorVirtualizationErrorReason = "managed_scheduler"
-	AcceleratorVirtualizationManagedCertManagerReason AcceleratorVirtualizationErrorReason = "managed_cert_manager"
+	AcceleratorVirtualizationInvalidVersionReason          AcceleratorVirtualizationErrorReason = "invalid_version"
+	AcceleratorVirtualizationUnsupportedClusterReason      AcceleratorVirtualizationErrorReason = "unsupported_cluster"
+	AcceleratorVirtualizationUnsupportedVersionReason      AcceleratorVirtualizationErrorReason = "unsupported_version"
+	AcceleratorVirtualizationUnsupportedConfigReason       AcceleratorVirtualizationErrorReason = "unsupported_config"
+	AcceleratorVirtualizationManagedSchedulerReason        AcceleratorVirtualizationErrorReason = "managed_scheduler"
+	AcceleratorVirtualizationManagedCertManagerReason      AcceleratorVirtualizationErrorReason = "managed_cert_manager"
+	AcceleratorVirtualizationManagedAdmissionWebhookReason AcceleratorVirtualizationErrorReason = "managed_admission_webhook"
 )
 
 type AcceleratorVirtualizationError struct {
@@ -117,6 +118,23 @@ func ValidateAcceleratorVirtualizationConfigPatch(configPatch map[string]interfa
 			Reason:  AcceleratorVirtualizationManagedCertManagerReason,
 			Message: "HAMi cert-manager integration is managed by Neutree and cannot be enabled",
 			Hint:    "Remove scheduler.certManager.enabled from accelerator_virtualization.config_patch",
+		}
+	}
+
+	if admissionWebhook, ok, err := unstructured.NestedBool(configPatch, "scheduler", "admissionWebhook", "enabled"); err == nil && ok && !admissionWebhook {
+		return &AcceleratorVirtualizationError{
+			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
+			Message: "HAMi scheduler admission webhook is managed by Neutree and cannot be disabled",
+			Hint:    "Remove scheduler.admissionWebhook.enabled from accelerator_virtualization.config_patch",
+		}
+	}
+
+	if _, found, err := unstructured.NestedFieldNoCopy(
+		configPatch, "scheduler", "admissionWebhook", "namespaceSelector"); err == nil && found {
+		return &AcceleratorVirtualizationError{
+			Reason:  AcceleratorVirtualizationManagedAdmissionWebhookReason,
+			Message: "HAMi scheduler admission webhook namespaceSelector is managed by Neutree and cannot be customized",
+			Hint:    "Remove scheduler.admissionWebhook.namespaceSelector from accelerator_virtualization.config_patch",
 		}
 	}
 

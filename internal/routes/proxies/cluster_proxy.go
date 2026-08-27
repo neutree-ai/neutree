@@ -710,38 +710,31 @@ func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {
 	}
 }
 
-func validateClusterAcceleratorVirtualizationDisable(
-	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
-) *validationError {
-	if cluster.GetDeletionTimestamp() != "" {
-		return nil
-	}
-
-	workspace, name, validationErr := resolveClusterIdentityForAcceleratorVirtualizationDisable(
-		s, cluster, queryParams)
-	if validationErr != nil {
-		return validationErr
-	}
-
-	return validateClusterAcceleratorVirtualizationDisableForIdentity(s, workspace, name)
-}
-
-func validateClusterAcceleratorVirtualizationDisableForIdentity(
-	s storage.Storage, workspace, name string,
-) *validationError {
+func countClusterEndpoints(
+	s storage.Storage, workspace, name string, matches func(*v1.Endpoint) bool,
+) (int, error) {
 	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
 	if err != nil {
-		return internalServerValidationError()
+		return 0, err
 	}
 
-	vGPUEndpointCount := 0
+	count := 0
 
-	for _, endpoint := range endpoints {
-		if endpoint.Spec != nil &&
-			endpoint.Spec.Resources != nil &&
-			endpoint.Spec.Resources.HasAcceleratorVirtualization() {
-			vGPUEndpointCount++
+	for i := range endpoints {
+		if matches(&endpoints[i]) {
+			count++
 		}
+	}
+
+	return count, nil
+}
+
+func validateClusterAcceleratorVirtualizationDisable(
+	s storage.Storage, workspace, name string,
+) *validationError {
+	vGPUEndpointCount, err := countClusterEndpoints(s, workspace, name, endpointRequestsVirtualization)
+	if err != nil {
+		return internalServerValidationError()
 	}
 
 	if vGPUEndpointCount > 0 {
@@ -758,31 +751,6 @@ func validateClusterAcceleratorVirtualizationDisableForIdentity(
 	return nil
 }
 
-func validateClusterAcceleratorVirtualizationDisableForCurrent(
-	s storage.Storage, current *v1.Cluster, patch v1.Cluster,
-) *validationError {
-	if current == nil || current.Metadata == nil || current.Metadata.Workspace == "" || current.Metadata.Name == "" {
-		return &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    "cluster identity is required when disabling accelerator virtualization",
-		}
-	}
-
-	if patch.Metadata != nil &&
-		((patch.Metadata.Workspace != "" && patch.Metadata.Workspace != current.Metadata.Workspace) ||
-			(patch.Metadata.Name != "" && patch.Metadata.Name != current.Metadata.Name)) {
-		return &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    "cluster metadata in patch body does not match patch target",
-		}
-	}
-
-	return validateClusterAcceleratorVirtualizationDisableForIdentity(
-		s, current.Metadata.Workspace, current.Metadata.Name)
-}
-
 // validateClusterAcceleratorVirtualizationModeSwitch blocks switching the
 // cluster accelerator virtualization mode while any endpoint still uses
 // accelerator virtualization. The gate applies to any mode change (e.g.
@@ -796,17 +764,19 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		return nil
 	}
 
+	// The dispatch guard only routes already-enabled clusters here, but the
+	// function is public and dereferences current below, so keep the contract
+	// explicit for any future caller.
+	if current == nil || current.Spec == nil || !current.Spec.AcceleratorVirtualizationEnabled() {
+		return nil
+	}
+
 	if currentSpecMode(current) == next.Spec.AcceleratorVirtualization.Mode {
 		return nil
 	}
 
-	workspace, name, validationErr := resolveClusterIdentityForAcceleratorVirtualizationDisable(
-		s, *current, url.Values{})
-	if validationErr != nil {
-		return validationErr
-	}
-
-	endpoints, err := s.ListEndpoint(storage.ListOption{Filters: clusterEndpointReferenceFilters(workspace, name)})
+	vGPUEndpointCount, err := countClusterEndpoints(
+		s, current.Metadata.Workspace, current.Metadata.Name, endpointRequestsVirtualization)
 	if err != nil {
 		return &validationError{
 			Code:    "10228",
@@ -815,21 +785,17 @@ func validateClusterAcceleratorVirtualizationModeSwitch(
 		}
 	}
 
-	count := 0
-
-	for _, endpoint := range endpoints {
-		if endpointRequestsVirtualization(&endpoint) {
-			count++
-		}
-	}
-
-	if count > 0 {
+	if vGPUEndpointCount > 0 {
 		return &validationError{
-			Code:    "10228",
-			Message: fmt.Sprintf("cannot switch cluster accelerator virtualization mode for cluster '%s/%s'", workspace, name),
+			Code: "10228",
+			Message: fmt.Sprintf(
+				"cannot switch cluster accelerator virtualization mode for cluster '%s/%s'",
+				current.Metadata.Workspace,
+				current.Metadata.Name,
+			),
 			Hint: fmt.Sprintf(
 				"%d vGPU endpoint(s) still use accelerator virtualization; disable virtualization on the endpoints before switching",
-				count,
+				vGPUEndpointCount,
 			),
 		}
 	}
@@ -859,68 +825,20 @@ func endpointRequestsVirtualization(endpoint *v1.Endpoint) bool {
 	return endpoint.Spec.Resources.HasAcceleratorVirtualization()
 }
 
-func resolveClusterIdentityForAcceleratorVirtualizationDisable(
-	s storage.Storage, cluster v1.Cluster, queryParams url.Values,
-) (string, string, *validationError) {
-	filters := queryParamsToFilters(queryParams)
-	if len(filters) > 0 {
-		workspace, name, validationErr := resolveClusterIdentityFromPatchFilters(s, filters)
-		if validationErr != nil {
-			return "", "", validationErr
-		}
-
-		if cluster.Metadata != nil &&
-			((cluster.Metadata.Workspace != "" && cluster.Metadata.Workspace != workspace) ||
-				(cluster.Metadata.Name != "" && cluster.Metadata.Name != name)) {
-			return "", "", &validationError{
-				Code:    "10209",
-				Message: "failed to validate cluster accelerator virtualization",
-				Hint:    "cluster metadata in patch body does not match patch target",
-			}
-		}
-
-		return workspace, name, nil
-	}
-
-	if cluster.Metadata != nil && cluster.Metadata.Workspace != "" && cluster.Metadata.Name != "" {
-		return cluster.Metadata.Workspace, cluster.Metadata.Name, nil
-	}
-
-	return "", "", &validationError{
-		Code:    "10209",
-		Message: "failed to validate cluster accelerator virtualization",
-		Hint:    "cluster identity is required when disabling accelerator virtualization",
-	}
-}
-
-func resolveClusterIdentityFromPatchFilters(s storage.Storage, filters []storage.Filter) (string, string, *validationError) {
-	clusters, err := s.ListCluster(storage.ListOption{Filters: filters})
-	if err != nil {
-		return "", "", &validationError{
+func validateClusterAcceleratorVirtualizationPatchIdentity(
+	target, patch *v1.Metadata,
+) *validationError {
+	if patch != nil &&
+		((patch.Workspace != "" && patch.Workspace != target.Workspace) ||
+			(patch.Name != "" && patch.Name != target.Name)) {
+		return &validationError{
 			Code:    "10209",
 			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    err.Error(),
+			Hint:    "cluster metadata in patch body does not match patch target",
 		}
 	}
 
-	if len(clusters) != 1 {
-		return "", "", &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    fmt.Sprintf("expected exactly one cluster from patch filters, got %d", len(clusters)),
-		}
-	}
-
-	resolved := clusters[0]
-	if resolved.Metadata == nil || resolved.Metadata.Workspace == "" || resolved.Metadata.Name == "" {
-		return "", "", &validationError{
-			Code:    "10209",
-			Message: "failed to validate cluster accelerator virtualization",
-			Hint:    "cluster identity is required when disabling accelerator virtualization",
-		}
-	}
-
-	return resolved.Metadata.Workspace, resolved.Metadata.Name, nil
+	return nil
 }
 
 func validateClusterAcceleratorVirtualizationInput(
@@ -945,16 +863,116 @@ func validateClusterAcceleratorVirtualizationInput(
 		return nil
 	}
 
-	if validationErr := validateClusterAcceleratorVirtualizationModeSwitch(s, input.Current, input.New); validationErr != nil {
-		return validationErr
-	}
+	return validateClusterAcceleratorVirtualizationTransition(s, input)
+}
 
-	if !input.Current.Spec.AcceleratorVirtualizationEnabled() ||
-		input.New.Spec.AcceleratorVirtualizationEnabled() {
+// validateClusterAcceleratorVirtualizationTransition classifies the
+// accelerator virtualization transition requested by a cluster PATCH and
+// dispatches to the guard that owns that transition shape. Classifying first
+// keeps each guard focused on one shape: a first-time enable (virtualization
+// currently off) always goes to the enable guard even when the patch also sets
+// a mode, a disable always goes to the disable guard, and the mode-switch guard
+// only ever sees an already-enabled cluster changing modes. A patch that does
+// not change the virtualization state runs no guard.
+func validateClusterAcceleratorVirtualizationTransition(
+	s storage.Storage, input *ValidationInput[v1.Cluster],
+) *validationError {
+	currentEnabled := input.Current.Spec.AcceleratorVirtualizationEnabled()
+	newEnabled := input.New.Spec.AcceleratorVirtualizationEnabled()
+
+	modeChanged := currentEnabled && newEnabled &&
+		currentSpecMode(input.Current) != currentSpecMode(input.New)
+	if currentEnabled == newEnabled && !modeChanged {
 		return nil
 	}
 
-	return validateClusterAcceleratorVirtualizationDisableForCurrent(s, input.Current, input.Patch)
+	if validationErr := validateClusterAcceleratorVirtualizationPatchIdentity(
+		input.Current.Metadata, input.Patch.Metadata); validationErr != nil {
+		return validationErr
+	}
+
+	switch {
+	case !currentEnabled && newEnabled:
+		// Enabling changes the cluster's GPU scheduling and device-plugin
+		// behavior. Running inference endpoints would be disrupted by the
+		// scheduler/webhook takeover, so the enable transition is gated on the
+		// cluster having no running GPU endpoints.
+		return validateClusterAcceleratorVirtualizationEnable(
+			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
+
+	case currentEnabled && !newEnabled:
+		// Disabling removes HAMi while vGPU endpoints still reference it.
+		return validateClusterAcceleratorVirtualizationDisable(
+			s, input.Current.Metadata.Workspace, input.Current.Metadata.Name)
+
+	case currentEnabled && newEnabled:
+		return validateClusterAcceleratorVirtualizationModeSwitch(s, input.Current, input.New)
+	}
+
+	return nil
+}
+
+func validateClusterAcceleratorVirtualizationEnable(
+	s storage.Storage, workspace, name string,
+) *validationError {
+	runningGPUEndpointCount, err := countClusterEndpoints(s, workspace, name, endpointRequestsRunningGPU)
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	if runningGPUEndpointCount > 0 {
+		return &validationError{
+			Code:    "10231",
+			Message: fmt.Sprintf("cannot enable accelerator virtualization for cluster '%s/%s'", workspace, name),
+			Hint: fmt.Sprintf(
+				"%d GPU endpoint(s) still run on this cluster; pause or delete the GPU endpoints before enabling accelerator virtualization",
+				runningGPUEndpointCount,
+			),
+		}
+	}
+
+	return nil
+}
+
+// endpointRequestsRunningGPU reports whether an endpoint requests physical GPU
+// cards and is not paused. The enable guard must fail closed for legacy
+// Endpoint rows that declare either spec.resources.gpu or a Kubernetes GPU
+// extended resource without the newer accelerator.type metadata, because
+// enabling HAMi would still disrupt those running workloads. Pausing an
+// endpoint scales its replicas to zero, so a paused endpoint has replicas == 0.
+func endpointRequestsRunningGPU(endpoint *v1.Endpoint) bool {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Resources == nil {
+		return false
+	}
+
+	if !resourceSpecRequestsPhysicalGPU(endpoint.Spec.Resources) {
+		return false
+	}
+
+	return endpointReplicaCount(endpoint.Spec) > 0
+}
+
+func resourceSpecRequestsPhysicalGPU(resources *v1.ResourceSpec) bool {
+	if resources == nil {
+		return false
+	}
+
+	if resources.GetGPUCount() > 0 {
+		return true
+	}
+
+	for resourceName, quantity := range resources.GetCustomResources() {
+		if !strings.HasSuffix(resourceName, "/gpu") {
+			continue
+		}
+
+		gpuCount, err := strconv.ParseFloat(quantity, 64)
+		if err == nil && gpuCount > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func validateClusterAcceleratorVirtualizationCluster(cluster v1.Cluster) *validationError {

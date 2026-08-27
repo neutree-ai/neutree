@@ -41,6 +41,38 @@ the hardcoded default. This lets a cluster supply its own device-config
 templates (for example chip hard-slice templates) through chart values without
 rebuilding the chart.
 
+### `scheduler.updateStrategy` value
+
+The scheduler Deployment previously used the Kubernetes default RollingUpdate
+strategy (25% surge / 25% unavailable). On a single-replica scheduler with no
+hostPort binding, an update could take down the only scheduler before its
+replacement became ready. The chart now renders `spec.strategy` from
+`values.scheduler.updateStrategy`; the packaged default is
+`maxUnavailable: 0, maxSurge: 1` so the new scheduler is created before the
+old one is removed and a single-node cluster never loses its only scheduler.
+
+### Soft scheduler pod anti-affinity
+
+The scheduler pod anti-affinity (active when `scheduler.leaderElect` is true)
+is now `preferredDuringSchedulingIgnoredDuringExecution` instead of the
+upstream hard `requiredDuringSchedulingIgnoredDuringExecution`. On a
+single-node cluster the hard form made a scheduler rollout unschedulable
+(the new pod could never satisfy the different-host constraint); the soft form
+keeps the spread intent on multi-node clusters while allowing co-location when
+no other node is available. Leader election still guards against two active
+schedulers during the brief rollout overlap.
+
+## Webhook configuration
+
+Neutree does not override the HAMi chart's `failurePolicy`, so the packaged
+chart default (`Ignore`) applies. It intentionally does not override the
+chart's `namespaceSelector`, so matching admission requests are not limited to
+the owning cluster namespace. The HAMi chart still emits its default selector,
+which excludes namespaces marked `hami.io/webhook: ignore`.
+
+Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
+disabled through `accelerator_virtualization.config_patch`.
+
 ## Verification
 
 - `helm template` renders `device-config.content` into the
