@@ -88,10 +88,10 @@ func TestValidateExternalEndpointCreateName(t *testing.T) {
 		{name: "ascii space", resource: "external endpoint", accepted: false},
 		{name: "leading space", resource: " external", accepted: false},
 		{name: "trailing space", resource: "external ", accepted: false},
-		{name: "unicode without space", resource: "外部端点", accepted: false},
-		{name: "unicode with space", resource: "外部 空格-2ea258e575", accepted: false},
+		{name: "unicode without space", resource: "ëndpoint", accepted: false},
+		{name: "unicode with space", resource: "ëndpoint spacer-2ea258e575", accepted: false},
 		{name: "percent character", resource: "external%20endpoint", accepted: false},
-		{name: "percent encoded unicode", resource: "%E5%A4%96%E9%83%A8", accepted: false},
+		{name: "percent encoded unicode", resource: "%C3%ABndpoint", accepted: false},
 		{name: "uppercase", resource: "External", accepted: false},
 		{name: "slash", resource: "external/endpoint", accepted: false},
 		{name: "question mark", resource: "external?x=1", accepted: false},
@@ -141,7 +141,7 @@ func TestValidateExternalEndpointCreateRequiresName(t *testing.T) {
 func TestValidateExternalEndpointCreateBulk(t *testing.T) {
 	t.Run("rejects an array where any name is illegal", func(t *testing.T) {
 		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
-			`[{"metadata":{"name":"legal-one"}},{"metadata":{"name":"外部 空格"}}]`)
+			`[{"metadata":{"name":"legal-one"}},{"metadata":{"name":"ëndpoint spacer"}}]`)
 
 		assertExternalEndpointNameRejected(t, recorder, reached)
 	})
@@ -157,14 +157,14 @@ func TestValidateExternalEndpointCreateBulk(t *testing.T) {
 func TestValidateExternalEndpointPatch(t *testing.T) {
 	t.Run("rejects a rename to an illegal name", func(t *testing.T) {
 		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
-			`{"metadata":{"name":"外部 空格-2ea258e575"}}`)
+			`{"metadata":{"name":"ëndpoint spacer-2ea258e575"}}`)
 
 		assertExternalEndpointNameRejected(t, recorder, reached)
 	})
 
 	t.Run("allows a patch that does not touch the name", func(t *testing.T) {
 		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
-			`{"spec":{"timeout":30},"metadata":{"display_name":"外部 端点"}}`)
+			`{"spec":{"timeout":30},"metadata":{"display_name":"Ëndpoint Rëname"}}`)
 
 		assert.True(t, reached)
 	})
@@ -178,7 +178,7 @@ func TestValidateExternalEndpointPatch(t *testing.T) {
 	// A resource named before this check existed still has to be deletable.
 	t.Run("allows a soft delete regardless of the name it carries", func(t *testing.T) {
 		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
-			`{"metadata":{"name":"外部 空格-2ea258e575","deletion_timestamp":"2026-08-25T06:29:27Z"}}`)
+			`{"metadata":{"name":"ëndpoint spacer-2ea258e575","deletion_timestamp":"2026-08-25T06:29:27Z"}}`)
 
 		assert.True(t, reached)
 	})
