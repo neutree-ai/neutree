@@ -128,19 +128,13 @@ func TestAcceleratorProfileJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, []string{"--gpus all"}, decoded.MetricsExporter.Runtime.DockerRunOptions)
 }
 
-func TestAcceleratorProfileAcceptsLegacyNodeAgentJSON(t *testing.T) {
-	const legacy = `{"accelerator_type":"vendor_accelerator","node_agent":{"image":"registry.example/neutree-node-agent:v1.2.0"}}`
+func TestAcceleratorProfileIgnoresLegacyNodeAgentJSON(t *testing.T) {
+	profile := AcceleratorProfile{}
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"node_agent":{"image":"registry.example/neutree-node-agent:v1.2.0"}
+	}`), &profile))
 
-	var profile AcceleratorProfile
-	require.NoError(t, json.Unmarshal([]byte(legacy), &profile))
-	require.NotNil(t, profile.NodeAgentRuntime)
-	require.NotNil(t, profile.NodeAgent)
-	assert.Equal(t, profile.NodeAgentRuntime.Image, profile.NodeAgent.Image)
-
-	data, err := json.Marshal(profile)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), `"node_agent_runtime"`)
-	assert.NotContains(t, string(data), `"node_agent":`)
+	assert.Nil(t, profile.NodeAgentRuntime)
 }
 
 func TestAcceleratorProfileJSONRoundTripPreservesVirtualizationMonitor(t *testing.T) {

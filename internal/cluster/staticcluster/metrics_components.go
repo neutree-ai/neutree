@@ -242,7 +242,7 @@ func nodeAgentRuntime(profile *v1.AcceleratorProfile) *v1.NodeAgentRuntimeProfil
 		return nil
 	}
 
-	return profile.EffectiveNodeAgentRuntime()
+	return profile.NodeAgentRuntime
 }
 
 func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) ([]v1.ComponentVolume, []v1.ComponentVolumeMount) {

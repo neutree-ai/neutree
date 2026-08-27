@@ -44,7 +44,7 @@ type metricsAcceleratorExporter struct {
 	MetricsPath     string
 
 	SecurityContext       *corev1.SecurityContext
-	NodeAgent             *v1.NodeAgentProfile
+	NodeAgent             *v1.NodeAgentRuntimeProfile
 	VirtualizationMonitor *v1.VirtualizationMonitorProfile
 
 	NodeSelector   map[string]string
@@ -153,7 +153,7 @@ func (m *MetricsComponent) buildAcceleratorExporter(
 		Port:                  exporterProfile.Port,
 		MetricsPath:           exporterMetricsPath(exporterProfile.MetricsPath),
 		SecurityContext:       exporterRuntimeSecurityContext(runtime),
-		NodeAgent:             profile.EffectiveNodeAgentRuntime(),
+		NodeAgent:             profile.NodeAgentRuntime,
 		VirtualizationMonitor: cloneVirtualizationMonitor(profile.VirtualizationMonitor),
 		NodeSelector:          exporterRuntimeNodeSelector(runtime),
 		ConfigFileData:        configFileData,

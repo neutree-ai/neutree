@@ -111,7 +111,7 @@ func defaultMetricsNodeAgent() metricsNodeAgent {
 	}
 }
 
-func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentProfile) *corev1.SecurityContext {
+func nodeAgentRuntimeSecurityContext(runtime *v1.NodeAgentRuntimeProfile) *corev1.SecurityContext {
 	if runtime == nil {
 		return nil
 	}

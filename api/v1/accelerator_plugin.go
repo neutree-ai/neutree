@@ -1,8 +1,6 @@
 package v1
 
 import (
-	"encoding/json"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -97,9 +95,6 @@ type AcceleratorProfile struct {
 	// the NodeAgent. It is intentionally independent from MetricsExporter.Runtime
 	// so renderers cannot inherit exporter privilege or mounts implicitly.
 	NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
-	// NodeAgent is the legacy Go/JSON spelling accepted while older management
-	// data is being read. New profiles are always serialized as node_agent_runtime.
-	NodeAgent *NodeAgentRuntimeProfile `json:"-"`
 	// VirtualizationMonitor identifies the vendor-managed monitor whose raw
 	// metrics can be collected for accelerator virtualization. Renderers and
 	// generic collectors consume this declaration without branching on vendor
@@ -150,61 +145,6 @@ type NodeAgentRuntimeProfile struct {
 	Runtime string `json:"runtime,omitempty"`
 	// DockerRunOptions are StaticNode-only Docker options; Kubernetes does not parse them.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
-}
-
-// NodeAgentProfile is kept as a source-compatible type alias for integrations
-// compiled against the earlier profile spelling.
-type NodeAgentProfile = NodeAgentRuntimeProfile
-
-// EffectiveNodeAgentRuntime returns the canonical runtime profile, accepting
-// the legacy Go field only when a caller has not populated the canonical one.
-func (p *AcceleratorProfile) EffectiveNodeAgentRuntime() *NodeAgentRuntimeProfile {
-	if p == nil {
-		return nil
-	}
-
-	if p.NodeAgentRuntime != nil {
-		return p.NodeAgentRuntime
-	}
-
-	return p.NodeAgent
-}
-
-// MarshalJSON emits the canonical node_agent_runtime field while allowing
-// callers that still construct the legacy NodeAgent field to migrate safely.
-func (p AcceleratorProfile) MarshalJSON() ([]byte, error) {
-	type profileAlias AcceleratorProfile
-
-	return json.Marshal(&struct {
-		*profileAlias
-		NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
-	}{
-		profileAlias:     (*profileAlias)(&p),
-		NodeAgentRuntime: p.EffectiveNodeAgentRuntime(),
-	})
-}
-
-// UnmarshalJSON accepts both profile spellings and exposes the same value
-// through the legacy Go field for older in-process consumers.
-func (p *AcceleratorProfile) UnmarshalJSON(data []byte) error {
-	type profileAlias AcceleratorProfile
-	var decoded struct {
-		*profileAlias
-		LegacyNodeAgent *NodeAgentRuntimeProfile `json:"node_agent,omitempty"`
-	}
-	decoded.profileAlias = (*profileAlias)(p)
-
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-
-	if p.NodeAgentRuntime == nil {
-		p.NodeAgentRuntime = decoded.LegacyNodeAgent
-	}
-
-	p.NodeAgent = p.NodeAgentRuntime
-
-	return nil
 }
 
 type AcceleratorExporterProfile struct {

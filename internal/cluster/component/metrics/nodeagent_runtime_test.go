@@ -37,7 +37,7 @@ func TestMetricsResourcesProjectsSelectedRuntimeToSingleNodeAgent(t *testing.T) 
 			"port":9395,
 			"metrics_path":"/metrics"
 		},
-		"node_agent":{
+		"node_agent_runtime":{
 			"privileged":true,
 			"env":{"VENDOR_VISIBLE_DEVICES":"all","NEUTREE_VIRTUALIZATION_MONITOR_PROFILE":"stale"},
 			"capabilities":{"add":["SYS_ADMIN"]},

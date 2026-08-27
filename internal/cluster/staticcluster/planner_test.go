@@ -23,7 +23,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				},
 				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
 			},
-			NodeAgent: &v1.NodeAgentProfile{
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 				Privileged: true,
 				Env: map[string]string{
 					"NVIDIA_VISIBLE_DEVICES": "all",
@@ -287,7 +287,7 @@ func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	profiles := map[string]*v1.AcceleratorProfile{
 		v1.AcceleratorTypeNVIDIAGPU.String(): {
-			NodeAgent: &v1.NodeAgentProfile{
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 				Runtime: "nvidia",
 			},
 		},
@@ -317,7 +317,7 @@ func TestPlannerPlanBackfillsStaticNodeAgentAcceleratorType(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 }
 
-func TestPlannerDoesNotValidateNodeAgentProfile(t *testing.T) {
+func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
 		staticNodeStatusWithAccelerator(
@@ -341,7 +341,7 @@ func TestPlannerDoesNotValidateNodeAgentProfile(t *testing.T) {
 		profiles: map[string]*v1.AcceleratorProfile{
 			v1.AcceleratorTypeNVIDIAGPU.String(): {
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-				NodeAgent: &v1.NodeAgentProfile{
+				NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 					Volumes: []v1.ComponentVolume{{
 						Name:     "vendor-driver",
 						HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
