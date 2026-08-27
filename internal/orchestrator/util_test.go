@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -257,6 +258,37 @@ func TestCPUOnly_OnlyMemory(t *testing.T) {
 	assert.NotNil(t, k8s)
 	assert.Equal(t, "16Gi", k8s.Requests["memory"])
 	assert.Empty(t, k8s.Requests["cpu"])
+}
+
+func TestParseVLLMHumanReadableInt(t *testing.T) {
+	tests := []struct {
+		name  string
+		value interface{}
+		want  int64
+	}{
+		{name: "plain integer string", value: "8589934592", want: 8589934592},
+		{name: "binary gigabytes", value: "8G", want: 8 * (1 << 30)},
+		{name: "decimal gigabytes", value: "8g", want: 8_000_000_000},
+		{name: "fractional decimal gigabytes", value: "1.5g", want: 1_500_000_000},
+		{name: "native JSON number", value: float64(8589934592), want: 8589934592},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseVLLMHumanReadableInt(tt.value)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestParseVLLMHumanReadableIntRejectsInvalidValues(t *testing.T) {
+	for _, value := range []interface{}{"8GB", "1.5G", "abc", -1, 1.5} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			_, err := parseVLLMHumanReadableInt(value)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestGPUZero_NoAcceleratorType(t *testing.T) {
