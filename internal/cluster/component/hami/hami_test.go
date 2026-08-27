@@ -359,13 +359,17 @@ func TestHAMiComponentSchedulerUpdateStrategyAndAffinity(t *testing.T) {
 	assert.False(t, hasRequired, "scheduler anti-affinity must not be hard-required")
 }
 
-func TestHAMiComponentWebhookFailurePolicyFailWithoutNamespaceOverride(t *testing.T) {
+func TestHAMiComponentWebhookUsesChartDefaultFailurePolicyWithoutNamespaceOverride(t *testing.T) {
 	const clusterNamespace = "neutree-system"
 
 	component := NewHAMiComponent(newTestCluster(), clusterNamespace, "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 	protectedValues := component.protectedChartValues()
-	_, found, err := unstructured.NestedMap(protectedValues, "scheduler", "admissionWebhook", "namespaceSelector")
+	_, found, err := unstructured.NestedString(protectedValues, "scheduler", "admissionWebhook", "failurePolicy")
+	require.NoError(t, err)
+	assert.False(t, found, "Neutree must not override the chart failurePolicy")
+
+	_, found, err = unstructured.NestedMap(protectedValues, "scheduler", "admissionWebhook", "namespaceSelector")
 	require.NoError(t, err)
 	assert.False(t, found, "Neutree must not override the chart namespaceSelector")
 
@@ -382,7 +386,7 @@ func TestHAMiComponentWebhookFailurePolicyFailWithoutNamespaceOverride(t *testin
 
 	first, ok := webhooks[0].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "Fail", first["failurePolicy"])
+	assert.Equal(t, "Ignore", first["failurePolicy"])
 
 	// The HAMi chart always emits its default namespaceSelector. Neutree must
 	// not replace it with an owning-namespace-only selector.

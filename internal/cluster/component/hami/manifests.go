@@ -175,12 +175,6 @@ func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
 			"extender": map[string]interface{}{
 				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
 			},
-			"admissionWebhook": map[string]interface{}{
-				// Reject pod admission when the HAMi scheduler webhook is
-				// unavailable instead of letting GPU pods fall through to the
-				// default scheduler and bypass the HAMi global device view.
-				"failurePolicy": "Fail",
-			},
 		},
 		"devicePlugin": map[string]interface{}{
 			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),

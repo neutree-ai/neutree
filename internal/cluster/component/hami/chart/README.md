@@ -62,14 +62,12 @@ keeps the spread intent on multi-node clusters while allowing co-location when
 no other node is available. Leader election still guards against two active
 schedulers during the brief rollout overlap.
 
-## Webhook failure policy
+## Webhook configuration
 
-Neutree configures the admission webhook (in Go, not in this chart) with
-`failurePolicy: Fail`, so GPU pods cannot fall through to the default scheduler
-and bypass the HAMi global device view when the scheduler webhook is
-unreachable. It intentionally does not override the chart's
-`namespaceSelector`, so matching admission requests are not limited to the
-owning cluster namespace. The HAMi chart still emits its default selector,
+Neutree does not override the HAMi chart's `failurePolicy`, so the packaged
+chart default (`Ignore`) applies. It intentionally does not override the
+chart's `namespaceSelector`, so matching admission requests are not limited to
+the owning cluster namespace. The HAMi chart still emits its default selector,
 which excludes namespaces marked `hami.io/webhook: ignore`.
 
 Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
