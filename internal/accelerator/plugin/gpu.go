@@ -249,9 +249,9 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 			Port:        9394,
 			MetricsPath: "/metrics",
 		},
-		// External mode is owned by the upstream operator, but both Kubernetes
-		// and StaticNode still need this profile-owned endpoint metadata to
-		// render their scrape and NodeAgent target configuration.
+		// External mode is owned by the upstream operator. Kubernetes uses this
+		// profile-owned endpoint metadata to render scrape and NodeAgent target
+		// configuration without constraining the operator namespace.
 		ExternalMetricsTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{
 				"app": "nvidia-dcgm-exporter",

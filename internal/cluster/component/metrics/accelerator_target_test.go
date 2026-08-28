@@ -137,6 +137,82 @@ func TestBuildMetricsResourcesUsesExternalTargetWithoutManagedExporterProfile(t 
 	assert.Contains(t, args, "--accelerator-exporter-metrics-path=/metrics/custom")
 }
 
+func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmpty(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
+		AcceleratorType: "vendor_accelerator",
+		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+			Image: "example.com/neutree-node-agent:v1.2.0",
+		},
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "operator-exporter"},
+			Port:        19401,
+			MetricsPath: "/operator-metrics",
+		},
+	}, nil).Maybe()
+
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.2",
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+		namespace:             "neutree-system",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		acceleratorMgr:        acceleratorMgr,
+	}
+
+	objects, err := component.GetMetricsResources(context.Background())
+	require.NoError(t, err)
+
+	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
+	jobConfig := metricsScrapeJobConfig(t, vmagentConfig, acceleratorExporterJobName("vendor_accelerator"))
+	assert.Contains(t, jobConfig, "label: app=operator-exporter")
+	assert.Contains(t, jobConfig, "replacement: $1:19401")
+	assert.NotContains(t, jobConfig, "namespaces:")
+	assert.NotContains(t, jobConfig, "neutree-system")
+
+	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
+	container := nodeAgent.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, container.Args, "--accelerator-exporter-port=19401")
+	assert.Contains(t, container.Args, "--accelerator-exporter-metrics-path=/operator-metrics")
+	assert.Empty(t, envValue(container.Env, v1.AcceleratorExporterNamespaceEnvKey))
+	assert.False(t, containsEnv(container.Env, v1.AcceleratorExporterNamespaceEnvKey))
+	assert.NotEmpty(t, envValue(container.Env, v1.AcceleratorExporterPodSelectorEnvKey))
+}
+
+func metricsScrapeJobConfig(t *testing.T, config string, jobName string) string {
+	t.Helper()
+
+	start := "- job_name: '" + jobName + "'"
+	startIndex := strings.Index(config, start)
+	require.NotEqual(t, -1, startIndex, "job %q was not rendered", jobName)
+
+	jobConfig := config[startIndex:]
+	if nextJob := strings.Index(jobConfig[len(start):], "\n- job_name:"); nextJob >= 0 {
+		jobConfig = jobConfig[:len(start)+nextJob]
+	}
+
+	return jobConfig
+}
+
+func containsEnv(env []corev1.EnvVar, name string) bool {
+	for _, item := range env {
+		if item.Name == name {
+			return true
+		}
+	}
+
+	return false
+}
+
 func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()

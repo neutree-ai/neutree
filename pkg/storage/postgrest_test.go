@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -110,4 +111,41 @@ func TestCallDatabaseFunction_FailureDoesNotPoisonListQueries(t *testing.T) {
 	require.Empty(t, endpoints)
 	require.Equal(t, int32(1), atomic.LoadInt32(&listCalls),
 		"the List must reach the server, not short-circuit on a stale error")
+}
+
+func TestParseResponseReadsLegacyStaticNodeComponentVolumes(t *testing.T) {
+	const response = `[
+		{
+			"id": 1,
+			"kind": "StaticNode",
+			"metadata": {"workspace": "default", "name": "worker-0"},
+			"spec": {
+				"cluster": "static-a",
+				"components": [{
+					"name": "accelerator-exporter",
+					"image": "example.com/exporter:v1",
+					"volumes": [{
+						"name": "driver",
+						"host_path": "/opt/vendor/driver",
+						"mount_path": "/driver",
+						"read_only": true
+					}]
+				}]
+			}
+		}
+	]`
+
+	var nodes []v1.StaticNode
+	require.NoError(t, parseResponse(&nodes, []byte(response)))
+	require.Len(t, nodes, 1)
+	require.NotNil(t, nodes[0].Spec)
+	require.Len(t, nodes[0].Spec.Components, 1)
+
+	component := nodes[0].Spec.Components[0]
+	require.Len(t, component.Volumes, 1)
+	require.NotNil(t, component.Volumes[0].HostPath)
+	require.Equal(t, "/opt/vendor/driver", component.Volumes[0].HostPath.Path)
+	require.Len(t, component.VolumeMounts, 1)
+	require.NotNil(t, component.VolumeMounts[0].ReadOnly)
+	require.True(t, *component.VolumeMounts[0].ReadOnly)
 }

@@ -86,8 +86,7 @@ func buildMetricsComponents(
 ) ([]v1.NodeComponentSpec, error) {
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
-	if exporter := acceleratorExporterProfile(profile); exporter != nil &&
-		acceleratorExporterMode(cluster) != v1.ClusterAcceleratorExporterModeExternal {
+	if exporter := acceleratorExporterProfile(profile); exporter != nil {
 		components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 	}
 
@@ -243,7 +242,7 @@ func nodeAgentComponentArgs(cluster *v1.StaticNodeCluster, profile *v1.Accelerat
 	if err != nil || !supportsExplicitProfileContract || profile == nil || profile.AcceleratorType == "" {
 		args = append(args,
 			"--cluster-type=ray",
-			"--metrics-mode="+string(acceleratorExporterMode(cluster)),
+			"--metrics-mode=managed",
 			fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
 			"--procfs-root=/host/proc",
 			"--cgroupfs-root=/host/sys/fs/cgroup",
@@ -259,59 +258,25 @@ func nodeAgentComponentArgs(cluster *v1.StaticNodeCluster, profile *v1.Accelerat
 		"--cgroupfs-root=/host/sys/fs/cgroup",
 	)
 
-	return append(args, nodeAgentProfileTargetArgs(profile, acceleratorExporterMode(cluster))...)
+	return append(args, nodeAgentProfileTargetArgs(profile)...)
 }
 
-func nodeAgentProfileTargetArgs(
-	profile *v1.AcceleratorProfile,
-	mode v1.ClusterAcceleratorExporterMode,
-) []string {
+func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
 	if profile == nil || profile.AcceleratorType == "" {
 		return nil
 	}
 
 	args := []string{"--accelerator-type=" + profile.AcceleratorType}
-	target := acceleratorExporterTargetForMode(profile, mode)
+	exporter := acceleratorExporterProfile(profile)
 
-	if target == nil {
+	if exporter == nil {
 		return args
 	}
 
 	return append(args,
-		fmt.Sprintf("--accelerator-exporter-port=%d", target.Port),
-		"--accelerator-exporter-metrics-path="+exporterMetricsPath(target.MetricsPath),
+		fmt.Sprintf("--accelerator-exporter-port=%d", exporter.Port),
+		"--accelerator-exporter-metrics-path="+exporterMetricsPath(exporter.MetricsPath),
 	)
-}
-
-func acceleratorExporterTargetForMode(
-	profile *v1.AcceleratorProfile,
-	mode v1.ClusterAcceleratorExporterMode,
-) *v1.MetricsTargetProfile {
-	if profile == nil {
-		return nil
-	}
-
-	if mode == v1.ClusterAcceleratorExporterModeExternal {
-		return profile.ExternalMetricsTarget
-	}
-
-	exporter := acceleratorExporterProfile(profile)
-	if exporter == nil {
-		return nil
-	}
-
-	return &v1.MetricsTargetProfile{
-		Port:        exporter.Port,
-		MetricsPath: exporter.MetricsPath,
-	}
-}
-
-func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {
-	if cluster == nil || cluster.Spec == nil {
-		return v1.ClusterAcceleratorExporterModeManaged
-	}
-
-	return (&v1.ClusterConfig{Metrics: cluster.Spec.Metrics}).AcceleratorExporterMode()
 }
 
 func selectedNodeAgentImage(clusterVersion string, profile *v1.AcceleratorProfile) (string, error) {
@@ -470,7 +435,7 @@ func attachMetricsConfigFiles(cluster *v1.StaticNodeCluster, plans []DesiredNode
 
 		appendComponentConfigFile(node, vmagentComponentName, v1.NodeComponentConfigFile{
 			Path:         vmagentConfigPath,
-			Content:      renderVMAgentConfig(cluster, plans),
+			Content:      renderVMAgentConfig(plans),
 			Mode:         "0644",
 			Owner:        "root",
 			Group:        "root",
@@ -485,7 +450,7 @@ func attachMetricsConfigFiles(cluster *v1.StaticNodeCluster, plans []DesiredNode
 	}
 }
 
-func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan) string {
+func renderVMAgentConfig(plans []DesiredNodePlan) string {
 	plans = append([]DesiredNodePlan{}, plans...)
 	sort.SliceStable(plans, func(i, j int) bool {
 		return plans[i].Node.Metadata.Name < plans[j].Node.Metadata.Name
@@ -512,7 +477,7 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 		MetricRelabelConfigs: staticVMAgentRayMetricRelabelConfigs,
 	})
 
-	groups := acceleratorExporterTargetGroups(cluster, plans)
+	groups := acceleratorExporterTargetGroups(plans)
 	for _, group := range groups {
 		scrapeConfig := staticVMAgentScrapeConfig{
 			JobName:    group.JobName,
@@ -562,7 +527,7 @@ func renderVMAgentFileSDConfigFiles(
 		))
 	}
 
-	for _, group := range acceleratorExporterTargetGroups(cluster, plans) {
+	for _, group := range acceleratorExporterTargetGroups(plans) {
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
 			vmagentFileSDDir+"/"+group.JobName+".json",
 			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
@@ -732,16 +697,12 @@ type acceleratorExporterTarget struct {
 	Port            int
 }
 
-func acceleratorExporterTargetGroups(
-	cluster *v1.StaticNodeCluster,
-	plans []DesiredNodePlan,
-) []acceleratorExporterTargetGroup {
+func acceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
 	groupsByAcceleratorType := map[string]acceleratorExporterTargetGroup{}
-	mode := acceleratorExporterMode(cluster)
 
 	for _, plan := range plans {
-		target := acceleratorExporterTargetForMode(plan.AcceleratorProfile, mode)
-		if target == nil || plan.Node == nil || plan.Node.Spec == nil ||
+		exporter := acceleratorExporterProfile(plan.AcceleratorProfile)
+		if exporter == nil || plan.Node == nil || plan.Node.Spec == nil ||
 			plan.Accelerator == nil || plan.Accelerator.Type == "" {
 			continue
 		}
@@ -751,14 +712,14 @@ func acceleratorExporterTargetGroups(
 
 		if group.AcceleratorType == "" {
 			group.AcceleratorType = acceleratorType
-			group.MetricsPath = exporterMetricsPath(target.MetricsPath)
+			group.MetricsPath = exporterMetricsPath(exporter.MetricsPath)
 			group.JobName = acceleratorExporterMetricsJobName(acceleratorType)
 		}
 
 		group.Targets = append(group.Targets, acceleratorExporterTarget{
 			Node:            plan.Node,
 			AcceleratorType: acceleratorType,
-			Port:            target.Port,
+			Port:            exporter.Port,
 		})
 		groupsByAcceleratorType[acceleratorType] = group
 	}

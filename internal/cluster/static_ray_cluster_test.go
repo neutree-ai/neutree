@@ -98,6 +98,27 @@ func TestStaticRayReconcilerCreatesStaticNodeCluster(t *testing.T) {
 	store.AssertExpectations(t)
 }
 
+func TestStaticRayReconcilerRejectsExternalAcceleratorExporterBeforeStorageRead(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	reconciler := &staticRayReconciler{storage: store}
+	cluster := staticRayTestCluster("static-external", "v1.2.0", "10.0.0.10")
+	cluster.Spec.Config.Metrics = &v1.ClusterMetricsConfig{
+		AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+			Mode: v1.ClusterAcceleratorExporterModeExternal,
+		},
+	}
+	store.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Maybe()
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedStaticNodeImageRegistry()}, nil).Maybe()
+	store.On("CreateStaticNodeCluster", mock.Anything).Return(nil).Maybe()
+
+	err := reconciler.Reconcile(context.Background(), cluster)
+
+	require.EqualError(t, err, "accelerator_exporter.mode=external is not supported for SSH static clusters")
+	store.AssertNotCalled(t, "ListStaticNodeCluster", mock.Anything)
+	store.AssertNotCalled(t, "ListImageRegistry", mock.Anything)
+	store.AssertNotCalled(t, "CreateStaticNodeCluster", mock.Anything)
+}
+
 func TestStaticRayReconcilerRejectsInitializedHeadChange(t *testing.T) {
 	reconciler := &staticRayReconciler{}
 	cluster := staticRayTestCluster("static-head-change", "v1.0.2", "10.0.0.20")

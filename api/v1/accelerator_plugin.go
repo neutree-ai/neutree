@@ -103,9 +103,9 @@ type AcceleratorProfile struct {
 	// MetricsExporter describes the optional metrics exporter used for accelerator
 	// observability on Kubernetes and StaticNode clusters.
 	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
-	// ExternalMetricsTarget identifies an exporter owned by the upstream
-	// orchestration layer when external mode is selected. It is target metadata
-	// only; Neutree does not deploy, probe, or mutate the external workload.
+	// ExternalMetricsTarget identifies a Kubernetes exporter owned by the
+	// upstream orchestration layer when external mode is selected. It is target
+	// metadata only; Neutree does not deploy, probe, or mutate the workload.
 	ExternalMetricsTarget *MetricsTargetProfile `json:"external_metrics_target,omitempty"`
 }
 

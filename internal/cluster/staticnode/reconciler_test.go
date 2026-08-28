@@ -2,6 +2,7 @@ package staticnode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -811,6 +812,32 @@ func TestBuildDockerRunCommandQuotesDockerRunOptions(t *testing.T) {
 	assert.Contains(t, command, "'--volume' '/data:/data;' 'touch' '/tmp/pwned'")
 	assert.NotContains(t, command, "--volume /data:/data; touch /tmp/pwned")
 	assert.NotContains(t, command, " -p ")
+}
+
+func TestBuildDockerRunCommandSupportsLegacySerializedComponent(t *testing.T) {
+	const legacyStaticNode = `{
+		"spec":{
+			"cluster":"static-a",
+			"components":[{
+				"name":"accelerator-exporter",
+				"image":"registry.example.com/exporter:v1",
+				"volumes":[
+					{"name":"driver","host_path":"/opt/vendor/driver","mount_path":"/driver","read_only":true},
+					{"name":"runtime","host_path":"/var/run/vendor","mount_path":"/runtime","read_only":false}
+				]
+			}]
+		}
+	}`
+
+	var node v1.StaticNode
+	require.NoError(t, json.Unmarshal([]byte(legacyStaticNode), &node))
+	require.NotNil(t, node.Spec)
+	require.Len(t, node.Spec.Components, 1)
+
+	command := buildDockerRunCommand(&node, node.Spec.Components[0], "hash-exporter")
+	assert.Contains(t, command, "/opt/vendor/driver:/driver:ro")
+	assert.Contains(t, command, "/var/run/vendor:/runtime")
+	assert.NotContains(t, command, "/var/run/vendor:/runtime:ro")
 }
 
 func TestBuildDockerRunCommandLowersComponentCommandToEntrypoint(t *testing.T) {

@@ -131,6 +131,10 @@ func validateStaticNodeClusterSpec(c *v1.Cluster) error {
 		return errors.New("cluster spec is required")
 	}
 
+	if c.Spec.Config.AcceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal {
+		return errors.New("accelerator_exporter.mode=external is not supported for SSH static clusters")
+	}
+
 	if c.Spec.Version == "" {
 		return errors.New("cluster spec.version is required")
 	}

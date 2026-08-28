@@ -205,9 +205,11 @@ scrape_configs:
 {{ end }}
   kubernetes_sd_configs:
   - role: pod
+{{ if .Namespace }}
     namespaces:
       names:
       - {{ .Namespace }}
+{{ end }}
     selectors:
     - role: pod
       label: {{ .KubernetesLabelSelector }}

@@ -56,6 +56,11 @@ func (r *Planner) buildDesiredNodePlans(
 		return nil, errors.New("static node cluster spec is required")
 	}
 
+	if (&v1.ClusterConfig{Metrics: cluster.Spec.Metrics}).AcceleratorExporterMode() ==
+		v1.ClusterAcceleratorExporterModeExternal {
+		return nil, errors.New("accelerator_exporter.mode=external is not supported for SSH static clusters")
+	}
+
 	if cluster.Spec.Version == "" {
 		return nil, errors.New("static node cluster spec.version is required")
 	}

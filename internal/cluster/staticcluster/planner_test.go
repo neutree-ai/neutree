@@ -358,53 +358,38 @@ func TestPlannerDoesNotBackfillStaticNodeAgentAcceleratorType(t *testing.T) {
 }
 
 func TestPlannerUsesLegacyNodeAgentContractBeforeV112(t *testing.T) {
-	testCases := []struct {
-		name string
-		mode v1.ClusterAcceleratorExporterMode
-	}{
-		{name: "managed", mode: v1.ClusterAcceleratorExporterModeManaged},
-		{name: "external", mode: v1.ClusterAcceleratorExporterModeExternal},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			cluster := testStaticNodeCluster()
-			cluster.Spec.Version = "v1.1.1"
-			cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
-				AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: testCase.mode},
-			}
-			planner := &Planner{
-				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
-					profiles: map[string]*v1.AcceleratorProfile{
-						v1.AcceleratorTypeNVIDIAGPU.String(): {
-							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-							MetricsExporter: &v1.AcceleratorExporterProfile{
-								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-								Port:  19400,
-							},
-						},
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.1.1"
+	planner := &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:  19400,
 					},
 				},
-			}
-
-			nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
-				staticNodeStatusWithAccelerator(
-					"head-0",
-					v1.StaticNodeRoleHead,
-					v1.StaticNodePhaseReady,
-					true,
-					nvidiaAcceleratorStatus(),
-					nil,
-				),
-			})
-
-			nodeAgent := findComponent(nodes[0].Spec.Components, nodeAgentComponentName)
-			require.NotNil(t, nodeAgent)
-			assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
-			assert.Contains(t, nodeAgent.Args, "--metrics-mode="+string(testCase.mode))
-			assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
-		})
+			},
+		},
 	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+	})
+
+	nodeAgent := findComponent(nodes[0].Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
+	assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 }
 
 func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {

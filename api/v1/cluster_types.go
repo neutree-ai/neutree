@@ -108,7 +108,8 @@ type ClusterMetricsConfig struct {
 type ClusterAcceleratorExporterConfig struct {
 	// Mode controls accelerator exporter ownership.
 	// managed installs and scrapes the Neutree-managed exporter when the cluster version supports it.
-	// external skips exporter installation and scrapes an existing exporter through the legacy contract.
+	// external skips exporter installation and discovers an existing Kubernetes exporter.
+	// SSH static clusters do not support external mode.
 	Mode ClusterAcceleratorExporterMode `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 

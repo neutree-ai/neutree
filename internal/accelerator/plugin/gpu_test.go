@@ -334,6 +334,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, map[string]string{"app.kubernetes.io/component": "hami-device-plugin"}, profile.VirtualizationMetricsTarget.PodSelector)
 	assert.Equal(t, 9394, profile.VirtualizationMetricsTarget.Port)
 	assert.Equal(t, "/metrics", profile.VirtualizationMetricsTarget.MetricsPath)
+	assert.Empty(t, profile.ExternalMetricsTarget.Namespace)
 	assert.Equal(t, map[string]string{"app": "nvidia-dcgm-exporter"}, profile.ExternalMetricsTarget.PodSelector)
 	assert.Equal(t, nvidiaGPUOperatorDCGMExporterPort, profile.ExternalMetricsTarget.Port)
 	assert.Equal(t, "/metrics", profile.ExternalMetricsTarget.MetricsPath)

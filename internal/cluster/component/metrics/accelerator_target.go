@@ -46,10 +46,6 @@ func (m *MetricsComponent) acceleratorExporterScrapeTargets(
 			}
 
 			target.Namespace = plan.ExternalMetricsTarget.Namespace
-			if target.Namespace == "" {
-				target.Namespace = m.namespace
-			}
-
 			target.PodSelector = cloneStringMap(plan.ExternalMetricsTarget.PodSelector)
 			target.Port = plan.ExternalMetricsTarget.Port
 			target.MetricsPath = metricsTargetPath(plan.ExternalMetricsTarget.MetricsPath)

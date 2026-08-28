@@ -160,6 +160,87 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "GPU-abc", decoded.Status.Allocations[0].Devices[0].UUID)
 }
 
+func TestStaticNodeComponentReadsLegacyVolumeLayout(t *testing.T) {
+	const legacyStaticNode = `{
+		"kind":"StaticNode",
+		"metadata":{"workspace":"default","name":"worker-0"},
+		"spec":{
+			"cluster":"static-a",
+			"components":[{
+				"name":"accelerator-exporter",
+				"image":"example.com/exporter:v1",
+				"volumes":[
+					{"name":"driver","host_path":"/opt/vendor/driver","mount_path":"/driver","read_only":true},
+					{"name":"runtime","host_path":"/var/run/vendor","mount_path":"/runtime","read_only":false}
+				]
+			}]
+		}
+	}`
+
+	var node StaticNode
+	require.NoError(t, json.Unmarshal([]byte(legacyStaticNode), &node))
+	require.NotNil(t, node.Spec)
+	require.Len(t, node.Spec.Components, 1)
+
+	component := node.Spec.Components[0]
+	require.Len(t, component.Volumes, 2)
+	require.NotNil(t, component.Volumes[0].HostPath)
+	assert.Equal(t, "/opt/vendor/driver", component.Volumes[0].HostPath.Path)
+	assert.Empty(t, component.Volumes[0].HostPath.Type)
+	require.Len(t, component.VolumeMounts, 2)
+	assert.Equal(t, ComponentVolumeMount{Name: "driver", MountPath: "/driver", ReadOnly: boolPtr(true)}, component.VolumeMounts[0])
+	assert.Equal(t, ComponentVolumeMount{Name: "runtime", MountPath: "/runtime", ReadOnly: boolPtr(false)}, component.VolumeMounts[1])
+
+	canonical, err := json.Marshal(node)
+	require.NoError(t, err)
+	assert.Contains(t, string(canonical), `"host_path":{"path":"/opt/vendor/driver"}`)
+	assert.NotContains(t, string(canonical), `"host_path":"/opt/vendor/driver"`)
+	assert.Contains(t, string(canonical), `"volume_mounts"`)
+
+	var rewritten StaticNode
+	require.NoError(t, json.Unmarshal(canonical, &rewritten))
+	require.NotNil(t, rewritten.Spec)
+	require.Len(t, rewritten.Spec.Components, 1)
+	assert.Equal(t, component, rewritten.Spec.Components[0])
+}
+
+func TestStaticNodeComponentPrefersCanonicalVolumeMountOverLegacyMount(t *testing.T) {
+	const mixedStaticNode = `{
+		"spec":{
+			"components":[{
+				"name":"accelerator-exporter",
+				"volumes":[{
+					"name":"driver",
+					"host_path":"/opt/vendor/driver",
+					"mount_path":"/legacy-driver",
+					"read_only":true
+				}],
+				"volume_mounts":[{
+					"name":"driver",
+					"mount_path":"/canonical-driver",
+					"read_only":false
+				}]
+			}]
+		}
+	}`
+
+	var node StaticNode
+	require.NoError(t, json.Unmarshal([]byte(mixedStaticNode), &node))
+	require.NotNil(t, node.Spec)
+	require.Len(t, node.Spec.Components, 1)
+
+	component := node.Spec.Components[0]
+	require.Len(t, component.Volumes, 1)
+	require.Len(t, component.VolumeMounts, 1)
+	assert.Equal(t, "/canonical-driver", component.VolumeMounts[0].MountPath)
+	require.NotNil(t, component.VolumeMounts[0].ReadOnly)
+	assert.False(t, *component.VolumeMounts[0].ReadOnly)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
 func TestStaticNodeAPIShapeOmitsInternalOrDerivedFields(t *testing.T) {
 	clusterSpecType := reflect.TypeOf(ClusterSpec{})
 	_, hasParentUpgradeStrategy := clusterSpecType.FieldByName("UpgradeStrategy")
