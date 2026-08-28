@@ -358,6 +358,7 @@ func staticNodeComponentVolumes(
 	}
 
 	result := make([]v1.NodeComponentVolume, 0, len(mounts))
+
 	for _, mount := range mounts {
 		volume, exists := volumeByName[mount.Name]
 		if !exists || volume.HostPath == nil {

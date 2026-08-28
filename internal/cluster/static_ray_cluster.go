@@ -531,6 +531,7 @@ func copyStaticClusterMetrics(metrics *v1.ClusterMetricsConfig) *v1.ClusterMetri
 	}
 
 	copied := *metrics
+
 	if metrics.AcceleratorExporter != nil {
 		exporter := *metrics.AcceleratorExporter
 		copied.AcceleratorExporter = &exporter
