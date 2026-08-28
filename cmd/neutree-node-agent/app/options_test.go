@@ -1,0 +1,227 @@
+package app
+
+import (
+	"testing"
+
+	"github.com/spf13/pflag"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics"
+	nvidiaadapter "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/adapter/nvidia"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/allocation"
+	metricskubernetes "github.com/neutree-ai/neutree/internal/observability/neutreemetrics/kubernetes"
+	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/runtimeusage"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+)
+
+func TestOptionsConfigDefaults(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	assert.NoError(t, err)
+	assert.Equal(t, ":9101", config.ListenAddress)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{}, config.ScrapeTargetProvider)
+	assert.Equal(t, adapter.CanonicalLabels{ClusterType: v1.SSHClusterType}, config.Labels)
+	assert.Nil(t, config.KubernetesWriter)
+}
+
+func TestNewOptionsUsesKubeletPodResourcesDefault(t *testing.T) {
+	opts := newOptions()
+
+	assert.Equal(t, metricskubernetes.DefaultKubeletPodResourcesSocket, opts.kubeletPodResourcesSock)
+}
+
+func TestOptionsDoesNotExposeMetricsMode(t *testing.T) {
+	opts := newOptions()
+	flags := pflag.NewFlagSet("node-agent", pflag.ContinueOnError)
+
+	opts.addFlags(flags)
+
+	assert.Nil(t, flags.Lookup("metrics-mode"))
+}
+
+func TestOptionsConfigRequiresNodeForKubernetes(t *testing.T) {
+	opts := newOptions()
+
+	_, err := opts.configWithRegistry(adapterRegistry{})
+
+	assert.ErrorContains(t, err, "node name is required")
+}
+
+func TestOptionsConfigSkipsKubernetesWriterForRay(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	assert.NoError(t, err)
+	assert.Nil(t, config.KubernetesWriter)
+}
+
+func TestOptionsConfigEnablesRayAcceleratorEvidenceProvider(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.rayDashboardURL = "http://10.0.0.10:8265"
+	opts.node = "head-0"
+	opts.nodeIP = "10.0.0.10"
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	require.NoError(t, err)
+	provider, ok := config.StaticAcceleratorEvidenceProvider.(allocation.RayServeAllocationProvider)
+	require.True(t, ok)
+	assert.Equal(t, "http://10.0.0.10:8265", provider.DashboardURL)
+	assert.Equal(t, "10.0.0.10", provider.NodeIP)
+	runtimeProvider, ok := config.RuntimeUsageProvider.(runtimeusage.RayServeRuntimeUsageProvider)
+	require.True(t, ok)
+	assert.Equal(t, "http://10.0.0.10:8265", runtimeProvider.DashboardURL)
+	assert.Equal(t, "head-0", runtimeProvider.Node)
+	assert.Equal(t, "10.0.0.10", runtimeProvider.NodeIP)
+	assert.Equal(t, adapter.CanonicalLabels{
+		ClusterType: v1.SSHClusterType,
+		Node:        "head-0",
+		NodeIP:      "10.0.0.10",
+	}, config.Labels)
+}
+
+func TestOptionsAcceleratorEvidenceProviderUsesKubernetesRawEvidence(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	writer := &metricskubernetes.AnnotationWriter{
+		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
+		NodeName: "node-a",
+	}
+	opts := newOptions()
+	opts.clusterType = v1.KubernetesClusterType
+
+	kubernetesEvidenceProvider, staticEvidenceProvider := opts.acceleratorEvidenceProviders(writer)
+
+	_, ok := kubernetesEvidenceProvider.(allocation.KubernetesAllocationProvider)
+	assert.True(t, ok)
+	assert.Nil(t, staticEvidenceProvider)
+}
+
+func TestOptionsConfigAllowsUnregisteredAcceleratorType(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "unknown-accelerator"
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	assert.NoError(t, err)
+	assert.Equal(t, "unknown-accelerator", config.AcceleratorType)
+	assert.Empty(t, config.Accelerators)
+}
+
+func TestOptionsConfigAcceptsRegisteredAcceleratorType(t *testing.T) {
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: "fixture"}})
+	require.NoError(t, err)
+
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "fixture"
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Equal(t, "fixture", config.AcceleratorType)
+	assert.Contains(t, config.Accelerators, "fixture")
+}
+
+func TestOptionsConfigCarriesExplicitAcceleratorExporterTarget(t *testing.T) {
+	registry, err := newAdapterRegistry([]adapter.Accelerator{registryTestAdapter{typ: "fixture"}})
+	require.NoError(t, err)
+
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.acceleratorType = "fixture"
+	opts.acceleratorExporterPort = 8082
+	opts.acceleratorExporterPath = "/accelerator-metrics"
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Equal(t, 8082, config.AcceleratorExporterPort)
+	assert.Equal(t, "/accelerator-metrics", config.AcceleratorExporterMetricsPath)
+	assert.Equal(t, neutreemetrics.StaticScrapeTargetProvider{
+		AcceleratorType:                "fixture",
+		AcceleratorExporterPort:        8082,
+		AcceleratorExporterMetricsPath: "/accelerator-metrics",
+	}, config.ScrapeTargetProvider)
+}
+
+func TestOptionsConfigDecodesVirtualizationMetricsTarget(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+	opts.virtualizationMetricsTargetJSON = `{
+  "namespace":"kube-system",
+  "pod_selector":{"app.kubernetes.io/component":"hami-device-plugin"},
+  "port":9394,
+  "metrics_path":"/metrics"
+}`
+
+	config, err := opts.configWithRegistry(adapterRegistry{})
+
+	require.NoError(t, err)
+	assert.Equal(t, &v1.MetricsTargetProfile{
+		Namespace:   "kube-system",
+		PodSelector: map[string]string{"app.kubernetes.io/component": "hami-device-plugin"},
+		Port:        9394,
+		MetricsPath: "/metrics",
+	}, config.VirtualizationMetricsTarget)
+}
+
+func TestOptionsDecodesExternalExporterSelector(t *testing.T) {
+	opts := newOptions()
+	opts.acceleratorExporterSelectorJSON = `{"app":"external-exporter","role":"accelerator"}`
+
+	selector, err := opts.acceleratorExporterSelector()
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"app":  "external-exporter",
+		"role": "accelerator",
+	}, selector)
+}
+
+func TestOptionsRejectsMalformedExternalExporterSelector(t *testing.T) {
+	opts := newOptions()
+	opts.acceleratorExporterSelectorJSON = "not-json"
+
+	_, err := opts.acceleratorExporterSelector()
+
+	assert.ErrorContains(t, err, "decode accelerator exporter pod selector")
+}
+
+func TestOptionsConfigLeavesAdapterUnselectedWhenAcceleratorTypeEmpty(t *testing.T) {
+	opts := newOptions()
+	opts.clusterType = v1.SSHClusterType
+
+	registry, err := newAdapterRegistry([]adapter.Accelerator{nvidiaadapter.New()})
+	require.NoError(t, err)
+
+	config, err := opts.configWithRegistry(registry)
+
+	require.NoError(t, err)
+	assert.Empty(t, config.AcceleratorType)
+	assert.Contains(t, config.Accelerators, v1.AcceleratorTypeNVIDIAGPU.String())
+}
+
+func TestOptionsAcceleratorTypeFlagHelpOmitsLegacyFallbackText(t *testing.T) {
+	opts := newOptions()
+	flags := pflag.NewFlagSet("neutree-node-agent", pflag.ContinueOnError)
+
+	opts.addFlags(flags)
+
+	flag := flags.Lookup("accelerator-type")
+	require.NotNil(t, flag)
+	assert.NotContains(t, flag.Usage, "legacy DCGM path")
+}

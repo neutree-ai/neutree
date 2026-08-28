@@ -25,7 +25,7 @@ type StaticNodeClusterSpec struct {
 	Version string `json:"version,omitempty"`
 	// ImageRegistry is the registry prefix used when rendering static node component images.
 	ImageRegistry string `json:"image_registry,omitempty"`
-	// Metrics configures static-node observability collectors.
+	// Metrics configures static-node observability ownership.
 	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	// Nodes declares the desired static machines that make up the cluster.
 	// mergekey makes the API proxy backfill each node's masked ssh_auth from the
@@ -207,8 +207,10 @@ type NodeComponentSpec struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Ports declares host ports expected to be exposed by the component.
 	Ports []NodeComponentPort `json:"ports,omitempty"`
-	// Volumes declares host path mounts for the component container.
-	Volumes []NodeComponentVolume `json:"volumes,omitempty"`
+	// Volumes declares host path sources for the component container.
+	Volumes []ComponentVolume `json:"volumes,omitempty"`
+	// VolumeMounts declares where component volumes are mounted in the container.
+	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
 	// DockerRunOptions are extra docker run flags appended by the controller.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 	// ConfigFiles declares files that must be written before starting the component.
@@ -226,17 +228,6 @@ type NodeComponentPort struct {
 	Port int `json:"port,omitempty"`
 	// Protocol is the port protocol, for example TCP.
 	Protocol string `json:"protocol,omitempty"`
-}
-
-type NodeComponentVolume struct {
-	// Name is the logical mount name.
-	Name string `json:"name,omitempty"`
-	// HostPath is the path on the static node host.
-	HostPath string `json:"host_path,omitempty"`
-	// MountPath is the path inside the component container.
-	MountPath string `json:"mount_path,omitempty"`
-	// ReadOnly mounts the host path read-only when true.
-	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 type NodeComponentConfigFile struct {

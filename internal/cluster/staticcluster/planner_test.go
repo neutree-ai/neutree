@@ -2,12 +2,14 @@ package staticcluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
@@ -21,6 +23,29 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 					"ACCELERATOR_TYPE": "gpu",
 				},
 				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
+			},
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+				Image:      "neutree/neutree-node-agent:v1.2.0-rc.1",
+				Privileged: true,
+				Env: map[string]string{
+					"NVIDIA_VISIBLE_DEVICES": "all",
+				},
+				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
+				Volumes: []v1.ComponentVolume{{
+					Name:     "vendor-driver",
+					HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
+				}},
+				VolumeMounts:     []v1.ComponentVolumeMount{{Name: "vendor-driver", MountPath: "/opt/vendor/driver"}},
+				Runtime:          "nvidia",
+				DockerRunOptions: []string{"--gpus all"},
+			},
+			VirtualizationMetricsTarget: &v1.MetricsTargetProfile{
+				Namespace: "kube-system",
+				PodSelector: map[string]string{
+					"app.kubernetes.io/component": "hami-device-plugin",
+				},
+				Port:        9394,
+				MetricsPath: "/metrics",
 			},
 			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
@@ -37,10 +62,8 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 					},
 				},
 				Runtime: &v1.AcceleratorExporterRuntimeProfile{
-					HostNetwork: true,
-					Capabilities: &v1.AcceleratorExporterCapabilities{
-						Add: []string{"SYS_ADMIN"},
-					},
+					HostNetwork:      true,
+					Capabilities:     &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 					Runtime:          "nvidia",
 					DockerRunOptions: []string{"--gpus all"},
 				},
@@ -115,7 +138,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -140,16 +163,16 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, exporter.Env)
 	assert.Equal(t, []string{"--net=host", "--cap-add=SYS_ADMIN", "--runtime=nvidia", "--gpus all"}, exporter.DockerRunOptions)
 	assert.Equal(t, "DCGM_FI_DEV_GPU_TEMP, gauge, GPU temperature.", exporter.ConfigFiles[0].Content)
-	assert.Equal(t, "/etc/neutree/dcgm-exporter/default-counters.csv", exporter.Volumes[0].MountPath)
+	requireVolume(t, exporter, "accelerator-exporter-config-0", "/etc/neutree/dcgm-exporter/default-counters.csv", "/etc/neutree/dcgm-exporter/default-counters.csv")
 	assert.Equal(t, 19400, exporter.Ports[0].Port)
 	require.NotNil(t, exporter.HealthCheck)
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1", nodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1", nodeAgent.Image)
 	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
-	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
-	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
+	assert.Contains(t, nodeAgent.Args, "--cluster-type="+v1.SSHClusterType)
+	assert.NotContains(t, nodeAgent.Args, "--metrics-mode=managed")
 	assert.Contains(t, nodeAgent.Args, "--ray-dashboard-url=http://10.0.0.10:8265")
 	assert.NotContains(t, nodeAgent.Args, "--node-exporter-url=http://127.0.0.1:19100/metrics")
 	assert.NotContains(t, nodeAgent.Args, "--accelerator-exporter-url=http://127.0.0.1:19400/metrics")
@@ -157,7 +180,9 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, nodeAgent.Args, "--cgroupfs-root=/host/sys/fs/cgroup")
 	assert.Contains(t, nodeAgent.Args, "--node=head-0")
 	assert.Contains(t, nodeAgent.Args, "--node-ip=10.0.0.10")
-	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, nodeAgent.Env)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.Equal(t, "all", nodeAgent.Env["NVIDIA_VISIBLE_DEVICES"])
+	assert.Empty(t, nodeAgent.Env[v1.VirtualizationMetricsTargetEnvKey])
 	assert.NotContains(t, nodeAgent.Args, "--workspace=default")
 	assert.NotContains(t, nodeAgent.Args, "--cluster=static-a")
 	assert.NotContains(t, nodeAgent.Args, "--static-node-cluster=static-a")
@@ -171,6 +196,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.NotContains(t, nodeAgent.DockerRunOptions, "--volume /cluster-only:/cluster-only:ro")
 	requireVolume(t, nodeAgent, "host-proc", "/proc", "/host/proc")
 	requireVolume(t, nodeAgent, "host-cgroup", "/sys/fs/cgroup", "/host/sys/fs/cgroup")
+	requireVolume(t, nodeAgent, "vendor-driver", "/opt/vendor/driver", "/opt/vendor/driver")
 	require.Len(t, nodeAgent.Ports, 1)
 	assert.Equal(t, 19101, nodeAgent.Ports[0].Port)
 	require.NotNil(t, nodeAgent.HealthCheck)
@@ -251,45 +277,117 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 	})
 
 	cluster.Spec.Version = "mutated"
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", warmImageRef(head.Spec.Warm.Images, "ray-runtime"))
 }
 
-func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
-	tests := []struct {
-		name     string
-		exporter *v1.AcceleratorExporterProfile
-	}{
-		{
-			name: "empty name",
-			exporter: &v1.AcceleratorExporterProfile{
-				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-				Port:  9400,
-			},
-		},
-		{
-			name: "empty image",
-			exporter: &v1.AcceleratorExporterProfile{
-				Name: "dcgm-exporter",
-				Port: 9400,
-			},
-		},
-		{
-			name: "invalid port",
-			exporter: &v1.AcceleratorExporterProfile{
+func TestPlannerCanonicalizesEmptyExporterSlicesBeforeStaticNodeJSONRoundTrip(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	profiles := map[string]*v1.AcceleratorProfile{
+		v1.AcceleratorTypeNVIDIAGPU.String(): {
+			AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+			MetricsExporter: &v1.AcceleratorExporterProfile{
 				Name:  "dcgm-exporter",
 				Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+				Port:  19400,
+			},
+		},
+	}
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady, true, nvidiaAcceleratorStatus(), nil),
+		staticNodeStatusWithAccelerator("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady, true, cpuAcceleratorStatus(), nil),
+	}
+	planner := &Planner{AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: profiles}}
+
+	plans, err := planner.Plan(context.Background(), cluster, currentNodes)
+	require.NoError(t, err)
+	require.Len(t, plans, 2)
+
+	raw, err := json.Marshal(plans[0].Node)
+	require.NoError(t, err)
+
+	observed := &v1.StaticNode{}
+	require.NoError(t, json.Unmarshal(raw, observed))
+	require.NotNil(t, observed.Spec)
+	component := findComponent(observed.Spec.Components, acceleratorExporterComponentName)
+	require.NotNil(t, component)
+	assert.Nil(t, component.Command)
+	assert.Nil(t, component.Args)
+	assert.Nil(t, component.ConfigFiles)
+	assert.Nil(t, component.Volumes)
+	assert.Nil(t, component.VolumeMounts)
+	assert.False(t, staticNodeSpecDrifted(plans[0].Node, observed))
+}
+
+func TestPlannerDoesNotBackfillStaticNodeAgentAcceleratorType(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	profiles := map[string]*v1.AcceleratorProfile{
+		v1.AcceleratorTypeNVIDIAGPU.String(): {
+			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+				Image:   "neutree/neutree-node-agent:v1.2.0-rc.1",
+				Runtime: "nvidia",
 			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{profiles: profiles},
+	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, currentNodes)
+	require.Len(t, nodes, 2)
+
+	head := nodes[0]
+	require.NotNil(t, head.Spec)
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+}
+
+func TestPlannerUsesLegacyNodeAgentContractBeforeV112(t *testing.T) {
+	testCases := []struct {
+		name string
+		mode v1.ClusterAcceleratorExporterMode
+	}{
+		{name: "managed", mode: v1.ClusterAcceleratorExporterModeManaged},
+		{name: "external", mode: v1.ClusterAcceleratorExporterModeExternal},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
 			cluster := testStaticNodeCluster()
-			currentNodes := []*v1.StaticNode{
+			cluster.Spec.Version = "v1.1.1"
+			cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
+				AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: testCase.mode},
+			}
+			planner := &Planner{
+				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+					profiles: map[string]*v1.AcceleratorProfile{
+						v1.AcceleratorTypeNVIDIAGPU.String(): {
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+							MetricsExporter: &v1.AcceleratorExporterProfile{
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
+							},
+						},
+					},
+				},
+			}
+
+			nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
 				staticNodeStatusWithAccelerator(
 					"head-0",
 					v1.StaticNodeRoleHead,
@@ -298,35 +396,170 @@ func TestPlannerSkipsInvalidAcceleratorExporterProfiles(t *testing.T) {
 					nvidiaAcceleratorStatus(),
 					nil,
 				),
-				staticNodeStatusWithAccelerator(
-					"worker-0",
-					v1.StaticNodeRoleWorker,
-					v1.StaticNodePhaseReady,
-					true,
-					cpuAcceleratorStatus(),
-					nil,
-				),
-			}
+			})
 
-			nodes := plannedStaticNodes(t, &Planner{
-				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
-					profiles: map[string]*v1.AcceleratorProfile{
-						v1.AcceleratorTypeNVIDIAGPU.String(): {
-							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-							MetricsExporter: tt.exporter,
-						},
-					},
-				},
-				MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
-			}, cluster, currentNodes)
-
-			head := findStaticNode(nodes, "head-0")
-			require.NotNil(t, head)
-			assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
-			assert.NotEqual(t, "", warmImageRef(head.Spec.Warm.Images, nodeExporterComponentName))
-			assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
+			nodeAgent := findComponent(nodes[0].Spec.Components, nodeAgentComponentName)
+			require.NotNil(t, nodeAgent)
+			assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+			assert.Contains(t, nodeAgent.Args, "--metrics-mode="+string(testCase.mode))
+			assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
 		})
 	}
+}
+
+func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+	planner := &Planner{AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+		profiles: map[string]*v1.AcceleratorProfile{
+			v1.AcceleratorTypeNVIDIAGPU.String(): {
+				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+				NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+					Image: "neutree/neutree-node-agent:v1.2.0-rc.1",
+					Volumes: []v1.ComponentVolume{{
+						Name:     "vendor-driver",
+						HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
+					}},
+				},
+			},
+		},
+	}}
+
+	_, err := planner.Plan(context.Background(), cluster, currentNodes)
+
+	require.NoError(t, err)
+}
+
+func TestAcceleratorExporterConfigVolumesProjectUnvalidatedProfileEntries(t *testing.T) {
+	volumes, mounts := acceleratorExporterConfigVolumes([]v1.AcceleratorExporterConfigFile{
+		{Path: "", Content: "empty-path"},
+		{Path: "relative/exporter.yaml", Content: "relative-path"},
+	})
+
+	require.Len(t, volumes, 2)
+	require.NotNil(t, volumes[0].HostPath)
+	assert.Equal(t, "accelerator-exporter-config-0", volumes[0].Name)
+	assert.Empty(t, volumes[0].HostPath.Path)
+	require.NotNil(t, volumes[1].HostPath)
+	assert.Equal(t, "relative/exporter.yaml", volumes[1].HostPath.Path)
+	require.Len(t, mounts, 2)
+	assert.Equal(t, "", mounts[0].MountPath)
+	assert.Equal(t, "relative/exporter.yaml", mounts[1].MountPath)
+}
+
+func TestBuildAcceleratorExporterComponentProjectsRuntimeRequirements(t *testing.T) {
+	readOnly := true
+	exporter := &v1.AcceleratorExporterProfile{
+		Image: "registry.example.com/accelerator/exporter:v1",
+		Port:  19400,
+		ConfigFiles: []v1.AcceleratorExporterConfigFile{{
+			Path: "/etc/exporter/config.yaml",
+		}},
+		Runtime: &v1.AcceleratorExporterRuntimeProfile{
+			Privileged: true,
+			Volumes: []v1.ComponentVolume{{
+				Name: "driver-root",
+				HostPath: &v1.ComponentHostPathVolumeSource{
+					Path: "/opt/driver",
+					Type: v1.ComponentHostPathTypeDirectory,
+				},
+			}},
+			VolumeMounts: []v1.ComponentVolumeMount{{
+				Name:      "driver-root",
+				MountPath: "/opt/driver",
+				ReadOnly:  &readOnly,
+			}},
+		},
+	}
+
+	component := buildAcceleratorExporterComponent(testStaticNodeCluster(), exporter)
+
+	require.Len(t, component.Volumes, 2)
+	require.Len(t, component.VolumeMounts, 2)
+	assert.Equal(t, "accelerator-exporter-config-0", component.Volumes[0].Name)
+	assert.Equal(t, "driver-root", component.Volumes[1].Name)
+	assert.Equal(t, "accelerator-exporter-config-0", component.VolumeMounts[0].Name)
+	assert.Equal(t, "driver-root", component.VolumeMounts[1].Name)
+	assert.Contains(t, component.DockerRunOptions, "--privileged")
+}
+
+func TestAcceleratorExporterDockerRunOptionsProjectUnvalidatedCapabilities(t *testing.T) {
+	options := acceleratorExporterDockerRunOptions(&v1.AcceleratorExporterRuntimeProfile{
+		Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"", "SYS_ADMIN"}},
+	})
+
+	assert.Equal(t, []string{"--cap-add=", "--cap-add=SYS_ADMIN"}, options)
+}
+
+func TestPlannerProjectsMalformedAcceleratorExporterProfile(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	currentNodes := []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+	}
+
+	nodes := plannedStaticNodes(t, &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+						Image: "neutree/neutree-node-agent:v1.2.0-rc.1",
+					},
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						MetricsPath: "trusted/metrics",
+					},
+				},
+			},
+		},
+	}, cluster, currentNodes)
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	exporter := findComponent(head.Spec.Components, acceleratorExporterComponentName)
+	require.NotNil(t, exporter)
+	assert.Empty(t, exporter.Image)
+	require.Len(t, exporter.Ports, 1)
+	assert.Equal(t, 0, exporter.Ports[0].Port)
+	require.NotNil(t, exporter.HealthCheck)
+	assert.Equal(t, "/trusted/metrics", exporter.HealthCheck.HTTPPath)
+	assert.Equal(t, 0, exporter.HealthCheck.Port)
+
+	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, nodeAgent)
+	assert.Contains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-port=0")
+	assert.Contains(t, nodeAgent.Args, "--accelerator-exporter-metrics-path=/trusted/metrics")
 }
 
 func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
@@ -381,68 +614,6 @@ func TestPlannerIncludesMetricsComponentsForStaticFlowVersion(t *testing.T) {
 	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-node-exporter`)
 	assert.Contains(t, vmagentConfig.Content, `job_name: accelerator-exporter-nvidia-gpu`)
 	assert.NotNil(t, findConfigFile(vmagentComponent.ConfigFiles, vmagentNodeExporterFileSDPath))
-}
-
-func TestPlannerUsesExternalAcceleratorExporterTargets(t *testing.T) {
-	cluster := testStaticNodeCluster()
-	cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
-		AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
-			Mode: v1.ClusterAcceleratorExporterModeExternal,
-		},
-	}
-	currentNodes := []*v1.StaticNode{
-		staticNodeStatusWithAccelerator(
-			"head-0",
-			v1.StaticNodeRoleHead,
-			v1.StaticNodePhaseReady,
-			true,
-			nvidiaAcceleratorStatus(),
-			nil,
-		),
-		staticNodeStatusWithAccelerator(
-			"worker-0",
-			v1.StaticNodeRoleWorker,
-			v1.StaticNodePhaseReady,
-			true,
-			cpuAcceleratorStatus(),
-			nil,
-		),
-	}
-
-	nodes := plannedStaticNodes(t, &Planner{
-		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
-			profiles: map[string]*v1.AcceleratorProfile{
-				v1.AcceleratorTypeNVIDIAGPU.String(): {
-					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-					MetricsExporter: &v1.AcceleratorExporterProfile{
-						Name:        "dcgm-exporter",
-						Image:       "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-						Port:        19400,
-						MetricsPath: "/dcgm/metrics",
-					},
-				},
-			},
-		},
-		MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
-	}, cluster, currentNodes)
-
-	head := findStaticNode(nodes, "head-0")
-	require.NotNil(t, head)
-	assert.NotNil(t, findComponent(head.Spec.Components, nodeExporterComponentName))
-	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
-	assert.Equal(t, "", warmImageRef(head.Spec.Warm.Images, acceleratorExporterComponentName))
-
-	vmagentComponent := findComponent(head.Spec.Components, vmagentComponentName)
-	require.NotNil(t, vmagentComponent)
-	vmagentConfig := findConfigFile(vmagentComponent.ConfigFiles, vmagentConfigPath)
-	require.NotNil(t, vmagentConfig)
-	assert.Contains(t, vmagentConfig.Content, `job_name: static-node-accelerator-exporter`)
-	assert.NotContains(t, vmagentConfig.Content, `metrics_path: "/dcgm/metrics"`)
-
-	acceleratorTargets := findConfigFile(vmagentComponent.ConfigFiles, "/etc/neutree/vmagent/file_sd/accelerator-exporter.json")
-	require.NotNil(t, acceleratorTargets)
-	assert.Contains(t, acceleratorTargets.Content, `"10.0.0.10:9400"`)
-	assert.NotContains(t, acceleratorTargets.Content, `"10.0.0.11:9400"`)
 }
 
 func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
@@ -505,7 +676,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 			})
 
@@ -520,7 +691,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 			})
 		})
 	}
@@ -629,7 +800,7 @@ func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v9.9.9"
 
-	assert.Equal(t, "neutree/neutree-node-agent:v1.1.0-rc.1", defaultNodeAgentImage(cluster))
+	assert.Equal(t, "neutree/neutree-node-agent:v1.2.0-rc.1", defaultNodeAgentImage(cluster))
 }
 
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
@@ -676,7 +847,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.1.0-rc.1",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }
@@ -1595,14 +1766,14 @@ func TestMergeRuntimeConfigDoesNotClearBaseOptions(t *testing.T) {
 	assert.Equal(t, []string{"--profile"}, merged.Options)
 }
 
-func TestMergeRuntimeConfigDoesNotClearBaseEnvValue(t *testing.T) {
+func TestMergeRuntimeConfigAllowsEmptyEnvOverride(t *testing.T) {
 	merged := mergeRuntimeConfig(
 		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": "true"}},
 		&v1.RuntimeConfig{Env: map[string]string{"PROFILE_ONLY": ""}},
 	)
 
 	require.NotNil(t, merged)
-	assert.Equal(t, "true", merged.Env["PROFILE_ONLY"])
+	assert.Equal(t, "", merged.Env["PROFILE_ONLY"])
 }
 
 type staticNodeRuntimeConfigProfileProvider struct {
@@ -1645,7 +1816,7 @@ func findComponent(components []v1.NodeComponentSpec, name string) *v1.NodeCompo
 	return nil
 }
 
-func assertNotContainsVolume(t *testing.T, volumes []v1.NodeComponentVolume, name string) {
+func assertNotContainsVolume(t *testing.T, volumes []v1.ComponentVolume, name string) {
 	t.Helper()
 
 	for _, volume := range volumes {
@@ -1659,7 +1830,7 @@ func requireVolume(
 	name string,
 	hostPath string,
 	mountPath string,
-) v1.NodeComponentVolume {
+) v1.ComponentVolume {
 	t.Helper()
 
 	require.NotNil(t, component)
@@ -1668,16 +1839,25 @@ func requireVolume(
 			continue
 		}
 
-		assert.Equal(t, hostPath, volume.HostPath)
-		assert.Equal(t, mountPath, volume.MountPath)
-		assert.True(t, volume.ReadOnly)
+		require.NotNil(t, volume.HostPath)
+		assert.Equal(t, hostPath, volume.HostPath.Path)
+		for _, mount := range component.VolumeMounts {
+			if mount.Name != name {
+				continue
+			}
 
-		return volume
+			assert.Equal(t, mountPath, mount.MountPath)
+			assert.True(t, mount.ReadOnly == nil || *mount.ReadOnly)
+
+			return volume
+		}
+
+		t.Fatalf("expected component %s to have volume mount %s", component.Name, name)
 	}
 
 	t.Fatalf("expected component %s to have volume %s", component.Name, name)
 
-	return v1.NodeComponentVolume{}
+	return v1.ComponentVolume{}
 }
 
 func findStaticNode(nodes []*v1.StaticNode, name string) *v1.StaticNode {
@@ -1900,10 +2080,8 @@ func TestAcceleratorExporterDockerRunOptions(t *testing.T) {
 		{
 			name: "nvidia runtime with capabilities and docker options",
 			runtime: &v1.AcceleratorExporterRuntimeProfile{
-				HostNetwork: true,
-				Capabilities: &v1.AcceleratorExporterCapabilities{
-					Add: []string{"SYS_ADMIN"},
-				},
+				HostNetwork:      true,
+				Capabilities:     &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 				Runtime:          "nvidia",
 				DockerRunOptions: []string{"--gpus all"},
 			},

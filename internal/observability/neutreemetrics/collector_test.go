@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/neutree-ai/neutree/internal/observability/neutreemetrics/normalizer"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
@@ -74,11 +75,58 @@ func TestMetricsCollectorDropsEndpointAcceleratorSamplesWithoutUUID(t *testing.T
 	require.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`)
 }
 
+func TestMetricsCollectorRendersAdapterOwnedDescriptor(t *testing.T) {
+	output := renderCollectorMetricsWithDescriptors(t, []normalizer.Sample{{
+		Name: "neutree_node_accelerator_vendor_info",
+		Labels: map[string]string{
+			"cluster_type":     "ray",
+			"node":             "worker-0",
+			"accelerator_type": "vendor",
+			"accelerator_uuid": "vendor-0",
+			"driver_version":   "1.2.3",
+		},
+		Value: 1,
+	}}, []adapter.MetricDescriptor{{
+		Name:               "neutree_node_accelerator_vendor_info",
+		LabelNames:         []string{"cluster_type", "node", "accelerator_type", "accelerator_uuid", "driver_version"},
+		RequiredLabelNames: []string{"accelerator_uuid", "driver_version"},
+	}})
+
+	require.Contains(t, output, `neutree_node_accelerator_vendor_info{accelerator_type="vendor",accelerator_uuid="vendor-0",cluster_type="ray",driver_version="1.2.3",node="worker-0"} 1`)
+}
+
+func TestMetricsCollectorDropsAdapterDescriptorWithoutRequiredLabel(t *testing.T) {
+	output := renderCollectorMetricsWithDescriptors(t, []normalizer.Sample{{
+		Name: "neutree_node_accelerator_vendor_info",
+		Labels: map[string]string{
+			"cluster_type":     "ray",
+			"node":             "worker-0",
+			"accelerator_type": "vendor",
+			"accelerator_uuid": "vendor-0",
+		},
+		Value: 1,
+	}}, []adapter.MetricDescriptor{{
+		Name:               "neutree_node_accelerator_vendor_info",
+		LabelNames:         []string{"cluster_type", "node", "accelerator_type", "accelerator_uuid", "driver_version"},
+		RequiredLabelNames: []string{"accelerator_uuid", "driver_version"},
+	}})
+
+	require.NotContains(t, output, `neutree_node_accelerator_vendor_info{`)
+}
+
 func renderCollectorMetrics(t *testing.T, samples []normalizer.Sample) string {
+	return renderCollectorMetricsWithDescriptors(t, samples)
+}
+
+func renderCollectorMetricsWithDescriptors(
+	t *testing.T,
+	samples []normalizer.Sample,
+	descriptors ...[]adapter.MetricDescriptor,
+) string {
 	t.Helper()
 
 	registry := prometheus.NewRegistry()
-	registry.MustRegister(newMetricsCollector(samples))
+	registry.MustRegister(newMetricsCollector(samples, descriptors...))
 
 	request := httptest.NewRequest("GET", "/metrics", nil)
 	response := httptest.NewRecorder()

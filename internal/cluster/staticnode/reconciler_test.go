@@ -611,6 +611,39 @@ func TestReconcilerReconcileNodeDeviceSnapshotSkipsCPUFallback(t *testing.T) {
 	assert.Equal(t, 0, client.calls)
 }
 
+func TestReconcilerReconcileNodeDeviceSnapshotKeepsDetectedGPUWhenSnapshotHasNoDevices(t *testing.T) {
+	fallback := &v1.StaticNodeAcceleratorStatus{
+		Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+		Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+			{UUID: "GPU-abc", ProductName: "NVIDIA A100"},
+		},
+	}
+	client := &fakeNodeDeviceSnapshotClient{
+		snapshot: &v1.NodeDeviceSnapshot{
+			Accelerator: v1.StaticNodeAcceleratorStatus{
+				Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+			},
+			Allocations: []v1.StaticNodeAllocationStatus{
+				{Endpoint: "chat", ReplicaID: "replica-a"},
+			},
+		},
+	}
+
+	accelerator, allocations, err := (&Reconciler{NodeDeviceSnapshotClient: client}).ReconcileNodeDeviceSnapshot(
+		context.Background(),
+		staticNodeForDeviceSnapshot(),
+		fallback,
+		[]v1.NodeComponentStatus{
+			{Name: nodeAgentComponentName, Ready: true, Phase: v1.NodeComponentPhaseRunning},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, fallback, accelerator)
+	require.Len(t, allocations, 1)
+	assert.Equal(t, "chat", allocations[0].Endpoint)
+}
+
 func TestReconcilerReconcileNodeDeviceSnapshotWaitsForNodeAgentReady(t *testing.T) {
 	node := staticNodeForDeviceSnapshot()
 	node.Status = &v1.StaticNodeStatus{
@@ -778,6 +811,22 @@ func TestBuildDockerRunCommandQuotesDockerRunOptions(t *testing.T) {
 	assert.Contains(t, command, "'--volume' '/data:/data;' 'touch' '/tmp/pwned'")
 	assert.NotContains(t, command, "--volume /data:/data; touch /tmp/pwned")
 	assert.NotContains(t, command, " -p ")
+}
+
+func TestBuildDockerRunCommandLowersComponentCommandToEntrypoint(t *testing.T) {
+	command := buildDockerRunCommand(
+		&v1.StaticNode{Spec: &v1.StaticNodeSpec{Cluster: "static-a"}},
+		v1.NodeComponentSpec{
+			Name:    "accelerator-exporter",
+			Image:   "registry.example.com/accelerator/exporter:v1",
+			Command: []string{"/usr/local/bin/exporter"},
+			Args:    []string{"--web.listen-address=:19400"},
+		},
+		"hash-exporter",
+	)
+
+	assert.Contains(t, command, "--entrypoint '/usr/local/bin/exporter' 'registry.example.com/accelerator/exporter:v1' '--web.listen-address=:19400'")
+	assert.NotContains(t, command, "'registry.example.com/accelerator/exporter:v1' '/usr/local/bin/exporter'")
 }
 
 func TestReconcilerReconcileComponentsStartsContainer(t *testing.T) {
@@ -969,6 +1018,7 @@ func TestReconcilerReconcileComponentsUsesLocalImageWithoutPull(t *testing.T) {
 
 func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 	healthHost, healthPort := newStaticNodeHealthServer(t, testDefaultHealthHTTPPath, `ok`)
+	readOnly := true
 	node := &v1.StaticNode{
 		Metadata: testStaticNodeMetadata("head-0"),
 		Spec: &v1.StaticNodeSpec{
@@ -992,13 +1042,15 @@ func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 							CreateParent: true,
 						},
 					},
-					Volumes: []v1.NodeComponentVolume{
-						{
-							HostPath:  testRayConfigPath,
-							MountPath: testRayConfigPath,
-							ReadOnly:  true,
-						},
-					},
+					Volumes: []v1.ComponentVolume{{
+						Name:     "ray-config",
+						HostPath: &v1.ComponentHostPathVolumeSource{Path: testRayConfigPath, Type: v1.ComponentHostPathTypeFile},
+					}},
+					VolumeMounts: []v1.ComponentVolumeMount{{
+						Name:      "ray-config",
+						MountPath: testRayConfigPath,
+						ReadOnly:  &readOnly,
+					}},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultHealthHTTPPath,
 						Port:     healthPort,

@@ -10,29 +10,28 @@ import (
 	"text/template"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
 const (
-	nodeExporterComponentName           = "node-exporter"
-	nodeAgentComponentName              = "neutree-node-agent"
-	vmagentComponentName                = "vmagent"
-	acceleratorExporterComponentName    = "accelerator-exporter"
-	defaultVMAgentPort                  = 8429
-	defaultNodeExporterPort             = 19100
-	defaultNodeAgentPort                = 19101
-	defaultPrometheusHTTPPath           = "/metrics"
-	externalDCGMExporterPort            = 9400
-	defaultHealthHTTPPath               = "/health"
-	vmagentConfigPath                   = "/etc/neutree/vmagent/config.yaml"
-	vmagentFileSDDir                    = "/etc/neutree/vmagent/file_sd"
-	vmagentNodeExporterFileSDPath       = vmagentFileSDDir + "/node-exporter.json"
-	vmagentNodeAgentFileSDPath          = vmagentFileSDDir + "/node-agent.json"
-	vmagentRayFileSDPath                = vmagentFileSDDir + "/ray.json"
-	managedAcceleratorExporterJobPrefix = "accelerator-exporter"
-	defaultNodeExporterImage            = "quay.io/prometheus/node-exporter:" + componentversion.NodeExporter
-	defaultVMAgentImage                 = "victoriametrics/vmagent:" + componentversion.VictoriaMetrics
+	nodeExporterComponentName        = "node-exporter"
+	nodeAgentComponentName           = "neutree-node-agent"
+	vmagentComponentName             = "vmagent"
+	acceleratorExporterComponentName = "accelerator-exporter"
+	defaultVMAgentPort               = 8429
+	defaultNodeExporterPort          = 19100
+	defaultNodeAgentPort             = 19101
+	defaultPrometheusHTTPPath        = "/metrics"
+	defaultHealthHTTPPath            = "/health"
+	vmagentConfigPath                = "/etc/neutree/vmagent/config.yaml"
+	vmagentFileSDDir                 = "/etc/neutree/vmagent/file_sd"
+	vmagentNodeExporterFileSDPath    = vmagentFileSDDir + "/node-exporter.json"
+	vmagentNodeAgentFileSDPath       = vmagentFileSDDir + "/node-agent.json"
+	vmagentRayFileSDPath             = vmagentFileSDDir + "/ray.json"
+	acceleratorExporterJobPrefix     = "accelerator-exporter"
+	defaultNodeExporterImage         = "quay.io/prometheus/node-exporter:" + component.NodeExporter
+	defaultVMAgentImage              = "victoriametrics/vmagent:" + component.VictoriaMetrics
 )
 
 const staticVMAgentConfigTemplateText = `global:
@@ -84,22 +83,26 @@ func buildMetricsComponents(
 	role v1.StaticNodeRole,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
-) []v1.NodeComponentSpec {
+) ([]v1.NodeComponentSpec, error) {
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
-	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeManaged {
-		if exporter := acceleratorExporterProfile(profile); validAcceleratorExporterProfile(exporter) {
-			components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
-		}
+	if exporter := acceleratorExporterProfile(profile); exporter != nil &&
+		acceleratorExporterMode(cluster) != v1.ClusterAcceleratorExporterModeExternal {
+		components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 	}
 
-	components = append(components, buildNodeAgentComponent(cluster, node, profile))
+	nodeAgent, err := buildNodeAgentComponent(cluster, node, profile)
+	if err != nil {
+		return nil, err
+	}
+
+	components = append(components, nodeAgent)
 
 	if role == v1.StaticNodeRoleHead && util.IsHTTPOrHTTPSURL(metricsRemoteWriteURL) {
 		components = append(components, buildVMAgentComponent(cluster, metricsRemoteWriteURL))
 	}
 
-	return components
+	return components, nil
 }
 
 func buildNodeExporterComponent(cluster *v1.StaticNodeCluster) v1.NodeComponentSpec {
@@ -114,14 +117,15 @@ func buildNodeExporterComponent(cluster *v1.StaticNodeCluster) v1.NodeComponentS
 			"--net=host",
 			"--pid=host",
 		},
-		Volumes: []v1.NodeComponentVolume{
-			{
-				Name:      "host-root",
-				HostPath:  "/",
-				MountPath: "/host",
-				ReadOnly:  true,
-			},
-		},
+		Volumes: []v1.ComponentVolume{{
+			Name:     "host-root",
+			HostPath: &v1.ComponentHostPathVolumeSource{Path: "/", Type: v1.ComponentHostPathTypeDirectory},
+		}},
+		VolumeMounts: []v1.ComponentVolumeMount{{
+			Name:      "host-root",
+			MountPath: "/host",
+			ReadOnly:  staticComponentReadOnly(true),
+		}},
 		Ports: []v1.NodeComponentPort{
 			{Name: "metrics", Port: defaultNodeExporterPort, Protocol: "TCP"},
 		},
@@ -140,30 +144,52 @@ func acceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorE
 	return profile.MetricsExporter
 }
 
-func validAcceleratorExporterProfile(exporter *v1.AcceleratorExporterProfile) bool {
-	return exporter != nil &&
-		strings.TrimSpace(exporter.Name) != "" &&
-		strings.TrimSpace(exporter.Image) != "" &&
-		exporter.Port > 0
-}
-
 func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
 ) v1.NodeComponentSpec {
+	configVolumes, configVolumeMounts := acceleratorExporterConfigVolumes(exporter.ConfigFiles)
+	var runtimeVolumes []v1.ComponentVolume
+	var runtimeVolumeMounts []v1.ComponentVolumeMount
+
+	if exporter.Runtime != nil {
+		runtimeVolumes = append([]v1.ComponentVolume{}, exporter.Runtime.Volumes...)
+		runtimeVolumeMounts = append([]v1.ComponentVolumeMount{}, exporter.Runtime.VolumeMounts...)
+	}
+
+	var volumes []v1.ComponentVolume
+	for _, group := range [][]v1.ComponentVolume{configVolumes, runtimeVolumes} {
+		volumes = append(volumes, group...)
+	}
+
+	if len(volumes) == 0 {
+		volumes = nil
+	}
+
+	var volumeMounts []v1.ComponentVolumeMount
+	for _, group := range [][]v1.ComponentVolumeMount{configVolumeMounts, runtimeVolumeMounts} {
+		volumeMounts = append(volumeMounts, group...)
+	}
+
+	if len(volumeMounts) == 0 {
+		volumeMounts = nil
+	}
+
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
 		Image:            staticComponentImage(cluster, exporter.Image),
-		Args:             append([]string{}, exporter.Args...),
+		Command:          copyMetricsStringSlice(exporter.Command),
+		Args:             copyMetricsStringSlice(exporter.Args),
 		Env:              copyMetricsStringMap(exporter.Env),
-		Volumes:          acceleratorExporterConfigVolumes(exporter.ConfigFiles),
+		Volumes:          volumes,
+		VolumeMounts:     volumeMounts,
 		ConfigFiles:      acceleratorExporterComponentConfigFiles(exporter.ConfigFiles),
 		DockerRunOptions: acceleratorExporterDockerRunOptions(exporter.Runtime),
 		Ports: []v1.NodeComponentPort{
 			{Name: "metrics", Port: exporter.Port, Protocol: "TCP"},
 		},
 		HealthCheck: &v1.NodeComponentHealthCheck{
-			HTTPPath: exporterMetricsPath(exporter),
+			HTTPPath: exporterMetricsPath(exporter.MetricsPath),
 			Port:     exporter.Port,
 		},
 	}
@@ -173,14 +199,13 @@ func buildNodeAgentComponent(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
-) v1.NodeComponentSpec {
-	args := []string{
-		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
-		"--cluster-type=ray",
-		"--metrics-mode=" + string(acceleratorExporterMode(cluster)),
-		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
-		"--procfs-root=/host/proc",
-		"--cgroupfs-root=/host/sys/fs/cgroup",
+) (v1.NodeComponentSpec, error) {
+	volumes, volumeMounts := nodeAgentComponentVolumes(profile)
+	args := nodeAgentComponentArgs(cluster, profile)
+	image, err := selectedNodeAgentImage(cluster.Spec.Version, profile)
+
+	if err != nil {
+		return v1.NodeComponentSpec{}, err
 	}
 
 	if node != nil && node.Metadata != nil {
@@ -193,24 +218,12 @@ func buildNodeAgentComponent(
 
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
-		Image:            staticComponentImage(cluster, defaultNodeAgentImage(cluster)),
+		Image:            staticComponentImage(cluster, image),
 		Args:             args,
-		Env:              nodeAgentEnv(profile),
+		Env:              nodeAgentComponentEnv(cluster.Spec.Version, profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
-		Volumes: []v1.NodeComponentVolume{
-			{
-				Name:      "host-proc",
-				HostPath:  "/proc",
-				MountPath: "/host/proc",
-				ReadOnly:  true,
-			},
-			{
-				Name:      "host-cgroup",
-				HostPath:  "/sys/fs/cgroup",
-				MountPath: "/host/sys/fs/cgroup",
-				ReadOnly:  true,
-			},
-		},
+		Volumes:          volumes,
+		VolumeMounts:     volumeMounts,
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
@@ -218,70 +231,180 @@ func buildNodeAgentComponent(
 			HTTPPath: defaultHealthHTTPPath,
 			Port:     defaultNodeAgentPort,
 		},
-	}
+	}, nil
 }
 
-func nodeAgentEnv(profile *v1.AcceleratorProfile) map[string]string {
-	exporter := acceleratorExporterProfile(profile)
-	if exporter == nil || len(exporter.Env) == 0 {
+func nodeAgentComponentArgs(cluster *v1.StaticNodeCluster, profile *v1.AcceleratorProfile) []string {
+	args := []string{
+		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
+	}
+
+	supportsExplicitProfileContract, err := component.SupportsNodeAgentProfileContract(cluster.Spec.Version)
+	if err != nil || !supportsExplicitProfileContract || profile == nil || profile.AcceleratorType == "" {
+		args = append(args,
+			"--cluster-type=ray",
+			"--metrics-mode="+string(acceleratorExporterMode(cluster)),
+			fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
+			"--procfs-root=/host/proc",
+			"--cgroupfs-root=/host/sys/fs/cgroup",
+		)
+
+		return args
+	}
+
+	args = append(args,
+		"--cluster-type="+v1.SSHClusterType,
+		fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
+		"--procfs-root=/host/proc",
+		"--cgroupfs-root=/host/sys/fs/cgroup",
+	)
+
+	return append(args, nodeAgentProfileTargetArgs(profile, acceleratorExporterMode(cluster))...)
+}
+
+func nodeAgentProfileTargetArgs(
+	profile *v1.AcceleratorProfile,
+	mode v1.ClusterAcceleratorExporterMode,
+) []string {
+	if profile == nil || profile.AcceleratorType == "" {
 		return nil
 	}
 
-	allowed := map[string]struct{}{
-		"NVIDIA_VISIBLE_DEVICES":     {},
-		"NVIDIA_DRIVER_CAPABILITIES": {},
-	}
-	env := map[string]string{}
+	args := []string{"--accelerator-type=" + profile.AcceleratorType}
+	target := acceleratorExporterTargetForMode(profile, mode)
 
-	for key, value := range exporter.Env {
-		if _, ok := allowed[key]; !ok {
-			continue
-		}
-
-		env[key] = value
+	if target == nil {
+		return args
 	}
 
-	return env
+	return append(args,
+		fmt.Sprintf("--accelerator-exporter-port=%d", target.Port),
+		"--accelerator-exporter-metrics-path="+exporterMetricsPath(target.MetricsPath),
+	)
+}
+
+func acceleratorExporterTargetForMode(
+	profile *v1.AcceleratorProfile,
+	mode v1.ClusterAcceleratorExporterMode,
+) *v1.MetricsTargetProfile {
+	if profile == nil {
+		return nil
+	}
+
+	if mode == v1.ClusterAcceleratorExporterModeExternal {
+		return profile.ExternalMetricsTarget
+	}
+
+	exporter := acceleratorExporterProfile(profile)
+	if exporter == nil {
+		return nil
+	}
+
+	return &v1.MetricsTargetProfile{
+		Port:        exporter.Port,
+		MetricsPath: exporter.MetricsPath,
+	}
+}
+
+func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {
+	if cluster == nil || cluster.Spec == nil {
+		return v1.ClusterAcceleratorExporterModeManaged
+	}
+
+	return (&v1.ClusterConfig{Metrics: cluster.Spec.Metrics}).AcceleratorExporterMode()
+}
+
+func selectedNodeAgentImage(clusterVersion string, profile *v1.AcceleratorProfile) (string, error) {
+	var nodeAgentProfile *v1.NodeAgentRuntimeProfile
+	if profile != nil {
+		nodeAgentProfile = profile.NodeAgentRuntime
+	}
+
+	selection, err := component.SelectNodeAgent(clusterVersion, nodeAgentProfile)
+	if err != nil {
+		return "", err
+	}
+
+	return selection.Image, nil
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	return "neutree/neutree-node-agent:" + componentversion.NeutreeNodeAgent
+	image, err := selectedNodeAgentImage(cluster.Spec.Version, nil)
+	if err != nil || image == "" {
+		return "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
+	}
+
+	return image
 }
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
 	options := []string{"--net=host", "--pid=host", "--cgroupns=host"}
-	exporter := acceleratorExporterProfile(profile)
 
-	if exporter == nil || exporter.Runtime == nil {
+	runtime := nodeAgentRuntime(profile)
+	if runtime == nil {
 		return options
 	}
 
-	// Until AcceleratorProfile exposes a dedicated NodeAgentRuntime, reuse the
-	// metrics exporter runtime because both components need accelerator visibility.
-	return appendDockerRunOptionsUnique(options, acceleratorExporterDockerRunOptions(exporter.Runtime)...)
-}
-
-func appendDockerRunOptionsUnique(options []string, values ...string) []string {
-	seen := make(map[string]struct{}, len(options)+len(values))
-	result := make([]string, 0, len(options)+len(values))
-	merged := append(append([]string{}, options...), values...)
-
-	for _, option := range merged {
-		option = strings.TrimSpace(option)
-		if option == "" {
-			continue
-		}
-
-		if _, ok := seen[option]; ok {
-			continue
-		}
-
-		seen[option] = struct{}{}
-
-		result = append(result, option)
+	if runtime.Privileged {
+		options = append(options, "--privileged")
 	}
 
-	return result
+	if runtime.Capabilities != nil {
+		for _, capability := range runtime.Capabilities.Add {
+			options = append(options, "--cap-add="+string(capability))
+		}
+	}
+
+	if runtime.Runtime != "" {
+		options = append(options, "--runtime="+runtime.Runtime)
+	}
+
+	return append(options, runtime.DockerRunOptions...)
+}
+
+func nodeAgentRuntime(profile *v1.AcceleratorProfile) *v1.NodeAgentRuntimeProfile {
+	if profile == nil {
+		return nil
+	}
+
+	return profile.NodeAgentRuntime
+}
+
+func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) ([]v1.ComponentVolume, []v1.ComponentVolumeMount) {
+	volumes := []v1.ComponentVolume{
+		{Name: "host-proc", HostPath: &v1.ComponentHostPathVolumeSource{Path: "/proc", Type: v1.ComponentHostPathTypeDirectory}},
+		{Name: "host-cgroup", HostPath: &v1.ComponentHostPathVolumeSource{Path: "/sys/fs/cgroup", Type: v1.ComponentHostPathTypeDirectory}},
+	}
+	mounts := []v1.ComponentVolumeMount{
+		{Name: "host-proc", MountPath: "/host/proc", ReadOnly: staticComponentReadOnly(true)},
+		{Name: "host-cgroup", MountPath: "/host/sys/fs/cgroup", ReadOnly: staticComponentReadOnly(true)},
+	}
+
+	runtime := nodeAgentRuntime(profile)
+	if runtime == nil {
+		return volumes, mounts
+	}
+
+	volumes = append(volumes, runtime.Volumes...)
+	mounts = append(mounts, runtime.VolumeMounts...)
+
+	return volumes, mounts
+}
+
+func nodeAgentComponentEnv(_ string, profile *v1.AcceleratorProfile) map[string]string {
+	var runtimeEnv map[string]string
+	if runtime := nodeAgentRuntime(profile); runtime != nil {
+		runtimeEnv = runtime.Env
+	}
+
+	// Static NodeAgent has no Kubernetes Pod discovery path. The
+	// VirtualizationMetricsTarget is therefore intentionally skipped here;
+	// Kubernetes metrics rendering owns that monitor configuration.
+	return copyMetricsStringMap(runtimeEnv)
+}
+
+func staticComponentReadOnly(value bool) *bool {
+	return &value
 }
 
 func copyMetricsStringMap(values map[string]string) map[string]string {
@@ -295,6 +418,14 @@ func copyMetricsStringMap(values map[string]string) map[string]string {
 	}
 
 	return copied
+}
+
+func copyMetricsStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	return append([]string{}, values...)
 }
 
 func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL string) v1.NodeComponentSpec {
@@ -311,14 +442,15 @@ func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL 
 		Image:            staticComponentImage(cluster, defaultVMAgentImage),
 		Args:             vmagentArgs,
 		DockerRunOptions: []string{"--net=host"},
-		Volumes: []v1.NodeComponentVolume{
-			{
-				Name:      "vmagent-config-dir",
-				HostPath:  "/etc/neutree/vmagent",
-				MountPath: "/etc/neutree/vmagent",
-				ReadOnly:  true,
-			},
-		},
+		Volumes: []v1.ComponentVolume{{
+			Name:     "vmagent-config-dir",
+			HostPath: &v1.ComponentHostPathVolumeSource{Path: "/etc/neutree/vmagent", Type: v1.ComponentHostPathTypeDirectory},
+		}},
+		VolumeMounts: []v1.ComponentVolumeMount{{
+			Name:      "vmagent-config-dir",
+			MountPath: "/etc/neutree/vmagent",
+			ReadOnly:  staticComponentReadOnly(true),
+		}},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultVMAgentPort, Protocol: "TCP"},
 		},
@@ -381,10 +513,10 @@ func renderVMAgentConfig(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan)
 	})
 
 	groups := acceleratorExporterTargetGroups(cluster, plans)
-	for i, group := range groups {
+	for _, group := range groups {
 		scrapeConfig := staticVMAgentScrapeConfig{
-			JobName:    acceleratorExporterTargetGroupJobName(group, len(groups), i),
-			FileSDPath: strconv.Quote(acceleratorExporterTargetGroupFileSDPath(group)),
+			JobName:    group.JobName,
+			FileSDPath: strconv.Quote(vmagentFileSDDir + "/" + group.JobName + ".json"),
 		}
 		if group.MetricsPath != defaultPrometheusHTTPPath {
 			scrapeConfig.MetricsPath = strconv.Quote(group.MetricsPath)
@@ -432,7 +564,7 @@ func renderVMAgentFileSDConfigFiles(
 
 	for _, group := range acceleratorExporterTargetGroups(cluster, plans) {
 		configFiles = append(configFiles, vmagentFileSDConfigFile(
-			acceleratorExporterTargetGroupFileSDPath(group),
+			vmagentFileSDDir+"/"+group.JobName+".json",
 			renderVMAgentAcceleratorExporterFileSDTargets(cluster, group.Targets),
 		))
 	}
@@ -597,26 +729,21 @@ type acceleratorExporterTargetGroup struct {
 type acceleratorExporterTarget struct {
 	Node            *v1.StaticNode
 	AcceleratorType string
-	Component       v1.NodeComponentSpec
 	Port            int
 }
 
-func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
-	if acceleratorExporterMode(cluster) == v1.ClusterAcceleratorExporterModeExternal {
-		return externalAcceleratorExporterTargetGroups(plans)
-	}
-
+func acceleratorExporterTargetGroups(
+	cluster *v1.StaticNodeCluster,
+	plans []DesiredNodePlan,
+) []acceleratorExporterTargetGroup {
 	groupsByAcceleratorType := map[string]acceleratorExporterTargetGroup{}
+	mode := acceleratorExporterMode(cluster)
 
 	for _, plan := range plans {
-		component, ok := desiredComponentByName(plan, acceleratorExporterComponentName)
-		if !ok || len(component.Ports) == 0 || plan.Accelerator == nil || plan.Accelerator.Type == "" {
+		target := acceleratorExporterTargetForMode(plan.AcceleratorProfile, mode)
+		if target == nil || plan.Node == nil || plan.Node.Spec == nil ||
+			plan.Accelerator == nil || plan.Accelerator.Type == "" {
 			continue
-		}
-
-		metricsPath := defaultPrometheusHTTPPath
-		if component.HealthCheck != nil {
-			metricsPath = normalizedMetricsPath(component.HealthCheck.HTTPPath)
 		}
 
 		acceleratorType := plan.Accelerator.Type
@@ -624,46 +751,19 @@ func acceleratorExporterTargetGroups(cluster *v1.StaticNodeCluster, plans []Desi
 
 		if group.AcceleratorType == "" {
 			group.AcceleratorType = acceleratorType
-			group.MetricsPath = metricsPath
-			group.JobName = managedAcceleratorExporterJobName(acceleratorType)
+			group.MetricsPath = exporterMetricsPath(target.MetricsPath)
+			group.JobName = acceleratorExporterMetricsJobName(acceleratorType)
 		}
 
 		group.Targets = append(group.Targets, acceleratorExporterTarget{
 			Node:            plan.Node,
 			AcceleratorType: acceleratorType,
-			Component:       component,
-			Port:            component.Ports[0].Port,
+			Port:            target.Port,
 		})
 		groupsByAcceleratorType[acceleratorType] = group
 	}
 
 	return sortedAcceleratorExporterTargetGroups(groupsByAcceleratorType)
-}
-
-func externalAcceleratorExporterTargetGroups(plans []DesiredNodePlan) []acceleratorExporterTargetGroup {
-	targets := []acceleratorExporterTarget{}
-
-	for _, plan := range plans {
-		if plan.Node == nil || plan.Node.Spec == nil || plan.Accelerator == nil ||
-			plan.Accelerator.Type != v1.AcceleratorTypeNVIDIAGPU.String() {
-			continue
-		}
-
-		targets = append(targets, acceleratorExporterTarget{
-			Node:            plan.Node,
-			AcceleratorType: plan.Accelerator.Type,
-			Port:            externalDCGMExporterPort,
-		})
-	}
-
-	if len(targets) == 0 {
-		return nil
-	}
-
-	return []acceleratorExporterTargetGroup{{
-		MetricsPath: defaultPrometheusHTTPPath,
-		Targets:     targets,
-	}}
 }
 
 func sortedAcceleratorExporterTargetGroups(
@@ -684,62 +784,13 @@ func sortedAcceleratorExporterTargetGroups(
 	return groups
 }
 
-func desiredComponentByName(plan DesiredNodePlan, name string) (v1.NodeComponentSpec, bool) {
-	if plan.Node == nil || plan.Node.Spec == nil {
-		return v1.NodeComponentSpec{}, false
-	}
-
-	for _, component := range plan.Node.Spec.Components {
-		if component.Name == name {
-			return component, true
-		}
-	}
-
-	return v1.NodeComponentSpec{}, false
-}
-
-func acceleratorExporterJobName(metricsPath string, _ int, index int) string {
-	if metricsPath == defaultPrometheusHTTPPath {
-		return "static-node-accelerator-exporter"
-	}
-
-	name := strings.Trim(metricsPath, "/")
-	name = strings.ReplaceAll(name, "/", "-")
-
-	if name == "" {
-		name = strconv.Itoa(index)
-	}
-
-	return "static-node-accelerator-exporter-" + name
-}
-
-func acceleratorExporterTargetGroupJobName(group acceleratorExporterTargetGroup, groupCount int, index int) string {
-	if group.JobName != "" {
-		return group.JobName
-	}
-
-	return acceleratorExporterJobName(group.MetricsPath, groupCount, index)
-}
-
-func managedAcceleratorExporterJobName(acceleratorType string) string {
+func acceleratorExporterMetricsJobName(acceleratorType string) string {
 	name := sanitizeStaticMetricsName(acceleratorType)
 	if name == "" {
-		return managedAcceleratorExporterJobPrefix
+		return acceleratorExporterJobPrefix
 	}
 
-	return managedAcceleratorExporterJobPrefix + "-" + name
-}
-
-func acceleratorExporterTargetGroupFileSDPath(group acceleratorExporterTargetGroup) string {
-	if group.JobName != "" {
-		return vmagentFileSDDir + "/" + group.JobName + ".json"
-	}
-
-	return acceleratorExporterFileSDPath(group.MetricsPath)
-}
-
-func acceleratorExporterFileSDPath(metricsPath string) string {
-	return vmagentFileSDDir + "/" + strings.TrimPrefix(acceleratorExporterJobName(metricsPath, 2, 0), "static-node-") + ".json"
+	return acceleratorExporterJobPrefix + "-" + name
 }
 
 func sanitizeStaticMetricsName(value string) string {
@@ -767,16 +818,6 @@ func sanitizeStaticMetricsName(value string) string {
 	return strings.Trim(builder.String(), "-")
 }
 
-func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {
-	if cluster == nil || cluster.Spec == nil {
-		return v1.ClusterAcceleratorExporterModeManaged
-	}
-
-	config := &v1.ClusterConfig{Metrics: cluster.Spec.Metrics}
-
-	return config.AcceleratorExporterMode()
-}
-
 func vmagentTargetLabels(
 	cluster *v1.StaticNodeCluster,
 	node *v1.StaticNode,
@@ -787,31 +828,24 @@ func vmagentTargetLabels(
 		"workspace":           cluster.Metadata.Workspace,
 		"neutree_cluster":     cluster.Metadata.Name,
 		"static_node_cluster": cluster.Metadata.Name,
-		"cluster_type":        "ray",
+		"cluster_type":        v1.SSHClusterType,
 		"node":                node.Metadata.Name,
 		"node_ip":             node.Spec.IP,
 		"node_role":           string(node.Spec.Role),
 	}
 }
 
-func exporterMetricsPath(exporter *v1.AcceleratorExporterProfile) string {
-	if exporter == nil {
+func exporterMetricsPath(metricsPath string) string {
+	metricsPath = strings.TrimSpace(metricsPath)
+	if metricsPath == "" {
 		return defaultPrometheusHTTPPath
 	}
 
-	return normalizedMetricsPath(exporter.MetricsPath)
-}
-
-func normalizedMetricsPath(path string) string {
-	if path == "" {
-		return defaultPrometheusHTTPPath
+	if !strings.HasPrefix(metricsPath, "/") {
+		return "/" + metricsPath
 	}
 
-	if !strings.HasPrefix(path, "/") {
-		return "/" + path
-	}
-
-	return path
+	return metricsPath
 }
 
 func acceleratorExporterDockerRunOptions(
@@ -830,14 +864,13 @@ func acceleratorExporterDockerRunOptions(
 		options = append(options, "--pid=host")
 	}
 
+	if runtime.Privileged {
+		options = append(options, "--privileged")
+	}
+
 	if runtime.Capabilities != nil {
 		for _, capability := range runtime.Capabilities.Add {
-			capability = strings.TrimSpace(capability)
-			if capability == "" {
-				continue
-			}
-
-			options = append(options, "--cap-add="+capability)
+			options = append(options, "--cap-add="+string(capability))
 		}
 	}
 
@@ -858,28 +891,38 @@ func acceleratorExporterDockerRunOptions(
 
 func acceleratorExporterConfigVolumes(
 	configFiles []v1.AcceleratorExporterConfigFile,
-) []v1.NodeComponentVolume {
-	volumes := make([]v1.NodeComponentVolume, 0, len(configFiles))
+) ([]v1.ComponentVolume, []v1.ComponentVolumeMount) {
+	if len(configFiles) == 0 {
+		return nil, nil
+	}
+
+	volumes := make([]v1.ComponentVolume, 0, len(configFiles))
+	mounts := make([]v1.ComponentVolumeMount, 0, len(configFiles))
 
 	for i, configFile := range configFiles {
-		if configFile.Path == "" {
-			continue
-		}
+		name := "accelerator-exporter-config-" + strconv.Itoa(i)
+		volumes = append(volumes, v1.ComponentVolume{
+			Name:     name,
+			HostPath: &v1.ComponentHostPathVolumeSource{Path: configFile.Path, Type: v1.ComponentHostPathTypeFile},
+		})
 
-		volumes = append(volumes, v1.NodeComponentVolume{
-			Name:      "accelerator-exporter-config-" + strconv.Itoa(i),
-			HostPath:  configFile.Path,
+		mounts = append(mounts, v1.ComponentVolumeMount{
+			Name:      name,
 			MountPath: configFile.Path,
-			ReadOnly:  true,
+			ReadOnly:  staticComponentReadOnly(true),
 		})
 	}
 
-	return volumes
+	return volumes, mounts
 }
 
 func acceleratorExporterComponentConfigFiles(
 	configFiles []v1.AcceleratorExporterConfigFile,
 ) []v1.NodeComponentConfigFile {
+	if len(configFiles) == 0 {
+		return nil
+	}
+
 	componentConfigFiles := make([]v1.NodeComponentConfigFile, 0, len(configFiles))
 
 	for _, configFile := range configFiles {

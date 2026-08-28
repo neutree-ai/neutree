@@ -173,7 +173,7 @@ scrape_configs:
       - {{ .Namespace }}
     selectors:
     - role: pod
-      label: app={{ .NeutreeNodeAgentMetricsName }}
+      label: neutree.ai/metrics-target=node-agent
   relabel_configs:
   - source_labels: [__meta_kubernetes_pod_container_port_name]
     action: keep
@@ -197,7 +197,7 @@ scrape_configs:
   - target_label: workspace
     replacement: {{ .Workspace | quote }}
 {{ end }}
-{{ range .AcceleratorExporters }}
+{{ range .AcceleratorExporterScrapeTargets }}
 # Scrape accelerator exporter metrics from detected accelerator nodes.
 - job_name: '{{ .JobName }}'
 {{ if .HasCustomMetricsPath }}
@@ -207,10 +207,10 @@ scrape_configs:
   - role: pod
     namespaces:
       names:
-      - {{ $.Namespace }}
+      - {{ .Namespace }}
     selectors:
     - role: pod
-      label: app={{ .AppLabel }}
+      label: {{ .KubernetesLabelSelector }}
   relabel_configs:
   - source_labels: [__meta_kubernetes_pod_ip]
     action: replace
@@ -233,37 +233,12 @@ scrape_configs:
   - target_label: accelerator_type
     replacement: {{ .AcceleratorType }}
 {{ end }}
-{{ if .EnableExternalDCGMScrape }}
-# Scrape an existing dcgm-exporter deployed outside Neutree ownership.
-- job_name: 'dcgm-exporter'
-  kubernetes_sd_configs:
-  - role: pod
-    selectors:
-    - role: pod
-      label: app=nvidia-dcgm-exporter
-  relabel_configs:
-  - source_labels: [__meta_kubernetes_pod_ip]
-    action: replace
-    target_label: __address__
-    regex: (.+)
-    replacement: $1:9400
-  - source_labels: [__meta_kubernetes_pod_node_name]
-    action: replace
-    target_label: node
-  - source_labels: [__meta_kubernetes_namespace]
-    action: replace
-    target_label: namespace
-  - source_labels: [__meta_kubernetes_pod_name]
-    action: replace
-    target_label: pod
-  - target_label: neutree_cluster
-    replacement: {{ .ClusterName | quote }}
-  - target_label: workspace
-    replacement: {{ .Workspace | quote }}
-{{ end }}
-{{ if .EnableHAMiMonitorScrape }}
-# Scrape HAMi vGPU monitor metrics from the managed HAMi device-plugin pods
+{{ range .VirtualizationMetricsScrapeTargets }}
+# Scrape the profile-owned accelerator virtualization monitor endpoint.
 - job_name: 'hami-vgpu-monitor'
+{{ if .HasCustomMetricsPath }}
+  metrics_path: {{ .MetricsPath }}
+{{ end }}
   kubernetes_sd_configs:
   - role: pod
     namespaces:
@@ -271,16 +246,15 @@ scrape_configs:
       - {{ .Namespace }}
     selectors:
     - role: pod
-      label: app.kubernetes.io/component=hami-device-plugin
+      label: {{ .KubernetesLabelSelector }}
   relabel_configs:
-  # Set the __address__ to pod IP and vGPU monitor port
+  # Set the __address__ to pod IP and profile-owned monitor port.
   - source_labels: [__meta_kubernetes_pod_ip]
     action: replace
     target_label: __address__
     regex: (.+)
-    replacement: $1:9394
-  # Add monitor target metadata as labels. HAMi container metrics already
-  # expose workload namespace/pod labels, so keep those intact.
+    replacement: $1:{{ .Port }}
+  # Preserve monitor target metadata while leaving workload labels untouched.
   - source_labels: [__meta_kubernetes_pod_node_name]
     action: replace
     target_label: node
@@ -292,9 +266,9 @@ scrape_configs:
     target_label: monitor_pod
   # Add cluster and workspace labels
   - target_label: neutree_cluster
-    replacement: {{ .ClusterName | quote }}
+    replacement: {{ $.ClusterName | quote }}
   - target_label: workspace
-    replacement: {{ .Workspace | quote }}
+    replacement: {{ $.Workspace | quote }}
 {{ end }}
 {{ if .EnableKubeStateMetrics }}
 # Scrape kube-state-metrics for Neutree pod ownership labels.

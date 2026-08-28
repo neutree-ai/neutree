@@ -91,8 +91,78 @@ type AcceleratorProfile struct {
 	ClusterRuntime *RuntimeConfig `json:"cluster_runtime,omitempty"`
 	// EngineRuntime describes how inference engine containers should access the accelerator.
 	EngineRuntime *RuntimeConfig `json:"engine_runtime,omitempty"`
-	// MetricsExporter describes the optional metrics exporter used for accelerator observability.
+	// NodeAgentRuntime describes the image and runtime access required only by
+	// the NodeAgent. It is intentionally independent from MetricsExporter.Runtime
+	// so renderers cannot inherit exporter privilege or mounts implicitly.
+	NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
+	// VirtualizationMetricsTarget identifies the vendor-managed monitor whose
+	// raw metrics can be collected for accelerator virtualization. Renderers and
+	// generic collectors consume this declaration without branching on vendor
+	// names, selectors, or ports.
+	VirtualizationMetricsTarget *MetricsTargetProfile `json:"virtualization_metrics_target,omitempty"`
+	// MetricsExporter describes the optional metrics exporter used for accelerator
+	// observability on Kubernetes and StaticNode clusters.
 	MetricsExporter *AcceleratorExporterProfile `json:"metrics_exporter,omitempty"`
+	// ExternalMetricsTarget identifies an exporter owned by the upstream
+	// orchestration layer when external mode is selected. It is target metadata
+	// only; Neutree does not deploy, probe, or mutate the external workload.
+	ExternalMetricsTarget *MetricsTargetProfile `json:"external_metrics_target,omitempty"`
+}
+
+// MetricsTargetProfile declares a Prometheus endpoint discovered through
+// Kubernetes Pods. AcceleratorProfile keeps virtualization and external
+// exporter targets as separate fields because they have different lifecycle
+// owners, even though they share this endpoint shape.
+type MetricsTargetProfile struct {
+	// Namespace scopes Kubernetes Pod discovery. Empty lets the management
+	// plane resolve the managed cluster namespace when it renders NodeAgent
+	// configuration, while explicit values are preserved unchanged.
+	Namespace string `json:"namespace,omitempty"`
+	// PodSelector identifies monitor Pods on a node.
+	PodSelector map[string]string `json:"pod_selector,omitempty"`
+	// Port is the monitor metrics port.
+	Port int `json:"port,omitempty"`
+	// MetricsPath is the monitor HTTP path, defaulting to /metrics when empty.
+	MetricsPath string `json:"metrics_path,omitempty"`
+}
+
+// VirtualizationMetricsTargetEnvKey is the reserved NodeAgent environment
+// variable carrying the selected Profile's complete monitor configuration.
+// It remains one JSON document so NodeAgent and vmagent cannot independently
+// lower individual selector, namespace, port, or path fields.
+const VirtualizationMetricsTargetEnvKey = "NEUTREE_VIRTUALIZATION_METRICS_TARGET"
+
+// AcceleratorExporterPodSelectorEnvKey carries the rendered Kubernetes Pod
+// selector for NodeAgent's local accelerator-exporter discovery. Port and path
+// remain explicit NodeAgent arguments so both consumers use the same target.
+const AcceleratorExporterPodSelectorEnvKey = "NEUTREE_ACCELERATOR_EXPORTER_POD_SELECTOR"
+
+// AcceleratorExporterNamespaceEnvKey carries the rendered Kubernetes
+// namespace for NodeAgent's local accelerator-exporter discovery.
+const AcceleratorExporterNamespaceEnvKey = "NEUTREE_ACCELERATOR_EXPORTER_NAMESPACE"
+
+// NodeAgentRuntimeProfile declares the image and backend-specific NodeAgent access
+// contract for an explicit accelerator profile.
+type NodeAgentRuntimeProfile struct {
+	// Image is the NodeAgent image used by clusters newer than v1.1.1.
+	Image string `json:"image,omitempty"`
+	// Privileged requests privileged execution on backends that support it.
+	Privileged bool `json:"privileged,omitempty"`
+	// NodeSelector constrains Kubernetes NodeAgent placement. StaticNode ignores it.
+	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// Env declares NodeAgent-only environment variables. Exporter environment
+	// variables are not implicitly inherited by the NodeAgent.
+	Env map[string]string `json:"env,omitempty"`
+	// Capabilities declares Linux capabilities required by the NodeAgent only.
+	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
+	// Volumes declares structured host volumes required by the NodeAgent runtime.
+	Volumes []ComponentVolume `json:"volumes,omitempty"`
+	// VolumeMounts declares the matching container mounts for Volumes.
+	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
+	// Runtime selects the Docker runtime handler on StaticNode.
+	Runtime string `json:"runtime,omitempty"`
+	// DockerRunOptions are StaticNode-only Docker options; Kubernetes does not parse them.
+	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 }
 
 type AcceleratorExporterProfile struct {
@@ -100,7 +170,9 @@ type AcceleratorExporterProfile struct {
 	Name string `json:"name,omitempty"`
 	// Image is the exporter container image.
 	Image string `json:"image,omitempty"`
-	// Args are passed to the exporter image entrypoint.
+	// Command overrides the exporter image entrypoint.
+	Command []string `json:"command,omitempty"`
+	// Args are passed to the exporter command or image entrypoint.
 	Args []string `json:"args,omitempty"`
 	// Port is the metrics port exposed by the exporter.
 	Port int `json:"port,omitempty"`
@@ -141,9 +213,15 @@ type AcceleratorExporterRuntimeProfile struct {
 	// HostPID is supported by StaticNode and Kubernetes when the backend has an equivalent.
 	HostPID bool `json:"host_pid,omitempty"`
 	// Capabilities is supported by StaticNode and Kubernetes when the backend has an equivalent.
-	Capabilities *AcceleratorExporterCapabilities `json:"capabilities,omitempty"`
+	Capabilities *corev1.Capabilities `json:"capabilities,omitempty"`
+	// Privileged requests privileged execution on backends that support it.
+	Privileged bool `json:"privileged,omitempty"`
 	// NodeSelector is Kubernetes-only placement; StaticNode ignores it.
 	NodeSelector map[string]string `json:"node_selector,omitempty"`
+	// Volumes declares structured host volumes required by the exporter runtime.
+	Volumes []ComponentVolume `json:"volumes,omitempty"`
+	// VolumeMounts declares the matching container mounts for Volumes.
+	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
 	// Runtime selects the Docker runtime handler (e.g. "nvidia") on StaticNode.
 	// Kubernetes does not parse it. Without this, exporter/node-agent
 	// containers only received `--gpus all` and no `--runtime=`, which left GPU
@@ -158,8 +236,32 @@ type AcceleratorExporterRuntimeProfile struct {
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 }
 
-type AcceleratorExporterCapabilities struct {
-	Add []string `json:"add,omitempty"`
+// ComponentHostPathType is the supported type of a structured host path volume.
+type ComponentHostPathType string
+
+const (
+	ComponentHostPathTypeDirectory ComponentHostPathType = "directory"
+	ComponentHostPathTypeSocket    ComponentHostPathType = "socket"
+	ComponentHostPathTypeFile      ComponentHostPathType = "file"
+)
+
+// ComponentVolume declares a backend-neutral component volume.
+type ComponentVolume struct {
+	Name     string                         `json:"name,omitempty"`
+	HostPath *ComponentHostPathVolumeSource `json:"host_path,omitempty"`
+}
+
+// ComponentHostPathVolumeSource describes a host path exposed to a component.
+type ComponentHostPathVolumeSource struct {
+	Path string                `json:"path,omitempty"`
+	Type ComponentHostPathType `json:"type,omitempty"`
+}
+
+// ComponentVolumeMount declares where a component volume is mounted in a container.
+type ComponentVolumeMount struct {
+	Name      string `json:"name,omitempty"`
+	MountPath string `json:"mount_path,omitempty"`
+	ReadOnly  *bool  `json:"read_only,omitempty"`
 }
 
 type GetSupportEnginesResponse struct {

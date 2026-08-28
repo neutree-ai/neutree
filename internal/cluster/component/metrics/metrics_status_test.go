@@ -8,6 +8,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.openly.dev/pointy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -208,6 +209,30 @@ func TestCheckResourcesStatusIncludesKubeStateMetrics(t *testing.T) {
 	assert.Equal(t, 1, status.KubeStateMetricsPodsReady)
 }
 
+func TestCheckResourcesStatusChecksSingleNodeAgent(t *testing.T) {
+	client := fake.NewClientBuilder().WithObjects(
+		readyMetricsDeployment("neutree-kube-state-metrics"),
+		readyMetricsDaemonSet(nodeExporterDaemonSetName, 2),
+		readyMetricsDaemonSet(neutreeNodeAgentMetricsName, 2),
+	).Build()
+	component := &MetricsComponent{
+		ctrlClient: client,
+		namespace:  "default",
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
+			Spec:     &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+	}
+
+	status, err := component.CheckResourcesStatus(context.Background())
+
+	require.NoError(t, err)
+	assert.True(t, status.NeutreeNodeAgentMetricsRequired)
+	assert.True(t, status.NeutreeNodeAgentMetricsDaemonSetReady)
+	assert.Equal(t, 2, status.NeutreeNodeAgentMetricsPodsReady)
+	assert.Equal(t, 2, status.NeutreeNodeAgentMetricsTotalPods)
+}
+
 func TestCheckResourcesStatusDoesNotRequireVMAgentWithoutValidRemoteWrite(t *testing.T) {
 	for _, remoteWriteURL := range []string{"", "invalid-url"} {
 		t.Run("remote write URL="+remoteWriteURL, func(t *testing.T) {
@@ -310,22 +335,13 @@ func TestCheckResourcesStatusIncludesAcceleratorExporterDaemonSet(t *testing.T) 
 	assert.True(t, status.AcceleratorExporterDaemonSetsReady)
 }
 
-func TestCheckResourcesStatusDoesNotRequireManagedAcceleratorExporterInExternalMode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func TestCheckResourcesStatusDoesNotCheckExternalExporterDaemonSet(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
 		WithObjects(
 			readyMetricsDeployment("vmagent"),
 			readyMetricsDeployment("neutree-kube-state-metrics"),
 			readyMetricsDaemonSet("neutree-node-exporter", 1),
 			readyMetricsDaemonSet("neutree-node-agent", 1),
-			&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "gpu-node",
-					Labels: map[string]string{
-						"nvidia.com/gpu.present": "true",
-					},
-				},
-			},
 		).
 		Build()
 
@@ -333,11 +349,10 @@ func TestCheckResourcesStatusDoesNotRequireManagedAcceleratorExporterInExternalM
 		ctrlClient:            fakeClient,
 		namespace:             "default",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
-		acceleratorMgr:        accelerator.NewManager(),
 		cluster: &v1.Cluster{
 			Metadata: &v1.Metadata{Name: "test", Workspace: "default"},
 			Spec: &v1.ClusterSpec{
-				Version: "v1.1.0",
+				Version: "v1.1.2",
 				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
 					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
 						Mode: v1.ClusterAcceleratorExporterModeExternal,

@@ -101,14 +101,14 @@ type ClusterConfig struct {
 }
 
 type ClusterMetricsConfig struct {
-	// AcceleratorExporter controls how GPU metrics exporters are handled.
+	// AcceleratorExporter controls how accelerator metrics exporters are handled.
 	AcceleratorExporter *ClusterAcceleratorExporterConfig `json:"accelerator_exporter,omitempty" yaml:"accelerator_exporter,omitempty"`
 }
 
 type ClusterAcceleratorExporterConfig struct {
 	// Mode controls accelerator exporter ownership.
 	// managed installs and scrapes the Neutree-managed exporter when the cluster version supports it.
-	// external skips exporter installation and scrapes an existing dcgm-exporter with the legacy k8s config.
+	// external skips exporter installation and scrapes an existing exporter through the legacy contract.
 	Mode ClusterAcceleratorExporterMode `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 

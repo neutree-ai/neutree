@@ -12,7 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch/manifests"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
-	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/pkg/command"
 )
 
@@ -133,9 +133,9 @@ func prepareObsStackDeployConfig(options *obsStackInstallOptions) error {
 		GrafanaWorkDir         string
 	}{
 		DeployIps:              options.deployIps,
-		VictoriaMetricsVersion: componentversion.VictoriaMetricsCluster,
+		VictoriaMetricsVersion: component.VictoriaMetricsCluster,
 		NodeIP:                 options.nodeIP,
-		GrafanaVersion:         componentversion.Grafana,
+		GrafanaVersion:         component.Grafana,
 		GrafanaWorkDir:         filepath.Join(options.workDir, "obs-stack", "grafana"),
 	}
 

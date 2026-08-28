@@ -155,6 +155,12 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 
 		nodeAgent := requireStaticNodeComponent(node, "neutree-node-agent")
 		ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--listen-address=:19101"))
+
+		if containsString(nodeAgent.Args, "--cluster-type=ray") {
+			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement(ContainSubstring("--metrics-mode=")))
+			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--accelerator-type=")))
+		}
+
 		ExpectWithOffset(1, nodeAgent.Ports).To(ContainElement(v1.NodeComponentPort{
 			Name:     "http",
 			Port:     19101,
@@ -210,6 +216,16 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	}
 }
 
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+
+	return false
+}
+
 func assertStaticNodeAgentDeviceSnapshotAPI(
 	node v1.StaticNode,
 	sshUser string,
@@ -259,13 +275,28 @@ func assertStaticNodeAgentDeviceSnapshotAPI(
 	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
 }
 
+// assertStaticNodeExternalAcceleratorExporterComponents checks the static
+// renderer only. External exporter process ownership remains with the
+// environment, while file-SD and NodeAgent target arguments must use the
+// selected Profile's port and path.
 func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 	nodes := getStaticNodesForCluster(clusterName)
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
+	sshUser := profileSSHUser()
+	if sshUser == "" {
+		sshUser = defaultSSHUser
+	}
+
+	ExpectWithOffset(1, profile.SSHNodes).NotTo(BeEmpty(), "ssh_nodes must be configured")
+	keyFile := expandHome(profile.SSHNodes[0].KeyFile)
+	ExpectWithOffset(1, keyFile).NotTo(BeEmpty(), "ssh key file must be configured")
+
 	gpuNodeIPs := []string{}
 
-	for _, node := range nodes {
+	loopNodes := nodes
+
+	for _, node := range loopNodes {
 		ExpectWithOffset(1, node.Spec).NotTo(BeNil())
 		ExpectWithOffset(1, node.Status).NotTo(BeNil())
 
@@ -277,13 +308,25 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 		}))
 		requireStaticNodeComponentRunning(node, "node-exporter")
 
+		nodeAgent := requireStaticNodeComponent(node, "neutree-node-agent")
+		ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--metrics-mode=")))
+		requireStaticNodeComponentRunning(node, "neutree-node-agent")
+
+		isGPUNode := node.Status.Accelerator != nil &&
+			node.Status.Accelerator.Type == v1.AcceleratorTypeNVIDIAGPU.String()
+		assertStaticNodeAgentDeviceSnapshotAPI(node, sshUser, keyFile, isGPUNode)
+
 		ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
 		ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
 
-		if node.Status.Accelerator != nil &&
-			node.Status.Accelerator.Type == v1.AcceleratorTypeNVIDIAGPU.String() {
-			gpuNodeIPs = append(gpuNodeIPs, node.Spec.IP)
+		if !isGPUNode {
+			continue
 		}
+
+		gpuNodeIPs = append(gpuNodeIPs, node.Spec.IP)
+
+		ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-port=9400"))
+		ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-metrics-path=/metrics"))
 	}
 
 	head := requireStaticNodeRole(nodes, v1.StaticNodeRoleHead)
@@ -292,18 +335,20 @@ func assertStaticNodeExternalAcceleratorExporterComponents(clusterName string) {
 
 	vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-exporter"))
+	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-node-agent"))
 	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-ray"))
 
 	if len(gpuNodeIPs) == 0 {
-		ExpectWithOffset(1, vmagentConfig.Content).NotTo(ContainSubstring("job_name: static-node-accelerator-exporter"))
+		ExpectWithOffset(1, vmagentConfig.Content).NotTo(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
+
 		return
 	}
 
-	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: static-node-accelerator-exporter"))
+	ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
 
 	acceleratorTargets := requireStaticNodeComponentConfigFile(
 		vmagent,
-		"/etc/neutree/vmagent/file_sd/accelerator-exporter.json",
+		"/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json",
 	)
 
 	for _, ip := range gpuNodeIPs {

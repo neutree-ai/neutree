@@ -343,21 +343,34 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 		parts = append(parts, "-e", shellArg(key+"="+component.Env[key]))
 	}
 
+	volumeByName := make(map[string]v1.ComponentVolume, len(component.Volumes))
 	for _, volume := range component.Volumes {
-		if volume.HostPath == "" || volume.MountPath == "" {
+		volumeByName[volume.Name] = volume
+	}
+
+	for _, mount := range component.VolumeMounts {
+		volume, exists := volumeByName[mount.Name]
+		if !exists || volume.HostPath == nil || volume.HostPath.Path == "" || mount.MountPath == "" {
 			continue
 		}
 
-		value := volume.HostPath + ":" + volume.MountPath
-		if volume.ReadOnly {
+		value := volume.HostPath.Path + ":" + mount.MountPath
+		if mount.ReadOnly == nil || *mount.ReadOnly {
 			value += ":ro"
 		}
 
 		parts = append(parts, "-v", shellArg(value))
 	}
 
+	if len(component.Command) > 0 {
+		parts = append(parts, "--entrypoint", shellArg(component.Command[0]))
+	}
+
 	parts = append(parts, shellArg(component.Image))
-	parts = append(parts, shellArgs(component.Command)...)
+	if len(component.Command) > 1 {
+		parts = append(parts, shellArgs(component.Command[1:])...)
+	}
+
 	parts = append(parts, shellArgs(component.Args)...)
 
 	return strings.Join(parts, " ")

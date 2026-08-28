@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/component"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var (
@@ -308,6 +310,9 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NotNil(t, profile)
 	require.NotNil(t, profile.ClusterRuntime)
 	require.NotNil(t, profile.EngineRuntime)
+	require.NotNil(t, profile.NodeAgentRuntime)
+	require.NotNil(t, profile.VirtualizationMetricsTarget)
+	require.NotNil(t, profile.ExternalMetricsTarget)
 	require.NotNil(t, profile.MetricsExporter)
 	assert.Equal(t, string(v1.AcceleratorTypeNVIDIAGPU), profile.AcceleratorType)
 	assert.Equal(t, "nvidia", profile.ClusterRuntime.Runtime)
@@ -319,6 +324,19 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	containerRuntime, err := p.GetContainerRuntimeConfig()
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
+	assert.Equal(t, "neutree/neutree-node-agent:"+component.NeutreeNodeAgent, profile.NodeAgentRuntime.Image)
+	assert.True(t, profile.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, profile.NodeAgentRuntime.Env)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.NodeAgentRuntime.DockerRunOptions)
+	assert.Empty(t, profile.VirtualizationMetricsTarget.Namespace)
+	assert.Equal(t, map[string]string{"app.kubernetes.io/component": "hami-device-plugin"}, profile.VirtualizationMetricsTarget.PodSelector)
+	assert.Equal(t, 9394, profile.VirtualizationMetricsTarget.Port)
+	assert.Equal(t, "/metrics", profile.VirtualizationMetricsTarget.MetricsPath)
+	assert.Equal(t, map[string]string{"app": "nvidia-dcgm-exporter"}, profile.ExternalMetricsTarget.PodSelector)
+	assert.Equal(t, nvidiaGPUOperatorDCGMExporterPort, profile.ExternalMetricsTarget.Port)
+	assert.Equal(t, "/metrics", profile.ExternalMetricsTarget.MetricsPath)
 	assert.Equal(t, "dcgm-exporter", profile.MetricsExporter.Name)
 	assert.Equal(t, nvidiaDCGMExporterImage, profile.MetricsExporter.Image)
 	assert.Equal(t, nvidiaDCGMExporterPort, profile.MetricsExporter.Port)
@@ -334,7 +352,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	require.NotNil(t, profile.MetricsExporter.Runtime)
 	assert.True(t, profile.MetricsExporter.Runtime.HostNetwork)
 	require.NotNil(t, profile.MetricsExporter.Runtime.Capabilities)
-	assert.Equal(t, []string{"SYS_ADMIN"}, profile.MetricsExporter.Runtime.Capabilities.Add)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.MetricsExporter.Runtime.Capabilities.Add)
 	assert.Equal(t,
 		map[string]string{NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue},
 		profile.MetricsExporter.Runtime.NodeSelector)
@@ -409,4 +427,23 @@ func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
 	// Node and engine runtimes keep the legacy --gpus all path unchanged.
 	assert.Equal(t, []string{"--gpus all"}, profile.ClusterRuntime.Options)
 	assert.Equal(t, []string{"--gpus all"}, profile.EngineRuntime.Options)
+}
+
+func TestGPUAcceleratorPluginProfileNodeAgentExplicit(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, profile.NodeAgentRuntime)
+	assert.True(t, profile.NodeAgentRuntime.Privileged)
+	assert.Equal(t, map[string]string{
+		"NVIDIA_VISIBLE_DEVICES": "all",
+	}, profile.NodeAgentRuntime.Env)
+	require.NotNil(t, profile.NodeAgentRuntime.Capabilities)
+	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.NodeAgentRuntime.Capabilities.Add)
+	assert.Equal(t, "nvidia", profile.NodeAgentRuntime.Runtime)
+	assert.Equal(t, []string{"--gpus all"}, profile.NodeAgentRuntime.DockerRunOptions)
+	assert.Empty(t, profile.NodeAgentRuntime.Volumes)
+	assert.Empty(t, profile.NodeAgentRuntime.VolumeMounts)
 }

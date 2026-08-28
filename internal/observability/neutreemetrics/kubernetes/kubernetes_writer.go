@@ -12,6 +12,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
 )
 
 type AnnotationWriter struct {
@@ -35,6 +36,12 @@ func (w *AnnotationWriter) writeNodeDevices(
 	ctx context.Context,
 	devices []v1.StaticNodeAcceleratorDeviceStatus,
 ) error {
+	// An empty snapshot must not erase a previously discovered inventory from
+	// the Node annotation. The next nonempty observation will reconcile it.
+	if len(kubernetesDeviceAnnotations(devices)) == 0 {
+		return nil
+	}
+
 	node := &corev1.Node{}
 	if err := w.Client.Get(ctx, client.ObjectKey{Name: w.NodeName}, node); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -45,7 +52,11 @@ func (w *AnnotationWriter) writeNodeDevices(
 	}
 
 	original := node.DeepCopy()
-	annotations := copyAnnotations(node.Annotations)
+
+	annotations := adapter.CloneStringMap(node.Annotations)
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
 
 	value, err := json.Marshal(kubernetesDeviceAnnotations(devices))
 	if err != nil {
@@ -94,7 +105,11 @@ func (w *AnnotationWriter) writePodAllocations(
 		pod := podList.Items[i].DeepCopy()
 		key := client.ObjectKey{Namespace: pod.Namespace, Name: pod.Name}
 		original := pod.DeepCopy()
-		annotations := copyAnnotations(pod.Annotations)
+
+		annotations := adapter.CloneStringMap(pod.Annotations)
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
 
 		podAllocations := allocationsByPod[key]
 		if len(podAllocations) == 0 {
@@ -128,15 +143,6 @@ func (w *AnnotationWriter) writePodAllocations(
 	}
 
 	return nil
-}
-
-func copyAnnotations(input map[string]string) map[string]string {
-	output := map[string]string{}
-	for key, value := range input {
-		output[key] = value
-	}
-
-	return output
 }
 
 func allocationMatchesPod(allocation v1.StaticNodeAllocationStatus, pod corev1.Pod) bool {
