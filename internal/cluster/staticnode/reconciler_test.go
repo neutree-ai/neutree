@@ -2,7 +2,6 @@ package staticnode
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -814,30 +813,31 @@ func TestBuildDockerRunCommandQuotesDockerRunOptions(t *testing.T) {
 	assert.NotContains(t, command, " -p ")
 }
 
-func TestBuildDockerRunCommandSupportsLegacySerializedComponent(t *testing.T) {
-	const legacyStaticNode = `{
-		"spec":{
-			"cluster":"static-a",
-			"components":[{
-				"name":"accelerator-exporter",
-				"image":"registry.example.com/exporter:v1",
-				"volumes":[
-					{"name":"driver","host_path":"/opt/vendor/driver","mount_path":"/driver","read_only":true},
-					{"name":"runtime","host_path":"/var/run/vendor","mount_path":"/runtime","read_only":false}
-				]
-			}]
-		}
-	}`
+func TestBuildDockerRunCommandUsesPersistedComponentVolumes(t *testing.T) {
+	command := buildDockerRunCommand(
+		&v1.StaticNode{Spec: &v1.StaticNodeSpec{Cluster: "static-a"}},
+		v1.NodeComponentSpec{
+			Name:  "accelerator-exporter",
+			Image: "registry.example.com/accelerator/exporter:v1",
+			Volumes: []v1.NodeComponentVolume{
+				{
+					Name:      "driver",
+					HostPath:  "/opt/vendor/driver",
+					MountPath: "/driver",
+					ReadOnly:  true,
+				},
+				{
+					Name:      "runtime",
+					HostPath:  "/var/run/vendor",
+					MountPath: "/runtime",
+				},
+			},
+		},
+		"hash-exporter",
+	)
 
-	var node v1.StaticNode
-	require.NoError(t, json.Unmarshal([]byte(legacyStaticNode), &node))
-	require.NotNil(t, node.Spec)
-	require.Len(t, node.Spec.Components, 1)
-
-	command := buildDockerRunCommand(&node, node.Spec.Components[0], "hash-exporter")
-	assert.Contains(t, command, "/opt/vendor/driver:/driver:ro")
-	assert.Contains(t, command, "/var/run/vendor:/runtime")
-	assert.NotContains(t, command, "/var/run/vendor:/runtime:ro")
+	assert.Contains(t, command, "-v '/opt/vendor/driver:/driver:ro'")
+	assert.Contains(t, command, "-v '/var/run/vendor:/runtime'")
 }
 
 func TestBuildDockerRunCommandLowersComponentCommandToEntrypoint(t *testing.T) {
@@ -1069,14 +1069,11 @@ func TestReconcilerReconcileComponentsRestartsWhenConfigChanged(t *testing.T) {
 							CreateParent: true,
 						},
 					},
-					Volumes: []v1.ComponentVolume{{
-						Name:     "ray-config",
-						HostPath: &v1.ComponentHostPathVolumeSource{Path: testRayConfigPath, Type: v1.ComponentHostPathTypeFile},
-					}},
-					VolumeMounts: []v1.ComponentVolumeMount{{
+					Volumes: []v1.NodeComponentVolume{{
 						Name:      "ray-config",
+						HostPath:  testRayConfigPath,
 						MountPath: testRayConfigPath,
-						ReadOnly:  &readOnly,
+						ReadOnly:  readOnly,
 					}},
 					HealthCheck: &v1.NodeComponentHealthCheck{
 						HTTPPath: testDefaultHealthHTTPPath,

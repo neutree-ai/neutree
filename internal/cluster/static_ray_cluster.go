@@ -131,10 +131,6 @@ func validateStaticNodeClusterSpec(c *v1.Cluster) error {
 		return errors.New("cluster spec is required")
 	}
 
-	if c.Spec.Config.AcceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal {
-		return errors.New("accelerator_exporter.mode=external is not supported for SSH static clusters")
-	}
-
 	if c.Spec.Version == "" {
 		return errors.New("cluster spec.version is required")
 	}
@@ -307,6 +303,11 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		})
 	}
 
+	var metrics *v1.ClusterMetricsConfig
+	if c.Spec.Config != nil {
+		metrics = copyStaticClusterMetrics(c.Spec.Config.Metrics)
+	}
+
 	return &v1.StaticNodeCluster{
 		APIVersion: "v1",
 		Kind:       v1.StaticNodeClusterKind,
@@ -319,6 +320,7 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
+			Metrics:         metrics,
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
@@ -521,4 +523,18 @@ func copyStaticClusterStringMap(values map[string]string) map[string]string {
 	}
 
 	return copied
+}
+
+func copyStaticClusterMetrics(metrics *v1.ClusterMetricsConfig) *v1.ClusterMetricsConfig {
+	if metrics == nil {
+		return nil
+	}
+
+	copied := *metrics
+	if metrics.AcceleratorExporter != nil {
+		exporter := *metrics.AcceleratorExporter
+		copied.AcceleratorExporter = &exporter
+	}
+
+	return &copied
 }

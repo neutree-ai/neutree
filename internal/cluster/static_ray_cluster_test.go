@@ -98,7 +98,7 @@ func TestStaticRayReconcilerCreatesStaticNodeCluster(t *testing.T) {
 	store.AssertExpectations(t)
 }
 
-func TestStaticRayReconcilerRejectsExternalAcceleratorExporterBeforeStorageRead(t *testing.T) {
+func TestStaticRayReconcilerPropagatesExternalMetrics(t *testing.T) {
 	store := &storagemocks.MockStorage{}
 	reconciler := &staticRayReconciler{storage: store}
 	cluster := staticRayTestCluster("static-external", "v1.2.0", "10.0.0.10")
@@ -107,16 +107,25 @@ func TestStaticRayReconcilerRejectsExternalAcceleratorExporterBeforeStorageRead(
 			Mode: v1.ClusterAcceleratorExporterModeExternal,
 		},
 	}
-	store.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Maybe()
-	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedStaticNodeImageRegistry()}, nil).Maybe()
-	store.On("CreateStaticNodeCluster", mock.Anything).Return(nil).Maybe()
+
+	store.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Once()
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedStaticNodeImageRegistry()}, nil).Once()
+	store.On("CreateStaticNodeCluster", mock.MatchedBy(func(created *v1.StaticNodeCluster) bool {
+		require.NotNil(t, created.Spec)
+		require.NotNil(t, created.Spec.Metrics)
+		require.NotNil(t, created.Spec.Metrics.AcceleratorExporter)
+		assert.Equal(t, v1.ClusterAcceleratorExporterModeExternal, created.Spec.Metrics.AcceleratorExporter.Mode)
+		assert.NotSame(t, cluster.Spec.Config.Metrics, created.Spec.Metrics)
+		assert.NotSame(t, cluster.Spec.Config.Metrics.AcceleratorExporter, created.Spec.Metrics.AcceleratorExporter)
+
+		return true
+	})).Return(nil).Once()
 
 	err := reconciler.Reconcile(context.Background(), cluster)
 
-	require.EqualError(t, err, "accelerator_exporter.mode=external is not supported for SSH static clusters")
-	store.AssertNotCalled(t, "ListStaticNodeCluster", mock.Anything)
-	store.AssertNotCalled(t, "ListImageRegistry", mock.Anything)
-	store.AssertNotCalled(t, "CreateStaticNodeCluster", mock.Anything)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-external is provisioning")
+	store.AssertExpectations(t)
 }
 
 func TestStaticRayReconcilerRejectsInitializedHeadChange(t *testing.T) {

@@ -318,7 +318,6 @@ func TestPlannerCanonicalizesEmptyExporterSlicesBeforeStaticNodeJSONRoundTrip(t 
 	assert.Nil(t, component.Args)
 	assert.Nil(t, component.ConfigFiles)
 	assert.Nil(t, component.Volumes)
-	assert.Nil(t, component.VolumeMounts)
 	assert.False(t, staticNodeSpecDrifted(plans[0].Node, observed))
 }
 
@@ -358,38 +357,53 @@ func TestPlannerDoesNotBackfillStaticNodeAgentAcceleratorType(t *testing.T) {
 }
 
 func TestPlannerUsesLegacyNodeAgentContractBeforeV112(t *testing.T) {
-	cluster := testStaticNodeCluster()
-	cluster.Spec.Version = "v1.1.1"
-	planner := &Planner{
-		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
-			profiles: map[string]*v1.AcceleratorProfile{
-				v1.AcceleratorTypeNVIDIAGPU.String(): {
-					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
-					MetricsExporter: &v1.AcceleratorExporterProfile{
-						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
-						Port:  19400,
-					},
-				},
-			},
-		},
+	testCases := []struct {
+		name string
+		mode v1.ClusterAcceleratorExporterMode
+	}{
+		{name: "managed", mode: v1.ClusterAcceleratorExporterModeManaged},
+		{name: "external", mode: v1.ClusterAcceleratorExporterModeExternal},
 	}
 
-	nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
-		staticNodeStatusWithAccelerator(
-			"head-0",
-			v1.StaticNodeRoleHead,
-			v1.StaticNodePhaseReady,
-			true,
-			nvidiaAcceleratorStatus(),
-			nil,
-		),
-	})
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cluster := testStaticNodeCluster()
+			cluster.Spec.Version = "v1.1.1"
+			cluster.Spec.Metrics = &v1.ClusterMetricsConfig{
+				AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{Mode: testCase.mode},
+			}
+			planner := &Planner{
+				AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+					profiles: map[string]*v1.AcceleratorProfile{
+						v1.AcceleratorTypeNVIDIAGPU.String(): {
+							AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+							MetricsExporter: &v1.AcceleratorExporterProfile{
+								Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+								Port:  19400,
+							},
+						},
+					},
+				},
+			}
 
-	nodeAgent := findComponent(nodes[0].Spec.Components, nodeAgentComponentName)
-	require.NotNil(t, nodeAgent)
-	assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
-	assert.Contains(t, nodeAgent.Args, "--metrics-mode=managed")
-	assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+			nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
+				staticNodeStatusWithAccelerator(
+					"head-0",
+					v1.StaticNodeRoleHead,
+					v1.StaticNodePhaseReady,
+					true,
+					nvidiaAcceleratorStatus(),
+					nil,
+				),
+			})
+
+			nodeAgent := findComponent(nodes[0].Spec.Components, nodeAgentComponentName)
+			require.NotNil(t, nodeAgent)
+			assert.Contains(t, nodeAgent.Args, "--cluster-type=ray")
+			assert.Contains(t, nodeAgent.Args, "--metrics-mode="+string(testCase.mode))
+			assert.NotContains(t, nodeAgent.Args, "--accelerator-type=nvidia_gpu")
+		})
+	}
 }
 
 func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
@@ -477,12 +491,36 @@ func TestBuildAcceleratorExporterComponentProjectsRuntimeRequirements(t *testing
 	component := buildAcceleratorExporterComponent(testStaticNodeCluster(), exporter)
 
 	require.Len(t, component.Volumes, 2)
-	require.Len(t, component.VolumeMounts, 2)
 	assert.Equal(t, "accelerator-exporter-config-0", component.Volumes[0].Name)
+	assert.Equal(t, "/etc/exporter/config.yaml", component.Volumes[0].HostPath)
+	assert.Equal(t, "/etc/exporter/config.yaml", component.Volumes[0].MountPath)
+	assert.True(t, component.Volumes[0].ReadOnly)
 	assert.Equal(t, "driver-root", component.Volumes[1].Name)
-	assert.Equal(t, "accelerator-exporter-config-0", component.VolumeMounts[0].Name)
-	assert.Equal(t, "driver-root", component.VolumeMounts[1].Name)
+	assert.Equal(t, "/opt/driver", component.Volumes[1].HostPath)
+	assert.Equal(t, "/opt/driver", component.Volumes[1].MountPath)
+	assert.True(t, component.Volumes[1].ReadOnly)
 	assert.Contains(t, component.DockerRunOptions, "--privileged")
+}
+
+func TestStaticNodeComponentVolumesTransferProfileVolumesAndMounts(t *testing.T) {
+	readWrite := false
+	volumes := staticNodeComponentVolumes(
+		[]v1.ComponentVolume{
+			{Name: "driver", HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/driver"}},
+			{Name: "missing-source"},
+		},
+		[]v1.ComponentVolumeMount{
+			{Name: "driver", MountPath: "/driver"},
+			{Name: "driver", MountPath: "/driver-rw", ReadOnly: &readWrite},
+			{Name: "missing-source", MountPath: "/ignored"},
+			{Name: "missing-volume", MountPath: "/ignored"},
+		},
+	)
+
+	assert.Equal(t, []v1.NodeComponentVolume{
+		{Name: "driver", HostPath: "/opt/driver", MountPath: "/driver", ReadOnly: true},
+		{Name: "driver", HostPath: "/opt/driver", MountPath: "/driver-rw", ReadOnly: false},
+	}, volumes)
 }
 
 func TestAcceleratorExporterDockerRunOptionsProjectUnvalidatedCapabilities(t *testing.T) {
@@ -1801,7 +1839,7 @@ func findComponent(components []v1.NodeComponentSpec, name string) *v1.NodeCompo
 	return nil
 }
 
-func assertNotContainsVolume(t *testing.T, volumes []v1.ComponentVolume, name string) {
+func assertNotContainsVolume(t *testing.T, volumes []v1.NodeComponentVolume, name string) {
 	t.Helper()
 
 	for _, volume := range volumes {
@@ -1815,7 +1853,7 @@ func requireVolume(
 	name string,
 	hostPath string,
 	mountPath string,
-) v1.ComponentVolume {
+) v1.NodeComponentVolume {
 	t.Helper()
 
 	require.NotNil(t, component)
@@ -1824,25 +1862,16 @@ func requireVolume(
 			continue
 		}
 
-		require.NotNil(t, volume.HostPath)
-		assert.Equal(t, hostPath, volume.HostPath.Path)
-		for _, mount := range component.VolumeMounts {
-			if mount.Name != name {
-				continue
-			}
+		assert.Equal(t, hostPath, volume.HostPath)
+		assert.Equal(t, mountPath, volume.MountPath)
+		assert.True(t, volume.ReadOnly)
 
-			assert.Equal(t, mountPath, mount.MountPath)
-			assert.True(t, mount.ReadOnly == nil || *mount.ReadOnly)
-
-			return volume
-		}
-
-		t.Fatalf("expected component %s to have volume mount %s", component.Name, name)
+		return volume
 	}
 
 	t.Fatalf("expected component %s to have volume %s", component.Name, name)
 
-	return v1.ComponentVolume{}
+	return v1.NodeComponentVolume{}
 }
 
 func findStaticNode(nodes []*v1.StaticNode, name string) *v1.StaticNode {

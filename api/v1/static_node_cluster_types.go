@@ -1,8 +1,6 @@
 package v1
 
 import (
-	"bytes"
-	"encoding/json"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -209,10 +207,10 @@ type NodeComponentSpec struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Ports declares host ports expected to be exposed by the component.
 	Ports []NodeComponentPort `json:"ports,omitempty"`
-	// Volumes declares host path sources for the component container.
-	Volumes []ComponentVolume `json:"volumes,omitempty"`
-	// VolumeMounts declares where component volumes are mounted in the container.
-	VolumeMounts []ComponentVolumeMount `json:"volume_mounts,omitempty"`
+	// Volumes declares host path mounts for the component container. This is a
+	// persisted StaticNode contract; Profile volumes are lowered to this layout
+	// by the static-cluster planner.
+	Volumes []NodeComponentVolume `json:"volumes,omitempty"`
 	// DockerRunOptions are extra docker run flags appended by the controller.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
 	// ConfigFiles declares files that must be written before starting the component.
@@ -223,116 +221,6 @@ type NodeComponentSpec struct {
 	ConfigHash string `json:"config_hash,omitempty"`
 }
 
-// UnmarshalJSON accepts the legacy StaticNode volume layout stored in existing
-// components JSON. Legacy volume entries carried mount metadata alongside a
-// string host_path; the current layout separates host paths and mounts.
-func (s *NodeComponentSpec) UnmarshalJSON(data []byte) error {
-	type nodeComponentSpecAlias NodeComponentSpec
-
-	var decoded struct {
-		*nodeComponentSpecAlias
-		Volumes json.RawMessage `json:"volumes"`
-	}
-
-	*s = NodeComponentSpec{}
-	decoded.nodeComponentSpecAlias = (*nodeComponentSpecAlias)(s)
-
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-
-	volumes, legacyMounts, err := decodeNodeComponentVolumes(decoded.Volumes, s.VolumeMounts)
-	if err != nil {
-		return err
-	}
-
-	s.Volumes = volumes
-	s.VolumeMounts = append(s.VolumeMounts, legacyMounts...)
-
-	return nil
-}
-
-func decodeNodeComponentVolumes(
-	rawVolumes json.RawMessage,
-	explicitMounts []ComponentVolumeMount,
-) ([]ComponentVolume, []ComponentVolumeMount, error) {
-	trimmedVolumes := bytes.TrimSpace(rawVolumes)
-	if len(trimmedVolumes) == 0 || bytes.Equal(trimmedVolumes, []byte("null")) {
-		return nil, nil, nil
-	}
-
-	var entries []json.RawMessage
-	if err := json.Unmarshal(trimmedVolumes, &entries); err != nil {
-		return nil, nil, err
-	}
-
-	volumes := make([]ComponentVolume, 0, len(entries))
-	legacyMounts := make([]ComponentVolumeMount, 0, len(entries))
-	mountNames := make(map[string]struct{}, len(explicitMounts))
-
-	for _, mount := range explicitMounts {
-		mountNames[mount.Name] = struct{}{}
-	}
-
-	for _, entry := range entries {
-		var legacy struct {
-			Name      string          `json:"name,omitempty"`
-			HostPath  json.RawMessage `json:"host_path,omitempty"`
-			MountPath string          `json:"mount_path,omitempty"`
-			ReadOnly  *bool           `json:"read_only,omitempty"`
-		}
-
-		if err := json.Unmarshal(entry, &legacy); err != nil {
-			return nil, nil, err
-		}
-
-		if legacyHostPath, ok, err := legacyComponentHostPath(legacy.HostPath); err != nil {
-			return nil, nil, err
-		} else if ok {
-			volumes = append(volumes, ComponentVolume{
-				Name:     legacy.Name,
-				HostPath: &ComponentHostPathVolumeSource{Path: legacyHostPath},
-			})
-
-			if legacy.MountPath != "" {
-				if _, exists := mountNames[legacy.Name]; !exists {
-					legacyMounts = append(legacyMounts, ComponentVolumeMount{
-						Name:      legacy.Name,
-						MountPath: legacy.MountPath,
-						ReadOnly:  legacy.ReadOnly,
-					})
-					mountNames[legacy.Name] = struct{}{}
-				}
-			}
-
-			continue
-		}
-
-		var volume ComponentVolume
-		if err := json.Unmarshal(entry, &volume); err != nil {
-			return nil, nil, err
-		}
-
-		volumes = append(volumes, volume)
-	}
-
-	return volumes, legacyMounts, nil
-}
-
-func legacyComponentHostPath(rawHostPath json.RawMessage) (string, bool, error) {
-	trimmedHostPath := bytes.TrimSpace(rawHostPath)
-	if len(trimmedHostPath) == 0 || bytes.Equal(trimmedHostPath, []byte("null")) || trimmedHostPath[0] != '"' {
-		return "", false, nil
-	}
-
-	var path string
-	if err := json.Unmarshal(trimmedHostPath, &path); err != nil {
-		return "", false, err
-	}
-
-	return path, true, nil
-}
-
 type NodeComponentPort struct {
 	// Name is the logical port name.
 	Name string `json:"name,omitempty"`
@@ -340,6 +228,20 @@ type NodeComponentPort struct {
 	Port int `json:"port,omitempty"`
 	// Protocol is the port protocol, for example TCP.
 	Protocol string `json:"protocol,omitempty"`
+}
+
+// NodeComponentVolume is the persisted StaticNode host-path mount contract.
+// Unlike ComponentVolume, its mount metadata is stored with the host path so
+// existing StaticNode components JSON remains readable across upgrades.
+type NodeComponentVolume struct {
+	// Name is the logical mount name.
+	Name string `json:"name,omitempty"`
+	// HostPath is the path on the static node host.
+	HostPath string `json:"host_path,omitempty"`
+	// MountPath is the path inside the component container.
+	MountPath string `json:"mount_path,omitempty"`
+	// ReadOnly mounts the host path read-only when true.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 type NodeComponentConfigFile struct {

@@ -343,19 +343,13 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 		parts = append(parts, "-e", shellArg(key+"="+component.Env[key]))
 	}
 
-	volumeByName := make(map[string]v1.ComponentVolume, len(component.Volumes))
 	for _, volume := range component.Volumes {
-		volumeByName[volume.Name] = volume
-	}
-
-	for _, mount := range component.VolumeMounts {
-		volume, exists := volumeByName[mount.Name]
-		if !exists || volume.HostPath == nil || volume.HostPath.Path == "" || mount.MountPath == "" {
+		if volume.HostPath == "" || volume.MountPath == "" {
 			continue
 		}
 
-		value := volume.HostPath.Path + ":" + mount.MountPath
-		if mount.ReadOnly == nil || *mount.ReadOnly {
+		value := volume.HostPath + ":" + volume.MountPath
+		if volume.ReadOnly {
 			value += ":ro"
 		}
 

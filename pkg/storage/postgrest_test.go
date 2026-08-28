@@ -113,7 +113,7 @@ func TestCallDatabaseFunction_FailureDoesNotPoisonListQueries(t *testing.T) {
 		"the List must reach the server, not short-circuit on a stale error")
 }
 
-func TestParseResponseReadsLegacyStaticNodeComponentVolumes(t *testing.T) {
+func TestParseResponseReadsPersistedStaticNodeComponentVolumes(t *testing.T) {
 	const response = `[
 		{
 			"id": 1,
@@ -140,12 +140,10 @@ func TestParseResponseReadsLegacyStaticNodeComponentVolumes(t *testing.T) {
 	require.Len(t, nodes, 1)
 	require.NotNil(t, nodes[0].Spec)
 	require.Len(t, nodes[0].Spec.Components, 1)
-
-	component := nodes[0].Spec.Components[0]
-	require.Len(t, component.Volumes, 1)
-	require.NotNil(t, component.Volumes[0].HostPath)
-	require.Equal(t, "/opt/vendor/driver", component.Volumes[0].HostPath.Path)
-	require.Len(t, component.VolumeMounts, 1)
-	require.NotNil(t, component.VolumeMounts[0].ReadOnly)
-	require.True(t, *component.VolumeMounts[0].ReadOnly)
+	require.Equal(t, v1.NodeComponentVolume{
+		Name:      "driver",
+		HostPath:  "/opt/vendor/driver",
+		MountPath: "/driver",
+		ReadOnly:  true,
+	}, nodes[0].Spec.Components[0].Volumes[0])
 }

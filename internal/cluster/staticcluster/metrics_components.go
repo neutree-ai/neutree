@@ -86,7 +86,8 @@ func buildMetricsComponents(
 ) ([]v1.NodeComponentSpec, error) {
 	components := []v1.NodeComponentSpec{buildNodeExporterComponent(cluster)}
 
-	if exporter := acceleratorExporterProfile(profile); exporter != nil {
+	if exporter := acceleratorExporterProfile(profile); exporter != nil &&
+		acceleratorExporterMode(cluster) != v1.ClusterAcceleratorExporterModeExternal {
 		components = append(components, buildAcceleratorExporterComponent(cluster, exporter))
 	}
 
@@ -116,14 +117,11 @@ func buildNodeExporterComponent(cluster *v1.StaticNodeCluster) v1.NodeComponentS
 			"--net=host",
 			"--pid=host",
 		},
-		Volumes: []v1.ComponentVolume{{
-			Name:     "host-root",
-			HostPath: &v1.ComponentHostPathVolumeSource{Path: "/", Type: v1.ComponentHostPathTypeDirectory},
-		}},
-		VolumeMounts: []v1.ComponentVolumeMount{{
+		Volumes: []v1.NodeComponentVolume{{
 			Name:      "host-root",
+			HostPath:  "/",
 			MountPath: "/host",
-			ReadOnly:  staticComponentReadOnly(true),
+			ReadOnly:  true,
 		}},
 		Ports: []v1.NodeComponentPort{
 			{Name: "metrics", Port: defaultNodeExporterPort, Protocol: "TCP"},
@@ -143,6 +141,14 @@ func acceleratorExporterProfile(profile *v1.AcceleratorProfile) *v1.AcceleratorE
 	return profile.MetricsExporter
 }
 
+func acceleratorExporterMode(cluster *v1.StaticNodeCluster) v1.ClusterAcceleratorExporterMode {
+	if cluster == nil || cluster.Spec == nil {
+		return v1.ClusterAcceleratorExporterModeManaged
+	}
+
+	return (&v1.ClusterConfig{Metrics: cluster.Spec.Metrics}).AcceleratorExporterMode()
+}
+
 func buildAcceleratorExporterComponent(
 	cluster *v1.StaticNodeCluster,
 	exporter *v1.AcceleratorExporterProfile,
@@ -156,23 +162,8 @@ func buildAcceleratorExporterComponent(
 		runtimeVolumeMounts = append([]v1.ComponentVolumeMount{}, exporter.Runtime.VolumeMounts...)
 	}
 
-	var volumes []v1.ComponentVolume
-	for _, group := range [][]v1.ComponentVolume{configVolumes, runtimeVolumes} {
-		volumes = append(volumes, group...)
-	}
-
-	if len(volumes) == 0 {
-		volumes = nil
-	}
-
-	var volumeMounts []v1.ComponentVolumeMount
-	for _, group := range [][]v1.ComponentVolumeMount{configVolumeMounts, runtimeVolumeMounts} {
-		volumeMounts = append(volumeMounts, group...)
-	}
-
-	if len(volumeMounts) == 0 {
-		volumeMounts = nil
-	}
+	volumes := append(append([]v1.ComponentVolume{}, configVolumes...), runtimeVolumes...)
+	volumeMounts := append(append([]v1.ComponentVolumeMount{}, configVolumeMounts...), runtimeVolumeMounts...)
 
 	return v1.NodeComponentSpec{
 		Name:             acceleratorExporterComponentName,
@@ -180,8 +171,7 @@ func buildAcceleratorExporterComponent(
 		Command:          copyMetricsStringSlice(exporter.Command),
 		Args:             copyMetricsStringSlice(exporter.Args),
 		Env:              copyMetricsStringMap(exporter.Env),
-		Volumes:          volumes,
-		VolumeMounts:     volumeMounts,
+		Volumes:          staticNodeComponentVolumes(volumes, volumeMounts),
 		ConfigFiles:      acceleratorExporterComponentConfigFiles(exporter.ConfigFiles),
 		DockerRunOptions: acceleratorExporterDockerRunOptions(exporter.Runtime),
 		Ports: []v1.NodeComponentPort{
@@ -199,7 +189,7 @@ func buildNodeAgentComponent(
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) (v1.NodeComponentSpec, error) {
-	volumes, volumeMounts := nodeAgentComponentVolumes(profile)
+	volumes := nodeAgentComponentVolumes(profile)
 	args := nodeAgentComponentArgs(cluster, profile)
 	image, err := selectedNodeAgentImage(cluster.Spec.Version, profile)
 
@@ -222,7 +212,6 @@ func buildNodeAgentComponent(
 		Env:              nodeAgentComponentEnv(cluster.Spec.Version, profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
 		Volumes:          volumes,
-		VolumeMounts:     volumeMounts,
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultNodeAgentPort, Protocol: "TCP"},
 		},
@@ -242,7 +231,7 @@ func nodeAgentComponentArgs(cluster *v1.StaticNodeCluster, profile *v1.Accelerat
 	if err != nil || !supportsExplicitProfileContract || profile == nil || profile.AcceleratorType == "" {
 		args = append(args,
 			"--cluster-type=ray",
-			"--metrics-mode=managed",
+			"--metrics-mode="+string(acceleratorExporterMode(cluster)),
 			fmt.Sprintf("--ray-dashboard-url=http://%s:%d", staticNodeClusterHeadIP(cluster), v1.RayDashboardPort),
 			"--procfs-root=/host/proc",
 			"--cgroupfs-root=/host/sys/fs/cgroup",
@@ -335,7 +324,7 @@ func nodeAgentRuntime(profile *v1.AcceleratorProfile) *v1.NodeAgentRuntimeProfil
 	return profile.NodeAgentRuntime
 }
 
-func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) ([]v1.ComponentVolume, []v1.ComponentVolumeMount) {
+func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) []v1.NodeComponentVolume {
 	volumes := []v1.ComponentVolume{
 		{Name: "host-proc", HostPath: &v1.ComponentHostPathVolumeSource{Path: "/proc", Type: v1.ComponentHostPathTypeDirectory}},
 		{Name: "host-cgroup", HostPath: &v1.ComponentHostPathVolumeSource{Path: "/sys/fs/cgroup", Type: v1.ComponentHostPathTypeDirectory}},
@@ -347,13 +336,52 @@ func nodeAgentComponentVolumes(profile *v1.AcceleratorProfile) ([]v1.ComponentVo
 
 	runtime := nodeAgentRuntime(profile)
 	if runtime == nil {
-		return volumes, mounts
+		return staticNodeComponentVolumes(volumes, mounts)
 	}
 
 	volumes = append(volumes, runtime.Volumes...)
 	mounts = append(mounts, runtime.VolumeMounts...)
 
-	return volumes, mounts
+	return staticNodeComponentVolumes(volumes, mounts)
+}
+
+// staticNodeComponentVolumes lowers the backend-neutral Profile volume model
+// to StaticNode's persisted inline mount layout. The conversion preserves the
+// static runtime's read-only default and supports multiple mounts per source.
+func staticNodeComponentVolumes(
+	volumes []v1.ComponentVolume,
+	mounts []v1.ComponentVolumeMount,
+) []v1.NodeComponentVolume {
+	volumeByName := make(map[string]v1.ComponentVolume, len(volumes))
+	for _, volume := range volumes {
+		volumeByName[volume.Name] = volume
+	}
+
+	result := make([]v1.NodeComponentVolume, 0, len(mounts))
+	for _, mount := range mounts {
+		volume, exists := volumeByName[mount.Name]
+		if !exists || volume.HostPath == nil {
+			continue
+		}
+
+		readOnly := true
+		if mount.ReadOnly != nil {
+			readOnly = *mount.ReadOnly
+		}
+
+		result = append(result, v1.NodeComponentVolume{
+			Name:      mount.Name,
+			HostPath:  volume.HostPath.Path,
+			MountPath: mount.MountPath,
+			ReadOnly:  readOnly,
+		})
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+
+	return result
 }
 
 func nodeAgentComponentEnv(_ string, profile *v1.AcceleratorProfile) map[string]string {
@@ -407,14 +435,11 @@ func buildVMAgentComponent(cluster *v1.StaticNodeCluster, metricsRemoteWriteURL 
 		Image:            staticComponentImage(cluster, defaultVMAgentImage),
 		Args:             vmagentArgs,
 		DockerRunOptions: []string{"--net=host"},
-		Volumes: []v1.ComponentVolume{{
-			Name:     "vmagent-config-dir",
-			HostPath: &v1.ComponentHostPathVolumeSource{Path: "/etc/neutree/vmagent", Type: v1.ComponentHostPathTypeDirectory},
-		}},
-		VolumeMounts: []v1.ComponentVolumeMount{{
+		Volumes: []v1.NodeComponentVolume{{
 			Name:      "vmagent-config-dir",
+			HostPath:  "/etc/neutree/vmagent",
 			MountPath: "/etc/neutree/vmagent",
-			ReadOnly:  staticComponentReadOnly(true),
+			ReadOnly:  true,
 		}},
 		Ports: []v1.NodeComponentPort{
 			{Name: "http", Port: defaultVMAgentPort, Protocol: "TCP"},
