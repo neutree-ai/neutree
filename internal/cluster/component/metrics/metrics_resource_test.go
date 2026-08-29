@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -1588,4 +1589,239 @@ func assertValidPrometheusYAML(t *testing.T, config string) {
 	if err := yaml.Unmarshal([]byte(config), &parsed); err != nil {
 		t.Fatalf("prometheus.yml is not valid YAML: %v\n%s", err, config)
 	}
+}
+
+// ---- Speculative decoding metric relabel surface --------------------------
+//
+// Spec-decode metrics must survive relabeling on both cluster paths so
+// dashboards can query the canonical `vllm:` / `sglang:` forms. These tests
+// apply the *actual* metric_relabel_configs from each vmagent config to the
+// raw names the scrapers can see, proving the six canonical spec metrics
+// arrive at the store unchanged in meaning.
+
+// nameRelabelRule is one metric_relabel_configs entry that rewrites __name__.
+type nameRelabelRule struct {
+	replacement string
+	regex       *regexp.Regexp
+}
+
+// nameFilterRule is a metric_relabel_configs entry that keep/drop filters on
+// __name__ (a cardinality-control rule). Prometheus keep/drop rules carry an
+// `action` and no `target_label`.
+type nameFilterRule struct {
+	action string // "keep" or "drop"
+	regex  *regexp.Regexp
+}
+
+// parseNameRelabelRules extracts __name__-related rules from a vmagent
+// prometheus.yml: both the canonical rename rules (__name__ -> __name__) and
+// any keep/drop filter on __name__. Prometheus relabel regexes are RE2
+// (identical to Go regexp), so applying them with regexp here mirrors the
+// scraper exactly.
+func parseNameRelabelRules(configYAML string) (rules []nameRelabelRule, filters []nameFilterRule) {
+	var cfg struct {
+		ScrapeConfigs []struct {
+			MetricRelabelConfigs []struct {
+				SourceLabels []string `yaml:"source_labels"`
+				Regex        string   `yaml:"regex"`
+				TargetLabel  string   `yaml:"target_label"`
+				Replacement  string   `yaml:"replacement"`
+				Action       string   `yaml:"action"`
+			} `yaml:"metric_relabel_configs"`
+		} `yaml:"scrape_configs"`
+	}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		panic(err)
+	}
+
+	for _, sc := range cfg.ScrapeConfigs {
+		for _, rc := range sc.MetricRelabelConfigs {
+			onName := len(rc.SourceLabels) == 1 && rc.SourceLabels[0] == "__name__"
+			if !onName || rc.Regex == "" {
+				continue
+			}
+			switch rc.Action {
+			case "", "replace":
+				if rc.TargetLabel != "__name__" {
+					continue
+				}
+				rules = append(rules, nameRelabelRule{
+					replacement: rc.Replacement,
+					regex:       regexp.MustCompile(rc.Regex),
+				})
+			case "keep", "drop":
+				filters = append(filters, nameFilterRule{
+					action: rc.Action,
+					regex:  regexp.MustCompile(rc.Regex),
+				})
+			}
+		}
+	}
+	return rules, filters
+}
+
+// applyNameRelabels runs metric names through the relabel rules in order,
+// mirroring Prometheus: a rule whose regex matches replaces the name with the
+// replacement; a non-matching rule leaves it unchanged.
+func applyNameRelabels(name string, rules []nameRelabelRule) string {
+	out := name
+	for _, r := range rules {
+		if r.regex.MatchString(out) {
+			out = r.regex.ReplaceAllString(out, r.replacement)
+		}
+	}
+	return out
+}
+
+func loadStaticVMAgentConfig(t *testing.T) ([]nameRelabelRule, []nameFilterRule) {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "..", "observability", "vmagent", "prometheus.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read static vmagent config: %v", err)
+	}
+	return parseNameRelabelRules(string(data))
+}
+
+// TestVMAgentConfigNormalizesSpecDecodeMetricNames asserts the six canonical
+// speculative-decoding metrics survive metric-name relabeling on both the SSH
+// (static) and Kubernetes (rendered) vmagent paths.
+func TestVMAgentConfigNormalizesSpecDecodeMetricNames(t *testing.T) {
+	specMetrics := []string{
+		"vllm:spec_decode_num_drafts_total",
+		"vllm:spec_decode_num_draft_tokens_total",
+		"vllm:spec_decode_num_accepted_tokens_total",
+		"vllm:spec_decode_num_accepted_tokens_per_pos_total",
+		"sglang:spec_accept_length",
+		"sglang:spec_accept_rate",
+	}
+
+	// Raw forms the scrapers can see. On the SSH/static path every engine
+	// metric is exported through Ray, so names carry a ray_<engine> prefix in
+	// either the Ray 2.53+ underscore form (ray_vllm_spec_...) or the legacy
+	// colon form (ray_vllm:spec_...). The native (prefix-less) canonical form
+	// only ever appears on the Kubernetes path where engines expose /metrics
+	// directly.
+	rawForms := func(engine, canonical string) []string {
+		suffix := strings.SplitN(canonical, ":", 2)[1]
+		return []string{
+			"ray_" + engine + "_" + strings.ReplaceAll(suffix, ":", "_"),
+			"ray_" + engine + ":" + suffix,
+		}
+	}
+
+	staticRules, _ := loadStaticVMAgentConfig(t)
+
+	t.Run("ssh static config", func(t *testing.T) {
+		for _, m := range specMetrics {
+			engine := strings.SplitN(m, ":", 2)[0]
+			for _, raw := range rawForms(engine, m) {
+				got := applyNameRelabels(raw, staticRules)
+				if got != m {
+					t.Errorf("static relabel: raw %q -> %q, want %q", raw, got, m)
+				}
+			}
+		}
+	})
+
+	t.Run("kubernetes rendered config", func(t *testing.T) {
+		metricsCmpt := &MetricsComponent{
+			cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{
+					Name:      "test-cluster",
+					Workspace: "test-workspace",
+				},
+				Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+			},
+			namespace:             "test-namespace",
+			imagePrefix:           "test-image-prefix",
+			imagePullSecret:       "test-image-pull-secret",
+			metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		}
+
+		objs, err := metricsCmpt.GetMetricsResources(context.Background())
+		if err != nil {
+			t.Fatalf("failed to build vmagent resources: %v", err)
+		}
+
+		var config string
+		for _, obj := range objs.Items {
+			if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+				config, _, _ = unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+			}
+		}
+		if config == "" {
+			t.Fatalf("vmagent-config configmap not found in rendered resources")
+		}
+
+		k8sRules, _ := parseNameRelabelRules(config)
+		for _, m := range specMetrics {
+			if strings.HasPrefix(m, "vllm:") {
+				// K8s vLLM runs natively with `vllm:` names; only the
+				// canonical form exists and must pass through unchanged.
+				if got := applyNameRelabels(m, k8sRules); got != m {
+					t.Errorf("k8s relabel: canonical %q -> %q, want unchanged", m, got)
+				}
+				continue
+			}
+			// SGLang on K8s can appear as either the native colon form or
+			// the underscore form the config normalizes.
+			for _, raw := range []string{m, strings.ReplaceAll(m, ":", "_")} {
+				if got := applyNameRelabels(raw, k8sRules); got != m {
+					t.Errorf("k8s relabel: raw %q -> %q, want %q", raw, got, m)
+				}
+			}
+		}
+	})
+}
+
+// TestVMAgentConfigDoesNotDropSpecDecodeMetrics asserts neither vmagent config
+// filters __name__ with keep/drop actions in metric_relabel_configs, so
+// spec-decode metrics are never excluded at scrape time.
+func TestVMAgentConfigDoesNotDropSpecDecodeMetrics(t *testing.T) {
+	// parseNameRelabelRules now surfaces __name__ keep/drop rules (action:
+	// keep/drop carry no target_label). Asserting none exist proves no spec
+	// metric family is filtered. K8s keep/drop actions live in relabel_configs
+	// (target discovery by pod label), never in metric_relabel_configs on
+	// __name__.
+	assertNoNameFilter := func(t *testing.T, label string, filters []nameFilterRule) {
+		t.Helper()
+		if len(filters) > 0 {
+			for _, f := range filters {
+				t.Errorf("%s: found __name__ %s rule (regex %q) — would filter spec-decode metrics", label, f.action, f.regex.String())
+			}
+		}
+	}
+
+	_, staticFilters := loadStaticVMAgentConfig(t)
+	assertNoNameFilter(t, "static", staticFilters)
+
+	metricsCmpt := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{
+				Name:      "test-cluster",
+				Workspace: "test-workspace",
+			},
+			Spec: &v1.ClusterSpec{Version: "v1.1.0"},
+		},
+		namespace:             "test-namespace",
+		imagePrefix:           "test-image-prefix",
+		imagePullSecret:       "test-image-pull-secret",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+	}
+	objs, err := metricsCmpt.GetMetricsResources(context.Background())
+	if err != nil {
+		t.Fatalf("failed to build vmagent resources: %v", err)
+	}
+	var config string
+	for _, obj := range objs.Items {
+		if obj.GetKind() == "ConfigMap" && obj.GetName() == "vmagent-config" {
+			config, _, _ = unstructured.NestedString(obj.Object, "data", "prometheus.yml")
+		}
+	}
+	if config == "" {
+		t.Fatalf("vmagent-config configmap not found in rendered resources")
+	}
+	_, k8sFilters := parseNameRelabelRules(config)
+	assertNoNameFilter(t, "kubernetes", k8sFilters)
 }
