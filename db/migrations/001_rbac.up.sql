@@ -114,7 +114,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ----------------------
 CREATE TYPE api.workspace_status AS (
     phase TEXT,
-    service_url TEXT,
     error_message TEXT
 );
 
@@ -179,7 +178,6 @@ CREATE TYPE api.role_spec AS (
 
 CREATE TYPE api.role_status AS (
     phase TEXT,
-    service_url TEXT,
     error_message TEXT
 );
 
@@ -259,7 +257,6 @@ CREATE TYPE api.role_assignment_spec AS (
 
 CREATE TYPE api.role_assignment_status AS (
     phase TEXT,
-    service_url TEXT,
     error_message TEXT
 );
 
