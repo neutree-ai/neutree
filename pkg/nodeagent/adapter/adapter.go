@@ -119,6 +119,10 @@ type KubernetesEvidence struct {
 	VirtualizationMonitor VirtualizationMonitorEvidence
 	NodeLabels            map[string]string
 	NodeAnnotations       map[string]string
+	// NodeAllocatableResources is the raw local Node status.allocatable map.
+	// The host does not interpret resource names or values; adapters own that
+	// vendor-specific projection.
+	NodeAllocatableResources map[string]int64
 }
 
 // PodResource is a raw kubelet PodResources observation.
@@ -308,6 +312,20 @@ func (e KubernetesEvidence) Clone() KubernetesEvidence {
 
 	result.NodeLabels = CloneStringMap(e.NodeLabels)
 	result.NodeAnnotations = CloneStringMap(e.NodeAnnotations)
+	result.NodeAllocatableResources = cloneInt64Map(e.NodeAllocatableResources)
+
+	return result
+}
+
+func cloneInt64Map(source map[string]int64) map[string]int64 {
+	if source == nil {
+		return nil
+	}
+
+	result := make(map[string]int64, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
 
 	return result
 }

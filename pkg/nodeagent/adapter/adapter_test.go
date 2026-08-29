@@ -34,6 +34,9 @@ func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 		}},
 		NodeLabels:      map[string]string{"vendor.example/model": "raw-model"},
 		NodeAnnotations: map[string]string{"vendor.example/metadata": "raw"},
+		NodeAllocatableResources: map[string]int64{
+			"vendor.example/accelerator": 8,
+		},
 	}
 
 	cloned := original.Clone()
@@ -42,6 +45,7 @@ func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 	cloned.EndpointPods[0].Annotations["vendor.example/raw"] = "changed"
 	cloned.NodeLabels["vendor.example/model"] = "changed"
 	cloned.NodeAnnotations["vendor.example/metadata"] = "changed"
+	cloned.NodeAllocatableResources["vendor.example/accelerator"] = 4
 	*cloned.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes = 2048
 
 	assert.Equal(t, "device-a", original.PodResources[0].Containers[0].DeviceIDs[0])
@@ -49,6 +53,7 @@ func TestKubernetesEvidenceCloneDoesNotShareNestedValues(t *testing.T) {
 	assert.Equal(t, "value", original.EndpointPods[0].Annotations["vendor.example/raw"])
 	assert.Equal(t, "raw-model", original.NodeLabels["vendor.example/model"])
 	assert.Equal(t, "raw", original.NodeAnnotations["vendor.example/metadata"])
+	assert.Equal(t, int64(8), original.NodeAllocatableResources["vendor.example/accelerator"])
 	assert.Equal(t, 1024.0, *original.Common.EndpointReplicaAcceleratorUsages[0].MemoryUsedBytes)
 	assert.True(t, cloned.VirtualizationMonitor.Up)
 	assert.Equal(t, original.VirtualizationMonitor.Text, cloned.VirtualizationMonitor.Text)

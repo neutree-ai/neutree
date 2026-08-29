@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,11 +33,16 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 	provider := KubernetesAllocationProvider{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 			endpointPod,
-			&corev1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name:        "node-a",
-				Labels:      map[string]string{"vendor.example/model": "raw-model"},
-				Annotations: map[string]string{"vendor.example/metadata": "raw"},
-			}},
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "node-a",
+					Labels:      map[string]string{"vendor.example/model": "raw-model"},
+					Annotations: map[string]string{"vendor.example/metadata": "raw"},
+				},
+				Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+					corev1.ResourceName("vendor.example/accelerator"): resource.MustParse("8"),
+				}},
+			},
 		).WithIndex(&corev1.Pod{}, "spec.nodeName", podNodeNameIndex).Build(),
 		NodeName: "node-a",
 		PodResources: PodResourceListerFunc(func(context.Context) ([]adapter.PodResource, error) {
@@ -62,13 +68,19 @@ func TestKubernetesAllocationProviderBuildsRawAcceleratorEvidence(t *testing.T) 
 	assert.Equal(t, "raw", evidence.EndpointPods[0].Annotations["vendor.example/devices"])
 	assert.Equal(t, "raw-model", evidence.NodeLabels["vendor.example/model"])
 	assert.Equal(t, "raw", evidence.NodeAnnotations["vendor.example/metadata"])
+	assert.Equal(t, map[string]int64{"vendor.example/accelerator": 8}, evidence.NodeAllocatableResources)
 }
 
-func TestKubernetesAllocationProviderPropagatesPodResourceErrors(t *testing.T) {
+func TestKubernetesAllocationProviderKeepsNodeResourcesWhenPodResourcesFail(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	provider := KubernetesAllocationProvider{
-		Client:   fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+			Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+				corev1.ResourceName("vendor.example/accelerator"): resource.MustParse("8"),
+			}},
+		}).Build(),
 		NodeName: "node-a",
 		PodResources: PodResourceListerFunc(func(context.Context) ([]adapter.PodResource, error) {
 			return nil, errors.New("pod resources unavailable")
@@ -77,8 +89,31 @@ func TestKubernetesAllocationProviderPropagatesPodResourceErrors(t *testing.T) {
 
 	evidence, err := provider.KubernetesAcceleratorEvidence(context.Background())
 
-	require.Error(t, err)
-	assert.Equal(t, adapter.KubernetesEvidence{}, evidence)
+	require.NoError(t, err)
+	assert.False(t, evidence.AllocationAvailable)
+	assert.Empty(t, evidence.PodResources)
+	assert.Empty(t, evidence.EndpointPods)
+	assert.Equal(t, map[string]int64{"vendor.example/accelerator": 8}, evidence.NodeAllocatableResources)
+}
+
+func TestKubernetesAllocationProviderKeepsNodeResourcesWithoutPodResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	provider := KubernetesAllocationProvider{
+		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+			Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+				corev1.ResourceName("vendor.example/accelerator"): resource.MustParse("8"),
+			}},
+		}).Build(),
+		NodeName: "node-a",
+	}
+
+	evidence, err := provider.KubernetesAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, evidence.AllocationAvailable)
+	assert.Equal(t, map[string]int64{"vendor.example/accelerator": 8}, evidence.NodeAllocatableResources)
 }
 
 func TestKubernetesAllocationProviderWithoutDependenciesReturnsEmptyEvidence(t *testing.T) {

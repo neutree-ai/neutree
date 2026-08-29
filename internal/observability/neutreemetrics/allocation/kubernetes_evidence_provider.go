@@ -37,32 +37,33 @@ type KubernetesAllocationProvider struct {
 func (p KubernetesAllocationProvider) KubernetesAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.KubernetesEvidence, error) {
-	if p.Client == nil || p.NodeName == "" || p.PodResources == nil {
+	if p.Client == nil || p.NodeName == "" {
 		return adapter.KubernetesEvidence{}, nil
+	}
+
+	node, err := p.localNode(ctx)
+	if err != nil {
+		return adapter.KubernetesEvidence{}, err
+	}
+
+	evidence := nodeEvidence(node)
+	if p.PodResources == nil {
+		return evidence.Clone(), nil
 	}
 
 	podResources, err := p.PodResources.ListPodResources(ctx)
 	if err != nil {
-		return adapter.KubernetesEvidence{}, err
+		return evidence.Clone(), nil
 	}
 
 	pods, err := p.localEndpointPods(ctx)
 	if err != nil {
-		return adapter.KubernetesEvidence{}, err
+		return evidence.Clone(), nil
 	}
 
-	nodeLabels, nodeAnnotations, err := p.localNodeMetadata(ctx)
-	if err != nil {
-		return adapter.KubernetesEvidence{}, err
-	}
-
-	evidence := adapter.KubernetesEvidence{
-		AllocationAvailable: true,
-		PodResources:        podResources,
-		EndpointPods:        endpointPodEvidence(pods),
-		NodeLabels:          nodeLabels,
-		NodeAnnotations:     nodeAnnotations,
-	}
+	evidence.AllocationAvailable = true
+	evidence.PodResources = podResources
+	evidence.EndpointPods = endpointPodEvidence(pods)
 
 	return evidence.Clone(), nil
 }
@@ -104,17 +105,42 @@ func (p KubernetesAllocationProvider) localEndpointPods(ctx context.Context) ([]
 	return pods, nil
 }
 
-func (p KubernetesAllocationProvider) localNodeMetadata(ctx context.Context) (map[string]string, map[string]string, error) {
+func (p KubernetesAllocationProvider) localNode(ctx context.Context) (*corev1.Node, error) {
 	node := &corev1.Node{}
 	if err := p.Client.Get(ctx, client.ObjectKey{Name: p.NodeName}, node); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, nil, nil
+			return nil, nil
 		}
 
-		return nil, nil, err
+		return nil, err
 	}
 
-	return node.Labels, node.Annotations, nil
+	return node, nil
+}
+
+func nodeEvidence(node *corev1.Node) adapter.KubernetesEvidence {
+	if node == nil {
+		return adapter.KubernetesEvidence{}
+	}
+
+	return adapter.KubernetesEvidence{
+		NodeLabels:               node.Labels,
+		NodeAnnotations:          node.Annotations,
+		NodeAllocatableResources: allocatableResources(node.Status.Allocatable),
+	}
+}
+
+func allocatableResources(resources corev1.ResourceList) map[string]int64 {
+	if len(resources) == 0 {
+		return nil
+	}
+
+	result := make(map[string]int64, len(resources))
+	for name, quantity := range resources {
+		result[string(name)] = quantity.Value()
+	}
+
+	return result
 }
 
 func endpointPodEvidence(pods []corev1.Pod) []adapter.EndpointPodEvidence {
