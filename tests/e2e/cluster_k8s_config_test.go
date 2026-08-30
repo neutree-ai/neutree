@@ -236,7 +236,6 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ExpectSuccess(r)
 
 			k8sH = NewK8sHelper(kubeconfig)
-
 			r = ClusterH.Get(clusterName)
 			ExpectSuccess(r)
 			cluster = parseClusterJSON(r.Stdout)
@@ -247,7 +246,7 @@ var _ = Describe("K8s Cluster Config", Ordered, Label("cluster", "k8s", "config"
 			ClusterH.EnsureDeleted(clusterName)
 		})
 
-		It("should scrape external accelerator exporter without installing managed DCGM", Label("C2732256"), func() {
+		It("should render the external exporter target without installing a managed exporter", Label("C2732256"), func() {
 			assertK8sExternalAcceleratorExporterResources(
 				context.Background(),
 				k8sH,

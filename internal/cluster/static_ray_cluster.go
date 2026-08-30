@@ -303,6 +303,11 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		})
 	}
 
+	var metrics *v1.ClusterMetricsConfig
+	if c.Spec.Config != nil {
+		metrics = copyStaticClusterMetrics(c.Spec.Config.Metrics)
+	}
+
 	return &v1.StaticNodeCluster{
 		APIVersion: "v1",
 		Kind:       v1.StaticNodeClusterKind,
@@ -315,26 +320,11 @@ func (r *staticRayReconciler) buildStaticCluster(c *v1.Cluster) (*v1.StaticNodeC
 		Spec: &v1.StaticNodeClusterSpec{
 			Version:         c.Spec.Version,
 			ImageRegistry:   imagePrefix,
-			Metrics:         copyStaticClusterMetricsConfig(c.Spec.Config),
+			Metrics:         metrics,
 			Nodes:           nodes,
 			UpgradeStrategy: v1.DefaultClusterUpgradeStrategy(),
 		},
 	}, nil
-}
-
-func copyStaticClusterMetricsConfig(config *v1.ClusterConfig) *v1.ClusterMetricsConfig {
-	if config == nil || config.Metrics == nil {
-		return nil
-	}
-
-	copied := &v1.ClusterMetricsConfig{}
-	if config.Metrics.AcceleratorExporter != nil {
-		copied.AcceleratorExporter = &v1.ClusterAcceleratorExporterConfig{
-			Mode: config.Metrics.AcceleratorExporter.Mode,
-		}
-	}
-
-	return copied
 }
 
 func (r *staticRayReconciler) findStaticCluster(
@@ -533,4 +523,19 @@ func copyStaticClusterStringMap(values map[string]string) map[string]string {
 	}
 
 	return copied
+}
+
+func copyStaticClusterMetrics(metrics *v1.ClusterMetricsConfig) *v1.ClusterMetricsConfig {
+	if metrics == nil {
+		return nil
+	}
+
+	copied := *metrics
+
+	if metrics.AcceleratorExporter != nil {
+		exporter := *metrics.AcceleratorExporter
+		copied.AcceleratorExporter = &exporter
+	}
+
+	return &copied
 }

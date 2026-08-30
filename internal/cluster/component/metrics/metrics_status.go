@@ -114,25 +114,32 @@ func (m *MetricsComponent) CheckResourcesStatus(ctx context.Context) (*MetricsSt
 			status.NodeExporterTotalPods = nodeExporterTotalPods
 		}
 
-		neutreeNodeAgentMetricsReady, neutreeNodeAgentMetricsPodsReady, neutreeNodeAgentMetricsTotalPods, err := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
-		if err != nil {
-			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, err))
+		nodeAgentReady, nodeAgentPodsReady, nodeAgentTotalPods, checkErr := m.checkDaemonSetStatus(ctx, neutreeNodeAgentMetricsName)
+		if checkErr != nil {
+			status.Errors = append(status.Errors, fmt.Sprintf("%s daemonset check failed: %v", neutreeNodeAgentMetricsName, checkErr))
 		} else {
-			status.NeutreeNodeAgentMetricsDaemonSetReady = neutreeNodeAgentMetricsReady
-			status.NeutreeNodeAgentMetricsPodsReady = neutreeNodeAgentMetricsPodsReady
-			status.NeutreeNodeAgentMetricsTotalPods = neutreeNodeAgentMetricsTotalPods
+			status.NeutreeNodeAgentMetricsDaemonSetReady = nodeAgentReady
+			status.NeutreeNodeAgentMetricsPodsReady = nodeAgentPodsReady
+			status.NeutreeNodeAgentMetricsTotalPods = nodeAgentTotalPods
 		}
 	}
 
-	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
+	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+	if nodeExporterRequired && !external {
 		acceleratorExporters, err := m.planAcceleratorExporters(ctx)
 		if err != nil {
 			status.Errors = append(status.Errors, fmt.Sprintf("accelerator-exporter plan failed: %v", err))
-		} else if len(acceleratorExporters) > 0 {
+		} else if nodeExporterRequired && !external && len(acceleratorExporters) > 0 {
 			status.AcceleratorExporterRequired = true
 			status.AcceleratorExporterDaemonSetsReady = true
 
-			for _, exporter := range acceleratorExporters {
+			for _, plan := range acceleratorExporters {
+				if plan.Exporter == nil {
+					continue
+				}
+
+				exporter := plan.Exporter
+
 				exporterReady, exporterPodsReady, exporterTotalPods, checkErr := m.checkDaemonSetStatus(ctx, exporter.Name)
 				if checkErr != nil {
 					status.AcceleratorExporterDaemonSetsReady = false

@@ -15,7 +15,7 @@ ARG GO_BUILD_ARGS
 
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} \
     go build "${GO_BUILD_ARGS}" \
-    -o neutree-node-agent cmd/neutree-node-agent/neutree-node-agent.go
+    -o neutree-node-agent cmd/neutree-node-agent/main.go
 
 FROM --platform=linux/${ARCH} ubuntu:22.04
 

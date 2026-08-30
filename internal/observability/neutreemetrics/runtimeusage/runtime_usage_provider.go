@@ -1,6 +1,7 @@
 package runtimeusage
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -39,10 +40,6 @@ func (f ProviderFunc) Usages(ctx context.Context) ([]model.EndpointReplicaRuntim
 	return f(ctx)
 }
 
-func firstNonEmpty(values ...string) string {
-	return model.FirstNonEmpty(values...)
-}
-
 type ContainerRuntimeUsage struct {
 	ContainerID           string
 	CPUUsageSeconds       float64
@@ -68,8 +65,8 @@ type CGroupFSUsageReader struct {
 }
 
 func (r CGroupFSUsageReader) UsageForPID(pid int) (ContainerRuntimeUsage, bool, error) {
-	procRoot := firstNonEmpty(r.ProcFSRoot, defaultProcFSRoot)
-	cgroupRoot := firstNonEmpty(r.CGroupFSRoot, defaultCGroupFSRoot)
+	procRoot := cmp.Or(r.ProcFSRoot, defaultProcFSRoot)
+	cgroupRoot := cmp.Or(r.CGroupFSRoot, defaultCGroupFSRoot)
 	raw, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cgroup"))
 
 	if err != nil {
@@ -186,7 +183,7 @@ func (r CGroupFSUsageReader) readCGroupV1(
 	}
 
 	usage := ContainerRuntimeUsage{
-		ContainerID:     containerIDFromCGroupPath(firstNonEmpty(paths.cpu, paths.memory)),
+		ContainerID:     containerIDFromCGroupPath(cmp.Or(paths.cpu, paths.memory)),
 		CPUUsageSeconds: cpuUsage / 1_000_000_000,
 	}
 
@@ -253,7 +250,7 @@ func (p RayServeRuntimeUsageProvider) Usages(ctx context.Context) ([]model.Endpo
 	}
 
 	cgroupUsage := p.cgroupUsageReader()
-	nodeLabel := firstNonEmpty(p.Node, p.NodeIP, nodeID)
+	nodeLabel := cmp.Or(p.Node, p.NodeIP, nodeID)
 	usages := make([]model.EndpointReplicaRuntimeUsage, 0)
 
 	for _, appName := range rayserve.SortedServeApplicationNames(applications) {
@@ -338,7 +335,7 @@ func rayReplicaRuntimeUsage(
 	}
 
 	workspace, endpoint := rayserve.ApplicationIdentity(appName, status)
-	replicaID := firstNonEmpty(replica.ReplicaID, replica.ActorID)
+	replicaID := cmp.Or(replica.ReplicaID, replica.ActorID)
 
 	return model.EndpointReplicaRuntimeUsage{
 		Workspace:             workspace,

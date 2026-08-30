@@ -1,41 +1,17 @@
 package model
 
-import (
-	"net/http"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-)
+import v1 "github.com/neutree-ai/neutree/api/v1"
 
 const (
 	SourceNodeAgent     = "neutree-node-agent"
 	WorkloadRoleBackend = "backend"
 )
 
-type CanonicalLabels struct {
-	Workspace         string
-	NeutreeCluster    string
-	StaticNodeCluster string
-	ClusterType       string
-	Node              string
-	NodeIP            string
-	NodeRole          string
-}
-
 type ScrapeResult struct {
 	Target string
 	Up     bool
 	Body   string
 	Error  string
-}
-
-type DeviceSnapshotProvider interface {
-	DeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, error)
-}
-
-type DeviceSnapshotProviderFunc func(r *http.Request) (*v1.NodeDeviceSnapshot, error)
-
-func (f DeviceSnapshotProviderFunc) DeviceSnapshot(r *http.Request) (*v1.NodeDeviceSnapshot, error) {
-	return f(r)
 }
 
 type EndpointAllocation struct {
@@ -65,60 +41,4 @@ type EndpointReplicaRuntimeUsage struct {
 	MemoryWorkingSetBytes *float64
 	CPULimitCores         *float64
 	MemoryLimitBytes      *float64
-}
-
-type EndpointReplicaGPUUsage struct {
-	Workspace        string
-	Cluster          string
-	Endpoint         string
-	InstanceID       string
-	ReplicaID        string
-	NodeID           string
-	Container        string
-	GPUUUID          string
-	AcceleratorType  string
-	AcceleratorIndex string
-	VDeviceIndex     string
-	Product          string
-	MemoryUsedBytes  *float64
-	UtilizationRatio *float64
-}
-
-type GPUHardwareInfo struct {
-	UUID              string
-	Index             string
-	MinorNumber       string
-	Product           string
-	Architecture      string
-	CUDACapability    string
-	DriverVersion     string
-	CUDADriverVersion string
-	MemoryTotalMiB    string
-	NVLink            string
-	NVSwitch          string
-	PCIEBusID         string
-	PCIEGeneration    string
-	PCIEWidth         string
-	NUMANode          string
-}
-
-type PodResource struct {
-	Namespace  string
-	Name       string
-	Containers []ContainerDevices
-}
-
-type ContainerDevices struct {
-	ResourceName string
-	DeviceIDs    []string
-}
-
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-
-	return ""
 }

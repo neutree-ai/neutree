@@ -23,15 +23,20 @@ func buildNodeComponents(
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 	metricsRemoteWriteURL string,
-) []v1.NodeComponentSpec {
+) ([]v1.NodeComponentSpec, error) {
 	role := v1.StaticNodeRoleWorker
 	if node != nil && node.Spec != nil {
 		role = node.Spec.Role
 	}
 
 	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
+	metricsComponents, err := buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)
 
-	return append(components, buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)...)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(components, metricsComponents...), nil
 }
 
 func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeComponentSpec {

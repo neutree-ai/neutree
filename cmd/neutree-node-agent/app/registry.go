@@ -1,0 +1,101 @@
+package app
+
+import (
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+
+	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
+)
+
+// adapterRegistry is intentionally private to the NodeAgent application
+// assembly. pkg/nodeagent/adapter is the reusable accelerator contract;
+// registry construction, descriptor ownership checks, and immutable startup
+// wiring are process-local concerns and must not become a public pkg API.
+type adapterRegistry struct {
+	byType      map[string]adapter.Accelerator
+	descriptors []adapter.MetricDescriptor
+}
+
+func newAdapterRegistry(accelerators []adapter.Accelerator) (adapterRegistry, error) {
+	registry := adapterRegistry{
+		byType: make(map[string]adapter.Accelerator, len(accelerators)),
+	}
+	descriptorOwners := make(map[string]string)
+
+	for _, accelerator := range accelerators {
+		if isNilAdapter(accelerator) {
+			return adapterRegistry{}, fmt.Errorf("accelerator adapter is nil")
+		}
+
+		acceleratorType := strings.TrimSpace(accelerator.Type())
+		if acceleratorType == "" {
+			return adapterRegistry{}, fmt.Errorf("accelerator adapter type is required")
+		}
+
+		if _, exists := registry.byType[acceleratorType]; exists {
+			return adapterRegistry{}, fmt.Errorf("duplicate accelerator adapter %q", acceleratorType)
+		}
+
+		registry.byType[acceleratorType] = accelerator
+
+		provider, ok := accelerator.(adapter.MetricDescriptorProvider)
+		if !ok {
+			continue
+		}
+
+		for _, descriptor := range provider.MetricDescriptors() {
+			name := strings.TrimSpace(descriptor.Name)
+			if owner, exists := descriptorOwners[name]; exists {
+				return adapterRegistry{}, fmt.Errorf(
+					"accelerator metric descriptor %q conflicts between adapters %q and %q",
+					name,
+					owner,
+					acceleratorType,
+				)
+			}
+
+			descriptorOwners[name] = acceleratorType
+
+			registry.descriptors = append(registry.descriptors, adapter.MetricDescriptor{
+				Name:               name,
+				LabelNames:         append([]string(nil), descriptor.LabelNames...),
+				RequiredLabelNames: append([]string(nil), descriptor.RequiredLabelNames...),
+			})
+		}
+	}
+
+	sort.Slice(registry.descriptors, func(i, j int) bool {
+		return registry.descriptors[i].Name < registry.descriptors[j].Name
+	})
+
+	return registry, nil
+}
+
+func (r adapterRegistry) accelerators() map[string]adapter.Accelerator {
+	result := make(map[string]adapter.Accelerator, len(r.byType))
+	for acceleratorType, accelerator := range r.byType {
+		result[acceleratorType] = accelerator
+	}
+
+	return result
+}
+
+func (r adapterRegistry) descriptorsCopy() []adapter.MetricDescriptor {
+	return adapter.CloneMetricDescriptors(r.descriptors)
+}
+
+func isNilAdapter(accelerator adapter.Accelerator) bool {
+	if accelerator == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(accelerator)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return value.IsNil()
+	default:
+		return false
+	}
+}

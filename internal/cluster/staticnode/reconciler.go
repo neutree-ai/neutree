@@ -170,6 +170,16 @@ func (r *Reconciler) ReconcileNodeDeviceSnapshot(
 		return fallback, allocations, nil
 	}
 
+	if len(accelerator.Devices) == 0 &&
+		fallback != nil &&
+		fallback.Type != "" &&
+		fallback.Type != v1.StaticNodeAcceleratorTypeCPU &&
+		accelerator.Type == fallback.Type {
+		// A transient empty NodeAgent snapshot for the same accelerator type is
+		// not an inventory deletion. Preserve the last known non-CPU devices.
+		return fallback, allocations, nil
+	}
+
 	if accelerator.Type == v1.StaticNodeAcceleratorTypeCPU &&
 		fallback != nil &&
 		fallback.Type != "" &&

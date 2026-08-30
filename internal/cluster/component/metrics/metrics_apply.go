@@ -21,31 +21,50 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check kube-state-metrics support for cluster %s", m.cluster.Metadata.Name)
 	}
-	// HAMi monitor scraping depends on virtualization being enabled. The
-	// kube-state-metrics sidecar is a cluster-version capability and is not
-	// HAMi-specific.
-	variables.EnableHAMiMonitorScrape = m.cluster.Spec.AcceleratorVirtualizationEnabled()
-	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 
 	enableManagedMetricsExporters, err := m.supportsManagedMetricsExporters()
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to check managed metrics exporter support for cluster %s", m.cluster.Metadata.Name)
 	}
 
+	variables.EnableKubeStateMetrics = enableKubeStateMetrics
 	variables.EnableNodeExporter = enableManagedMetricsExporters
 	variables.EnableNeutreeNodeAgentMetrics = enableManagedMetricsExporters
-	variables.EnableExternalDCGMScrape = m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
-	acceleratorExporters, err := m.planAcceleratorExporters(ctx)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
+	acceleratorPlans := []metricsAcceleratorPlan(nil)
+	acceleratorExporterTargets := []metricsScrapeTarget(nil)
+	virtualizationEnabled := m.cluster.Spec.AcceleratorVirtualizationEnabled()
+	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
+
+	if enableManagedMetricsExporters || virtualizationEnabled || external {
+		acceleratorPlans, err = m.planAcceleratorExporters(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to plan accelerator exporters for cluster %s", m.cluster.Metadata.Name)
+		}
+
+		acceleratorExporterTargets = m.acceleratorExporterScrapeTargets(acceleratorPlans, external)
+		variables.AcceleratorExporterScrapeTargets = acceleratorExporterTargets
+
+		if virtualizationEnabled {
+			variables.VirtualizationMetricsScrapeTargets = virtualizationMetricsScrapeTargets(acceleratorPlans)
+		}
+
+		if enableManagedMetricsExporters && !external {
+			variables.AcceleratorExporters = managedAcceleratorExporters(acceleratorPlans)
+		}
 	}
 
-	if m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeManaged {
-		variables.AcceleratorExporters = acceleratorExporters
-	}
+	if variables.EnableNeutreeNodeAgentMetrics {
+		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), acceleratorPlans, acceleratorExporterTargets)
+		if err != nil {
+			return nil, errors.Wrapf(err, "build node agent runtime for cluster %s", m.cluster.Metadata.Name)
+		}
 
-	variables.NeutreeNodeAgentMetricsEnv = nodeAgentEnvFromAcceleratorExporters(acceleratorExporters)
+		variables.NodeAgent = nodeAgent
+		if nodeAgent.Image != "" {
+			variables.NeutreeNodeAgentMetricsImage = util.RewriteImageRef(m.imagePrefix, nodeAgent.Image)
+		}
+	}
 
 	if variables.EnableVMAgent {
 		vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
@@ -56,7 +75,9 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		variables.VMAgentConfig = vmagentConfig
 	}
 
-	if !variables.EnableVMAgent && !variables.EnableKubeStateMetrics && !variables.EnableNodeExporter && len(variables.AcceleratorExporters) == 0 {
+	if !variables.EnableVMAgent && !variables.EnableKubeStateMetrics && !variables.EnableNodeExporter &&
+		len(variables.AcceleratorExporters) == 0 && len(variables.AcceleratorExporterScrapeTargets) == 0 &&
+		len(variables.VirtualizationMetricsScrapeTargets) == 0 {
 		return &unstructured.UnstructuredList{}, nil
 	}
 
@@ -66,6 +87,14 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	return objs, nil
+}
+
+func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
+	if m == nil || m.cluster == nil || m.cluster.Spec == nil {
+		return v1.ClusterAcceleratorExporterModeManaged
+	}
+
+	return m.cluster.Spec.Config.AcceleratorExporterMode()
 }
 
 // ApplyResources applies all metrics resources to the cluster

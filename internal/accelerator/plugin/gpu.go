@@ -13,6 +13,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -26,6 +27,7 @@ const (
 	NvidiaGPUKubernetesNodeSelectorKey string              = "nvidia.com/gpu.product"
 	nvidiaDCGMExporterImage            string              = "nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless"
 	nvidiaDCGMExporterPort             int                 = 19400
+	nvidiaGPUOperatorDCGMExporterPort  int                 = 9400
 	nvidiaDCGMExporterCollectorsPath   string              = "/etc/neutree/dcgm-exporter/default-counters.csv"
 	nvidiaDCGMExporterCollectors       string              = `# Format
 # DCGM FIELD, Prometheus metric type, help message
@@ -230,6 +232,33 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		AcceleratorType: string(v1.AcceleratorTypeNVIDIAGPU),
 		ClusterRuntime:  &clusterRuntime,
 		EngineRuntime:   &engineRuntime,
+		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+			Image:      "neutree/neutree-node-agent:" + component.NeutreeNodeAgent,
+			Privileged: true,
+			Env: map[string]string{
+				"NVIDIA_VISIBLE_DEVICES": "all",
+			},
+			Capabilities:     &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
+			Runtime:          "nvidia",
+			DockerRunOptions: []string{"--gpus all"},
+		},
+		VirtualizationMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{
+				"app.kubernetes.io/component": "hami-device-plugin",
+			},
+			Port:        9394,
+			MetricsPath: "/metrics",
+		},
+		// External mode is owned by the upstream operator. Kubernetes uses this
+		// profile-owned endpoint metadata to render scrape and NodeAgent target
+		// configuration without constraining the operator namespace.
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{
+				"app": "nvidia-dcgm-exporter",
+			},
+			Port:        nvidiaGPUOperatorDCGMExporterPort,
+			MetricsPath: "/metrics",
+		},
 		MetricsExporter: &v1.AcceleratorExporterProfile{
 			Name:  "dcgm-exporter",
 			Image: nvidiaDCGMExporterImage,
@@ -256,10 +285,8 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 				},
 			},
 			Runtime: &v1.AcceleratorExporterRuntimeProfile{
-				HostNetwork: true,
-				Capabilities: &v1.AcceleratorExporterCapabilities{
-					Add: []string{"SYS_ADMIN"},
-				},
+				HostNetwork:  true,
+				Capabilities: &corev1.Capabilities{Add: []corev1.Capability{corev1.Capability("SYS_ADMIN")}},
 				NodeSelector: map[string]string{
 					NvidiaGPUDiscoveryLabelKey: NvidiaGPUDiscoveryLabelValue,
 				},

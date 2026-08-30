@@ -197,7 +197,7 @@ var _ = Describe("SSH Cluster Config", Ordered, Label("cluster", "ssh", "config"
 			ClusterH.EnsureDeleted(clusterName)
 		})
 
-		It("should keep node-exporter managed and scrape external accelerator exporter", Label("C2613101"), func() {
+		It("should render a static external exporter target without an exporter component", Label("C2613101"), func() {
 			assertStaticNodeExternalAcceleratorExporterComponents(clusterName)
 		})
 	})

@@ -25,7 +25,7 @@ type StaticNodeClusterSpec struct {
 	Version string `json:"version,omitempty"`
 	// ImageRegistry is the registry prefix used when rendering static node component images.
 	ImageRegistry string `json:"image_registry,omitempty"`
-	// Metrics configures static-node observability collectors.
+	// Metrics configures static-node observability ownership.
 	Metrics *ClusterMetricsConfig `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	// Nodes declares the desired static machines that make up the cluster.
 	// mergekey makes the API proxy backfill each node's masked ssh_auth from the
@@ -207,7 +207,9 @@ type NodeComponentSpec struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Ports declares host ports expected to be exposed by the component.
 	Ports []NodeComponentPort `json:"ports,omitempty"`
-	// Volumes declares host path mounts for the component container.
+	// Volumes declares host path mounts for the component container. This is a
+	// persisted StaticNode contract; Profile volumes are lowered to this layout
+	// by the static-cluster planner.
 	Volumes []NodeComponentVolume `json:"volumes,omitempty"`
 	// DockerRunOptions are extra docker run flags appended by the controller.
 	DockerRunOptions []string `json:"docker_run_options,omitempty"`
@@ -228,6 +230,9 @@ type NodeComponentPort struct {
 	Protocol string `json:"protocol,omitempty"`
 }
 
+// NodeComponentVolume is the persisted StaticNode host-path mount contract.
+// Unlike ComponentVolume, its mount metadata is stored with the host path so
+// existing StaticNode components JSON remains readable across upgrades.
 type NodeComponentVolume struct {
 	// Name is the logical mount name.
 	Name string `json:"name,omitempty"`

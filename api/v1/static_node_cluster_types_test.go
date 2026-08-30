@@ -79,6 +79,12 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 					Args:             []string{"--head"},
 					Env:              map[string]string{"RAY_TMPDIR": "/tmp/ray"},
 					DockerRunOptions: []string{"--net=host"},
+					Volumes: []NodeComponentVolume{{
+						Name:      "ray-config",
+						HostPath:  "/etc/neutree/ray.yaml",
+						MountPath: "/etc/neutree/ray.yaml",
+						ReadOnly:  true,
+					}},
 					ConfigFiles: []NodeComponentConfigFile{
 						{Path: "/etc/neutree/ray.yaml", Content: "ray: {}", Mode: "0644", Atomic: true},
 					},
@@ -135,6 +141,8 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	data, err := json.Marshal(node)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"docker_run_options":["--net=host"]`)
+	assert.Contains(t, string(data), `"host_path":"/etc/neutree/ray.yaml"`)
+	assert.NotContains(t, string(data), `"volume_mounts"`)
 	assert.Contains(t, string(data), `"config_files"`)
 	assert.Contains(t, string(data), `"minor_number":0`)
 
@@ -143,6 +151,13 @@ func TestStaticNodeComponentJSONRoundTrip(t *testing.T) {
 	require.NotNil(t, decoded.Spec)
 	require.Len(t, decoded.Spec.Components, 1)
 	assert.Equal(t, "ray-head", decoded.Spec.Components[0].Name)
+	require.Len(t, decoded.Spec.Components[0].Volumes, 1)
+	assert.Equal(t, NodeComponentVolume{
+		Name:      "ray-config",
+		HostPath:  "/etc/neutree/ray.yaml",
+		MountPath: "/etc/neutree/ray.yaml",
+		ReadOnly:  true,
+	}, decoded.Spec.Components[0].Volumes[0])
 	require.NotNil(t, decoded.Status)
 	require.NotNil(t, decoded.Status.Accelerator)
 	assert.Equal(t, AcceleratorTypeNVIDIAGPU.String(), decoded.Status.Accelerator.Type)

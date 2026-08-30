@@ -3,10 +3,8 @@ package metrics
 import (
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -314,6 +312,7 @@ metadata:
   namespace: {{ .Namespace }}
   labels:
     app: {{ .NeutreeNodeAgentMetricsName }}
+    neutree.ai/metrics-target: node-agent
     neutree.ai/cluster-version: {{ .ClusterVersion }}
 spec:
   selector:
@@ -325,10 +324,15 @@ spec:
     metadata:
       labels:
         app: {{ .NeutreeNodeAgentMetricsName }}
+        neutree.ai/metrics-target: node-agent
         cluster: {{ .ClusterName | quote }}
         workspace: {{ .Workspace | quote }}
         neutree.ai/cluster-version: {{ .ClusterVersion }}
     spec:
+{{ if .NodeAgent.NodeSelector }}
+      nodeSelector:
+{{ .NodeAgent.NodeSelector | toYaml | indent 8 }}
+{{ end }}
       serviceAccountName: {{ .NeutreeNodeAgentMetricsName }}
       imagePullSecrets:
       - name: {{ .ImagePullSecret }}
@@ -337,13 +341,22 @@ spec:
         image: {{ .NeutreeNodeAgentMetricsImage }}
         args:
         - --listen-address=:{{ .NeutreeNodeAgentMetricsPort }}
-        - --cluster-type=kubernetes
+{{ if .NodeAgent.UseLegacyContract }}
+        - --cluster-type={{ .NodeAgentLegacyClusterType }}
         - --metrics-mode={{ .MetricsMode }}
+{{ else }}
+        - --cluster-type={{ .NodeAgentClusterType }}
+{{ end }}
         - --node=$(NODE_NAME)
         - --node-ip=$(NODE_IP)
+{{ if .NodeAgent.AcceleratorType }}
+        - --accelerator-type={{ .NodeAgent.AcceleratorType }}
+        - --accelerator-exporter-port={{ .NodeAgent.AcceleratorExporterPort }}
+        - --accelerator-exporter-metrics-path={{ .NodeAgent.AcceleratorExporterMetricsPath }}
+{{ end }}
         env:
-{{ if .NeutreeNodeAgentMetricsEnv }}
-{{ .NeutreeNodeAgentMetricsEnv | toYaml | indent 8 }}
+{{ if .NodeAgent.Env }}
+{{ .NodeAgent.Env | toYaml | indent 8 }}
 {{ end }}
         - name: NODE_NAME
           valueFrom:
@@ -362,15 +375,12 @@ spec:
             port: metrics
           initialDelaySeconds: 10
           periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: metrics
-          initialDelaySeconds: 5
-          periodSeconds: 10
+{{ if .NodeAgent.SecurityContext }}
+        securityContext:
+{{ .NodeAgent.SecurityContext | toYaml | indent 10 }}
+{{ end }}
         volumeMounts:
-        - name: kubelet-pod-resources
-          mountPath: /var/lib/kubelet/pod-resources
+{{ .NodeAgent.VolumeMounts | toYaml | indent 8 }}
         resources:
           limits:
             {{- range $key, $value := .NeutreeNodeAgentMetricsResources }}
@@ -381,10 +391,7 @@ spec:
             {{ $key }}: {{ $value }}
             {{- end }}
       volumes:
-      - name: kubelet-pod-resources
-        hostPath:
-          path: /var/lib/kubelet/pod-resources
-          type: DirectoryOrCreate
+{{ .NodeAgent.Volumes | toYaml | indent 6 }}
 {{ end }}
 {{ range .AcceleratorExporters }}
 {{ if .ConfigFileData }}
@@ -411,6 +418,7 @@ metadata:
   labels:
     app: {{ .AppLabel }}
     neutree.ai/metrics-target: accelerator-exporter
+    neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
     neutree.ai/cluster-version: {{ $.ClusterVersion }}
 spec:
   selector:
@@ -423,6 +431,7 @@ spec:
       labels:
         app: {{ .AppLabel }}
         neutree.ai/metrics-target: accelerator-exporter
+        neutree.ai/accelerator-type: {{ .AcceleratorType | quote }}
         cluster: {{ $.ClusterName | quote }}
         workspace: {{ $.Workspace | quote }}
         neutree.ai/cluster-version: {{ $.ClusterVersion }}
@@ -442,6 +451,10 @@ spec:
       containers:
       - name: {{ .ContainerName }}
         image: {{ .Image }}
+{{ if .Command }}
+        command:
+{{ .Command | toYaml | indent 8 }}
+{{ end }}
 {{ if .Args }}
         args:
 {{ .Args | toYaml | indent 8 }}
@@ -453,11 +466,9 @@ spec:
         ports:
         - name: metrics
           containerPort: {{ .Port }}
-{{ if .Capabilities }}
+{{ if .SecurityContext }}
         securityContext:
-          capabilities:
-            add:
-{{ .Capabilities | toYaml | indent 12 }}
+{{ .SecurityContext | toYaml | indent 10 }}
 {{ end }}
 {{ if .VolumeMounts }}
         volumeMounts:
@@ -536,36 +547,38 @@ spec:
 
 // MetricsManifestVariables holds the variables for rendering metrics manifests
 type MetricsManifestVariables struct {
-	ClusterName                      string
-	Workspace                        string
-	Namespace                        string
-	ImagePullSecret                  string
-	Version                          string
-	VMAgentImage                     string
-	NodeExporterName                 string
-	NodeExporterImage                string
-	NodeExporterPort                 int
-	NeutreeNodeAgentMetricsName      string
-	NeutreeNodeAgentMetricsImage     string
-	NeutreeNodeAgentMetricsPort      int
-	NeutreeNodeAgentMetricsEnv       []corev1.EnvVar
-	KubeStateMetricsImage            string
-	ClusterVersion                   string
-	MetricsRemoteWriteURL            string
-	MetricsMode                      string
-	Replicas                         int
-	Resources                        map[string]string
-	NeutreeNodeAgentMetricsResources map[string]string
-	KubeStateMetricsResources        map[string]string
-	HashSuffix                       string
-	EnableHAMiMonitorScrape          bool
-	EnableKubeStateMetrics           bool
-	EnableNeutreeNodeAgentMetrics    bool
-	EnableNodeExporter               bool
-	EnableExternalDCGMScrape         bool
-	AcceleratorExporters             []metricsAcceleratorExporter
-	EnableVMAgent                    bool
-	VMAgentConfig                    string
+	ClusterName                        string
+	Workspace                          string
+	Namespace                          string
+	ImagePullSecret                    string
+	Version                            string
+	VMAgentImage                       string
+	NodeExporterName                   string
+	NodeExporterImage                  string
+	NodeExporterPort                   int
+	NeutreeNodeAgentMetricsName        string
+	NeutreeNodeAgentMetricsImage       string
+	NeutreeNodeAgentMetricsPort        int
+	MetricsMode                        string
+	NodeAgentClusterType               string
+	NodeAgentLegacyClusterType         string
+	NodeAgent                          metricsNodeAgent
+	KubeStateMetricsImage              string
+	ClusterVersion                     string
+	MetricsRemoteWriteURL              string
+	Replicas                           int
+	Resources                          map[string]string
+	NeutreeNodeAgentMetricsResources   map[string]string
+	KubeStateMetricsResources          map[string]string
+	HashSuffix                         string
+	EnableKubeStateMetrics             bool
+	EnableNeutreeNodeAgentMetrics      bool
+	EnableNodeExporter                 bool
+	AcceleratorExporters               []metricsAcceleratorExporter
+	AcceleratorExporterScrapeTargets   []metricsScrapeTarget
+	VirtualizationMetricsScrapeTargets []metricsScrapeTarget
+	EnableVMAgent                      bool
+	VMAgentConfig                      string
 
 	// InferenceDefaultPort is the port the neutree-inference job scrapes when an
 	// engine version does not declare a different one.
@@ -581,7 +594,7 @@ type MetricsManifestVariables struct {
 // buildManifestVariables creates the data structure for rendering manifests
 func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	// Default values for metrics component
-	version := componentversion.VictoriaMetrics
+	version := component.VictoriaMetrics
 	replicas := 1
 	resources := map[string]string{
 		"cpu":    "100m",
@@ -595,6 +608,13 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		"cpu":    "500m",
 		"memory": "128Mi",
 	}
+	nodeAgentImage := "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
+
+	selection, err := component.SelectNodeAgent(m.cluster.GetVersion(), nil)
+
+	if err == nil && selection.Image != "" {
+		nodeAgentImage = selection.Image
+	}
 
 	return MetricsManifestVariables{
 		ClusterName:                      m.cluster.Metadata.Name,
@@ -607,12 +627,15 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 		NodeExporterImage:                util.RewriteImageRef(m.imagePrefix, defaultNodeExporterImage),
 		NodeExporterPort:                 nodeExporterPort,
 		NeutreeNodeAgentMetricsName:      neutreeNodeAgentMetricsName,
-		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, neutreeNodeAgentImageName+":"+componentversion.NeutreeNodeAgent),
+		NeutreeNodeAgentMetricsImage:     util.RewriteImageRef(m.imagePrefix, nodeAgentImage),
 		NeutreeNodeAgentMetricsPort:      neutreeNodeAgentMetricsPort,
+		MetricsMode:                      string(m.cluster.Spec.Config.AcceleratorExporterMode()),
+		NodeAgentClusterType:             v1.KubernetesClusterType,
+		NodeAgentLegacyClusterType:       v1.KubernetesClusterType,
+		NodeAgent:                        defaultMetricsNodeAgent(),
 		KubeStateMetricsImage:            util.RewriteImageRef(m.imagePrefix, defaultKubeStateMetricsImage),
 		ClusterVersion:                   m.cluster.GetVersion(),
 		MetricsRemoteWriteURL:            m.metricsRemoteWriteURL,
-		MetricsMode:                      string(m.acceleratorExporterMode()),
 		Replicas:                         replicas,
 		Resources:                        resources,
 		NeutreeNodeAgentMetricsResources: neutreeNodeAgentMetricsResources,

@@ -98,6 +98,36 @@ func TestStaticRayReconcilerCreatesStaticNodeCluster(t *testing.T) {
 	store.AssertExpectations(t)
 }
 
+func TestStaticRayReconcilerPropagatesExternalMetrics(t *testing.T) {
+	store := &storagemocks.MockStorage{}
+	reconciler := &staticRayReconciler{storage: store}
+	cluster := staticRayTestCluster("static-external", "v1.2.0", "10.0.0.10")
+	cluster.Spec.Config.Metrics = &v1.ClusterMetricsConfig{
+		AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+			Mode: v1.ClusterAcceleratorExporterModeExternal,
+		},
+	}
+
+	store.On("ListStaticNodeCluster", mock.Anything).Return([]v1.StaticNodeCluster{}, nil).Once()
+	store.On("ListImageRegistry", mock.Anything).Return([]v1.ImageRegistry{connectedStaticNodeImageRegistry()}, nil).Once()
+	store.On("CreateStaticNodeCluster", mock.MatchedBy(func(created *v1.StaticNodeCluster) bool {
+		require.NotNil(t, created.Spec)
+		require.NotNil(t, created.Spec.Metrics)
+		require.NotNil(t, created.Spec.Metrics.AcceleratorExporter)
+		assert.Equal(t, v1.ClusterAcceleratorExporterModeExternal, created.Spec.Metrics.AcceleratorExporter.Mode)
+		assert.NotSame(t, cluster.Spec.Config.Metrics, created.Spec.Metrics)
+		assert.NotSame(t, cluster.Spec.Config.Metrics.AcceleratorExporter, created.Spec.Metrics.AcceleratorExporter)
+
+		return true
+	})).Return(nil).Once()
+
+	err := reconciler.Reconcile(context.Background(), cluster)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "static node cluster static-external is provisioning")
+	store.AssertExpectations(t)
+}
+
 func TestStaticRayReconcilerRejectsInitializedHeadChange(t *testing.T) {
 	reconciler := &staticRayReconciler{}
 	cluster := staticRayTestCluster("static-head-change", "v1.0.2", "10.0.0.20")

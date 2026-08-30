@@ -13,7 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/cmd/launch/manifests"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/util"
-	"github.com/neutree-ai/neutree/internal/componentversion"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -264,12 +264,12 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		"DbPassword":                   options.dbPassword,
 		"MetricsRemoteWriteURL":        options.metricsRemoteWriteURL,
 		"GrafanaURL":                   options.grafanaURL,
-		"VictoriaMetricsVersion":       componentversion.VictoriaMetrics,
+		"VictoriaMetricsVersion":       component.VictoriaMetrics,
 		"VictoriaLogsRetentionPeriod":  options.victorialogsRetentionPeriod,
 		"NeutreeVersion":               options.version,
 		"JwtToken":                     *jwtToken,
-		"VectorVersion":                componentversion.Vector,
-		"KongVersion":                  componentversion.Kong,
+		"VectorVersion":                component.Vector,
+		"KongVersion":                  component.Kong,
 		"KongWorkerProcesses":          kongWorkerProcesses,
 		"KongPluginGatewayChecksum":    pluginChecksums["neutree-ai-gateway"],
 		"KongPluginStatisticsChecksum": pluginChecksums["neutree-ai-statistics"],

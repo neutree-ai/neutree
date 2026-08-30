@@ -356,8 +356,15 @@ func buildDockerRunCommand(node *v1.StaticNode, component v1.NodeComponentSpec, 
 		parts = append(parts, "-v", shellArg(value))
 	}
 
+	if len(component.Command) > 0 {
+		parts = append(parts, "--entrypoint", shellArg(component.Command[0]))
+	}
+
 	parts = append(parts, shellArg(component.Image))
-	parts = append(parts, shellArgs(component.Command)...)
+	if len(component.Command) > 1 {
+		parts = append(parts, shellArgs(component.Command[1:])...)
+	}
+
 	parts = append(parts, shellArgs(component.Args)...)
 
 	return strings.Join(parts, " ")
