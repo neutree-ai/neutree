@@ -4144,6 +4144,32 @@ func TestEndpointToApplication_WithoutModelRegistry(t *testing.T) {
 	assert.NotContains(t, modelArgs, "registry_path")
 }
 
+// NEU-633: an Endpoint that omits spec.model entirely (not just an empty
+// ModelSpec) for an engine that ships its own model, e.g. Flex. Before the
+// fix EndpointToApplication panicked dereferencing endpoint.Spec.Model.
+func TestEndpointToApplication_WithoutModel(t *testing.T) {
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "production", Name: "flex-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine:            &v1.EndpointEngineSpec{Engine: "flex", Version: "1.0.0"},
+			Resources:         &v1.ResourceSpec{Accelerator: map[string]string{}},
+			DeploymentOptions: map[string]interface{}{},
+		},
+	}
+
+	app, err := EndpointToApplication(endpoint, &v1.Cluster{}, nil, nil, nil, &acceleratormocks.MockManager{})
+
+	require.NoError(t, err)
+
+	modelArgs, ok := app.Args["model"].(map[string]interface{})
+	require.True(t, ok)
+
+	assert.Equal(t, "", modelArgs["registry_type"])
+	assert.NotContains(t, modelArgs, "name")
+	assert.NotContains(t, modelArgs, "serve_name")
+	assert.NotContains(t, modelArgs, "registry_path")
+}
+
 // The ModelScope deploy path through the Ray (SSH cluster) orchestrator. The
 // Kubernetes orchestrator has the same test; both are here because the two
 // build their model args independently and a fix applied to one has silently

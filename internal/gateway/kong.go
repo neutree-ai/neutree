@@ -753,6 +753,12 @@ func isResourceNotFoundError(err error) bool {
 }
 
 func getEndpointRouteType(ep *v1.Endpoint) string {
+	// An engine that ships its own model (e.g. Flex) may leave Spec.Model nil;
+	// there is no task to branch on, so fall through to the default route type.
+	if ep.Spec.Model == nil {
+		return v1.RouteTypeChatCompletions
+	}
+
 	switch ep.Spec.Model.Task {
 	case v1.TextGenerationModelTask:
 		return v1.RouteTypeChatCompletions

@@ -36,7 +36,8 @@ func engineTPArgKey(engineName string) string {
 }
 
 // endpointModelServeName is the model id the endpoint answers to over the
-// OpenAI-compatible API.
+// OpenAI-compatible API, empty when the endpoint names no model (an engine
+// that ships its own, e.g. Flex).
 //
 // A version is appended only for registries where it names a distinct stored
 // artifact — bentoml. On a hub the "version" is a git revision, so appending it
@@ -44,6 +45,10 @@ func engineTPArgKey(engineName string) string {
 // name any client would ask for and differs from what the same model is called
 // when deployed from Hugging Face. Both hub kinds are excluded for that reason.
 func endpointModelServeName(endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) string {
+	if endpoint.Spec.Model == nil {
+		return ""
+	}
+
 	serveName := endpoint.Spec.Model.Name
 	if endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameSGLang {
 		return serveName
@@ -136,13 +141,20 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 	return &engine[0], nil
 }
 
+// endpointNamesModelRegistry reports whether the endpoint has a model
+// registry to resolve at all. False for an engine that ships its own model
+// (e.g. Flex), where Spec.Model may be nil or carry no registry.
+func endpointNamesModelRegistry(endpoint *v1.Endpoint) bool {
+	return endpoint.Spec != nil && endpoint.Spec.Model != nil && endpoint.Spec.Model.Registry != ""
+}
+
 // resolveEndpointModelRegistry returns the model registry an endpoint deploys
 // from, or nil when it names none.
 //
 // nil is a legitimate state, not a lookup failure: an engine that ships its own
 // weights has nothing to fetch. Callers must handle it.
 func resolveEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
-	if endpoint.Spec == nil || endpoint.Spec.Model == nil || endpoint.Spec.Model.Registry == "" {
+	if !endpointNamesModelRegistry(endpoint) {
 		return nil, nil
 	}
 
