@@ -324,10 +324,9 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 		return err
 	}
 
-	// An endpoint that names no registry (nil Spec.Model, or Model.Registry
-	// empty for an engine that ships its own model) never had anything
-	// SSH-mounted, so there is nothing to disconnect.
-	if !isNew && endpoint.Spec.Model != nil && endpoint.Spec.Model.Registry != "" {
+	// An endpoint that names no registry (an engine that ships its own model,
+	// e.g. Flex) never had anything SSH-mounted, so there is nothing to disconnect.
+	if !isNew && endpointNamesModelRegistry(endpoint) {
 		modelRegistry, mErr := getEndpointModelRegistry(o.storage, endpoint)
 
 		switch {
