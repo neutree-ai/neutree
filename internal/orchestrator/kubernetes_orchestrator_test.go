@@ -2496,6 +2496,20 @@ func TestKubernetesOrchestrator_setModelArgs(t *testing.T) {
 				"serve_name":    "gpt-model",
 			},
 		},
+		{
+			// NEU-633: an engine that ships its own model (e.g. Flex) is deployed
+			// with no spec.model at all. setModelArgs must not dereference it.
+			name: "nil model spec for a model-free engine",
+			endpoint: &v1.Endpoint{
+				Spec: &v1.EndpointSpec{
+					Engine: &v1.EndpointEngineSpec{
+						Engine: "flex",
+					},
+				},
+			},
+			modelRegistry:     nil,
+			expectedModelArgs: map[string]interface{}{},
+		},
 	}
 
 	for _, tt := range tests {

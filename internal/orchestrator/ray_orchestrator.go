@@ -324,7 +324,10 @@ func (o *RayOrchestrator) DeleteEndpoint(endpoint *v1.Endpoint) error {
 		return err
 	}
 
-	if !isNew {
+	// An endpoint that names no registry (nil Spec.Model, or Model.Registry
+	// empty for an engine that ships its own model) never had anything
+	// SSH-mounted, so there is nothing to disconnect.
+	if !isNew && endpoint.Spec.Model != nil && endpoint.Spec.Model.Registry != "" {
 		modelRegistry, mErr := getEndpointModelRegistry(o.storage, endpoint)
 
 		switch {
@@ -913,15 +916,20 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		applicationEnv[k] = v
 	}
 
+	// endpoint.Spec.Model is nil for an engine that ships its own model (e.g.
+	// Flex): there is nothing to place, so modelArgs stays empty beyond
+	// registry_type rather than dereferencing a spec field the endpoint never had.
 	modelArgs := map[string]interface{}{
 		"registry_type": endpointModelRegistryType(modelRegistry),
-		"name":          endpoint.Spec.Model.Name,
-		"file":          endpoint.Spec.Model.File,
-		"version":       endpoint.Spec.Model.Version,
-		"task":          endpoint.Spec.Model.Task,
 	}
 
-	modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
+	if endpoint.Spec.Model != nil {
+		modelArgs["name"] = endpoint.Spec.Model.Name
+		modelArgs["file"] = endpoint.Spec.Model.File
+		modelArgs["version"] = endpoint.Spec.Model.Version
+		modelArgs["task"] = endpoint.Spec.Model.Task
+		modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
+	}
 
 	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
 

@@ -376,8 +376,16 @@ func (k *kubernetesOrchestrator) setModelCacheVariables(data *DeploymentManifest
 	return nil
 }
 
-// setModelArgs initializes model arguments from endpoint spec
+// setModelArgs initializes model arguments from endpoint spec.
+//
+// endpoint.Spec.Model is nil for an engine that ships its own model (e.g.
+// Flex): there is nothing to place, so ModelArgs stays empty rather than
+// dereferencing a spec field the endpoint never had.
 func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) {
+	if endpoint.Spec.Model == nil {
+		return
+	}
+
 	modelArgs := map[string]interface{}{
 		"name":          endpoint.Spec.Model.Name,
 		"version":       endpoint.Spec.Model.Version,
