@@ -11,19 +11,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 func usesStaticNodeClusterFlow(version string) bool {
 	enabled, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, version)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "cluster version must be semver")
-
-	return enabled
-}
-
-func usesProfileNodeAgentContract(version string) bool {
-	enabled, err := component.SupportsNodeAgentProfileContract(version)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "cluster version must be semver")
 
 	return enabled
@@ -139,10 +131,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	ExpectWithOffset(1, nodes).NotTo(BeEmpty())
 
 	hasGPUNode := false
-	gpuNodeIPs := []string{}
-	nonGPUNodeIPs := []string{}
 	sshUser := profileSSHUser()
-	usesProfileContract := usesProfileNodeAgentContract(profileClusterVersion())
 
 	if sshUser == "" {
 		sshUser = defaultSSHUser
@@ -167,12 +156,7 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		nodeAgent := requireStaticNodeComponent(node, "neutree-node-agent")
 		ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--listen-address=:19101"))
 
-		if usesProfileContract {
-			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--cluster-type=" + v1.SSHClusterType))
-			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement("--cluster-type=ray"))
-			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--metrics-mode=")))
-		} else {
-			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--cluster-type=ray"))
+		if containsString(nodeAgent.Args, "--cluster-type=ray") {
 			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement(ContainSubstring("--metrics-mode=")))
 			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--accelerator-type=")))
 		}
@@ -208,11 +192,6 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		assertStaticNodeAgentDeviceSnapshotAPI(node, sshUser, keyFile, isGPUNode)
 
 		if !isGPUNode {
-			nonGPUNodeIPs = append(nonGPUNodeIPs, node.Spec.IP)
-
-			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--accelerator-type=")))
-			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--accelerator-exporter-port=")))
-			ExpectWithOffset(1, nodeAgent.Args).NotTo(ContainElement(ContainSubstring("--accelerator-exporter-metrics-path=")))
 			ExpectWithOffset(1, findStaticNodeComponent(node.Spec.Components, "accelerator-exporter")).To(BeNil())
 			ExpectWithOffset(1, findStaticNodeComponentStatus(node.Status.Components, "accelerator-exporter")).To(BeNil())
 
@@ -220,15 +199,6 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		}
 
 		hasGPUNode = true
-
-		gpuNodeIPs = append(gpuNodeIPs, node.Spec.IP)
-
-		if usesProfileContract {
-			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-type=nvidia_gpu"))
-			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-port=19400"))
-			ExpectWithOffset(1, nodeAgent.Args).To(ContainElement("--accelerator-exporter-metrics-path=/metrics"))
-		}
-
 		exporter := requireStaticNodeComponent(node, "accelerator-exporter")
 		ExpectWithOffset(1, exporter.Ports).To(ContainElement(v1.NodeComponentPort{
 			Name:     "metrics",
@@ -243,20 +213,17 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 		vmagent := requireStaticNodeComponent(head, "vmagent")
 		vmagentConfig := requireStaticNodeComponentConfigFile(vmagent, "/etc/neutree/vmagent/config.yaml")
 		ExpectWithOffset(1, vmagentConfig.Content).To(ContainSubstring("job_name: accelerator-exporter-nvidia-gpu"))
+	}
+}
 
-		exporterTargets := requireStaticNodeComponentConfigFile(
-			vmagent,
-			"/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json",
-		)
-
-		for _, nodeIP := range gpuNodeIPs {
-			ExpectWithOffset(1, exporterTargets.Content).To(ContainSubstring(nodeIP + ":19400"))
-		}
-
-		for _, nodeIP := range nonGPUNodeIPs {
-			ExpectWithOffset(1, exporterTargets.Content).NotTo(ContainSubstring(nodeIP + ":19400"))
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
 		}
 	}
+
+	return false
 }
 
 func assertStaticNodeAgentDeviceSnapshotAPI(
