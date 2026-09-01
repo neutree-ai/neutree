@@ -93,6 +93,18 @@ func eventuallyStaticNodeClusterReady(name string, desiredVersion string, desire
 	}, TerminalPhaseTimeout, 5*time.Second).Should(Succeed())
 }
 
+func staticNodeClusterVersion(name string) string {
+	r := RunCLI("get", "StaticNodeCluster", name, "-w", profileWorkspace(), "-o", "json")
+	ExpectWithOffset(1, r.ExitCode).To(Equal(0), r.Stderr)
+
+	var cluster v1.StaticNodeCluster
+	ExpectWithOffset(1, json.Unmarshal([]byte(r.Stdout), &cluster)).To(Succeed())
+	ExpectWithOffset(1, cluster.Status).NotTo(BeNil())
+	ExpectWithOffset(1, cluster.Status.Version).NotTo(BeEmpty())
+
+	return cluster.Status.Version
+}
+
 func assertNoStaticNodeCluster(name string) {
 	r := RunCLI("get", "StaticNodeCluster", "-w", profileWorkspace(), "-o", "json")
 	if r.ExitCode != 0 {
@@ -142,7 +154,8 @@ func assertStaticNodeMetricsComponents(clusterName string) {
 	gpuNodeIPs := []string{}
 	nonGPUNodeIPs := []string{}
 	sshUser := profileSSHUser()
-	usesProfileContract := usesProfileNodeAgentContract(profileClusterVersion())
+	clusterVersion := staticNodeClusterVersion(clusterName)
+	usesProfileContract := usesProfileNodeAgentContract(clusterVersion)
 
 	if sshUser == "" {
 		sshUser = defaultSSHUser
