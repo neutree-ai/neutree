@@ -189,13 +189,13 @@ func buildNodeAgentComponent(
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) (v1.NodeComponentSpec, error) {
-	volumes := nodeAgentComponentVolumes(profile)
-	args := nodeAgentComponentArgs(cluster, profile)
-	image, err := selectedNodeAgentImage(cluster.Spec.Version, profile)
-
+	selection, err := selectedNodeAgent(cluster.Spec.Version, profile)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
+
+	volumes := nodeAgentComponentVolumes(profile)
+	args := nodeAgentComponentArgs(cluster, profile, selection.Contract)
 
 	if node != nil && node.Metadata != nil {
 		args = append(args, "--node="+node.Metadata.Name)
@@ -207,7 +207,7 @@ func buildNodeAgentComponent(
 
 	return v1.NodeComponentSpec{
 		Name:             nodeAgentComponentName,
-		Image:            staticComponentImage(cluster, image),
+		Image:            staticComponentImage(cluster, selection.Image),
 		Args:             args,
 		Env:              nodeAgentComponentEnv(cluster.Spec.Version, profile),
 		DockerRunOptions: nodeAgentDockerRunOptions(profile),
@@ -222,13 +222,16 @@ func buildNodeAgentComponent(
 	}, nil
 }
 
-func nodeAgentComponentArgs(cluster *v1.StaticNodeCluster, profile *v1.AcceleratorProfile) []string {
+func nodeAgentComponentArgs(
+	cluster *v1.StaticNodeCluster,
+	profile *v1.AcceleratorProfile,
+	contract component.NodeAgentContract,
+) []string {
 	args := []string{
 		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
 	}
 
-	supportsExplicitProfileContract, err := component.SupportsNodeAgentProfileContract(cluster.Spec.Version)
-	if err != nil || !supportsExplicitProfileContract || profile == nil || profile.AcceleratorType == "" {
+	if contract == component.NodeAgentContractLegacy {
 		args = append(args,
 			"--cluster-type=ray",
 			"--metrics-mode="+string(acceleratorExporterMode(cluster)),
@@ -268,27 +271,25 @@ func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
 	)
 }
 
-func selectedNodeAgentImage(clusterVersion string, profile *v1.AcceleratorProfile) (string, error) {
+func selectedNodeAgent(
+	clusterVersion string,
+	profile *v1.AcceleratorProfile,
+) (component.NodeAgentSelection, error) {
 	var nodeAgentProfile *v1.NodeAgentRuntimeProfile
 	if profile != nil {
 		nodeAgentProfile = profile.NodeAgentRuntime
 	}
 
-	selection, err := component.SelectNodeAgent(clusterVersion, nodeAgentProfile)
-	if err != nil {
-		return "", err
-	}
-
-	return selection.Image, nil
+	return component.SelectNodeAgent(clusterVersion, nodeAgentProfile)
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	image, err := selectedNodeAgentImage(cluster.Spec.Version, nil)
-	if err != nil || image == "" {
+	selection, err := selectedNodeAgent(cluster.Spec.Version, nil)
+	if err != nil || selection.Image == "" {
 		return "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 	}
 
-	return image
+	return selection.Image
 }
 
 func nodeAgentDockerRunOptions(profile *v1.AcceleratorProfile) []string {
