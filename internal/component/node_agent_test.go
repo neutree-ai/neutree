@@ -21,10 +21,14 @@ func TestSelectNodeAgentUsesLegacyImageForLegacyVersions(t *testing.T) {
 }
 
 func TestSelectNodeAgentUsesDefaultProfileImageWhenProfileMissing(t *testing.T) {
-	selection, err := SelectNodeAgent("v1.1.2", nil)
-	require.NoError(t, err)
-	assert.Equal(t, NodeAgentContractProfile, selection.Contract)
-	assert.Equal(t, defaultProfileNodeAgentImage(), selection.Image)
+	for _, version := range []string{"v1.1.2", "v1.2.0-alpha.3"} {
+		t.Run(version, func(t *testing.T) {
+			selection, err := SelectNodeAgent(version, nil)
+			require.NoError(t, err)
+			assert.Equal(t, NodeAgentContractProfile, selection.Contract)
+			assert.Equal(t, defaultProfileNodeAgentImage(), selection.Image)
+		})
+	}
 }
 
 func TestSelectNodeAgentUsesProfileImageForNewerVersions(t *testing.T) {

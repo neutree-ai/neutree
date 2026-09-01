@@ -406,6 +406,77 @@ func TestPlannerUsesLegacyNodeAgentContractBeforeV112(t *testing.T) {
 	}
 }
 
+func TestPlannerUsesProfileNodeAgentContractForCPUHeadWithoutProfile(t *testing.T) {
+	cluster := testStaticNodeCluster()
+	cluster.Spec.Version = "v1.2.0-alpha.3"
+	planner := &Planner{
+		AcceleratorProfileProvider: fakeAcceleratorProfileProvider{
+			profiles: map[string]*v1.AcceleratorProfile{
+				v1.AcceleratorTypeNVIDIAGPU.String(): {
+					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+					MetricsExporter: &v1.AcceleratorExporterProfile{
+						Image: "nvcr.io/nvidia/k8s/dcgm-exporter:test",
+						Port:  19400,
+					},
+				},
+			},
+		},
+		MetricsRemoteWriteURL: "http://vm:8480/insert/0/prometheus/",
+	}
+
+	nodes := plannedStaticNodes(t, planner, cluster, []*v1.StaticNode{
+		staticNodeStatusWithAccelerator(
+			"head-0",
+			v1.StaticNodeRoleHead,
+			v1.StaticNodePhaseReady,
+			true,
+			cpuAcceleratorStatus(),
+			nil,
+		),
+		staticNodeStatusWithAccelerator(
+			"worker-0",
+			v1.StaticNodeRoleWorker,
+			v1.StaticNodePhaseReady,
+			true,
+			nvidiaAcceleratorStatus(),
+			nil,
+		),
+	})
+
+	head := findStaticNode(nodes, "head-0")
+	require.NotNil(t, head)
+	headNodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, headNodeAgent)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1", headNodeAgent.Image)
+	assert.Contains(t, headNodeAgent.Args, "--cluster-type="+v1.SSHClusterType)
+	assert.NotContains(t, headNodeAgent.Args, "--cluster-type=ray")
+	assert.NotContains(t, headNodeAgent.Args, "--metrics-mode=managed")
+	assert.NotContains(t, headNodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.NotContains(t, headNodeAgent.Args, "--accelerator-exporter-port=19400")
+	assert.NotContains(t, headNodeAgent.Args, "--accelerator-exporter-metrics-path=/metrics")
+	assert.Nil(t, findComponent(head.Spec.Components, acceleratorExporterComponentName))
+
+	worker := findStaticNode(nodes, "worker-0")
+	require.NotNil(t, worker)
+	workerNodeAgent := findComponent(worker.Spec.Components, nodeAgentComponentName)
+	require.NotNil(t, workerNodeAgent)
+	assert.Contains(t, workerNodeAgent.Args, "--cluster-type="+v1.SSHClusterType)
+	assert.Contains(t, workerNodeAgent.Args, "--accelerator-type=nvidia_gpu")
+	assert.Contains(t, workerNodeAgent.Args, "--accelerator-exporter-port=19400")
+	assert.Contains(t, workerNodeAgent.Args, "--accelerator-exporter-metrics-path=/metrics")
+	require.NotNil(t, findComponent(worker.Spec.Components, acceleratorExporterComponentName))
+
+	vmagent := findComponent(head.Spec.Components, vmagentComponentName)
+	require.NotNil(t, vmagent)
+	exporterTargets := findConfigFile(
+		vmagent.ConfigFiles,
+		"/etc/neutree/vmagent/file_sd/accelerator-exporter-nvidia-gpu.json",
+	)
+	require.NotNil(t, exporterTargets)
+	assert.Contains(t, exporterTargets.Content, "10.0.0.11:19400")
+	assert.NotContains(t, exporterTargets.Content, "10.0.0.10:19400")
+}
+
 func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	currentNodes := []*v1.StaticNode{
