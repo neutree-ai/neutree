@@ -662,6 +662,8 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 	assert.Equal(t, int32(19101), nodeAgent.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
 	assert.Equal(t, "500m", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Limits.Cpu().String())
 	assert.Equal(t, "500m", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String())
+	assert.Equal(t, "256Mi", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Limits.Memory().String())
+	assert.Equal(t, "256Mi", nodeAgent.Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String())
 
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
 	assert.Assert(t, strings.Contains(args, "--listen-address=:19101"))
