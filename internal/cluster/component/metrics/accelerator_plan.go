@@ -96,19 +96,14 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 
 	for _, plan := range candidates {
 		if external {
-			if plan.ExternalMetricsTarget == nil {
+			// An external target describes how to scrape an exporter, but it does
+			// not identify the accelerator type by itself. Require the same
+			// profile-owned runtime selector used by managed exporters.
+			if plan.ExternalMetricsTarget == nil || plan.Exporter == nil ||
+				len(plan.Exporter.NodeSelector) == 0 {
 				continue
 			}
-
-			matching = append(matching, plan)
-			if len(matching) > 1 {
-				return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
-			}
-
-			continue
-		}
-
-		if plan.Exporter == nil {
+		} else if plan.Exporter == nil {
 			continue
 		}
 

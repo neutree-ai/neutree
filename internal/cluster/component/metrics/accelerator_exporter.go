@@ -103,7 +103,15 @@ func managedAcceleratorExporters(plans []metricsAcceleratorPlan) []metricsAccele
 
 	for _, plan := range plans {
 		if plan.Exporter != nil {
-			exporters = append(exporters, *plan.Exporter)
+			exporter := *plan.Exporter
+			if exporter.AcceleratorType == v1.AcceleratorTypeNVIDIAGPU.String() {
+				// NVIDIA selection still uses the profile selector, but the
+				// managed exporter remains compatible with CPU nodes. Clear only
+				// the render copy so planning metadata stays intact.
+				exporter.NodeSelector = nil
+			}
+
+			exporters = append(exporters, exporter)
 		}
 	}
 

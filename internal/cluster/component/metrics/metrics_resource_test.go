@@ -1037,9 +1037,7 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19400), dcgm.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
 	assert.Equal(t, "all", envValue(dcgm.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
-	assert.DeepEqual(t,
-		map[string]string{"nvidia.com/gpu.present": "true"},
-		dcgm.Spec.Template.Spec.NodeSelector)
+	assert.Assert(t, len(dcgm.Spec.Template.Spec.NodeSelector) == 0)
 	assert.Assert(t, !dcgm.Spec.Template.Spec.HostNetwork)
 	requireContainerCapability(t, dcgm, "SYS_ADMIN")
 	assert.Assert(t, dcgm.Spec.Template.Spec.Affinity == nil)
@@ -1290,6 +1288,8 @@ func TestBuildMetricsResourcesProjectsProfileOnAllDeploymentBackends(t *testing.
 	objects, err := metricsCmpt.GetMetricsResources(context.Background())
 	assert.NilError(t, err)
 	assert.Assert(t, hasMetricsDaemonSet(objects, "custom-accelerator-custom-exporter"))
+	exporter := findMetricsDaemonSet(t, objects, "custom-accelerator-custom-exporter")
+	assert.DeepEqual(t, map[string]string{"accelerator.example.com/custom": "true"}, exporter.Spec.Template.Spec.NodeSelector)
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
 	assert.Assert(t, strings.Contains(args, "--accelerator-type=custom_accelerator"))

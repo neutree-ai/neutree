@@ -112,7 +112,7 @@ func assertK8sMetricsResources(
 		By("Checking NVIDIA DCGM exporter DaemonSet")
 
 		dcgm := eventuallyDaemonSetReady(ctx, k8sH, namespace, "nvidia-gpu-dcgm-exporter")
-		ExpectWithOffset(1, dcgm.Spec.Template.Spec.NodeSelector).To(HaveKeyWithValue("nvidia.com/gpu.present", "true"))
+		ExpectWithOffset(1, dcgm.Spec.Template.Spec.NodeSelector).To(BeEmpty())
 		ExpectWithOffset(1, dcgm.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 		ExpectWithOffset(1, dcgm.Spec.Template.Spec.Containers[0].Ports).To(ContainElement(
 			HaveField("ContainerPort", int32(19400)),

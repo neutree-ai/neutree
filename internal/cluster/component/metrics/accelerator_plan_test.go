@@ -42,7 +42,7 @@ func TestSelectClusterAcceleratorPlanRejectsMultipleMatches(t *testing.T) {
 	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }
 
-func TestSelectClusterAcceleratorPlanExternalTargetIgnoresManagedNodeSelector(t *testing.T) {
+func TestSelectClusterAcceleratorPlanExternalUsesExporterNodeSelector(t *testing.T) {
 	component := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Spec: &v1.ClusterSpec{
@@ -54,7 +54,10 @@ func TestSelectClusterAcceleratorPlanExternalTargetIgnoresManagedNodeSelector(t 
 			},
 		},
 		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-a",
+				Labels: map[string]string{"vendor.example/accelerator": "true"},
+			},
 		}).Build(),
 	}
 
@@ -75,6 +78,111 @@ func TestSelectClusterAcceleratorPlanExternalTargetIgnoresManagedNodeSelector(t 
 	require.NoError(t, err)
 	require.Len(t, selected, 1)
 	assert.Equal(t, "vendor_accelerator", selected[0].AcceleratorType)
+}
+
+func TestSelectClusterAcceleratorPlanExternalSkipsUnmatchedExporterSelector(t *testing.T) {
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "cpu-node"},
+		}).Build(),
+	}
+
+	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
+		AcceleratorType: "vendor_accelerator",
+		Exporter: &metricsAcceleratorExporter{
+			NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
+		},
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "external-exporter"},
+			Port:        9400,
+		},
+	}})
+
+	require.NoError(t, err)
+	assert.Nil(t, selected)
+}
+
+func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *testing.T) {
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-a",
+				Labels: map[string]string{
+					"vendor.example/gpu":         "true",
+					"vendor.example/accelerator": "true",
+				},
+			},
+		}).Build(),
+	}
+
+	_, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{
+		{
+			AcceleratorType: "nvidia_gpu",
+			Exporter: &metricsAcceleratorExporter{
+				NodeSelector: map[string]string{"vendor.example/gpu": "true"},
+			},
+			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+				PodSelector: map[string]string{"app": "nvidia-exporter"},
+				Port:        9400,
+			},
+		},
+		{
+			AcceleratorType: "vendor_accelerator",
+			Exporter: &metricsAcceleratorExporter{
+				NodeSelector: map[string]string{"vendor.example/accelerator": "true"},
+			},
+			ExternalMetricsTarget: &v1.MetricsTargetProfile{
+				PodSelector: map[string]string{"app": "vendor-exporter"},
+				Port:        9401,
+			},
+		},
+	})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
+}
+
+func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporterSelector(t *testing.T) {
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+	}
+
+	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
+		AcceleratorType: "vendor_accelerator",
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "external-exporter"},
+			Port:        9400,
+		},
+	}})
+
+	require.NoError(t, err)
+	assert.Nil(t, selected)
 }
 
 func TestSelectClusterAcceleratorPlanSkipsWhenNoMatch(t *testing.T) {
