@@ -438,9 +438,10 @@ ENGINE_TASKS ?= text-generation,text-embedding,text-rerank
 ENGINE_DESCRIPTION ?= $(ENGINE_NAME) inference engine
 ENGINE_PACKAGE_MIRROR_REGISTRY ?=
 ENGINE_PACKAGE_URL ?=
+ENGINE_PACKAGE_FORCE_PULL ?=
 
 .PHONY: build-engine-package
-build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION, ENGINE_PACKAGE_MIRROR_REGISTRY, ENGINE_PACKAGE_URL)
+build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENGINE_VERSION, ENGINE_IMAGES, ENGINE_TASKS, ENGINE_DESCRIPTION, ENGINE_PACKAGE_MIRROR_REGISTRY, ENGINE_PACKAGE_URL, ENGINE_PACKAGE_FORCE_PULL)
 	@mkdir -p $(ENGINE_PACKAGE_OUTPUT_DIR)
 	OUTPUT_DIR="$(ENGINE_PACKAGE_OUTPUT_DIR)" bash $(ENGINE_PACKAGE_SCRIPT) \
 		-n $(ENGINE_NAME) \
@@ -451,6 +452,7 @@ build-engine-package: ## Build engine package (configurable via ENGINE_NAME, ENG
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		$(if $(ENGINE_PACKAGE_MIRROR_REGISTRY),--mirror-registry $(ENGINE_PACKAGE_MIRROR_REGISTRY)) \
 		$(if $(ENGINE_PACKAGE_URL),--package-url "$(ENGINE_PACKAGE_URL)") \
+		$(if $(ENGINE_PACKAGE_FORCE_PULL),--force-pull) \
 		-o $(ENGINE_NAME)-$(ENGINE_VERSION).tar.gz \
 		-d "$(ENGINE_DESCRIPTION)"
 

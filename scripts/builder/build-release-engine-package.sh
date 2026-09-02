@@ -120,7 +120,7 @@ case "$engine:$accelerator" in
         supported_tasks="text-generation,text-embedding"
         ;;
     llama-cpp:cpu)
-        manifest_accelerator="ssh_cpu"
+        manifest_accelerator="cpu"
         supported_tasks="text-generation,text-embedding"
         ;;
     *)
@@ -130,7 +130,7 @@ esac
 
 manifest_version="$engine_version"
 if [[ -n "$engine_patch_suffix" ]]; then
-    manifest_version="${engine_version}-neutree${engine_patch_suffix}"
+    manifest_version="${engine_version}-${engine_patch_suffix}"
 fi
 
 base_version="${engine_version%%-*}"
@@ -156,6 +156,7 @@ fi
 mkdir -p "$output_dir"
 make -C "$repo_root" build-engine-package \
     ENGINE_PACKAGE_OUTPUT_DIR="$output_dir" \
+    ENGINE_PACKAGE_FORCE_PULL=1 \
     ENGINE_PACKAGE_URL="$package_url" \
     ENGINE_NAME="$engine" \
     ENGINE_VERSION="$manifest_version" \

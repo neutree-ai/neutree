@@ -117,6 +117,16 @@ func TestEngineVersion_GetImageForSSHAccelerator(t *testing.T) {
 			expected:        genericImage,
 		},
 		{
+			name: "SSH CPU falls back to generic CPU image",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"cpu": {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+				},
+			},
+			acceleratorType: "cpu",
+			expected:        &EngineImage{ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+		},
+		{
 			name: "both SSH and generic missing, returns nil",
 			engineVersion: &EngineVersion{
 				Images: map[string]*EngineImage{
@@ -324,6 +334,16 @@ func TestEngineVersion_GetImageForK8sAccelerator(t *testing.T) {
 			},
 			acceleratorType: "nvidia_gpu",
 			expected:        genericImage,
+		},
+		{
+			name: "Kubernetes CPU falls back to generic CPU image",
+			engineVersion: &EngineVersion{
+				Images: map[string]*EngineImage{
+					"cpu": {ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
+				},
+			},
+			acceleratorType: "cpu",
+			expected:        &EngineImage{ImageName: "neutree/engine-llama-cpp", Tag: "v0.3.7-ray2.53.0"},
 		},
 		{
 			name: "neither k8s nor generic found, returns nil",

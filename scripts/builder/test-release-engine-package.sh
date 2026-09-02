@@ -22,6 +22,13 @@ assert_contains() {
     [[ "$value" == *"$expected"* ]] || fail "expected output to contain: $expected"
 }
 
+assert_not_contains() {
+    local value="$1"
+    local unexpected="$2"
+
+    [[ "$value" != *"$unexpected"* ]] || fail "expected output not to contain: $unexpected"
+}
+
 assert_file() {
     local path="$1"
 
@@ -35,12 +42,25 @@ assert_file_contains() {
     grep -Fq -- "$expected" "$path" || fail "expected $path to contain: $expected"
 }
 
+assert_file_not_contains() {
+    local path="$1"
+    local unexpected="$2"
+
+    ! grep -Fq -- "$unexpected" "$path" || fail "expected $path not to contain: $unexpected"
+}
+
 fake_bin="$temp_root/bin"
+fake_docker_log="$temp_root/docker.log"
 mkdir -p "$fake_bin"
+: > "$fake_docker_log"
 
 cat > "$fake_bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+if [[ -n "${FAKE_DOCKER_LOG:-}" ]]; then
+    printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+fi
 
 case "${1:-}" in
     image)
@@ -48,9 +68,14 @@ case "${1:-}" in
             echo 128
             exit 0
         fi
+        if [[ "${2:-}" == "inspect" && "$*" == *"{{.Os}}/{{.Architecture}}"* ]]; then
+            echo linux/amd64
+            exit 0
+        fi
         exit 1
         ;;
     pull)
+        [[ "${FAKE_DOCKER_FAIL_PULL:-}" != "true" ]] || exit 1
         exit 0
         ;;
     save)
@@ -126,8 +151,8 @@ set -euo pipefail
 EOF
 chmod +x "$fake_cli"
 
-package_url="https://files.internal/engine-packages/vllm/v0.24.0-neutree1/nvidia/v0.24.0-neutree1-ray2.53.0/vllm-v0.24.0-neutree1.tar.gz"
-image_ref="registry.internal:5000/release/engine-vllm:v0.24.0-neutree1-ray2.53.0"
+package_url="https://files.internal/engine-packages/vllm/v0.24.0-custom1/nvidia/v0.24.0-custom1-ray2.53.0/vllm-v0.24.0-custom1.tar.gz"
+image_ref="registry.internal:5000/release/engine-vllm:v0.24.0-custom1-ray2.53.0"
 schema_path="$repo_root/internal/engine/vllm/v0.24.0/schema.json"
 template_dir="$repo_root/internal/engine/vllm/v0.24.0/templates"
 
@@ -135,23 +160,23 @@ manifest_output="$temp_root/manifest-output"
 OUTPUT_DIR="$manifest_output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
     --manifest-only \
     --name vllm \
-    --version v0.24.0-neutree1 \
+    --version v0.24.0-custom1 \
     --images "nvidia_gpu:$image_ref" \
     --supported-tasks "text-generation,text-embedding,text-rerank" \
     --schema "$schema_path" \
     --template-dir "$template_dir" \
     --package-url "$package_url"
 
-manifest_path="$manifest_output/vllm-v0.24.0-neutree1-manifest.yaml"
+manifest_path="$manifest_output/vllm-v0.24.0-custom1-manifest.yaml"
 assert_file "$manifest_path"
 assert_file_contains "$manifest_path" "package_url: \"$package_url\""
 assert_file_contains "$manifest_path" "image_name: \"registry.internal:5000/release/engine-vllm\""
-assert_file_contains "$manifest_path" "tag: \"v0.24.0-neutree1-ray2.53.0\""
+assert_file_contains "$manifest_path" "tag: \"v0.24.0-custom1-ray2.53.0\""
 
 if OUTPUT_DIR="$temp_root/invalid-image-output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
     --manifest-only \
     --name vllm \
-    --version v0.24.0-neutree1 \
+    --version v0.24.0-custom1 \
     --images "nvidia_gpu:registry.internal:5000/release/engine-vllm" \
     --supported-tasks "text-generation,text-embedding,text-rerank" \
     --schema "$schema_path" \
@@ -163,7 +188,7 @@ fi
 if OUTPUT_DIR="$temp_root/insecure-url-output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
     --manifest-only \
     --name vllm \
-    --version v0.24.0-neutree1 \
+    --version v0.24.0-custom1 \
     --images "nvidia_gpu:$image_ref" \
     --supported-tasks "text-generation,text-embedding,text-rerank" \
     --schema "$schema_path" \
@@ -176,7 +201,7 @@ credentialed_package_url="https://user:pass@files.internal/engine-packages/vllm/
 if OUTPUT_DIR="$temp_root/credentialed-url-output" bash "$repo_root/scripts/builder/build-engine-package.sh" \
     --manifest-only \
     --name vllm \
-    --version v0.24.0-neutree1 \
+    --version v0.24.0-custom1 \
     --images "nvidia_gpu:$image_ref" \
     --supported-tasks "text-generation,text-embedding,text-rerank" \
     --schema "$schema_path" \
@@ -190,6 +215,12 @@ make_output=$(make -s --just-print -C "$repo_root" build-engine-manifest \
     ENGINE_PACKAGE_URL="$package_url")
 assert_contains "$make_output" "OUTPUT_DIR=\"$temp_root/make-output\""
 assert_contains "$make_output" "--package-url \"$package_url\""
+assert_not_contains "$make_output" "--force-pull"
+
+force_make_output=$(make -s --just-print -C "$repo_root" build-engine-package \
+    ENGINE_PACKAGE_OUTPUT_DIR="$temp_root/force-make-output" \
+    ENGINE_PACKAGE_FORCE_PULL=1)
+assert_contains "$force_make_output" "--force-pull"
 
 resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-image-ref \
     ENGINE_TYPE=vllm \
@@ -198,7 +229,7 @@ resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-imag
     IMAGE_PROJECT=release \
     ENGINE_VLLM_VERSION=v0.24.0 \
     ENGINE_VLLM_BASE_IMAGE_TAG=v0.24.0 \
-    ENGINE_PATCH_SUFFIX=1 \
+    ENGINE_PATCH_SUFFIX=custom1 \
     RAY_SHORT_VERSION=ray2.53.0)
 [[ "$resolved_image" == "nvidia_gpu:$image_ref" ]] || fail "unexpected image mapping: $resolved_image"
 
@@ -208,9 +239,9 @@ resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-imag
     IMAGE_REPO=registry.internal:5000 \
     IMAGE_PROJECT=release \
     ENGINE_VLLM_ROCM_BASE_IMAGE_TAG=v0.24.0-rocm \
-    ENGINE_PATCH_SUFFIX=1 \
+    ENGINE_PATCH_SUFFIX=custom1 \
     RAY_SHORT_VERSION=ray2.53.0)
-[[ "$resolved_image" == "amd_gpu:registry.internal:5000/release/engine-vllm-rocm:v0.24.0-rocm-neutree1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
+[[ "$resolved_image" == "amd_gpu:registry.internal:5000/release/engine-vllm-rocm:v0.24.0-rocm-custom1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
 
 resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-image-ref \
     ENGINE_TYPE=sglang \
@@ -218,9 +249,9 @@ resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-imag
     IMAGE_REPO=registry.internal:5000 \
     IMAGE_PROJECT=release \
     ENGINE_SGLANG_BASE_IMAGE_TAG=v0.5.10 \
-    ENGINE_PATCH_SUFFIX=1 \
+    ENGINE_PATCH_SUFFIX=custom1 \
     RAY_SHORT_VERSION=ray2.53.0)
-[[ "$resolved_image" == "nvidia_gpu:registry.internal:5000/release/engine-sglang:v0.5.10-neutree1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
+[[ "$resolved_image" == "nvidia_gpu:registry.internal:5000/release/engine-sglang:v0.5.10-custom1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
 
 resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-image-ref \
     ENGINE_TYPE=sglang \
@@ -228,9 +259,9 @@ resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-imag
     IMAGE_REPO=registry.internal:5000 \
     IMAGE_PROJECT=release \
     ENGINE_SGLANG_ROCM_TAG=v0.5.10-rocm720-mi30x \
-    ENGINE_PATCH_SUFFIX=1 \
+    ENGINE_PATCH_SUFFIX=custom1 \
     RAY_SHORT_VERSION=ray2.53.0)
-[[ "$resolved_image" == "amd_gpu:registry.internal:5000/release/engine-sglang:v0.5.10-rocm720-mi30x-neutree1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
+[[ "$resolved_image" == "amd_gpu:registry.internal:5000/release/engine-sglang:v0.5.10-rocm720-mi30x-custom1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
 
 resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-image-ref \
     ENGINE_TYPE=llama-cpp \
@@ -238,25 +269,71 @@ resolved_image=$(make -s -C "$repo_root/cluster-image-builder" print-engine-imag
     IMAGE_REPO=registry.internal:5000 \
     IMAGE_PROJECT=release \
     ENGINE_LLAMA_CPP_VERSION=v0.3.7 \
-    ENGINE_PATCH_SUFFIX=1 \
+    ENGINE_PATCH_SUFFIX=custom1 \
     RAY_SHORT_VERSION=ray2.53.0)
-[[ "$resolved_image" == "ssh_cpu:registry.internal:5000/release/engine-llama-cpp:v0.3.7-neutree1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
+[[ "$resolved_image" == "cpu:registry.internal:5000/release/engine-llama-cpp:v0.3.7-custom1-ray2.53.0" ]] || fail "unexpected image mapping: $resolved_image"
+
+default_cache_output="$temp_root/default-cache-output"
+: > "$fake_docker_log"
+PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$fake_docker_log" OUTPUT_DIR="$default_cache_output" \
+    bash "$repo_root/scripts/builder/build-engine-package.sh" \
+    --name vllm \
+    --version v0.24.0-custom1 \
+    --images "nvidia_gpu:$image_ref" \
+    --supported-tasks "text-generation,text-embedding,text-rerank" \
+    --schema "$schema_path" \
+    --template-dir "$template_dir" \
+    --package-url "$package_url"
+assert_not_contains "$(cat "$fake_docker_log")" "pull --platform"
 
 package_output="$temp_root/package-output"
-PATH="$fake_bin:$PATH" "$repo_root/scripts/builder/build-release-engine-package.sh" \
+: > "$fake_docker_log"
+PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$fake_docker_log" "$repo_root/scripts/builder/build-release-engine-package.sh" \
     --engine vllm \
     --engine-version v0.24.0 \
     --accelerator nvidia \
-    --engine-patch-suffix 1 \
+    --engine-patch-suffix custom1 \
     --image-ref "$image_ref" \
     --package-url "$package_url" \
     --output-dir "$package_output" \
     --neutree-cli "$fake_cli"
 
-assert_file "$package_output/vllm-v0.24.0-neutree1.tar.gz"
-assert_file "$package_output/vllm-v0.24.0-neutree1-manifest.yaml"
-assert_file "$package_output/vllm-v0.24.0-neutree1.tar.gz.sha256"
-assert_file_contains "$package_output/vllm-v0.24.0-neutree1-manifest.yaml" "package_url: \"$package_url\""
+assert_file "$package_output/vllm-v0.24.0-custom1.tar.gz"
+assert_file "$package_output/vllm-v0.24.0-custom1-manifest.yaml"
+assert_file "$package_output/vllm-v0.24.0-custom1.tar.gz.sha256"
+assert_file_contains "$package_output/vllm-v0.24.0-custom1-manifest.yaml" "package_url: \"$package_url\""
+assert_contains "$(cat "$fake_docker_log")" "pull --platform linux/amd64 $image_ref"
+
+failed_pull_output="$temp_root/failed-pull-output"
+if PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$fake_docker_log" FAKE_DOCKER_FAIL_PULL=true \
+    "$repo_root/scripts/builder/build-release-engine-package.sh" \
+    --engine vllm \
+    --engine-version v0.24.0 \
+    --accelerator nvidia \
+    --engine-patch-suffix custom1 \
+    --image-ref "$image_ref" \
+    --package-url "$package_url" \
+    --output-dir "$failed_pull_output" \
+    --neutree-cli "$fake_cli"; then
+    fail "expected forced pull failure"
+fi
+[[ ! -e "$failed_pull_output/vllm-v0.24.0-custom1.tar.gz" ]] || fail "failed pull must not produce an archive"
+
+llama_package_url="https://files.internal/engine-packages/llama-cpp/v0.3.7-custom1/cpu/v0.3.7-custom1-ray2.53.0/llama-cpp-v0.3.7-custom1.tar.gz"
+llama_image_ref="registry.internal:5000/release/engine-llama-cpp:v0.3.7-custom1-ray2.53.0"
+llama_output="$temp_root/llama-output"
+PATH="$fake_bin:$PATH" FAKE_DOCKER_LOG="$fake_docker_log" "$repo_root/scripts/builder/build-release-engine-package.sh" \
+    --engine llama-cpp \
+    --engine-version v0.3.7 \
+    --accelerator cpu \
+    --engine-patch-suffix custom1 \
+    --image-ref "$llama_image_ref" \
+    --package-url "$llama_package_url" \
+    --output-dir "$llama_output" \
+    --neutree-cli "$fake_cli"
+assert_file "$llama_output/llama-cpp-v0.3.7-custom1-manifest.yaml"
+assert_file_contains "$llama_output/llama-cpp-v0.3.7-custom1-manifest.yaml" "      cpu:"
+assert_file_not_contains "$llama_output/llama-cpp-v0.3.7-custom1-manifest.yaml" "ssh_cpu:"
 
 missing_assets_package_url="https://files.internal/engine-packages/vllm/v9.99.9/nvidia/v9.99.9-ray2.53.0/vllm-v9.99.9.tar.gz"
 if PATH="$fake_bin:$PATH" "$repo_root/scripts/builder/build-release-engine-package.sh" \
@@ -276,6 +353,10 @@ for workflow in \
     "$repo_root/.github/workflows/release-engine-image-llama-cpp.yaml"; do
     grep -Fq "if: \${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL != '' }}" "$workflow" \
         || fail "expected release package opt-in gate in $workflow"
+    ! grep -Fq 'ray_version:' "$workflow" \
+        || fail "release workflow must not expose ray_version"
+    grep -Fq 'RAY_VERSION: ray-2.53.0-neutree' "$workflow" \
+        || fail "release workflow must use the fixed Ray branch"
 done
 
 echo "PASS: release engine package builder"

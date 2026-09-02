@@ -12,7 +12,7 @@ ACCELERATORS ?= gpu amd-gpu
 ALL_ARCH ?= amd64 arm64
 
 RAY_REPO ?= https://github.com/neutree-ai/ray.git
-RAY_VERSION ?= ray-2.53.0-neutree-fix
+RAY_VERSION ?= ray-2.53.0-neutree
 RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head -c 7)
 
 # Engine image build args
@@ -173,7 +173,7 @@ print-engine-image-ref: ## Print accelerator:image:tag for a released engine ima
 		vllm:rocm) printf '%s\n' "amd_gpu:$(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
 		sglang:nvidia) printf '%s\n' "nvidia_gpu:$(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
 		sglang:rocm) printf '%s\n' "amd_gpu:$(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
-		llama-cpp:cpu) printf '%s\n' "ssh_cpu:$(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
+		llama-cpp:cpu) printf '%s\n' "cpu:$(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)" ;; \
 		*) echo "unsupported engine mapping: $(ENGINE_TYPE):$(ENGINE_ACCELERATOR)" >&2; exit 1 ;; \
 	esac
 

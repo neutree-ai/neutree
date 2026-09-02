@@ -237,6 +237,7 @@ Options:
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
+    --force-pull              Always pull selected images before export
     --package-url URL         URL of the complete archive for standalone manifest imports
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
@@ -321,6 +322,7 @@ OUTPUT_FILE=""
 DESCRIPTION=""
 PLATFORM="linux/amd64"
 MIRROR_REGISTRY=""
+FORCE_PULL=""
 PACKAGE_URL=""
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
@@ -402,6 +404,10 @@ while [[ $# -gt 0 ]]; do
         --mirror-registry)
             MIRROR_REGISTRY="$2"
             shift 2
+            ;;
+        --force-pull)
+            FORCE_PULL="true"
+            shift
             ;;
         --package-url)
             if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
@@ -506,13 +512,18 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        if image_exists_for_platform "$FULL_IMAGE" "$PLATFORM"; then
-            print_info "Image $FULL_IMAGE found locally. Skipping pull."
-        elif [ -n "$MIRROR_REGISTRY" ]; then
+        if [ -n "$MIRROR_REGISTRY" ]; then
             IMAGE_WITHOUT_REGISTRY=$(strip_image_registry "$FULL_IMAGE")
             MIRROR_IMAGE="${MIRROR_REGISTRY}/${IMAGE_WITHOUT_REGISTRY}"
 
-            if image_exists_for_platform "$MIRROR_IMAGE" "$PLATFORM"; then
+            if [ -n "$FORCE_PULL" ]; then
+                print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
+                if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
+                    print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
+                    exit 1
+                fi
+                print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
+            elif image_exists_for_platform "$MIRROR_IMAGE" "$PLATFORM"; then
                 print_info "Mirror image $MIRROR_IMAGE found locally. Skipping pull."
             else
                 print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
@@ -528,6 +539,15 @@ if [ -z "$MANIFEST_ONLY" ]; then
                 print_error "Failed to tag image: $MIRROR_IMAGE -> $FULL_IMAGE"
                 exit 1
             fi
+        elif [ -n "$FORCE_PULL" ]; then
+            print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
+            if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
+                print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
+                exit 1
+            fi
+            print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
+        elif image_exists_for_platform "$FULL_IMAGE" "$PLATFORM"; then
+            print_info "Image $FULL_IMAGE found locally. Skipping pull."
         else
             print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
             if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then

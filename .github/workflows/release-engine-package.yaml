@@ -116,7 +116,7 @@ jobs:
 
           manifest_version="$ENGINE_VERSION"
           if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
-            manifest_version="${ENGINE_VERSION}-neutree${ENGINE_PATCH_SUFFIX}"
+            manifest_version="${ENGINE_VERSION}-${ENGINE_PATCH_SUFFIX}"
           fi
 
           make_args=(
