@@ -105,16 +105,15 @@ jobs:
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
 
   release-package:
-    if: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL != '' }}
+    if: ${{ github.event.inputs.accelerator == 'nvidia' }}
     needs:
       - push-manifests
     uses: ./.github/workflows/release-engine-package.yaml
     with:
       engine: sglang
-      accelerator: ${{ github.event.inputs.accelerator }}
+      accelerator: nvidia
       engine_version: ${{ github.event.inputs.engine_version }}
       base_image_tag_override: ${{ github.event.inputs.base_image_tag_override }}
       ray_short_version: ${{ github.event.inputs.ray_short_version }}
       engine_patch_suffix: ${{ github.event.inputs.engine_patch_suffix }}
-      file_server_url: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL }}
     secrets: inherit

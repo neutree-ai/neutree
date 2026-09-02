@@ -65,31 +65,6 @@ parse_image_spec() {
     fi
 }
 
-image_exists_for_platform() {
-    local image="$1"
-    local platform="$2"
-    local image_platform
-    local requested_os
-    local requested_arch
-    local requested_platform
-
-    requested_os="${platform%%/*}"
-    requested_arch="${platform#*/}"
-    requested_arch="${requested_arch%%/*}"
-    requested_platform="${requested_os}/${requested_arch}"
-
-    if ! image_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null); then
-        return 1
-    fi
-
-    if [ "$image_platform" = "$requested_platform" ]; then
-        return 0
-    fi
-
-    print_warn "Image $image found locally for $image_platform, but $platform was requested."
-    return 1
-}
-
 # Function to read and format deploy template
 read_deploy_template() {
     local template_file="$1"
@@ -237,8 +212,6 @@ Options:
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
-    --force-pull              Always pull selected images before export
-    --package-url URL         URL of the complete archive for standalone manifest imports
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -322,8 +295,6 @@ OUTPUT_FILE=""
 DESCRIPTION=""
 PLATFORM="linux/amd64"
 MIRROR_REGISTRY=""
-FORCE_PULL=""
-PACKAGE_URL=""
 MANIFEST_ONLY=""
 # Capability declarations. Empty means "undeclared", which is not the same as
 # declaring false: an engine version with no capabilities block keeps the
@@ -405,18 +376,6 @@ while [[ $# -gt 0 ]]; do
             MIRROR_REGISTRY="$2"
             shift 2
             ;;
-        --force-pull)
-            FORCE_PULL="true"
-            shift
-            ;;
-        --package-url)
-            if [[ $# -lt 2 || -z "$2" || "$2" == -* ]]; then
-                print_error "$1 requires a value"
-                exit 1
-            fi
-            PACKAGE_URL="$2"
-            shift 2
-            ;;
         --manifest-only)
             MANIFEST_ONLY="true"
             shift
@@ -451,24 +410,6 @@ if [ -z "$IMAGES" ]; then
     print_error "For CPU-only engines, use: cpu:image:tag"
     print_error "Example: -i \"cpu:neutree/llama-cpp:v1.0.0\""
     show_usage
-    exit 1
-fi
-
-if [ -n "$PACKAGE_URL" ] && [[ ! "$PACKAGE_URL" =~ ^https://[^[:space:]\"\\]+$ || "$PACKAGE_URL" == *\?* || "$PACKAGE_URL" == *\#* ]]; then
-    print_error "--package-url must be an HTTPS URL without whitespace or quotes"
-    exit 1
-fi
-if [ -n "$PACKAGE_URL" ]; then
-    PACKAGE_URL_AUTHORITY="${PACKAGE_URL#https://}"
-    PACKAGE_URL_AUTHORITY="${PACKAGE_URL_AUTHORITY%%/*}"
-    if [[ "$PACKAGE_URL_AUTHORITY" == *"@"* ]]; then
-        print_error "--package-url must not include URL credentials"
-        exit 1
-    fi
-fi
-
-if [ -n "$PACKAGE_URL" ] && [ -n "$MANIFEST_TEMPLATE" ]; then
-    print_error "--package-url cannot be combined with --manifest because package URL injection requires the generated manifest"
     exit 1
 fi
 
@@ -516,38 +457,18 @@ if [ -z "$MANIFEST_ONLY" ]; then
             IMAGE_WITHOUT_REGISTRY=$(strip_image_registry "$FULL_IMAGE")
             MIRROR_IMAGE="${MIRROR_REGISTRY}/${IMAGE_WITHOUT_REGISTRY}"
 
-            if [ -n "$FORCE_PULL" ]; then
-                print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
-                if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
-                    print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
-                    exit 1
-                fi
-                print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
-            elif image_exists_for_platform "$MIRROR_IMAGE" "$PLATFORM"; then
-                print_info "Mirror image $MIRROR_IMAGE found locally. Skipping pull."
-            else
-                print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
-                if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
-                    print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
-                    exit 1
-                fi
-                print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
+            print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
+            if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
+                print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
+                exit 1
             fi
+            print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
 
             print_info "Retagging $MIRROR_IMAGE to $FULL_IMAGE"
             if ! docker tag "$MIRROR_IMAGE" "$FULL_IMAGE"; then
                 print_error "Failed to tag image: $MIRROR_IMAGE -> $FULL_IMAGE"
                 exit 1
             fi
-        elif [ -n "$FORCE_PULL" ]; then
-            print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
-            if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
-                print_error "Failed to pull image $FULL_IMAGE for platform $PLATFORM"
-                exit 1
-            fi
-            print_info "Successfully pulled $FULL_IMAGE for platform $PLATFORM"
-        elif image_exists_for_platform "$FULL_IMAGE" "$PLATFORM"; then
-            print_info "Image $FULL_IMAGE found locally. Skipping pull."
         else
             print_info "Pulling latest $PLATFORM image: $FULL_IMAGE"
             if ! docker pull --platform "$PLATFORM" "$FULL_IMAGE"; then
@@ -811,12 +732,6 @@ ${PLAYGROUND_BODY}"
         # Add your configuration schema here"
     fi
 
-    PACKAGE_URL_SECTION=""
-    if [ -n "$PACKAGE_URL" ]; then
-        PACKAGE_URL_SECTION="
-  package_url: \"${PACKAGE_URL}\""
-    fi
-
     cat > "$PACKAGE_DIR/manifest.yaml" << EOF
 manifest_version: "1.0"
 
@@ -825,7 +740,6 @@ metadata:
   author: "Neutree Team"
   created_at: "$CREATED_AT"
   version: $VERSION
-${PACKAGE_URL_SECTION}
   tags:
     - "engine"
     - "$ENGINE_NAME"

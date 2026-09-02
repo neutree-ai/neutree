@@ -76,7 +76,6 @@ jobs:
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
 
   release-package:
-    if: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL != '' }}
     needs:
       - push-manifests
     uses: ./.github/workflows/release-engine-package.yaml
@@ -86,5 +85,4 @@ jobs:
       engine_version: ${{ github.event.inputs.engine_version }}
       ray_short_version: ${{ github.event.inputs.ray_short_version }}
       engine_patch_suffix: ${{ github.event.inputs.engine_patch_suffix }}
-      file_server_url: ${{ vars.ENGINE_PACKAGE_FILE_SERVER_URL }}
     secrets: inherit
