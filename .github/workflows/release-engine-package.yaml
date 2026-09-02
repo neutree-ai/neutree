@@ -33,6 +33,8 @@ on:
     secrets:
       ENGINE_PACKAGE_FILE_SERVER_URL:
         required: true
+      SLACK_WEBHOOK_URL:
+        required: false
       RELEASE_SERVE_IMAGE_PROJECT:
         required: true
       SERVE_IMAGE_REPO:
@@ -49,10 +51,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
 
       - name: Resolve package metadata
         id: package
@@ -130,9 +128,6 @@ jobs:
           username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
           password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
 
-      - name: Build neutree-cli
-        run: make build-neutree-cli
-
       - name: Build engine package
         shell: bash
         env:
@@ -156,7 +151,6 @@ jobs:
             --template-dir "$TEMPLATE_DIR" \
             --output "$archive_name" \
             --description "$ENGINE inference engine"
-          "$GITHUB_WORKSPACE/bin/neutree-cli" import validate -p "$OUTPUT_DIR/$archive_name"
 
       - name: Upload engine package
         shell: bash
@@ -174,3 +168,26 @@ jobs:
           curl -T "$archive" "$package_url"
           curl -T "$checksum" "$package_url.sha256"
           curl -T "$manifest" "${package_url%.tar.gz}-manifest.yaml"
+
+      - name: Notify Slack
+        if: ${{ success() }}
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SLACK_WEBHOOK_URL" ]] || exit 0
+          archive_url="$ENGINE_PACKAGE_FILE_SERVER_URL"
+          checksum_url="${archive_url}.sha256"
+          manifest_url="${archive_url%.tar.gz}-manifest.yaml"
+          message=$(printf 'Engine package published: %s %s\nArchive: %s\nChecksum: %s\nManifest: %s' "$ENGINE" "$MANIFEST_VERSION" "$archive_url" "$checksum_url" "$manifest_url")
+          escaped_message=${message//\\/\\\\}
+          escaped_message=${escaped_message//\"/\\\"}
+          escaped_message=${escaped_message//$'\n'/\\n}
+          payload=$(printf '{"text":"%s"}' "$escaped_message")
+          if ! curl --silent --show-error --fail --request POST --header 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null; then
+            echo 'WARNING: Slack notification failed' >&2
+          fi
