@@ -27,4 +27,6 @@ never receive an implicit `neutree` prefix. Derive image tags, manifest
 versions, archive/checksum names, and package URLs from the same suffix
 semantics. Preserve legacy `-neutree*` names only when callers explicitly pass
 that value, and update the matching enterprise release path plus required
-static checks and Step 5 release evidence whenever this contract changes.
+static checks and Step 5 release evidence whenever this contract changes. Ray
+image builds use `ray-2.53.0-neutree` by default; any explicit Ray override must
+resolve to a non-empty commit before Docker runs, with no silent fallback.
