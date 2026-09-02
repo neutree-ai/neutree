@@ -10,6 +10,11 @@ on:
         description: "llama-cpp-python version (e.g. v0.3.7)"
         required: true
         type: string
+      ray_version:
+        description: "Ray branch or tag used to build the engine image"
+        required: false
+        type: string
+        default: "ray-2.53.0-neutree-fix"
       ray_short_version:
         description: "ray short version for image tag (e.g: ray2.53.0)"
         required: false
@@ -28,9 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Validate release inputs
+        id: validate
         shell: bash
         env:
           ENGINE_VERSION: ${{ github.event.inputs.engine_version }}
+          RAY_VERSION: ${{ github.event.inputs.ray_version }}
+          RAY_REPO: https://github.com/neutree-ai/ray.git
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
         run: |
@@ -38,6 +46,11 @@ jobs:
           [[ "$ENGINE_VERSION" =~ ^v[A-Za-z0-9._-]+$ ]] || { echo "engine_version must start with v and match [A-Za-z0-9._-]+"; exit 1; }
           [[ -z "$ENGINE_PATCH_SUFFIX" || "$ENGINE_PATCH_SUFFIX" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "engine_patch_suffix must match [A-Za-z0-9._-]+"; exit 1; }
           [[ "$RAY_SHORT_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "ray_short_version must be a Docker tag segment"; exit 1; }
+          [[ "$RAY_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$RAY_VERSION" != refs/* ]] || { echo "ray_version must be a safe branch or tag name"; exit 1; }
+          git check-ref-format --branch "$RAY_VERSION" >/dev/null
+          ray_commit="$(git ls-remote "$RAY_REPO" "refs/heads/$RAY_VERSION" "refs/tags/$RAY_VERSION" "refs/tags/$RAY_VERSION^{}" | awk 'index($2, "refs/tags/") == 1 && substr($2, length($2) - 2) == "^{}" { print $1; found=1; exit } index($2, "refs/heads/") == 1 { print $1; found=1; exit } NR == 1 { first=$1 } END { if (!found && first != "") print first }')"
+          [[ "$ray_commit" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "ray_version does not resolve to a commit"; exit 1; }
+          echo "ray_commit=$ray_commit" >> "$GITHUB_OUTPUT"
       - name: Login docker
         uses: docker/login-action@v2
         with:
@@ -53,7 +66,8 @@ jobs:
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           ARCH: amd64
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
-          RAY_VERSION: ray-2.53.0-neutree
+          RAY_VERSION: ${{ github.event.inputs.ray_version }}
+          RAY_COMMIT: ${{ steps.validate.outputs.ray_commit }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:

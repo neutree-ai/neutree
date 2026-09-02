@@ -118,6 +118,15 @@ jobs:
           if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
             manifest_version="${ENGINE_VERSION}-${ENGINE_PATCH_SUFFIX}"
           fi
+          base_version="${ENGINE_VERSION%%-*}"
+          schema_path="internal/engine/$ENGINE/$base_version/schema.json"
+          template_dir="internal/engine/$ENGINE/$base_version/templates"
+          [[ -f "$schema_path" ]] || { echo "engine schema is missing: $schema_path" >&2; exit 1; }
+          [[ -d "$template_dir" ]] || { echo "engine templates are missing: $template_dir" >&2; exit 1; }
+          find "$template_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) -print -quit | grep -q . || {
+            echo "engine templates are missing: $template_dir" >&2
+            exit 1
+          }
 
           make_args=(
             -s
@@ -133,24 +142,28 @@ jobs:
 
           case "$ENGINE:$ACCELERATOR" in
             vllm:nvidia)
+              supported_tasks="text-generation,text-embedding,text-rerank"
               make_args+=(
                 "ENGINE_VLLM_VERSION=$ENGINE_VERSION"
                 "ENGINE_VLLM_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
               )
               ;;
             vllm:rocm)
+              supported_tasks="text-generation,text-embedding,text-rerank"
               make_args+=(
                 "ENGINE_VLLM_VERSION=$ENGINE_VERSION"
                 "ENGINE_VLLM_ROCM_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
               )
               ;;
             sglang:nvidia)
+              supported_tasks="text-generation,text-embedding"
               make_args+=(
                 "ENGINE_SGLANG_VERSION=$ENGINE_VERSION"
                 "ENGINE_SGLANG_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
               )
               ;;
             sglang:rocm)
+              supported_tasks="text-generation,text-embedding"
               sglang_rocm_tag="$ENGINE_VERSION-rocm720-mi30x"
               if [[ -n "$BASE_IMAGE_TAG_OVERRIDE" ]]; then
                 sglang_rocm_tag="$BASE_IMAGE_TAG_OVERRIDE"
@@ -161,6 +174,7 @@ jobs:
               )
               ;;
             llama-cpp:cpu)
+              supported_tasks="text-generation,text-embedding"
               make_args+=(
                 "ENGINE_LLAMA_CPP_VERSION=$ENGINE_VERSION"
               )
@@ -179,9 +193,13 @@ jobs:
           {
             printf 'manifest_version=%s\n' "$manifest_version"
             printf 'image_ref=%s\n' "$image_ref"
+            printf 'image_spec=%s\n' "$image_spec"
             printf 'package_url=%s\n' "$package_url"
             printf 'output_dir=%s\n' "$output_dir"
             printf 'staging_id=%s\n' "$staging_id"
+            printf 'schema_path=%s\n' "$schema_path"
+            printf 'template_dir=%s\n' "$template_dir"
+            printf 'supported_tasks=%s\n' "$supported_tasks"
           } >> "$GITHUB_OUTPUT"
 
       - name: Login docker
@@ -198,28 +216,29 @@ jobs:
         shell: bash
         env:
           ENGINE: ${{ inputs.engine }}
-          ACCELERATOR: ${{ inputs.accelerator }}
-          ENGINE_VERSION: ${{ inputs.engine_version }}
-          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
-          IMAGE_REF: ${{ steps.package.outputs.image_ref }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          IMAGE_SPEC: ${{ steps.package.outputs.image_spec }}
           PACKAGE_URL: ${{ steps.package.outputs.package_url }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
+          SCHEMA_PATH: ${{ steps.package.outputs.schema_path }}
+          TEMPLATE_DIR: ${{ steps.package.outputs.template_dir }}
+          SUPPORTED_TASKS: ${{ steps.package.outputs.supported_tasks }}
         run: |
           set -euo pipefail
-          command=(
-            scripts/builder/build-release-engine-package.sh
-            --engine "$ENGINE"
-            --engine-version "$ENGINE_VERSION"
-            --accelerator "$ACCELERATOR"
-            --image-ref "$IMAGE_REF"
-            --package-url "$PACKAGE_URL"
-            --output-dir "$OUTPUT_DIR"
-            --neutree-cli "$GITHUB_WORKSPACE/bin/neutree-cli"
-          )
-          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
-            command+=(--engine-patch-suffix "$ENGINE_PATCH_SUFFIX")
-          fi
-          "${command[@]}"
+          archive_name="$ENGINE-$MANIFEST_VERSION.tar.gz"
+          OUTPUT_DIR="$OUTPUT_DIR" bash scripts/builder/build-engine-package.sh \
+            --name "$ENGINE" \
+            --version "$MANIFEST_VERSION" \
+            --images "$IMAGE_SPEC" \
+            --supported-tasks "$SUPPORTED_TASKS" \
+            --platform linux/amd64 \
+            --force-pull \
+            --schema "$SCHEMA_PATH" \
+            --template-dir "$TEMPLATE_DIR" \
+            --package-url "$PACKAGE_URL" \
+            --output "$archive_name" \
+            --description "$ENGINE inference engine"
+          "$GITHUB_WORKSPACE/bin/neutree-cli" import validate -p "$OUTPUT_DIR/$archive_name"
 
       - name: Publish engine package
         shell: bash

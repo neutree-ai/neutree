@@ -469,12 +469,6 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 		$(if $(ENGINE_PACKAGE_URL),--package-url "$(ENGINE_PACKAGE_URL)") \
 		-d "$(ENGINE_DESCRIPTION)"
 
-.PHONY: test-engine-package-builder
-test-engine-package-builder: ## Run deterministic engine package builder tests
-	bash scripts/builder/test-release-engine-package.sh
-	bash scripts/builder/test-publish-engine-package.sh
-	go test ./scripts/builder/verify_engine_package
-
 ##@ Cluster Package
 
 CLUSTER_PACKAGE_SCRIPT := scripts/builder/build-package.sh
