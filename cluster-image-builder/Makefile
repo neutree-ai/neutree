@@ -48,14 +48,46 @@ ENGINE_SGLANG_ROCM_TAG ?= $(ENGINE_SGLANG_VERSION)-rocm720-mi30x
 ENGINE_SGLANG_DIR_VERSION ?= $(shell echo $(ENGINE_SGLANG_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
 
-# Optional Neutree-side patch suffix appended only to the output image tag.
-# Empty (default) keeps the upstream tag unchanged. Setting e.g. "1" produces
-# tags like "v0.24.0-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
-# and pip install version still resolve to the upstream version.
+# Optional raw patch suffix appended only to the output image tag.
+# Empty (default) keeps the upstream tag unchanged. Setting e.g. "custom1"
+# produces tags like "v0.24.0-custom1-ray2.53.0" while base image,
+# ENGINE_VERSION_DIR, and pip install version still resolve to the upstream
+# version. Callers that need a legacy tag pass "neutree1" explicitly.
 # Use = (recursive) so the value is re-evaluated each time it is referenced,
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
-ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-neutree$(strip $(ENGINE_PATCH_SUFFIX)))
+ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-$(strip $(ENGINE_PATCH_SUFFIX)))
+ENGINE_RELEASE_TAG_BASE ?=
+
+export ENGINE_PATCH_SUFFIX RAY_SHORT_VERSION ENGINE_RELEASE_TAG_BASE
+
+.PHONY: validate-engine-release-tag
+validate-engine-release-tag:
+	@suffix="$$ENGINE_PATCH_SUFFIX"; \
+	if [ -n "$$suffix" ]; then \
+		case "$$suffix" in [A-Za-z0-9_]*) ;; *) echo "ENGINE_PATCH_SUFFIX must be a Docker tag segment without a leading hyphen" >&2; exit 1 ;; esac; \
+		case "$$suffix" in *[!A-Za-z0-9_.-]*) echo "ENGINE_PATCH_SUFFIX must be a Docker tag segment without a leading hyphen" >&2; exit 1 ;; esac; \
+		if [ $${#suffix} -gt 128 ]; then echo "ENGINE_PATCH_SUFFIX exceeds the Docker tag segment limit" >&2; exit 1; fi; \
+	fi; \
+	tag="$$ENGINE_RELEASE_TAG_BASE"; \
+	if [ -n "$$suffix" ]; then tag="$$tag-$$suffix"; fi; \
+	tag="$$tag-$$RAY_SHORT_VERSION"; \
+	if [ $${#tag} -gt 128 ]; then echo "final Engine image tag exceeds Docker's 128-character limit: $$tag" >&2; exit 1; fi
+
+docker-build-engine-vllm docker-push-engine-vllm docker-push-manifest-engine-vllm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_VLLM_BASE_IMAGE_TAG)
+docker-build-engine-vllm docker-push-engine-vllm docker-push-manifest-engine-vllm: validate-engine-release-tag
+
+docker-build-engine-vllm-rocm docker-push-engine-vllm-rocm docker-push-manifest-engine-vllm-rocm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)
+docker-build-engine-vllm-rocm docker-push-engine-vllm-rocm docker-push-manifest-engine-vllm-rocm: validate-engine-release-tag
+
+docker-build-engine-llama-cpp docker-push-engine-llama-cpp docker-push-manifest-engine-llama-cpp: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_LLAMA_CPP_VERSION)
+docker-build-engine-llama-cpp docker-push-engine-llama-cpp docker-push-manifest-engine-llama-cpp: validate-engine-release-tag
+
+docker-build-engine-sglang docker-push-engine-sglang docker-push-manifest-engine-sglang: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_SGLANG_BASE_IMAGE_TAG)
+docker-build-engine-sglang docker-push-engine-sglang docker-push-manifest-engine-sglang: validate-engine-release-tag
+
+docker-build-engine-sglang-rocm docker-push-engine-sglang-rocm docker-push-manifest-engine-sglang-rocm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_SGLANG_ROCM_TAG)
+docker-build-engine-sglang-rocm docker-push-engine-sglang-rocm docker-push-manifest-engine-sglang-rocm: validate-engine-release-tag
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
