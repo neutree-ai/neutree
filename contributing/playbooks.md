@@ -66,31 +66,6 @@ Then on a real cluster: deploy a model with the new engine/version pair and conf
 
 ---
 
-## Engine Image and Package Release
-
-Use this playbook when changing Engine image tags, manual package defaults, or
-release workflow inputs.
-
-1. Treat `engine_patch_suffix` as an optional raw Docker tag segment without a
-   leading `-`. Empty preserves the upstream version; a non-empty suffix is
-   appended exactly once as `-<suffix>`. A legacy `-neutree*` tag is produced
-   only when the caller explicitly supplies that value.
-2. Keep image tags, Engine manifest versions, archive/checksum names, and
-   package URLs consistent with the same suffix semantics whenever those
-   artifacts are part of the release path. Apply the matching rule to the
-   enterprise vLLM-Ascend image and manual package targets.
-3. Use `ray-2.53.0-neutree` as the canonical Ray ref. Any explicit Ray override
-   must resolve to a non-empty commit before Docker starts; do not silently
-   substitute another ref. Cover every Ray-consuming image build target,
-   including community GPU/AMD and Engine images plus enterprise Ascend runtime
-   and vLLM-Ascend images.
-4. Verify default, custom, explicit legacy, invalid, and overlong tag paths
-   with Make dry-runs and workflow/static checks. Record controlled release
-   evidence for the selected tags. Do not add or modify package unit tests when
-   the task scope explicitly excludes them.
-
----
-
 ## Adding a New Resource Type
 
 Scope: a new top-level resource (e.g. `Foo`) reachable through the CLI, persisted in Postgres with workspace-isolated RLS, and reconciled by a controller.

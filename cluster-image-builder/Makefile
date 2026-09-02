@@ -57,55 +57,20 @@ RAY_SHORT_VERSION ?= ray2.53.0
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
 ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-$(strip $(ENGINE_PATCH_SUFFIX)))
-ENGINE_RELEASE_TAG_BASE ?=
-
-export ENGINE_PATCH_SUFFIX RAY_COMMIT RAY_SHORT_VERSION RAY_VERSION ENGINE_RELEASE_TAG_BASE
-
-.PHONY: validate-ray-commit
-validate-ray-commit:
-	@if [ -z "$$RAY_COMMIT" ]; then echo "RAY_COMMIT is empty: unable to resolve RAY_VERSION=$$RAY_VERSION" >&2; exit 1; fi
-
-.PHONY: validate-engine-release-tag
-validate-engine-release-tag: validate-ray-commit
-	@suffix="$$ENGINE_PATCH_SUFFIX"; \
-	if [ -n "$$suffix" ]; then \
-		case "$$suffix" in [A-Za-z0-9_]*) ;; *) echo "ENGINE_PATCH_SUFFIX must be a Docker tag segment without a leading hyphen" >&2; exit 1 ;; esac; \
-		case "$$suffix" in *[!A-Za-z0-9_.-]*) echo "ENGINE_PATCH_SUFFIX must be a Docker tag segment without a leading hyphen" >&2; exit 1 ;; esac; \
-		if [ $${#suffix} -gt 128 ]; then echo "ENGINE_PATCH_SUFFIX exceeds the Docker tag segment limit" >&2; exit 1; fi; \
-	fi; \
-	tag="$$ENGINE_RELEASE_TAG_BASE"; \
-	if [ -n "$$suffix" ]; then tag="$$tag-$$suffix"; fi; \
-	tag="$$tag-$$RAY_SHORT_VERSION"; \
-	if [ $${#tag} -gt 128 ]; then echo "final Engine image tag exceeds Docker's 128-character limit: $$tag" >&2; exit 1; fi
-
-docker-build-engine-vllm docker-push-engine-vllm docker-push-manifest-engine-vllm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_VLLM_BASE_IMAGE_TAG)
-docker-build-engine-vllm docker-push-engine-vllm docker-push-manifest-engine-vllm: validate-engine-release-tag
-
-docker-build-engine-vllm-rocm docker-push-engine-vllm-rocm docker-push-manifest-engine-vllm-rocm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)
-docker-build-engine-vllm-rocm docker-push-engine-vllm-rocm docker-push-manifest-engine-vllm-rocm: validate-engine-release-tag
-
-docker-build-engine-llama-cpp docker-push-engine-llama-cpp docker-push-manifest-engine-llama-cpp: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_LLAMA_CPP_VERSION)
-docker-build-engine-llama-cpp docker-push-engine-llama-cpp docker-push-manifest-engine-llama-cpp: validate-engine-release-tag
-
-docker-build-engine-sglang docker-push-engine-sglang docker-push-manifest-engine-sglang: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_SGLANG_BASE_IMAGE_TAG)
-docker-build-engine-sglang docker-push-engine-sglang docker-push-manifest-engine-sglang: validate-engine-release-tag
-
-docker-build-engine-sglang-rocm docker-push-engine-sglang-rocm docker-push-manifest-engine-sglang-rocm: override ENGINE_RELEASE_TAG_BASE := $(ENGINE_SGLANG_ROCM_TAG)
-docker-build-engine-sglang-rocm docker-push-engine-sglang-rocm docker-push-manifest-engine-sglang-rocm: validate-engine-release-tag
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ACCELERATORS))
 
 .PHONY: docker-build-gpu
-docker-build-gpu: validate-ray-commit prepare ## Build the GPU cluster image
+docker-build-gpu: prepare ## Build the GPU cluster image
 	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
 		--label neutree.ai/accelerator-type=nvidia_gpu \
 		-f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
 
 .PHONY: docker-build-amd-gpu
-docker-build-amd-gpu: validate-ray-commit prepare ## Build the AMD GPU cluster image
+docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
 		--label neutree.ai/accelerator-type=amd_gpu \

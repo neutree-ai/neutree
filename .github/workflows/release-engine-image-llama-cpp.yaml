@@ -35,8 +35,8 @@ jobs:
       - name: Validate engine_patch_suffix
         if: ${{ github.event.inputs.engine_patch_suffix != '' }}
         run: |
-          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$' \
-            || { echo "engine_patch_suffix must be a Docker tag segment without a leading hyphen"; exit 1; }
+          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
+            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
       - name: Login docker
         uses: docker/login-action@v2
         with:
