@@ -90,7 +90,7 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 
 func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
-	acceleratorMgr.On("SupportPlugins").Return([]string{"npu", v1.AcceleratorTypeNVIDIAGPU.String()})
+	acceleratorMgr.On("SupportPlugins").Return([]string{"other_accelerator", v1.AcceleratorTypeNVIDIAGPU.String()})
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).Return(&v1.AcceleratorProfile{
 		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
@@ -109,21 +109,21 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 			Port:        9400,
 		},
 	}, nil)
-	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "npu").Return(&v1.AcceleratorProfile{
-		AcceleratorType: "npu",
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "other_accelerator").Return(&v1.AcceleratorProfile{
+		AcceleratorType: "other_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-			Image: "example.com/npu-node-agent:v1",
+			Image: "example.com/other-node-agent:v1",
 		},
 		MetricsExporter: &v1.AcceleratorExporterProfile{
-			Name:  "npu-exporter",
-			Image: "example.com/npu-exporter:v1",
+			Name:  "other-exporter",
+			Image: "example.com/other-exporter:v1",
 			Port:  8082,
 			Runtime: &v1.AcceleratorExporterRuntimeProfile{
-				NodeSelector: map[string]string{"workerselector": "dls-worker-node"},
+				NodeSelector: map[string]string{"example.com/other-accelerator": "true"},
 			},
 		},
 		ExternalMetricsTarget: &v1.MetricsTargetProfile{
-			PodSelector: map[string]string{"app": "npu-exporter"},
+			PodSelector: map[string]string{"app": "other-exporter"},
 			Port:        8082,
 		},
 	}, nil)
@@ -152,12 +152,12 @@ func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.
 	objects, err := component.GetMetricsResources(context.Background())
 	require.NoError(t, err)
 	assert.False(t, hasMetricsDaemonSet(objects, "nvidia-gpu-dcgm-exporter"))
-	assert.False(t, hasMetricsDaemonSet(objects, "npu-npu-exporter"))
+	assert.False(t, hasMetricsDaemonSet(objects, "other-accelerator-other-exporter"))
 
 	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
 	assert.Contains(t, vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'")
 	assert.Contains(t, vmagentConfig, "label: app=nvidia-dcgm-exporter")
-	assert.NotContains(t, vmagentConfig, "job_name: 'accelerator-exporter-npu'")
+	assert.NotContains(t, vmagentConfig, "job_name: 'accelerator-exporter-other-accelerator'")
 
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
