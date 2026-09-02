@@ -47,57 +47,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Validate release inputs
-        shell: bash
-        env:
-          ENGINE: ${{ inputs.engine }}
-          ACCELERATOR: ${{ inputs.accelerator }}
-          ENGINE_VERSION: ${{ inputs.engine_version }}
-          BASE_IMAGE_TAG_OVERRIDE: ${{ inputs.base_image_tag_override }}
-          RAY_SHORT_VERSION: ${{ inputs.ray_short_version }}
-          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
-          FILE_SERVER_URL: ${{ inputs.file_server_url }}
-        run: |
-          set -euo pipefail
-          case "$ENGINE:$ACCELERATOR" in
-            vllm:nvidia|vllm:rocm|sglang:nvidia|sglang:rocm|llama-cpp:cpu)
-              ;;
-            *)
-              echo "unsupported engine and accelerator combination: $ENGINE:$ACCELERATOR" >&2
-              exit 1
-              ;;
-          esac
-          [[ "$ENGINE_VERSION" =~ ^v[A-Za-z0-9._-]+$ ]] || {
-            echo "engine_version must start with v and match [A-Za-z0-9._-]+" >&2
-            exit 1
-          }
-          [[ "$ENGINE_PATCH_SUFFIX" =~ ^[A-Za-z0-9._-]*$ ]] || {
-            echo "engine_patch_suffix must match [A-Za-z0-9._-]*" >&2
-            exit 1
-          }
-          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
-            echo "base_image_tag_override must be a Docker tag when set" >&2
-            exit 1
-          }
-          [[ -z "$BASE_IMAGE_TAG_OVERRIDE" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION" || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION".* || "$BASE_IMAGE_TAG_OVERRIDE" == "$ENGINE_VERSION"-* ]] || {
-            echo "base_image_tag_override must use the same upstream version as engine_version" >&2
-            exit 1
-          }
-          [[ "$RAY_SHORT_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
-            echo "ray_short_version must be a Docker tag segment" >&2
-            exit 1
-          }
-          [[ "$FILE_SERVER_URL" =~ ^https://[^[:space:]\"\\]+$ && "$FILE_SERVER_URL" != *\?* && "$FILE_SERVER_URL" != *\#* ]] || {
-            echo "file_server_url must be an HTTPS URL without whitespace or quotes" >&2
-            exit 1
-          }
-          file_server_authority="${FILE_SERVER_URL#https://}"
-          file_server_authority="${file_server_authority%%/*}"
-          [[ "$file_server_authority" != *"@"* ]] || {
-            echo "file_server_url must not include URL credentials" >&2
-            exit 1
-          }
-
       - name: Resolve package metadata
         id: package
         shell: bash
@@ -187,7 +136,6 @@ jobs:
           archive_name="$ENGINE-$manifest_version.tar.gz"
           package_url="${FILE_SERVER_URL%/}/engine-packages/$ENGINE/$manifest_version/$ACCELERATOR/$image_tag/$archive_name"
           output_dir="$RUNNER_TEMP/engine-package"
-          staging_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$ENGINE-$ACCELERATOR"
 
           mkdir -p "$output_dir"
           {
@@ -196,7 +144,6 @@ jobs:
             printf 'image_spec=%s\n' "$image_spec"
             printf 'package_url=%s\n' "$package_url"
             printf 'output_dir=%s\n' "$output_dir"
-            printf 'staging_id=%s\n' "$staging_id"
             printf 'schema_path=%s\n' "$schema_path"
             printf 'template_dir=%s\n' "$template_dir"
             printf 'supported_tasks=%s\n' "$supported_tasks"
@@ -240,19 +187,18 @@ jobs:
             --description "$ENGINE inference engine"
           "$GITHUB_WORKSPACE/bin/neutree-cli" import validate -p "$OUTPUT_DIR/$archive_name"
 
-      - name: Publish engine package
+      - name: Upload engine package
         shell: bash
         env:
           ENGINE: ${{ inputs.engine }}
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
           PACKAGE_URL: ${{ steps.package.outputs.package_url }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
-          STAGING_ID: ${{ steps.package.outputs.staging_id }}
         run: |
           set -euo pipefail
-          scripts/builder/publish-engine-package.sh \
-            --package-url "$PACKAGE_URL" \
-            --archive "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz" \
-            --manifest "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml" \
-            --checksum "$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz.sha256" \
-            --staging-id "$STAGING_ID"
+          archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz"
+          checksum="$archive.sha256"
+          manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          curl -T "$archive" "$PACKAGE_URL"
+          curl -T "$checksum" "$PACKAGE_URL.sha256"
+          curl -T "$manifest" "${PACKAGE_URL%.tar.gz}-manifest.yaml"
