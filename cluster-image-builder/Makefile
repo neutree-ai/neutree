@@ -48,14 +48,15 @@ ENGINE_SGLANG_ROCM_TAG ?= $(ENGINE_SGLANG_VERSION)-rocm720-mi30x
 ENGINE_SGLANG_DIR_VERSION ?= $(shell echo $(ENGINE_SGLANG_VERSION) | sed 's/-.*//' | tr '.' '_')
 RAY_SHORT_VERSION ?= ray2.53.0
 
-# Optional Neutree-side patch suffix appended only to the output image tag.
-# Empty (default) keeps the upstream tag unchanged. Setting e.g. "1" produces
-# tags like "v0.24.0-neutree1-ray2.53.0" while base image, ENGINE_VERSION_DIR,
-# and pip install version still resolve to the upstream version.
+# Optional raw patch suffix appended only to the output image tag.
+# Empty (default) keeps the upstream tag unchanged. Setting e.g. "custom1"
+# produces tags like "v0.24.0-custom1-ray2.53.0" while base image,
+# ENGINE_VERSION_DIR, and pip install version still resolve to the upstream
+# version. Callers that need a legacy tag pass "neutree1" explicitly.
 # Use = (recursive) so the value is re-evaluated each time it is referenced,
 # removing any ordering dependency on ENGINE_PATCH_SUFFIX.
 ENGINE_PATCH_SUFFIX ?=
-ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-neutree$(strip $(ENGINE_PATCH_SUFFIX)))
+ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-$(strip $(ENGINE_PATCH_SUFFIX)))
 
 .PHONY: docker-build
 docker-build: ## Run docker-build-* targets for all the images
