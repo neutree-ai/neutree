@@ -160,7 +160,7 @@ func TestSelectClusterAcceleratorPlanExternalRejectsMultipleSelectorMatches(t *t
 	assert.ErrorContains(t, err, "currently supports only one matching accelerator exporter")
 }
 
-func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporterSelector(t *testing.T) {
+func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporter(t *testing.T) {
 	component := &MetricsComponent{
 		cluster: &v1.Cluster{
 			Spec: &v1.ClusterSpec{
@@ -171,6 +171,9 @@ func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporterSelector(
 				}},
 			},
 		},
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "cpu-node"},
+		}).Build(),
 	}
 
 	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
@@ -183,6 +186,52 @@ func TestSelectClusterAcceleratorPlanExternalSkipsTargetWithoutExporterSelector(
 
 	require.NoError(t, err)
 	assert.Nil(t, selected)
+}
+
+func TestSelectClusterAcceleratorPlanExternalSkipsEmptyExporterSelector(t *testing.T) {
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Spec: &v1.ClusterSpec{
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "cpu-node"},
+		}).Build(),
+	}
+
+	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
+		AcceleratorType: "vendor_accelerator",
+		Exporter:        &metricsAcceleratorExporter{},
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "external-exporter"},
+			Port:        9400,
+		},
+	}})
+
+	require.NoError(t, err)
+	assert.Nil(t, selected)
+}
+
+func TestSelectClusterAcceleratorPlanManagedKeepsEmptyExporterSelectorCompatibility(t *testing.T) {
+	component := &MetricsComponent{
+		ctrlClient: fake.NewClientBuilder().WithObjects(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "cpu-node"},
+		}).Build(),
+	}
+
+	selected, err := component.selectClusterAcceleratorPlan(context.Background(), []metricsAcceleratorPlan{{
+		AcceleratorType: "vendor_accelerator",
+		Exporter:        &metricsAcceleratorExporter{},
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, selected, 1)
+	assert.Equal(t, "vendor_accelerator", selected[0].AcceleratorType)
 }
 
 func TestSelectClusterAcceleratorPlanSkipsWhenNoMatch(t *testing.T) {

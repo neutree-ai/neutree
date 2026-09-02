@@ -241,6 +241,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -418,6 +419,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVir
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -1037,7 +1039,9 @@ func TestBuildMetricsResourcesIncludesAcceleratorExporterFromPluginProfile(t *te
 	assert.Equal(t, "test-image-pull-secret", dcgm.Spec.Template.Spec.ImagePullSecrets[0].Name)
 	assert.Equal(t, int32(19400), dcgm.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
 	assert.Equal(t, "all", envValue(dcgm.Spec.Template.Spec.Containers[0].Env, "NVIDIA_VISIBLE_DEVICES"))
-	assert.Assert(t, len(dcgm.Spec.Template.Spec.NodeSelector) == 0)
+	assert.DeepEqual(t,
+		map[string]string{"nvidia.com/gpu.present": "true"},
+		dcgm.Spec.Template.Spec.NodeSelector)
 	assert.Assert(t, !dcgm.Spec.Template.Spec.HostNetwork)
 	requireContainerCapability(t, dcgm, "SYS_ADMIN")
 	assert.Assert(t, dcgm.Spec.Template.Spec.Affinity == nil)

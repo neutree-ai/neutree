@@ -343,6 +343,7 @@ func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) 
 		namespace:             "metrics-system",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objects, err := component.GetMetricsResources(context.Background())

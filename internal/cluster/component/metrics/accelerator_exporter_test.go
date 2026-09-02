@@ -9,7 +9,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestManagedAcceleratorExportersClearsNVIDIASelectorOnlyForRender(t *testing.T) {
+func TestManagedAcceleratorExportersPreservesProfileSelectors(t *testing.T) {
 	nvidiaSelector := map[string]string{"nvidia.com/gpu.present": "true"}
 	customSelector := map[string]string{"accelerator.example.com/custom": "true"}
 	plans := []metricsAcceleratorPlan{
@@ -25,7 +25,7 @@ func TestManagedAcceleratorExportersClearsNVIDIASelectorOnlyForRender(t *testing
 
 	exporters := managedAcceleratorExporters(plans)
 	require.Len(t, exporters, 2)
-	assert.Nil(t, exporters[0].NodeSelector)
+	assert.Equal(t, nvidiaSelector, exporters[0].NodeSelector)
 	assert.Equal(t, nvidiaSelector, plans[0].Exporter.NodeSelector)
 	assert.Equal(t, customSelector, exporters[1].NodeSelector)
 }

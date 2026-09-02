@@ -89,44 +89,35 @@ func (m *MetricsComponent) selectClusterAcceleratorPlan(
 		return nil, nil
 	}
 
+	nodes, err := m.clusterNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	var matching []metricsAcceleratorPlan
-	var nodes []corev1.Node
-	nodesLoaded := false
 	external := m.acceleratorExporterMode() == v1.ClusterAcceleratorExporterModeExternal
 
 	for _, plan := range candidates {
-		if external {
-			// An external target describes how to scrape an exporter, but it does
-			// not identify the accelerator type by itself. Require the same
-			// profile-owned runtime selector used by managed exporters.
-			if plan.ExternalMetricsTarget == nil || plan.Exporter == nil ||
-				len(plan.Exporter.NodeSelector) == 0 {
-				continue
-			}
-		} else if plan.Exporter == nil {
+		if external && plan.ExternalMetricsTarget == nil {
 			continue
 		}
 
-		matches := len(plan.Exporter.NodeSelector) == 0
-		if !matches {
-			if !nodesLoaded {
-				loadedNodes, err := m.clusterNodes(ctx)
-				if err != nil {
-					return nil, err
-				}
-
-				nodes = loadedNodes
-				nodesLoaded = true
-			}
-
-			matches = acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes)
+		if plan.Exporter == nil {
+			continue
 		}
 
-		if matches {
-			matching = append(matching, plan)
-			if len(matching) > 1 {
-				return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
-			}
+		if external && len(plan.Exporter.NodeSelector) == 0 {
+			continue
+		}
+
+		if len(plan.Exporter.NodeSelector) > 0 &&
+			!acceleratorExporterMatchesAnyNode(*plan.Exporter, nodes) {
+			continue
+		}
+
+		matching = append(matching, plan)
+		if len(matching) > 1 {
+			return nil, fmt.Errorf("currently supports only one matching accelerator exporter")
 		}
 	}
 
