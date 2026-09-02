@@ -83,38 +83,26 @@ jobs:
             exit 1
           }
 
-          make_args=(
-            -s
-            -C cluster-image-builder
-            print-engine-image-ref
-            "ENGINE_TYPE=$ENGINE"
-            "ENGINE_ACCELERATOR=$ACCELERATOR"
-            "IMAGE_REPO=$IMAGE_REPO"
-            "IMAGE_PROJECT=$IMAGE_PROJECT"
-            "RAY_SHORT_VERSION=$RAY_SHORT_VERSION"
-            "ENGINE_PATCH_SUFFIX=$ENGINE_PATCH_SUFFIX"
-          )
+          image_patch_tag=""
+          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
+            image_patch_tag="-${ENGINE_PATCH_SUFFIX}"
+          fi
 
           case "$ENGINE:$ACCELERATOR" in
             vllm:nvidia)
               supported_tasks="text-generation,text-embedding,text-rerank"
-              make_args+=(
-                "ENGINE_VLLM_VERSION=$ENGINE_VERSION"
-                "ENGINE_VLLM_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
-              )
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-vllm:${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="nvidia_gpu:${image_ref}"
               ;;
             sglang:nvidia)
               supported_tasks="text-generation,text-embedding"
-              make_args+=(
-                "ENGINE_SGLANG_VERSION=$ENGINE_VERSION"
-                "ENGINE_SGLANG_BASE_IMAGE_TAG=${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}"
-              )
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-sglang:${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="nvidia_gpu:${image_ref}"
               ;;
             llama-cpp:cpu)
               supported_tasks="text-generation,text-embedding"
-              make_args+=(
-                "ENGINE_LLAMA_CPP_VERSION=$ENGINE_VERSION"
-              )
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-llama-cpp:${ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="cpu:${image_ref}"
               ;;
             *)
               echo "unsupported engine package target: $ENGINE:$ACCELERATOR" >&2
@@ -122,9 +110,6 @@ jobs:
               ;;
           esac
 
-          image_spec="$(make "${make_args[@]}")"
-          image_ref="${image_spec#*:}"
-          image_tag="${image_ref##*:}"
           output_dir="$RUNNER_TEMP/engine-package"
 
           mkdir -p "$output_dir"
@@ -132,7 +117,6 @@ jobs:
             printf 'manifest_version=%s\n' "$manifest_version"
             printf 'image_ref=%s\n' "$image_ref"
             printf 'image_spec=%s\n' "$image_spec"
-            printf 'image_tag=%s\n' "$image_tag"
             printf 'output_dir=%s\n' "$output_dir"
             printf 'schema_path=%s\n' "$schema_path"
             printf 'template_dir=%s\n' "$template_dir"
@@ -179,8 +163,6 @@ jobs:
         env:
           ENGINE: ${{ inputs.engine }}
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
-          ACCELERATOR: ${{ inputs.accelerator }}
-          IMAGE_TAG: ${{ steps.package.outputs.image_tag }}
           ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
         run: |
@@ -188,7 +170,7 @@ jobs:
           archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz"
           checksum="$archive.sha256"
           manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
-          package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}/engine-packages/$ENGINE/$MANIFEST_VERSION/$ACCELERATOR/$IMAGE_TAG/$ENGINE-$MANIFEST_VERSION.tar.gz"
+          package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
           curl -T "$archive" "$package_url"
           curl -T "$checksum" "$package_url.sha256"
           curl -T "$manifest" "${package_url%.tar.gz}-manifest.yaml"
