@@ -258,12 +258,21 @@ func endpointPatchMayAffectModelSourceValidation(endpoint *v1.Endpoint) bool {
 // validateEndpointModelSource decides which parts of spec.model an endpoint has
 // to fill in, and checks that the registry it names is real.
 //
-// Registry, model name and version are required exactly when Neutree downloads
-// the model itself, which v1.IsBuiltInModelDownloaderEngine answers and the
-// orchestrator keys its download step off as well -- keep the two on the same
-// predicate, or validation and deployment will disagree about which endpoints
-// need a model at all. An engine that brings its own model has none of these to
-// give, and the database no longer demands them.
+// Registry and model name are required exactly when Neutree downloads the model
+// itself, which v1.IsBuiltInModelDownloaderEngine answers and the orchestrator
+// keys its download step off as well -- keep the two on the same predicate, or
+// validation and deployment will disagree about which endpoints need a model at
+// all. An engine that brings its own model has neither to give, and the database
+// no longer demands them.
+//
+// spec.model.version is deliberately *not* in that list. An empty version is a
+// supported value meaning "whatever the registry calls its default", and every
+// registry type resolves it: getDeployedModelRealVersion passes "" through to
+// Hugging Face and ModelScope so the hub picks the repository's default branch,
+// and looks the latest version up for BentoML. Migration 045 dropped the
+// presence trigger for exactly this reason, so endpoints without a version have
+// been legal -- and deployable -- ever since; demanding one here would strand
+// them on any spec change, including the resume that follows a pause.
 //
 // A registry that *is* named is resolved against the endpoint's own workspace
 // whichever engine is in play: deps.Storage runs as the service role and does
@@ -284,7 +293,6 @@ func validateEndpointModelSource(store storage.Storage, endpoint *v1.Endpoint) *
 		}{
 			{"spec.model.registry", model.Registry},
 			{"spec.model.name", model.Name},
-			{"spec.model.version", model.Version},
 		} {
 			if required.value == "" {
 				return endpointModelSourceError(fmt.Sprintf(

@@ -2305,14 +2305,13 @@ func TestValidateEndpointModelSource(t *testing.T) {
 		}
 	})
 
-	t.Run("requires registry, name and version for an engine Neutree downloads for", func(t *testing.T) {
+	t.Run("requires registry and name for an engine Neutree downloads for", func(t *testing.T) {
 		for _, tc := range []struct {
 			missing string
 			model   *v1.ModelSpec
 		}{
 			{"spec.model.registry", &v1.ModelSpec{Name: "qwen3", Version: "latest"}},
 			{"spec.model.name", &v1.ModelSpec{Registry: "hf", Version: "latest"}},
-			{"spec.model.version", &v1.ModelSpec{Registry: "hf", Name: "qwen3"}},
 		} {
 			for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
 				store := &fakeModelRegistryStorage{registries: visible}
@@ -2324,6 +2323,22 @@ func TestValidateEndpointModelSource(t *testing.T) {
 					assert.Contains(t, err.Hint, tc.missing+" is required")
 				}
 			}
+		}
+	})
+
+	t.Run("accepts an empty version from an engine Neutree downloads for", func(t *testing.T) {
+		// An empty version is not a missing field, it is the way to say "the
+		// registry's default": Hugging Face and ModelScope resolve it to the
+		// repository's default branch and BentoML to its latest version. Migration
+		// 045 dropped the presence trigger for this reason, so versionless
+		// endpoints exist in the wild and have always deployed.
+		for _, engine := range []string{v1.EngineNameVLLM, v1.EngineNameLlamaCpp, v1.EngineNameSGLang} {
+			store := &fakeModelRegistryStorage{registries: visible}
+
+			err := validateEndpointModelSource(store, modelSourceEndpoint("ws-a",
+				&v1.ModelSpec{Registry: "hf", Name: "qwen3"}, engine))
+
+			assert.Nilf(t, err, "engine %s", engine)
 		}
 	})
 
@@ -2399,16 +2414,18 @@ func TestEndpointPatchMayAffectModelSourceValidation(t *testing.T) {
 }
 
 // NEU-715: the UI pauses by resending the whole spec with replicas.num set to 0,
-// so the pause carries spec.model and spec.engine and used to be judged on them.
-// An endpoint whose spec.model.version is empty could then never be paused.
+// so the pause carries spec.model and spec.engine and is judged on them. The
+// replica-count exemption keeps a pause from being blocked by a model source the
+// endpoint cannot fix while it is on its way down.
 func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 	zero, one := 0, 1
 
-	// A vLLM endpoint that downloads its own model but has no version recorded --
-	// the shape the issue reproduces on.
-	versionless := func(replicas *int) *v1.Endpoint {
+	// A vLLM endpoint that downloads its own model but names no registry -- a
+	// spec the check genuinely rejects, so it shows the exemption at work rather
+	// than the absence of anything to exempt.
+	registryless := func(replicas *int) *v1.Endpoint {
 		endpoint := modelSourceEndpoint("ws-a",
-			&v1.ModelSpec{Registry: "hf", Name: "qwen3"}, v1.EngineNameVLLM)
+			&v1.ModelSpec{Name: "qwen3", Version: "latest"}, v1.EngineNameVLLM)
 		endpoint.Spec.Replicas = v1.ReplicaSpec{Num: replicas}
 
 		return endpoint
@@ -2416,7 +2433,7 @@ func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 
 	t.Run("lets a full-spec pause through", func(t *testing.T) {
 		store := &fakeModelRegistryStorage{}
-		patch := versionless(&zero)
+		patch := registryless(&zero)
 
 		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
 			Operation: endpointValidationPatch,
@@ -2434,30 +2451,30 @@ func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
 			Operation: endpointValidationPatch,
 			Patch:     v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &zero}}},
-			New:       versionless(&zero),
+			New:       registryless(&zero),
 		})
 
 		assert.Nil(t, err)
 	})
 
-	t.Run("still rejects a resume that leaves the version empty", func(t *testing.T) {
+	t.Run("still rejects a resume that leaves the registry empty", func(t *testing.T) {
 		store := &fakeModelRegistryStorage{}
 
 		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
 			Operation: endpointValidationPatch,
 			Patch:     v1.Endpoint{Spec: &v1.EndpointSpec{Replicas: v1.ReplicaSpec{Num: &one}}},
-			New:       versionless(&one),
+			New:       registryless(&one),
 		})
 
 		if assert.NotNil(t, err) {
 			assert.Equal(t, "10229", err.Code)
-			assert.Contains(t, err.Hint, "spec.model.version")
+			assert.Contains(t, err.Hint, "spec.model.registry")
 		}
 	})
 
-	t.Run("still rejects a full-spec edit that leaves the version empty", func(t *testing.T) {
+	t.Run("still rejects a full-spec edit that leaves the registry empty", func(t *testing.T) {
 		store := &fakeModelRegistryStorage{}
-		patch := versionless(&one)
+		patch := registryless(&one)
 
 		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
 			Operation: endpointValidationPatch,
@@ -2474,7 +2491,7 @@ func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 	// it must not fall through the pause exemption.
 	t.Run("still rejects a patch that names no replica count", func(t *testing.T) {
 		store := &fakeModelRegistryStorage{}
-		patch := versionless(nil)
+		patch := registryless(nil)
 
 		err := validateEndpointPatchModelSource(store, &endpointValidationInput{
 			Operation: endpointValidationPatch,
@@ -2486,4 +2503,44 @@ func TestValidateEndpointPatchModelSourcePause(t *testing.T) {
 			assert.Equal(t, "10229", err.Code)
 		}
 	})
+}
+
+// The reported bug: a vLLM endpoint recorded without a model version --
+// legal since migration 045, and the shape endpoints created between then and
+// the NEU-633 validation move carry -- was refused on the way back up from a
+// pause. Nothing about it is invalid, so every direction has to pass.
+func TestValidateEndpointPatchModelSourceEmptyVersion(t *testing.T) {
+	zero, one := 0, 1
+
+	versionless := func(replicas *int) *v1.Endpoint {
+		endpoint := modelSourceEndpoint("ws-a",
+			&v1.ModelSpec{Registry: "hf", Name: "qwen3"}, v1.EngineNameVLLM)
+		endpoint.Spec.Replicas = v1.ReplicaSpec{Num: replicas}
+
+		return endpoint
+	}
+
+	visible := []v1.ModelRegistry{{Metadata: &v1.Metadata{Name: "hf", Workspace: "ws-a"}}}
+
+	for _, tc := range []struct {
+		name     string
+		replicas *int
+	}{
+		{"resumes", &one},
+		{"pauses", &zero},
+		{"edits with no replica count", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeModelRegistryStorage{registries: visible}
+			patch := versionless(tc.replicas)
+
+			err := validateEndpointPatchModelSource(store, &endpointValidationInput{
+				Operation: endpointValidationPatch,
+				Patch:     *patch,
+				New:       patch,
+			})
+
+			assert.Nil(t, err)
+		})
+	}
 }
