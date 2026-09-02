@@ -59,10 +59,14 @@ ENGINE_PATCH_SUFFIX ?=
 ENGINE_PATCH_TAG = $(if $(strip $(ENGINE_PATCH_SUFFIX)),-$(strip $(ENGINE_PATCH_SUFFIX)))
 ENGINE_RELEASE_TAG_BASE ?=
 
-export ENGINE_PATCH_SUFFIX RAY_SHORT_VERSION ENGINE_RELEASE_TAG_BASE
+export ENGINE_PATCH_SUFFIX RAY_COMMIT RAY_SHORT_VERSION RAY_VERSION ENGINE_RELEASE_TAG_BASE
+
+.PHONY: validate-ray-commit
+validate-ray-commit:
+	@if [ -z "$$RAY_COMMIT" ]; then echo "RAY_COMMIT is empty: unable to resolve RAY_VERSION=$$RAY_VERSION" >&2; exit 1; fi
 
 .PHONY: validate-engine-release-tag
-validate-engine-release-tag:
+validate-engine-release-tag: validate-ray-commit
 	@suffix="$$ENGINE_PATCH_SUFFIX"; \
 	if [ -n "$$suffix" ]; then \
 		case "$$suffix" in [A-Za-z0-9_]*) ;; *) echo "ENGINE_PATCH_SUFFIX must be a Docker tag segment without a leading hyphen" >&2; exit 1 ;; esac; \
@@ -94,14 +98,14 @@ docker-build: ## Run docker-build-* targets for all the images
 	$(MAKE) ARCH=$(ARCH) $(addprefix docker-build-,$(ACCELERATORS))
 
 .PHONY: docker-build-gpu
-docker-build-gpu: prepare ## Build the GPU cluster image
+docker-build-gpu: validate-ray-commit prepare ## Build the GPU cluster image
 	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
 		--label neutree.ai/accelerator-type=nvidia_gpu \
 		-f Dockerfile -t $(NEUTREE_SERVE_IMAGE)-$(ARCH):$(IMAGE_TAG) .
 
 .PHONY: docker-build-amd-gpu
-docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
+docker-build-amd-gpu: validate-ray-commit prepare ## Build the AMD GPU cluster image
 	docker build --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
 		--label neutree.ai/cluster-version=$(IMAGE_TAG) \
 		--label neutree.ai/accelerator-type=amd_gpu \
