@@ -16,8 +16,8 @@ import (
 
 const (
 	// cleanupCallTimeout caps a delete request so a hung API cannot block
-	// AfterSuite indefinitely after `go test -timeout 0` removes Go's runtime
-	// backstop.
+	// AfterSuite indefinitely; the finite Go test timeout remains a final
+	// process-level backstop.
 	cleanupCallTimeout = 30 * time.Second
 	// cleanupWaitTimeout gives the controller enough time to finish one
 	// dependency layer before cleanup attempts its parent resources.
@@ -26,9 +26,9 @@ const (
 	cleanupWorkerLimit = 8
 	// cleanupNodeTimeout bounds all dependency layers when AfterSuite runs
 	// after a Ginkgo interruption.
-	// ponytail: fixed 45m cap covers six 5m waves plus delete overhead;
+	// ponytail: fixed 2h cap covers six 5m waves in bounded batches plus delete overhead;
 	// derive it from waves if a future dependency adds another wave.
-	cleanupNodeTimeout = 45 * time.Minute
+	cleanupNodeTimeout = 2 * time.Hour
 )
 
 const (

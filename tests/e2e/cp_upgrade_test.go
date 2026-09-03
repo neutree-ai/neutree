@@ -11,7 +11,32 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	neutreeclient "github.com/neutree-ai/neutree/pkg/client"
 )
+
+func deleteUpgradeAPIKey(serverURL, jwt, workspace, name string) error {
+	apiClient := neutreeclient.NewClient(serverURL,
+		neutreeclient.WithAPIKey("Bearer "+jwt),
+		neutreeclient.WithInsecureSkipVerify(),
+		neutreeclient.WithTimeout(30*time.Second),
+	)
+
+	data, err := apiClient.Generic.Get("ApiKey", workspace, name)
+	if err != nil {
+		if neutreeclient.IsNotFound(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	id := neutreeclient.ExtractID(data)
+	if id == "" {
+		return fmt.Errorf("api key %q response has no id", name)
+	}
+
+	return apiClient.Generic.Delete("ApiKey", id, workspace, name, neutreeclient.DeleteOptions{})
+}
 
 var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgrade"), func() {
 	var (
@@ -28,8 +53,10 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		mrName         string
 
 		// Saved Cfg values, restored in AfterAll after cleanup
-		origServerURL string
-		origAPIKey    string
+		origServerURL  string
+		origAPIKey     string
+		upgradeJWT     string
+		upgradeKeyName string
 
 		// Pre-upgrade snapshots for spec comparison
 		preSSHCluster v1.Cluster
@@ -95,7 +122,9 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		Expect(jwt).NotTo(BeEmpty(), "admin login should return JWT")
 
 		// Create a real API key (sk_xxx) via PostgREST RPC — works with both CLI and Kong
-		apiKey := createAPIKey(cph.APIURL(), jwt, profileWorkspace(), "e2e-upgrade-key-"+Cfg.RunID)
+		upgradeJWT = jwt
+		upgradeKeyName = "e2e-upgrade-key-" + Cfg.RunID
+		apiKey := createAPIKey(cph.APIURL(), jwt, profileWorkspace(), upgradeKeyName)
 		Cfg.APIKey = apiKey
 
 		By("Creating test resources on old version")
@@ -174,6 +203,12 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 			"-w", profileWorkspace(), "--force", "--ignore-not-found")
 
 		cph.CleanAll()
+
+		if upgradeJWT != "" && upgradeKeyName != "" {
+			if err := deleteUpgradeAPIKey(cph.APIURL(), upgradeJWT, profileWorkspace(), upgradeKeyName); err != nil {
+				fmt.Fprintf(GinkgoWriter, "failed to delete upgrade API key %s: %v\n", upgradeKeyName, err)
+			}
+		}
 
 		// Restore Cfg after all cleanup commands that depend on the CP URL/API key.
 		Cfg.ServerURL = origServerURL
