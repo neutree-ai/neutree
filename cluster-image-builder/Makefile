@@ -14,6 +14,9 @@ ALL_ARCH ?= amd64 arm64
 RAY_REPO ?= https://github.com/neutree-ai/ray.git
 RAY_VERSION ?= ray-2.53.0-neutree
 RAY_COMMIT ?= $(shell git ls-remote $(RAY_REPO) $(RAY_VERSION) | cut -f1 | head -c 7)
+ENGINE_RAY_BUILD_BASE_IMAGE_AMD64 ?= quay.io/pypa/manylinux2014_x86_64:2024-07-02-9ac04ee
+ENGINE_RAY_BUILD_BASE_IMAGE_ARM64 ?= quay.io/pypa/manylinux2014_aarch64:2024-07-02-9ac04ee
+ENGINE_RAY_BUILD_BASE_IMAGE = $(if $(filter arm64,$(ARCH)),$(ENGINE_RAY_BUILD_BASE_IMAGE_ARM64),$(ENGINE_RAY_BUILD_BASE_IMAGE_AMD64))
 
 # Engine image build args
 ENGINE_VLLM_BASE_IMAGE_REPO ?= vllm/vllm-openai
@@ -78,28 +81,28 @@ docker-build-amd-gpu: prepare ## Build the AMD GPU cluster image
 
 .PHONY: docker-build-engine-vllm
 docker-build-engine-vllm: prepare ## Build the vLLM engine image (NVIDIA)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_BASE_IMAGE_REPO):$(ENGINE_VLLM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_BUILD_BASE_IMAGE=$(ENGINE_RAY_BUILD_BASE_IMAGE) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-$(ARCH):$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-vllm-rocm
 docker-build-engine-vllm-rocm: prepare ## Build the vLLM engine image (ROCm)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_VLLM_ROCM_BASE_IMAGE_REPO):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_VLLM_DIR_VERSION) --build-arg RAY_BUILD_BASE_IMAGE=$(ENGINE_RAY_BUILD_BASE_IMAGE) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-vllm -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm-$(ARCH):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-llama-cpp
 docker-build-engine-llama-cpp: prepare ## Build the llama-cpp-python engine image
-	docker build --build-arg LLAMA_CPP_VERSION=$(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/^v//') --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg LLAMA_CPP_VERSION=$(shell echo $(ENGINE_LLAMA_CPP_VERSION) | sed 's/^v//') --build-arg ENGINE_VERSION_DIR=$(ENGINE_LLAMA_CPP_DIR_VERSION) --build-arg RAY_BUILD_BASE_IMAGE=$(ENGINE_RAY_BUILD_BASE_IMAGE) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-llama-cpp -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp-$(ARCH):$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-sglang
 docker-build-engine-sglang: prepare ## Build the SGLang engine image (NVIDIA)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_BASE_IMAGE_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DIR_VERSION) --build-arg RAY_BUILD_BASE_IMAGE=$(ENGINE_RAY_BUILD_BASE_IMAGE) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang-$(ARCH):$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-build-engine-sglang-rocm
 docker-build-engine-sglang-rocm: prepare ## Build the SGLang engine image (AMD ROCm, MI300x)
-	docker build --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_ROCM_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DIR_VERSION) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
-		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg ENGINE_BASE_IMAGE=$(ENGINE_SGLANG_BASE_IMAGE_REPO):$(ENGINE_SGLANG_ROCM_TAG) --build-arg ENGINE_VERSION_DIR=$(ENGINE_SGLANG_DIR_VERSION) --build-arg RAY_BUILD_BASE_IMAGE=$(ENGINE_RAY_BUILD_BASE_IMAGE) --build-arg RAY_COMMIT=$(RAY_COMMIT) --build-arg RAY_REPO=$(RAY_REPO) \
+		-f Dockerfile.engine-sglang -t $(NEUTREE_ENGINE_IMAGE)-sglang-$(ARCH):$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) .
 
 .PHONY: docker-push
 docker-push: ## Run docker-push-* targets for all the images
@@ -115,43 +118,43 @@ docker-push-amd-gpu: ## Push the AMD GPU image
 
 .PHONY: docker-push-engine-vllm
 docker-push-engine-vllm: ## Push the vLLM engine image (NVIDIA)
-	docker push $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-$(ARCH):$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-vllm-rocm
 docker-push-engine-vllm-rocm: ## Push the vLLM engine image (ROCm)
-	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-vllm-rocm-$(ARCH):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-llama-cpp
 docker-push-engine-llama-cpp: ## Push the llama-cpp-python engine image
-	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-llama-cpp-$(ARCH):$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-sglang
 docker-push-engine-sglang: ## Push the SGLang engine image (NVIDIA)
-	docker push $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-sglang-$(ARCH):$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-engine-sglang-rocm
 docker-push-engine-sglang-rocm: ## Push the SGLang engine image (AMD ROCm, MI300x)
-	docker push $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
+	docker push $(NEUTREE_ENGINE_IMAGE)-sglang-$(ARCH):$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)
 
 .PHONY: docker-push-manifest-engine-vllm
 docker-push-manifest-engine-vllm: ## Push the vLLM engine manifest image
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm:$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(foreach arch,$(ALL_ARCH),$(NEUTREE_ENGINE_IMAGE)-vllm-$(arch):$(ENGINE_VLLM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION))
 
 .PHONY: docker-push-manifest-engine-vllm-rocm
 docker-push-manifest-engine-vllm-rocm: ## Push the vLLM engine manifest image (ROCm)
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-vllm-rocm:$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(foreach arch,$(ALL_ARCH),$(NEUTREE_ENGINE_IMAGE)-vllm-rocm-$(arch):$(ENGINE_VLLM_ROCM_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION))
 
 .PHONY: docker-push-manifest-engine-llama-cpp
 docker-push-manifest-engine-llama-cpp: ## Push the llama-cpp engine manifest image
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-llama-cpp:$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(foreach arch,$(ALL_ARCH),$(NEUTREE_ENGINE_IMAGE)-llama-cpp-$(arch):$(ENGINE_LLAMA_CPP_VERSION)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION))
 
 .PHONY: docker-push-manifest-engine-sglang
 docker-push-manifest-engine-sglang: ## Push the SGLang engine manifest image (NVIDIA)
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(foreach arch,$(ALL_ARCH),$(NEUTREE_ENGINE_IMAGE)-sglang-$(arch):$(ENGINE_SGLANG_BASE_IMAGE_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION))
 
 .PHONY: docker-push-manifest-engine-sglang-rocm
 docker-push-manifest-engine-sglang-rocm: ## Push the SGLang engine manifest image (AMD ROCm)
-	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(NEUTREE_ENGINE_IMAGE)\-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION)~g")
+	docker buildx imagetools create -t $(NEUTREE_ENGINE_IMAGE)-sglang:$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION) $(foreach arch,$(ALL_ARCH),$(NEUTREE_ENGINE_IMAGE)-sglang-$(arch):$(ENGINE_SGLANG_ROCM_TAG)$(ENGINE_PATCH_TAG)-$(RAY_SHORT_VERSION))
 
 .PHONY: docker-push-manifest
 docker-push-manifest: $(addprefix docker-push-manifest-,$(ACCELERATORS))

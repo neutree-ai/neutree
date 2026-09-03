@@ -74,11 +74,43 @@ jobs:
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
+  build-arm64-image:
+    if: ${{ github.event.inputs.accelerator == 'nvidia' }}
+    runs-on: ["serve-builder","ARM64"]
+    name: build arm64 vllm engine image
+    steps:
+      - uses: actions/checkout@v2
+      - name: Validate engine_patch_suffix
+        if: ${{ github.event.inputs.engine_patch_suffix != '' }}
+        run: |
+          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
+            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
+      - name: Login docker
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+      - name: build and push engine image
+        run: |
+          cd cluster-image-builder
+          make docker-build-engine-vllm docker-push-engine-vllm
+        env:
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          ARCH: arm64
+          ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
+          ENGINE_VLLM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
+          RAY_VERSION: ${{ github.event.inputs.ray_version }}
+          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:
     runs-on: ["serve-builder","X64"]
     name: merge and push vllm manifests
     needs:
       - build-amd64-image
+      - build-arm64-image
+    if: ${{ always() && needs.build-amd64-image.result == 'success' && (github.event.inputs.accelerator == 'rocm' || needs.build-arm64-image.result == 'success') }}
     steps:
       - uses: actions/checkout@v2
       - name: Login docker
@@ -95,6 +127,14 @@ jobs:
           else
             echo "suffix=" >> "$GITHUB_OUTPUT"
           fi
+      - name: Resolve manifest architectures
+        id: arch
+        run: |
+          if [ "${{ github.event.inputs.accelerator }}" = "nvidia" ]; then
+            echo "all_arch=amd64 arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "all_arch=amd64" >> "$GITHUB_OUTPUT"
+          fi
       - name: push manifests
         run: |
           cd cluster-image-builder
@@ -102,7 +142,7 @@ jobs:
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
-          ALL_ARCH: amd64
+          ALL_ARCH: ${{ steps.arch.outputs.all_arch }}
           ENGINE_VLLM_VERSION: ${{ github.event.inputs.engine_version }}
           ENGINE_VLLM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
           ENGINE_VLLM_ROCM_BASE_IMAGE_TAG: ${{ github.event.inputs.base_image_tag_override || github.event.inputs.engine_version }}
