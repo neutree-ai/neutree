@@ -165,9 +165,9 @@ jobs:
           checksum="$archive.sha256"
           manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
           package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
-          curl -T "$archive" "$package_url"
-          curl -T "$checksum" "$package_url"
-          curl -T "$manifest" "$package_url"
+          curl --fail -T "$archive" "$package_url"
+          curl --fail -T "$checksum" "$package_url"
+          curl --fail -T "$manifest" "$package_url"
 
       - name: Notify Slack
         if: ${{ success() }}
