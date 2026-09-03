@@ -55,40 +55,11 @@ jobs:
           RAY_VERSION: ${{ github.event.inputs.ray_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
-  build-arm64-image:
-    runs-on: ["serve-builder","ARM64"]
-    name: build arm64 llama-cpp engine image
-    steps:
-      - uses: actions/checkout@v2
-      - name: Validate engine_patch_suffix
-        if: ${{ github.event.inputs.engine_patch_suffix != '' }}
-        run: |
-          printf '%s\n' "${{ github.event.inputs.engine_patch_suffix }}" | grep -qE '^[a-zA-Z0-9._-]+$' \
-            || { echo "engine_patch_suffix must match [a-zA-Z0-9._-]+"; exit 1; }
-      - name: Login docker
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ secrets.SERVE_IMAGE_REPO }}
-          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
-          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
-      - name: build and push engine image
-        run: |
-          cd cluster-image-builder
-          make docker-build-engine-llama-cpp docker-push-engine-llama-cpp
-        env:
-          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
-          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
-          ARCH: arm64
-          ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
-          RAY_VERSION: ${{ github.event.inputs.ray_version }}
-          RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
-          ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
   push-manifests:
     runs-on: ["serve-builder","X64"]
     name: merge and push llama-cpp manifests
     needs:
       - build-amd64-image
-      - build-arm64-image
     steps:
       - uses: actions/checkout@v2
       - name: Login docker
@@ -104,7 +75,7 @@ jobs:
         env:
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
-          ALL_ARCH: amd64 arm64
+          ALL_ARCH: amd64
           ENGINE_LLAMA_CPP_VERSION: ${{ github.event.inputs.engine_version }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
