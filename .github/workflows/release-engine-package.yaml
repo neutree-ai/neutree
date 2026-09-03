@@ -166,8 +166,8 @@ jobs:
           manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
           package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
           curl -T "$archive" "$package_url"
-          curl -T "$checksum" "$package_url.sha256"
-          curl -T "$manifest" "${package_url%.tar.gz}-manifest.yaml"
+          curl -T "$checksum" "$package_url"
+          curl -T "$manifest" "$package_url"
 
       - name: Notify Slack
         if: ${{ success() }}
@@ -180,9 +180,13 @@ jobs:
         run: |
           set -euo pipefail
           [[ -n "$SLACK_WEBHOOK_URL" ]] || exit 0
-          archive_url="$ENGINE_PACKAGE_FILE_SERVER_URL"
-          checksum_url="${archive_url}.sha256"
-          manifest_url="${archive_url%.tar.gz}-manifest.yaml"
+          archive_name="$ENGINE-$MANIFEST_VERSION.tar.gz"
+          checksum_name="$archive_name.sha256"
+          manifest_name="$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          package_dir="${ENGINE_PACKAGE_FILE_SERVER_URL%/}"
+          archive_url="$package_dir/$archive_name"
+          checksum_url="$package_dir/$checksum_name"
+          manifest_url="$package_dir/$manifest_name"
           message=$(printf 'Engine package published: %s %s\nArchive: %s\nChecksum: %s\nManifest: %s' "$ENGINE" "$MANIFEST_VERSION" "$archive_url" "$checksum_url" "$manifest_url")
           escaped_message=${message//\\/\\\\}
           escaped_message=${escaped_message//\"/\\\"}
