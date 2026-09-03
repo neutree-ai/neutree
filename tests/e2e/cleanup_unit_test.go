@@ -169,13 +169,33 @@ func TestTrackResource_RejectsOtherRunAndUnsupportedKind(t *testing.T) {
 	useRunIDForTest(t, "123456")
 
 	trackResource("cluster", "e2e-cluster-654321", "default")
-	trackResource("engine", "e2e-engine-123456", "default")
+	trackResource("role", "e2e-role-123456", "default")
 	trackResource("cluster", "not-e2e-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
 	if len(trackedResources) != 0 {
 		t.Fatalf("want no ineligible resources, got %+v", trackedResources)
+	}
+}
+
+func TestTestEngineName_TracksCurrentRunEngine(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+
+	name := testEngineName("e2e-engine-test")
+	if name != "e2e-engine-test-123456" {
+		t.Fatalf("engine name = %q", name)
+	}
+
+	trackedMu.Lock()
+	defer trackedMu.Unlock()
+	if _, ok := trackedResources[trackedResource{
+		Kind:      trackedEngine,
+		Name:      name,
+		Workspace: profileWorkspace(),
+	}]; !ok {
+		t.Fatalf("engine was not tracked: %+v", trackedResources)
 	}
 }
 
@@ -214,14 +234,17 @@ metadata:
 `)
 
 	got := trackedResourcesFromManifest(path, profileWorkspace())
-	if len(got) != 2 {
-		t.Fatalf("want 2 current lifecycle resources, got %+v", got)
+	if len(got) != 3 {
+		t.Fatalf("want 3 current lifecycle resources, got %+v", got)
 	}
 	if got[0] != (trackedResource{Kind: "endpoint", Name: "e2e-endpoint-123456", Workspace: "test-workspace"}) {
 		t.Fatalf("unexpected first resource: %+v", got[0])
 	}
 	if got[1] != (trackedResource{Kind: "externalendpoint", Name: "e2e-external-123456", Workspace: profileWorkspace()}) {
 		t.Fatalf("unexpected second resource: %+v", got[1])
+	}
+	if got[2] != (trackedResource{Kind: trackedEngine, Name: "e2e-engine-123456", Workspace: "test-workspace"}) {
+		t.Fatalf("unexpected third resource: %+v", got[2])
 	}
 }
 
@@ -423,6 +446,7 @@ func TestCleanupTrackedResources_DeletesInDependencyOrder(t *testing.T) {
 	useCLIForTest(t, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\nexit 0\n", logPath))
 
 	trackResource("modelregistry", "e2e-registry-123456", "default")
+	trackResource("engine", "e2e-engine-123456", "default")
 	trackResource("cluster", "e2e-cluster-123456", "default")
 	trackResource("endpoint", "e2e-endpoint-123456", "default")
 
@@ -440,12 +464,14 @@ func TestCleanupTrackedResources_DeletesInDependencyOrder(t *testing.T) {
 	endpointWaitIndex := strings.Index(output, "wait endpoint e2e-endpoint-123456")
 	registryIndex := strings.Index(output, "delete modelregistry e2e-registry-123456")
 	registryWaitIndex := strings.Index(output, "wait modelregistry e2e-registry-123456")
+	engineIndex := strings.Index(output, "delete engine e2e-engine-123456")
+	engineWaitIndex := strings.Index(output, "wait engine e2e-engine-123456")
 	clusterIndex := strings.Index(output, "delete cluster e2e-cluster-123456")
 	clusterWaitIndex := strings.Index(output, "wait cluster e2e-cluster-123456")
-	if endpointIndex < 0 || endpointWaitIndex < 0 || registryIndex < 0 || registryWaitIndex < 0 || clusterIndex < 0 || clusterWaitIndex < 0 {
+	if endpointIndex < 0 || endpointWaitIndex < 0 || registryIndex < 0 || registryWaitIndex < 0 || engineIndex < 0 || engineWaitIndex < 0 || clusterIndex < 0 || clusterWaitIndex < 0 {
 		t.Fatalf("missing cleanup command(s): %q", output)
 	}
-	if endpointIndex > endpointWaitIndex || endpointWaitIndex > registryIndex || registryIndex > registryWaitIndex || registryWaitIndex > clusterIndex || clusterIndex > clusterWaitIndex {
+	if endpointIndex > endpointWaitIndex || endpointWaitIndex > registryIndex || registryIndex > registryWaitIndex || registryWaitIndex > engineIndex || engineIndex > engineWaitIndex || engineWaitIndex > clusterIndex || clusterIndex > clusterWaitIndex {
 		t.Fatalf("cleanup order is not dependency-safe: %q", output)
 	}
 }
@@ -463,6 +489,7 @@ exit 0
 `, logPath))
 
 	trackResource("endpoint", "e2e-endpoint-123456", "default")
+	trackResource("engine", "e2e-engine-123456", "default")
 	trackResource("cluster", "e2e-cluster-123456", "default")
 	trackResource("imageregistry", "e2e-image-registry-123456", "default")
 
@@ -476,8 +503,80 @@ exit 0
 	if strings.Contains(output, "delete cluster e2e-cluster-123456") {
 		t.Fatalf("cluster cleanup must wait for endpoint cleanup success: %q", output)
 	}
+	if strings.Contains(output, "delete engine e2e-engine-123456") {
+		t.Fatalf("engine cleanup must wait for endpoint cleanup success: %q", output)
+	}
 	if strings.Contains(output, "delete imageregistry e2e-image-registry-123456") {
 		t.Fatalf("registry cleanup must wait for cluster cleanup success: %q", output)
+	}
+}
+
+func TestCleanupTrackedResources_WaitsSuccessfulDeletesAfterPartialFailure(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	logPath := filepath.Join(t.TempDir(), "cli.log")
+	useCLIForTest(t, fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %q
+case "$*" in
+  *"delete endpoint e2e-failed-123456"*) exit 1 ;;
+esac
+exit 0
+`, logPath))
+
+	trackResource("endpoint", "e2e-successful-123456", "default")
+	trackResource("endpoint", "e2e-failed-123456", "default")
+	trackResource("cluster", "e2e-cluster-123456", "default")
+
+	cleanupTrackedResourcesWithContext(context.Background())
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake CLI log: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, "wait endpoint e2e-successful-123456") {
+		t.Fatalf("successful delete was not waited: %q", output)
+	}
+	if strings.Contains(output, "wait endpoint e2e-failed-123456") {
+		t.Fatalf("failed delete must not be waited: %q", output)
+	}
+	if strings.Contains(output, "delete cluster e2e-cluster-123456") {
+		t.Fatalf("cluster cleanup must stop after partial endpoint delete failure: %q", output)
+	}
+}
+
+func TestCleanupTrackedResources_ContinuesAfterIndependentDeleteFailure(t *testing.T) {
+	for _, kind := range []string{trackedModelRegistry, trackedEngine} {
+		t.Run(kind, func(t *testing.T) {
+			resetTrackedForTest(t)
+			useRunIDForTest(t, "123456")
+			logPath := filepath.Join(t.TempDir(), "cli.log")
+			useCLIForTest(t, fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %q
+case "$*" in
+  *"delete %s e2e-%s-123456"*) exit 1 ;;
+esac
+exit 0
+`, logPath, kind, kind))
+
+			trackResource(kind, "e2e-"+kind+"-123456", "default")
+			trackResource(trackedCluster, "e2e-cluster-123456", "default")
+			trackResource(trackedImageRegistry, "e2e-image-registry-123456", "default")
+
+			cleanupTrackedResourcesWithContext(context.Background())
+
+			data, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("read fake CLI log: %v", err)
+			}
+			output := string(data)
+			if !strings.Contains(output, "delete cluster e2e-cluster-123456") {
+				t.Fatalf("cluster cleanup should continue after %s failure: %q", kind, output)
+			}
+			if !strings.Contains(output, "delete imageregistry e2e-image-registry-123456") {
+				t.Fatalf("image registry cleanup should continue after %s failure: %q", kind, output)
+			}
+		})
 	}
 }
 

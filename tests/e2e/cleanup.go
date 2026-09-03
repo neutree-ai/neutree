@@ -24,7 +24,7 @@ const (
 	cleanupWaitTimeout = 5 * time.Minute
 	// cleanupNodeTimeout bounds all dependency layers when AfterSuite runs
 	// after a Ginkgo interruption.
-	// ponytail: fixed 45m cap covers five 5m waves plus delete overhead;
+	// ponytail: fixed 45m cap covers six 5m waves plus delete overhead;
 	// derive it from waves if a future dependency adds another wave.
 	cleanupNodeTimeout = 45 * time.Minute
 )
@@ -35,6 +35,7 @@ const (
 	trackedExternalEndpoint = "externalendpoint"
 	trackedImageRegistry    = "imageregistry"
 	trackedModelRegistry    = "modelregistry"
+	trackedEngine           = "engine"
 )
 
 // trackedResource records a lifecycle resource created by the current E2E
@@ -145,9 +146,10 @@ func cleanupTrackedResourcesWithContext(ctx context.Context) {
 		return
 	}
 
-	// Model registries only depend on endpoints and may be cleaned while
-	// clusters are still finishing their own deletion.
+	// Model registries and engines only depend on endpoints. Their failures are
+	// logged but do not block unrelated cluster/image-registry cleanup.
 	cleanupResourceGroup(ctx, leftover, trackedModelRegistry)
+	cleanupResourceGroup(ctx, leftover, trackedEngine)
 
 	if !cleanupResourceGroup(ctx, leftover, trackedCluster) {
 		return
@@ -163,6 +165,7 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 	}
 
 	deleteSucceeded := true
+	deletedResources := make([]trackedResource, 0, len(group))
 
 	for _, command := range runCleanupCommands(group, func(resource trackedResource) CLIResult {
 		return runCLIWithContext(ctx, cleanupCallTimeout,
@@ -179,16 +182,16 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 
 			fmt.Fprintf(GinkgoWriter, "  delete %s/%s in %s failed (exit %d): %s\n",
 				resource.Kind, resource.Name, resource.Workspace, result.ExitCode, result.Stderr)
-		}
-	}
 
-	if !deleteSucceeded {
-		return false
+			continue
+		}
+
+		deletedResources = append(deletedResources, resource)
 	}
 
 	waitSucceeded := true
 
-	for _, command := range runCleanupCommands(group, func(resource trackedResource) CLIResult {
+	for _, command := range runCleanupCommands(deletedResources, func(resource trackedResource) CLIResult {
 		return runCLIWithContext(ctx, cleanupWaitTimeout,
 			"wait", resource.Kind, resource.Name,
 			"-w", resource.Workspace,
@@ -210,7 +213,7 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 		}
 	}
 
-	return waitSucceeded
+	return deleteSucceeded && waitSucceeded
 }
 
 type cleanupCommandResult struct {
@@ -372,6 +375,8 @@ func canonicalTrackedKind(kind string) (string, bool) {
 		return trackedImageRegistry, true
 	case trackedModelRegistry:
 		return trackedModelRegistry, true
+	case trackedEngine:
+		return trackedEngine, true
 	default:
 		return "", false
 	}
