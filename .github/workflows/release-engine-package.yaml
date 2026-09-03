@@ -192,7 +192,9 @@ jobs:
           archive_url="$package_dir/$archive_name"
           checksum_url="$package_dir/$checksum_name"
           manifest_url="$package_dir/$manifest_name"
-          message=$(printf 'Engine package published: %s %s\nArchive: %s\nChecksum: %s\nManifest: %s' "$ENGINE" "$MANIFEST_VERSION" "$archive_url" "$checksum_url" "$manifest_url")
+          message=$(printf '%s engine package published: %s\nArchitecture: %s' "$ENGINE" "$MANIFEST_VERSION" "$PACKAGE_ARCH")
+          message+=$(printf '\nManifest: %s' "$manifest_url")
+          message+=$(printf '\nArchive: %s\nChecksum: %s' "$archive_url" "$checksum_url")
           escaped_message=${message//\\/\\\\}
           escaped_message=${escaped_message//\"/\\\"}
           escaped_message=${escaped_message//$'\n'/\\n}
