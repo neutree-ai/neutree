@@ -1,7 +1,12 @@
 package e2e
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // resetTrackedForTest clears the package-level registry both immediately and
@@ -14,60 +19,103 @@ func resetTrackedForTest(t *testing.T) {
 
 	reset := func() {
 		trackedMu.Lock()
-		trackedResources = nil
+		trackedResources = make(map[trackedResource]struct{})
 		trackedMu.Unlock()
 	}
 	reset()
 	t.Cleanup(reset)
 }
 
+func useRunIDForTest(t *testing.T, runID string) {
+	t.Helper()
+
+	original := Cfg.RunID
+	Cfg.RunID = runID
+	t.Cleanup(func() {
+		Cfg.RunID = original
+	})
+}
+
+func writeManifestForTest(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "resources.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	return path
+}
+
+func useCLIForTest(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "neutree-cli")
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("write fake CLI: %v", err)
+	}
+
+	original := cliBinary
+	cliBinary = path
+	t.Cleanup(func() {
+		cliBinary = original
+	})
+
+	return path
+}
+
 func TestTrackResource_AppendsEntry(t *testing.T) {
 	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
 
-	trackResource("cluster", "e2e-foo", "default")
+	trackResource("cluster", "e2e-foo-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
 	if len(trackedResources) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(trackedResources))
 	}
-	got := trackedResources[0]
-	if got.Kind != "cluster" || got.Name != "e2e-foo" || got.Workspace != "default" {
-		t.Fatalf("entry mismatch: %+v", got)
+	found := false
+	for got := range trackedResources {
+		if got.Kind == "cluster" && got.Name == "e2e-foo-123456" && got.Workspace == "default" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("entry mismatch: %+v", trackedResources)
 	}
 }
 
-func TestTrackResource_AllowsDuplicates(t *testing.T) {
-	// Duplicate registrations should each appear separately. cleanupTracked-
-	// Resources uses --ignore-not-found, so duplicate deletes are harmless,
-	// and we prefer simple-and-correct over dedup-on-write.
+func TestTrackResource_DeduplicatesExactResource(t *testing.T) {
 	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
 
-	trackResource("cluster", "e2e-foo", "default")
-	trackResource("cluster", "e2e-foo", "default")
+	trackResource("cluster", "e2e-foo-123456", "default")
+	trackResource("Cluster", "e2e-foo-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
-	if len(trackedResources) != 2 {
-		t.Fatalf("want 2 entries (dedup not expected), got %d", len(trackedResources))
+	if len(trackedResources) != 1 {
+		t.Fatalf("want 1 deduplicated entry, got %d", len(trackedResources))
 	}
 }
 
 func TestUntrackResource_RemovesByExactTriple(t *testing.T) {
 	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
 
-	trackResource("cluster", "e2e-foo", "default")
-	trackResource("modelregistry", "e2e-mr", "default")
-	trackResource("imageregistry", "e2e-ir", "default")
+	trackResource("cluster", "e2e-foo-123456", "default")
+	trackResource("modelregistry", "e2e-mr-123456", "default")
+	trackResource("imageregistry", "e2e-ir-123456", "default")
 
-	untrackResource("modelregistry", "e2e-mr", "default")
+	untrackResource("modelregistry", "e2e-mr-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
 	if len(trackedResources) != 2 {
 		t.Fatalf("want 2 entries after untrack, got %d", len(trackedResources))
 	}
-	for _, r := range trackedResources {
+	for r := range trackedResources {
 		if r.Kind == "modelregistry" {
 			t.Fatalf("modelregistry should be removed, still present: %+v", r)
 		}
@@ -76,15 +124,16 @@ func TestUntrackResource_RemovesByExactTriple(t *testing.T) {
 
 func TestUntrackResource_NoMatch_NoOp(t *testing.T) {
 	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
 
-	trackResource("cluster", "e2e-foo", "default")
+	trackResource("cluster", "e2e-foo-123456", "default")
 
 	// Different name -> no removal.
-	untrackResource("cluster", "e2e-bar", "default")
+	untrackResource("cluster", "e2e-bar-123456", "default")
 	// Different workspace -> no removal.
-	untrackResource("cluster", "e2e-foo", "other-ws")
+	untrackResource("cluster", "e2e-foo-123456", "other-ws")
 	// Different kind -> no removal.
-	untrackResource("modelregistry", "e2e-foo", "default")
+	untrackResource("modelregistry", "e2e-foo-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
@@ -95,19 +144,340 @@ func TestUntrackResource_NoMatch_NoOp(t *testing.T) {
 
 func TestUntrackResource_RemovesAllMatchingDuplicates(t *testing.T) {
 	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
 
-	trackResource("cluster", "e2e-foo", "default")
-	trackResource("cluster", "e2e-foo", "default")
-	trackResource("cluster", "e2e-other", "default")
+	trackResource("cluster", "e2e-foo-123456", "default")
+	trackResource("cluster", "e2e-other-123456", "default")
 
-	untrackResource("cluster", "e2e-foo", "default")
+	untrackResource("cluster", "e2e-foo-123456", "default")
 
 	trackedMu.Lock()
 	defer trackedMu.Unlock()
 	if len(trackedResources) != 1 {
-		t.Fatalf("want 1 entry after removing both duplicates, got %d", len(trackedResources))
+		t.Fatalf("want 1 entry after untrack, got %d", len(trackedResources))
 	}
-	if trackedResources[0].Name != "e2e-other" {
-		t.Fatalf("wrong remaining entry: %+v", trackedResources[0])
+	for resource := range trackedResources {
+		if resource.Name != "e2e-other-123456" {
+			t.Fatalf("wrong remaining entry: %+v", resource)
+		}
+	}
+}
+
+func TestTrackResource_RejectsOtherRunAndUnsupportedKind(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+
+	trackResource("cluster", "e2e-cluster-654321", "default")
+	trackResource("engine", "e2e-engine-123456", "default")
+	trackResource("cluster", "not-e2e-123456", "default")
+
+	trackedMu.Lock()
+	defer trackedMu.Unlock()
+	if len(trackedResources) != 0 {
+		t.Fatalf("want no ineligible resources, got %+v", trackedResources)
+	}
+}
+
+func TestTrackedResourcesFromManifest_SelectsCurrentLifecycleResources(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: e2e-endpoint-123456
+  workspace: test-workspace
+---
+apiVersion: v1
+kind: ExternalEndpoint
+metadata:
+  name: e2e-external-123456
+---
+apiVersion: v1
+kind: Cluster
+metadata:
+  name: e2e-cluster-654321
+  workspace: test-workspace
+---
+apiVersion: v1
+kind: Engine
+metadata:
+  name: e2e-engine-123456
+  workspace: test-workspace
+---
+apiVersion: v1
+kind: ImageRegistry
+metadata:
+  name: not-e2e-123456
+  workspace: test-workspace
+`)
+
+	got := trackedResourcesFromManifest(path, profileWorkspace())
+	if len(got) != 2 {
+		t.Fatalf("want 2 current lifecycle resources, got %+v", got)
+	}
+	if got[0] != (trackedResource{Kind: "endpoint", Name: "e2e-endpoint-123456", Workspace: "test-workspace"}) {
+		t.Fatalf("unexpected first resource: %+v", got[0])
+	}
+	if got[1] != (trackedResource{Kind: "externalendpoint", Name: "e2e-external-123456", Workspace: profileWorkspace()}) {
+		t.Fatalf("unexpected second resource: %+v", got[1])
+	}
+}
+
+func TestTrackResourcesForApplyCommand_DeduplicatesMultiDocumentManifest(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: ModelRegistry
+metadata:
+  name: e2e-registry-123456
+  workspace: default
+---
+apiVersion: v1
+kind: ModelRegistry
+metadata:
+  name: e2e-registry-123456
+  workspace: default
+`)
+
+	trackResourcesForApplyCommand([]string{"apply", "-f", path})
+
+	trackedMu.Lock()
+	defer trackedMu.Unlock()
+	if len(trackedResources) != 1 {
+		t.Fatalf("want 1 deduplicated tracked resource, got %+v", trackedResources)
+	}
+}
+
+func TestTrackedResourcesFromManifest_UsesCommandWorkspaceFallback(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: e2e-endpoint-123456
+`)
+
+	got := trackedResourcesFromManifest(path, "other-workspace")
+	if len(got) != 1 {
+		t.Fatalf("want 1 tracked resource, got %+v", got)
+	}
+	if got[0] != (trackedResource{
+		Kind:      "endpoint",
+		Name:      "e2e-endpoint-123456",
+		Workspace: "other-workspace",
+	}) {
+		t.Fatalf("unexpected resource: %+v", got[0])
+	}
+}
+
+func TestTrackedResourcesFromManifest_RejectsMalformedManifest(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, "kind: Endpoint\nmetadata: [")
+
+	if got := trackedResourcesFromManifest(path, profileWorkspace()); len(got) != 0 {
+		t.Fatalf("malformed manifest should not register resources, got %+v", got)
+	}
+}
+
+func TestRunCLIWithStdin_TracksApplyAndWaitsForConfirmedDelete(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	useCLIForTest(t, "#!/bin/sh\nexit 0\n")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: e2e-endpoint-123456
+  workspace: default
+`)
+
+	result := RunCLI("apply", "--file="+path)
+	if result.ExitCode != 0 {
+		t.Fatalf("apply result = %+v", result)
+	}
+	if trackedResourceCount() != 1 {
+		t.Fatalf("apply should pre-register current resource")
+	}
+
+	result = RunCLI("delete", "endpoint", "e2e-endpoint-123456", "-w", "default", "--wait=false")
+	if result.ExitCode != 0 || trackedResourceCount() != 1 {
+		t.Fatalf("async delete should retain resource, result=%+v count=%d", result, trackedResourceCount())
+	}
+
+	result = RunCLI("wait", "endpoint", "e2e-endpoint-123456", "-w", "default", "--for=delete")
+	if result.ExitCode != 0 || trackedResourceCount() != 0 {
+		t.Fatalf("successful delete wait should untrack resource, result=%+v count=%d", result, trackedResourceCount())
+	}
+}
+
+func TestReconcileTrackedResourcesAfterCommand(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+
+	resource := trackedResource{Kind: "endpoint", Name: "e2e-endpoint-123456", Workspace: "default"}
+	trackResource(resource.Kind, resource.Name, resource.Workspace)
+
+	reconcileTrackedResourcesAfterCommand([]string{"delete", "endpoint", resource.Name, "-w", resource.Workspace})
+	if trackedResourceCount() != 0 {
+		t.Fatalf("synchronous delete should untrack resource")
+	}
+
+	trackResource(resource.Kind, resource.Name, resource.Workspace)
+	reconcileTrackedResourcesAfterCommand([]string{"delete", "endpoint", resource.Name, "-w", resource.Workspace, "--wait=false"})
+	if trackedResourceCount() != 1 {
+		t.Fatalf("asynchronous delete should retain resource until wait succeeds")
+	}
+
+	reconcileTrackedResourcesAfterCommand([]string{"wait", "endpoint", resource.Name, "-w", resource.Workspace, "--for", "delete"})
+	if trackedResourceCount() != 0 {
+		t.Fatalf("successful delete wait should untrack resource")
+	}
+}
+
+func TestReconcileTrackedResourcesAfterManifestDelete(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: ModelRegistry
+metadata:
+  name: e2e-registry-123456
+  workspace: default
+`)
+
+	trackResourcesForApplyCommand([]string{"apply", "-f", path})
+	if trackedResourceCount() != 1 {
+		t.Fatalf("apply should register manifest resource")
+	}
+
+	reconcileTrackedResourcesAfterCommand([]string{"delete", "-f", path, "--force"})
+	if trackedResourceCount() != 0 {
+		t.Fatalf("successful manifest delete should untrack resource")
+	}
+}
+
+func TestTrackResourcesForApplyCommand_UsesCommandWorkspaceFallback(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: e2e-endpoint-123456
+`)
+
+	trackResourcesForApplyCommand([]string{"apply", "-f", path, "-w", "other-workspace"})
+	if trackedResourceCount() != 1 {
+		t.Fatalf("apply should register resource with command workspace fallback")
+	}
+
+	trackedMu.Lock()
+	defer trackedMu.Unlock()
+	if _, ok := trackedResources[trackedResource{
+		Kind:      "endpoint",
+		Name:      "e2e-endpoint-123456",
+		Workspace: "other-workspace",
+	}]; !ok {
+		t.Fatalf("tracked resources = %+v", trackedResources)
+	}
+}
+
+func TestSnapshotTrackedResources_OrdersDependentsFirst(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+
+	trackResource("modelregistry", "e2e-registry-123456", "default")
+	trackResource("imageregistry", "e2e-image-registry-123456", "default")
+	trackResource("cluster", "e2e-cluster-123456", "default")
+	trackResource("externalendpoint", "e2e-external-123456", "default")
+	trackResource("endpoint", "e2e-endpoint-123456", "default")
+
+	got := snapshotTrackedResources()
+	wantKinds := []string{"endpoint", "externalendpoint", "cluster", "imageregistry", "modelregistry"}
+	if len(got) != len(wantKinds) {
+		t.Fatalf("want %d resources, got %+v", len(wantKinds), got)
+	}
+	for i, want := range wantKinds {
+		if got[i].Kind != want {
+			t.Fatalf("resource %d kind = %q, want %q; all=%+v", i, got[i].Kind, want, got)
+		}
+	}
+}
+
+func TestCleanupTrackedResources_DeletesInDependencyOrder(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	logPath := filepath.Join(t.TempDir(), "cli.log")
+	useCLIForTest(t, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\nexit 0\n", logPath))
+
+	trackResource("modelregistry", "e2e-registry-123456", "default")
+	trackResource("cluster", "e2e-cluster-123456", "default")
+	trackResource("endpoint", "e2e-endpoint-123456", "default")
+
+	cleanupTrackedResources()
+	if trackedResourceCount() != 0 {
+		t.Fatalf("cleanup should clear current-process registry")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake CLI log: %v", err)
+	}
+	output := string(data)
+	endpointIndex := strings.Index(output, "delete endpoint e2e-endpoint-123456")
+	endpointWaitIndex := strings.Index(output, "wait endpoint e2e-endpoint-123456")
+	registryIndex := strings.Index(output, "delete modelregistry e2e-registry-123456")
+	registryWaitIndex := strings.Index(output, "wait modelregistry e2e-registry-123456")
+	clusterIndex := strings.Index(output, "delete cluster e2e-cluster-123456")
+	clusterWaitIndex := strings.Index(output, "wait cluster e2e-cluster-123456")
+	if endpointIndex < 0 || endpointWaitIndex < 0 || registryIndex < 0 || registryWaitIndex < 0 || clusterIndex < 0 || clusterWaitIndex < 0 {
+		t.Fatalf("missing cleanup command(s): %q", output)
+	}
+	if endpointIndex > endpointWaitIndex || endpointWaitIndex > registryIndex || registryIndex > registryWaitIndex || registryWaitIndex > clusterIndex || clusterIndex > clusterWaitIndex {
+		t.Fatalf("cleanup order is not dependency-safe: %q", output)
+	}
+}
+
+func TestCleanupTrackedResources_StopsDependentCleanupAfterEndpointDeleteFailure(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	logPath := filepath.Join(t.TempDir(), "cli.log")
+	useCLIForTest(t, fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %q
+case "$*" in
+  *"delete endpoint e2e-endpoint-123456"*) exit 1 ;;
+esac
+exit 0
+`, logPath))
+
+	trackResource("endpoint", "e2e-endpoint-123456", "default")
+	trackResource("cluster", "e2e-cluster-123456", "default")
+	trackResource("imageregistry", "e2e-image-registry-123456", "default")
+
+	cleanupTrackedResources()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake CLI log: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "delete cluster e2e-cluster-123456") {
+		t.Fatalf("cluster cleanup must wait for endpoint cleanup success: %q", output)
+	}
+	if strings.Contains(output, "delete imageregistry e2e-image-registry-123456") {
+		t.Fatalf("registry cleanup must wait for cluster cleanup success: %q", output)
+	}
+}
+
+func TestRunCLIWithTimeout_ReturnsTimeoutExitCode(t *testing.T) {
+	useCLIForTest(t, "#!/bin/sh\nexec sleep 1\n")
+
+	result := runCLIWithTimeout(10*time.Millisecond, "get", "cluster")
+	if result.ExitCode != 124 {
+		t.Fatalf("timeout exit code = %d, want 124; result=%+v", result.ExitCode, result)
 	}
 }

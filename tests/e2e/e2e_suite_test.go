@@ -27,10 +27,10 @@ var _ = BeforeSuite(func() {
 	BuildCLI()
 })
 
-var _ = AfterSuite(func() {
-	cleanupTrackedResources()
+var _ = AfterSuite(func(ctx SpecContext) {
+	cleanupTrackedResourcesWithContext(ctx)
 	CleanupCLI()
-})
+}, NodeTimeout(cleanupNodeTimeout))
 
 var _ = ReportAfterSuite("TestRail Reporter", func(report Report) {
 	trRunID := profileTestrailRunID()

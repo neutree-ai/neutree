@@ -134,6 +134,8 @@ func RunCLI(args ...string) CLIResult {
 
 // RunCLIWithStdin executes the neutree-cli binary with stdin input and given arguments.
 func RunCLIWithStdin(stdin string, args ...string) CLIResult {
+	trackResourcesForApplyCommand(args)
+
 	injected := []string{
 		"--server-url", Cfg.ServerURL,
 		"--api-key", Cfg.APIKey,
@@ -169,11 +171,16 @@ func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 		}
 	}
 
-	return CLIResult{
+	result := CLIResult{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 	}
+	if result.ExitCode == 0 {
+		reconcileTrackedResourcesAfterCommand(args)
+	}
+
+	return result
 }
 
 // String returns a human-readable representation of the CLI result.
@@ -476,8 +483,6 @@ func SetupImageRegistry() {
 		"--timeout", "2m",
 	)
 	ExpectSuccess(r)
-
-	trackResource("imageregistry", testImageRegistry(), profileWorkspace())
 }
 
 // TeardownImageRegistry deletes the image registry and cleans up the temp YAML.
@@ -1182,8 +1187,6 @@ func setupSSHCluster(prefix string) (clusterName string) {
 	By("Waiting for cluster Running")
 	ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
 
-	trackResource("cluster", clusterName, profileWorkspace())
-
 	return clusterName
 }
 
@@ -1213,22 +1216,14 @@ func setupK8sCluster(prefix string) (clusterName string) {
 	By("Waiting for cluster Running")
 	ch.EventuallyInPhase(clusterName, v1.ClusterPhaseRunning, "", TerminalPhaseTimeout)
 
-	trackResource("cluster", clusterName, profileWorkspace())
-
 	return clusterName
 }
 
 // teardownCluster deletes a cluster and image registry.
-//
-// Untracks the cluster only when the API confirms removal — otherwise the
-// entry stays in the registry so AfterSuite can retry. Wiping it out
-// blindly would defeat the safety net this PR is adding.
 func teardownCluster(clusterName string) {
 	ch := NewClusterHelper()
 
-	if ch.EnsureDeleted(clusterName).ExitCode == 0 {
-		untrackResource("cluster", clusterName, profileWorkspace())
-	}
+	ch.EnsureDeleted(clusterName)
 
 	TeardownImageRegistry()
 }
