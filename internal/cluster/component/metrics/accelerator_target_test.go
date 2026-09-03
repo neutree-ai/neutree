@@ -88,13 +88,98 @@ func TestBuildMetricsResourcesUsesProfileExternalTarget(t *testing.T) {
 	assert.Equal(t, map[string]string{"app": "vendor-exporter"}, selector)
 }
 
-func TestBuildMetricsResourcesUsesExternalTargetWithoutManagedExporterProfile(t *testing.T) {
+func TestBuildMetricsResourcesExternalSelectsOnlyNodeMatchingProfile(t *testing.T) {
+	acceleratorMgr := &acceleratormocks.MockManager{}
+	acceleratorMgr.On("SupportPlugins").Return([]string{"other_accelerator", v1.AcceleratorTypeNVIDIAGPU.String()})
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, v1.AcceleratorTypeNVIDIAGPU.String()).Return(&v1.AcceleratorProfile{
+		AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
+		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+			Image: "example.com/nvidia-node-agent:v1",
+		},
+		MetricsExporter: &v1.AcceleratorExporterProfile{
+			Name:  "dcgm-exporter",
+			Image: "example.com/dcgm-exporter:v1",
+			Port:  19400,
+			Runtime: &v1.AcceleratorExporterRuntimeProfile{
+				NodeSelector: map[string]string{"nvidia.com/gpu.present": "true"},
+			},
+		},
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "nvidia-dcgm-exporter"},
+			Port:        9400,
+		},
+	}, nil)
+	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "other_accelerator").Return(&v1.AcceleratorProfile{
+		AcceleratorType: "other_accelerator",
+		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
+			Image: "example.com/other-node-agent:v1",
+		},
+		MetricsExporter: &v1.AcceleratorExporterProfile{
+			Name:  "other-exporter",
+			Image: "example.com/other-exporter:v1",
+			Port:  8082,
+			Runtime: &v1.AcceleratorExporterRuntimeProfile{
+				NodeSelector: map[string]string{"example.com/other-accelerator": "true"},
+			},
+		},
+		ExternalMetricsTarget: &v1.MetricsTargetProfile{
+			PodSelector: map[string]string{"app": "other-exporter"},
+			Port:        8082,
+		},
+	}, nil)
+	t.Cleanup(func() { acceleratorMgr.AssertExpectations(t) })
+
+	component := &MetricsComponent{
+		cluster: &v1.Cluster{
+			Metadata: &v1.Metadata{Name: "test-cluster", Workspace: "test-workspace"},
+			Spec: &v1.ClusterSpec{
+				Version: "v1.1.2",
+				Config: &v1.ClusterConfig{Metrics: &v1.ClusterMetricsConfig{
+					AcceleratorExporter: &v1.ClusterAcceleratorExporterConfig{
+						Mode: v1.ClusterAcceleratorExporterModeExternal,
+					},
+				}},
+			},
+		},
+		namespace:             "metrics-system",
+		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
+		acceleratorMgr:        acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("gpu-node", map[string]string{
+			"nvidia.com/gpu.present": "true",
+		})).Build(),
+	}
+
+	objects, err := component.GetMetricsResources(context.Background())
+	require.NoError(t, err)
+	assert.False(t, hasMetricsDaemonSet(objects, "nvidia-gpu-dcgm-exporter"))
+	assert.False(t, hasMetricsDaemonSet(objects, "other-accelerator-other-exporter"))
+
+	vmagentConfig := findMetricsConfigMap(t, objects, "vmagent-config").Data["prometheus.yml"]
+	assert.Contains(t, vmagentConfig, "job_name: 'accelerator-exporter-nvidia-gpu'")
+	assert.Contains(t, vmagentConfig, "label: app=nvidia-dcgm-exporter")
+	assert.NotContains(t, vmagentConfig, "job_name: 'accelerator-exporter-other-accelerator'")
+
+	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
+	args := nodeAgent.Spec.Template.Spec.Containers[0].Args
+	assert.Contains(t, args, "--accelerator-type=nvidia_gpu")
+	assert.Contains(t, args, "--accelerator-exporter-port=9400")
+}
+
+func TestBuildMetricsResourcesUsesExternalTargetWithRuntimeSelector(t *testing.T) {
 	acceleratorMgr := &acceleratormocks.MockManager{}
 	acceleratorMgr.On("SupportPlugins").Return([]string{"vendor_accelerator"}).Maybe()
 	acceleratorMgr.On("GetAcceleratorProfile", mock.Anything, "vendor_accelerator").Return(&v1.AcceleratorProfile{
 		AcceleratorType: "vendor_accelerator",
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
+		},
+		MetricsExporter: &v1.AcceleratorExporterProfile{
+			Name:  "upstream-exporter",
+			Image: "example.com/upstream-exporter:v1",
+			Port:  19400,
+			Runtime: &v1.AcceleratorExporterRuntimeProfile{
+				NodeSelector: map[string]string{"example.com/accelerator": "true"},
+			},
 		},
 		ExternalMetricsTarget: &v1.MetricsTargetProfile{
 			Namespace:   "upstream-system",
@@ -119,6 +204,9 @@ func TestBuildMetricsResourcesUsesExternalTargetWithoutManagedExporterProfile(t 
 		namespace:             "metrics-system",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("accelerator-node", map[string]string{
+			"example.com/accelerator": "true",
+		})).Build(),
 	}
 
 	objects, err := component.GetMetricsResources(context.Background())
@@ -145,6 +233,14 @@ func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmp
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
 			Image: "example.com/neutree-node-agent:v1.2.0",
 		},
+		MetricsExporter: &v1.AcceleratorExporterProfile{
+			Name:  "operator-exporter",
+			Image: "example.com/operator-exporter:v1",
+			Port:  19400,
+			Runtime: &v1.AcceleratorExporterRuntimeProfile{
+				NodeSelector: map[string]string{"example.com/accelerator": "true"},
+			},
+		},
 		ExternalMetricsTarget: &v1.MetricsTargetProfile{
 			PodSelector: map[string]string{"app": "operator-exporter"},
 			Port:        19401,
@@ -167,6 +263,9 @@ func TestBuildMetricsResourcesUsesExternalTargetAcrossNamespacesWhenNamespaceEmp
 		namespace:             "neutree-system",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient: fake.NewClientBuilder().WithObjects(metricsTestNode("accelerator-node", map[string]string{
+			"example.com/accelerator": "true",
+		})).Build(),
 	}
 
 	objects, err := component.GetMetricsResources(context.Background())
@@ -244,6 +343,7 @@ func TestBuildVMAgentConfigUsesProfileVirtualizationMetricsTarget(t *testing.T) 
 		namespace:             "metrics-system",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objects, err := component.GetMetricsResources(context.Background())

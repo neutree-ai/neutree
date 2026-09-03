@@ -241,6 +241,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrape(t *testing.T) {
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -418,6 +419,7 @@ func TestBuildVMAgentConfigIncludesHAMiMonitorScrapeBeforeV110WhenAcceleratorVir
 		imagePullSecret:       "test-image-pull-secret",
 		metricsRemoteWriteURL: "https://metrics.example.com/api/v1/write",
 		acceleratorMgr:        acceleratorMgr,
+		ctrlClient:            fake.NewClientBuilder().WithObjects(metricsTestNode("cpu-node", nil)).Build(),
 	}
 
 	objs, err := metricsCmpt.GetMetricsResources(context.Background())
@@ -1292,6 +1294,8 @@ func TestBuildMetricsResourcesProjectsProfileOnAllDeploymentBackends(t *testing.
 	objects, err := metricsCmpt.GetMetricsResources(context.Background())
 	assert.NilError(t, err)
 	assert.Assert(t, hasMetricsDaemonSet(objects, "custom-accelerator-custom-exporter"))
+	exporter := findMetricsDaemonSet(t, objects, "custom-accelerator-custom-exporter")
+	assert.DeepEqual(t, map[string]string{"accelerator.example.com/custom": "true"}, exporter.Spec.Template.Spec.NodeSelector)
 	nodeAgent := findMetricsDaemonSet(t, objects, neutreeNodeAgentMetricsName)
 	args := strings.Join(nodeAgent.Spec.Template.Spec.Containers[0].Args, "\n")
 	assert.Assert(t, strings.Contains(args, "--accelerator-type=custom_accelerator"))
