@@ -62,6 +62,7 @@ jobs:
           BASE_IMAGE_TAG_OVERRIDE: ${{ inputs.base_image_tag_override }}
           RAY_SHORT_VERSION: ${{ inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
+          PACKAGE_ARCH: amd64
           IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
           IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
         run: |
@@ -113,6 +114,7 @@ jobs:
           mkdir -p "$output_dir"
           {
             printf 'manifest_version=%s\n' "$manifest_version"
+            printf 'package_arch=%s\n' "$PACKAGE_ARCH"
             printf 'image_ref=%s\n' "$image_ref"
             printf 'image_spec=%s\n' "$image_spec"
             printf 'output_dir=%s\n' "$output_dir"
@@ -133,6 +135,7 @@ jobs:
         env:
           ENGINE: ${{ inputs.engine }}
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
           IMAGE_SPEC: ${{ steps.package.outputs.image_spec }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
           SCHEMA_PATH: ${{ steps.package.outputs.schema_path }}
@@ -140,7 +143,7 @@ jobs:
           SUPPORTED_TASKS: ${{ steps.package.outputs.supported_tasks }}
         run: |
           set -euo pipefail
-          archive_name="$ENGINE-$MANIFEST_VERSION.tar.gz"
+          archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           OUTPUT_DIR="$OUTPUT_DIR" bash scripts/builder/build-engine-package.sh \
             --name "$ENGINE" \
             --version "$MANIFEST_VERSION" \
@@ -157,11 +160,12 @@ jobs:
         env:
           ENGINE: ${{ inputs.engine }}
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
           ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
           OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
         run: |
           set -euo pipefail
-          archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION.tar.gz"
+          archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum="$archive.sha256"
           manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
           package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
@@ -175,12 +179,13 @@ jobs:
         env:
           ENGINE: ${{ inputs.engine }}
           MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
           ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
           [[ -n "$SLACK_WEBHOOK_URL" ]] || exit 0
-          archive_name="$ENGINE-$MANIFEST_VERSION.tar.gz"
+          archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
           checksum_name="$archive_name.sha256"
           manifest_name="$ENGINE-$MANIFEST_VERSION-manifest.yaml"
           package_dir="${ENGINE_PACKAGE_FILE_SERVER_URL%/}"

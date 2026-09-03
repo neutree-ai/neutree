@@ -208,7 +208,7 @@ Options:
     -m, --manifest FILE       Path to manifest template file (optional)
     -t, --template-dir DIR    Path to template directory containing kubernetes/default.yaml
     -c, --schema FILE         Path to engine_schema.json file (optional)
-    -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
+    -o, --output FILE         Output package file path (default: ENGINE-VERSION-<arch>.tar.gz)
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
@@ -415,7 +415,8 @@ fi
 
 # Set default output file
 if [ -z "$OUTPUT_FILE" ]; then
-    OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}.tar.gz"
+    PACKAGE_ARCH="${PLATFORM##*/}"
+    OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}-${PACKAGE_ARCH}.tar.gz"
 fi
 
 # Create temporary directory
