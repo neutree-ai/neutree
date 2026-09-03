@@ -22,6 +22,8 @@ const (
 	// cleanupWaitTimeout gives the controller enough time to finish one
 	// dependency layer before cleanup attempts its parent resources.
 	cleanupWaitTimeout = 5 * time.Minute
+	// cleanupWorkerLimit bounds local CLI processes in one independent wave.
+	cleanupWorkerLimit = 8
 	// cleanupNodeTimeout bounds all dependency layers when AfterSuite runs
 	// after a Ginkgo interruption.
 	// ponytail: fixed 45m cap covers six 5m waves plus delete overhead;
@@ -221,25 +223,39 @@ type cleanupCommandResult struct {
 	result   CLIResult
 }
 
-// runCleanupCommands runs resources from one dependency wave together.
-// ponytail: one CLI process per resource; add a bounded worker pool only if
-// real E2E runs show control-plane pressure from a larger same-kind batch.
+// runCleanupCommands runs resources from one dependency wave with bounded
+// local process and API concurrency.
 func runCleanupCommands(resources []trackedResource, run func(trackedResource) CLIResult) []cleanupCommandResult {
 	results := make([]cleanupCommandResult, len(resources))
+	jobs := make(chan int)
 	var waitGroup sync.WaitGroup
 
-	for index, resource := range resources {
+	workerCount := cleanupWorkerLimit
+	if len(resources) < workerCount {
+		workerCount = len(resources)
+	}
+
+	for worker := 0; worker < workerCount; worker++ {
 		waitGroup.Add(1)
 
-		go func(index int, resource trackedResource) {
+		go func() {
 			defer waitGroup.Done()
 
-			results[index] = cleanupCommandResult{
-				resource: resource,
-				result:   run(resource),
+			for index := range jobs {
+				resource := resources[index]
+				results[index] = cleanupCommandResult{
+					resource: resource,
+					result:   run(resource),
+				}
 			}
-		}(index, resource)
+		}()
 	}
+
+	for index := range resources {
+		jobs <- index
+	}
+
+	close(jobs)
 
 	waitGroup.Wait()
 
@@ -329,7 +345,7 @@ func trackedResourcesFromManifest(path, fallbackWorkspace string) []trackedResou
 		}
 
 		if err != nil {
-			return nil
+			return resources
 		}
 
 		workspace := manifest.Metadata.Workspace

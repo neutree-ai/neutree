@@ -307,6 +307,25 @@ func TestTrackedResourcesFromManifest_RejectsMalformedManifest(t *testing.T) {
 	}
 }
 
+func TestTrackedResourcesFromManifest_PreservesEntriesBeforeParseError(t *testing.T) {
+	resetTrackedForTest(t)
+	useRunIDForTest(t, "123456")
+	path := writeManifestForTest(t, `
+apiVersion: v1
+kind: Endpoint
+metadata:
+  name: e2e-endpoint-123456
+---
+kind: Endpoint
+metadata: [
+`)
+
+	got := trackedResourcesFromManifest(path, profileWorkspace())
+	if len(got) != 1 || got[0].Name != "e2e-endpoint-123456" {
+		t.Fatalf("valid entries before parse error were lost: %+v", got)
+	}
+}
+
 func TestRunCLIWithStdin_TracksApplyAndWaitsForConfirmedDelete(t *testing.T) {
 	resetTrackedForTest(t)
 	useRunIDForTest(t, "123456")
@@ -613,6 +632,47 @@ func TestRunCleanupCommands_RunsSameWaveInParallel(t *testing.T) {
 	}
 	close(release)
 
+	if results := <-done; len(results) != len(resources) {
+		t.Fatalf("result count = %d, want %d", len(results), len(resources))
+	}
+}
+
+func TestRunCleanupCommands_BoundsSameWaveWorkers(t *testing.T) {
+	resources := make([]trackedResource, cleanupWorkerLimit+1)
+	started := make(chan struct{}, len(resources))
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+
+	done := make(chan []cleanupCommandResult, 1)
+	go func() {
+		done <- runCleanupCommands(resources, func(trackedResource) CLIResult {
+			started <- struct{}{}
+			<-release
+			return CLIResult{}
+		})
+	}()
+
+	for i := 0; i < cleanupWorkerLimit; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("cleanup worker did not start")
+		}
+	}
+
+	select {
+	case <-started:
+		t.Fatal("cleanup exceeded its worker limit")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	released = true
 	if results := <-done; len(results) != len(resources) {
 		t.Fatalf("result count = %d, want %d", len(results), len(resources))
 	}
