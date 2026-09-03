@@ -108,3 +108,17 @@ jobs:
           ENGINE_SGLANG_ROCM_TAG: ${{ github.event.inputs.base_image_tag_override || format('{0}-rocm720-mi30x', github.event.inputs.engine_version) }}
           RAY_SHORT_VERSION: ${{ github.event.inputs.ray_short_version }}
           ENGINE_PATCH_SUFFIX: ${{ github.event.inputs.engine_patch_suffix }}
+
+  release-package:
+    if: ${{ github.event.inputs.accelerator == 'nvidia' }}
+    needs:
+      - push-manifests
+    uses: ./.github/workflows/release-engine-package.yaml
+    with:
+      engine: sglang
+      accelerator: nvidia
+      engine_version: ${{ github.event.inputs.engine_version }}
+      base_image_tag_override: ${{ github.event.inputs.base_image_tag_override }}
+      ray_short_version: ${{ github.event.inputs.ray_short_version }}
+      engine_patch_suffix: ${{ github.event.inputs.engine_patch_suffix }}
+    secrets: inherit

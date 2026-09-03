@@ -1,0 +1,204 @@
+name: release-engine-package
+
+on:
+  workflow_call:
+    inputs:
+      engine:
+        description: "engine name"
+        required: true
+        type: string
+      accelerator:
+        description: "accelerator segment used in the stable package path"
+        required: true
+        type: string
+      engine_version:
+        description: "upstream engine version (for example v0.24.0)"
+        required: true
+        type: string
+      base_image_tag_override:
+        description: "optional upstream base image tag override"
+        required: false
+        default: ""
+        type: string
+      ray_short_version:
+        description: "short ray version used in image tags"
+        required: false
+        default: "ray2.53.0"
+        type: string
+      engine_patch_suffix:
+        description: "optional neutree patch suffix appended to package and image tags"
+        required: false
+        default: ""
+        type: string
+    secrets:
+      ENGINE_PACKAGE_FILE_SERVER_URL:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+      RELEASE_SERVE_IMAGE_PROJECT:
+        required: true
+      SERVE_IMAGE_REPO:
+        required: true
+      SERVE_IMAGE_PUSH_TOKEN:
+        required: true
+      SERVE_IMAGE_PUSH_USERNAME:
+        required: true
+
+jobs:
+  release-package:
+    runs-on: ["serve-builder", "X64"]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve package metadata
+        id: package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          ACCELERATOR: ${{ inputs.accelerator }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+          BASE_IMAGE_TAG_OVERRIDE: ${{ inputs.base_image_tag_override }}
+          RAY_SHORT_VERSION: ${{ inputs.ray_short_version }}
+          ENGINE_PATCH_SUFFIX: ${{ inputs.engine_patch_suffix }}
+          PACKAGE_ARCH: amd64
+          IMAGE_REPO: ${{ secrets.SERVE_IMAGE_REPO }}
+          IMAGE_PROJECT: ${{ secrets.RELEASE_SERVE_IMAGE_PROJECT }}
+        run: |
+          set -euo pipefail
+
+          manifest_version="$ENGINE_VERSION"
+          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
+            manifest_version="${ENGINE_VERSION}-${ENGINE_PATCH_SUFFIX}"
+          fi
+          base_version="${ENGINE_VERSION%%-*}"
+          schema_path="internal/engine/$ENGINE/$base_version/schema.json"
+          template_dir="internal/engine/$ENGINE/$base_version/templates"
+          [[ -f "$schema_path" ]] || { echo "engine schema is missing: $schema_path" >&2; exit 1; }
+          [[ -d "$template_dir" ]] || { echo "engine templates are missing: $template_dir" >&2; exit 1; }
+          find "$template_dir" -type f \( -name '*.yaml' -o -name '*.yml' \) -print -quit | grep -q . || {
+            echo "engine templates are missing: $template_dir" >&2
+            exit 1
+          }
+
+          image_patch_tag=""
+          if [[ -n "$ENGINE_PATCH_SUFFIX" ]]; then
+            image_patch_tag="-${ENGINE_PATCH_SUFFIX}"
+          fi
+
+          case "$ENGINE:$ACCELERATOR" in
+            vllm:nvidia)
+              supported_tasks="text-generation,text-embedding,text-rerank"
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-vllm:${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="nvidia_gpu:${image_ref}"
+              ;;
+            sglang:nvidia)
+              supported_tasks="text-generation,text-embedding"
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-sglang:${BASE_IMAGE_TAG_OVERRIDE:-$ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="nvidia_gpu:${image_ref}"
+              ;;
+            llama-cpp:cpu)
+              supported_tasks="text-generation,text-embedding"
+              image_ref="${IMAGE_REPO}/${IMAGE_PROJECT}/engine-llama-cpp:${ENGINE_VERSION}${image_patch_tag}-${RAY_SHORT_VERSION}"
+              image_spec="cpu:${image_ref}"
+              ;;
+            *)
+              echo "unsupported engine package target: $ENGINE:$ACCELERATOR" >&2
+              exit 1
+              ;;
+          esac
+
+          output_dir="$RUNNER_TEMP/engine-package"
+
+          mkdir -p "$output_dir"
+          {
+            printf 'manifest_version=%s\n' "$manifest_version"
+            printf 'package_arch=%s\n' "$PACKAGE_ARCH"
+            printf 'image_ref=%s\n' "$image_ref"
+            printf 'image_spec=%s\n' "$image_spec"
+            printf 'output_dir=%s\n' "$output_dir"
+            printf 'schema_path=%s\n' "$schema_path"
+            printf 'template_dir=%s\n' "$template_dir"
+            printf 'supported_tasks=%s\n' "$supported_tasks"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login docker
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.SERVE_IMAGE_REPO }}
+          username: ${{ secrets.SERVE_IMAGE_PUSH_USERNAME }}
+          password: ${{ secrets.SERVE_IMAGE_PUSH_TOKEN }}
+
+      - name: Build engine package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
+          IMAGE_SPEC: ${{ steps.package.outputs.image_spec }}
+          OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
+          SCHEMA_PATH: ${{ steps.package.outputs.schema_path }}
+          TEMPLATE_DIR: ${{ steps.package.outputs.template_dir }}
+          SUPPORTED_TASKS: ${{ steps.package.outputs.supported_tasks }}
+        run: |
+          set -euo pipefail
+          archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
+          OUTPUT_DIR="$OUTPUT_DIR" bash scripts/builder/build-engine-package.sh \
+            --name "$ENGINE" \
+            --version "$MANIFEST_VERSION" \
+            --images "$IMAGE_SPEC" \
+            --supported-tasks "$SUPPORTED_TASKS" \
+            --platform linux/amd64 \
+            --schema "$SCHEMA_PATH" \
+            --template-dir "$TEMPLATE_DIR" \
+            --output "$archive_name" \
+            --description "$ENGINE inference engine"
+
+      - name: Upload engine package
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
+          ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
+          OUTPUT_DIR: ${{ steps.package.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+          archive="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
+          checksum="$archive.sha256"
+          manifest="$OUTPUT_DIR/$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          package_url="${ENGINE_PACKAGE_FILE_SERVER_URL}"
+          curl --fail -T "$archive" "$package_url"
+          curl --fail -T "$checksum" "$package_url"
+          curl --fail -T "$manifest" "$package_url"
+
+      - name: Notify Slack
+        if: ${{ success() }}
+        shell: bash
+        env:
+          ENGINE: ${{ inputs.engine }}
+          MANIFEST_VERSION: ${{ steps.package.outputs.manifest_version }}
+          PACKAGE_ARCH: ${{ steps.package.outputs.package_arch }}
+          ENGINE_PACKAGE_FILE_SERVER_URL: ${{ secrets.ENGINE_PACKAGE_FILE_SERVER_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SLACK_WEBHOOK_URL" ]] || exit 0
+          archive_name="$ENGINE-$MANIFEST_VERSION-$PACKAGE_ARCH.tar.gz"
+          checksum_name="$archive_name.sha256"
+          manifest_name="$ENGINE-$MANIFEST_VERSION-manifest.yaml"
+          package_dir="${ENGINE_PACKAGE_FILE_SERVER_URL%/}"
+          archive_url="$package_dir/$archive_name"
+          checksum_url="$package_dir/$checksum_name"
+          manifest_url="$package_dir/$manifest_name"
+          message=$(printf '%s engine package published: %s\nArchitecture: %s' "$ENGINE" "$MANIFEST_VERSION" "$PACKAGE_ARCH")
+          message+=$(printf '\nManifest: %s' "$manifest_url")
+          message+=$(printf '\nArchive: %s\nChecksum: %s' "$archive_url" "$checksum_url")
+          escaped_message=${message//\\/\\\\}
+          escaped_message=${escaped_message//\"/\\\"}
+          escaped_message=${escaped_message//$'\n'/\\n}
+          payload=$(printf '{"text":"%s"}' "$escaped_message")
+          if ! curl --silent --show-error --fail --request POST --header 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null; then
+            echo 'WARNING: Slack notification failed' >&2
+          fi

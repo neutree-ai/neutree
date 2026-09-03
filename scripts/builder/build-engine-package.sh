@@ -45,29 +45,24 @@ strip_image_registry() {
     fi
 }
 
-image_exists_for_platform() {
-    local image="$1"
-    local platform="$2"
-    local image_platform
-    local requested_os
-    local requested_arch
-    local requested_platform
+parse_image_spec() {
+    local spec="$1"
+    local image_with_tag
 
-    requested_os="${platform%%/*}"
-    requested_arch="${platform#*/}"
-    requested_arch="${requested_arch%%/*}"
-    requested_platform="${requested_os}/${requested_arch}"
-
-    if ! image_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null); then
-        return 1
+    if [[ "$spec" != *:* ]]; then
+        print_error "Invalid image specification '$spec': expected accelerator:image:tag"
+        exit 1
     fi
 
-    if [ "$image_platform" = "$requested_platform" ]; then
-        return 0
-    fi
+    ACCELERATOR="${spec%%:*}"
+    image_with_tag="${spec#*:}"
+    IMAGE_NAME="${image_with_tag%:*}"
+    IMAGE_TAG="${image_with_tag##*:}"
 
-    print_warn "Image $image found locally for $image_platform, but $platform was requested."
-    return 1
+    if [ -z "$ACCELERATOR" ] || [ -z "$IMAGE_NAME" ] || [ -z "$IMAGE_TAG" ] || [ "$IMAGE_NAME" = "$image_with_tag" ] || [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+        print_error "Invalid image specification '$spec': expected accelerator:image:tag"
+        exit 1
+    fi
 }
 
 # Function to read and format deploy template
@@ -213,7 +208,7 @@ Options:
     -m, --manifest FILE       Path to manifest template file (optional)
     -t, --template-dir DIR    Path to template directory containing kubernetes/default.yaml
     -c, --schema FILE         Path to engine_schema.json file (optional)
-    -o, --output FILE         Output package file path (default: ENGINE-VERSION.tar.gz)
+    -o, --output FILE         Output package file path (default: ENGINE-VERSION-<arch>.tar.gz)
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
     --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
@@ -420,7 +415,8 @@ fi
 
 # Set default output file
 if [ -z "$OUTPUT_FILE" ]; then
-    OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}.tar.gz"
+    PACKAGE_ARCH="${PLATFORM##*/}"
+    OUTPUT_FILE="${ENGINE_NAME}-${ENGINE_VERSION}-${PACKAGE_ARCH}.tar.gz"
 fi
 
 # Create temporary directory
@@ -441,6 +437,12 @@ fi
 IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
 IMAGE_ENTRIES=""
 
+# Validate image specifications up front so manifest-only mode enforces the
+# same accelerator:image:tag contract as packaged builds.
+for spec in "${IMAGE_SPECS[@]}"; do
+    parse_image_spec "$spec"
+done
+
 if [ -z "$MANIFEST_ONLY" ]; then
     # Export Docker images
     print_info "Exporting Docker images..."
@@ -448,29 +450,20 @@ if [ -z "$MANIFEST_ONLY" ]; then
     # Pull the selected platform before collecting images for export
     ALL_IMAGES=()
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
-        if image_exists_for_platform "$FULL_IMAGE" "$PLATFORM"; then
-            print_info "Image $FULL_IMAGE found locally. Skipping pull."
-        elif [ -n "$MIRROR_REGISTRY" ]; then
+        if [ -n "$MIRROR_REGISTRY" ]; then
             IMAGE_WITHOUT_REGISTRY=$(strip_image_registry "$FULL_IMAGE")
             MIRROR_IMAGE="${MIRROR_REGISTRY}/${IMAGE_WITHOUT_REGISTRY}"
 
-            if image_exists_for_platform "$MIRROR_IMAGE" "$PLATFORM"; then
-                print_info "Mirror image $MIRROR_IMAGE found locally. Skipping pull."
-            else
-                print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
-                if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
-                    print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
-                    exit 1
-                fi
-                print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
+            print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
+            if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
+                print_error "Failed to pull image $MIRROR_IMAGE for platform $PLATFORM"
+                exit 1
             fi
+            print_info "Successfully pulled $MIRROR_IMAGE for platform $PLATFORM"
 
             print_info "Retagging $MIRROR_IMAGE to $FULL_IMAGE"
             if ! docker tag "$MIRROR_IMAGE" "$FULL_IMAGE"; then
@@ -509,10 +502,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
 
     # Build manifest entries with per-image size from docker inspect
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
         INSPECT_SIZE=$(docker image inspect "$FULL_IMAGE" --format '{{.Size}}')
@@ -530,10 +520,7 @@ else
     print_info "Manifest-only mode: skipping Docker image export"
     COMBINED_TAR_BASENAME="${ENGINE_NAME}-${ENGINE_VERSION}-images.tar"
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         IMAGE_ENTRIES="${IMAGE_ENTRIES}
     - accelerator: \"$ACCELERATOR\"
@@ -559,10 +546,7 @@ else
     IMAGES_MAP=""
     IFS=',' read -ra IMAGE_SPECS <<< "$IMAGES"
     for spec in "${IMAGE_SPECS[@]}"; do
-        IFS=':' read -ra PARTS <<< "$spec"
-        ACCELERATOR="${PARTS[0]}"
-        IMAGE_NAME="${PARTS[1]}"
-        IMAGE_TAG="${PARTS[2]}"
+        parse_image_spec "$spec"
 
         IMAGES_MAP="${IMAGES_MAP}
       ${ACCELERATOR}:
