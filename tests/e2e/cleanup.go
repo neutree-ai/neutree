@@ -24,7 +24,9 @@ const (
 	cleanupWaitTimeout = 5 * time.Minute
 	// cleanupNodeTimeout bounds all dependency layers when AfterSuite runs
 	// after a Ginkgo interruption.
-	cleanupNodeTimeout = 30 * time.Minute
+	// ponytail: fixed 45m cap covers five 5m waves plus delete overhead;
+	// derive it from waves if a future dependency adds another wave.
+	cleanupNodeTimeout = 45 * time.Minute
 )
 
 const (
@@ -162,12 +164,16 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 
 	deleteSucceeded := true
 
-	for _, resource := range group {
-		result := runCLIWithContext(ctx, cleanupCallTimeout,
+	for _, command := range runCleanupCommands(group, func(resource trackedResource) CLIResult {
+		return runCLIWithContext(ctx, cleanupCallTimeout,
 			"delete", resource.Kind, resource.Name,
 			"-w", resource.Workspace,
 			"--force", "--ignore-not-found", "--wait=false",
 		)
+	}) {
+		resource := command.resource
+		result := command.result
+
 		if result.ExitCode != 0 {
 			deleteSucceeded = false
 
@@ -182,13 +188,17 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 
 	waitSucceeded := true
 
-	for _, resource := range group {
-		result := runCLIWithContext(ctx, cleanupWaitTimeout,
+	for _, command := range runCleanupCommands(group, func(resource trackedResource) CLIResult {
+		return runCLIWithContext(ctx, cleanupWaitTimeout,
 			"wait", resource.Kind, resource.Name,
 			"-w", resource.Workspace,
 			"--for", "delete",
 			"--timeout", cleanupWaitTimeout.String(),
 		)
+	}) {
+		resource := command.resource
+		result := command.result
+
 		if result.ExitCode == 0 {
 			fmt.Fprintf(GinkgoWriter, "  deleted %s/%s in %s\n",
 				resource.Kind, resource.Name, resource.Workspace)
@@ -201,6 +211,36 @@ func cleanupResourceGroup(ctx context.Context, resources []trackedResource, kind
 	}
 
 	return waitSucceeded
+}
+
+type cleanupCommandResult struct {
+	resource trackedResource
+	result   CLIResult
+}
+
+// runCleanupCommands runs resources from one dependency wave together.
+// ponytail: one CLI process per resource; add a bounded worker pool only if
+// real E2E runs show control-plane pressure from a larger same-kind batch.
+func runCleanupCommands(resources []trackedResource, run func(trackedResource) CLIResult) []cleanupCommandResult {
+	results := make([]cleanupCommandResult, len(resources))
+	var waitGroup sync.WaitGroup
+
+	for index, resource := range resources {
+		waitGroup.Add(1)
+
+		go func(index int, resource trackedResource) {
+			defer waitGroup.Done()
+
+			results[index] = cleanupCommandResult{
+				resource: resource,
+				result:   run(resource),
+			}
+		}(index, resource)
+	}
+
+	waitGroup.Wait()
+
+	return results
 }
 
 func trackedResourcesOfKind(resources []trackedResource, kind string) []trackedResource {

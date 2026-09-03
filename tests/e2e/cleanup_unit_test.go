@@ -481,6 +481,44 @@ exit 0
 	}
 }
 
+func TestRunCleanupCommands_RunsSameWaveInParallel(t *testing.T) {
+	resources := []trackedResource{
+		{Kind: trackedEndpoint, Name: "e2e-first-123456", Workspace: "default"},
+		{Kind: trackedEndpoint, Name: "e2e-second-123456", Workspace: "default"},
+	}
+	started := make(chan struct{}, len(resources))
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+
+	done := make(chan []cleanupCommandResult, 1)
+	go func() {
+		done <- runCleanupCommands(resources, func(trackedResource) CLIResult {
+			started <- struct{}{}
+			<-release
+			return CLIResult{}
+		})
+	}()
+
+	for range resources {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("cleanup commands did not start in parallel")
+		}
+	}
+	close(release)
+
+	if results := <-done; len(results) != len(resources) {
+		t.Fatalf("result count = %d, want %d", len(results), len(resources))
+	}
+}
+
 func TestRunCLIWithContext_ReturnsTimeoutExitCode(t *testing.T) {
 	useCLIForTest(t, "#!/bin/sh\nexec sleep 1\n")
 
