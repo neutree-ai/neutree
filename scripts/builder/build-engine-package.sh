@@ -35,16 +35,6 @@ normalize_registry() {
     echo "$registry"
 }
 
-strip_image_registry() {
-    local image="$1"
-
-    if [[ "$image" =~ ^((localhost)|([^/]*[.:][^/]*))/(.+)$ ]]; then
-        echo "${BASH_REMATCH[4]}"
-    else
-        echo "$image"
-    fi
-}
-
 parse_image_spec() {
     local spec="$1"
     local image_with_tag
@@ -211,7 +201,7 @@ Options:
     -o, --output FILE         Output package file path (default: ENGINE-VERSION-<arch>.tar.gz)
     -d, --description TEXT    Engine version description
     -p, --platform PLATFORM   Image platform used for pull and manifest (default: linux/amd64)
-    --mirror-registry URL     Mirror registry for missing images (e.g., registry.example.com)
+    --mirror-registry URL     Mirror prefix for canonical images (e.g., registry.example.com/project)
     --manifest-only           Generate only the manifest file (skip Docker image export and packaging)
     -h, --help                Show this help message
 
@@ -455,8 +445,7 @@ if [ -z "$MANIFEST_ONLY" ]; then
         FULL_IMAGE="$IMAGE_NAME:$IMAGE_TAG"
 
         if [ -n "$MIRROR_REGISTRY" ]; then
-            IMAGE_WITHOUT_REGISTRY=$(strip_image_registry "$FULL_IMAGE")
-            MIRROR_IMAGE="${MIRROR_REGISTRY}/${IMAGE_WITHOUT_REGISTRY}"
+            MIRROR_IMAGE="${MIRROR_REGISTRY}/${FULL_IMAGE}"
 
             print_info "Pulling latest $PLATFORM image from mirror: $MIRROR_IMAGE"
             if ! docker pull --platform "$PLATFORM" "$MIRROR_IMAGE"; then
