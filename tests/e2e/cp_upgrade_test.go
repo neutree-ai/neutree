@@ -1,10 +1,16 @@
 package e2e
 
 import (
+	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,7 +41,88 @@ func deleteUpgradeAPIKey(serverURL, jwt, workspace, name string) error {
 		return fmt.Errorf("api key %q response has no id", name)
 	}
 
-	return apiClient.Generic.Delete("ApiKey", id, workspace, name, neutreeclient.DeleteOptions{})
+	var resource struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(data, &resource); err != nil {
+		return fmt.Errorf("api key %q response has invalid metadata: %w", name, err)
+	}
+	if resource.Metadata == nil {
+		return fmt.Errorf("api key %q response has no metadata", name)
+	}
+
+	resource.Metadata["deletion_timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	payload, err := json.Marshal(map[string]any{"metadata": resource.Metadata})
+	if err != nil {
+		return fmt.Errorf("marshal api key %q delete payload: %w", name, err)
+	}
+
+	endpoint := strings.TrimRight(serverURL, "/") + "/api/v1/api_keys?id=eq." + url.QueryEscape(id)
+	req, err := http.NewRequest(http.MethodPatch, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build api key %q delete request: %w", name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Content-Type", "application/json")
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()      //nolint:errcheck
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	resp, err := (&http.Client{Timeout: 30 * time.Second, Transport: transport}).Do(req)
+	if err != nil {
+		return fmt.Errorf("delete api key %q: %w", name, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete api key %q returned HTTP %d: %s", name, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}
+
+type upgradeAPIKeyCleanup struct {
+	serverURL string
+	jwt       string
+	workspace string
+	name      string
+}
+
+var (
+	upgradeAPIKeyCleanupMu sync.Mutex
+	upgradeAPIKeyState     *upgradeAPIKeyCleanup
+)
+
+func registerUpgradeAPIKeyCleanup(serverURL, jwt, workspace, name string) {
+	upgradeAPIKeyCleanupMu.Lock()
+	defer upgradeAPIKeyCleanupMu.Unlock()
+
+	upgradeAPIKeyState = &upgradeAPIKeyCleanup{
+		serverURL: serverURL,
+		jwt:       jwt,
+		workspace: workspace,
+		name:      name,
+	}
+}
+
+func cleanupUpgradeAPIKey() {
+	upgradeAPIKeyCleanupMu.Lock()
+	state := upgradeAPIKeyState
+	upgradeAPIKeyCleanupMu.Unlock()
+	if state == nil {
+		return
+	}
+
+	if err := deleteUpgradeAPIKey(state.serverURL, state.jwt, state.workspace, state.name); err != nil {
+		fmt.Fprintf(GinkgoWriter, "failed to delete upgrade API key %s: %v\n", state.name, err)
+		return
+	}
+
+	upgradeAPIKeyCleanupMu.Lock()
+	if upgradeAPIKeyState == state {
+		upgradeAPIKeyState = nil
+	}
+	upgradeAPIKeyCleanupMu.Unlock()
 }
 
 var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgrade"), func() {
@@ -53,10 +140,8 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		mrName         string
 
 		// Saved Cfg values, restored in AfterAll after cleanup
-		origServerURL  string
-		origAPIKey     string
-		upgradeJWT     string
-		upgradeKeyName string
+		origServerURL string
+		origAPIKey    string
 
 		// Pre-upgrade snapshots for spec comparison
 		preSSHCluster v1.Cluster
@@ -122,8 +207,8 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		Expect(jwt).NotTo(BeEmpty(), "admin login should return JWT")
 
 		// Create a real API key (sk_xxx) via PostgREST RPC — works with both CLI and Kong
-		upgradeJWT = jwt
-		upgradeKeyName = "e2e-upgrade-key-" + Cfg.RunID
+		upgradeKeyName := "e2e-upgrade-key-" + Cfg.RunID
+		registerUpgradeAPIKeyCleanup(cph.APIURL(), jwt, profileWorkspace(), upgradeKeyName)
 		apiKey := createAPIKey(cph.APIURL(), jwt, profileWorkspace(), upgradeKeyName)
 		Cfg.APIKey = apiKey
 
@@ -202,11 +287,7 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		RunCLI("delete", "modelregistry", mrName,
 			"-w", profileWorkspace(), "--force", "--ignore-not-found")
 
-		if upgradeJWT != "" && upgradeKeyName != "" {
-			if err := deleteUpgradeAPIKey(cph.APIURL(), upgradeJWT, profileWorkspace(), upgradeKeyName); err != nil {
-				fmt.Fprintf(GinkgoWriter, "failed to delete upgrade API key %s: %v\n", upgradeKeyName, err)
-			}
-		}
+		cleanupUpgradeAPIKey()
 
 		cph.CleanAll()
 

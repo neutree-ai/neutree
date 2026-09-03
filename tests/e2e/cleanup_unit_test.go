@@ -3,6 +3,9 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,6 +199,59 @@ func TestTestEngineName_TracksCurrentRunEngine(t *testing.T) {
 		Workspace: profileWorkspace(),
 	}]; !ok {
 		t.Fatalf("engine was not tracked: %+v", trackedResources)
+	}
+}
+
+func TestCleanupUpgradeAPIKey_UsesCapturedJWT(t *testing.T) {
+	var patchSeen bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer admin-jwt" {
+			t.Errorf("authorization = %q, want Bearer admin-jwt", r.Header.Get("Authorization"))
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `[{"id":"api-key-id","metadata":{"name":"e2e-upgrade-key-123456","workspace":"default"}}]`)
+		case http.MethodPatch:
+			if r.URL.Query().Get("id") != "eq.api-key-id" {
+				t.Errorf("patch id = %q, want eq.api-key-id", r.URL.Query().Get("id"))
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read patch body: %v", err)
+			}
+			if !strings.Contains(string(body), "deletion_timestamp") {
+				t.Errorf("patch body lacks deletion_timestamp: %s", body)
+			}
+			patchSeen = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	upgradeAPIKeyCleanupMu.Lock()
+	upgradeAPIKeyState = nil
+	upgradeAPIKeyCleanupMu.Unlock()
+	t.Cleanup(func() {
+		upgradeAPIKeyCleanupMu.Lock()
+		upgradeAPIKeyState = nil
+		upgradeAPIKeyCleanupMu.Unlock()
+	})
+
+	registerUpgradeAPIKeyCleanup(server.URL, "admin-jwt", "default", "e2e-upgrade-key-123456")
+	cleanupUpgradeAPIKey()
+	cleanupUpgradeAPIKey()
+
+	if !patchSeen {
+		t.Fatal("upgrade API key cleanup did not issue PATCH")
+	}
+	upgradeAPIKeyCleanupMu.Lock()
+	defer upgradeAPIKeyCleanupMu.Unlock()
+	if upgradeAPIKeyState != nil {
+		t.Fatal("successful API key cleanup should clear owner state")
 	}
 }
 

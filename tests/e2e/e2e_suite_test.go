@@ -29,6 +29,7 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func(ctx SpecContext) {
 	cleanupTrackedResourcesWithContext(ctx)
+	cleanupUpgradeAPIKey()
 	CleanupCLI()
 }, NodeTimeout(cleanupNodeTimeout))
 
