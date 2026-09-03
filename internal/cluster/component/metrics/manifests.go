@@ -606,7 +606,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	}
 	neutreeNodeAgentMetricsResources := map[string]string{
 		"cpu":    "500m",
-		"memory": "128Mi",
+		"memory": "256Mi",
 	}
 	nodeAgentImage := "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 
