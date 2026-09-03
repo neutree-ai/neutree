@@ -202,13 +202,13 @@ var _ = Describe("Control Plane Upgrade", Ordered, Label("control-plane", "upgra
 		RunCLI("delete", "modelregistry", mrName,
 			"-w", profileWorkspace(), "--force", "--ignore-not-found")
 
-		cph.CleanAll()
-
 		if upgradeJWT != "" && upgradeKeyName != "" {
 			if err := deleteUpgradeAPIKey(cph.APIURL(), upgradeJWT, profileWorkspace(), upgradeKeyName); err != nil {
 				fmt.Fprintf(GinkgoWriter, "failed to delete upgrade API key %s: %v\n", upgradeKeyName, err)
 			}
 		}
+
+		cph.CleanAll()
 
 		// Restore Cfg after all cleanup commands that depend on the CP URL/API key.
 		Cfg.ServerURL = origServerURL

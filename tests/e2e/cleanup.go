@@ -26,9 +26,9 @@ const (
 	cleanupWorkerLimit = 8
 	// cleanupNodeTimeout bounds all dependency layers when AfterSuite runs
 	// after a Ginkgo interruption.
-	// ponytail: fixed 2h cap covers six 5m waves in bounded batches plus delete overhead;
+	// ponytail: fixed 4h cap covers six 5m waves in bounded batches plus delete overhead;
 	// derive it from waves if a future dependency adds another wave.
-	cleanupNodeTimeout = 2 * time.Hour
+	cleanupNodeTimeout = 4 * time.Hour
 )
 
 const (

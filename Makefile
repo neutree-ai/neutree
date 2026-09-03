@@ -211,9 +211,9 @@ test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 LABEL_FILTER ?=
 # Ginkgo owns the suite timeout; this finite outer timeout remains a last-resort
 # kill switch for a wedged test process. Keep E2E_GO_TIMEOUT at least
-# E2E_TIMEOUT plus the 2h cleanup budget; override both for longer suites.
+# E2E_TIMEOUT plus the 4h cleanup budget; override both for longer suites.
 E2E_TIMEOUT ?= 2h
-E2E_GO_TIMEOUT ?= 6h
+E2E_GO_TIMEOUT ?= 8h
 
 .PHONY: e2e-test
 e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
