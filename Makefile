@@ -463,6 +463,7 @@ build-engine-manifest: ## Build engine manifest only (no Docker image export, co
 		-v $(ENGINE_VERSION) \
 		-i "$(ENGINE_IMAGES)" \
 		-s "$(ENGINE_TASKS)" \
+		-p "$(ENGINE_PLATFORM)" \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json),-c $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/schema.json) \
 		$(if $(wildcard $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates),-t $(ENGINE_BASE_DIR)/$(ENGINE_NAME)/$(ENGINE_DIR_VERSION)/templates) \
 		-d "$(ENGINE_DESCRIPTION)"
