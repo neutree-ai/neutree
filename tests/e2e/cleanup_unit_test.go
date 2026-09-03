@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -314,6 +315,35 @@ metadata:
 	}
 }
 
+func TestRunCLIWithStdin_ForwardsInputArgsAndExitCode(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args.txt")
+	stdinPath := filepath.Join(t.TempDir(), "stdin.txt")
+	useCLIForTest(t, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" > %q\ncat > %q\nexit 7\n", argsPath, stdinPath))
+
+	result := RunCLIWithStdin("input", "get", "cluster")
+	if result.ExitCode != 7 {
+		t.Fatalf("exit code = %d, want 7; result=%+v", result.ExitCode, result)
+	}
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	for _, want := range []string{"--server-url", "--api-key", "--insecure", "get cluster"} {
+		if !strings.Contains(string(args), want) {
+			t.Fatalf("arguments %q do not contain %q", args, want)
+		}
+	}
+
+	stdin, err := os.ReadFile(stdinPath)
+	if err != nil {
+		t.Fatalf("read stdin: %v", err)
+	}
+	if string(stdin) != "input" {
+		t.Fatalf("stdin = %q, want %q", stdin, "input")
+	}
+}
+
 func TestReconcileTrackedResourcesAfterCommand(t *testing.T) {
 	resetTrackedForTest(t)
 	useRunIDForTest(t, "123456")
@@ -386,28 +416,6 @@ metadata:
 	}
 }
 
-func TestSnapshotTrackedResources_OrdersDependentsFirst(t *testing.T) {
-	resetTrackedForTest(t)
-	useRunIDForTest(t, "123456")
-
-	trackResource("modelregistry", "e2e-registry-123456", "default")
-	trackResource("imageregistry", "e2e-image-registry-123456", "default")
-	trackResource("cluster", "e2e-cluster-123456", "default")
-	trackResource("externalendpoint", "e2e-external-123456", "default")
-	trackResource("endpoint", "e2e-endpoint-123456", "default")
-
-	got := snapshotTrackedResources()
-	wantKinds := []string{"endpoint", "externalendpoint", "cluster", "imageregistry", "modelregistry"}
-	if len(got) != len(wantKinds) {
-		t.Fatalf("want %d resources, got %+v", len(wantKinds), got)
-	}
-	for i, want := range wantKinds {
-		if got[i].Kind != want {
-			t.Fatalf("resource %d kind = %q, want %q; all=%+v", i, got[i].Kind, want, got)
-		}
-	}
-}
-
 func TestCleanupTrackedResources_DeletesInDependencyOrder(t *testing.T) {
 	resetTrackedForTest(t)
 	useRunIDForTest(t, "123456")
@@ -418,7 +426,7 @@ func TestCleanupTrackedResources_DeletesInDependencyOrder(t *testing.T) {
 	trackResource("cluster", "e2e-cluster-123456", "default")
 	trackResource("endpoint", "e2e-endpoint-123456", "default")
 
-	cleanupTrackedResources()
+	cleanupTrackedResourcesWithContext(context.Background())
 	if trackedResourceCount() != 0 {
 		t.Fatalf("cleanup should clear current-process registry")
 	}
@@ -458,7 +466,7 @@ exit 0
 	trackResource("cluster", "e2e-cluster-123456", "default")
 	trackResource("imageregistry", "e2e-image-registry-123456", "default")
 
-	cleanupTrackedResources()
+	cleanupTrackedResourcesWithContext(context.Background())
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -473,10 +481,10 @@ exit 0
 	}
 }
 
-func TestRunCLIWithTimeout_ReturnsTimeoutExitCode(t *testing.T) {
+func TestRunCLIWithContext_ReturnsTimeoutExitCode(t *testing.T) {
 	useCLIForTest(t, "#!/bin/sh\nexec sleep 1\n")
 
-	result := runCLIWithTimeout(10*time.Millisecond, "get", "cluster")
+	result := runCLIWithContext(context.Background(), 10*time.Millisecond, "get", "cluster")
 	if result.ExitCode != 124 {
 		t.Fatalf("timeout exit code = %d, want 124; result=%+v", result.ExitCode, result)
 	}

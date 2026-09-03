@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -102,8 +99,7 @@ func trackedResourceCount() int {
 	return len(trackedResources)
 }
 
-// snapshotTrackedResources returns the current registry in dependency-safe
-// delete order without mutating it.
+// snapshotTrackedResources returns the current registry without mutating it.
 func snapshotTrackedResources() []trackedResource {
 	trackedMu.Lock()
 	resources := make([]trackedResource, 0, len(trackedResources))
@@ -113,25 +109,6 @@ func snapshotTrackedResources() []trackedResource {
 	}
 	trackedMu.Unlock()
 
-	sort.Slice(resources, func(i, j int) bool {
-		leftPriority := cleanupPriority(resources[i].Kind)
-		rightPriority := cleanupPriority(resources[j].Kind)
-
-		if leftPriority != rightPriority {
-			return leftPriority < rightPriority
-		}
-
-		if resources[i].Kind != resources[j].Kind {
-			return resources[i].Kind < resources[j].Kind
-		}
-
-		if resources[i].Workspace != resources[j].Workspace {
-			return resources[i].Workspace < resources[j].Workspace
-		}
-
-		return resources[i].Name < resources[j].Name
-	})
-
 	return resources
 }
 
@@ -140,12 +117,6 @@ func clearTrackedResources() {
 	defer trackedMu.Unlock()
 
 	trackedResources = make(map[trackedResource]struct{})
-}
-
-// cleanupTrackedResources uses a background context for unit tests. The suite
-// uses cleanupTrackedResourcesWithContext so its NodeTimeout can stop cleanup.
-func cleanupTrackedResources() {
-	cleanupTrackedResourcesWithContext(context.Background())
 }
 
 // cleanupTrackedResources force-deletes current-process resources in
@@ -304,7 +275,7 @@ func trackedResourcesFromManifest(path, fallbackWorkspace string) []trackedResou
 	}
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	resources := make(map[trackedResource]struct{})
+	var resources []trackedResource
 
 	for {
 		var manifest manifestResource
@@ -325,28 +296,11 @@ func trackedResourcesFromManifest(path, fallbackWorkspace string) []trackedResou
 
 		resource, ok := newTrackedResource(manifest.Kind, manifest.Metadata.Name, workspace)
 		if ok {
-			resources[resource] = struct{}{}
+			resources = append(resources, resource)
 		}
 	}
 
-	result := make([]trackedResource, 0, len(resources))
-	for resource := range resources {
-		result = append(result, resource)
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Kind != result[j].Kind {
-			return result[i].Kind < result[j].Kind
-		}
-
-		if result[i].Workspace != result[j].Workspace {
-			return result[i].Workspace < result[j].Workspace
-		}
-
-		return result[i].Name < result[j].Name
-	})
-
-	return result
+	return resources
 }
 
 func newTrackedResource(kind, name, workspace string) (trackedResource, bool) {
@@ -368,15 +322,15 @@ func newTrackedResource(kind, name, workspace string) (trackedResource, bool) {
 
 func canonicalTrackedKind(kind string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "cluster", "clusters":
+	case trackedCluster:
 		return trackedCluster, true
-	case "endpoint", "endpoints":
+	case trackedEndpoint:
 		return trackedEndpoint, true
-	case "externalendpoint", "external-endpoint", "externalendpoints", "external-endpoints":
+	case trackedExternalEndpoint:
 		return trackedExternalEndpoint, true
-	case "imageregistry", "image-registry", "imageregistries", "image-registries":
+	case trackedImageRegistry:
 		return trackedImageRegistry, true
-	case "modelregistry", "model-registry", "modelregistries", "model-registries":
+	case trackedModelRegistry:
 		return trackedModelRegistry, true
 	default:
 		return "", false
@@ -385,19 +339,6 @@ func canonicalTrackedKind(kind string) (string, bool) {
 
 func isCurrentRunResource(name string) bool {
 	return strings.HasPrefix(name, "e2e-") && strings.HasSuffix(name, "-"+Cfg.RunID)
-}
-
-func cleanupPriority(kind string) int {
-	switch kind {
-	case trackedEndpoint, trackedExternalEndpoint:
-		return 0
-	case trackedCluster:
-		return 1
-	case trackedImageRegistry, trackedModelRegistry:
-		return 2
-	default:
-		return 3
-	}
 }
 
 func commandFilePath(args []string) string {
@@ -466,59 +407,16 @@ func directCommandResource(args []string) (trackedResource, bool) {
 	return newTrackedResource(args[1], args[2], commandWorkspace(args))
 }
 
-// runCLIWithTimeout is a context-bounded sibling of RunCLI used by unit tests
-// and single cleanup calls without a Ginkgo node context.
-func runCLIWithTimeout(timeout time.Duration, args ...string) CLIResult {
-	return runCLIWithContext(context.Background(), timeout, args...)
-}
-
 // runCLIWithContext inherits the AfterSuite NodeTimeout and adds a per-command
 // bound so a hung CLI process cannot block the remaining cleanup groups.
 func runCLIWithContext(parent context.Context, timeout time.Duration, args ...string) CLIResult {
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	injected := []string{
-		"--server-url", Cfg.ServerURL,
-		"--api-key", Cfg.APIKey,
-		"--insecure",
-	}
-	fullArgs := make([]string, 0, len(injected)+len(args))
-	fullArgs = append(fullArgs, injected...)
-	fullArgs = append(fullArgs, args...)
-
-	cmd := exec.CommandContext(ctx, cliBinary, fullArgs...)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	exitCode := 0
-
-	if err != nil {
-		if ctx.Err() != nil {
-			return CLIResult{
-				Stdout:   stdout.String(),
-				Stderr:   strings.TrimSpace(stderr.String()) + " (cleanup command stopped: " + ctx.Err().Error() + ")",
-				ExitCode: 124,
-			}
-		}
-
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				exitCode = status.ExitStatus()
-			} else {
-				exitCode = 1
-			}
-		} else {
-			exitCode = 1
-		}
+	result := runCLI(ctx, "", args...)
+	if result.ExitCode == 124 && ctx.Err() != nil {
+		result.Stderr = strings.TrimSpace(result.Stderr) + " (cleanup command stopped: " + ctx.Err().Error() + ")"
 	}
 
-	return CLIResult{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}
+	return result
 }
