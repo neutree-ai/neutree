@@ -45,6 +45,13 @@ type EngineHelper struct {
 // EngineH is the package-level instance, initialised in BeforeAll.
 var EngineH *EngineHelper
 
+func testEngineName(prefix string) string {
+	name := prefix + "-" + Cfg.RunID
+	trackResource(trackedEngine, name, profileWorkspace())
+
+	return name
+}
+
 // NewEngineHelper creates an EngineHelper with the test workspace and mirror registry.
 func NewEngineHelper(mirrorRegistry string) *EngineHelper {
 	return &EngineHelper{
@@ -389,7 +396,7 @@ var _ = Describe("Engine", Ordered, func() {
 	Describe("Import", Label("engine", "import"), func() {
 
 		It("should create a new engine via CLI import", Label("C2613227"), func() {
-			name := "e2e-engine-create"
+			name := testEngineName("e2e-engine-create")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			pkg := buildEnginePackage(engineManifest{
@@ -417,7 +424,7 @@ var _ = Describe("Engine", Ordered, func() {
 
 		// NEU-427: TestRail C2649200
 		It("should populate Engine.Spec.SupportedTasks from version-level supported_tasks on create", Label("C2649200"), func() {
-			name := "e2e-engine-tasks-create"
+			name := testEngineName("e2e-engine-tasks-create")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// buildEnginePackage emits supported_tasks at engine_versions[0] level
@@ -443,7 +450,7 @@ var _ = Describe("Engine", Ordered, func() {
 
 		// NEU-427: TestRail C2649201
 		It("should union version-level supported_tasks into existing Engine.Spec.SupportedTasks on re-import", Label("C2649201"), func() {
-			name := "e2e-engine-tasks-union"
+			name := testEngineName("e2e-engine-tasks-union")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			pkg1 := buildEnginePackage(engineManifest{
@@ -479,7 +486,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should add a new engine version via CLI import", Label("C2613216"), func() {
-			name := "e2e-engine-newver"
+			name := testEngineName("e2e-engine-newver")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import v1
@@ -518,7 +525,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should add accelerator architecture to existing version via CLI import", Label("C2613217"), func() {
-			name := "e2e-engine-accel"
+			name := testEngineName("e2e-engine-accel")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import with nvidia_gpu only
@@ -556,7 +563,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should update K8s deployment config via CLI import", Label("C2613218"), func() {
-			name := "e2e-engine-deploy"
+			name := testEngineName("e2e-engine-deploy")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import without deploy template
@@ -597,7 +604,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should create engine from standalone manifest YAML", Label("manifest"), func() {
-			name := "e2e-engine-manifest-create"
+			name := testEngineName("e2e-engine-manifest-create")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			manifest := buildEngineManifestFile(engineManifest{
@@ -624,7 +631,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should add version to existing engine via manifest import", Label("manifest"), func() {
-			name := "e2e-engine-manifest-addver"
+			name := testEngineName("e2e-engine-manifest-addver")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			m1 := buildEngineManifestFile(engineManifest{
@@ -661,7 +668,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should merge accelerator via manifest import with --force", Label("manifest"), func() {
-			name := "e2e-engine-manifest-accel"
+			name := testEngineName("e2e-engine-manifest-accel")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			m1 := buildEngineManifestFile(engineManifest{
@@ -712,7 +719,7 @@ var _ = Describe("Engine", Ordered, func() {
 
 		It("should download and import images via manifest with package_url", Label("manifest", "docker"), func() {
 
-			name := "e2e-engine-manifest-pkgurl"
+			name := testEngineName("e2e-engine-manifest-pkgurl")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Build a real engine package archive to serve via HTTP
@@ -762,7 +769,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should update values schema via CLI import", Label("C2613219"), func() {
-			name := "e2e-engine-schema"
+			name := testEngineName("e2e-engine-schema")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import without schema
@@ -813,7 +820,7 @@ var _ = Describe("Engine", Ordered, func() {
 	Describe("RemoveVersion", Label("engine", "remove-version"), func() {
 
 		It("should remove a version from a multi-version engine", func() {
-			name := "e2e-engine-rmver"
+			name := testEngineName("e2e-engine-rmver")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import v1 and v2
@@ -859,7 +866,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should reject removing the last version without --force", func() {
-			name := "e2e-engine-rmver-last"
+			name := testEngineName("e2e-engine-rmver-last")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			pkg := buildEnginePackage(engineManifest{
@@ -878,7 +885,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should delete engine when force-removing the last version", func() {
-			name := "e2e-engine-rmver-force"
+			name := testEngineName("e2e-engine-rmver-force")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			pkg := buildEnginePackage(engineManifest{
@@ -902,7 +909,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should fail when removing a non-existent version", func() {
-			name := "e2e-engine-rmver-noexist"
+			name := testEngineName("e2e-engine-rmver-noexist")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			pkg := buildEnginePackage(engineManifest{
@@ -920,7 +927,7 @@ var _ = Describe("Engine", Ordered, func() {
 		})
 
 		It("should recalculate SupportedTasks after version removal", func() {
-			name := "e2e-engine-rmver-tasks"
+			name := testEngineName("e2e-engine-rmver-tasks")
 			DeferCleanup(EngineH.EnsureDeleted, name)
 
 			// Import v1 with text-generation
