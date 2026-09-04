@@ -2179,10 +2179,26 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data := newDeploymentManifestVariables()
-			k.setEngineArgs(&data, tt.endpoint, tt.engine)
+			require.NoError(t, k.setEngineArgs(&data, tt.endpoint, tt.engine))
 			assert.Equal(t, tt.expectedArgs, data.EngineArgs)
 		})
 	}
+}
+
+func TestKubernetesOrchestrator_NormalizesKVCacheWithoutMutatingEndpoint(t *testing.T) {
+	k := &kubernetesOrchestrator{}
+	originalArgs := map[string]interface{}{"kv_cache_memory_bytes": "8G"}
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Variables: map[string]interface{}{"engine_args": originalArgs},
+	}}
+	engine := &v1.Engine{Metadata: &v1.Metadata{Name: v1.EngineNameVLLM}}
+	data := newDeploymentManifestVariables()
+
+	require.NoError(t, k.setEngineArgs(&data, endpoint, engine))
+
+	assert.Equal(t, int64(8589934592), data.EngineArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", originalArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", endpoint.Spec.Variables["engine_args"].(map[string]interface{})["kv_cache_memory_bytes"])
 }
 
 func TestEscapeEngineArgsForTemplate(t *testing.T) {
@@ -2277,6 +2293,7 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 		"allowed_media_domains":      []string{"a.example.com", "b.example.com"},
 		"override_generation_config": map[string]interface{}{"temperature": 0.8},
 		"gpu_memory_utilization":     "0.85",
+		"kv_cache_memory_bytes":      float64(8589934592),
 		"enable_prefix_caching":      "false",
 	}
 
@@ -2287,7 +2304,55 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	assert.Equal(t, []interface{}{"a.example.com", "b.example.com"}, args["allowed_media_domains"])
 	assert.Equal(t, `{\"temperature\":0.8}`, args["override_generation_config"])
 	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
+	assert.Equal(t, "8589934592", args["kv_cache_memory_bytes"])
 	assert.Equal(t, "false", args["enable_prefix_caching"])
+}
+
+func TestBuildDeployment_VLLMLargeIntegerUsesDecimalNotation(t *testing.T) {
+	cases := []string{"vllm-v0.17.1", "vllm-v0.24.0"}
+
+	for _, templateKey := range cases {
+		t.Run(templateKey, func(t *testing.T) {
+			data := DeploymentManifestVariables{
+				NeutreeVersion:  "v0.1.0",
+				ClusterName:     "test-cluster",
+				Workspace:       "test-workspace",
+				Namespace:       "default",
+				ImagePrefix:     "registry.example.com",
+				ImageRepo:       "myrepo",
+				ImageTag:        "v1.0.0",
+				ImagePullSecret: "my-secret",
+				EngineName:      v1.EngineNameVLLM,
+				EngineVersion:   "v1.0.0",
+				EndpointName:    "test-endpoint",
+				ModelArgs: map[string]interface{}{
+					"name":          "gpt-4",
+					"task":          "text-generation",
+					"path":          "/mnt/models/gpt-4",
+					"registry_type": "bentoml",
+					"registry_path": "/mnt/registry/gpt-4-model",
+					"serve_name":    "gpt-4-serve",
+				},
+				EngineArgs: map[string]interface{}{
+					"kv_cache_memory_bytes": float64(8589934592),
+				},
+				Resources: map[string]string{
+					"cpu":    "500m",
+					"memory": "1Gi",
+				},
+				RoutingLogic: "roundrobin",
+				Replicas:     1,
+			}
+
+			prepareEngineArgsForTemplate(data.EngineArgs, v1.EngineNameVLLM)
+			objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, templateKey), data)
+			require.NoError(t, err)
+
+			tokens := extractEngineCLITokens(t, objs)
+			assertFlagWithValue(t, tokens, "--kv_cache_memory_bytes", "8589934592")
+			assert.NotContains(t, tokens, "8.589934592e+09")
+		})
+	}
 }
 
 func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
