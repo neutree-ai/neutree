@@ -50,6 +50,30 @@ local upstream_entry = {
         default = false,
       },
     },
+    {
+      priority = {
+        type = "integer",
+        required = false,
+        default = 0,
+        between = { 0, 2147483647 },
+      },
+    },
+    {
+      weight = {
+        type = "integer",
+        required = false,
+        default = 1,
+        between = { 1, 2147483647 },
+      },
+    },
+    {
+      max_inflight_requests = {
+        type = "integer",
+        required = false,
+        default = 0,
+        between = { 0, 2147483647 },
+      },
+    },
   },
 }
 

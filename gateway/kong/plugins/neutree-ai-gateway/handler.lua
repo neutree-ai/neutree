@@ -179,18 +179,169 @@ local function fail(code, msg)
     return kong.response.exit(code, msg and { error = { message = msg } } or nil)
 end
 
-local function resolve_upstream(conf, model)
-    if not conf.upstreams then
-        return nil
+local INFLIGHT_DICT_NAME = "neutree_ai_gateway_inflight"
+
+local function target_priority(entry)
+    return tonumber(entry.priority) or 0
+end
+
+local function target_weight(entry)
+    local weight = tonumber(entry.weight) or 1
+    return weight > 0 and weight or 1
+end
+
+local function target_limit(entry)
+    local limit = tonumber(entry.max_inflight_requests) or 0
+    return limit > 0 and limit or 0
+end
+
+local function inflight_dict()
+    return ngx.shared and ngx.shared[INFLIGHT_DICT_NAME] or nil
+end
+
+local function inflight_key(conf, model, index)
+    local endpoint = conf.route_prefix or conf.endpoint_name or "external-endpoint"
+    return table.concat({ "neutree-ai-gateway", endpoint, tostring(model), tostring(index) }, ":")
+end
+
+local function release_inflight()
+    local ctx = kong.ctx.plugin
+    local key = ctx.inflight_key
+    if not key then
+        return
     end
 
-    for _, entry in ipairs(conf.upstreams) do
-        if entry.model_mapping[model] then
-            return entry
+    -- Clear first so an unexpected duplicate release cannot decrement twice.
+    ctx.inflight_key = nil
+    local dict = inflight_dict()
+    if not dict then
+        kong.log.err("missing shared dictionary ", INFLIGHT_DICT_NAME, " while releasing inflight request")
+        return
+    end
+
+    local current, err = dict:incr(key, -1)
+    if not current then
+        kong.log.err("failed to release inflight request: ", err or "unknown")
+    elseif current < 0 then
+        dict:set(key, 0)
+    end
+end
+
+local function reserve_target(conf, model, candidate)
+    local limit = target_limit(candidate.entry)
+    if limit == 0 then
+        return true
+    end
+
+    local dict = inflight_dict()
+    if not dict then
+        return nil, "Kong is missing the " .. INFLIGHT_DICT_NAME .. " shared dictionary"
+    end
+
+    local key = inflight_key(conf, model, candidate.index)
+    local current, err = dict:incr(key, 1, 0)
+    if not current then
+        return nil, "failed to reserve upstream capacity: " .. (err or "unknown")
+    end
+
+    if current > limit then
+        dict:incr(key, -1)
+        return false
+    end
+
+    kong.ctx.plugin.inflight_key = key
+    return true
+end
+
+local function has_capacity(conf, model, candidate)
+    if target_limit(candidate.entry) == 0 then
+        return true
+    end
+
+    local dict = inflight_dict()
+    if not dict then
+        return nil, "Kong is missing the " .. INFLIGHT_DICT_NAME .. " shared dictionary"
+    end
+
+    return (dict:get(inflight_key(conf, model, candidate.index)) or 0) < target_limit(candidate.entry)
+end
+
+local function weighted_choice(candidates)
+    local total = 0
+    for _, candidate in ipairs(candidates) do
+        total = total + target_weight(candidate.entry)
+    end
+
+    -- Use the float form so a large, valid sum of target weights does not hit
+    -- Lua's integer argument limit for math.random.
+    local pick = math.random() * total
+    for _, candidate in ipairs(candidates) do
+        pick = pick - target_weight(candidate.entry)
+        if pick <= 0 then
+            return candidate
         end
     end
 
-    return nil
+    return candidates[#candidates]
+end
+
+local function select_upstream(conf, model)
+    if not conf.upstreams then
+        return nil, "model_not_found"
+    end
+
+    local candidates = {}
+    local priorities = {}
+    local seen_priorities = {}
+    for index, entry in ipairs(conf.upstreams) do
+        if entry.model_mapping[model] then
+            local priority = target_priority(entry)
+            candidates[#candidates + 1] = { entry = entry, index = index, priority = priority }
+            if not seen_priorities[priority] then
+                priorities[#priorities + 1] = priority
+                seen_priorities[priority] = true
+            end
+        end
+    end
+
+    if #candidates == 0 then
+        return nil, "model_not_found"
+    end
+
+    table.sort(priorities)
+    for _, priority in ipairs(priorities) do
+        while true do
+            local available = {}
+            for _, candidate in ipairs(candidates) do
+                if candidate.priority == priority then
+                    local ok, err = has_capacity(conf, model, candidate)
+                    if ok == nil then
+                        return nil, "internal_error", err
+                    end
+                    if ok then
+                        available[#available + 1] = candidate
+                    end
+                end
+            end
+
+            if #available == 0 then
+                break
+            end
+
+            local selected = weighted_choice(available)
+            local reserved, err = reserve_target(conf, model, selected)
+            if reserved then
+                return selected.entry
+            end
+            if reserved == nil then
+                return nil, "internal_error", err
+            end
+            -- Another worker filled this target after the capacity check. Loop
+            -- and select again from the remaining capacity in this priority.
+        end
+    end
+
+    return nil, "capacity_exhausted"
 end
 
 local function set_upstream_target(entry)
@@ -262,14 +413,18 @@ local function maybe_return_model_list(conf, suffix)
     if is_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
         local models = json_array()
+        local seen = {}
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
-                models[#models + 1] = {
-                    id = model_name,
-                    object = "model",
-                    created = 0,
-                    owned_by = "external-endpoint",
-                }
+                if not seen[model_name] then
+                    models[#models + 1] = {
+                        id = model_name,
+                        object = "model",
+                        created = 0,
+                        owned_by = "external-endpoint",
+                    }
+                    seen[model_name] = true
+                end
             end
         end
         kong.response.exit(200, {
@@ -282,14 +437,18 @@ local function maybe_return_model_list(conf, suffix)
     if is_anthropic_models_path(suffix) and kong.request.get_method() == "GET" then
         kong.ctx.plugin.skip = true
         local models = json_array()
+        local seen = {}
         for _, entry in ipairs(conf.upstreams) do
             for model_name, _ in pairs(entry.model_mapping) do
-                models[#models + 1] = {
-                    id = model_name,
-                    type = "model",
-                    display_name = model_name,
-                    created_at = "2025-01-01T00:00:00Z",
-                }
+                if not seen[model_name] then
+                    models[#models + 1] = {
+                        id = model_name,
+                        type = "model",
+                        display_name = model_name,
+                        created_at = "2025-01-01T00:00:00Z",
+                    }
+                    seen[model_name] = true
+                end
             end
         end
         kong.response.exit(200, {
@@ -1265,13 +1424,21 @@ function AIGatewayHandler:access(conf)
         kong.ctx.plugin.route_type = "/v1/chat/completions"
 
         if conf.upstreams then
-            local matched_entry = resolve_upstream(conf, openai_req.model)
+            local matched_entry, selection_err, selection_detail = select_upstream(conf, openai_req.model)
             if not matched_entry then
+                if selection_err == "capacity_exhausted" then
+                    return anthropic_error(503, "overloaded_error", "All upstreams are at capacity for model: " .. tostring(openai_req.model))
+                end
+                if selection_err == "internal_error" then
+                    kong.log.err(selection_detail)
+                    return anthropic_error(500, "api_error", "Unable to select an upstream")
+                end
                 return anthropic_error(400, "invalid_request_error", "No upstream configured for model: " .. tostring(openai_req.model))
             end
 
             local _, route_err = set_upstream_target(matched_entry)
             if route_err then
+                release_inflight()
                 return route_err
             end
             if matched_entry.internal then
@@ -1379,13 +1546,21 @@ function AIGatewayHandler:access(conf)
             return fail(400, "missing 'model' field in request body")
         end
 
-        local matched_entry = resolve_upstream(conf, ai_request.model)
+        local matched_entry, selection_err, selection_detail = select_upstream(conf, ai_request.model)
         if not matched_entry then
+            if selection_err == "capacity_exhausted" then
+                return fail(503, "All upstreams are at capacity for model: " .. ai_request.model)
+            end
+            if selection_err == "internal_error" then
+                kong.log.err(selection_detail)
+                return fail(500, "Unable to select an upstream")
+            end
             return fail(400, "No upstream configured for model: " .. ai_request.model)
         end
 
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
+            release_inflight()
             return route_err
         end
 
@@ -1479,6 +1654,8 @@ function AIGatewayHandler:body_filter(conf)
 end
 
 function AIGatewayHandler:log(conf)
+    release_inflight()
+
     if kong.ctx.plugin.skip then
         return
     end
@@ -1554,6 +1731,8 @@ AIGatewayHandler._TEST = {
     convert_response = convert_response,
     make_message_start = make_message_start,
     anthropic_usage_from_openai = anthropic_usage_from_openai,
+    select_upstream = select_upstream,
+    release_inflight = release_inflight,
 }
 
 return AIGatewayHandler
