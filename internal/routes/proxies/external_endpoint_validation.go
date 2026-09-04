@@ -120,46 +120,61 @@ func validateExternalEndpointRouting(payload map[string]json.RawMessage) *valida
 			MaxInflight   json.RawMessage `json:"max_inflight_requests"`
 		} `json:"targets"`
 	}
+
 	if err := json.Unmarshal(modelRoutesRaw, &modelRoutes); err != nil {
 		return invalidExternalEndpointPayloadError(err.Error())
 	}
+
 	providerNames := make(map[string]struct{}, len(upstreams))
+
 	for i, upstream := range upstreams {
 		nameRaw, hasName := upstream["name"]
 		if !hasName {
 			return invalidExternalEndpointRoutingError(i, "name is required when model_routes is configured")
 		}
 		var name string
+
 		if err := json.Unmarshal(nameRaw, &name); err != nil || name == "" {
 			return invalidExternalEndpointRoutingError(i, "name must be a non-empty string when model_routes is configured")
 		}
+
 		if _, exists := providerNames[name]; exists {
 			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("duplicate upstream name %q", name))
 		}
+
 		providerNames[name] = struct{}{}
 	}
+
 	seenModels := make(map[string]struct{}, len(modelRoutes))
+
 	for i, route := range modelRoutes {
 		if route.Model == "" {
 			return invalidExternalEndpointRoutingError(i, "model must not be empty")
 		}
+
 		if len(route.Targets) == 0 {
 			return invalidExternalEndpointRoutingError(i, "targets must not be empty")
 		}
+
 		if route.Strategy != "" && route.Strategy != "weighted_random" {
 			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("unsupported strategy %q", route.Strategy))
 		}
+
 		if _, exists := seenModels[route.Model]; exists {
 			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("duplicate model route %q", route.Model))
 		}
+
 		seenModels[route.Model] = struct{}{}
+
 		for j, target := range route.Targets {
 			if target.Upstream == "" || target.UpstreamModel == "" {
 				return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] upstream and upstream_model are required", j))
 			}
+
 			if _, exists := providerNames[target.Upstream]; !exists {
 				return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] references unknown upstream %q", j, target.Upstream))
 			}
+
 			for field, raw := range map[string]json.RawMessage{
 				"priority":              target.Priority,
 				"weight":                target.Weight,
@@ -168,10 +183,13 @@ func validateExternalEndpointRouting(payload map[string]json.RawMessage) *valida
 				if len(raw) == 0 {
 					continue
 				}
+
 				minimum, strict := 0, false
+
 				if field == "weight" {
 					strict = true
 				}
+
 				if err := validateOptionalRoutingInteger(map[string]json.RawMessage{field: raw}, field, minimum, strict); err != nil {
 					return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] %s", j, err.Error()))
 				}
@@ -201,6 +219,7 @@ func validateOptionalRoutingInteger(target map[string]json.RawMessage, field str
 	if strictMinimum && value <= minimum {
 		return fmt.Errorf("%s must be greater than %d", field, minimum)
 	}
+
 	if !strictMinimum && value < minimum {
 		return fmt.Errorf("%s must be greater than or equal to %d", field, minimum)
 	}

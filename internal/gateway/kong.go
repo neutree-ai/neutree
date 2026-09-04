@@ -810,12 +810,15 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	}
 
 	pluginReady := ready
+
 	if len(ee.Spec.ModelRoutes) > 0 {
 		var err error
 		pluginReady, err = expandExternalEndpointModelRoutes(ee, ready)
+
 		if err != nil {
 			return statuses, err
 		}
+
 		if len(pluginReady) == 0 {
 			return statuses, errors.Errorf("external endpoint %s has no resolvable model route target", ee.Key())
 		}
@@ -880,29 +883,36 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 // model target even when one provider is reused by several routes.
 func expandExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolvedUpstream) ([]resolvedUpstream, error) {
 	providers := make(map[string]resolvedUpstream, len(ready))
+
 	for _, r := range ready {
 		if r.entry.Name != "" {
 			providers[r.entry.Name] = r
 		}
 	}
+
 	configuredProviders := make(map[string]struct{}, len(ee.Spec.Upstreams))
+
 	for _, entry := range ee.Spec.Upstreams {
 		configuredProviders[entry.Name] = struct{}{}
 	}
 
 	expanded := make([]resolvedUpstream, 0)
+
 	for _, route := range ee.Spec.ModelRoutes {
 		if route.Model == "" {
 			return nil, errors.Errorf("external endpoint %s has a model route with an empty model", ee.Key())
 		}
+
 		for _, target := range route.Targets {
 			provider, ok := providers[target.Upstream]
 			if !ok {
 				if _, configured := configuredProviders[target.Upstream]; configured {
 					continue
 				}
+
 				return nil, errors.Errorf("external endpoint %s model route %q references unknown upstream %q", ee.Key(), route.Model, target.Upstream)
 			}
+
 			if target.UpstreamModel == "" {
 				return nil, errors.Errorf("external endpoint %s model route %q has an empty upstream_model", ee.Key(), route.Model)
 			}
@@ -1074,11 +1084,13 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
 	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
 	modelsByUpstream := make(map[string]map[string]struct{})
+
 	for _, route := range ee.Spec.ModelRoutes {
 		for _, target := range route.Targets {
 			if modelsByUpstream[target.Upstream] == nil {
 				modelsByUpstream[target.Upstream] = make(map[string]struct{})
 			}
+
 			modelsByUpstream[target.Upstream][route.Model] = struct{}{}
 		}
 	}
@@ -1086,13 +1098,16 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 	for i := range resolved {
 		entry := resolved[i].entry
 		models := entry.ExposedModels()
+
 		if routeModels := modelsByUpstream[entry.Name]; len(routeModels) > 0 {
 			models = make([]string, 0, len(routeModels))
 			for model := range routeModels {
 				models = append(models, model)
 			}
+
 			sort.Strings(models)
 		}
+
 		status := v1.ExternalEndpointUpstreamStatus{
 			Kind:   entry.Kind(),
 			Ref:    entry.Ref(),
