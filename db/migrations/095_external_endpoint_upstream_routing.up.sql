@@ -14,5 +14,3 @@ CREATE TYPE api.external_endpoint_model_route AS (
 
 ALTER TYPE api.external_endpoint_upstream_entry ADD ATTRIBUTE name TEXT;
 ALTER TYPE api.external_endpoint_spec ADD ATTRIBUTE model_routes api.external_endpoint_model_route[];
-
-NOTIFY pgrst, 'reload schema';
