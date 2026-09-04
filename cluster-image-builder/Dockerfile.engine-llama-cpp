@@ -52,7 +52,7 @@ RUN --mount=type=bind,from=build_ray,src=/ray,target=/install \
 
 # Install common serve-layer dependencies
 RUN --mount=type=bind,src=requirements,target=requirements \
-    pip install --no-cache-dir -r requirements/common.txt
+    pip install --no-cache-dir -r requirements/common.txt fastapi==0.136.1
 
 # Copy Neutree serve layer code (shared + specified engine version only)
 ARG ENGINE_VERSION_DIR
