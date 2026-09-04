@@ -3,6 +3,7 @@ package proxies
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ const (
 
 	externalEndpointInvalidPayloadCode = "10231"
 	externalEndpointInvalidNameCode    = "10232"
+	externalEndpointInvalidRoutingCode = "10233"
 )
 
 // validateExternalEndpoint enforces the metadata.name contract at the API
@@ -69,10 +71,141 @@ func validateExternalEndpoint() gin.HandlerFunc {
 
 				return
 			}
+
+			if validationErr := validateExternalEndpointRouting(payload); validationErr != nil {
+				rejectExternalEndpoint(c, validationErr)
+
+				return
+			}
 		}
 
 		c.Next()
 	}
+}
+
+func validateExternalEndpointRouting(payload map[string]json.RawMessage) *validationError {
+	specRaw, ok := payload["spec"]
+	if !ok || bytes.Equal(bytes.TrimSpace(specRaw), []byte("null")) {
+		return nil
+	}
+
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return invalidExternalEndpointPayloadError(err.Error())
+	}
+
+	upstreamsRaw, ok := spec["upstreams"]
+	if !ok || bytes.Equal(bytes.TrimSpace(upstreamsRaw), []byte("null")) {
+		return nil
+	}
+
+	var upstreams []map[string]json.RawMessage
+	if err := json.Unmarshal(upstreamsRaw, &upstreams); err != nil {
+		return invalidExternalEndpointPayloadError(err.Error())
+	}
+
+	modelRoutesRaw, ok := spec["model_routes"]
+	if !ok || bytes.Equal(bytes.TrimSpace(modelRoutesRaw), []byte("null")) {
+		return nil
+	}
+
+	var modelRoutes []struct {
+		Model    string `json:"model"`
+		Strategy string `json:"strategy"`
+		Targets  []struct {
+			Upstream      string          `json:"upstream"`
+			UpstreamModel string          `json:"upstream_model"`
+			Priority      json.RawMessage `json:"priority"`
+			Weight        json.RawMessage `json:"weight"`
+			MaxInflight   json.RawMessage `json:"max_inflight_requests"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(modelRoutesRaw, &modelRoutes); err != nil {
+		return invalidExternalEndpointPayloadError(err.Error())
+	}
+	providerNames := make(map[string]struct{}, len(upstreams))
+	for i, upstream := range upstreams {
+		nameRaw, hasName := upstream["name"]
+		if !hasName {
+			return invalidExternalEndpointRoutingError(i, "name is required when model_routes is configured")
+		}
+		var name string
+		if err := json.Unmarshal(nameRaw, &name); err != nil || name == "" {
+			return invalidExternalEndpointRoutingError(i, "name must be a non-empty string when model_routes is configured")
+		}
+		if _, exists := providerNames[name]; exists {
+			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("duplicate upstream name %q", name))
+		}
+		providerNames[name] = struct{}{}
+	}
+	seenModels := make(map[string]struct{}, len(modelRoutes))
+	for i, route := range modelRoutes {
+		if route.Model == "" {
+			return invalidExternalEndpointRoutingError(i, "model must not be empty")
+		}
+		if len(route.Targets) == 0 {
+			return invalidExternalEndpointRoutingError(i, "targets must not be empty")
+		}
+		if route.Strategy != "" && route.Strategy != "weighted_random" {
+			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("unsupported strategy %q", route.Strategy))
+		}
+		if _, exists := seenModels[route.Model]; exists {
+			return invalidExternalEndpointRoutingError(i, fmt.Sprintf("duplicate model route %q", route.Model))
+		}
+		seenModels[route.Model] = struct{}{}
+		for j, target := range route.Targets {
+			if target.Upstream == "" || target.UpstreamModel == "" {
+				return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] upstream and upstream_model are required", j))
+			}
+			if _, exists := providerNames[target.Upstream]; !exists {
+				return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] references unknown upstream %q", j, target.Upstream))
+			}
+			for field, raw := range map[string]json.RawMessage{
+				"priority":              target.Priority,
+				"weight":                target.Weight,
+				"max_inflight_requests": target.MaxInflight,
+			} {
+				if len(raw) == 0 {
+					continue
+				}
+				minimum, strict := 0, false
+				if field == "weight" {
+					strict = true
+				}
+				if err := validateOptionalRoutingInteger(map[string]json.RawMessage{field: raw}, field, minimum, strict); err != nil {
+					return invalidExternalEndpointRoutingError(i, fmt.Sprintf("targets[%d] %s", j, err.Error()))
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateOptionalRoutingInteger(target map[string]json.RawMessage, field string, minimum int,
+	strictMinimum bool) error {
+	raw, ok := target[field]
+	if !ok {
+		return nil
+	}
+
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("%s must be an integer", field)
+	}
+
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("%s must be an integer", field)
+	}
+
+	if strictMinimum && value <= minimum {
+		return fmt.Errorf("%s must be greater than %d", field, minimum)
+	}
+	if !strictMinimum && value < minimum {
+		return fmt.Errorf("%s must be greater than or equal to %d", field, minimum)
+	}
+
+	return nil
 }
 
 // validateExternalEndpointName checks the name a single payload carries.
@@ -190,5 +323,13 @@ func invalidExternalEndpointNameError(hint string) *validationError {
 		Code:    externalEndpointInvalidNameCode,
 		Message: "invalid external endpoint name",
 		Hint:    hint + "; use metadata.display_name for a human-readable name",
+	}
+}
+
+func invalidExternalEndpointRoutingError(index int, hint string) *validationError {
+	return &validationError{
+		Code:    externalEndpointInvalidRoutingCode,
+		Message: "invalid external endpoint routing policy",
+		Hint:    fmt.Sprintf("spec.upstreams[%d].%s", index, hint),
 	}
 }
