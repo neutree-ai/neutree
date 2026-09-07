@@ -364,7 +364,8 @@ func createUpgradeTestResources(irName, mrName, sshCluster, k8sCluster, sshEp, k
 	By("Creating model registry")
 
 	mrPath, err := renderTemplateToTempFile("testdata/model-registry.yaml", map[string]any{
-		"E2E_MODEL_REGISTRY": mrName,
+		"E2E_MODEL_REGISTRY":             mrName,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": profile.ModelRegistry.Credentials,
 	})
 	Expect(err).NotTo(HaveOccurred())
 

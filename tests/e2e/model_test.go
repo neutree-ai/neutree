@@ -24,9 +24,10 @@ var registryYAML string
 // and waits for it to reach Connected phase.
 func SetupModelRegistry() {
 	defaults := map[string]any{
-		"E2E_MODEL_REGISTRY":     testRegistry(),
-		"E2E_WORKSPACE":          profileWorkspace(),
-		"E2E_MODEL_REGISTRY_URL": profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY":             testRegistry(),
+		"E2E_WORKSPACE":                  profileWorkspace(),
+		"E2E_MODEL_REGISTRY_URL":         profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": profile.ModelRegistry.Credentials,
 	}
 	var err error
 	registryYAML, err = renderTemplateToTempFile(

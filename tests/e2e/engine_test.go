@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/neutree-ai/neutree/internal/util"
 )
 
 // --- Engine registry setup/teardown ---
@@ -38,8 +41,11 @@ func TeardownLocalRegistry() {
 
 // EngineHelper encapsulates common parameters for engine CLI operations.
 type EngineHelper struct {
-	workspace      string
-	mirrorRegistry string
+	workspace        string
+	mirrorRegistry   string
+	registryProject  string
+	registryUsername string
+	registryPassword string
 }
 
 // EngineH is the package-level instance, initialised in BeforeAll.
@@ -48,8 +54,22 @@ var EngineH *EngineHelper
 // NewEngineHelper creates an EngineHelper with the test workspace and mirror registry.
 func NewEngineHelper(mirrorRegistry string) *EngineHelper {
 	return &EngineHelper{
-		workspace:      profileWorkspace(),
-		mirrorRegistry: mirrorRegistry,
+		workspace:        profileWorkspace(),
+		mirrorRegistry:   mirrorRegistry,
+		registryUsername: "e2e",
+		registryPassword: "e2e",
+	}
+}
+
+// NewProfileEngineHelper configures engine imports for the profile's writable
+// ImageRegistry, including its project and credentials.
+func NewProfileEngineHelper() *EngineHelper {
+	return &EngineHelper{
+		workspace:        profileWorkspace(),
+		mirrorRegistry:   util.StripRegistryScheme(strings.TrimSpace(profile.ImageRegistry.URL)),
+		registryProject:  profile.ImageRegistry.Repository,
+		registryUsername: profile.ImageRegistry.Username,
+		registryPassword: profile.ImageRegistry.Password,
 	}
 }
 
@@ -59,11 +79,27 @@ func (e *EngineHelper) Import(packagePath string, extra ...string) CLIResult {
 		"-p", packagePath,
 		"--workspace", e.workspace,
 		"--mirror-registry", e.mirrorRegistry,
-		"--registry-username", "e2e",
-		"--registry-password", "e2e",
+		"--registry-username", e.registryUsername,
+		"--registry-password", e.registryPassword,
+	}
+	if e.registryProject != "" {
+		args = append(args, "--registry-project", e.registryProject)
 	}
 	args = append(args, extra...)
 	return RunCLI(args...)
+}
+
+// ImportPackageURL imports an archive referenced by a temporary standalone
+// manifest. The importer downloads the archive and pushes its images.
+func (e *EngineHelper) ImportPackageURL(name, version, packageURL string, extra ...string) CLIResult {
+	manifest := buildEngineManifestFile(engineManifest{
+		Name:       name,
+		Version:    version,
+		PackageURL: packageURL,
+	})
+	defer os.Remove(manifest)
+
+	return e.Import(manifest, extra...)
 }
 
 // ImportSkipImage imports an engine package with --skip-image-push.
