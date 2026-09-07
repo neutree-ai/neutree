@@ -348,6 +348,7 @@ EOF
 
 # Package
 mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
 PACKAGE_FILE="${OUTPUT_DIR}/${PACKAGE_NAME}.tar.gz"
 
 log_info "Creating package: $PACKAGE_FILE"
@@ -357,9 +358,9 @@ CURRENT_DIR=$(pwd)
 cd "$TEMP_DIR" || exit 1
 
 if command -v pigz &> /dev/null; then
-    tar -I "pigz -p 16" -cf "${CURRENT_DIR}/${PACKAGE_FILE}" *
+    tar -I "pigz -p 16" -cf "$PACKAGE_FILE" ./*
 else
-    tar -czf "${CURRENT_DIR}/${PACKAGE_FILE}" *
+    tar -czf "$PACKAGE_FILE" ./*
 fi
 
 cd "$CURRENT_DIR" || exit 1
