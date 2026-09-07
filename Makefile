@@ -209,12 +209,18 @@ test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks\|db/dbtest')
 
 LABEL_FILTER ?=
-E2E_TIMEOUT ?= 30m
+# Ginkgo owns the suite timeout; this finite outer timeout remains a last-resort
+# kill switch for a wedged test process. Keep E2E_GO_TIMEOUT at least
+# E2E_TIMEOUT plus the 4h cleanup budget; override both for longer suites.
+E2E_TIMEOUT ?= 2h
+E2E_GO_TIMEOUT ?= 8h
 
 .PHONY: e2e-test
 e2e-test: ## Run E2E tests (requires NEUTREE_SERVER_URL and NEUTREE_API_KEY)
-	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout 6h ./tests/e2e/... \
-		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips --ginkgo.timeout=$(E2E_TIMEOUT) $(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
+	$(if $(wildcard .env),set -a && source .env && set +a &&) go test -v -timeout $(E2E_GO_TIMEOUT) ./tests/e2e/... \
+		--ginkgo.v --ginkgo.no-color --ginkgo.silence-skips \
+		--ginkgo.timeout=$(E2E_TIMEOUT) --ginkgo.grace-period=5m \
+		$(if $(LABEL_FILTER),--ginkgo.label-filter="$(LABEL_FILTER)")
 
 ##@ Gateway Lua Testing
 

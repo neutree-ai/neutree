@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -134,6 +135,17 @@ func RunCLI(args ...string) CLIResult {
 
 // RunCLIWithStdin executes the neutree-cli binary with stdin input and given arguments.
 func RunCLIWithStdin(stdin string, args ...string) CLIResult {
+	trackResourcesForApplyCommand(args)
+	result := runCLI(context.Background(), stdin, args...)
+
+	if result.ExitCode == 0 {
+		reconcileTrackedResourcesAfterCommand(args)
+	}
+
+	return result
+}
+
+func runCLI(ctx context.Context, stdin string, args ...string) CLIResult {
 	injected := []string{
 		"--server-url", Cfg.ServerURL,
 		"--api-key", Cfg.APIKey,
@@ -143,7 +155,7 @@ func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 	fullArgs = append(fullArgs, injected...)
 	fullArgs = append(fullArgs, args...)
 
-	cmd := exec.Command(cliBinary, fullArgs...)
+	cmd := exec.CommandContext(ctx, cliBinary, fullArgs...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -158,7 +170,9 @@ func RunCLIWithStdin(stdin string, args ...string) CLIResult {
 	exitCode := 0
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if ctx.Err() != nil {
+			exitCode = 124
+		} else if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				exitCode = status.ExitStatus()
 			} else {
