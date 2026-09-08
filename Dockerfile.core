@@ -26,7 +26,7 @@ FROM --platform=linux/${ARCH} ubuntu:22.04
 
 # Copy requirements file and install dependencies
 COPY requirements.txt .
-RUN apt-get update && apt-get install rsync openssh-client util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && \
+RUN apt-get update && apt-get install tini rsync openssh-client util-linux python3 python3-dev nfs-common python3-pip build-essential libssl-dev libffi-dev -y && \
     pip install -U --no-cache-dir -r requirements.txt && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -54,8 +54,19 @@ echo "rpc.statd started"
 # Wait a moment for services to be ready
 sleep 1
 
-# Start main application (replace current process)
-exec /neutree-core "$@"
+# Start main application (replace current process).
+#
+# tini runs as PID 1 so orphaned grandchildren are reaped. Anything that
+# daemonizes below us (the rpcbind/rpc.statd started above, and the SSH
+# ControlMaster that OpenSSH backgrounds for ControlPersist) is reparented
+# to PID 1 on exit. Without an init there, those processes stay zombies
+# forever: the main binary only waits on its own direct children, and a
+# zombie pins its signal_struct, which in turn pins the scheduler autogroup
+# created by the setsid() such a daemon performs. That autogroup costs
+# sizeof(cfs_rq)+sizeof(sched_entity) per *possible* CPU (hundreds of KB on
+# large hosts) of unreclaimable, non-cgroup-accounted kernel memory, so the
+# leak escapes the pod memory limit and exhausts the node.
+exec /usr/bin/tini -- /neutree-core "$@"
 EOF
 
 RUN chmod +x /entrypoint.sh
