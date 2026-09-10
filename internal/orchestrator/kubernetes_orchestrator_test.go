@@ -1740,6 +1740,126 @@ func Test_checkPodFailures(t *testing.T) {
 	}
 }
 
+func Test_checkPodFailures_modelDownloaderReason(t *testing.T) {
+	const offlineReason = "model download failed for model-scope model 'Qwen/Qwen3-8B': runtime model " +
+		"download is unavailable: offline mode is enabled, so the weights cannot be fetched from the " +
+		"hub, and none are present at /models-cache."
+
+	podWithInit := func(state corev1.ContainerState, last corev1.ContainerState, restarts int32) []corev1.Pod {
+		return []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-dl"},
+			Status: corev1.PodStatus{
+				InitContainerStatuses: []corev1.ContainerStatus{{
+					Name:                 modelDownloaderInitContainerName,
+					RestartCount:         restarts,
+					State:                state,
+					LastTerminationState: last,
+				}},
+			},
+		}}
+	}
+
+	terminated := corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+		ExitCode: 1,
+		Reason:   "Error",
+		Message:  offlineReason,
+	}}
+	crashLoop := corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+		Reason:  k8sContainerReasonCrashLoopBackOff,
+		Message: "back-off 5m0s restarting failed container",
+	}}
+
+	tests := []struct {
+		name        string
+		pods        []corev1.Pod
+		wantFailed  bool
+		wantMsgPart string
+	}{
+		{
+			name:        "terminated with a reason -> reason reaches the status",
+			pods:        podWithInit(terminated, corev1.ContainerState{}, 5),
+			wantFailed:  true,
+			wantMsgPart: "terminated with exit code 1 after 5 restarts: " + offlineReason,
+		},
+		{
+			name:        "crash looping -> the last attempt's reason is kept",
+			pods:        podWithInit(crashLoop, terminated, 5),
+			wantFailed:  true,
+			wantMsgPart: "terminated with exit code 1 after 5 restarts: " + offlineReason,
+		},
+		{
+			name: "no reason recorded -> no dangling colon",
+			pods: podWithInit(corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 1,
+			}}, corev1.ContainerState{}, 5),
+			wantFailed:  true,
+			wantMsgPart: "terminated with exit code 1 after 5 restarts",
+		},
+		{
+			name:       "retrying below the threshold -> not a failure yet",
+			pods:       podWithInit(terminated, corev1.ContainerState{}, 2),
+			wantFailed: false,
+		},
+		{
+			// At the threshold and running again, the attempt in flight is what
+			// counts; the previous exit must not be reported as the outcome.
+			// (Past the threshold a still-unready container is failed by the
+			// generic restart check, which is unchanged.)
+			name:       "running again at the threshold -> not judged by history",
+			pods:       podWithInit(corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}, terminated, 5),
+			wantFailed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := &kubernetesOrchestrator{}
+			hasFailed, msg := k.checkPodFailures(tt.pods)
+			assert.Equal(t, tt.wantFailed, hasFailed)
+
+			if tt.wantFailed {
+				assert.Contains(t, msg, tt.wantMsgPart)
+				assert.NotContains(t, msg, "restarts: \n")
+			}
+		})
+	}
+
+	t.Run("no reason recorded leaves no trailing separator", func(t *testing.T) {
+		k := &kubernetesOrchestrator{}
+		_, msg := k.checkPodFailures(podWithInit(corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+		}, corev1.ContainerState{}, 5))
+		assert.False(t, strings.HasSuffix(msg, ": "))
+	})
+}
+
+func Test_hasIncompleteModelDownloaderInitContainer_keepsLastReason(t *testing.T) {
+	const reason = "runtime model download is unavailable: cannot reach the ModelScope endpoint"
+
+	pods := []corev1.Pod{{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-dl"},
+		Status: corev1.PodStatus{
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name:         modelDownloaderInitContainerName,
+				RestartCount: 2,
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+					Reason:  k8sContainerReasonCrashLoopBackOff,
+					Message: "back-off 40s restarting failed container",
+				}},
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 1,
+					Message:  reason,
+				}},
+			}},
+		},
+	}}
+
+	incomplete, detail := hasIncompleteModelDownloaderInitContainer(pods)
+	assert.True(t, incomplete)
+	assert.Contains(t, detail, k8sContainerReasonCrashLoopBackOff)
+	assert.Contains(t, detail, "last attempt: "+reason)
+}
+
 func TestKubernetesOrchestrator_setRoutingLogic(t *testing.T) {
 	k := &kubernetesOrchestrator{}
 
