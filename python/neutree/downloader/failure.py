@@ -52,8 +52,12 @@ _SECRET_ENV_VARS = (
 _REDACTED = "<redacted>"
 
 _PATTERNS = (
-    # Authorization header, however it was rendered (str(), repr(), a dict).
-    (re.compile(r"(?i)(authorization\s*[:=]\s*['\"]?\s*(?:bearer|basic|token)?\s*)\S+"),
+    # Authorization header, however it was rendered. The optional quote after
+    # the key is what makes a dict/repr rendering match — {'Authorization':
+    # 'Basic ...'} puts a quote between the key and the colon, and without it
+    # only a value that happened to look like a known token shape was redacted,
+    # leaving Basic credentials in the clear.
+    (re.compile(r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?\s*(?:bearer|basic|token)?\s*)[^'\",}\s]+"),
      r"\1" + _REDACTED),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-~+/]+=*"), "Bearer " + _REDACTED),
     # Credential-bearing query parameters, including the signed-URL family a

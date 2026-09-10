@@ -25,6 +25,21 @@ class TestSanitize(unittest.TestCase):
         self.assertNotIn("ms-8f2c1d9e4b7a", cleaned)
         self.assertIn("<redacted>", cleaned)
 
+    def test_redacts_basic_credentials_in_dict_renderings(self):
+        """A quoted key puts a quote between "Authorization" and the colon.
+
+        Basic credentials match none of the token-shape patterns, so if the
+        header pattern does not fire on this rendering nothing else redacts them.
+        """
+        for rendering in ("{'Authorization': 'Basic dXNlcjpwYXNzd29yZA=='}",
+                          '{"Authorization": "Basic dXNlcjpwYXNzd29yZA=="}',
+                          "headers={'authorization': 'Token abc123xyz'}"):
+            with self.subTest(rendering=rendering):
+                cleaned = sanitize(rendering)
+                self.assertNotIn("dXNlcjpwYXNzd29yZA==", cleaned)
+                self.assertNotIn("abc123xyz", cleaned)
+                self.assertIn("<redacted>", cleaned)
+
     def test_redacts_bearer_token_in_prose(self):
         cleaned = sanitize("sent Bearer hf_AbCdEfGhIjKlMnOpQrSt to the hub")
         self.assertNotIn("hf_AbCdEfGhIjKlMnOpQrSt", cleaned)
