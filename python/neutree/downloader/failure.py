@@ -17,12 +17,26 @@ the step they cannot easily take.
 
 Two constraints shape the text that goes there:
 
-* **It is user-visible, so it is sanitized.** A hub error can quote the URL that
-  produced it, and a signed CDN URL carries its credential in the query string;
-  a wrapped exception can carry a header dict. `sanitize()` redacts those, and
-  additionally redacts the *literal values* of the token environment variables
-  this container was given — the one check that does not depend on guessing the
-  shape of a secret.
+* **It is user-visible, so the container's own credentials are redacted.**
+  `sanitize()` removes the *literal values* of the environment variables a token
+  can arrive in (`utils.CREDENTIAL_ENV_VARS`). That is an exact match, not a
+  guess at what a secret looks like, so it holds however the value was rendered
+  — quoted in a dict, in an `Authorization` header, or bare in prose.
+
+  There is deliberately no pattern-matching backstop here. An earlier version
+  carried regexes for `Authorization` headers, signed-URL query parameters and
+  `hf_`/`ms-`/`sk-` token shapes; they were removed because they were the wrong
+  instrument twice over. For the case that matters — this container's own token
+  — they only duplicated the exact match. For the case they nominally covered —
+  text written by the hub or by `huggingface_hub` — they scanned for
+  credential-shaped fragments, while what is actually risky about foreign text
+  is the content itself. That is handled structurally instead: whitespace is
+  collapsed (no injected log lines), the message is capped, and a URL is reduced
+  to `scheme://netloc` at the point it is interpolated, so a signed CDN URL's
+  query string never enters a message in the first place.
+
+  Add a pattern here when a real leak path is demonstrated, not in anticipation
+  of one: an unfalsifiable blocklist reads as protection and grants none.
 * **It is truncated by kubelet at 4096 bytes.** A message longer than that would
   be cut wherever the limit lands, which is exactly where the actionable
   sentence tends to be. The head is kept, on purpose: these messages lead with
@@ -30,8 +44,9 @@ Two constraints shape the text that goes there:
 """
 
 import os
-import re
 from typing import Optional
+
+from .utils import CREDENTIAL_ENV_VARS
 
 # kubelet caps a termination message at 4096 bytes and truncates the tail. Stay
 # under it with room for the multi-byte characters a model id or path can carry.
@@ -40,59 +55,30 @@ MAX_MESSAGE_BYTES = 3500
 TERMINATION_LOG_ENV = "NEUTREE_TERMINATION_LOG"
 DEFAULT_TERMINATION_LOG = "/dev/termination-log"
 
-# Environment variables whose value is a credential. Their literal values are
-# redacted out of any message, which catches a leak no pattern below would.
-_SECRET_ENV_VARS = (
-    "NEUTREE_DL_TOKEN",
-    "HF_TOKEN",
-    "HUGGING_FACE_HUB_TOKEN",
-    "MODELSCOPE_API_TOKEN",
-)
-
 _REDACTED = "<redacted>"
 
-_PATTERNS = (
-    # Authorization header, however it was rendered. The optional quote after
-    # the key is what makes a dict/repr rendering match — {'Authorization':
-    # 'Basic ...'} puts a quote between the key and the colon, and without it
-    # only a value that happened to look like a known token shape was redacted,
-    # leaving Basic credentials in the clear.
-    (re.compile(r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?\s*(?:bearer|basic|token)?\s*)[^'\",}\s]+"),
-     r"\1" + _REDACTED),
-    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-~+/]+=*"), "Bearer " + _REDACTED),
-    # Credential-bearing query parameters, including the signed-URL family a
-    # ModelScope/CDN redirect produces.
-    (re.compile(r"(?i)\b((?:access[_-]?token|api[_-]?key|apikey|auth|credential|password|"
-                r"secret|signature|sig|token|x-amz-[a-z-]*(?:signature|credential|security-token))"
-                r")=[^&\s'\"]+"),
-     r"\1=" + _REDACTED),
-    # Mapping/keyword renderings: {'token': 'ms-...'}, token='ms-...'.
-    (re.compile(r"(?i)(['\"]?(?:access[_-]?token|api[_-]?key|apikey|credential|password|secret|token)"
-                r"['\"]?\s*[:=]\s*)['\"][^'\"]+['\"]"),
-     r"\1'" + _REDACTED + "'"),
-    # Well-known token shapes, in case one is quoted bare.
-    (re.compile(r"\bhf_[A-Za-z0-9]{8,}"), _REDACTED),
-    (re.compile(r"\bms-[0-9a-fA-F]{8,}[0-9a-fA-F-]*"), _REDACTED),
-    (re.compile(r"\bsk-[A-Za-z0-9]{8,}"), _REDACTED),
-)
+# Below this length a credential is not distinguishable from ordinary words, and
+# replacing it would mangle the message rather than protect anything.
+_MIN_REDACTABLE_LENGTH = 4
 
 
 def sanitize(text: str) -> str:
-    """Strip credentials out of a message that is about to be shown to a user."""
+    """Remove this container's credentials from a message headed for a user.
+
+    Exact-value replacement over `CREDENTIAL_ENV_VARS`, which is the whole of it
+    — see the module docstring for why there is no pattern-matching backstop.
+    Very short values are left alone: a two-character token is indistinguishable
+    from ordinary text, and blanking it would corrupt the message it appears in.
+    """
     if not text:
         return ""
 
     cleaned = str(text)
 
-    # Literal secret values first: a token that also matches a pattern below is
-    # redacted either way, but one that matches none is only caught here.
-    for name in _SECRET_ENV_VARS:
+    for name in CREDENTIAL_ENV_VARS:
         value = os.environ.get(name)
-        if value and len(value) >= 4:
+        if value and len(value) >= _MIN_REDACTABLE_LENGTH:
             cleaned = cleaned.replace(value, _REDACTED)
-
-    for pattern, replacement in _PATTERNS:
-        cleaned = pattern.sub(replacement, cleaned)
 
     return cleaned
 

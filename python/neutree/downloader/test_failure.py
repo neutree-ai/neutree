@@ -17,53 +17,57 @@ from neutree.downloader.failure import (
     sanitize,
     write_termination_message,
 )
+from neutree.downloader.utils import CREDENTIAL_ENV_VARS
 
 
 class TestSanitize(unittest.TestCase):
-    def test_redacts_authorization_header(self):
-        cleaned = sanitize("failed: {'Authorization': 'Bearer ms-8f2c1d9e4b7a'} rejected")
-        self.assertNotIn("ms-8f2c1d9e4b7a", cleaned)
-        self.assertIn("<redacted>", cleaned)
+    """Redaction is exact-value, so it is rendering-independent by construction.
 
-    def test_redacts_basic_credentials_in_dict_renderings(self):
-        """A quoted key puts a quote between "Authorization" and the colon.
+    These cases exist to hold that property, not to enumerate spellings: if the
+    check ever became pattern-based again, the dict and header renderings below
+    are the first ones to slip through it.
+    """
 
-        Basic credentials match none of the token-shape patterns, so if the
-        header pattern does not fire on this rendering nothing else redacts them.
-        """
-        for rendering in ("{'Authorization': 'Basic dXNlcjpwYXNzd29yZA=='}",
-                          '{"Authorization": "Basic dXNlcjpwYXNzd29yZA=="}',
-                          "headers={'authorization': 'Token abc123xyz'}"):
-            with self.subTest(rendering=rendering):
-                cleaned = sanitize(rendering)
-                self.assertNotIn("dXNlcjpwYXNzd29yZA==", cleaned)
-                self.assertNotIn("abc123xyz", cleaned)
-                self.assertIn("<redacted>", cleaned)
-
-    def test_redacts_bearer_token_in_prose(self):
-        cleaned = sanitize("sent Bearer hf_AbCdEfGhIjKlMnOpQrSt to the hub")
-        self.assertNotIn("hf_AbCdEfGhIjKlMnOpQrSt", cleaned)
-
-    def test_redacts_signed_url_query_parameters(self):
-        cleaned = sanitize(
-            "HTTP 403 fetching https://cdn.modelscope.cn/model.safetensors"
-            "?Signature=abc123def&X-Amz-Security-Token=zzz&Expires=1700000000"
+    def test_redacts_the_token_however_it_is_rendered(self):
+        renderings = (
+            "HTTP 401 with Authorization: Bearer {tok}",
+            "{{'Authorization': 'Bearer {tok}'}} was rejected",
+            '{{"headers": {{"authorization": "Basic {tok}"}}}}',
+            "hub refused the credential {tok}",
+            "https://www.modelscope.cn/api/v1/models?token={tok}",
         )
-        self.assertNotIn("abc123def", cleaned)
-        self.assertNotIn("zzz", cleaned)
-        # Non-credential parameters survive: they are part of the diagnosis.
-        self.assertIn("Expires=1700000000", cleaned)
 
-    def test_redacts_token_environment_values_even_when_shapeless(self):
-        with mock.patch.dict(os.environ, {"MODELSCOPE_API_TOKEN": "plain-secret-value"}):
+        with mock.patch.dict(os.environ, {"MODELSCOPE_API_TOKEN": "ms-8f2c1d9e4b7a"}):
+            for rendering in renderings:
+                with self.subTest(rendering=rendering):
+                    cleaned = sanitize(rendering.format(tok="ms-8f2c1d9e4b7a"))
+                    self.assertNotIn("ms-8f2c1d9e4b7a", cleaned)
+                    self.assertIn("<redacted>", cleaned)
+
+    def test_redacts_a_token_of_no_particular_shape(self):
+        """The point of matching on value: this one looks like nothing."""
+        with mock.patch.dict(os.environ, {"NEUTREE_DL_TOKEN": "plain-secret-value"}):
             cleaned = sanitize("hub refused the credential plain-secret-value")
 
         self.assertNotIn("plain-secret-value", cleaned)
 
-    def test_keeps_the_actionable_text(self):
+    def test_covers_every_variable_a_credential_can_arrive_in(self):
+        for name in CREDENTIAL_ENV_VARS:
+            with self.subTest(env=name):
+                with mock.patch.dict(os.environ, {name: "the-secret-value"}, clear=True):
+                    self.assertNotIn("the-secret-value", sanitize("rejected the-secret-value"))
+
+    def test_leaves_a_message_with_no_credential_in_it_alone(self):
         message = ("runtime model download is unavailable: offline mode is enabled, so the weights "
                    "for ModelScope model 'Qwen/Qwen3-8B' cannot be fetched from the hub")
-        self.assertEqual(sanitize(message), message)
+
+        with mock.patch.dict(os.environ, {"MODELSCOPE_API_TOKEN": "ms-8f2c1d9e4b7a"}):
+            self.assertEqual(sanitize(message), message)
+
+    def test_ignores_a_token_too_short_to_tell_from_prose(self):
+        """Blanking a 2-character value would corrupt the message, not protect it."""
+        with mock.patch.dict(os.environ, {"HF_TOKEN": "ab"}):
+            self.assertEqual(sanitize("unable to grab the weights"), "unable to grab the weights")
 
 
 class TestDescribeException(unittest.TestCase):

@@ -61,6 +61,24 @@ MODEL_DOWNLOAD_DONE_MARKER = "NEUTREE_MODEL_DOWNLOAD_DONE"
 MODEL_DOWNLOAD_FAILED_MARKER = "NEUTREE_MODEL_DOWNLOAD_FAILED"
 
 
+# The environment variables a credential can arrive in. Declared here, beside
+# the only place they are read, because failure.sanitize() redacts their literal
+# values out of anything shown to a user: a token this container holds but this
+# tuple does not name would be redacted by nothing.
+GENERIC_TOKEN_ENV = "NEUTREE_DL_TOKEN"
+MODELSCOPE_TOKEN_ENV = "MODELSCOPE_API_TOKEN"
+HF_TOKEN_ENV = "HF_TOKEN"
+
+CREDENTIAL_ENV_VARS = (
+    GENERIC_TOKEN_ENV,
+    MODELSCOPE_TOKEN_ENV,
+    HF_TOKEN_ENV,
+    # Not read here: huggingface_hub reads it for itself, so a Hugging Face
+    # download can be authenticated by a value this package never sees.
+    "HUGGING_FACE_HUB_TOKEN",
+)
+
+
 def download_with_markers(downloader: Any, source: str, dest: str, *,
                           credentials: Optional[Dict[str, str]] = None,
                           recursive: bool = True, overwrite: bool = False,
@@ -114,8 +132,8 @@ def build_request_from_model_args(model_args: Dict[str, Any]) -> Tuple[str, Down
     # The hub-specific variable is chosen by backend rather than by falling
     # through a shared chain, so a cluster that has both registries configured
     # cannot send a Hugging Face token to ModelScope or the reverse.
-    hub_token_env = "MODELSCOPE_API_TOKEN" if backend == "model-scope" else "HF_TOKEN"
-    token = os.environ.get("NEUTREE_DL_TOKEN") or os.environ.get(hub_token_env)
+    hub_token_env = MODELSCOPE_TOKEN_ENV if backend == "model-scope" else HF_TOKEN_ENV
+    token = os.environ.get(GENERIC_TOKEN_ENV) or os.environ.get(hub_token_env)
     if token and token != "":
         credentials = {"token": token}
 
