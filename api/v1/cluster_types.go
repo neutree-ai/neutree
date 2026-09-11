@@ -46,7 +46,14 @@ type ClusterSpec struct {
 	ImageRegistry             string                         `json:"image_registry"`
 	AcceleratorVirtualization *AcceleratorVirtualizationSpec `json:"accelerator_virtualization,omitempty" yaml:"accelerator_virtualization,omitempty"`
 	// the neutree serving version, if not specified, the default version will be used
-	Version string `json:"version"`
+	Version string      `json:"version"`
+	ZCache  *ZCacheSpec `json:"zcache,omitempty" yaml:"zcache,omitempty"`
+}
+
+// ZCacheSpec is the minimal cluster-level contract used by the PoC.
+type ZCacheSpec struct {
+	Enabled   bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	L1SizeGiB int32 `json:"l1_size_gib,omitempty" yaml:"l1_size_gib,omitempty"`
 }
 
 type ClusterUpgradeStrategy struct {
@@ -219,6 +226,15 @@ type ClusterStatus struct {
 	// AcceleratorVirtualization reports the effective HAMi virtualization mode
 	// and the virtualization resource keys legal under it.
 	AcceleratorVirtualization *AcceleratorVirtualizationStatus `json:"accelerator_virtualization,omitempty"`
+	ZCache                    *ZCacheStatus                    `json:"zcache,omitempty"`
+}
+
+type ZCacheStatus struct {
+	Phase        string `json:"phase,omitempty"`
+	ReadyNodes   int32  `json:"ready_nodes,omitempty"`
+	DesiredNodes int32  `json:"desired_nodes,omitempty"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"

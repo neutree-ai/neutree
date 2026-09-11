@@ -46,6 +46,12 @@ type EndpointSpec struct {
 	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
 	Variables         map[string]any      `json:"variables,omitempty"`
 	Env               map[string]string   `json:"env,omitempty"`
+	ZCache            *EndpointZCacheSpec `json:"zcache,omitempty" yaml:"zcache,omitempty"`
+}
+
+// EndpointZCacheSpec is the minimal opt-in contract for the PoC.
+type EndpointZCacheSpec struct {
+	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 type EndpointPhase string

@@ -49,6 +49,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 		Validators: []endpointValidator{
 			validateEndpointCreateModelSource,
 			validateEndpointCreateResourceShape,
+			validateEndpointZCache,
 		},
 	},
 	endpointValidationPatch: {
@@ -56,9 +57,23 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 			validateEndpointPatchClusterImmutable,
 			validateEndpointPatchModelSource,
 			validateEndpointPatchResourceShape,
+			validateEndpointZCache,
 		},
 	},
 	endpointValidationSoftDelete: {},
+}
+
+func validateEndpointZCache(_ storage.Storage, input *endpointValidationInput) *validationError {
+	if input.New == nil || input.New.Spec == nil || input.New.Spec.ZCache == nil || !input.New.Spec.ZCache.Enabled {
+		return nil
+	}
+	if input.New.Spec.Cluster == "" {
+		return &validationError{Code: "zcache_cluster_required", Message: "ZCache requires a cluster", Hint: "select a cluster with ZCache enabled", HTTPStatus: http.StatusBadRequest}
+	}
+	if input.Current != nil && input.Current.Spec != nil && input.Current.Spec.ZCache != nil && input.Current.Spec.ZCache.Enabled {
+		return nil
+	}
+	return nil
 }
 
 func validateEndpoint(store storage.Storage) gin.HandlerFunc {
