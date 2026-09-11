@@ -2,7 +2,9 @@
 """
 import argparse
 import sys
+import traceback
 
+from .failure import build_failure_message, write_termination_message
 from .utils import build_request_from_model_args, download_with_markers
 
 
@@ -37,6 +39,25 @@ def main(argv=None):
         "registry_type": args.registry_type,
         "path": args.path,
     }
+    # A failure anywhere below is the only thing the user will see about this
+    # endpoint: the container exits, kubelet reports an exit code and a restart
+    # count, and the reason reaches the endpoint status only through the
+    # termination message. Record it before exiting, or the status ends at
+    # "exit code 1" with nothing after the colon. Resolution of the backend and
+    # the request is inside the guard too — an unreadable registry or an
+    # unknown backend fails the container just as visibly as a failed transfer.
+    try:
+        _run(model_args)
+    except Exception as exc:  # noqa: BLE001 - reported, then turned into a non-zero exit
+        message = build_failure_message(exc, model_name=args.name,
+                                        registry_type=args.registry_type)
+        write_termination_message(message)
+        traceback.print_exc()
+        print(message, file=sys.stderr, flush=True)
+        sys.exit(1)
+
+
+def _run(model_args):
     # Build low-level DownloadRequest from model_args + environment using utils helper
     backend, dl_req = build_request_from_model_args(model_args)
 

@@ -671,14 +671,22 @@ func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string)
 					message += ": " + initStatus.State.Waiting.Message
 				}
 
+				// While the kubelet backs off, the waiting message is only its own
+				// "back-off ... restarting failed container". The reason the last
+				// attempt gave — offline hub, cache miss — lives in the previous
+				// termination and is what the user needs while the retries run.
+				if last := initStatus.LastTerminationState.Terminated; last != nil && last.Message != "" {
+					message += "; last attempt: " + strings.TrimSpace(last.Message)
+				}
+
 				return true, message
 			}
 
 			if initStatus.State.Terminated != nil {
 				message := fmt.Sprintf("%s init container terminated with exit code %d after %d restart(s), retrying model download",
 					modelDownloaderInitContainerName, initStatus.State.Terminated.ExitCode, initStatus.RestartCount)
-				if initStatus.State.Terminated.Message != "" {
-					message += ": " + initStatus.State.Terminated.Message
+				if detail := terminationDetail(initStatus); detail != "" {
+					message += ": " + detail
 				}
 
 				return true, message
@@ -714,16 +722,28 @@ func checkContainerStatuses(podName string, statuses []corev1.ContainerStatus, c
 			continue
 		}
 
-		if containerType == "Init Container" &&
-			cs.State.Terminated != nil &&
-			cs.State.Terminated.ExitCode != 0 &&
-			cs.RestartCount >= containerFailureRestartThreshold {
-			failed = true
+		// An init container that has exhausted the restart threshold is a
+		// terminal failure, and the reason it exited is the only thing the user
+		// can act on. Both halves of the crash-loop cycle are matched: the
+		// moment of exit (State.Terminated) and the back-off that follows it
+		// (State.Waiting=CrashLoopBackOff, where the exit has already moved
+		// into LastTerminationState). Reading only the first loses the reason
+		// for most of the loop's duration and reports the endpoint as merely
+		// downloading while the kubelet waits out its back-off.
+		if containerType == "Init Container" && cs.RestartCount >= containerFailureRestartThreshold {
+			if terminated := failedInitTermination(cs); terminated != nil {
+				failed = true
 
-			errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' %s '%s' terminated with exit code %d after %d restarts: %s",
-				podName, containerType, cs.Name, cs.State.Terminated.ExitCode, cs.RestartCount, cs.State.Terminated.Message))
+				message := fmt.Sprintf("Pod '%s' %s '%s' terminated with exit code %d after %d restarts",
+					podName, containerType, cs.Name, terminated.ExitCode, cs.RestartCount)
+				if detail := terminationDetail(cs); detail != "" {
+					message += ": " + detail
+				}
 
-			continue
+				errorMsg = append(errorMsg, message)
+
+				continue
+			}
 		}
 
 		// Check for ImagePullBackOff
@@ -828,6 +848,61 @@ func containerFailureContext(cs corev1.ContainerStatus) (string, string) {
 	}
 
 	return "", ""
+}
+
+// failedInitTermination returns the non-zero exit an init container is failing
+// on, whether that exit is the container's current state or the one it is
+// backing off from. Nil when the container is not sitting on a failed exit —
+// notably when it is Running again, where a historical exit says nothing about
+// the attempt in flight.
+func failedInitTermination(cs corev1.ContainerStatus) *corev1.ContainerStateTerminated {
+	if cs.State.Terminated != nil {
+		if cs.State.Terminated.ExitCode != 0 {
+			return cs.State.Terminated
+		}
+
+		return nil
+	}
+
+	if cs.State.Waiting != nil && cs.LastTerminationState.Terminated != nil &&
+		cs.LastTerminationState.Terminated.ExitCode != 0 {
+		return cs.LastTerminationState.Terminated
+	}
+
+	return nil
+}
+
+// terminationDetail returns the actionable reason a container recorded on its
+// way out, preferring the termination message the process itself wrote (the
+// model downloader writes the offline / cache-miss reason there) over the
+// kubelet's own wording.
+//
+// The last attempt's message is kept when the current state has none: a
+// container in CrashLoopBackOff reports only "back-off 5m0s restarting failed
+// container", and dropping to that would discard the one sentence that says
+// what to do about it.
+func terminationDetail(cs corev1.ContainerStatus) string {
+	if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+		return strings.TrimSpace(cs.State.Terminated.Message)
+	}
+
+	if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Message != "" {
+		return strings.TrimSpace(cs.LastTerminationState.Terminated.Message)
+	}
+
+	if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
+		return cs.State.Terminated.Reason
+	}
+
+	if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+		if cs.State.Waiting.Message != "" {
+			return cs.State.Waiting.Reason + ": " + strings.TrimSpace(cs.State.Waiting.Message)
+		}
+
+		return cs.State.Waiting.Reason
+	}
+
+	return ""
 }
 
 // joinReasonMessage returns the failure-context suffix for the restart
