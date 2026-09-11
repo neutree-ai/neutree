@@ -63,7 +63,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 	endpointValidationSoftDelete: {},
 }
 
-func validateEndpointZCache(_ storage.Storage, input *endpointValidationInput) *validationError {
+func validateEndpointZCache(store storage.Storage, input *endpointValidationInput) *validationError {
 	if input.New == nil || input.New.Spec == nil || input.New.Spec.ZCache == nil || !input.New.Spec.ZCache.Enabled {
 		return nil
 	}
@@ -72,6 +72,16 @@ func validateEndpointZCache(_ storage.Storage, input *endpointValidationInput) *
 	}
 	if input.Current != nil && input.Current.Spec != nil && input.Current.Spec.ZCache != nil && input.Current.Spec.ZCache.Enabled {
 		return nil
+	}
+	cluster, validationErr := resolveEndpointCluster(store, input.New)
+	if validationErr != nil {
+		return validationErr
+	}
+	if cluster.Spec == nil || cluster.Spec.ZCache == nil || !cluster.Spec.ZCache.Enabled {
+		return &validationError{Code: "zcache_cluster_disabled", Message: "selected cluster does not have ZCache enabled", Hint: "enable ZCache on the cluster first", HTTPStatus: http.StatusBadRequest}
+	}
+	if cluster.Status == nil || cluster.Status.ZCache == nil || cluster.Status.ZCache.Phase != "Ready" {
+		return &validationError{Code: "zcache_not_ready", Message: "selected cluster ZCache is not ready", Hint: "wait for the cluster ZCache runtime to become Ready", HTTPStatus: http.StatusBadRequest}
 	}
 	return nil
 }

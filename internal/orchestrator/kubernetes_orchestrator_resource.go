@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -58,6 +59,7 @@ type DeploymentManifestVariables struct {
 	Replicas        int32
 	NodeSelector    map[string]string
 	NeutreeVersion  string
+	ZCacheEndpoint  string
 	// ProgressDeadlineSeconds bounds how long the Deployment may take to
 	// become available before the controller reports ProgressDeadlineExceeded.
 	// StartupProbeFailureThreshold is the startupProbe failureThreshold; with
@@ -194,10 +196,35 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 	// detect user-provided values in either key format. Applies to engines
 	// that expose a TP arg (vLLM / SGLang).
 	setEngineTensorParallelDefault(data, endpoint, engine)
+	setZCacheEngineArgs(data, endpoint, engine)
 
 	// Prepare engine arg values for YAML double-quoted template rendering.
 	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
 	prepareEngineArgsForTemplate(data.EngineArgs, engine.Metadata.Name)
+}
+
+// setZCacheEngineArgs injects the fixed PoC LMCache MP endpoint only after the
+// cluster reconciler has reported a Ready runtime. A disabled or unavailable
+// cache leaves the existing engine arguments untouched.
+func setZCacheEngineArgs(data *DeploymentManifestVariables, endpoint *v1.Endpoint, engine *v1.Engine) {
+	if engine == nil || engine.Metadata == nil || engine.Metadata.Name != v1.EngineNameVLLM || endpoint == nil || endpoint.Spec == nil || endpoint.Spec.ZCache == nil || !endpoint.Spec.ZCache.Enabled {
+		return
+	}
+	raw := data.ZCacheEndpoint
+	if raw == "" {
+		return
+	}
+	host, port := raw, "7500"
+	if parsedHost, parsedPort, err := net.SplitHostPort(raw); err == nil {
+		host, port = parsedHost, parsedPort
+	}
+	if _, exists := data.EngineArgs["kv-transfer-config"]; exists {
+		return
+	}
+	if _, exists := data.EngineArgs["kv_transfer_config"]; exists {
+		return
+	}
+	data.EngineArgs["kv-transfer-config"] = fmt.Sprintf(`{"kv_connector":"LMCacheMPConnector","kv_role":"kv_both","kv_connector_extra_config":{"lmcache.mp.host":"tcp://%s","lmcache.mp.port":%s,"lmcache.mp.mp_transfer_mode":"data"}}`, host, port)
 }
 
 func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string) {
@@ -521,6 +548,11 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 
 	// Set routing logic
 	k.setRoutingLogic(&data, endpoint)
+	// Resolve the cluster-level runtime address into render-only variables; it is
+	// never persisted as endpoint user input.
+	if endpoint.Spec != nil && endpoint.Spec.ZCache != nil && endpoint.Spec.ZCache.Enabled && deployedCluster.Status != nil && deployedCluster.Status.ZCache != nil && deployedCluster.Status.ZCache.Phase == "Ready" {
+		data.ZCacheEndpoint = deployedCluster.Status.ZCache.Endpoint
+	}
 
 	// Set engine args
 	k.setEngineArgs(&data, endpoint, engine)

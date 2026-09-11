@@ -54,6 +54,8 @@ type ClusterSpec struct {
 type ZCacheSpec struct {
 	Enabled   bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	L1SizeGiB int32 `json:"l1_size_gib,omitempty" yaml:"l1_size_gib,omitempty"`
+	// APIURL is the in-cluster zcache-api base URL used by the PoC.
+	APIURL string `json:"api_url,omitempty" yaml:"api_url,omitempty"`
 }
 
 type ClusterUpgradeStrategy struct {
