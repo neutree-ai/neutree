@@ -371,8 +371,9 @@
       "description": "The fraction of GPU memory to be used"
     },
     "kv_cache_memory_bytes": {
-      "type": "integer",
-      "description": "Size of KV Cache per GPU in bytes"
+      "type": ["integer", "string"],
+      "pattern": "^(?:\\d+|\\d+(?:\\.\\d+)?[kmgt]|\\d+[KMGT])$",
+      "description": "Size of KV Cache per GPU in bytes. Supports integer bytes or human-readable values such as 8G"
     },
     "max_num_batched_tokens": {
       "type": "integer",

@@ -12,6 +12,7 @@ func TestGetVLLMV0_17_1EngineSchema(t *testing.T) {
 	if schema == nil {
 		t.Fatal("expected schema to be non-nil")
 	}
+	assertHumanReadableKVCacheMemorySchema(t, schema)
 }
 
 func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
@@ -22,6 +23,7 @@ func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
 	if schema == nil {
 		t.Fatal("expected schema to be non-nil")
 	}
+	assertHumanReadableKVCacheMemorySchema(t, schema)
 
 	props, ok := schema["properties"].(map[string]interface{})
 	if !ok {
@@ -50,6 +52,26 @@ func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
 
 	if _, err := GetEngineSchema("vllm-v0.24.0"); err != nil {
 		t.Fatalf("EngineSchemas lookup for vLLM v0.24.0 failed: %v", err)
+	}
+}
+
+func assertHumanReadableKVCacheMemorySchema(t *testing.T, schema map[string]interface{}) {
+	t.Helper()
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("schema.properties missing or wrong type")
+	}
+	kvCache, ok := props["kv_cache_memory_bytes"].(map[string]interface{})
+	if !ok {
+		t.Fatal("kv_cache_memory_bytes schema missing or wrong type")
+	}
+	types, ok := kvCache["type"].([]interface{})
+	if !ok || len(types) != 2 || types[0] != "integer" || types[1] != "string" {
+		t.Fatalf("kv_cache_memory_bytes type = %#v, want [integer string]", kvCache["type"])
+	}
+	if _, ok := kvCache["pattern"].(string); !ok {
+		t.Fatal("kv_cache_memory_bytes string pattern is missing")
 	}
 }
 

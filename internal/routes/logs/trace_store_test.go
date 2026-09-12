@@ -237,11 +237,11 @@ func TestAssembleBody(t *testing.T) {
 	b64 := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 
 	cases := []struct {
-		name   string
-		parts  []traceChunk
-		want   int
-		body   string
-		ok     bool
+		name  string
+		parts []traceChunk
+		want  int
+		body  string
+		ok    bool
 	}{
 		{"empty complete", nil, 0, "", true},
 		{"single", []traceChunk{{seq: 0, data: b64("abc")}}, 1, "abc", true},
