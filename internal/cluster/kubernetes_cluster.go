@@ -123,14 +123,14 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 		}
 	}
 
-	if len(errs) > 0 {
-		return utilerrors.NewAggregate(errs)
-	}
-
 	// ZCache is an optional optimization layer; its API or rollout state must
 	// not block the core Kubernetes cluster from becoming usable.
 	if err := c.reconcileZCache(reconcileCtx.Ctx, reconcileCtx.Cluster); err != nil {
 		klog.Warningf("failed to reconcile zcache for %s: %v", reconcileCtx.Cluster.Metadata.WorkspaceName(), err)
+	}
+
+	if len(errs) > 0 {
+		return utilerrors.NewAggregate(errs)
 	}
 
 	// Update status fields after successful reconcile
