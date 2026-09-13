@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/compatibility"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -70,9 +71,6 @@ func validateEndpointZCache(store storage.Storage, input *endpointValidationInpu
 	if input.New.Spec.Cluster == "" {
 		return &validationError{Code: "zcache_cluster_required", Message: "ZCache requires a cluster", Hint: "select a cluster with ZCache enabled", HTTPStatus: http.StatusBadRequest}
 	}
-	if input.Current != nil && input.Current.Spec != nil && input.Current.Spec.ZCache != nil && input.Current.Spec.ZCache.Enabled {
-		return nil
-	}
 	cluster, validationErr := resolveEndpointCluster(store, input.New)
 	if validationErr != nil {
 		return validationErr
@@ -82,6 +80,24 @@ func validateEndpointZCache(store storage.Storage, input *endpointValidationInpu
 	}
 	if cluster.Status == nil || cluster.Status.ZCache == nil || cluster.Status.ZCache.Phase != "Ready" {
 		return &validationError{Code: "zcache_not_ready", Message: "selected cluster ZCache is not ready", Hint: "wait for the cluster ZCache runtime to become Ready", HTTPStatus: http.StatusBadRequest}
+	}
+	engine := ""
+	engineVersion := ""
+	if input.New.Spec.Engine != nil {
+		engine = input.New.Spec.Engine.Engine
+		engineVersion = input.New.Spec.Engine.Version
+	}
+	zcacheVersion := cluster.Spec.ZCache.RuntimeVersion
+	if zcacheVersion == "" {
+		zcacheVersion = "v0.5.0"
+	}
+	matrix, err := compatibility.Default()
+	if err != nil {
+		return &validationError{Code: "zcache_compatibility_config_invalid", Message: "ZCache compatibility configuration is invalid", Hint: err.Error(), HTTPStatus: http.StatusInternalServerError}
+	}
+	result, reason := matrix.Check(engine, engineVersion, zcacheVersion)
+	if result != compatibility.Supported {
+		return &validationError{Code: "zcache_incompatible", Message: "engine and ZCache versions are not a supported combination", Hint: reason, HTTPStatus: http.StatusBadRequest}
 	}
 	return nil
 }
