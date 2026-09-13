@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	pocZCacheImageRepository = "lmcache/lmcache"
-	pocZCacheImageTag        = "0.5.0"
+	pocZCacheImageRepository = "registry.smtx.io/zcache/lmcache-standalone"
+	pocZCacheImageTag        = "v0.5.0"
 	pocZCacheServicePort     = 7500
 	pocZCacheMetricsPort     = 8000
 	pocZCacheAPIURL          = "http://zcache-api:8080"
