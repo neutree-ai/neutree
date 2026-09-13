@@ -238,6 +238,7 @@ type ZCacheStatus struct {
 	Endpoint     string             `json:"endpoint,omitempty"`
 	Message      string             `json:"message,omitempty"`
 	Nodes        []ZCacheNodeStatus `json:"nodes,omitempty"`
+	Version      string             `json:"version,omitempty"`
 }
 
 type ZCacheNodeStatus struct {

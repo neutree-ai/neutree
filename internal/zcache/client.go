@@ -40,6 +40,11 @@ type RuntimeResponse struct {
 	Endpoint *RuntimeEndpoint `json:"endpoint,omitempty"`
 	Nodes    []string         `json:"nodes,omitempty"`
 }
+type InstallationResponse struct {
+	Runtime struct {
+		Version string `json:"version"`
+	} `json:"runtime"`
+}
 type ValidateNodeResult struct {
 	NodeName string   `json:"nodeName"`
 	Valid    bool     `json:"valid"`
@@ -131,6 +136,11 @@ func (c *Client) ClusterNodes(ctx context.Context) (ClusterNodesResponse, error)
 func (c *Client) Runtime(ctx context.Context) (RuntimeResponse, error) {
 	var out RuntimeResponse
 	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/runtime", nil, &out)
+	return out, err
+}
+func (c *Client) Installation(ctx context.Context) (InstallationResponse, error) {
+	var out InstallationResponse
+	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/installation", nil, &out)
 	return out, err
 }
 func (c *Client) Validate(ctx context.Context, request ValidateRequest) (ValidateResponse, error) {
