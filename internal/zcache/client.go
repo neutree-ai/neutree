@@ -113,7 +113,9 @@ type OperationsResponse struct {
 }
 
 type OperationMetadata struct {
-	Kind string `json:"kind"`
+	Kind          string   `json:"kind"`
+	AffectedNodes []string `json:"affectedNodes"`
+	ChangedFields []string `json:"changedFields"`
 }
 
 type OperationNode struct {
@@ -194,13 +196,29 @@ func (c *Client) Operation(ctx context.Context, id string) (OperationResponse, e
 	return out, err
 }
 func (c *Client) LatestOperation(ctx context.Context) (OperationResponse, error) {
-	var out OperationsResponse
-	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/operations?limit=1", nil, &out)
+	operations, err := c.Operations(ctx, 1)
 	if err != nil {
 		return OperationResponse{}, err
 	}
-	if len(out.Operations) == 0 {
+	if len(operations) == 0 {
 		return OperationResponse{}, fmt.Errorf("no ZCache operations")
 	}
-	return c.Operation(ctx, out.Operations[0].ID)
+	return operations[0], nil
+}
+
+func (c *Client) Operations(ctx context.Context, limit int) ([]OperationResponse, error) {
+	var out OperationsResponse
+	err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/v1/zcache/operations?limit=%d", limit), nil, &out)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]OperationResponse, 0, len(out.Operations))
+	for _, summary := range out.Operations {
+		detail, detailErr := c.Operation(ctx, summary.ID)
+		if detailErr != nil {
+			continue
+		}
+		result = append(result, detail)
+	}
+	return result, nil
 }

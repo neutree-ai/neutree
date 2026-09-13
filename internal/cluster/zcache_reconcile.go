@@ -47,6 +47,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		previousConfig = config
 	}
 	latestOperation, _ := client.LatestOperation(ctx)
+	operationHistory, _ := client.Operations(ctx, 20)
 	currentNodes, _ := client.Nodes(ctx)
 	currentNodeStatuses := currentZCacheNodeStatuses(currentNodes.Nodes, l1SizeOrDefault(cluster))
 	installation, _ := client.Installation(ctx)
@@ -65,7 +66,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 			Phase: "Ready", ReadyNodes: int32(len(runtime.Nodes)), DesiredNodes: int32(len(runtime.Nodes)),
 			Endpoint:  net.JoinHostPort(runtime.Endpoint.Address, strconv.Itoa(int(runtime.Endpoint.Port))),
 			Nodes:     nodeStatuses,
-			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, runtime.Nodes), existingOperation),
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, runtime.Nodes), existingOperation), Operations: operationSummaries(operationHistory),
 		}
 		return nil
 	}
@@ -73,7 +74,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 	nodes, err := client.ClusterNodes(ctx)
 	if err != nil {
 		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", Message: err.Error(), Nodes: currentNodeStatuses,
-			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation), Operations: operationSummaries(operationHistory)}
 		return nil
 	}
 	targets := make([]string, 0, len(nodes.Nodes))
@@ -107,13 +108,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 			message = validation.Nodes[0].Reasons[0]
 		}
 		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", ReadyNodes: countReadyNodes(currentNodeStatuses), DesiredNodes: int32(len(targets)), Message: message, Nodes: currentNodeStatuses,
-			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation), Operations: operationSummaries(operationHistory)}
 		return nil
 	}
 	apply, err := client.Apply(ctx, request)
 	if err != nil {
 		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", ReadyNodes: countReadyNodes(currentNodeStatuses), DesiredNodes: int32(len(targets)), Message: err.Error(), Nodes: currentNodeStatuses,
-			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation), Operations: operationSummaries(operationHistory)}
 		return nil
 	}
 	operation, err := client.Operation(ctx, apply.OperationID)
@@ -135,7 +136,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		nodeStatuses = append(nodeStatuses, v1.ZCacheNodeStatus{Name: node.NodeName, Phase: node.Phase, CapacityGiB: l1Size, Reason: node.Reason})
 	}
 	cluster.Status.ZCache = &v1.ZCacheStatus{Phase: phase, ReadyNodes: readyNodes, DesiredNodes: int32(len(targets)), Message: message, Nodes: currentNodeStatuses,
-		Operation: operationStatus(operation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
+		Operation: operationStatus(operation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation), Operations: operationSummaries(append([]zcache.OperationResponse{operation}, operationHistory...))}
 	return nil
 }
 
@@ -164,7 +165,24 @@ func operationStatus(operation zcache.OperationResponse, previous, desired v1.ZC
 		nodes = append(nodes, v1.ZCacheOperationNodeStatus{Name: node.NodeName, Phase: string(node.Phase), Reason: node.Reason})
 	}
 	return &v1.ZCacheOperationStatus{ID: operation.ID, Phase: string(operation.Phase), Kind: string(operation.Operation.Kind), Summary: operation.Summary, Reason: operation.Reason,
-		PreviousConfig: previous, DesiredConfig: desired, Nodes: nodes, CanCancel: false}
+		PreviousConfig: previous, DesiredConfig: desired, Nodes: nodes, CanCancel: false, AffectedNodes: operation.Operation.AffectedNodes, ChangedFields: operation.Operation.ChangedFields}
+}
+
+func operationSummaries(operations []zcache.OperationResponse) []v1.ZCacheOperationSummary {
+	result := make([]v1.ZCacheOperationSummary, 0, len(operations))
+	seen := map[string]bool{}
+	for _, operation := range operations {
+		if operation.ID == "" || seen[operation.ID] {
+			continue
+		}
+		seen[operation.ID] = true
+		nodes := make([]v1.ZCacheOperationNodeStatus, 0, len(operation.Nodes))
+		for _, node := range operation.Nodes {
+			nodes = append(nodes, v1.ZCacheOperationNodeStatus{Name: node.NodeName, Phase: string(node.Phase), Reason: node.Reason})
+		}
+		result = append(result, v1.ZCacheOperationSummary{ID: operation.ID, Phase: string(operation.Phase), Kind: string(operation.Operation.Kind), Summary: operation.Summary, Reason: operation.Reason, AffectedNodes: operation.Operation.AffectedNodes, ChangedFields: operation.Operation.ChangedFields, Nodes: nodes})
+	}
+	return result
 }
 
 func currentZCacheNodeStatuses(nodes []zcache.NodeResponse, capacity int32) []v1.ZCacheNodeStatus {

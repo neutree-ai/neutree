@@ -243,7 +243,8 @@ type ZCacheStatus struct {
 	// Operation describes the latest configuration change separately from the
 	// current runtime status above. Its node phases are results of that change,
 	// not a replacement for the current runtime node state.
-	Operation *ZCacheOperationStatus `json:"operation,omitempty"`
+	Operation  *ZCacheOperationStatus   `json:"operation,omitempty"`
+	Operations []ZCacheOperationSummary `json:"operations,omitempty"`
 }
 
 type ZCacheNodeStatus struct {
@@ -268,6 +269,19 @@ type ZCacheOperationStatus struct {
 	DesiredConfig  ZCacheConfigSnapshot        `json:"desired_config"`
 	Nodes          []ZCacheOperationNodeStatus `json:"nodes,omitempty"`
 	CanCancel      bool                        `json:"can_cancel"`
+	AffectedNodes  []string                    `json:"affected_nodes,omitempty"`
+	ChangedFields  []string                    `json:"changed_fields,omitempty"`
+}
+
+type ZCacheOperationSummary struct {
+	ID            string                      `json:"id"`
+	Phase         string                      `json:"phase"`
+	Kind          string                      `json:"kind,omitempty"`
+	Summary       string                      `json:"summary,omitempty"`
+	Reason        string                      `json:"reason,omitempty"`
+	AffectedNodes []string                    `json:"affected_nodes,omitempty"`
+	ChangedFields []string                    `json:"changed_fields,omitempty"`
+	Nodes         []ZCacheOperationNodeStatus `json:"nodes,omitempty"`
 }
 
 type ZCacheOperationNodeStatus struct {
