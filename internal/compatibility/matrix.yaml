@@ -1,0 +1,6 @@
+rules:
+  - engine: vllm
+    engineVersion: 0.24.0
+    zcacheVersion: 0.5.0
+    result: supported
+    reason: "Validated vLLM 0.24.0 with ZCache 0.5.0"
