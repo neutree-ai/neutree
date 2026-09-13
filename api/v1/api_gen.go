@@ -592,6 +592,7 @@ type ApiClusterStatus struct {
 	RayVersion          string      `json:"ray_version"`
 	Initialized         interface{} `json:"initialized"`
 	NodeProvisionStatus string      `json:"node_provision_status"`
+	ZCache              interface{} `json:"zcache"`
 }
 
 type ApiModelCatalogSpec struct {
