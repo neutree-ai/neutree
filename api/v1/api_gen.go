@@ -425,7 +425,6 @@ type ApiMetadata struct {
 
 type ApiWorkspaceStatus struct {
 	Phase        string `json:"phase"`
-	ServiceUrl   string `json:"service_url"`
 	ErrorMessage string `json:"error_message"`
 }
 
@@ -436,7 +435,6 @@ type ApiRoleSpec struct {
 
 type ApiRoleStatus struct {
 	Phase        string `json:"phase"`
-	ServiceUrl   string `json:"service_url"`
 	ErrorMessage string `json:"error_message"`
 }
 
@@ -449,7 +447,6 @@ type ApiRoleAssignmentSpec struct {
 
 type ApiRoleAssignmentStatus struct {
 	Phase        string `json:"phase"`
-	ServiceUrl   string `json:"service_url"`
 	ErrorMessage string `json:"error_message"`
 }
 
@@ -459,7 +456,6 @@ type ApiUserProfileSpec struct {
 
 type ApiUserProfileStatus struct {
 	Phase        string `json:"phase"`
-	ServiceUrl   string `json:"service_url"`
 	ErrorMessage string `json:"error_message"`
 }
 
