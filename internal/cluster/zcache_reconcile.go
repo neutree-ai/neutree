@@ -39,9 +39,14 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 	client := zcache.NewClient(apiURL, http.DefaultClient)
 	runtime, err := client.Runtime(ctx)
 	if err == nil && runtime.Ready && runtime.Endpoint != nil {
+		nodeStatuses := make([]v1.ZCacheNodeStatus, 0, len(runtime.Nodes))
+		for _, node := range runtime.Nodes {
+			nodeStatuses = append(nodeStatuses, v1.ZCacheNodeStatus{Name: node, Phase: "Ready", CapacityGiB: l1SizeOrDefault(cluster)})
+		}
 		cluster.Status.ZCache = &v1.ZCacheStatus{
 			Phase: "Ready", ReadyNodes: int32(len(runtime.Nodes)), DesiredNodes: int32(len(runtime.Nodes)),
 			Endpoint: net.JoinHostPort(runtime.Endpoint.Address, strconv.Itoa(int(runtime.Endpoint.Port))),
+			Nodes:    nodeStatuses,
 		}
 		return nil
 	}
@@ -57,10 +62,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 			targets = append(targets, node.Name)
 		}
 	}
-	l1Size := cluster.Spec.ZCache.L1SizeGiB
-	if l1Size <= 0 {
-		l1Size = 8
-	}
+	l1Size := l1SizeOrDefault(cluster)
 	request := zcache.ValidateRequest{LMCache: zcache.RuntimeRequest{
 		Mode: "l1", TargetNodes: targets, DevicesByNode: map[string][]string{},
 		Image:       zcache.RuntimeImage{Repository: pocZCacheImageRepository, Tag: pocZCacheImageTag, PullPolicy: "IfNotPresent"},
@@ -94,6 +96,17 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		phase = "NotReady"
 		message = operation.Reason
 	}
-	cluster.Status.ZCache = &v1.ZCacheStatus{Phase: phase, DesiredNodes: int32(len(targets)), Message: message}
+	nodeStatuses := make([]v1.ZCacheNodeStatus, 0, len(operation.Nodes))
+	for _, node := range operation.Nodes {
+		nodeStatuses = append(nodeStatuses, v1.ZCacheNodeStatus{Name: node.NodeName, Phase: node.Phase, CapacityGiB: l1Size, Reason: node.Reason})
+	}
+	cluster.Status.ZCache = &v1.ZCacheStatus{Phase: phase, DesiredNodes: int32(len(targets)), Message: message, Nodes: nodeStatuses}
 	return nil
+}
+
+func l1SizeOrDefault(cluster *v1.Cluster) int32 {
+	if cluster != nil && cluster.Spec != nil && cluster.Spec.ZCache != nil && cluster.Spec.ZCache.L1SizeGiB > 0 {
+		return cluster.Spec.ZCache.L1SizeGiB
+	}
+	return 8
 }

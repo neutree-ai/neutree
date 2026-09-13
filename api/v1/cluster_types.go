@@ -232,11 +232,19 @@ type ClusterStatus struct {
 }
 
 type ZCacheStatus struct {
-	Phase        string `json:"phase,omitempty"`
-	ReadyNodes   int32  `json:"ready_nodes,omitempty"`
-	DesiredNodes int32  `json:"desired_nodes,omitempty"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	Message      string `json:"message,omitempty"`
+	Phase        string             `json:"phase,omitempty"`
+	ReadyNodes   int32              `json:"ready_nodes,omitempty"`
+	DesiredNodes int32              `json:"desired_nodes,omitempty"`
+	Endpoint     string             `json:"endpoint,omitempty"`
+	Message      string             `json:"message,omitempty"`
+	Nodes        []ZCacheNodeStatus `json:"nodes,omitempty"`
+}
+
+type ZCacheNodeStatus struct {
+	Name        string `json:"name"`
+	Phase       string `json:"phase"`
+	CapacityGiB int32  `json:"capacity_gib,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"

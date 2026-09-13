@@ -79,10 +79,17 @@ type ApplyResponse struct {
 	OperationID string `json:"operationId"`
 }
 type OperationResponse struct {
-	ID      string `json:"id"`
-	Phase   string `json:"phase"`
-	Summary string `json:"summary"`
-	Reason  string `json:"reason"`
+	ID      string          `json:"id"`
+	Phase   string          `json:"phase"`
+	Summary string          `json:"summary"`
+	Reason  string          `json:"reason"`
+	Nodes   []OperationNode `json:"nodes,omitempty"`
+}
+
+type OperationNode struct {
+	NodeName string `json:"nodeName"`
+	Phase    string `json:"phase"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func (c *Client) request(ctx context.Context, method, endpoint string, body any, out any) error {
