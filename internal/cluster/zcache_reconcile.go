@@ -92,9 +92,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		}
 	}
 	l1Size := l1SizeOrDefault(cluster)
+	runtimeVersion := pocZCacheImageTag
+	if cluster.Spec.ZCache.RuntimeVersion != "" {
+		runtimeVersion = cluster.Spec.ZCache.RuntimeVersion
+	}
 	request := zcache.ValidateRequest{LMCache: zcache.RuntimeRequest{
 		Mode: "l1", TargetNodes: targets, DevicesByNode: map[string][]string{},
-		Image:       zcache.RuntimeImage{Repository: pocZCacheImageRepository, Tag: pocZCacheImageTag, PullPolicy: "IfNotPresent"},
+		Image:       zcache.RuntimeImage{Repository: pocZCacheImageRepository, Tag: runtimeVersion, PullPolicy: "IfNotPresent"},
 		Resources:   zcache.ResourceConfig{Requests: map[string]string{"cpu": "100m", "memory": "256Mi"}, Limits: map[string]string{"cpu": "500m", "memory": "512Mi"}},
 		ServicePort: pocZCacheServicePort, MetricsPort: pocZCacheMetricsPort, L1SizeGB: l1Size,
 	}}

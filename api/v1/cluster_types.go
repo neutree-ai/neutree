@@ -52,9 +52,11 @@ type ClusterSpec struct {
 
 // ZCacheSpec is the minimal cluster-level contract used by the PoC.
 type ZCacheSpec struct {
-	Enabled     bool     `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	L1SizeGiB   int32    `json:"l1_size_gib,omitempty" yaml:"l1_size_gib,omitempty"`
-	TargetNodes []string `json:"target_nodes,omitempty" yaml:"target_nodes,omitempty"`
+	Enabled bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// RuntimeVersion selects the data-plane LMCache runtime image tag.
+	RuntimeVersion string   `json:"runtime_version,omitempty" yaml:"runtime_version,omitempty"`
+	L1SizeGiB      int32    `json:"l1_size_gib,omitempty" yaml:"l1_size_gib,omitempty"`
+	TargetNodes    []string `json:"target_nodes,omitempty" yaml:"target_nodes,omitempty"`
 	// APIURL is the in-cluster zcache-api base URL used by the PoC.
 	APIURL string `json:"api_url,omitempty" yaml:"api_url,omitempty"`
 }
