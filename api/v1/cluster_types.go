@@ -240,6 +240,10 @@ type ZCacheStatus struct {
 	Message      string             `json:"message,omitempty"`
 	Nodes        []ZCacheNodeStatus `json:"nodes,omitempty"`
 	Version      string             `json:"version,omitempty"`
+	// Operation describes the latest configuration change separately from the
+	// current runtime status above. Its node phases are results of that change,
+	// not a replacement for the current runtime node state.
+	Operation *ZCacheOperationStatus `json:"operation,omitempty"`
 }
 
 type ZCacheNodeStatus struct {
@@ -247,6 +251,29 @@ type ZCacheNodeStatus struct {
 	Phase       string `json:"phase"`
 	CapacityGiB int32  `json:"capacity_gib,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+}
+
+type ZCacheConfigSnapshot struct {
+	L1SizeGiB   int32    `json:"l1_size_gib,omitempty"`
+	TargetNodes []string `json:"target_nodes,omitempty"`
+}
+
+type ZCacheOperationStatus struct {
+	ID             string                      `json:"id"`
+	Phase          string                      `json:"phase"`
+	Kind           string                      `json:"kind,omitempty"`
+	Summary        string                      `json:"summary,omitempty"`
+	Reason         string                      `json:"reason,omitempty"`
+	PreviousConfig ZCacheConfigSnapshot        `json:"previous_config"`
+	DesiredConfig  ZCacheConfigSnapshot        `json:"desired_config"`
+	Nodes          []ZCacheOperationNodeStatus `json:"nodes,omitempty"`
+	CanCancel      bool                        `json:"can_cancel"`
+}
+
+type ZCacheOperationNodeStatus struct {
+	Name   string `json:"name"`
+	Phase  string `json:"phase"`
+	Reason string `json:"reason,omitempty"`
 }
 
 const ComponentStatusAcceleratorVirtualizationKey = "accelerator_virtualization"

@@ -40,6 +40,23 @@ type RuntimeResponse struct {
 	Endpoint *RuntimeEndpoint `json:"endpoint,omitempty"`
 	Nodes    []string         `json:"nodes,omitempty"`
 }
+type ConfigResponse struct {
+	LMCache struct {
+		TargetNodes []string `json:"targetNodes"`
+		L1          struct {
+			SizeGiB int32 `json:"sizeGb"`
+		} `json:"l1"`
+	} `json:"lmcache"`
+}
+type NodeResponse struct {
+	Name    string `json:"name"`
+	Runtime string `json:"runtime"`
+	Cache   string `json:"cache"`
+	Reason  string `json:"reason"`
+}
+type NodesResponse struct {
+	Nodes []NodeResponse `json:"nodes"`
+}
 type InstallationResponse struct {
 	Runtime struct {
 		Version string `json:"version"`
@@ -84,11 +101,19 @@ type ApplyResponse struct {
 	OperationID string `json:"operationId"`
 }
 type OperationResponse struct {
-	ID      string          `json:"id"`
-	Phase   string          `json:"phase"`
-	Summary string          `json:"summary"`
-	Reason  string          `json:"reason"`
-	Nodes   []OperationNode `json:"nodes,omitempty"`
+	ID        string            `json:"id"`
+	Phase     string            `json:"phase"`
+	Summary   string            `json:"summary"`
+	Reason    string            `json:"reason"`
+	Operation OperationMetadata `json:"operation"`
+	Nodes     []OperationNode   `json:"nodes,omitempty"`
+}
+type OperationsResponse struct {
+	Operations []OperationResponse `json:"operations"`
+}
+
+type OperationMetadata struct {
+	Kind string `json:"kind"`
 }
 
 type OperationNode struct {
@@ -138,6 +163,16 @@ func (c *Client) Runtime(ctx context.Context) (RuntimeResponse, error) {
 	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/runtime", nil, &out)
 	return out, err
 }
+func (c *Client) Config(ctx context.Context) (ConfigResponse, error) {
+	var out ConfigResponse
+	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/config", nil, &out)
+	return out, err
+}
+func (c *Client) Nodes(ctx context.Context) (NodesResponse, error) {
+	var out NodesResponse
+	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/nodes", nil, &out)
+	return out, err
+}
 func (c *Client) Installation(ctx context.Context) (InstallationResponse, error) {
 	var out InstallationResponse
 	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/installation", nil, &out)
@@ -157,4 +192,15 @@ func (c *Client) Operation(ctx context.Context, id string) (OperationResponse, e
 	var out OperationResponse
 	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/operations/"+id, nil, &out)
 	return out, err
+}
+func (c *Client) LatestOperation(ctx context.Context) (OperationResponse, error) {
+	var out OperationsResponse
+	err := c.request(ctx, http.MethodGet, "/api/v1/zcache/operations?limit=1", nil, &out)
+	if err != nil {
+		return OperationResponse{}, err
+	}
+	if len(out.Operations) == 0 {
+		return OperationResponse{}, fmt.Errorf("no ZCache operations")
+	}
+	return c.Operation(ctx, out.Operations[0].ID)
 }

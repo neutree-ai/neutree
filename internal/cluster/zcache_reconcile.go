@@ -32,11 +32,23 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 	if cluster.Status == nil {
 		cluster.Status = &v1.ClusterStatus{}
 	}
+	var existingOperation *v1.ZCacheOperationStatus
+	if cluster.Status.ZCache != nil && cluster.Status.ZCache.Operation != nil {
+		copy := *cluster.Status.ZCache.Operation
+		existingOperation = &copy
+	}
 	apiURL := cluster.Spec.ZCache.APIURL
 	if apiURL == "" {
 		apiURL = pocZCacheAPIURL
 	}
 	client := zcache.NewClient(apiURL, http.DefaultClient)
+	previousConfig := zcache.ConfigResponse{}
+	if config, configErr := client.Config(ctx); configErr == nil {
+		previousConfig = config
+	}
+	latestOperation, _ := client.LatestOperation(ctx)
+	currentNodes, _ := client.Nodes(ctx)
+	currentNodeStatuses := currentZCacheNodeStatuses(currentNodes.Nodes, l1SizeOrDefault(cluster))
 	installation, _ := client.Installation(ctx)
 	defer func() {
 		if cluster.Status != nil && cluster.Status.ZCache != nil {
@@ -51,15 +63,17 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		}
 		cluster.Status.ZCache = &v1.ZCacheStatus{
 			Phase: "Ready", ReadyNodes: int32(len(runtime.Nodes)), DesiredNodes: int32(len(runtime.Nodes)),
-			Endpoint: net.JoinHostPort(runtime.Endpoint.Address, strconv.Itoa(int(runtime.Endpoint.Port))),
-			Nodes:    nodeStatuses,
+			Endpoint:  net.JoinHostPort(runtime.Endpoint.Address, strconv.Itoa(int(runtime.Endpoint.Port))),
+			Nodes:     nodeStatuses,
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, runtime.Nodes), existingOperation),
 		}
 		return nil
 	}
 
 	nodes, err := client.ClusterNodes(ctx)
 	if err != nil {
-		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", Message: err.Error()}
+		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", Message: err.Error(), Nodes: currentNodeStatuses,
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
 		return nil
 	}
 	targets := make([]string, 0, len(nodes.Nodes))
@@ -92,12 +106,14 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		} else if len(validation.Nodes) > 0 && len(validation.Nodes[0].Reasons) > 0 {
 			message = validation.Nodes[0].Reasons[0]
 		}
-		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", ReadyNodes: 0, DesiredNodes: int32(len(targets)), Message: message}
+		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", ReadyNodes: countReadyNodes(currentNodeStatuses), DesiredNodes: int32(len(targets)), Message: message, Nodes: currentNodeStatuses,
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
 		return nil
 	}
 	apply, err := client.Apply(ctx, request)
 	if err != nil {
-		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", DesiredNodes: int32(len(targets)), Message: err.Error()}
+		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotReady", ReadyNodes: countReadyNodes(currentNodeStatuses), DesiredNodes: int32(len(targets)), Message: err.Error(), Nodes: currentNodeStatuses,
+			Operation: operationStatus(latestOperation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
 		return nil
 	}
 	operation, err := client.Operation(ctx, apply.OperationID)
@@ -118,8 +134,59 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		}
 		nodeStatuses = append(nodeStatuses, v1.ZCacheNodeStatus{Name: node.NodeName, Phase: node.Phase, CapacityGiB: l1Size, Reason: node.Reason})
 	}
-	cluster.Status.ZCache = &v1.ZCacheStatus{Phase: phase, ReadyNodes: readyNodes, DesiredNodes: int32(len(targets)), Message: message, Nodes: nodeStatuses}
+	cluster.Status.ZCache = &v1.ZCacheStatus{Phase: phase, ReadyNodes: readyNodes, DesiredNodes: int32(len(targets)), Message: message, Nodes: currentNodeStatuses,
+		Operation: operationStatus(operation, configSnapshot(previousConfig), configSnapshotForCluster(cluster, nil), existingOperation)}
 	return nil
+}
+
+func configSnapshot(config zcache.ConfigResponse) v1.ZCacheConfigSnapshot {
+	return v1.ZCacheConfigSnapshot{L1SizeGiB: config.LMCache.L1.SizeGiB, TargetNodes: append([]string(nil), config.LMCache.TargetNodes...)}
+}
+
+func configSnapshotForCluster(cluster *v1.Cluster, runtimeNodes []string) v1.ZCacheConfigSnapshot {
+	targets := append([]string(nil), runtimeNodes...)
+	if targets == nil && cluster != nil && cluster.Spec != nil && cluster.Spec.ZCache != nil {
+		targets = append([]string(nil), cluster.Spec.ZCache.TargetNodes...)
+	}
+	return v1.ZCacheConfigSnapshot{L1SizeGiB: l1SizeOrDefault(cluster), TargetNodes: targets}
+}
+
+func operationStatus(operation zcache.OperationResponse, previous, desired v1.ZCacheConfigSnapshot, existing *v1.ZCacheOperationStatus) *v1.ZCacheOperationStatus {
+	if operation.ID == "" {
+		return nil
+	}
+	if existing != nil && existing.ID == operation.ID {
+		previous = existing.PreviousConfig
+		desired = existing.DesiredConfig
+	}
+	nodes := make([]v1.ZCacheOperationNodeStatus, 0, len(operation.Nodes))
+	for _, node := range operation.Nodes {
+		nodes = append(nodes, v1.ZCacheOperationNodeStatus{Name: node.NodeName, Phase: string(node.Phase), Reason: node.Reason})
+	}
+	return &v1.ZCacheOperationStatus{ID: operation.ID, Phase: string(operation.Phase), Kind: string(operation.Operation.Kind), Summary: operation.Summary, Reason: operation.Reason,
+		PreviousConfig: previous, DesiredConfig: desired, Nodes: nodes, CanCancel: false}
+}
+
+func currentZCacheNodeStatuses(nodes []zcache.NodeResponse, capacity int32) []v1.ZCacheNodeStatus {
+	result := make([]v1.ZCacheNodeStatus, 0, len(nodes))
+	for _, node := range nodes {
+		phase := "NotReady"
+		if node.Runtime == "Ready" && node.Cache == "Available" {
+			phase = "Ready"
+		}
+		result = append(result, v1.ZCacheNodeStatus{Name: node.Name, Phase: phase, CapacityGiB: capacity, Reason: node.Reason})
+	}
+	return result
+}
+
+func countReadyNodes(nodes []v1.ZCacheNodeStatus) int32 {
+	var count int32
+	for _, node := range nodes {
+		if node.Phase == "Ready" || node.Phase == "Succeeded" {
+			count++
+		}
+	}
+	return count
 }
 
 func l1SizeOrDefault(cluster *v1.Cluster) int32 {

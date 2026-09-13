@@ -39,3 +39,28 @@ func TestClientValidateAndRuntime(t *testing.T) {
 		t.Fatalf("runtime: %+v %v", runtime, err)
 	}
 }
+
+func TestClientLatestOperationLoadsNodeDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/zcache/operations":
+			_ = json.NewEncoder(w).Encode(OperationsResponse{Operations: []OperationResponse{{ID: "op-1"}}})
+		case "/api/v1/zcache/operations/op-1":
+			_ = json.NewEncoder(w).Encode(OperationResponse{
+				ID: "op-1", Phase: "Failed", Operation: OperationMetadata{Kind: "update_nodes"},
+				Nodes: []OperationNode{{NodeName: "gpu-1", Phase: "Succeeded"}, {NodeName: "gpu-2", Phase: "Failed", Reason: "OOM"}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	operation, err := NewClient(server.URL, server.Client()).LatestOperation(context.Background())
+	if err != nil {
+		t.Fatalf("latest operation: %v", err)
+	}
+	if operation.ID != "op-1" || len(operation.Nodes) != 2 || operation.Nodes[1].Reason != "OOM" {
+		t.Fatalf("unexpected operation: %+v", operation)
+	}
+}
