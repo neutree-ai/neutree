@@ -16,6 +16,7 @@ const (
 	pocZCacheImageTag        = "0.5.0"
 	pocZCacheServicePort     = 7500
 	pocZCacheMetricsPort     = 8000
+	pocZCacheAPIURL          = "http://zcache-api:8080"
 )
 
 // reconcileZCache drives only the PoC's single L1 runtime. It is deliberately
@@ -31,12 +32,11 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 	if cluster.Status == nil {
 		cluster.Status = &v1.ClusterStatus{}
 	}
-	if cluster.Spec.ZCache.APIURL == "" {
-		cluster.Status.ZCache = &v1.ZCacheStatus{Phase: "NotConfigured", Message: "zcache api_url is required for the PoC"}
-		return nil
+	apiURL := cluster.Spec.ZCache.APIURL
+	if apiURL == "" {
+		apiURL = pocZCacheAPIURL
 	}
-
-	client := zcache.NewClient(cluster.Spec.ZCache.APIURL, http.DefaultClient)
+	client := zcache.NewClient(apiURL, http.DefaultClient)
 	runtime, err := client.Runtime(ctx)
 	if err == nil && runtime.Ready && runtime.Endpoint != nil {
 		cluster.Status.ZCache = &v1.ZCacheStatus{
