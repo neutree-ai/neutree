@@ -63,8 +63,16 @@ func (c *NativeKubernetesClusterReconciler) reconcileZCache(ctx context.Context,
 		return nil
 	}
 	targets := make([]string, 0, len(nodes.Nodes))
+	configuredTargets := map[string]bool{}
+	hasConfiguredTargets := false
+	if cluster.Spec.ZCache != nil {
+		hasConfiguredTargets = cluster.Spec.ZCache.TargetNodes != nil
+		for _, name := range cluster.Spec.ZCache.TargetNodes {
+			configuredTargets[name] = true
+		}
+	}
 	for _, node := range nodes.Nodes {
-		if node.Ready && node.Selectable {
+		if node.Ready && node.Selectable && (!hasConfiguredTargets || configuredTargets[node.Name]) {
 			targets = append(targets, node.Name)
 		}
 	}
