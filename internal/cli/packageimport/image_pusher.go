@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/docker/docker/api/types/image"
@@ -12,6 +13,11 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 )
+
+type imageSnapshot struct {
+	ids  map[string]struct{}
+	refs map[string]string
+}
 
 // ImagePusher handles pushing container images to registries
 type ImagePusher struct {
@@ -26,9 +32,107 @@ func NewImagePusher() (*ImagePusher, error) {
 		return nil, errors.Wrap(err, "failed to create Docker client")
 	}
 
-	return &ImagePusher{
-		dockerClient: dockerClient,
-	}, nil
+	return &ImagePusher{dockerClient: dockerClient}, nil
+}
+
+// SnapshotLocalImages captures local image IDs and tags before package import.
+func (p *ImagePusher) SnapshotLocalImages(ctx context.Context) (*imageSnapshot, error) {
+	images, err := p.dockerClient.ImageList(ctx, image.ListOptions{All: true})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list local images")
+	}
+
+	snapshot := &imageSnapshot{
+		ids:  make(map[string]struct{}),
+		refs: make(map[string]string),
+	}
+
+	for _, imageSummary := range images {
+		if imageSummary.ID != "" {
+			snapshot.ids[imageSummary.ID] = struct{}{}
+		}
+
+		for _, ref := range imageSummary.RepoTags {
+			if ref == "" || ref == "<none>:<none>" {
+				continue
+			}
+
+			snapshot.refs[ref] = imageSummary.ID
+		}
+	}
+
+	return snapshot, nil
+}
+
+// CleanupImages removes newly introduced image references after all pushes succeed.
+func (p *ImagePusher) CleanupImages(ctx context.Context, before *imageSnapshot, mirrorRegistry string, manifest *PackageManifest) error {
+	after, err := p.SnapshotLocalImages(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to snapshot local images for cleanup")
+	}
+
+	targetRefs := make(map[string]struct{})
+	sourceRefs := make(map[string]struct{})
+
+	for _, imageSpec := range manifest.Images {
+		sourceRef := fmt.Sprintf("%s:%s", imageSpec.ImageName, imageSpec.Tag)
+		targetRef := p.buildTargetImage(mirrorRegistry, imageSpec)
+
+		if isCleanupCandidate(before, after, targetRef) {
+			targetRefs[targetRef] = struct{}{}
+		}
+
+		if isCleanupCandidate(before, after, sourceRef) {
+			sourceRefs[sourceRef] = struct{}{}
+		}
+	}
+
+	var cleanupErrors []string
+	cleanupRefs := func(refs map[string]struct{}) {
+		for _, ref := range sortedImageRefs(refs) {
+			if _, err := p.dockerClient.ImageRemove(ctx, ref, image.RemoveOptions{}); err != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Sprintf("%s: %v", ref, err))
+			}
+		}
+	}
+	cleanupRefs(targetRefs)
+	cleanupRefs(sourceRefs)
+
+	if len(cleanupErrors) > 0 {
+		return errors.Errorf("failed to clean local image references: %s", strings.Join(cleanupErrors, "; "))
+	}
+
+	return nil
+}
+
+func isCleanupCandidate(before, after *imageSnapshot, ref string) bool {
+	if before == nil || after == nil {
+		return false
+	}
+
+	if _, existed := before.refs[ref]; existed {
+		return false
+	}
+
+	imageID, exists := after.refs[ref]
+	if !exists || imageID == "" {
+		return false
+	}
+
+	_, existed := before.ids[imageID]
+
+	return !existed
+}
+
+func sortedImageRefs(refs map[string]struct{}) []string {
+	result := make([]string, 0, len(refs))
+	for ref := range refs {
+		result = append(result, ref)
+	}
+
+	sort.Strings(result)
+
+	return result
 }
 
 func (p *ImagePusher) LoadImages(ctx context.Context, manifest *PackageManifest, extractedPath string) error {
