@@ -22,3 +22,25 @@ func TestSetZCacheEngineArgsRequiresReadyEndpoint(t *testing.T) {
 		t.Fatalf("cache args missing: %#v", data.EngineArgs)
 	}
 }
+
+func TestSetZCacheNodeSelectorUsesRuntimeLabelWhenEnabled(t *testing.T) {
+	data := newDeploymentManifestVariables()
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{ZCache: &v1.EndpointZCacheSpec{Enabled: true}}}
+
+	setZCacheNodeSelector(&data, endpoint)
+
+	if got := data.NodeSelector[zcacheRuntimeLabelKey]; got != zcacheRuntimeLabelValue {
+		t.Fatalf("runtime label = %q, want %q", got, zcacheRuntimeLabelValue)
+	}
+}
+
+func TestSetZCacheNodeSelectorSkipsDisabledEndpoint(t *testing.T) {
+	data := newDeploymentManifestVariables()
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{ZCache: &v1.EndpointZCacheSpec{Enabled: false}}}
+
+	setZCacheNodeSelector(&data, endpoint)
+
+	if _, ok := data.NodeSelector[zcacheRuntimeLabelKey]; ok {
+		t.Fatal("runtime label set for disabled endpoint")
+	}
+}

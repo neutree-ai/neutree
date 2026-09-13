@@ -31,6 +31,10 @@ const (
 	// startupProbePeriodSeconds is the startupProbe periodSeconds used by the
 	// engine K8s templates. failureThreshold = timeout / periodSeconds.
 	startupProbePeriodSeconds = 10
+	// zcacheRuntimeLabelKey/value are maintained by the ZCache runtime
+	// controller on nodes selected for the default runtime.
+	zcacheRuntimeLabelKey   = "zcache.smartx.com/node-agent-runtime"
+	zcacheRuntimeLabelValue = "zcache"
 )
 
 // startupTimeoutSecondsKey is the deployment_options key carrying the
@@ -553,6 +557,7 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	if endpoint.Spec != nil && endpoint.Spec.ZCache != nil && endpoint.Spec.ZCache.Enabled && deployedCluster.Status != nil && deployedCluster.Status.ZCache != nil && deployedCluster.Status.ZCache.Phase == "Ready" {
 		data.ZCacheEndpoint = deployedCluster.Status.ZCache.Endpoint
 	}
+	setZCacheNodeSelector(&data, endpoint)
 
 	// Set engine args
 	k.setEngineArgs(&data, endpoint, engine)
@@ -582,6 +587,13 @@ func (k *kubernetesOrchestrator) buildManifestVariables(endpoint *v1.Endpoint, d
 	k.addSharedMemoryVolume(&data)
 
 	return data, nil
+}
+
+func setZCacheNodeSelector(data *DeploymentManifestVariables, endpoint *v1.Endpoint) {
+	if data == nil || endpoint == nil || endpoint.Spec == nil || endpoint.Spec.ZCache == nil || !endpoint.Spec.ZCache.Enabled {
+		return
+	}
+	data.NodeSelector[zcacheRuntimeLabelKey] = zcacheRuntimeLabelValue
 }
 
 func (k *kubernetesOrchestrator) getDeployTemplate(endpoint *v1.Endpoint, engine *v1.Engine) (string, error) {
