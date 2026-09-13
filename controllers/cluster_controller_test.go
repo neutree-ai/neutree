@@ -535,6 +535,7 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 							v1.AcceleratorVirtualizationCorePercentKey,
 						},
 					}
+					c.Status.ZCache = &v1.ZCacheStatus{Phase: "Ready", ReadyNodes: 2, DesiredNodes: 2, Endpoint: "zcache:8080"}
 				}).Return(nil)
 				s.On("UpdateCluster", "1", mock.Anything).Run(func(args mock.Arguments) {
 					obj := args.Get(1).(*v1.Cluster)
@@ -553,6 +554,9 @@ func TestClusterController_UpdateClusterStatus(t *testing.T) {
 						v1.AcceleratorVirtualizationMemoryMiBKey,
 						v1.AcceleratorVirtualizationCorePercentKey,
 					}, obj.Status.AcceleratorVirtualization.SupportedResources)
+					require.NotNil(t, obj.Status.ZCache)
+					assert.Equal(t, "Ready", obj.Status.ZCache.Phase)
+					assert.Equal(t, "zcache:8080", obj.Status.ZCache.Endpoint)
 				}).Return(nil)
 			},
 			wantErr: false,
