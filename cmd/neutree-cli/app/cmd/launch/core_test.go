@@ -469,6 +469,16 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 			targetVersion: "v1.3.0",
 		},
 		{
+			name:          "allows stable v1.3 CLI with enterprise target",
+			cliVersion:    "v1.3.0",
+			targetVersion: "v1.3.0-enterprise",
+		},
+		{
+			name:          "allows enterprise v1.3 CLI with stable target",
+			cliVersion:    "v1.3.0-enterprise",
+			targetVersion: "v1.3.0",
+		},
+		{
 			name:          "allows git describe prerelease version in same release line",
 			cliVersion:    "v1.3.0-nightly-20260913-5-g1e6a9fc8",
 			targetVersion: "v1.3.0-nightly-20260914",
