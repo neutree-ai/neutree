@@ -3,6 +3,7 @@ local PLUGIN_NAME = "neutree-ai-gateway"
 local upstream_entry = {
   type = "record",
   fields = {
+    { name = { type = "string", required = false } },
     {
       scheme = {
         type = "string",
@@ -116,8 +117,6 @@ local schema = {
             },
           },
           {
-            -- Model-scoped routing is carried through unchanged in this
-            -- schema. Execution semantics are implemented separately.
             model_routes = {
               type = "array",
               required = false,
