@@ -454,74 +454,64 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 		wantErr       string
 	}{
 		{
-			name:          "allows target version in same v1.3 release line",
-			cliVersion:    "v1.3.0-nightly-20260913",
-			targetVersion: "v1.3.0-nightly-20260914",
+			name:          "allows target version in same v1.2 release line",
+			cliVersion:    "v1.2.0-nightly-20260729",
+			targetVersion: "v1.2.0-nightly-20260730",
 		},
 		{
-			name:          "allows enterprise version in same v1.3 release line",
-			cliVersion:    "v1.3.0-nightly-20260913-enterprise",
-			targetVersion: "v1.3.0-nightly-20260914-enterprise",
+			name:          "allows enterprise version in same v1.2 release line",
+			cliVersion:    "v1.2.0-enterprise",
+			targetVersion: "v1.2.0-enterprise",
 		},
 		{
-			name:          "allows v1.3 release target",
-			cliVersion:    "v1.3.0-nightly-20260913",
-			targetVersion: "v1.3.0",
-		},
-		{
-			name:          "allows stable v1.3 CLI with enterprise target",
-			cliVersion:    "v1.3.0",
-			targetVersion: "v1.3.0-enterprise",
-		},
-		{
-			name:          "allows enterprise v1.3 CLI with stable target",
-			cliVersion:    "v1.3.0-enterprise",
-			targetVersion: "v1.3.0",
+			name:          "allows v1.2 release target",
+			cliVersion:    "v1.2.0-nightly-20260729",
+			targetVersion: "v1.2.0",
 		},
 		{
 			name:          "allows git describe prerelease version in same release line",
-			cliVersion:    "v1.3.0-nightly-20260913-5-g1e6a9fc8",
-			targetVersion: "v1.3.0-nightly-20260914",
+			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
+			targetVersion: "v1.2.0-nightly-20260730",
 		},
 		{
 			name:          "git describe CLI keeps development build flexibility",
-			cliVersion:    "v1.3.0-nightly-20260913-5-g1e6a9fc8",
+			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
 			targetVersion: fallbackNeutreeCoreVersion,
 		},
 		{
-			name:          "rejects target version below v1.3 release line",
-			cliVersion:    "v1.3.0-nightly-20260913",
-			targetVersion: "v1.2.0-nightly-20260912",
+			name:          "rejects target version below v1.2 release line",
+			cliVersion:    "v1.2.0-nightly-20260729",
+			targetVersion: "v1.1.0-nightly-20260728",
 			wantErr:       "not compatible",
 		},
 		{
-			name:          "rejects target version at v1.4 release-line boundary",
-			cliVersion:    "v1.3.0-nightly-20260913",
-			targetVersion: "v1.4.0-0",
+			name:          "rejects target version at v1.3 release-line boundary",
+			cliVersion:    "v1.2.0-nightly-20260729",
+			targetVersion: "v1.3.0-0",
 			wantErr:       "not compatible",
 		},
 		{
-			name:          "rejects target version above v1.3 release line",
-			cliVersion:    "v1.3.0-nightly-20260913",
-			targetVersion: "v1.4.0-nightly-20260914",
+			name:          "rejects target version above v1.2 release line",
+			cliVersion:    "v1.2.0-nightly-20260729",
+			targetVersion: "v1.3.0-nightly-20260730",
 			wantErr:       "not compatible",
 		},
 		{
 			name:          "rejects previous release line because only current release policy is configured",
-			cliVersion:    "v1.2.0-enterprise",
-			targetVersion: "v1.2.0-enterprise",
+			cliVersion:    "v1.1.0-enterprise",
+			targetVersion: "v1.1.0-enterprise",
 			wantErr:       "no configured",
 		},
 		{
 			name:          "rejects invalid target version",
-			cliVersion:    "v1.3.0-nightly-20260913",
+			cliVersion:    "v1.2.0-nightly-20260729",
 			targetVersion: "not-a-version",
 			wantErr:       "invalid target version",
 		},
 		{
 			name:          "development CLI still validates target version format",
 			cliVersion:    "dev",
-			targetVersion: "v1.3.0",
+			targetVersion: "v1.1.0",
 		},
 		{
 			name:          "development CLI rejects invalid target version",
@@ -553,13 +543,13 @@ func TestDefaultNeutreeCoreVersion(t *testing.T) {
 	}{
 		{
 			name:       "exact nightly tag defaults to CLI app version",
-			cliVersion: "v1.3.0-nightly-20260913",
-			want:       "v1.3.0-nightly-20260913",
+			cliVersion: "v1.2.0-nightly-20260729",
+			want:       "v1.2.0-nightly-20260729",
 		},
 		{
 			name:       "exact enterprise tag defaults to CLI app version",
-			cliVersion: "v1.3.0-enterprise",
-			want:       "v1.3.0-enterprise",
+			cliVersion: "v1.2.0-enterprise",
+			want:       "v1.2.0-enterprise",
 		},
 		{
 			name:       "git describe commit suffix falls back",
@@ -688,7 +678,7 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *testing.T) {
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.3.0-nightly-20260913"
+		return "v1.2.0-nightly-20260729"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -707,7 +697,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 			deployMode: constants.DeployModeSingle,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.3.0-nightly-20260914",
+		version:   "v1.2.0-nightly-20260730",
 	})
 
 	require.NoError(t, err)
@@ -725,7 +715,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.3.0-nightly-20260913"
+		return "v1.2.0-nightly-20260729"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -740,7 +730,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 			deployMode: constants.DeployModeSingle,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.2.0-nightly-20260912",
+		version:   "v1.1.0-nightly-20260728",
 	})
 
 	require.Error(t, err)
@@ -801,7 +791,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompo
 
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.3.0-nightly-20260913"
+		return "v1.2.0-nightly-20260729"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -819,7 +809,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompo
 				dryRun:     true,
 			},
 			jwtSecret: "test-secret",
-			version:   "v1.3.0-nightly-20260914",
+			version:   "v1.2.0-nightly-20260730",
 		})
 	})
 
