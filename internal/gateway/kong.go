@@ -1204,6 +1204,7 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 		Config: map[string]interface{}{
 			"route_prefix": getExternalEndpointRoutePath(ee),
 			"upstreams":    upstreams,
+			"model_routes": ee.Spec.ModelRoutes,
 			// See generateAIGatewayPlugin: identify the EE this route serves so the
 			// access plugin can enforce endpoint-level allowlists. Note the per-upstream
 			// "internal" flag is a routing detail; from the API key's perspective the
