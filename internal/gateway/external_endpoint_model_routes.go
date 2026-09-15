@@ -15,17 +15,21 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 	}
 
 	providers := make(map[string]resolvedUpstream, len(ready))
+
 	for _, provider := range ready {
 		if provider.entry.Name != "" {
+
 			if _, exists := providers[provider.entry.Name]; exists {
 				return nil, fmt.Errorf("duplicate upstream name %q", provider.entry.Name)
 			}
+
 			providers[provider.entry.Name] = provider
 		}
 	}
 
 	seenModels := make(map[string]struct{}, len(ee.Spec.ModelRoutes))
 	routes := make([]map[string]interface{}, 0, len(ee.Spec.ModelRoutes))
+
 	for _, route := range ee.Spec.ModelRoutes {
 		if route.Model == "" {
 			return nil, fmt.Errorf("model route model must not be empty")
@@ -34,6 +38,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			return nil, fmt.Errorf("duplicate model route %q", route.Model)
 		}
 		seenModels[route.Model] = struct{}{}
+
 		if len(route.Targets) == 0 {
 			return nil, fmt.Errorf("model route %q must have at least one target", route.Model)
 		}
@@ -42,11 +47,13 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 		}
 
 		targets := make([]map[string]interface{}, 0, len(route.Targets))
+
 		for _, target := range route.Targets {
 			if target.Upstream == "" {
 				return nil, fmt.Errorf("model route %q target upstream must not be empty", route.Model)
 			}
 			provider, ok := providers[target.Upstream]
+
 			if !ok {
 				return nil, fmt.Errorf("model route %q references unknown upstream %q", route.Model, target.Upstream)
 			}
@@ -57,6 +64,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 				return nil, fmt.Errorf("model route %q target %q has a negative routing value", route.Model, target.Upstream)
 			}
 			weight := target.Weight
+
 			if weight == 0 {
 				weight = 1
 			}
@@ -76,6 +84,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			if !provider.internal && provider.entry.Auth != nil {
 				compiled["auth_header"] = provider.entry.Auth.AuthHeaderValue()
 			}
+
 			targets = append(targets, compiled)
 		}
 

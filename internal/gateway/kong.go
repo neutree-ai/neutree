@@ -1036,6 +1036,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstream string) []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
+
 	for _, route := range routes {
 		for _, target := range route.Targets {
 			if target.Upstream == upstream {
