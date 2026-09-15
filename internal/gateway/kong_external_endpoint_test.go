@@ -198,6 +198,31 @@ func TestCompileExternalEndpointModelRoutesRejectsUnknownProvider(t *testing.T) 
 	assert.ErrorContains(t, err, `references unknown upstream "missing"`)
 }
 
+func TestCompileExternalEndpointModelRoutesSkipsFailedProvider(t *testing.T) {
+	healthy := externalUpstream("https://healthy.example/v1", nil)
+	healthy.Name = "healthy"
+	failed := externalUpstream("https://failed.example/v1", nil)
+	failed.Name = "failed"
+	ee := testExternalEndpoint(healthy, failed)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "company-chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{
+			{Upstream: "healthy", UpstreamModel: "gpt-4o"},
+			{Upstream: "failed", UpstreamModel: "gpt-4o"},
+		},
+	}}
+
+	routes, err := compileExternalEndpointModelRoutes(ee, []resolvedUpstream{
+		{entry: healthy, scheme: "https", host: "healthy.example", port: 443, path: "/v1"},
+		{entry: failed, err: errors.New("provider unavailable")},
+	})
+	require.NoError(t, err)
+	require.Len(t, routes, 1)
+	targets := routes[0]["targets"].([]map[string]interface{})
+	require.Len(t, targets, 1)
+	assert.Equal(t, "healthy", targets[0]["upstream"])
+}
+
 // fakeKongForExternalEndpoint serves the minimum admin API surface
 // SyncExternalEndpoint touches, and records the upstream list of the pushed
 // ai-gateway plugin.

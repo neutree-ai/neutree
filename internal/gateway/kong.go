@@ -810,7 +810,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
 			ee.Key(), joinUpstreamErrors(statuses))
 	}
-	modelRoutes, err := compileExternalEndpointModelRoutes(ee, ready)
+	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}

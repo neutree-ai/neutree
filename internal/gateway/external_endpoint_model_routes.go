@@ -11,14 +11,14 @@ import (
 // gateway plugin needs at request time.
 //
 //nolint:wsl // Validation and compilation are intentionally kept together.
-func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolvedUpstream) ([]map[string]interface{}, error) {
+func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) ([]map[string]interface{}, error) {
 	if ee.Spec == nil || len(ee.Spec.ModelRoutes) == 0 {
 		return nil, nil
 	}
 
-	providers := make(map[string]resolvedUpstream, len(ready))
+	providers := make(map[string]resolvedUpstream, len(resolved))
 
-	for _, provider := range ready {
+	for _, provider := range resolved {
 		if provider.entry.Name != "" {
 			if _, exists := providers[provider.entry.Name]; exists {
 				return nil, fmt.Errorf("duplicate upstream name %q", provider.entry.Name)
@@ -58,6 +58,9 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			if !ok {
 				return nil, fmt.Errorf("model route %q references unknown upstream %q", route.Model, target.Upstream)
 			}
+			if provider.err != nil {
+				continue
+			}
 			if target.UpstreamModel == "" {
 				return nil, fmt.Errorf("model route %q target upstream_model must not be empty", route.Model)
 			}
@@ -87,6 +90,9 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			}
 
 			targets = append(targets, compiled)
+		}
+		if len(targets) == 0 {
+			continue
 		}
 
 		routes = append(routes, map[string]interface{}{
