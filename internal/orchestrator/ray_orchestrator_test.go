@@ -2250,6 +2250,40 @@ func TestEndpointToApplication_TensorParallelSize(t *testing.T) {
 	}
 }
 
+func TestEndpointToApplication_NormalizesKVCacheWithoutMutatingEndpoint(t *testing.T) {
+	originalArgs := map[string]interface{}{"kv_cache_memory_bytes": "8G"}
+	endpoint := &v1.Endpoint{
+		Metadata: &v1.Metadata{Workspace: "test", Name: "test-endpoint"},
+		Spec: &v1.EndpointSpec{
+			Engine: &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM, Version: "v0.24.0"},
+			Resources: &v1.ResourceSpec{
+				Accelerator: map[string]string{},
+			},
+			Replicas:  v1.ReplicaSpec{Num: pointy.Int(1)},
+			Variables: map[string]interface{}{"engine_args": originalArgs},
+			Model:     &v1.ModelSpec{Name: "test-model"},
+		},
+	}
+	modelRegistry := &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{
+		Type: v1.HuggingFaceModelRegistryType,
+	}}
+
+	app, err := EndpointToApplication(
+		endpoint,
+		&v1.Cluster{},
+		modelRegistry,
+		nil,
+		nil,
+		&acceleratormocks.MockManager{},
+	)
+	require.NoError(t, err)
+
+	runtimeArgs := app.Args["engine_args"].(map[string]interface{})
+	assert.Equal(t, int64(8589934592), runtimeArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", originalArgs["kv_cache_memory_bytes"])
+	assert.Equal(t, "8G", endpoint.Spec.Variables["engine_args"].(map[string]interface{})["kv_cache_memory_bytes"])
+}
+
 func TestEndpointToApplication_TensorParallelSizeUsesRequestedGPUCount(t *testing.T) {
 	const customAcceleratorType = "custom_accelerator"
 
