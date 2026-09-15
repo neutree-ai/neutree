@@ -39,7 +39,8 @@ local upstream_entry = {
     {
       model_mapping = {
         type = "map",
-        required = true,
+        required = false,
+        default = {},
         keys = { type = "string" },
         values = { type = "string" },
       },
