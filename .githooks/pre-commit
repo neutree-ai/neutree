@@ -79,13 +79,9 @@ if [ -n "$CHANGED_LINT_GO" ]; then
     make golangci-lint
   fi
 
-  if [ "$(uname -s)" = "Linux" ]; then
-    if ! env GOOS=linux CGO_ENABLED=1 ./bin/golangci-lint run; then
-      echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
-      exit 1
-    fi
-  else
-    echo "   (skipped: Linux+cgo lint runs in CI and Linux development environments)"
+  if ! env GOOS=linux CGO_ENABLED=1 ./bin/golangci-lint run; then
+    echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
+    exit 1
   fi
 fi
 
