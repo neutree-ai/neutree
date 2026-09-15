@@ -95,7 +95,9 @@ func TestExternalEndpointUpstreamStatuses(t *testing.T) {
 		},
 	}
 
-	statuses := externalEndpointUpstreamStatuses(resolved)
+	statuses := externalEndpointUpstreamStatuses(testExternalEndpoint(
+		resolved[0].entry, resolved[1].entry,
+	), resolved)
 	require.Len(t, statuses, 2)
 
 	assert.Equal(t, v1.ExternalEndpointUpstreamKindEndpointRef, statuses[0].Kind)
@@ -111,6 +113,22 @@ func TestExternalEndpointUpstreamStatuses(t *testing.T) {
 	assert.Equal(t, v1.ExternalEndpointUpstreamPhaseFailed, statuses[1].Phase)
 	assert.Equal(t, "boom", statuses[1].ErrorMessage)
 	assert.NotContains(t, statuses[1].ErrorMessage, "sk-test")
+}
+
+func TestExternalEndpointUpstreamStatusesUsesModelRoutes(t *testing.T) {
+	entry := externalUpstream("https://api.openai.com/v1", map[string]string{"legacy": "old"})
+	entry.Name = "openai"
+	ee := testExternalEndpoint(entry)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{{
+			Upstream: "openai", UpstreamModel: "gpt-4o",
+		}},
+	}}
+
+	statuses := externalEndpointUpstreamStatuses(ee, []resolvedUpstream{{entry: entry}})
+	require.Len(t, statuses, 1)
+	assert.Equal(t, []string{"chat"}, statuses[0].Models)
 }
 
 func TestGenerateExternalEndpointAIGatewayPluginSkipsUnresolved(t *testing.T) {
@@ -139,6 +157,69 @@ func TestGenerateExternalEndpointAIGatewayPluginSkipsUnresolved(t *testing.T) {
 	assert.Equal(t, "api.openai.com", upstreams[0]["host"])
 	assert.Equal(t, false, upstreams[0]["internal"])
 	assert.Equal(t, "Bearer sk-test", upstreams[0]["auth_header"])
+	assert.Equal(t, 0, upstreams[0]["priority"])
+	assert.Equal(t, 1, upstreams[0]["weight"])
+	assert.Equal(t, 0, upstreams[0]["max_inflight_requests"])
+}
+
+func TestExpandExternalEndpointModelRoutesScopesPolicyToTarget(t *testing.T) {
+	openai := externalUpstream("https://api.openai.com/v1", nil)
+	openai.Name = "openai"
+	qwen := externalUpstream("https://qwen.example/v1", nil)
+	qwen.Name = "qwen"
+	ee := testExternalEndpoint(openai, qwen)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{
+		{
+			Model: "chat",
+			Targets: []v1.ExternalEndpointModelRouteTarget{
+				{Upstream: "openai", UpstreamModel: "gpt-4o", Priority: 0, Weight: 80},
+				{Upstream: "qwen", UpstreamModel: "Qwen3-32B", Priority: 1, Weight: 20},
+			},
+		},
+		{
+			Model: "reasoning",
+			Targets: []v1.ExternalEndpointModelRouteTarget{
+				{Upstream: "qwen", UpstreamModel: "Qwen3-32B", Priority: 0, Weight: 100},
+			},
+		},
+	}
+
+	ready := []resolvedUpstream{
+		{entry: openai, scheme: "https", host: "api.openai.com", port: 443, path: "/v1"},
+		{entry: qwen, scheme: "https", host: "qwen.example", port: 443, path: "/v1"},
+	}
+	expanded, err := expandExternalEndpointModelRoutes(ee, ready)
+	require.NoError(t, err)
+	require.Len(t, expanded, 3)
+
+	assert.Equal(t, map[string]string{"chat": "gpt-4o"}, expanded[0].entry.ModelMapping)
+	assert.Equal(t, 80, expanded[0].weight)
+	assert.Equal(t, map[string]string{"chat": "Qwen3-32B"}, expanded[1].entry.ModelMapping)
+	assert.Equal(t, 20, expanded[1].weight)
+	assert.Equal(t, map[string]string{"reasoning": "Qwen3-32B"}, expanded[2].entry.ModelMapping)
+	assert.Equal(t, 100, expanded[2].weight)
+}
+
+func TestExpandExternalEndpointModelRoutesSkipsUnresolvedProvider(t *testing.T) {
+	openai := externalUpstream("https://api.openai.com/v1", nil)
+	openai.Name = "openai"
+	qwen := externalUpstream("https://qwen.example/v1", nil)
+	qwen.Name = "qwen"
+	ee := testExternalEndpoint(openai, qwen)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{
+			{Upstream: "openai", UpstreamModel: "gpt-4o", Weight: 80},
+			{Upstream: "qwen", UpstreamModel: "Qwen3-32B", Weight: 20},
+		},
+	}}
+
+	expanded, err := expandExternalEndpointModelRoutes(ee, []resolvedUpstream{{
+		entry: openai, scheme: "https", host: "api.openai.com", port: 443, path: "/v1",
+	}})
+	require.NoError(t, err)
+	require.Len(t, expanded, 1)
+	assert.Equal(t, map[string]string{"chat": "gpt-4o"}, expanded[0].entry.ModelMapping)
 }
 
 func TestGenerateExternalEndpointAIGatewayPluginInternalEntry(t *testing.T) {

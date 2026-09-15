@@ -74,6 +74,21 @@ func assertExternalEndpointPayloadRejected(t *testing.T, recorder *httptest.Resp
 	assert.Equal(t, "invalid external endpoint payload", payload.Message)
 }
 
+func assertExternalEndpointRoutingRejected(t *testing.T, recorder *httptest.ResponseRecorder, reached bool,
+	hint string) {
+	t.Helper()
+
+	assert.False(t, reached, "request must not reach the storage proxy")
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+	var payload validationError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+
+	assert.Equal(t, externalEndpointInvalidRoutingCode, payload.Code)
+	assert.Equal(t, "invalid external endpoint routing policy", payload.Message)
+	assert.Contains(t, payload.Hint, hint)
+}
+
 func TestValidateExternalEndpointCreateName(t *testing.T) {
 	// The matrix NEU-714 asks for: a legal ASCII name, an ASCII space, Unicode
 	// without a space, Unicode with a space, and the percent character that a
@@ -179,6 +194,82 @@ func TestValidateExternalEndpointPatch(t *testing.T) {
 	t.Run("allows a soft delete regardless of the name it carries", func(t *testing.T) {
 		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
 			`{"metadata":{"name":"ëndpoint spacer-2ea258e575","deletion_timestamp":"2026-08-25T06:29:27Z"}}`)
+
+		assert.True(t, reached)
+	})
+}
+
+func TestValidateExternalEndpointRouting(t *testing.T) {
+	t.Run("accepts model-scoped targets", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `{
+            "metadata":{"name":"model-routes"},
+            "spec":{
+              "upstreams":[
+                {"name":"openai","upstream":{"url":"https://api.openai.com/v1"}},
+                {"name":"qwen","endpoint_ref":"local-qwen"}
+              ],
+              "model_routes":[
+                {"model":"chat","strategy":"weighted_random","targets":[
+                  {"upstream":"openai","upstream_model":"gpt-4o","priority":0,"weight":80},
+                  {"upstream":"qwen","upstream_model":"Qwen3-32B","priority":1,"weight":20}
+                ]}
+              ]
+            }
+        }`)
+		assert.True(t, reached)
+	})
+
+	t.Run("rejects model route with unknown upstream", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `{
+            "metadata":{"name":"model-routes"},
+            "spec":{
+              "upstreams":[{"name":"openai","upstream":{"url":"https://api.openai.com/v1"}}],
+              "model_routes":[{"model":"chat","targets":[{"upstream":"missing","upstream_model":"m"}]}]
+            }
+        }`)
+		assertExternalEndpointRoutingRejected(t, recorder, reached, "unknown upstream")
+	})
+
+	t.Run("rejects unsupported strategy", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, `{
+            "metadata":{"name":"model-routes"},
+            "spec":{
+              "upstreams":[{"name":"openai","upstream":{"url":"https://api.openai.com/v1"}}],
+              "model_routes":[{"model":"chat","strategy":"round_robin","targets":[
+                {"upstream":"openai","upstream_model":"gpt-4o"}
+              ]}]
+            }
+        }`)
+		assertExternalEndpointRoutingRejected(t, recorder, reached, "unsupported strategy")
+	})
+
+	cases := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{name: "zero weight", field: "weight", value: "0"},
+		{name: "negative weight", field: "weight", value: "-1"},
+		{name: "fractional weight", field: "weight", value: "1.5"},
+		{name: "null weight", field: "weight", value: "null"},
+		{name: "negative priority", field: "priority", value: "-1"},
+		{name: "negative max inflight", field: "max_inflight_requests", value: "-1"},
+	}
+
+	for _, tc := range cases {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			body := `{"metadata":{"name":"multi-provider"},"spec":{"upstreams":[{"name":"provider-a"}],` +
+				`"model_routes":[{"model":"chat","targets":[{"upstream":"provider-a","upstream_model":"m","` +
+				tc.field + `":` + tc.value + `}]}]}}`
+			recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost, body)
+
+			assertExternalEndpointRoutingRejected(t, recorder, reached, tc.field)
+		})
+	}
+
+	t.Run("allows legacy model mapping without routing policy", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
+			`{"spec":{"upstreams":[{"model_mapping":{"chat":"provider-a"}}]}}`)
 
 		assert.True(t, reached)
 	})

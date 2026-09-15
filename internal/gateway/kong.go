@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -793,7 +794,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	}
 
 	resolved := k.resolveExternalEndpointUpstreams(ee)
-	statuses := externalEndpointUpstreamStatuses(resolved)
+	statuses := externalEndpointUpstreamStatuses(ee, resolved)
 
 	ready := make([]resolvedUpstream, 0, len(resolved))
 
@@ -806,6 +807,21 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	if len(ready) == 0 {
 		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
 			ee.Key(), joinUpstreamErrors(statuses))
+	}
+
+	pluginReady := ready
+
+	if len(ee.Spec.ModelRoutes) > 0 {
+		var err error
+		pluginReady, err = expandExternalEndpointModelRoutes(ee, ready)
+
+		if err != nil {
+			return statuses, err
+		}
+
+		if len(pluginReady) == 0 {
+			return statuses, errors.Errorf("external endpoint %s has no resolvable model route target", ee.Key())
+		}
 	}
 
 	gwService, err := k.syncExternalEndpointService(ee, ready[0])
@@ -821,7 +837,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	// sync route plugins
 	needPluginMap := make(map[string]*kong.Plugin)
 
-	aiGatewayPlugin := k.generateExternalEndpointAIGatewayPlugin(ee, route, ready)
+	aiGatewayPlugin := k.generateExternalEndpointAIGatewayPlugin(ee, route, pluginReady)
 	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
 
 	aclPlugin := k.generateExternalEndpointACLPlugin(ee, route)
@@ -859,6 +875,65 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	}
 
 	return statuses, nil
+}
+
+// expandExternalEndpointModelRoutes compiles the model-scoped control-plane
+// format into the plugin's existing flat target list. Each route target gets
+// a one-key model_mapping, so priority and weight are evaluated per virtual
+// model target even when one provider is reused by several routes.
+func expandExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolvedUpstream) ([]resolvedUpstream, error) {
+	providers := make(map[string]resolvedUpstream, len(ready))
+
+	for _, r := range ready {
+		if r.entry.Name != "" {
+			providers[r.entry.Name] = r
+		}
+	}
+
+	configuredProviders := make(map[string]struct{}, len(ee.Spec.Upstreams))
+
+	for _, entry := range ee.Spec.Upstreams {
+		configuredProviders[entry.Name] = struct{}{}
+	}
+
+	expanded := make([]resolvedUpstream, 0)
+
+	for _, route := range ee.Spec.ModelRoutes {
+		if route.Model == "" {
+			return nil, errors.Errorf("external endpoint %s has a model route with an empty model", ee.Key())
+		}
+
+		for _, target := range route.Targets {
+			provider, ok := providers[target.Upstream]
+			if !ok {
+				if _, configured := configuredProviders[target.Upstream]; configured {
+					continue
+				}
+
+				return nil, errors.Errorf("external endpoint %s model route %q references unknown upstream %q", ee.Key(), route.Model, target.Upstream)
+			}
+
+			if target.UpstreamModel == "" {
+				return nil, errors.Errorf("external endpoint %s model route %q has an empty upstream_model", ee.Key(), route.Model)
+			}
+
+			entry := provider.entry
+			entry.ModelMapping = map[string]string{route.Model: target.UpstreamModel}
+			expanded = append(expanded, resolvedUpstream{
+				entry:               entry,
+				priority:            target.Priority,
+				weight:              target.Weight,
+				maxInflightRequests: target.MaxInflightRequests,
+				scheme:              provider.scheme,
+				host:                provider.host,
+				port:                provider.port,
+				path:                provider.path,
+				internal:            provider.internal,
+			})
+		}
+	}
+
+	return expanded, nil
 }
 
 // DeleteExternalEndpoint removes an external endpoint configuration from Kong
@@ -950,6 +1025,11 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 // out of the Kong configuration.
 type resolvedUpstream struct {
 	entry v1.ExternalEndpointUpstreamEntry
+	// Routing policy belongs to a model target, not the reusable provider
+	// entry. Legacy entries leave these at their default values.
+	priority            int
+	weight              int
+	maxInflightRequests int
 
 	scheme string
 	host   string
@@ -1001,15 +1081,37 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 
 // externalEndpointUpstreamStatuses projects resolution outcomes into the
 // user-visible per-upstream status list, in spec order.
-func externalEndpointUpstreamStatuses(resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
+func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
 	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
+	modelsByUpstream := make(map[string]map[string]struct{})
+
+	for _, route := range ee.Spec.ModelRoutes {
+		for _, target := range route.Targets {
+			if modelsByUpstream[target.Upstream] == nil {
+				modelsByUpstream[target.Upstream] = make(map[string]struct{})
+			}
+
+			modelsByUpstream[target.Upstream][route.Model] = struct{}{}
+		}
+	}
 
 	for i := range resolved {
 		entry := resolved[i].entry
+		models := entry.ExposedModels()
+
+		if routeModels := modelsByUpstream[entry.Name]; len(routeModels) > 0 {
+			models = make([]string, 0, len(routeModels))
+			for model := range routeModels {
+				models = append(models, model)
+			}
+
+			sort.Strings(models)
+		}
+
 		status := v1.ExternalEndpointUpstreamStatus{
 			Kind:   entry.Kind(),
 			Ref:    entry.Ref(),
-			Models: entry.ExposedModels(),
+			Models: models,
 			Phase:  v1.ExternalEndpointUpstreamPhaseReady,
 		}
 
@@ -1177,13 +1279,21 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 	upstreams := make([]map[string]interface{}, 0, len(ready))
 
 	for _, r := range ready {
+		weight := r.weight
+		if weight == 0 {
+			weight = 1
+		}
+
 		upstreamEntry := map[string]interface{}{
-			"model_mapping": r.entry.ModelMapping,
-			"scheme":        r.scheme,
-			"host":          r.host,
-			"port":          r.port,
-			"path":          r.path,
-			"auth_header":   nil,
+			"model_mapping":         r.entry.ModelMapping,
+			"scheme":                r.scheme,
+			"host":                  r.host,
+			"port":                  r.port,
+			"path":                  r.path,
+			"auth_header":           nil,
+			"priority":              r.priority,
+			"weight":                weight,
+			"max_inflight_requests": r.maxInflightRequests,
 			// Must explicitly set "internal" to match Kong schema default (false),
 			// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
 			"internal": r.internal,

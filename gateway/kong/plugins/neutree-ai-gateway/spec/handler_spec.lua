@@ -33,8 +33,37 @@ package.loaded["kong.tools.string"] = {
     strip = function(s) return s end,
 }
 
-_G.ngx = { now = function() return 0 end }
-_G.kong = { log = { warn = function() end, err = function() end } }
+local shared_values = {}
+local inflight_dict = {
+    get = function(_, key)
+        return shared_values[key]
+    end,
+    incr = function(_, key, delta, init)
+        local current = shared_values[key]
+        if current == nil then
+            if init == nil then
+                return nil, "not found"
+            end
+            current = init
+        end
+        current = current + delta
+        shared_values[key] = current
+        return current
+    end,
+    set = function(_, key, value)
+        shared_values[key] = value
+        return true
+    end,
+}
+
+_G.ngx = {
+    now = function() return 0 end,
+    shared = { neutree_ai_gateway_inflight = inflight_dict },
+}
+_G.kong = {
+    ctx = { plugin = {} },
+    log = { warn = function() end, err = function() end },
+}
 
 -- Load the handler by file path (relative to this spec) rather than by module
 -- name, so the tests do not depend on the kong.plugins.* directory nesting
@@ -60,6 +89,64 @@ describe("json_array()", function()
         local a = T.json_array()
         a[#a + 1] = { id = "x" }
         assert.are.equal('[{"id":"x"}]', cjson.encode(a))
+    end)
+end)
+
+describe("select_upstream()", function()
+    local function entry(model, priority, weight, limit)
+        return {
+            model_mapping = { chat = model },
+            priority = priority,
+            weight = weight,
+            max_inflight_requests = limit,
+        }
+    end
+
+    before_each(function()
+        shared_values = {}
+        _G.kong.ctx.plugin = {}
+    end)
+
+    it("uses the highest-priority available group", function()
+        local high = entry("provider-a", 0, 1, 0)
+        local low = entry("provider-b", 1, 1, 0)
+        local selected, reason = T.select_upstream({
+            route_prefix = "/workspace/ws/external-endpoint/ee",
+            upstreams = { high, low },
+        }, "chat")
+
+        assert.is_nil(reason)
+        assert.are.equal(high, selected)
+    end)
+
+    it("falls through to a lower priority when the higher group is full", function()
+        local high = entry("provider-a", 0, 1, 1)
+        local low = entry("provider-b", 1, 1, 1)
+        shared_values["neutree-ai-gateway:/workspace/ws/external-endpoint/ee:chat:1"] = 1
+        local selected, reason = T.select_upstream({
+            route_prefix = "/workspace/ws/external-endpoint/ee",
+            upstreams = { high, low },
+        }, "chat")
+
+        assert.is_nil(reason)
+        assert.are.equal(low, selected)
+        assert.are.equal(1, shared_values["neutree-ai-gateway:/workspace/ws/external-endpoint/ee:chat:2"])
+        T.release_inflight()
+        assert.are.equal(0, shared_values["neutree-ai-gateway:/workspace/ws/external-endpoint/ee:chat:2"])
+    end)
+
+    it("returns capacity_exhausted when every matching target is full", function()
+        local first = entry("provider-a", 0, 1, 1)
+        local second = entry("provider-b", 0, 1, 1)
+        shared_values["neutree-ai-gateway:/workspace/ws/external-endpoint/ee:chat:1"] = 1
+        shared_values["neutree-ai-gateway:/workspace/ws/external-endpoint/ee:chat:2"] = 1
+        local selected, reason = T.select_upstream({
+            route_prefix = "/workspace/ws/external-endpoint/ee",
+            upstreams = { first, second },
+        }, "chat")
+
+        assert.is_nil(selected)
+        assert.are.equal("capacity_exhausted", reason)
     end)
 end)
 

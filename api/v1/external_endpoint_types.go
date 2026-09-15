@@ -39,6 +39,10 @@ func (a *ExternalEndpointAuthSpec) AuthHeaderValue() string {
 }
 
 type ExternalEndpointUpstreamEntry struct {
+	// Name identifies this provider entry for model_routes targets. It is
+	// optional for the legacy model_mapping format.
+	Name string `json:"name,omitempty"`
+
 	// Upstream is the external API configuration (for external upstream type)
 	Upstream *ExternalEndpointUpstreamSpec `json:"upstream,omitempty"`
 
@@ -52,6 +56,24 @@ type ExternalEndpointUpstreamEntry struct {
 	// The keys are the exposed model names, values are the upstream model names
 	// e.g. {"fast": "gpt-4o-mini"} exposes "fast" and forwards as "gpt-4o-mini"
 	ModelMapping map[string]string `json:"model_mapping"`
+}
+
+// ExternalEndpointModelRouteTarget binds one virtual model to one concrete
+// upstream model. Routing policy belongs here, rather than on the provider,
+// so the same provider can be used with different policies by different
+// virtual models.
+type ExternalEndpointModelRouteTarget struct {
+	Upstream            string `json:"upstream"`
+	UpstreamModel       string `json:"upstream_model"`
+	Priority            int    `json:"priority,omitempty"`
+	Weight              int    `json:"weight,omitempty"`
+	MaxInflightRequests int    `json:"max_inflight_requests,omitempty"`
+}
+
+type ExternalEndpointModelRoute struct {
+	Model    string                             `json:"model"`
+	Strategy string                             `json:"strategy,omitempty"`
+	Targets  []ExternalEndpointModelRouteTarget `json:"targets"`
 }
 
 // Upstream entry kinds, used to describe an entry in the status without
@@ -139,6 +161,10 @@ type ExternalEndpointSpec struct {
 	// or endpoint_ref) instead of by array index, so deleting or reordering
 	// entries cannot leak one upstream's credential into another.
 	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams" mergekey:"upstream.url,endpoint_ref"`
+
+	// ModelRoutes is the model-scoped routing format. When present, the
+	// gateway uses these routes instead of the legacy upstream model_mapping.
+	ModelRoutes []ExternalEndpointModelRoute `json:"model_routes,omitempty"`
 
 	// Timeout is the request timeout in milliseconds, default 60000
 	Timeout *int `json:"timeout,omitempty"`
