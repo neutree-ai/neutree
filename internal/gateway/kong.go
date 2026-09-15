@@ -812,6 +812,13 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	}
 	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
+		// A new model-routes validation error must not leave the previous Kong
+		// route serving stale configuration. Fail closed until the resource is
+		// corrected and reconciled again.
+		if cleanupErr := k.deleteExternalEndpointRoute(ee); cleanupErr != nil {
+			return statuses, errors.Wrapf(err,
+				"invalid model routes (also failed to remove stale route: %v)", cleanupErr)
+		}
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
@@ -1236,7 +1243,11 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 		"endpoint_type": endpointTypeExternal,
 		"endpoint_name": ee.Metadata.Name,
 	}
-	if len(modelRoutes) > 0 {
+	// Preserve an explicitly configured model-routes mode even when every
+	// target was filtered because its provider is currently unresolved. An
+	// omitted field makes the Lua plugin fall back to legacy model_mapping and
+	// can accidentally route a model through a different configuration.
+	if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 		config["model_routes"] = modelRoutes
 	}
 
