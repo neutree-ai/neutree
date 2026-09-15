@@ -71,7 +71,6 @@ function M.begin(conf, model, env)
                 tried = {},
                 excluded = {},
                 attempts = 0,
-                committed = false,
             }
         end
     end
@@ -107,22 +106,6 @@ function M.finish(state)
         state.lease = nil
         lease()
     end
-end
-
-function M.retry(state, condition, replayable)
-    M.finish(state)
-    if not state or state.committed or not replayable then
-        return nil
-    end
-    if state.attempts >= 1 + (state.route.max_attempts or 0) then
-        return nil
-    end
-    for _, expected in ipairs(state.route.retryable_conditions or {}) do
-        if expected == condition then
-            return M.next(state)
-        end
-    end
-    return nil
 end
 
 return M

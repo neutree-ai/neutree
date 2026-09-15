@@ -231,42 +231,6 @@ end
 
 local build_upstream_path
 
-local function install_retry(conf)
-    if not conf.model_routes or not kong.service.set_target_retry_callback then
-        return
-    end
-    kong.service.set_target_retry_callback(function()
-        local ctx = kong.ctx.plugin
-        local state = ctx and ctx.routing_state
-        local status = kong.service.response.get_status()
-        local condition = status and ("http_" .. tostring(status)) or "timeout"
-        local target = routing.retry(state, condition, ctx and ctx.routing_body_raw ~= nil)
-        if not target then
-            return false
-        end
-        kong.service.set_target(target.host, target.port)
-        kong.service.request.set_scheme(target.scheme)
-        kong.service.request.clear_header("Authorization")
-        if target.auth_header and target.auth_header ~= "" then
-            kong.service.request.set_header("Authorization", target.auth_header)
-        end
-        kong.service.request.set_header("Host", target.host)
-        local suffix = ctx.route_suffix or "/v1/chat/completions"
-        local path = target.internal and suffix or strip_api_version_prefix(suffix)
-        kong.service.request.set_path(build_upstream_path(target, path))
-        local body = cjson.decode(ctx.routing_body_raw)
-        if type(body) == "table" then
-            body.model = target.upstream_model
-            local encoded = cjson.encode(body)
-            if encoded then
-                kong.service.request.set_raw_body(encoded)
-                ctx.routing_body_raw = encoded
-            end
-        end
-        return true
-    end)
-end
-
 local function set_upstream_target(entry)
     local target_host = entry.host
     local connect_host = target_host
@@ -1312,8 +1276,6 @@ function AIGatewayHandler:access(conf)
     local request_path = kong.request.get_path()
     local suffix = extract_suffix(request_path, conf.route_prefix or "")
 
-    install_retry(conf)
-
     -- Expose the IE/EE identity this route serves to later consumer plugins
     -- (neutree-ai-access endpoint-level allowlist). It is static per route/config,
     -- so stash it unconditionally regardless of request format or upstream match.
@@ -1371,7 +1333,6 @@ function AIGatewayHandler:access(conf)
             end
 
             kong.ctx.plugin.routing_state = state
-            kong.ctx.plugin.route_suffix = "/v1/chat/completions"
             matched_entry = target_entry(state)
             local _, route_err = set_upstream_target(matched_entry)
             if route_err then
@@ -1400,7 +1361,6 @@ function AIGatewayHandler:access(conf)
 
         local openai_json = cjson.encode(openai_req)
         kong.service.request.set_raw_body(openai_json)
-        kong.ctx.plugin.routing_body_raw = openai_json
         kong.service.request.set_header("Content-Type", "application/json")
         kong.service.request.clear_header("anthropic-version")
         kong.service.request.clear_header("anthropic-beta")
@@ -1489,7 +1449,6 @@ function AIGatewayHandler:access(conf)
         end
 
         kong.ctx.plugin.routing_state = state
-        kong.ctx.plugin.route_suffix = suffix
         matched_entry = target_entry(state)
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
@@ -1511,7 +1470,6 @@ function AIGatewayHandler:access(conf)
         local new_body = cjson.encode(ai_request)
         if new_body then
             kong.service.request.set_raw_body(new_body)
-            kong.ctx.plugin.routing_body_raw = new_body
         end
     end
 
@@ -1535,10 +1493,6 @@ function AIGatewayHandler:header_filter(conf)
     local response_status = kong.service.response.get_status()
     if response_status ~= 200 then
         return
-    end
-
-    if kong.ctx.plugin.routing_state then
-        kong.ctx.plugin.routing_state.committed = true
     end
 
     if kong.ctx.plugin.anthropic_mode then
