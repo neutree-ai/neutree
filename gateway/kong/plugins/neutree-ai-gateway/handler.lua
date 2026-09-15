@@ -3,6 +3,7 @@ local buffer = require("string.buffer")
 local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
+local routing = require("kong.plugins.neutree-ai-gateway.routing")
 
 -- JSON array/object policy (NEU-551).
 --
@@ -193,6 +194,43 @@ local function resolve_upstream(conf, model)
     return nil
 end
 
+local function begin_routing(conf, model)
+    if not conf.model_routes then
+        local entry = resolve_upstream(conf, model)
+        if entry then
+            return { legacy = true, current = entry }
+        end
+        return nil
+    end
+    local state, err = routing.begin(conf, model, {
+        shared = ngx.shared and ngx.shared.neutree_ai_gateway_inflight,
+    })
+    if not state then
+        return nil, err
+    end
+    local target, select_err = routing.next(state)
+    if not target then
+        return nil, select_err
+    end
+    return state, target
+end
+
+local function target_mapping(state, model)
+    if state and state.legacy then
+        return state.current.model_mapping[model]
+    end
+    return state and state.current and state.current.upstream_model
+end
+
+local function target_entry(state)
+    if state and state.legacy then
+        return state.current
+    end
+    return state and state.current
+end
+
+local build_upstream_path
+
 local function set_upstream_target(entry)
     local target_host = entry.host
     local connect_host = target_host
@@ -240,7 +278,7 @@ local function set_upstream_target(entry)
     return connect_host
 end
 
-local function build_upstream_path(entry, api_path)
+build_upstream_path = function(entry, api_path)
     local upstream_base = entry.path or "/"
     if upstream_base == "/" then
         upstream_base = ""
@@ -255,6 +293,30 @@ local function build_upstream_path(entry, api_path)
 end
 
 local function maybe_return_model_list(conf, suffix)
+    if conf.model_routes and kong.request.get_method() == "GET"
+       and (is_models_path(suffix) or is_anthropic_models_path(suffix)) then
+        kong.ctx.plugin.skip = true
+        local models = json_array()
+        for _, route in ipairs(conf.model_routes) do
+            models[#models + 1] = {
+                id = route.model,
+                object = "model",
+                type = "model",
+                created = 0,
+                owned_by = "external-endpoint",
+                display_name = route.model,
+                created_at = "2025-01-01T00:00:00Z",
+            }
+        end
+        if is_anthropic_models_path(suffix) then
+            kong.response.exit(200, { data = models, has_more = false,
+                first_id = models[1] and models[1].id or nil,
+                last_id = models[#models] and models[#models].id or nil })
+        else
+            kong.response.exit(200, { object = "list", data = models })
+        end
+        return true
+    end
     if not conf.upstreams then
         return false
     end
@@ -1264,12 +1326,14 @@ function AIGatewayHandler:access(conf)
         kong.ctx.plugin.is_stream = anthropic_req.stream == true
         kong.ctx.plugin.route_type = "/v1/chat/completions"
 
-        if conf.upstreams then
-            local matched_entry = resolve_upstream(conf, openai_req.model)
-            if not matched_entry then
+        if conf.model_routes or conf.upstreams then
+            local state, matched_entry = begin_routing(conf, openai_req.model)
+            if not state then
                 return anthropic_error(400, "invalid_request_error", "No upstream configured for model: " .. tostring(openai_req.model))
             end
 
+            kong.ctx.plugin.routing_state = state
+            matched_entry = target_entry(state)
             local _, route_err = set_upstream_target(matched_entry)
             if route_err then
                 return route_err
@@ -1279,7 +1343,7 @@ function AIGatewayHandler:access(conf)
             else
                 kong.service.request.set_path(build_upstream_path(matched_entry, "/chat/completions"))
             end
-            openai_req.model = matched_entry.model_mapping[openai_req.model]
+            openai_req.model = target_mapping(state, openai_req.model)
         else
             -- IE (internal endpoint) routes carry no `upstreams` config and rely on
             -- Kong's own service/route path translation. By this point the router has
@@ -1374,16 +1438,18 @@ function AIGatewayHandler:access(conf)
     kong.ctx.shared.neutree_request_model = ai_request.model
     kong.ctx.plugin.is_stream = ai_request.stream == true
 
-    if conf.upstreams then
+    if conf.model_routes or conf.upstreams then
         if not ai_request.model or ai_request.model == "" then
             return fail(400, "missing 'model' field in request body")
         end
 
-        local matched_entry = resolve_upstream(conf, ai_request.model)
-        if not matched_entry then
+        local state, matched_entry = begin_routing(conf, ai_request.model)
+        if not state then
             return fail(400, "No upstream configured for model: " .. ai_request.model)
         end
 
+        kong.ctx.plugin.routing_state = state
+        matched_entry = target_entry(state)
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
             return route_err
@@ -1394,7 +1460,7 @@ function AIGatewayHandler:access(conf)
         else
             kong.service.request.set_path(build_upstream_path(matched_entry, strip_api_version_prefix(suffix)))
         end
-        ai_request.model = matched_entry.model_mapping[ai_request.model]
+        ai_request.model = target_mapping(state, ai_request.model)
         if is_empty_table(ai_request.tools) then
             ai_request.tools = nil
         end
@@ -1484,6 +1550,10 @@ function AIGatewayHandler:log(conf)
     end
 
     local response_status = kong.service.response.get_status()
+
+    if kong.ctx.plugin.routing_state then
+        routing.finish(kong.ctx.plugin.routing_state)
+    end
 
     -- Emit raw req/res trace for every request (incl. failures).
     local response_body = kong.ctx.plugin.response_body_raw
