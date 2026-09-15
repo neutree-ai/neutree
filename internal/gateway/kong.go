@@ -785,6 +785,7 @@ func getEndpointRoutePath(ep *v1.Endpoint) string {
 // gateway configuration, while every other entry is still pushed. Only when no
 // entry resolves does the whole sync fail, since Kong needs at least one
 // reachable target to build the service.
+//nolint:wsl // Synchronization stages are intentionally adjacent for atomic Kong updates.
 func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
 	// An endpoint with no upstreams at all is a spec problem, not a resolution
 	// failure — keep saying so explicitly rather than reporting "nothing
@@ -1006,6 +1007,7 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 
 // externalEndpointUpstreamStatuses projects resolution outcomes into the
 // user-visible per-upstream status list, in spec order.
+//nolint:wsl // Projection keeps the model-route override next to legacy model projection.
 func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
 	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
 
@@ -1033,6 +1035,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 	return statuses
 }
 
+//nolint:wsl // The projection keeps route filtering and deduplication together.
 func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstream string) []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)

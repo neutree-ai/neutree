@@ -9,6 +9,7 @@ import (
 // compileExternalEndpointModelRoutes resolves the provider references in the
 // control-plane model route spec into the self-contained target records the
 // gateway plugin needs at request time.
+//nolint:wsl // Validation and compilation are intentionally kept together.
 func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolvedUpstream) ([]map[string]interface{}, error) {
 	if ee.Spec == nil || len(ee.Spec.ModelRoutes) == 0 {
 		return nil, nil
