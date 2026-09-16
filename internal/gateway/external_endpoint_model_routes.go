@@ -37,6 +37,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 		if _, exists := seenModels[route.Model]; exists {
 			return nil, fmt.Errorf("duplicate model route %q", route.Model)
 		}
+
 		seenModels[route.Model] = struct{}{}
 
 		if len(route.Targets) == 0 {
@@ -53,6 +54,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			if target.Upstream == "" {
 				return nil, fmt.Errorf("model route %q target upstream must not be empty", route.Model)
 			}
+
 			provider, ok := providers[target.Upstream]
 
 			if !ok {
@@ -66,6 +68,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			if target.UpstreamModel == "" {
 				return nil, fmt.Errorf("model route %q target upstream_model must not be empty", route.Model)
 			}
+
 			if target.Priority < 0 || target.Weight < 0 || target.MaxInflightRequests < 0 {
 				return nil, fmt.Errorf("model route %q target %q has a negative routing value", route.Model, target.Upstream)
 			}
