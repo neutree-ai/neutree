@@ -14,6 +14,14 @@ set -e
 plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$plugin_dir"
 
+# The repository keeps plugin files flat, while Kong loads them through its
+# namespaced module path. Mirror that path for the standalone test runner.
+module_dir="$plugin_dir/kong/plugins/neutree-ai-gateway"
+cleanup_module_dir() { rm -rf "$plugin_dir/kong"; }
+trap cleanup_module_dir EXIT
+mkdir -p "$(dirname "$module_dir")"
+ln -s "$plugin_dir" "$module_dir"
+
 # Put the luarocks trees on Lua's module path so luajit can find busted + cjson.
 eval "$(luarocks path)"
 
