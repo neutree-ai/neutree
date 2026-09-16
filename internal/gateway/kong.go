@@ -1218,7 +1218,6 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 
 	for _, r := range ready {
 		upstreamEntry := map[string]interface{}{
-			"name":          r.entry.Name,
 			"model_mapping": r.entry.ModelMapping,
 			"scheme":        r.scheme,
 			"host":          r.host,
@@ -1228,6 +1227,9 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			// Must explicitly set "internal" to match Kong schema default (false),
 			// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
 			"internal": r.internal,
+		}
+		if r.entry.Name != "" {
+			upstreamEntry["name"] = r.entry.Name
 		}
 
 		if !r.internal && r.entry.Auth != nil {

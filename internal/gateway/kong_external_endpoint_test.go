@@ -137,6 +137,7 @@ func TestGenerateExternalEndpointAIGatewayPluginSkipsUnresolved(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, upstreams, 1, "the unresolved endpoint_ref must be left out of the pushed config")
 	assert.Equal(t, "api.openai.com", upstreams[0]["host"])
+	assert.NotContains(t, upstreams[0], "name")
 	assert.Equal(t, false, upstreams[0]["internal"])
 	assert.Equal(t, "Bearer sk-test", upstreams[0]["auth_header"])
 }
@@ -156,6 +157,7 @@ func TestGenerateExternalEndpointAIGatewayPluginInternalEntry(t *testing.T) {
 	require.Len(t, upstreams, 1)
 	assert.Equal(t, true, upstreams[0]["internal"])
 	assert.Nil(t, upstreams[0]["auth_header"])
+	assert.NotContains(t, upstreams[0], "name")
 }
 
 func TestCompileExternalEndpointModelRoutes(t *testing.T) {
