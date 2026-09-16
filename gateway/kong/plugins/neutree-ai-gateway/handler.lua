@@ -1348,6 +1348,9 @@ function AIGatewayHandler:access(conf)
         if conf.model_routes or conf.upstreams then
             local state, matched_entry = begin_routing(conf, openai_req.model)
             if not state then
+                if matched_entry == "capacity_exhausted" then
+                    return anthropic_error(503, "overloaded_error", "All upstreams are at capacity for model: " .. tostring(openai_req.model))
+                end
                 return anthropic_error(400, "invalid_request_error", "No upstream configured for model: " .. tostring(openai_req.model))
             end
 
@@ -1464,6 +1467,9 @@ function AIGatewayHandler:access(conf)
 
         local state, matched_entry = begin_routing(conf, ai_request.model)
         if not state then
+            if matched_entry == "capacity_exhausted" then
+                return fail(503, "All upstreams are at capacity for model: " .. ai_request.model)
+            end
             return fail(400, "No upstream configured for model: " .. ai_request.model)
         end
 

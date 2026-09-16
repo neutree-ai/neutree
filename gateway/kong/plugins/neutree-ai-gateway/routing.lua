@@ -78,10 +78,12 @@ function M.begin(conf, model, env)
 end
 
 function M.next(state)
+    local capacity_exhausted = false
     while true do
         local available = candidates(state)
         if #available == 0 then
-            return nil, "no_available_target"
+            return nil, capacity_exhausted and "capacity_exhausted"
+                or "no_available_target"
         end
         local target = weighted_choice(available)
         local key = target_key(state, target)
@@ -95,6 +97,9 @@ function M.next(state)
         end
         if err == "counter_unavailable" then
             return nil, err
+        end
+        if err == "capacity_exhausted" then
+            capacity_exhausted = true
         end
         state.excluded[key] = true
     end
