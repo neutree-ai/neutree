@@ -79,7 +79,7 @@ if [ -n "$CHANGED_LINT_GO" ]; then
     make golangci-lint
   fi
 
-  if ! ./bin/golangci-lint run; then
+  if ! env GOOS=linux CGO_ENABLED=1 ./bin/golangci-lint run; then
     echo "   ✅ FIX: see contributing/coding-standards.md#lint-error-cheatsheet"
     exit 1
   fi
