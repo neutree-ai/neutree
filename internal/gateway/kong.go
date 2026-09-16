@@ -809,6 +809,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
 			ee.Key(), joinUpstreamErrors(statuses))
 	}
+
 	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
 		// A new model-routes validation error must not leave the previous Kong
@@ -818,6 +819,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 			return statuses, errors.Wrapf(err,
 				"invalid model routes (also failed to remove stale route: %v)", cleanupErr)
 		}
+
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
@@ -1020,6 +1022,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 	for i := range resolved {
 		entry := resolved[i].entry
 		models := entry.ExposedModels()
+
 		if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 			models = modelRouteModelsForUpstream(ee.Spec.ModelRoutes, entry.Name)
 		}

@@ -42,6 +42,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 		if len(route.Targets) == 0 {
 			return nil, fmt.Errorf("model route %q must have at least one target", route.Model)
 		}
+
 		if route.MaxAttempts < 0 {
 			return nil, fmt.Errorf("model route %q max_attempts must not be negative", route.Model)
 		}
@@ -57,15 +58,18 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			if !ok {
 				return nil, fmt.Errorf("model route %q references unknown upstream %q", route.Model, target.Upstream)
 			}
+
 			if provider.err != nil {
 				continue
 			}
+
 			if target.UpstreamModel == "" {
 				return nil, fmt.Errorf("model route %q target upstream_model must not be empty", route.Model)
 			}
 			if target.Priority < 0 || target.Weight < 0 || target.MaxInflightRequests < 0 {
 				return nil, fmt.Errorf("model route %q target %q has a negative routing value", route.Model, target.Upstream)
 			}
+
 			weight := target.Weight
 
 			if weight == 0 {
@@ -82,6 +86,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 
 			targets = append(targets, compiled)
 		}
+
 		if len(targets) == 0 {
 			continue
 		}
