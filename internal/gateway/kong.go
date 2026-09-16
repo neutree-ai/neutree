@@ -1041,13 +1041,17 @@ func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstrea
 			if target.Upstream == upstream {
 				if _, exists := seen[route.Model]; !exists {
 					seen[route.Model] = struct{}{}
+
 					models = append(models, route.Model)
 				}
+
 				break
 			}
 		}
 	}
+
 	sort.Strings(models)
+
 	return models
 }
 
