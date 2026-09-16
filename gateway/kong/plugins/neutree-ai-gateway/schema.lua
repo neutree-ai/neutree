@@ -39,7 +39,8 @@ local upstream_entry = {
     {
       model_mapping = {
         type = "map",
-        required = true,
+        required = false,
+        default = {},
         keys = { type = "string" },
         values = { type = "string" },
       },
@@ -69,7 +70,11 @@ local model_route = {
   type = "record",
   fields = {
     { model = { type = "string", required = true } },
-    { retryable_conditions = { type = "array", required = false, elements = { type = "string" } } },
+    { retryable_conditions = {
+        type = "array",
+        required = false,
+        elements = { type = "string", one_of = { "http_429", "http_502", "http_503", "http_504", "timeout" } },
+      } },
     { max_attempts = { type = "integer", required = false, default = 0, between = { 0, 2147483647 } } },
     { targets = { type = "array", required = true, elements = model_route_target } },
   },

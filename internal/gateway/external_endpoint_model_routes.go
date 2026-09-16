@@ -9,14 +9,16 @@ import (
 // compileExternalEndpointModelRoutes resolves the provider references in the
 // control-plane model route spec into the self-contained target records the
 // gateway plugin needs at request time.
-func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolvedUpstream) ([]map[string]interface{}, error) {
+//
+//nolint:wsl // Validation and compilation are intentionally kept together.
+func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) ([]map[string]interface{}, error) {
 	if ee.Spec == nil || len(ee.Spec.ModelRoutes) == 0 {
 		return nil, nil
 	}
 
-	providers := make(map[string]resolvedUpstream, len(ready))
+	providers := make(map[string]resolvedUpstream, len(resolved))
 
-	for _, provider := range ready {
+	for _, provider := range resolved {
 		if provider.entry.Name != "" {
 			if _, exists := providers[provider.entry.Name]; exists {
 				return nil, fmt.Errorf("duplicate upstream name %q", provider.entry.Name)
@@ -37,13 +39,11 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 		if _, exists := seenModels[route.Model]; exists {
 			return nil, fmt.Errorf("duplicate model route %q", route.Model)
 		}
-
 		seenModels[route.Model] = struct{}{}
 
 		if len(route.Targets) == 0 {
 			return nil, fmt.Errorf("model route %q must have at least one target", route.Model)
 		}
-
 		if route.MaxAttempts < 0 {
 			return nil, fmt.Errorf("model route %q max_attempts must not be negative", route.Model)
 		}
@@ -54,21 +54,20 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			if target.Upstream == "" {
 				return nil, fmt.Errorf("model route %q target upstream must not be empty", route.Model)
 			}
-
 			provider, ok := providers[target.Upstream]
 
 			if !ok {
 				return nil, fmt.Errorf("model route %q references unknown upstream %q", route.Model, target.Upstream)
 			}
-
+			if provider.err != nil {
+				continue
+			}
 			if target.UpstreamModel == "" {
 				return nil, fmt.Errorf("model route %q target upstream_model must not be empty", route.Model)
 			}
-
 			if target.Priority < 0 || target.Weight < 0 || target.MaxInflightRequests < 0 {
 				return nil, fmt.Errorf("model route %q target %q has a negative routing value", route.Model, target.Upstream)
 			}
-
 			weight := target.Weight
 
 			if weight == 0 {
@@ -78,20 +77,15 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 			compiled := map[string]interface{}{
 				"upstream":              target.Upstream,
 				"upstream_model":        target.UpstreamModel,
-				"scheme":                provider.scheme,
-				"host":                  provider.host,
-				"port":                  provider.port,
-				"path":                  provider.path,
-				"internal":              provider.internal,
 				"priority":              target.Priority,
 				"weight":                weight,
 				"max_inflight_requests": target.MaxInflightRequests,
 			}
-			if !provider.internal && provider.entry.Auth != nil {
-				compiled["auth_header"] = provider.entry.Auth.AuthHeaderValue()
-			}
 
 			targets = append(targets, compiled)
+		}
+		if len(targets) == 0 {
+			continue
 		}
 
 		routes = append(routes, map[string]interface{}{

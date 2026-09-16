@@ -38,6 +38,9 @@ jobs:
         run: make prepare-build-cli
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
+        env:
+          GOOS: linux
+          CGO_ENABLED: "1"
         with:
           version: v1.64.6
       - name: Test

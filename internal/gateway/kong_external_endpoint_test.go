@@ -137,6 +137,7 @@ func TestGenerateExternalEndpointAIGatewayPluginSkipsUnresolved(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, upstreams, 1, "the unresolved endpoint_ref must be left out of the pushed config")
 	assert.Equal(t, "api.openai.com", upstreams[0]["host"])
+	assert.NotContains(t, upstreams[0], "name")
 	assert.Equal(t, false, upstreams[0]["internal"])
 	assert.Equal(t, "Bearer sk-test", upstreams[0]["auth_header"])
 }
@@ -156,6 +157,7 @@ func TestGenerateExternalEndpointAIGatewayPluginInternalEntry(t *testing.T) {
 	require.Len(t, upstreams, 1)
 	assert.Equal(t, true, upstreams[0]["internal"])
 	assert.Nil(t, upstreams[0]["auth_header"])
+	assert.NotContains(t, upstreams[0], "name")
 }
 
 func TestCompileExternalEndpointModelRoutes(t *testing.T) {
@@ -183,7 +185,12 @@ func TestCompileExternalEndpointModelRoutes(t *testing.T) {
 	targets := routes[0]["targets"].([]map[string]interface{})
 	require.Len(t, targets, 1)
 	assert.Equal(t, "gpt-4o", targets[0]["upstream_model"])
-	assert.Equal(t, "Bearer sk-test", targets[0]["auth_header"])
+	assert.NotContains(t, targets[0], "scheme")
+	assert.NotContains(t, targets[0], "host")
+	assert.NotContains(t, targets[0], "port")
+	assert.NotContains(t, targets[0], "path")
+	assert.NotContains(t, targets[0], "internal")
+	assert.NotContains(t, targets[0], "auth_header")
 }
 
 func TestCompileExternalEndpointModelRoutesRejectsUnknownProvider(t *testing.T) {
@@ -196,6 +203,52 @@ func TestCompileExternalEndpointModelRoutesRejectsUnknownProvider(t *testing.T) 
 
 	_, err := compileExternalEndpointModelRoutes(ee, []resolvedUpstream{{entry: ee.Spec.Upstreams[0]}})
 	assert.ErrorContains(t, err, `references unknown upstream "missing"`)
+}
+
+func TestCompileExternalEndpointModelRoutesSkipsFailedProvider(t *testing.T) {
+	healthy := externalUpstream("https://healthy.example/v1", nil)
+	healthy.Name = "healthy"
+	failed := externalUpstream("https://failed.example/v1", nil)
+	failed.Name = "failed"
+	ee := testExternalEndpoint(healthy, failed)
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "company-chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{
+			{Upstream: "healthy", UpstreamModel: "gpt-4o"},
+			{Upstream: "failed", UpstreamModel: "gpt-4o"},
+		},
+	}}
+
+	routes, err := compileExternalEndpointModelRoutes(ee, []resolvedUpstream{
+		{entry: healthy, scheme: "https", host: "healthy.example", port: 443, path: "/v1"},
+		{entry: failed, err: errors.New("provider unavailable")},
+	})
+	require.NoError(t, err)
+	require.Len(t, routes, 1)
+	targets := routes[0]["targets"].([]map[string]interface{})
+	require.Len(t, targets, 1)
+	assert.Equal(t, "healthy", targets[0]["upstream"])
+}
+
+func TestGenerateExternalEndpointAIGatewayPluginPreservesEmptyModelRoutes(t *testing.T) {
+	ee := testExternalEndpoint(externalUpstream("https://failed.example/v1", nil))
+	ee.Spec.Upstreams[0].Name = "failed"
+	ee.Spec.ModelRoutes = []v1.ExternalEndpointModelRoute{{
+		Model: "company-chat",
+		Targets: []v1.ExternalEndpointModelRouteTarget{{
+			Upstream: "failed", UpstreamModel: "gpt-4o",
+		}},
+	}}
+
+	plugin := (&Kong{}).generateExternalEndpointAIGatewayPlugin(
+		ee,
+		&kong.Route{ID: pointy.String("r")},
+		[]resolvedUpstream{{entry: ee.Spec.Upstreams[0]}},
+		[]map[string]interface{}{},
+	)
+
+	assert.Contains(t, plugin.Config, "model_routes")
+	assert.Empty(t, plugin.Config["model_routes"])
 }
 
 // fakeKongForExternalEndpoint serves the minimum admin API surface

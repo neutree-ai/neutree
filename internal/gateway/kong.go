@@ -786,6 +786,8 @@ func getEndpointRoutePath(ep *v1.Endpoint) string {
 // gateway configuration, while every other entry is still pushed. Only when no
 // entry resolves does the whole sync fail, since Kong needs at least one
 // reachable target to build the service.
+//
+//nolint:wsl // Synchronization stages are intentionally adjacent for atomic Kong updates.
 func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpointUpstreamStatus, error) {
 	// An endpoint with no upstreams at all is a spec problem, not a resolution
 	// failure — keep saying so explicitly rather than reporting "nothing
@@ -809,10 +811,15 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
 			ee.Key(), joinUpstreamErrors(statuses))
 	}
-
-	modelRoutes, err := compileExternalEndpointModelRoutes(ee, ready)
-
+	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
+		// A new model-routes validation error must not leave the previous Kong
+		// route serving stale configuration. Fail closed until the resource is
+		// corrected and reconciled again.
+		if cleanupErr := k.deleteExternalEndpointRoute(ee); cleanupErr != nil {
+			return statuses, errors.Wrapf(err,
+				"invalid model routes (also failed to remove stale route: %v)", cleanupErr)
+		}
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
@@ -1009,13 +1016,14 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 
 // externalEndpointUpstreamStatuses projects resolution outcomes into the
 // user-visible per-upstream status list, in spec order.
+//
+//nolint:wsl // Projection keeps the model-route override next to legacy model projection.
 func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
 	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
 
 	for i := range resolved {
 		entry := resolved[i].entry
 		models := entry.ExposedModels()
-
 		if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 			models = modelRouteModelsForUpstream(ee.Spec.ModelRoutes, entry.Name)
 		}
@@ -1038,6 +1046,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 	return statuses
 }
 
+//nolint:wsl // The projection keeps route filtering and deduplication together.
 func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstream string) []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
@@ -1215,7 +1224,6 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 
 	for _, r := range ready {
 		upstreamEntry := map[string]interface{}{
-			"name":          r.entry.Name,
 			"model_mapping": r.entry.ModelMapping,
 			"scheme":        r.scheme,
 			"host":          r.host,
@@ -1225,6 +1233,9 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			// Must explicitly set "internal" to match Kong schema default (false),
 			// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
 			"internal": r.internal,
+		}
+		if r.entry.Name != "" {
+			upstreamEntry["name"] = r.entry.Name
 		}
 
 		if !r.internal && r.entry.Auth != nil {
@@ -1240,7 +1251,11 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 		"endpoint_type": endpointTypeExternal,
 		"endpoint_name": ee.Metadata.Name,
 	}
-	if len(modelRoutes) > 0 {
+	// Preserve an explicitly configured model-routes mode even when every
+	// target was filtered because its provider is currently unresolved. An
+	// omitted field makes the Lua plugin fall back to legacy model_mapping and
+	// can accidentally route a model through a different configuration.
+	if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 		config["model_routes"] = modelRoutes
 	}
 
