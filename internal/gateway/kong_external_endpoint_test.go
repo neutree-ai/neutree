@@ -183,7 +183,12 @@ func TestCompileExternalEndpointModelRoutes(t *testing.T) {
 	targets := routes[0]["targets"].([]map[string]interface{})
 	require.Len(t, targets, 1)
 	assert.Equal(t, "gpt-4o", targets[0]["upstream_model"])
-	assert.Equal(t, "Bearer sk-test", targets[0]["auth_header"])
+	assert.NotContains(t, targets[0], "scheme")
+	assert.NotContains(t, targets[0], "host")
+	assert.NotContains(t, targets[0], "port")
+	assert.NotContains(t, targets[0], "path")
+	assert.NotContains(t, targets[0], "internal")
+	assert.NotContains(t, targets[0], "auth_header")
 }
 
 func TestCompileExternalEndpointModelRoutesRejectsUnknownProvider(t *testing.T) {

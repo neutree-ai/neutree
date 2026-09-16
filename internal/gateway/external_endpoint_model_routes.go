@@ -76,17 +76,9 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, resolved []reso
 			compiled := map[string]interface{}{
 				"upstream":              target.Upstream,
 				"upstream_model":        target.UpstreamModel,
-				"scheme":                provider.scheme,
-				"host":                  provider.host,
-				"port":                  provider.port,
-				"path":                  provider.path,
-				"internal":              provider.internal,
 				"priority":              target.Priority,
 				"weight":                weight,
 				"max_inflight_requests": target.MaxInflightRequests,
-			}
-			if !provider.internal && provider.entry.Auth != nil {
-				compiled["auth_header"] = provider.entry.Auth.AuthHeaderValue()
 			}
 
 			targets = append(targets, compiled)

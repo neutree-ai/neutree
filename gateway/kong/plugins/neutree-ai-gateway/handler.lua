@@ -222,11 +222,30 @@ local function target_mapping(state, model)
     return state and state.current and state.current.upstream_model
 end
 
-local function target_entry(state)
+local function target_entry(conf, state)
     if state and state.legacy then
         return state.current
     end
-    return state and state.current
+    local target = state and state.current
+    if not target then
+        return nil
+    end
+
+    -- Model-route targets reference an upstream by name. Resolve that
+    -- reference here so connection details remain owned by `upstreams`.
+    for _, upstream in ipairs(conf.upstreams or {}) do
+        if upstream.name == target.upstream then
+            local entry = {}
+            for key, value in pairs(upstream) do
+                entry[key] = value
+            end
+            for key, value in pairs(target) do
+                entry[key] = value
+            end
+            return entry
+        end
+    end
+    return nil
 end
 
 local build_upstream_path
@@ -1333,7 +1352,7 @@ function AIGatewayHandler:access(conf)
             end
 
             kong.ctx.plugin.routing_state = state
-            matched_entry = target_entry(state)
+            matched_entry = target_entry(conf, state)
             local _, route_err = set_upstream_target(matched_entry)
             if route_err then
                 return route_err
@@ -1449,7 +1468,7 @@ function AIGatewayHandler:access(conf)
         end
 
         kong.ctx.plugin.routing_state = state
-        matched_entry = target_entry(state)
+        matched_entry = target_entry(conf, state)
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
             return route_err
