@@ -16,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -758,6 +759,7 @@ func TestKubernetesOrchestratorValidateDependenciesForAcceleratorVirtualization(
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accelerator virtualization is not enabled")
+		assert.False(t, isDependencyNotReady(err))
 	})
 
 	t.Run("rejects vGPU endpoint when accelerator virtualization component is not ready", func(t *testing.T) {
@@ -775,6 +777,7 @@ func TestKubernetesOrchestratorValidateDependenciesForAcceleratorVirtualization(
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "accelerator virtualization component is not ready")
+		assert.True(t, isDependencyNotReady(err))
 	})
 
 	t.Run("allows vGPU endpoint when accelerator virtualization component is ready", func(t *testing.T) {
@@ -4501,4 +4504,99 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_ModelScopeWithoutCrede
 
 	require.NoError(t, err)
 	assert.NotContains(t, data.Env, v1.ModelScopeTokenEnv)
+}
+
+func TestKubernetesOrchestratorKeepDeployedOnUnreadyDependency(t *testing.T) {
+	cluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
+		Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+		Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseUpdating},
+	}
+	endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint", Workspace: "workspace"}}
+
+	newContext := func(objs ...client.Object) *OrchestratorContext {
+		scheme := runtime.NewScheme()
+		_ = appsv1.AddToScheme(scheme)
+
+		return &OrchestratorContext{
+			Cluster:   cluster,
+			Endpoint:  endpoint,
+			ctrClient: fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build(),
+			logger:    klog.Background(),
+		}
+	}
+	deployed := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+		Name:      endpoint.Metadata.Name,
+		Namespace: util.ClusterNamespace(cluster),
+	}}
+	notReady := dependencyNotReadyf("deploy cluster %s is not running", cluster.Metadata.WorkspaceName())
+
+	t.Run("keeps an existing deployment while a dependency is not ready", func(t *testing.T) {
+		k := newKubernetesOrchestrator(Options{})
+		assert.True(t, k.keepDeployedOnUnreadyDependency(newContext(deployed), notReady))
+	})
+
+	t.Run("fails an endpoint that was never deployed", func(t *testing.T) {
+		k := newKubernetesOrchestrator(Options{})
+		assert.False(t, k.keepDeployedOnUnreadyDependency(newContext(), notReady))
+	})
+
+	t.Run("fails on a misconfiguration even when deployed", func(t *testing.T) {
+		k := newKubernetesOrchestrator(Options{})
+		assert.False(t, k.keepDeployedOnUnreadyDependency(newContext(deployed), errors.New("deploy cluster is not kubernetes type")))
+	})
+}
+
+func TestKubernetesOrchestratorValidateDependenciesClassifiesNotReady(t *testing.T) {
+	baseContext := func() *OrchestratorContext {
+		return &OrchestratorContext{
+			Cluster: &v1.Cluster{
+				Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
+				Spec:     &v1.ClusterSpec{Type: v1.KubernetesClusterType},
+				Status:   &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning},
+			},
+			Engine: &v1.Engine{
+				Metadata: &v1.Metadata{Name: "engine", Workspace: "workspace"},
+				Status:   &v1.EngineStatus{Phase: v1.EnginePhaseCreated},
+			},
+			ModelRegistry: &v1.ModelRegistry{
+				Metadata: &v1.Metadata{Name: "model-registry", Workspace: "workspace"},
+				Status:   &v1.ModelRegistryStatus{Phase: v1.ModelRegistryPhaseCONNECTED},
+			},
+			ImageRegistry: &v1.ImageRegistry{
+				Metadata: &v1.Metadata{Name: "image-registry", Workspace: "workspace"},
+				Status:   &v1.ImageRegistryStatus{Phase: v1.ImageRegistryPhaseCONNECTED},
+			},
+			Endpoint: &v1.Endpoint{
+				Metadata: &v1.Metadata{Name: "endpoint", Workspace: "workspace"},
+				Spec:     &v1.EndpointSpec{},
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		mutate   func(*OrchestratorContext)
+		notReady bool
+	}{
+		{"cluster updating", func(c *OrchestratorContext) { c.Cluster.Status.Phase = v1.ClusterPhaseUpdating }, true},
+		{"cluster upgrading", func(c *OrchestratorContext) { c.Cluster.Status.Phase = v1.ClusterPhaseUpgrading }, true},
+		{"cluster failed", func(c *OrchestratorContext) { c.Cluster.Status.Phase = v1.ClusterPhaseFailed }, true},
+		{"engine not created", func(c *OrchestratorContext) { c.Engine.Status.Phase = v1.EnginePhasePending }, true},
+		{"model registry failed", func(c *OrchestratorContext) { c.ModelRegistry.Status.Phase = v1.ModelRegistryPhaseFAILED }, true},
+		{"image registry failed", func(c *OrchestratorContext) { c.ImageRegistry.Status.Phase = v1.ImageRegistryPhaseFAILED }, true},
+		{"cluster of the wrong type", func(c *OrchestratorContext) { c.Cluster.Spec.Type = v1.SSHClusterType }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := baseContext()
+			tt.mutate(ctx)
+
+			err := newKubernetesOrchestrator(Options{}).validateDependencies(ctx)
+
+			require.Error(t, err)
+			assert.Equal(t, tt.notReady, isDependencyNotReady(err))
+		})
+	}
 }

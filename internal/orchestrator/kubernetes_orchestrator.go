@@ -98,7 +98,7 @@ func (k *kubernetesOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoin
 func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
 	// validate cluster status
 	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
-		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
+		return dependencyNotReadyf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
 	}
 
 	if ctx.Cluster.Spec.Type != v1.KubernetesClusterType {
@@ -111,18 +111,18 @@ func (k *kubernetesOrchestrator) validateDependencies(ctx *OrchestratorContext) 
 
 	// validate engine status
 	if ctx.Engine.Status == nil || ctx.Engine.Status.Phase != v1.EnginePhaseCreated {
-		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
+		return dependencyNotReadyf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
 	}
 
 	// An endpoint that names no registry has nothing to validate here.
 	if ctx.ModelRegistry != nil &&
 		(ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED) {
-		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
+		return dependencyNotReadyf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
 	}
 
 	// validate image registry status
 	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
-		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
+		return dependencyNotReadyf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
 	}
 
 	return nil
@@ -151,7 +151,7 @@ func validateAcceleratorVirtualizationDependencies(ctx *OrchestratorContext) err
 			statusDetails = fmt.Sprintf(": %s %s", acceleratorVirtualizationStatus.Reason, acceleratorVirtualizationStatus.Message)
 		}
 
-		return errors.Errorf(
+		return dependencyNotReadyf(
 			"endpoint %s requests accelerator virtualization, but deploy cluster %s accelerator virtualization component is not ready%s",
 			ctx.Endpoint.Metadata.WorkspaceName(),
 			ctx.Cluster.Metadata.WorkspaceName(),
@@ -177,6 +177,10 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	if err := k.validateDependencies(ctx); err != nil {
+		if k.keepDeployedOnUnreadyDependency(ctx, err) {
+			return nil
+		}
+
 		return errors.Wrapf(err, "failed to validate dependencies for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
@@ -188,6 +192,32 @@ func (k *kubernetesOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	return nil
+}
+
+// keepDeployedOnUnreadyDependency reports whether the apply should be skipped
+// because a dependency is only temporarily unavailable and the endpoint's
+// Deployment already exists. The running pods do not need the dependency;
+// redeploying does, so the apply is deferred to the first reconcile after the
+// dependency recovers.
+func (k *kubernetesOrchestrator) keepDeployedOnUnreadyDependency(ctx *OrchestratorContext, err error) bool {
+	if !isDependencyNotReady(err) {
+		return false
+	}
+
+	if getErr := ctx.ctrClient.Get(context.Background(), client.ObjectKey{
+		Namespace: util.ClusterNamespace(ctx.Cluster),
+		Name:      ctx.Endpoint.Metadata.Name,
+	}, &appsv1.Deployment{}); getErr != nil {
+		if !apierrors.IsNotFound(getErr) {
+			ctx.logger.Error(getErr, "Failed to check existing deployment")
+		}
+
+		return false
+	}
+
+	ctx.logger.V(2).Info("Dependency not ready, keeping the existing deployment", "reason", err.Error())
+
+	return true
 }
 
 // computeEndpointSpecHash computes a SHA256 hash of the endpoint spec.
