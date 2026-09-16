@@ -810,6 +810,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 			ee.Key(), joinUpstreamErrors(statuses))
 	}
 	modelRoutes, err := compileExternalEndpointModelRoutes(ee, ready)
+
 	if err != nil {
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
@@ -1013,6 +1014,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 	for i := range resolved {
 		entry := resolved[i].entry
 		models := entry.ExposedModels()
+
 		if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 			models = modelRouteModelsForUpstream(ee.Spec.ModelRoutes, entry.Name)
 		}

@@ -33,6 +33,7 @@ func compileExternalEndpointModelRoutes(ee *v1.ExternalEndpoint, ready []resolve
 		if route.Model == "" {
 			return nil, fmt.Errorf("model route model must not be empty")
 		}
+
 		if _, exists := seenModels[route.Model]; exists {
 			return nil, fmt.Errorf("duplicate model route %q", route.Model)
 		}
