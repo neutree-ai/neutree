@@ -13,7 +13,8 @@ CREATE TYPE api.external_endpoint_model_route AS (
     model TEXT,
     retryable_conditions TEXT[],
     max_attempts INTEGER,
-    targets api.external_endpoint_model_route_target[]
+    targets api.external_endpoint_model_route_target[],
+    strategy TEXT
 );
 
 ALTER TYPE api.external_endpoint_upstream_entry ADD ATTRIBUTE name TEXT;

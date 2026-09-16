@@ -1,10 +1,27 @@
 package v1
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestExternalEndpointModelRouteStrategyIsOptional(t *testing.T) {
+	route := ExternalEndpointModelRoute{
+		Model:   "virtual-model",
+		Targets: []ExternalEndpointModelRouteTarget{{Upstream: "model-aggr", UpstreamModel: "gpt-6-astra"}},
+	}
+
+	data, err := json.Marshal(route)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(data), `"strategy"`)
+
+	route.Strategy = "weighted"
+	data, err = json.Marshal(route)
+	assert.NoError(t, err)
+	assert.Contains(t, string(data), `"strategy":"weighted"`)
+}
 
 func TestAuthHeaderValue(t *testing.T) {
 	tests := []struct {

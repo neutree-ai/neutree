@@ -78,6 +78,9 @@ type ExternalEndpointModelRoute struct {
 	// request. Zero disables retrying and preserves legacy behavior.
 	MaxAttempts int                                `json:"max_attempts,omitempty"`
 	Targets     []ExternalEndpointModelRouteTarget `json:"targets"`
+	// Strategy is an optional UI presentation hint. Routing behavior is still
+	// determined by the target priority and weight fields.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // Upstream entry kinds, used to describe an entry in the status without
