@@ -32,6 +32,12 @@ package.loaded["kong.llm.drivers.openai"] = {
 package.loaded["kong.tools.string"] = {
     strip = function(s) return s end,
 }
+package.loaded["kong.plugins.neutree-ai-gateway.routing"] = {
+    begin = function() return {}, nil end,
+    next = function() return nil, nil end,
+    retry = function() return nil, nil end,
+    finish = function() end,
+}
 
 _G.ngx = { now = function() return 0 end }
 _G.kong = { log = { warn = function() end, err = function() end } }
