@@ -58,6 +58,7 @@ func (k *Kong) Init() error {
 
 	for _, plugin := range plugins {
 		err := k.syncPlugin(plugin)
+
 		if err != nil {
 			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
 		}
@@ -1015,6 +1016,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 		if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
 			models = modelRouteModelsForUpstream(ee.Spec.ModelRoutes, entry.Name)
 		}
+
 		status := v1.ExternalEndpointUpstreamStatus{
 			Kind:   entry.Kind(),
 			Ref:    entry.Ref(),
@@ -1036,6 +1038,7 @@ func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolv
 func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstream string) []string {
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
+
 	for _, route := range routes {
 		for _, target := range route.Targets {
 			if target.Upstream == upstream {
