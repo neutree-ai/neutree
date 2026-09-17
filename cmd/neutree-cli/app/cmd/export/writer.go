@@ -163,15 +163,19 @@ type usageWriter = recordWriter[client.UsageRow]
 var usageCSVHeader = []string{
 	"date", "api_key_id", "api_key_name", "endpoint_type", "endpoint_name",
 	"model_name", "workspace", "usage", "prompt_tokens", "completion_tokens",
+	"cache_read_tokens", "cache_creation_tokens", "reasoning_tokens", "cost_usd",
 }
 
-// usageCSVRow renders one usage aggregate bucket as a CSV row. Token columns are
-// empty for pre-dimensional records the server returns with NULL counts.
+// usageCSVRow renders one usage aggregate bucket as a CSV row. Token and cost
+// columns are empty where the server returns NULL: pre-dimensional records, and
+// breakdown fields that were not recorded for the bucket.
 func usageCSVRow(u client.UsageRow) []string {
 	return []string{
 		u.Date, u.APIKeyID, u.APIKeyName, u.EndpointType, u.EndpointName,
 		u.ModelName, u.Workspace,
 		int64PtrStr(u.Usage), int64PtrStr(u.PromptTokens), int64PtrStr(u.CompletionTokens),
+		int64PtrStr(u.CacheReadTokens), int64PtrStr(u.CacheCreationTokens), int64PtrStr(u.ReasoningTokens),
+		float64PtrStr(u.CostUSD),
 	}
 }
 
@@ -187,4 +191,14 @@ func int64PtrStr(p *int64) string {
 	}
 
 	return strconv.FormatInt(*p, 10)
+}
+
+// float64PtrStr renders a *float64 in its shortest exact decimal form, or ""
+// when nil.
+func float64PtrStr(p *float64) string {
+	if p == nil {
+		return ""
+	}
+
+	return strconv.FormatFloat(*p, 'f', -1, 64)
 }
