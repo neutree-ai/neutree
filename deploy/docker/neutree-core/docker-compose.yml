@@ -378,7 +378,13 @@ services:
       neutree.ai/kong-plugin-neutree-ai-quota-checksum: "{{ .KongPluginQuotaChecksum }}"
     environment:
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
-      KONG_NGINX_HTTP_LUA_SHARED_DICT: "neutree_ai_gateway_inflight 10m"
+      # One counter per (EE path, virtual model, upstream name, upstream model);
+      # the numeric value is the current inflight request count, not request data.
+      # Kong 3.9 measurements: 78-128-byte keys use ~256 B/entry (~40k in 10 MiB);
+      # 256-byte keys use ~512 B/entry (~20k). 10 MiB leaves headroom for 10k entries.
+      # Zero counters and historical target keys are not actively cleaned up or
+      # expired; size for cumulative distinct counters, not just current targets.
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: "neutree_ai_gateway_inflight ${KONG_INFLIGHT_SHARED_DICT_SIZE:-10m}"
       KONG_NGINX_WORKER_PROCESSES: "{{ .KongWorkerProcesses }}"
       KONG_PLUGINS: bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota
       LUA_PATH: "/neutree-kong-plugin/?.lua;;"
