@@ -92,7 +92,7 @@ func TestUsageCSVWriterHeaderAndNullColumns(t *testing.T) {
 		Date:       "2026-07-15",
 		APIKeyName: "my-key",
 		Usage:      i64Ptr(42),
-		// PromptTokens/CompletionTokens left nil -> empty columns
+		// token and cost columns left nil -> empty columns
 	}))
 	require.NoError(t, w.Close())
 
@@ -100,7 +100,31 @@ func TestUsageCSVWriterHeaderAndNullColumns(t *testing.T) {
 	require.Len(t, lines, 2)
 	require.Equal(t, strings.Join(usageCSVHeader, ","), lines[0])
 	require.Contains(t, lines[1], "my-key")
-	require.True(t, strings.HasSuffix(lines[1], ",42,,")) // usage=42, prompt/completion empty
+	require.True(t, strings.HasSuffix(lines[1], ",42,,,,,,")) // usage=42, token and cost columns empty
+}
+
+func TestUsageCSVWriterBreakdownColumns(t *testing.T) {
+	var buf bytes.Buffer
+
+	cost := 0.0125
+
+	w, err := newUsageWriter("csv", &buf)
+	require.NoError(t, err)
+	require.NoError(t, w.Write(client.UsageRow{
+		Date:                "2026-07-15",
+		Usage:               i64Ptr(30),
+		PromptTokens:        i64Ptr(10),
+		CompletionTokens:    i64Ptr(20),
+		CacheReadTokens:     i64Ptr(4),
+		CacheCreationTokens: i64Ptr(2),
+		ReasoningTokens:     i64Ptr(5),
+		CostUSD:             &cost,
+	}))
+	require.NoError(t, w.Close())
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 2)
+	require.True(t, strings.HasSuffix(lines[1], ",30,10,20,4,2,5,0.0125"), lines[1])
 }
 
 func TestUsageJSONWriterEmitsValidArray(t *testing.T) {
