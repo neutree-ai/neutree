@@ -121,10 +121,6 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not found")
 	}
 
-	if engine[0].Status == nil || engine[0].Status.Phase != v1.EnginePhaseCreated {
-		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not ready")
-	}
-
 	versionMatched := false
 
 	for _, v := range engine[0].Spec.Versions {

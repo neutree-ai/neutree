@@ -4586,6 +4586,10 @@ func TestKubernetesOrchestratorValidateDependenciesClassifiesNotReady(t *testing
 		{"model registry failed", func(c *OrchestratorContext) { c.ModelRegistry.Status.Phase = v1.ModelRegistryPhaseFAILED }, true},
 		{"image registry failed", func(c *OrchestratorContext) { c.ImageRegistry.Status.Phase = v1.ImageRegistryPhaseFAILED }, true},
 		{"cluster of the wrong type", func(c *OrchestratorContext) { c.Cluster.Spec.Type = v1.SSHClusterType }, false},
+		{"cluster of the wrong type that is also not running", func(c *OrchestratorContext) {
+			c.Cluster.Spec.Type = v1.SSHClusterType
+			c.Cluster.Status.Phase = v1.ClusterPhaseUpdating
+		}, false},
 	}
 
 	for _, tt := range tests {

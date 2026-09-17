@@ -138,13 +138,15 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 }
 
 func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
+	// A wrong cluster type is a misconfiguration, so it is checked before
+	// the status: a not-running cluster must not mask it as not-ready.
+	if ctx.Cluster.Spec.Type != v1.SSHClusterType {
+		return errors.Errorf("deploy cluster %s is not ssh type", ctx.Cluster.Metadata.WorkspaceName())
+	}
+
 	// validate cluster status
 	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
 		return dependencyNotReadyf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
-	}
-
-	if ctx.Cluster.Spec.Type != v1.SSHClusterType {
-		return errors.Errorf("deploy cluster %s is not ssh type", ctx.Cluster.Metadata.WorkspaceName())
 	}
 
 	// validate engine status
