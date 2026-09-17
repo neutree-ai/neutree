@@ -208,9 +208,9 @@ local function begin_routing(conf, model)
     if not state then
         return nil, err
     end
-    local target, select_err = routing.next(state)
+    local target, select_err, detail = routing.next(state)
     if not target then
-        return nil, select_err
+        return nil, select_err, detail
     end
     return state, target
 end
@@ -1346,8 +1346,12 @@ function AIGatewayHandler:access(conf)
         kong.ctx.plugin.route_type = "/v1/chat/completions"
 
         if conf.model_routes or conf.upstreams then
-            local state, matched_entry = begin_routing(conf, openai_req.model)
+            local state, matched_entry, detail = begin_routing(conf, openai_req.model)
             if not state then
+                if matched_entry == "counter_unavailable" then
+                    kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
+                    return anthropic_error(500, "api_error", "Unable to check upstream capacity")
+                end
                 if matched_entry == "capacity_exhausted" then
                     return anthropic_error(503, "overloaded_error", "All upstreams are at capacity for model: " .. tostring(openai_req.model))
                 end
@@ -1465,8 +1469,12 @@ function AIGatewayHandler:access(conf)
             return fail(400, "missing 'model' field in request body")
         end
 
-        local state, matched_entry = begin_routing(conf, ai_request.model)
+        local state, matched_entry, detail = begin_routing(conf, ai_request.model)
         if not state then
+            if matched_entry == "counter_unavailable" then
+                kong.log.err("unable to check upstream capacity: ", detail or "unknown counter error")
+                return fail(500, "Unable to check upstream capacity")
+            end
             if matched_entry == "capacity_exhausted" then
                 return fail(503, "All upstreams are at capacity for model: " .. ai_request.model)
             end

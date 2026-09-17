@@ -50,7 +50,7 @@ local function capacity_lease(state, target)
     local key = target_key(state, target)
     local value, err = shared:incr(key, 1, 0)
     if not value then
-        return nil, err or "counter_unavailable"
+        return nil, "counter_unavailable", err
     end
     if value > maximum then
         shared:incr(key, -1, value)
@@ -87,7 +87,7 @@ function M.next(state)
         end
         local target = weighted_choice(available)
         local key = target_key(state, target)
-        local lease, err = capacity_lease(state, target)
+        local lease, err, detail = capacity_lease(state, target)
         if lease then
             state.current = target
             state.lease = lease
@@ -96,7 +96,7 @@ function M.next(state)
             return target
         end
         if err == "counter_unavailable" then
-            return nil, err
+            return nil, err, detail
         end
         if err == "capacity_exhausted" then
             capacity_exhausted = true
