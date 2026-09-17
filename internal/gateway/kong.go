@@ -812,14 +812,6 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 
 	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
 	if err != nil {
-		// A new model-routes validation error must not leave the previous Kong
-		// route serving stale configuration. Fail closed until the resource is
-		// corrected and reconciled again.
-		if cleanupErr := k.deleteExternalEndpointRoute(ee); cleanupErr != nil {
-			return statuses, errors.Wrapf(err,
-				"invalid model routes (also failed to remove stale route: %v)", cleanupErr)
-		}
-
 		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
