@@ -8,6 +8,15 @@
 --   fetch fails/uncertain -> allowed (FAIL-OPEN: prefer inference availability)
 -- The plugin is attached only when the key has a token quota, so keys without a
 -- quota are never blocked here.
+--
+-- A key's quota can be per-model rather than a single pool for the whole key, so
+-- the remaining count is resolved against the model and the IE/EE endpoint this
+-- request hit (stashed in kong.ctx.shared by neutree-ai-gateway, priority 1100 --
+-- the same values neutree-ai-access uses for its allowlist). Which granularity
+-- applies is decided by the control plane, not here: this plugin always sends the
+-- request's dimensions and get_api_key_remaining ignores them for a key on an
+-- overall quota. The cache key therefore MUST include those dimensions, or one
+-- model exhausting its quota would start rejecting every other model on the key.
 
 local http = require("resty.http")
 local cjson = require("cjson.safe")
@@ -31,13 +40,60 @@ local function trunc_body(b)
     return b
 end
 
-local function fetch_remaining(conf, api_key_id)
+local function str_or_nil(v)
+    if type(v) == "string" and v ~= "" then
+        return v
+    end
+    return nil
+end
+
+-- Request dimensions for the per-model lookup: the client-facing model plus the
+-- IE/EE endpoint the request hit. Values are stashed by neutree-ai-gateway (1100)
+-- ahead of its model-mapping rewrite; this plugin runs at 890, so they are
+-- already in place.
+--
+-- The model resolution MUST match neutree-ai-access (895) exactly, including its
+-- raw-body fallback for routes that have no neutree-ai-gateway plugin. A key on a
+-- per-model quota necessarily has an allowed_models list (the limit hangs off its
+-- entries), so the access plugin has already resolved a model for every request
+-- that reaches here -- if it resolved one via the body and this plugin only read
+-- the stash, the model would come back nil and the quota would silently fail open.
+--
+-- Preferring the stash over the body also keeps the name client-facing: once the
+-- gateway plugin has rewritten the body, the model in it is the UPSTREAM name,
+-- which is not what quotas are keyed by. Where no stash exists no rewrite
+-- happened either, so the body still carries the client-facing name.
+local function request_dimensions()
+    local shared = kong.ctx.shared or {}
+    local model = str_or_nil(shared.neutree_request_model)
+
+    if not model then
+        local raw = kong.request.get_raw_body()
+        if raw and raw ~= "" then
+            local decoded = cjson.decode(raw)
+            if type(decoded) == "table" then
+                model = str_or_nil(decoded.model)
+            end
+        end
+    end
+
+    return model,
+           str_or_nil(shared.neutree_endpoint_type),
+           str_or_nil(shared.neutree_endpoint_name)
+end
+
+local function fetch_remaining(conf, api_key_id, model, ep_type, ep_name)
     local httpc = http.new()
     httpc:set_timeout(conf.timeout or 2000)
 
     local res, err = httpc:request_uri(conf.api_url .. "/rpc/get_api_key_remaining", {
         method = "POST",
-        body = cjson.encode({ p_id = api_key_id }),
+        body = cjson.encode({
+            p_id       = api_key_id,
+            p_model    = model    or cjson.null,
+            p_type     = ep_type  or cjson.null,
+            p_endpoint = ep_name  or cjson.null,
+        }),
         headers = {
             ["Content-Type"]  = "application/json",
             ["Accept"]        = "application/json",
@@ -85,10 +141,15 @@ function QuotaHandler:access(conf)
     end
 
     local api_key_id = consumer.custom_id
-    local cache_key = "neutree_quota:" .. api_key_id
+    local model, ep_type, ep_name = request_dimensions()
+    -- Per-model quotas are tracked per (key, model, endpoint), so the cached
+    -- remaining count must be scoped the same way.
+    local cache_key = "neutree_quota:" .. api_key_id ..
+        ":" .. (model or "") .. ":" .. (ep_type or "") .. ":" .. (ep_name or "")
     local ttl = conf.cache_ttl or 5
 
-    local gate, err = kong.cache:get(cache_key, { ttl = ttl, neg_ttl = ttl }, fetch_remaining, conf, api_key_id)
+    local gate, err = kong.cache:get(cache_key, { ttl = ttl, neg_ttl = ttl },
+        fetch_remaining, conf, api_key_id, model, ep_type, ep_name)
     if err then
         -- FAIL-OPEN: cannot determine remaining -> allow the request through,
         -- preferring inference availability over strict enforcement during a
