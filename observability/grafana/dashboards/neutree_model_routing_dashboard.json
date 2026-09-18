@@ -1,0 +1,150 @@
+{
+  "uid": "neutree-model-routing",
+  "title": "模型路由监控",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "指标数据源"
+      },
+      {
+        "name": "endpoint",
+        "type": "query",
+        "label": "外部端点路径",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(kong_neutree_route_inflight{job=\"neutree-gateway\"}, endpoint)",
+        "refresh": 1
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "label": "虚拟模型",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=\"$endpoint\"}, virtual_model)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "各上游请求数（所选时间范围内完成）",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model, upstream, upstream_model) (increase(kong_neutree_route_requests_total{job=\"neutree-gateway\",endpoint=\"$endpoint\",virtual_model=~\"$model\"}[$__range]))",
+          "legendFormat": "{{virtual_model}} → {{upstream}} / {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "Prometheus counter increase 是按采样点估算的增量；精确验收使用 verify.py 的原始计数差。只包括已选中上游且已结束的请求。"
+    },
+    {
+      "id": 2,
+      "title": "当前并发（读取 Kong inflight）",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model, upstream, upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=\"$endpoint\",virtual_model=~\"$model\"})",
+          "legendFormat": "{{virtual_model}} → {{upstream}} / {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "只表示经过被采集 Kong 实例的在途请求，不代表上游的全部并发。多个 Kong 实例按上游汇总。"
+    },
+    {
+      "id": 3,
+      "title": "实际分流比例（按虚拟模型分别计算）",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "instant": true,
+          "expr": "sum by (virtual_model, upstream, upstream_model) (increase(kong_neutree_route_requests_total{job=\"neutree-gateway\",endpoint=\"$endpoint\",virtual_model=~\"$model\"}[$__range])) / on (virtual_model) group_left sum by (virtual_model) (increase(kong_neutree_route_requests_total{job=\"neutree-gateway\",endpoint=\"$endpoint\",virtual_model=~\"$model\"}[$__range]))",
+          "legendFormat": "{{virtual_model}} → {{upstream}} / {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      }
+    }
+  ]
+}

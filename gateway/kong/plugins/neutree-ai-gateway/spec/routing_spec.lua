@@ -14,6 +14,29 @@ local function shared(values)
 end
 
 describe("routing capacity errors", function()
+    it("counts unlimited targets and releases their lease only once", function()
+        local values = {}
+        local conf = {
+            route_prefix = "/ee",
+            model_routes = {{
+                model = "chat",
+                targets = {{ upstream = "a", upstream_model = "actual", max_inflight_requests = 0 }},
+            }},
+        }
+        local env = { shared = shared(values) }
+        local first = assert(routing.begin(conf, "chat", env))
+        local second = assert(routing.begin(conf, "chat", env))
+        local target = assert(routing.next(first))
+        assert(routing.next(second))
+        local key = routing.target_key(first, target)
+        assert.are.equal(2, values[key])
+        routing.finish(first)
+        routing.finish(first)
+        assert.are.equal(1, values[key])
+        routing.finish(second)
+        assert.are.equal(0, values[key])
+    end)
+
     it("distinguishes capacity exhaustion from an unknown model", function()
         local values = {}
         local conf = {

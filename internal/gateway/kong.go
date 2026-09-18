@@ -55,6 +55,11 @@ func (k *Kong) Init() error {
 	plugins = append(plugins, k.generateKeyAuthenticationPlugin())
 	plugins = append(plugins, k.generateRewriteApiKeyHeaderPlugin())
 	plugins = append(plugins, k.generateHttpLogPlugin())
+	plugins = append(plugins, &kong.Plugin{
+		Name:         pointy.String("prometheus"),
+		InstanceName: pointy.String("neutree-prometheus"),
+		Config:       kong.Configuration{"status_code_metrics": false},
+	})
 
 	for _, plugin := range plugins {
 		err := k.syncPlugin(plugin)

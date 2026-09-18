@@ -34,6 +34,19 @@ local AIGatewayHandler = {
     VERSION = "0.0.1",
 }
 
+local metrics
+
+function AIGatewayHandler:init_worker()
+    metrics = require("kong.plugins.neutree-ai-gateway.metrics")
+    metrics.init_worker()
+end
+
+function AIGatewayHandler:configure(configs)
+    if metrics then
+        metrics.configure(configs)
+    end
+end
+
 local EMPTY = {}
 
 -- cjson decodes JSON null as cjson.null (a userdata sentinel).
@@ -1586,6 +1599,9 @@ function AIGatewayHandler:log(conf)
 
     if kong.ctx.plugin.routing_state then
         routing.finish(kong.ctx.plugin.routing_state)
+        if metrics then
+            metrics.log(conf, kong.ctx.plugin.routing_state)
+        end
     end
 
     -- Emit raw req/res trace for every request (incl. failures).
