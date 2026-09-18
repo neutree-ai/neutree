@@ -32,6 +32,12 @@ package.loaded["kong.llm.drivers.openai"] = {
 package.loaded["kong.tools.string"] = {
     strip = function(s) return s end,
 }
+package.loaded["kong.plugins.neutree-ai-gateway.routing"] = {
+    begin = function() return {}, nil end,
+    next = function() return nil, nil end,
+    retry = function() return nil, nil end,
+    finish = function() end,
+}
 
 _G.ngx = { now = function() return 0 end }
 _G.kong = { log = { warn = function() end, err = function() end } }
@@ -162,4 +168,39 @@ describe("make_message_start()", function()
         local ev = T.make_message_start("m", 5)
         assert.are.equal("[]", cjson.encode(ev.message.content))
     end)
+end)
+
+describe("routing counter errors at protocol boundaries", function()
+    for _, path in ipairs({ "/v1/chat/completions", "/anthropic/v1/messages" }) do
+        it("returns 500 and logs the underlying failure for " .. path, function()
+            local previous_kong = _G.kong
+            local routing_stub = package.loaded["kong.plugins.neutree-ai-gateway.routing"]
+            local previous_next = routing_stub.next
+            local logged
+            routing_stub.next = function() return nil, "counter_unavailable", "no memory" end
+            _G.kong = {
+                ctx = { shared = {}, plugin = {} },
+                request = {
+                    get_path = function() return path end,
+                    get_method = function() return "POST" end,
+                    get_header = function() return "application/json" end,
+                    get_raw_body = function()
+                        return '{"model":"chat","messages":[{"role":"user","content":"hello"}],"max_tokens":1}'
+                    end,
+                },
+                log = { err = function(_, detail) logged = detail end },
+                response = { exit = function(status, body) return { status = status, body = body } end },
+            }
+            local ok, response = pcall(handler.access, handler, { model_routes = {} })
+            _G.kong = previous_kong
+            routing_stub.next = previous_next
+            assert.is_true(ok, tostring(response))
+            assert.are.equal(500, response.status)
+            assert.are.equal("Unable to check upstream capacity", response.body.error.message)
+            assert.are.equal("no memory", logged)
+            if path == "/anthropic/v1/messages" then
+                assert.are.equal("api_error", response.body.error.type)
+            end
+        end)
+    end
 end)

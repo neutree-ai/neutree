@@ -378,6 +378,9 @@ services:
       neutree.ai/kong-plugin-neutree-ai-quota-checksum: "{{ .KongPluginQuotaChecksum }}"
     environment:
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: 20m
+      # See deploy/chart/neutree/values.yaml (kong.inflightSharedDictSize)
+      # for sizing guidance and counter retention behavior.
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: "neutree_ai_gateway_inflight ${KONG_INFLIGHT_SHARED_DICT_SIZE:-10m}"
       KONG_NGINX_WORKER_PROCESSES: "{{ .KongWorkerProcesses }}"
       KONG_PLUGINS: bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota
       LUA_PATH: "/neutree-kong-plugin/?.lua;;"
