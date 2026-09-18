@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,7 @@ func (k *Kong) Init() error {
 
 	for _, plugin := range plugins {
 		err := k.syncPlugin(plugin)
+
 		if err != nil {
 			return errors.Wrapf(err, "failed to sync plugin %s", *plugin.Name)
 		}
@@ -793,7 +795,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	}
 
 	resolved := k.resolveExternalEndpointUpstreams(ee)
-	statuses := externalEndpointUpstreamStatuses(resolved)
+	statuses := externalEndpointUpstreamStatuses(ee, resolved)
 
 	ready := make([]resolvedUpstream, 0, len(resolved))
 
@@ -806,6 +808,11 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	if len(ready) == 0 {
 		return statuses, errors.Errorf("external endpoint %s has no resolvable upstream: %s",
 			ee.Key(), joinUpstreamErrors(statuses))
+	}
+
+	modelRoutes, err := compileExternalEndpointModelRoutes(ee, resolved)
+	if err != nil {
+		return statuses, errors.Wrap(err, "invalid model routes")
 	}
 
 	gwService, err := k.syncExternalEndpointService(ee, ready[0])
@@ -821,7 +828,7 @@ func (k *Kong) SyncExternalEndpoint(ee *v1.ExternalEndpoint) ([]v1.ExternalEndpo
 	// sync route plugins
 	needPluginMap := make(map[string]*kong.Plugin)
 
-	aiGatewayPlugin := k.generateExternalEndpointAIGatewayPlugin(ee, route, ready)
+	aiGatewayPlugin := k.generateExternalEndpointAIGatewayPlugin(ee, route, ready, modelRoutes)
 	needPluginMap[*aiGatewayPlugin.InstanceName] = aiGatewayPlugin
 
 	aclPlugin := k.generateExternalEndpointACLPlugin(ee, route)
@@ -1001,15 +1008,21 @@ func (k *Kong) resolveExternalEndpointUpstreams(ee *v1.ExternalEndpoint) []resol
 
 // externalEndpointUpstreamStatuses projects resolution outcomes into the
 // user-visible per-upstream status list, in spec order.
-func externalEndpointUpstreamStatuses(resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
+func externalEndpointUpstreamStatuses(ee *v1.ExternalEndpoint, resolved []resolvedUpstream) []v1.ExternalEndpointUpstreamStatus {
 	statuses := make([]v1.ExternalEndpointUpstreamStatus, 0, len(resolved))
 
 	for i := range resolved {
 		entry := resolved[i].entry
+		models := entry.ExposedModels()
+
+		if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
+			models = modelRouteModelsForUpstream(ee.Spec.ModelRoutes, entry.Name)
+		}
+
 		status := v1.ExternalEndpointUpstreamStatus{
 			Kind:   entry.Kind(),
 			Ref:    entry.Ref(),
-			Models: entry.ExposedModels(),
+			Models: models,
 			Phase:  v1.ExternalEndpointUpstreamPhaseReady,
 		}
 
@@ -1022,6 +1035,29 @@ func externalEndpointUpstreamStatuses(resolved []resolvedUpstream) []v1.External
 	}
 
 	return statuses
+}
+
+func modelRouteModelsForUpstream(routes []v1.ExternalEndpointModelRoute, upstream string) []string {
+	seen := make(map[string]struct{})
+	models := make([]string, 0)
+
+	for _, route := range routes {
+		for _, target := range route.Targets {
+			if target.Upstream == upstream {
+				if _, exists := seen[route.Model]; !exists {
+					seen[route.Model] = struct{}{}
+
+					models = append(models, route.Model)
+				}
+
+				break
+			}
+		}
+	}
+
+	sort.Strings(models)
+
+	return models
 }
 
 // joinUpstreamErrors renders every failed entry into a single message, used when
@@ -1171,7 +1207,7 @@ func (k *Kong) deleteExternalEndpointRoute(ee *v1.ExternalEndpoint) error {
 // already-resolved upstreams. Callers pass only the entries that resolved, so a
 // broken entry simply stops being routable while the rest keep serving.
 func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, curRoute *kong.Route,
-	ready []resolvedUpstream) *kong.Plugin {
+	ready []resolvedUpstream, modelRoutes []map[string]interface{}) *kong.Plugin {
 	instanceName := "neutree-ai-gateway-external-endpoint-" + util.HashString(ee.Key())
 
 	upstreams := make([]map[string]interface{}, 0, len(ready))
@@ -1188,6 +1224,9 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 			// otherwise the merge-patch array replacement drops it and causes a perpetual sync loop.
 			"internal": r.internal,
 		}
+		if r.entry.Name != "" {
+			upstreamEntry["name"] = r.entry.Name
+		}
 
 		if !r.internal && r.entry.Auth != nil {
 			upstreamEntry["auth_header"] = r.entry.Auth.AuthHeaderValue()
@@ -1196,22 +1235,26 @@ func (k *Kong) generateExternalEndpointAIGatewayPlugin(ee *v1.ExternalEndpoint, 
 		upstreams = append(upstreams, upstreamEntry)
 	}
 
+	config := map[string]interface{}{
+		"route_prefix":  getExternalEndpointRoutePath(ee),
+		"upstreams":     upstreams,
+		"endpoint_type": endpointTypeExternal,
+		"endpoint_name": ee.Metadata.Name,
+	}
+	// Preserve an explicitly configured model-routes mode even when every
+	// target was filtered because its provider is currently unresolved. An
+	// omitted field makes the Lua plugin fall back to legacy model_mapping and
+	// can accidentally route a model through a different configuration.
+	if ee.Spec != nil && len(ee.Spec.ModelRoutes) > 0 {
+		config["model_routes"] = modelRoutes
+	}
+
 	return &kong.Plugin{
 		Name:         pointy.String("neutree-ai-gateway"),
 		InstanceName: &instanceName,
 		Route:        curRoute,
 		Protocols:    []*string{pointy.String("http"), pointy.String("https")},
-		Config: map[string]interface{}{
-			"route_prefix": getExternalEndpointRoutePath(ee),
-			"upstreams":    upstreams,
-			// See generateAIGatewayPlugin: identify the EE this route serves so the
-			// access plugin can enforce endpoint-level allowlists. Note the per-upstream
-			// "internal" flag is a routing detail; from the API key's perspective the
-			// request entered through this external endpoint, so the dimension is fixed
-			// to (external, ee.name) regardless of which upstream the model resolves to.
-			"endpoint_type": endpointTypeExternal,
-			"endpoint_name": ee.Metadata.Name,
-		},
+		Config:       config,
 	}
 }
 

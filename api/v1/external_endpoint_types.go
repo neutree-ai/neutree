@@ -39,6 +39,9 @@ func (a *ExternalEndpointAuthSpec) AuthHeaderValue() string {
 }
 
 type ExternalEndpointUpstreamEntry struct {
+	// Name identifies this provider entry for model route targets. It is
+	// optional so existing model_mapping configurations remain valid.
+	Name string `json:"name,omitempty"`
 	// Upstream is the external API configuration (for external upstream type)
 	Upstream *ExternalEndpointUpstreamSpec `json:"upstream,omitempty"`
 
@@ -52,6 +55,32 @@ type ExternalEndpointUpstreamEntry struct {
 	// The keys are the exposed model names, values are the upstream model names
 	// e.g. {"fast": "gpt-4o-mini"} exposes "fast" and forwards as "gpt-4o-mini"
 	ModelMapping map[string]string `json:"model_mapping"`
+}
+
+// ExternalEndpointModelRouteTarget binds a virtual model to a provider and
+// the concrete model name that provider receives. Routing fields are scoped
+// to the target because one provider may serve several virtual models.
+type ExternalEndpointModelRouteTarget struct {
+	Upstream            string `json:"upstream"`
+	UpstreamModel       string `json:"upstream_model"`
+	Priority            int    `json:"priority,omitempty"`
+	Weight              int    `json:"weight,omitempty"`
+	MaxInflightRequests int    `json:"max_inflight_requests,omitempty"`
+}
+
+// ExternalEndpointModelRoute defines one client-facing virtual model and its
+// candidate providers. Retry settings are intentionally model-scoped: a
+// failure policy for one model must not change another model's behavior.
+type ExternalEndpointModelRoute struct {
+	Model               string   `json:"model"`
+	RetryableConditions []string `json:"retryable_conditions,omitempty"`
+	// MaxAttempts is the maximum number of additional attempts after the first
+	// request. Zero disables retrying and preserves legacy behavior.
+	MaxAttempts int                                `json:"max_attempts,omitempty"`
+	Targets     []ExternalEndpointModelRouteTarget `json:"targets"`
+	// Strategy is an optional UI presentation hint. Routing behavior is still
+	// determined by the target priority and weight fields.
+	Strategy string `json:"strategy,omitempty"`
 }
 
 // Upstream entry kinds, used to describe an entry in the status without
@@ -139,6 +168,10 @@ type ExternalEndpointSpec struct {
 	// or endpoint_ref) instead of by array index, so deleting or reordering
 	// entries cannot leak one upstream's credential into another.
 	Upstreams []ExternalEndpointUpstreamEntry `json:"upstreams" mergekey:"upstream.url,endpoint_ref"`
+
+	// ModelRoutes is the model-scoped format. When present, it supersedes the
+	// legacy per-upstream model_mapping for gateway routing.
+	ModelRoutes []ExternalEndpointModelRoute `json:"model_routes,omitempty"`
 
 	// Timeout is the request timeout in milliseconds, default 60000
 	Timeout *int `json:"timeout,omitempty"`
