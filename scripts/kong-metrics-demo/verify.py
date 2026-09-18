@@ -104,12 +104,16 @@ def main():
         observed = {(row['metric']['upstream'], row['metric']['upstream_model']): float(row['value'][1])
                     for row in rows}
         return rows and observed == after
-    wait_for(stored, timeout=30)
+    # vmselect defaults to a 30s latency offset; allow for that plus scraping
+    # and ingestion without changing the deployed query/cache settings.
+    stored_started = time.monotonic()
+    wait_for(stored, timeout=90)
     report = {'model': args.model, 'statuses': outcomes,
               'observed_peak_inflight': max(peaks, default=0),
               'counter_deltas': [{'upstream': k[0], 'upstream_model': k[1], 'requests': v-before.get(k, 0)}
                                  for k, v in after.items()],
-              'inflight_returned_to_zero': True, 'victoriametrics_matches': True}
+              'inflight_returned_to_zero': True, 'victoriametrics_matches': True,
+              'storage_visibility_wait_seconds': round(time.monotonic() - stored_started, 2)}
     assert report['observed_peak_inflight'] > 0, 'No active request was sampled; concurrent gauge verification is inconclusive'
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
