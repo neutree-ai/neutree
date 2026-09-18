@@ -201,7 +201,7 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 	needed := l.Disabled
 
 	if l.AllowedModels != nil {
-		cfg["allowed_models"] = l.AllowedModels
+		cfg["allowed_models"] = accessPluginAllowedModels(l.AllowedModels)
 		needed = true
 	}
 
@@ -240,16 +240,23 @@ func (k *Kong) generateAPIKeyAccessPlugin(consumerID *string, apiKey *v1.ApiKey)
 }
 
 // generateAPIKeyQuotaPlugin builds the per-consumer neutree-ai-quota plugin when
-// the key has a token quota. The plugin pulls the dynamic remaining count from
-// neutree-api at request time. Returns nil when there is no token quota, or
-// when the neutree-api URL / service token are not configured (degrade to "no
-// quota enforcement" rather than mis-enforce).
+// the key has a token quota of either granularity -- an overall
+// limits.token_quota, or a per-model limit on an allowlist entry. The plugin
+// pulls the dynamic remaining count from neutree-api at request time. Returns nil
+// when there is no quota at all, or when the neutree-api URL / service token are
+// not configured (degrade to "no quota enforcement" rather than mis-enforce).
 func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) *kong.Plugin {
-	if apiKey.Spec == nil || apiKey.Spec.Limits == nil || apiKey.Spec.Limits.TokenQuota == nil {
+	if apiKey.Spec == nil || apiKey.Spec.Limits == nil {
 		return nil
 	}
 
-	if apiKey.Spec.Limits.TokenQuota.Limit <= 0 {
+	l := apiKey.Spec.Limits
+	// Either granularity needs the plugin: an overall quota, or at least one
+	// allowlist entry with its own limit. When both are present the control plane
+	// enforces the per-model one and ignores the overall quota, but that decision
+	// lives in api.get_api_key_remaining -- here it only matters that the plugin
+	// is attached at all.
+	if !hasPerModelTokenQuota(l) && (l.TokenQuota == nil || l.TokenQuota.Limit <= 0) {
 		return nil
 	}
 
@@ -268,6 +275,48 @@ func (k *Kong) generateAPIKeyQuotaPlugin(consumerID *string, apiKey *v1.ApiKey) 
 			"cache_ttl":     5,
 		},
 	}
+}
+
+// accessPluginAllowedModels projects the allowlist onto the shape the
+// neutree-ai-access plugin's schema declares. That schema is a strict Kong record
+// ({ model, type?, endpoint_name? }), so the per-entry token_limit added for
+// per-model quotas must not be sent here — Kong rejects unknown fields in a
+// record, which would fail the whole plugin upsert. The quota dimension is
+// enforced by neutree-ai-quota, which reads the limit from the control plane
+// rather than from reconciled config, so nothing is lost by dropping it.
+func accessPluginAllowedModels(models []v1.AllowedModel) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(models))
+
+	for _, m := range models {
+		entry := map[string]interface{}{"model": m.Model}
+		// Only send pinned dimensions: the handler reads "unset" as "any endpoint",
+		// and the schema's one_of on `type` rejects an empty string.
+		if m.Type != "" {
+			entry["type"] = m.Type
+		}
+
+		if m.EndpointName != "" {
+			entry["endpoint_name"] = m.EndpointName
+		}
+
+		out = append(out, entry)
+	}
+
+	return out
+}
+
+// hasPerModelTokenQuota reports whether any allowlist entry carries its own token
+// limit. That is what switches the key to per-model quota granularity: the
+// overall token_quota stops being enforced (see api.get_api_key_remaining), so
+// the quota plugin must be attached on this basis too, not only on token_quota.
+func hasPerModelTokenQuota(l *v1.ApiKeyLimits) bool {
+	for i := range l.AllowedModels {
+		if l.AllowedModels[i].TokenLimit != nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 // syncAPIKeyLimitPlugins reconciles the key's per-consumer limit plugins: upsert
