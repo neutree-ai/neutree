@@ -2,9 +2,9 @@
 
 本分支从 `origin/main` 的 `62fe9c7c` 开始。目标是在现有 Kong 上使用真实
 `model-aggr`，验证 **插件指标 → vmagent → VictoriaMetrics → Grafana**。
-尚未替换运行中的插件、重启容器、修改运行中的采集配置或导入看板。
-曾误启动远程部署准备，留下暂存文件和未完成的备份；备份失败后没有进入替换步骤。
-当前仅继续仓库内的实现和本地检查，真实链路尚未验收。
+2026-09-18 已获准在 `ssh dev` 的企业版环境部署，并完成真实请求的链路冒烟。
+结果、失败与修复、部署范围见 [部署记录](deployment-smoke-20260918.md)。
+本轮使用现有容器更新方式，不等同于完整发行安装/升级验收。
 
 ## 改动与验收
 
@@ -50,7 +50,8 @@ Helm 的 `global.clusterDomain` 默认 `cluster.local`，自定义集群 DNS 后
 不能只替换 Lua，也不需要手工向 Kong Admin API 创建 Prometheus 插件或手工追加抓取 job。
 企业版通过已有 `scripts/sync-community.sh` 导入本分支对应提交的部署资源，并将 Go 依赖更新到同一提交。
 企业版 UI 与中文资源沿用既有构建流程；本次没有 UI 源码修改或新增镜像。
-本轮仅构建、渲染和测试仓库产物，不执行远程升级。
+本轮验证了企业版构建和 CLI 渲染，并选择性应用到现有容器；没有运行整套 `launch` 升级或数据库迁移。
+企业构建建议传入准确的 Community 提交号；含 `/` 的分支名不能直接用于 `go get`。
 
 ## 可重复验证
 
@@ -73,7 +74,9 @@ python3 scripts/kong-metrics-demo/verify.py \
 否则总量比较不成立。上游失败、未选中目标、没有采到正并发都会明确失败，不能算通过。
 
 单元测试用假的 exporter 验证标签、读取、清理行为，不证明真实 exporter 或采集链已接通。
-跨 worker、配置重载和真实上游表现需在获准部署后运行验证。
+真实上游和存储链路已做冒烟；跨 worker 的系统性校验、配置重载、流式取消及多 Pod 仍需专门测试。
+现有 vmselect 默认 `search.latencyOffset=30s`，脚本最多等待 90 秒核对存储读数。
+DNS 刷新使用 vmagent 默认值（本环境为 30 秒）；其 v1.115.0 不支持 `dns_sd_configs.refresh_interval` 字段。
 
 本地验证：
 
