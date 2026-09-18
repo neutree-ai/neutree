@@ -12,6 +12,9 @@ spec:
     registry: {{ .E2E_MODEL_REGISTRY }}
     name: {{ .E2E_MODEL_NAME }}
     version: {{ .E2E_MODEL_VERSION }}
+{{- if .E2E_MODEL_FILE }}
+    file: {{ printf "%q" .E2E_MODEL_FILE }}
+{{- end }}
     task: {{ .E2E_MODEL_TASK }}
   resources:
     gpu: "{{ .E2E_GPU }}"
@@ -21,6 +24,7 @@ spec:
 {{- if .E2E_MEMORY }}
     memory: "{{ .E2E_MEMORY }}"
 {{- end }}
+{{- if not .E2E_CPU_ONLY }}
     accelerator:
       type: {{ .E2E_ACCELERATOR_TYPE }}
       product: {{ .E2E_ACCELERATOR_PRODUCT }}
@@ -32,6 +36,7 @@ spec:
 {{- end }}
 {{- if .E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT }}
       virtualization.core_percent: "{{ .E2E_ACCELERATOR_VIRTUALIZATION_CORE_PERCENT }}"
+{{- end }}
 {{- end }}
   variables:
     engine_args:

@@ -36,6 +36,13 @@ model_registry:
 
 workspace: default
 
+# Engine package files are resolved as
+# <package_url>/<engine>-<version>-<package_arch>.tar.gz.
+# package_arch names the target SSH node architecture; it is not the test
+# runner architecture. Change it to arm64 when using arm64 engine archives.
+package_url: http://file.smtx.io/neutree/artifacts/engine/v1.2.0
+package_arch: amd64
+
 cluster:
   version: v1.0.1
   # old_version: for upgrade tests — the version to create before upgrading to cluster.version
@@ -48,15 +55,27 @@ cluster:
 # defaults inside profile.go.
 engines:
   vllm:
-    version: v0.24.0
+    version: v0.24.0-p1
     old_version: v0.17.1           # multi-version isolation and upgrade tests (vLLM only)
+    accelerator_type: nvidia_gpu
     engine_args: "dtype=half,gpu_memory_utilization=0.85"
+    # model:                     # optional; omitted fields fall back to model below
+    #   name: test-model
+    #   version: "1.0"
+    #   task: text-generation
   sglang:
-    version: v0.5.10
+    version: v0.5.10-p1
+    accelerator_type: nvidia_gpu
     engine_args: ""                # empty → SGLang uses its built-in defaults
   llama-cpp:
-    version: v0.3.7
+    version: v0.3.7-p1
+    accelerator_type: cpu
     engine_args: ""
+    # model:
+    #   name: test-model-gguf
+    #   version: "1.0"
+    #   file: q8_0/*.gguf
+    #   task: text-generation
 
 model:
   name: test-model
