@@ -41,6 +41,12 @@ type UsageRow struct {
 	Usage            *int64 `json:"usage"`
 	PromptTokens     *int64 `json:"prompt_tokens"`
 	CompletionTokens *int64 `json:"completion_tokens"`
+	// Breakdown fields are null for usage aggregated before the server kept
+	// them, and for buckets whose records never reported that field.
+	CacheReadTokens     *int64   `json:"cache_read_tokens"`
+	CacheCreationTokens *int64   `json:"cache_creation_tokens"`
+	ReasoningTokens     *int64   `json:"reasoning_tokens"`
+	CostUSD             *float64 `json:"cost_usd"`
 }
 
 // UsageFilters are the RPC parameters. StartDate/EndDate are required
