@@ -1477,7 +1477,10 @@ func TestBuildPostgrestEndpointPatchValidationNew(t *testing.T) {
 func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 	existing := v1.Endpoint{
 		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
-		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+		Spec: &v1.EndpointSpec{
+			Cluster: "cluster-a",
+			Engine:  &v1.EndpointEngineSpec{Engine: testEngineName, Version: testEngineVersion},
+		},
 	}
 
 	tests := []struct {
@@ -1490,9 +1493,11 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 		expectedListCalls int
 	}{
 		{
-			name:              "same cluster patch",
-			method:            http.MethodPatch,
-			body:              `{"spec":{"cluster":"cluster-a"}}`,
+			name:   "same cluster patch",
+			method: http.MethodPatch,
+			// spec is replaced wholesale, so a patch that keeps the endpoint
+			// deployable resends the engine along with the cluster.
+			body:              `{"spec":{"cluster":"cluster-a","engine":{"engine":"vllm","version":"v0.1"}}}`,
 			expectedStatus:    http.StatusNoContent,
 			expectedHandler:   true,
 			expectedListCalls: 1,
@@ -2698,6 +2703,21 @@ func TestValidateEndpointDeployTarget(t *testing.T) {
 		}
 	})
 
+	t.Run("reads an engine row with no spec as having no version", func(t *testing.T) {
+		// A malformed row must answer 400, not panic the request.
+		store := &fakeClusterStorage{
+			clusters: []v1.Cluster{cluster},
+			engines:  []v1.Engine{{Metadata: &v1.Metadata{Name: testEngineName, Workspace: "team-a"}}},
+		}
+
+		err := validateEndpointDeployTarget(store, target("cluster-a", registered))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "has no version")
+		}
+	})
+
 	t.Run("leaves an empty cluster to the database trigger", func(t *testing.T) {
 		// spec.cluster is required by validate_endpoint_cluster_name (code
 		// 10010); re-reporting it here would change the code the UI branches on.
@@ -2729,19 +2749,39 @@ func TestValidateEndpointPatchEngineScope(t *testing.T) {
 		},
 	}
 
-	t.Run("skips a patch that does not carry an engine", func(t *testing.T) {
-		// No cluster in storage: a skipped check must not look anything up,
+	t.Run("skips a patch that carries no spec", func(t *testing.T) {
+		// Nothing in the patch can clear the engine, so nothing is looked up --
 		// which is also what keeps an unchanged cluster from being re-validated.
 		store := &fakeClusterStorage{}
 
 		err := validateEndpointPatchEngine(store, &endpointValidationInput{
-			Patch: v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}},
+			Patch: v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint"}},
 			New:   current,
 		})
 
 		assert.Nil(t, err)
 		assert.Equal(t, 0, store.engineListCalls)
 		assert.Equal(t, 0, store.listCalls)
+	})
+
+	t.Run("rejects a spec patch that drops the engine", func(t *testing.T) {
+		// PATCH replaces spec wholesale, so a spec sent without spec.engine
+		// clears it: the endpoint would be left with nothing to deploy.
+		store := &fakeClusterStorage{}
+		cleared := &v1.Endpoint{
+			Metadata: current.Metadata,
+			Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+		}
+
+		err := validateEndpointPatchEngine(store, &endpointValidationInput{
+			Patch: v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}},
+			New:   cleared,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10232", err.Code)
+			assert.Contains(t, err.Hint, "spec.engine.engine is required")
+		}
 	})
 
 	t.Run("rejects a patch that blanks the engine version", func(t *testing.T) {

@@ -216,12 +216,18 @@ func validateEndpointCreateDeployTarget(store storage.Storage, input *endpointVa
 	return validateEndpointDeployTarget(store, input.New)
 }
 
-// validateEndpointPatchEngine re-checks the engine when a patch carries one.
+// validateEndpointPatchEngine re-checks the engine whenever a patch carries a
+// spec. Checking only patches that name an engine would miss the case that
+// matters most: spec is replaced wholesale (see
+// buildPostgrestEndpointPatchValidationNew), so a patch that sends a spec
+// without spec.engine clears the engine the endpoint was deployed with, which
+// is exactly the state this validator exists to refuse.
+//
 // The cluster is not re-checked: validateEndpointPatchClusterImmutable already
 // refuses to change it, so the cluster the endpoint was created with is the
 // one that was checked at create time.
 func validateEndpointPatchEngine(store storage.Storage, input *endpointValidationInput) *validationError {
-	if input == nil || input.New == nil || input.Patch.Spec == nil || input.Patch.Spec.Engine == nil {
+	if input == nil || input.New == nil || input.Patch.Spec == nil {
 		return nil
 	}
 
@@ -314,6 +320,13 @@ func validateEndpointEngineExists(store storage.Storage, endpoint *v1.Endpoint) 
 
 	if len(engines) == 0 {
 		return endpointDeployTargetNotFoundError(fmt.Sprintf("engine %s/%s not found", workspace, spec.Engine))
+	}
+
+	// A row with no spec publishes no versions; reading it as "no such version"
+	// keeps a malformed row a 400 the caller can read rather than a panic.
+	if engines[0].Spec == nil {
+		return endpointDeployTargetNotFoundError(fmt.Sprintf(
+			"engine %s/%s has no version %s", workspace, spec.Engine, spec.Version))
 	}
 
 	for _, version := range engines[0].Spec.Versions {
