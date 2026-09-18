@@ -138,29 +138,31 @@ func (o *RayOrchestrator) prepareOrchestratorContext(endpoint *v1.Endpoint) (*Or
 }
 
 func (o *RayOrchestrator) validateDependencies(ctx *OrchestratorContext) error {
-	// validate cluster status
-	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
-		return errors.Errorf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
-	}
-
+	// A wrong cluster type is a misconfiguration, so it is checked before
+	// the status: a not-running cluster must not mask it as not-ready.
 	if ctx.Cluster.Spec.Type != v1.SSHClusterType {
 		return errors.Errorf("deploy cluster %s is not ssh type", ctx.Cluster.Metadata.WorkspaceName())
 	}
 
+	// validate cluster status
+	if ctx.Cluster.Status == nil || ctx.Cluster.Status.Phase != v1.ClusterPhaseRunning {
+		return dependencyNotReadyf("deploy cluster %s is not running", ctx.Cluster.Metadata.WorkspaceName())
+	}
+
 	// validate engine status
 	if ctx.Engine.Status == nil || ctx.Engine.Status.Phase != v1.EnginePhaseCreated {
-		return errors.Errorf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
+		return dependencyNotReadyf("engine %s not ready", ctx.Engine.Metadata.WorkspaceName())
 	}
 
 	// An endpoint that names no registry has nothing to validate here.
 	if ctx.ModelRegistry != nil &&
 		(ctx.ModelRegistry.Status == nil || ctx.ModelRegistry.Status.Phase != v1.ModelRegistryPhaseCONNECTED) {
-		return errors.Errorf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
+		return dependencyNotReadyf("model registry %s not ready", ctx.ModelRegistry.Metadata.WorkspaceName())
 	}
 
 	// validate image registry status
 	if ctx.ImageRegistry.Status == nil || ctx.ImageRegistry.Status.Phase != v1.ImageRegistryPhaseCONNECTED {
-		return errors.Errorf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
+		return dependencyNotReadyf("image registry %s not ready", ctx.ImageRegistry.Metadata.WorkspaceName())
 	}
 
 	return nil
@@ -175,6 +177,10 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 
 	err = o.validateDependencies(ctx)
 	if err != nil {
+		if o.keepDeployedOnUnreadyDependency(ctx, err) {
+			return nil
+		}
+
 		return errors.Wrapf(err, "failed to validate dependencies for endpoint %s", endpoint.Metadata.WorkspaceName())
 	}
 
@@ -196,6 +202,31 @@ func (o *RayOrchestrator) CreateEndpoint(endpoint *v1.Endpoint) error {
 	}
 
 	return o.createOrUpdate(ctx)
+}
+
+// keepDeployedOnUnreadyDependency reports whether the apply should be skipped
+// because a dependency is only temporarily unavailable and the endpoint's
+// Serve application already exists. The running replicas do not need the
+// dependency; redeploying does, so the apply is deferred to the first
+// reconcile after the dependency recovers.
+func (o *RayOrchestrator) keepDeployedOnUnreadyDependency(ctx *OrchestratorContext, err error) bool {
+	if !isDependencyNotReady(err) {
+		return false
+	}
+
+	apps, getErr := ctx.rayService.GetServeApplications()
+	if getErr != nil {
+		ctx.logger.Error(getErr, "Failed to check existing serve application")
+		return false
+	}
+
+	if _, exists := apps.Applications[EndpointToServeApplicationName(ctx.Endpoint)]; !exists {
+		return false
+	}
+
+	ctx.logger.V(2).Info("Dependency not ready, keeping the existing serve application", "reason", err.Error())
+
+	return true
 }
 
 // PauseEndpoint removes the endpoint's Ray Serve application, which is how

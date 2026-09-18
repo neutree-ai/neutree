@@ -577,3 +577,23 @@ func TestModelRegistryOptionalInDeployPath(t *testing.T) {
 		assert.Equal(t, "packaged-ocr", endpointModelServeName(endpoint, &v1.ModelRegistry{}))
 	})
 }
+
+// getUsedEngine resolves the engine regardless of its phase: readiness is
+// judged by validateDependencies, which can keep a deployed endpoint running
+// while the engine is not ready.
+func TestGetUsedEngineLeavesReadinessToValidation(t *testing.T) {
+	s := &storagemocks.MockStorage{}
+	s.On("ListEngine", mock.Anything).Return([]v1.Engine{{
+		Metadata: &v1.Metadata{Name: "vllm", Workspace: "default"},
+		Spec:     &v1.EngineSpec{Versions: []*v1.EngineVersion{{Version: "v0.24.0"}}},
+		Status:   &v1.EngineStatus{Phase: v1.EnginePhasePending},
+	}}, nil)
+
+	engine, err := getUsedEngine(s, &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "default"},
+		Spec:     &v1.EndpointSpec{Engine: &v1.EndpointEngineSpec{Engine: "vllm", Version: "v0.24.0"}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, v1.EnginePhasePending, engine.Status.Phase)
+}

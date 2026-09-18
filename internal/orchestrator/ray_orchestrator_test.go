@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -4264,4 +4265,44 @@ func TestEndpointToApplication_HuggingFaceUnchangedByModelScopeSupport(t *testin
 	assert.Equal(t, "hf-token", env[v1.HFTokenEnv])
 	assert.NotContains(t, env, v1.ModelScopeEndpointEnv)
 	assert.NotContains(t, env, v1.ModelScopeTokenEnv)
+}
+
+func TestRayOrchestratorKeepDeployedOnUnreadyDependency(t *testing.T) {
+	endpoint := &v1.Endpoint{Metadata: &v1.Metadata{Name: "chat-model", Workspace: "production"}}
+	notReady := dependencyNotReadyf("model registry %s not ready", "production/registry")
+
+	newContext := func(apps map[string]dashboard.RayServeApplicationStatus, getErr error) *OrchestratorContext {
+		mockDashboard := &dashboardmocks.MockDashboardService{}
+		mockDashboard.On("GetServeApplications").Return(&dashboard.RayServeApplicationsResponse{
+			Applications: apps,
+		}, getErr)
+
+		return &OrchestratorContext{
+			Endpoint:   endpoint,
+			rayService: mockDashboard,
+			logger:     klog.Background(),
+		}
+	}
+	deployed := map[string]dashboard.RayServeApplicationStatus{
+		EndpointToServeApplicationName(endpoint): {Status: "RUNNING"},
+	}
+
+	t.Run("keeps an existing application while a dependency is not ready", func(t *testing.T) {
+		assert.True(t, (&RayOrchestrator{}).keepDeployedOnUnreadyDependency(newContext(deployed, nil), notReady))
+	})
+
+	t.Run("fails an endpoint that was never deployed", func(t *testing.T) {
+		assert.False(t, (&RayOrchestrator{}).keepDeployedOnUnreadyDependency(
+			newContext(map[string]dashboard.RayServeApplicationStatus{}, nil), notReady))
+	})
+
+	t.Run("fails when the applications cannot be listed", func(t *testing.T) {
+		assert.False(t, (&RayOrchestrator{}).keepDeployedOnUnreadyDependency(
+			newContext(nil, errors.New("dashboard unreachable")), notReady))
+	})
+
+	t.Run("fails on a misconfiguration even when deployed", func(t *testing.T) {
+		assert.False(t, (&RayOrchestrator{}).keepDeployedOnUnreadyDependency(
+			newContext(deployed, nil), errors.New("deploy cluster is not ssh type")))
+	})
 }

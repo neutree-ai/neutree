@@ -121,10 +121,6 @@ func getUsedEngine(s storage.Storage, endpoint *v1.Endpoint) (*v1.Engine, error)
 		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not found")
 	}
 
-	if engine[0].Status == nil || engine[0].Status.Phase != v1.EnginePhaseCreated {
-		return nil, errors.New("engine " + endpoint.Spec.Engine.Engine + " not ready")
-	}
-
 	versionMatched := false
 
 	for _, v := range engine[0].Spec.Versions {
@@ -508,4 +504,26 @@ func IsEndpointPaused(endpoint *v1.Endpoint) bool {
 	}
 
 	return false
+}
+
+// dependencyNotReadyError marks a dependency that exists and is configured
+// correctly but is not usable right now (a cluster being updated, a registry
+// that lost its connection). Only these failures may leave an already-deployed
+// endpoint running; a misconfiguration still fails the endpoint.
+type dependencyNotReadyError struct {
+	msg string
+}
+
+func (e *dependencyNotReadyError) Error() string {
+	return e.msg
+}
+
+func dependencyNotReadyf(format string, args ...interface{}) error {
+	return &dependencyNotReadyError{msg: fmt.Sprintf(format, args...)}
+}
+
+func isDependencyNotReady(err error) bool {
+	var target *dependencyNotReadyError
+
+	return errors.As(err, &target)
 }
