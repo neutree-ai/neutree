@@ -28,7 +28,15 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
 # Import generic converter
-from dashboard_converter import DashboardConverter, DashboardConversionConfig, ConversionRule
+from dashboard_converter import (
+    DashboardConverter, DashboardConversionConfig, ConversionRule, VariableOverride,
+)
+
+
+CLUSTER_VARIABLE_DESCRIPTION = (
+    "Filter queries to a specific Neutree cluster. Neutree attaches the cluster "
+    "label to every scrape target."
+)
 
 
 def create_conversion_config(source_file: str, output_file: str) -> DashboardConversionConfig:
@@ -52,6 +60,15 @@ def create_conversion_config(source_file: str, output_file: str) -> DashboardCon
         )
     ]
 
+    # Upstream describes the Cluster variable in KubeRay terms. Conversion rules
+    # never touch descriptions, so state the Neutree behaviour by variable name.
+    variable_overrides = [
+        VariableOverride(
+            name="Cluster",
+            description=CLUSTER_VARIABLE_DESCRIPTION,
+        )
+    ]
+
     return DashboardConversionConfig(
         name="Ray to Neutree Cluster Label",
         description="Convert ray_io_cluster label to neutree_cluster in Ray upstream dashboards",
@@ -62,7 +79,12 @@ def create_conversion_config(source_file: str, output_file: str) -> DashboardCon
         filter_rules=filter_rules,
         custom_rules=[],
         variables=[],
-        keep_datasource_variable=False  # Keep original variables
+        # `variables=[]` plus `keep_datasource_variable=False` is load-bearing: the
+        # converter only converts upstream variables in place on that combination.
+        # Defining any variable here would switch it to the replace branch and drop
+        # every upstream variable, including the $Cluster the panels reference.
+        keep_datasource_variable=False,  # Keep original variables
+        variable_overrides=variable_overrides,
     )
 
 
