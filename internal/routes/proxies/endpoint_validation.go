@@ -49,6 +49,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 		Validators: []endpointValidator{
 			validateEndpointCreateModelSource,
 			validateEndpointCreateResourceShape,
+			validateEndpointCreateDeployTarget,
 		},
 	},
 	endpointValidationPatch: {
@@ -56,6 +57,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 			validateEndpointPatchClusterImmutable,
 			validateEndpointPatchModelSource,
 			validateEndpointPatchResourceShape,
+			validateEndpointPatchEngine,
 		},
 	},
 	endpointValidationSoftDelete: {},
@@ -203,6 +205,125 @@ func endpointPatchIsSoftDelete(payload map[string]json.RawMessage) (bool, error)
 	}
 
 	return metadata.DeletionTimestamp != "", nil
+}
+
+// validateEndpointCreateDeployTarget runs the deploy-target checks on create.
+func validateEndpointCreateDeployTarget(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.Patch.GetDeletionTimestamp() != "" {
+		return nil
+	}
+
+	return validateEndpointDeployTarget(store, input.New)
+}
+
+// validateEndpointPatchEngine re-checks the engine when a patch carries one.
+// The cluster is not re-checked: validateEndpointPatchClusterImmutable already
+// refuses to change it, so the cluster the endpoint was created with is the
+// one that was checked at create time.
+func validateEndpointPatchEngine(store storage.Storage, input *endpointValidationInput) *validationError {
+	if input == nil || input.New == nil || input.Patch.Spec == nil || input.Patch.Spec.Engine == nil {
+		return nil
+	}
+
+	return validateEndpointEngineRef(store, input.New)
+}
+
+// validateEndpointDeployTarget rejects an endpoint that names no engine, or
+// names a cluster or engine version that does not exist in its workspace.
+// Without this an incomplete endpoint is written, accepted by the API, and
+// then either fails in the controller or never converges at all — an endpoint
+// with no engine sits in Deploying forever (NEU-785).
+//
+// spec.cluster being required is left to the api_usage trigger
+// validate_endpoint_cluster_name, which already answers with code 10010; only
+// its existence is checked here.
+func validateEndpointDeployTarget(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if validationErr := validateEndpointClusterExists(store, endpoint); validationErr != nil {
+		return validationErr
+	}
+
+	return validateEndpointEngineRef(store, endpoint)
+}
+
+// validateEndpointEngineRef requires spec.engine and checks that the engine and
+// version it names are registered in the endpoint's workspace.
+func validateEndpointEngineRef(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil {
+		return endpointEngineError("spec.engine is required")
+	}
+
+	engine := endpoint.Spec.Engine
+	if engine == nil || engine.Engine == "" {
+		return endpointEngineError("spec.engine.engine is required")
+	}
+
+	if engine.Version == "" {
+		return endpointEngineError("spec.engine.version is required")
+	}
+
+	return validateEndpointEngineExists(store, endpoint)
+}
+
+// validateEndpointClusterExists checks the named cluster is visible in the
+// endpoint's workspace. An empty name is left to the database trigger.
+func validateEndpointClusterExists(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Cluster == "" {
+		return nil
+	}
+
+	if store == nil {
+		return internalServerValidationError()
+	}
+
+	workspace := endpointValidationWorkspace(endpoint)
+
+	clusters, err := store.ListCluster(storage.ListOption{
+		Filters: endpointClusterLookupFilters(endpoint.Spec.Cluster, workspace),
+	})
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	if len(clusters) == 0 {
+		return endpointDeployTargetNotFoundError(fmt.Sprintf("cluster %s/%s not found", workspace, endpoint.Spec.Cluster))
+	}
+
+	return nil
+}
+
+// validateEndpointEngineExists checks the named engine is visible in the
+// endpoint's workspace and publishes the requested version. The lookup mirrors
+// getUsedEngine, which is what the orchestrator resolves the engine with.
+func validateEndpointEngineExists(store storage.Storage, endpoint *v1.Endpoint) *validationError {
+	if store == nil {
+		return internalServerValidationError()
+	}
+
+	workspace := endpointValidationWorkspace(endpoint)
+	spec := endpoint.Spec.Engine
+
+	engines, err := store.ListEngine(storage.ListOption{
+		Filters: []storage.Filter{
+			{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(spec.Engine)},
+			{Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote(workspace)},
+		},
+	})
+	if err != nil {
+		return internalServerValidationError()
+	}
+
+	if len(engines) == 0 {
+		return endpointDeployTargetNotFoundError(fmt.Sprintf("engine %s/%s not found", workspace, spec.Engine))
+	}
+
+	for _, version := range engines[0].Spec.Versions {
+		if version != nil && version.Version == spec.Version {
+			return nil
+		}
+	}
+
+	return endpointDeployTargetNotFoundError(fmt.Sprintf(
+		"engine %s/%s has no version %s", workspace, spec.Engine, spec.Version))
 }
 
 func validateEndpointCreateModelSource(store storage.Storage, input *endpointValidationInput) *validationError {
@@ -991,6 +1112,22 @@ func endpointResourceValueError(err error) *validationError {
 		Code:    "10216",
 		Message: "invalid endpoint accelerator virtualization resources",
 		Hint:    err.Error(),
+	}
+}
+
+func endpointEngineError(hint string) *validationError {
+	return &validationError{
+		Code:    "10232",
+		Message: "invalid endpoint engine",
+		Hint:    hint,
+	}
+}
+
+func endpointDeployTargetNotFoundError(hint string) *validationError {
+	return &validationError{
+		Code:    "10233",
+		Message: "endpoint deploy target not found",
+		Hint:    hint,
 	}
 }
 
