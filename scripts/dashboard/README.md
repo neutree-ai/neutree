@@ -143,10 +143,9 @@ python3 dashboard_converter.py <config_file> [dashboard_dir]
   `keep_datasource_variable` is false**. Defining any variable switches to the replace
   branch, which discards every upstream variable. `convert_ray_to_neutree.py` depends on
   the carry-over branch, so its config must keep both settings as they are.
-- `convert_ray_to_neutree.py` builds its config in code, and `sync-grafana-dashboards.sh`
-  invokes it with two arguments, so **the code config is what the sync uses**. The JSON at
-  `configs/ray_to_neutree_cluster.json` only applies to the zero-argument invocation; the
-  two are kept in sync by hand.
+- Each `convert_*.py` script loads its rules from the JSON in `configs/`, so that file is
+  the single definition and there is nothing to keep in sync by hand. The scripts resolve
+  it relative to their own location and therefore work from any working directory.
 
 ## Dashboard Locations
 
