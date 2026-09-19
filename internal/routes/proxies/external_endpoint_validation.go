@@ -17,6 +17,7 @@ const (
 
 	externalEndpointInvalidPayloadCode = "10231"
 	externalEndpointInvalidNameCode    = "10232"
+	externalEndpointInvalidSourceCode  = "10240"
 )
 
 // validateExternalEndpoint enforces the metadata.name contract at the API
@@ -69,6 +70,12 @@ func validateExternalEndpoint() gin.HandlerFunc {
 
 				return
 			}
+
+			if validationErr := validateExternalEndpointModelSource(payload); validationErr != nil {
+				rejectExternalEndpoint(c, validationErr)
+
+				return
+			}
 		}
 
 		c.Next()
@@ -113,6 +120,45 @@ func validateExternalEndpointName(payload map[string]json.RawMessage, method str
 
 	if err := v1.ValidateResourceName(externalEndpointKind, name); err != nil {
 		return invalidExternalEndpointNameError(err.Error())
+	}
+
+	return nil
+}
+
+// validateExternalEndpointModelSource rejects the self-hosted source label on
+// an external endpoint. See v1.ValidateExternalEndpointModelSource for why that
+// value has to stay internal-endpoint-only.
+//
+// Only the label actually sent is judged; a payload that carries no labels (a
+// soft delete, a spec-only patch) is left alone. The database trigger
+// api.validate_external_endpoint_model_source is the authoritative guard -- the
+// CLI and every other PostgREST caller reach the same table -- this one only
+// turns the rejection into a clearer API-boundary error.
+func validateExternalEndpointModelSource(payload map[string]json.RawMessage) *validationError {
+	metadataRaw, ok := payload["metadata"]
+	if !ok {
+		return nil
+	}
+
+	var metadata struct {
+		Labels map[string]string `json:"labels"`
+	}
+
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		return invalidExternalEndpointPayloadError(err.Error())
+	}
+
+	source, ok := metadata.Labels[v1.ModelSourceLabel]
+	if !ok {
+		return nil
+	}
+
+	if err := v1.ValidateExternalEndpointModelSource(source); err != nil {
+		return &validationError{
+			Code:    externalEndpointInvalidSourceCode,
+			Message: "invalid external endpoint model source",
+			Hint:    err.Error(),
+		}
 	}
 
 	return nil

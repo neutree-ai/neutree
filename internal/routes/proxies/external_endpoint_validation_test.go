@@ -221,3 +221,69 @@ func TestValidateExternalEndpointPassesThroughOtherRequests(t *testing.T) {
 		assertExternalEndpointPayloadRejected(t, recorder, reached)
 	})
 }
+
+// TestExternalEndpointModelSourceValidation covers the NEU-782 source label at
+// the API boundary: self-hosted is internal-endpoint-only, everything else --
+// including a value that is not on the preset list -- is accepted, because the
+// enum has to stay extensible.
+func TestExternalEndpointModelSourceValidation(t *testing.T) {
+	const name = `"name":"ee-source"`
+
+	assertSourceRejected := func(t *testing.T, recorder *httptest.ResponseRecorder, reached bool) {
+		t.Helper()
+
+		assert.False(t, reached, "request must not reach the storage proxy")
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+		var payload validationError
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+
+		assert.Equal(t, externalEndpointInvalidSourceCode, payload.Code)
+		assert.Equal(t, "invalid external endpoint model source", payload.Message)
+		assert.Contains(t, payload.Hint, "self-hosted")
+	}
+
+	t.Run("rejects self-hosted on create", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`,"labels":{"neutree.ai/model-source":"self-hosted"}}}`)
+
+		assertSourceRejected(t, recorder, reached)
+	})
+
+	t.Run("rejects self-hosted on patch", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
+			`{"metadata":{"labels":{"neutree.ai/model-source":"self-hosted"}}}`)
+
+		assertSourceRejected(t, recorder, reached)
+	})
+
+	t.Run("accepts the other preset values", func(t *testing.T) {
+		for _, source := range []string{"internal-shared", "third-party-public", "partner"} {
+			_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+				`{"metadata":{`+name+`,"labels":{"neutree.ai/model-source":"`+source+`"}}}`)
+
+			assert.True(t, reached, "source %q must be accepted", source)
+		}
+	})
+
+	t.Run("accepts an unknown source value", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`,"labels":{"neutree.ai/model-source":"some-future-source"}}}`)
+
+		assert.True(t, reached, "an unlisted source value must still be accepted")
+	})
+
+	t.Run("leaves a payload without the label alone", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`,"labels":{"team":"infra"}}}`)
+
+		assert.True(t, reached)
+	})
+
+	t.Run("leaves a soft delete alone", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
+			`{"metadata":{"deletion_timestamp":"2024-01-01T00:00:00Z"}}`)
+
+		assert.True(t, reached)
+	})
+}
