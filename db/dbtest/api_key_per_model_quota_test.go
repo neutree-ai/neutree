@@ -13,6 +13,13 @@ import (
 // detailed_dimensional_usage -- the shape sync_api_key_usage accumulates
 // (054_usage_statistics_enhance.up.sql:131). total_usage is their sum, as the
 // real aggregation keeps the two in step.
+//
+// endpoint_type here MUST be the ledger's own spelling -- "endpoint" /
+// "external-endpoint" -- because vector derives it from the request path
+// (deploy/docker/neutree-core/vector/vector.yml:24), NOT the gateway's
+// "internal" / "external" that allowed_models entries use. Seeding these rows
+// with the gateway spelling would make the tests agree with a matcher that
+// never matches anything in production.
 func seedDetailedUsage(t *testing.T, db *sql.DB, name, workspace, apiKeyID string, byDimension map[string]int) {
 	t.Helper()
 
@@ -83,9 +90,9 @@ func TestApiKeyPerModelQuota(t *testing.T) {
 	// 300 tokens on the capped entry, plus usage on dimensions that must NOT count
 	// against it: the same model on a different endpoint, and a different model.
 	seedDetailedUsage(t, db, "pmquota-u1", "pmquota-ws", apiKeyID, map[string]int{
-		"external|ep-ext|paid-model":   300,
-		"external|ep-other|paid-model": 700,
-		"internal|ep-int|free-model":   900,
+		"external-endpoint|ep-ext|paid-model":   300,
+		"external-endpoint|ep-other|paid-model": 700,
+		"endpoint|ep-int|free-model":            900,
 	})
 
 	remaining := func(t *testing.T, model, epType, epName interface{}) sql.NullInt64 {
@@ -238,10 +245,10 @@ func TestApiKeyPerModelQuotaWildcard(t *testing.T) {
 	seedDetailedUsage(t, db, "pmwild-u1", "pmwild-ws", apiKeyID, map[string]int{
 		// Same model reached through two different endpoints, one internal and one
 		// external: an unpinned entry caps their sum.
-		"internal|ep-a|shared-model": 100,
-		"external|ep-b|shared-model": 250,
+		"endpoint|ep-a|shared-model":          100,
+		"external-endpoint|ep-b|shared-model": 250,
 		// A different model must not be charged against it.
-		"internal|ep-a|another-model": 900,
+		"endpoint|ep-a|another-model": 900,
 	})
 
 	var rem sql.NullInt64
@@ -339,4 +346,71 @@ func TestApiKeyPerModelQuotaValidation(t *testing.T) {
 			t.Fatalf("expected legacy overlapping allowlist to remain valid, got %v", err)
 		}
 	})
+}
+
+// TestApiKeyPerModelQuotaEndpointTypeVocabulary pins the translation between the
+// vocabulary allowed_models entries are written in ("internal" / "external", what
+// the gateway stashes and the access plugin matches on) and the one the usage
+// ledger stores ("endpoint" / "external-endpoint", which vector derives from the
+// request path). They are different spellings of the same distinction; without
+// the translation a per-model quota matches no usage at all and silently never
+// enforces.
+func TestApiKeyPerModelQuotaEndpointTypeVocabulary(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	user := CreateTestUser(t, "pmvocabuser", "pmvocab@example.com", "testpassword")
+
+	// Same model name on both sides, each capped separately -- the case per-model
+	// quotas exist for, and the one that breaks if the spellings are compared raw.
+	const limits = `{"allowed_models":[
+		{"model":"dual","type":"internal","token_limit":1000},
+		{"model":"dual","type":"external","token_limit":500}
+	]}`
+
+	var apiKeyID string
+	if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT id FROM api.create_api_key(
+				p_workspace := 'pmvocab-ws',
+				p_name := 'pmvocab-key',
+				p_quota := 0,
+				p_limits := $1::jsonb
+			)`, limits).Scan(&apiKeyID)
+	}); err != nil {
+		t.Fatalf("create_api_key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_daily_usage WHERE (spec).api_key_id = $1", apiKeyID)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", apiKeyID)
+	})
+
+	seedDetailedUsage(t, db, "pmvocab-u1", "pmvocab-ws", apiKeyID, map[string]int{
+		"endpoint|ep-in|dual":           400,
+		"external-endpoint|ep-out|dual": 120,
+	})
+
+	remaining := func(t *testing.T, epType string) sql.NullInt64 {
+		t.Helper()
+
+		var rem sql.NullInt64
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx,
+				`SELECT api.get_api_key_remaining($1, 'dual', $2, NULL)`, apiKeyID, epType).Scan(&rem)
+		}); err != nil {
+			t.Fatalf("get_api_key_remaining(%s): %v", epType, err)
+		}
+
+		return rem
+	}
+
+	// "internal" must read the ledger's "endpoint|..." rows: 1000 - 400.
+	if got := remaining(t, "internal"); !got.Valid || got.Int64 != 600 {
+		t.Fatalf("internal: expected remaining 600, got %v", got)
+	}
+	// "external" must read "external-endpoint|..." rows: 500 - 120. If the
+	// spellings were compared raw this would be the untouched 500.
+	if got := remaining(t, "external"); !got.Valid || got.Int64 != 380 {
+		t.Fatalf("external: expected remaining 380, got %v", got)
+	}
 }
