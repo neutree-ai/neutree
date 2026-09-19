@@ -51,6 +51,20 @@ type AllowedModel struct {
 	// "external" tokens (see endpointTypeInternal/External in internal/gateway).
 	Type         string `json:"type,omitempty"`
 	EndpointName string `json:"endpoint_name,omitempty"` // "" = any endpoint of this model
+	// TokenLimit is this entry's optional token quota for the key's quota period
+	// (the period lives on ApiKeyLimits.TokenQuota and is shared by every entry;
+	// there is deliberately no per-entry period). Nil means "no quota on this
+	// entry" — i.e. unlimited; it is never zero, since the DB rejects
+	// non-positive limits. As soon as ANY entry carries a TokenLimit, the key's
+	// overall TokenQuota stops being enforced (see api.get_api_key_remaining):
+	// the two granularities are mutually exclusive, and that is derived from the
+	// data rather than stored as a mode flag.
+	//
+	// Because an entry with an empty Type/EndpointName is a wildcard, two entries
+	// for the same model can both match one request. Quotas are only meaningful
+	// over a partition, so api.validate_api_key_limits rejects overlapping entries
+	// for a model once any entry of that model has a TokenLimit.
+	TokenLimit *int64 `json:"token_limit,omitempty"`
 }
 
 type ApiKeyTokenQuota struct {

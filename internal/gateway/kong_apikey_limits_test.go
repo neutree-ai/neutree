@@ -57,7 +57,10 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 	assert.Equal(t, cid, p.Consumer.ID)
 	assert.ElementsMatch(t, []*string{pointy.String("http"), pointy.String("https")}, p.Protocols)
 	assert.Equal(t, true, p.Config["disabled"])
-	assert.Equal(t, []v1.AllowedModel{{Model: "gpt-4o", Type: "internal", EndpointName: "ep-a"}}, p.Config["allowed_models"])
+	// Projected onto the plugin schema's record shape; see accessPluginAllowedModels.
+	assert.Equal(t, []map[string]interface{}{
+		{"model": "gpt-4o", "type": "internal", "endpoint_name": "ep-a"},
+	}, p.Config["allowed_models"])
 	assert.Equal(t, 8, p.Config["concurrency"])
 	rl, ok := p.Config["rate_limits"].([]map[string]interface{})
 	require.True(t, ok)
@@ -89,7 +92,7 @@ func TestGenerateAPIKeyAccessPlugin(t *testing.T) {
 		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{AllowedModels: []v1.AllowedModel{}}},
 	})
 	require.NotNil(t, p2d)
-	assert.Equal(t, []v1.AllowedModel{}, p2d.Config["allowed_models"])
+	assert.Equal(t, []map[string]interface{}{}, p2d.Config["allowed_models"])
 
 	// RPS only -> single second-window rate limit; disabled present and false
 	p3 := k.generateAPIKeyAccessPlugin(cid, &v1.ApiKey{
@@ -194,4 +197,60 @@ func TestSyncAPIKeyLimitPlugins(t *testing.T) {
 
 	assert.Equal(t, []string{quotaInstance}, created)           // desired quota plugin upserted
 	assert.Equal(t, []string{"/plugins/stale-access"}, deleted) // stale managed access plugin pruned; acl untouched
+}
+
+func TestAccessPluginAllowedModels(t *testing.T) {
+	// Unpinned dimensions are omitted rather than sent as "": the handler reads an
+	// absent field as "any endpoint", and the schema's one_of on `type` would
+	// reject an empty string.
+	assert.Equal(t, []map[string]interface{}{{"model": "m"}},
+		accessPluginAllowedModels([]v1.AllowedModel{{Model: "m"}}))
+
+	// token_limit must NOT reach the access plugin: its config is a strict Kong
+	// record and an unknown field fails the whole plugin upsert. Quota lives in
+	// neutree-ai-quota, which reads it from the control plane instead.
+	assert.Equal(t, []map[string]interface{}{{"model": "m", "type": "external"}},
+		accessPluginAllowedModels([]v1.AllowedModel{
+			{Model: "m", Type: "external", TokenLimit: pointy.Int64(1000)},
+		}))
+
+	assert.Equal(t, []map[string]interface{}{}, accessPluginAllowedModels(nil))
+}
+
+func TestHasPerModelTokenQuota(t *testing.T) {
+	assert.False(t, hasPerModelTokenQuota(&v1.ApiKeyLimits{}))
+	assert.False(t, hasPerModelTokenQuota(&v1.ApiKeyLimits{
+		AllowedModels: []v1.AllowedModel{{Model: "a"}, {Model: "b"}},
+	}))
+	assert.True(t, hasPerModelTokenQuota(&v1.ApiKeyLimits{
+		AllowedModels: []v1.AllowedModel{{Model: "a"}, {Model: "b", TokenLimit: pointy.Int64(1)}},
+	}))
+}
+
+// A key whose only quota is per-model still needs the quota plugin attached:
+// before per-model limits existed the plugin was gated on token_quota alone, so
+// such a key would have gone completely unenforced.
+func TestGenerateAPIKeyQuotaPluginPerModelOnly(t *testing.T) {
+	cid := pointy.String("consumer-1")
+	withAPI := &Kong{quotaAPIURL: "http://postgrest:6432", serviceToken: "tok"}
+
+	p := withAPI.generateAPIKeyQuotaPlugin(cid, &v1.ApiKey{
+		ID: "key-pm",
+		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{
+			AllowedModels: []v1.AllowedModel{
+				{Model: "free-model"},
+				{Model: "paid-model", Type: "external", TokenLimit: pointy.Int64(1_000_000)},
+			},
+		}},
+	})
+	require.NotNil(t, p)
+	assert.Equal(t, "neutree-ai-quota", *p.Name)
+
+	// An allowlist with no limits on it is still not a quota.
+	assert.Nil(t, withAPI.generateAPIKeyQuotaPlugin(cid, &v1.ApiKey{
+		ID: "key-nopm",
+		Spec: &v1.ApiKeySpec{Limits: &v1.ApiKeyLimits{
+			AllowedModels: []v1.AllowedModel{{Model: "free-model"}},
+		}},
+	}))
 }
