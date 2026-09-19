@@ -48,6 +48,20 @@ $$;
 --    Note this only sees usage recorded with a non-null endpoint_type: rows
 --    written before that column existed carry no detail key at all, so per-model
 --    accounting starts when the quota is configured and does not backfill.
+--
+--    p_type is in the GATEWAY vocabulary ("internal" / "external") because that is
+--    what allowed_models entries are written in and what the quota plugin reads
+--    from kong.ctx.shared. The ledger stores a THIRD spelling: vector derives
+--    endpoint_type from the request path
+--    (deploy/docker/neutree-core/vector/vector.yml:24, url_split[3]), so it holds
+--    the URL segment -- "endpoint" or "external-endpoint". They are translated
+--    here rather than at the call sites, so callers only ever deal in the
+--    vocabulary their own layer uses.
+--
+--    (For completeness there is a fourth spelling: get_workspace_models returns
+--    "endpoint" / "external_endpoint", underscored. The UI maps that to the
+--    gateway vocabulary when it builds an allowlist entry, so it never reaches
+--    here.)
 CREATE OR REPLACE FUNCTION api.api_key_model_period_usage(
     p_id       UUID,
     p_period   TEXT,
@@ -58,10 +72,19 @@ CREATE OR REPLACE FUNCTION api.api_key_model_period_usage(
 RETURNS BIGINT
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 AS $$
+DECLARE
+    v_ledger_type TEXT;
 BEGIN
     IF NOT api.can_read_api_key_usage(p_id) THEN
         RAISE EXCEPTION 'permission denied';
     END IF;
+
+    v_ledger_type := CASE p_type
+        WHEN 'internal' THEN 'endpoint'
+        WHEN 'external' THEN 'external-endpoint'
+        ELSE p_type
+    END;
+
     RETURN COALESCE((
         SELECT SUM(COALESCE((kv.value ->> 'total')::bigint, 0))
         FROM api.api_daily_usage d
@@ -75,7 +98,7 @@ BEGIN
                   kv.key,
                   length(split_part(kv.key, '|', 1)) + length(split_part(kv.key, '|', 2)) + 3
               ) = p_model
-          AND (p_type     IS NULL OR split_part(kv.key, '|', 1) = p_type)
+          AND (v_ledger_type IS NULL OR split_part(kv.key, '|', 1) = v_ledger_type)
           AND (p_endpoint IS NULL OR split_part(kv.key, '|', 2) = p_endpoint)
     ), 0)::bigint;
 END;
