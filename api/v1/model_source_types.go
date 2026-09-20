@@ -19,15 +19,16 @@ import "fmt"
 // name. Deliberately no DB CHECK constraint and no closed Go enum: a new source
 // value must not require a code or schema change.
 const (
-	// ModelSourceSelfHosted ("自建私有") is derived, never stored: every internal
+	// ModelSourceSelfHosted is derived, never stored: every internal
 	// Endpoint is self-hosted by definition, and it is rejected on an
 	// ExternalEndpoint (see ValidateExternalEndpointModelSource).
 	ModelSourceSelfHosted = "self-hosted"
-	// ModelSourceInternalShared is "内部共享".
+	// ModelSourceInternalShared covers models another part of the company shares
+	// with us, including ones provided by a parent group.
 	ModelSourceInternalShared = "internal-shared"
-	// ModelSourceThirdPartyPublic is "第三方公有".
+	// ModelSourceThirdPartyPublic covers metered public APIs.
 	ModelSourceThirdPartyPublic = "third-party-public"
-	// ModelSourcePartner is "合作伙伴".
+	// ModelSourcePartner covers a partner's deployment.
 	ModelSourcePartner = "partner"
 )
 

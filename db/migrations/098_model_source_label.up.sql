@@ -1,7 +1,8 @@
 -- Model source (NEU-782).
 --
--- A model's "source" (来源标签) tells apart models whose cost properties differ:
--- 自建私有 / 内部共享 / 第三方公有 / 合作伙伴. It is display / grouping metadata
+-- A model's "source" tells apart models whose cost properties differ: something
+-- we run ourselves, something another part of the company shares with us, a
+-- metered public API, a partner's deployment. It is display / grouping metadata
 -- only and takes no part in any quota or access decision.
 --
 -- GRANULARITY: per MODEL, not per endpoint. One external endpoint routinely
@@ -29,8 +30,8 @@ ALTER TYPE api.external_endpoint_spec ADD ATTRIBUTE model_sources JSONB;
 -- An API key's allowed_models entries are (model, type, endpoint_name) triples
 -- where type is internal/external. The same model name can be exposed by both
 -- an internal endpoint and an external one -- that is exactly the case NEU-783's
--- per-model quota exists for. Once the UI replaces the internal/外部 badge with
--- this source, the source becomes the ONLY way a user can tell the IE row apart
+-- per-model quota exists for. Once the UI replaces the internal/external badge
+-- with this source, the source becomes the ONLY way a user can tell the IE row apart
 -- from the EE row for that model name in the allowed_models picker. While
 -- 'self-hosted' <-> IE stays one-to-one that distinction is lossless; the moment
 -- an EE may also claim 'self-hosted', the two rows become indistinguishable and
