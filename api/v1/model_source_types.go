@@ -55,7 +55,7 @@ var PresetModelSources = []string{
 // identical and NEU-783's per-model quota unconfigurable in the UI.
 //
 // This mirrors api.validate_external_endpoint_model_source in
-// db/migrations/097_model_source_label.up.sql — the database is the
+// db/migrations/098_model_source_label.up.sql — the database is the
 // authoritative guard, this one only produces a nicer API-boundary error.
 func ValidateExternalEndpointModelSources(sources map[string]string) error {
 	for model, source := range sources {
