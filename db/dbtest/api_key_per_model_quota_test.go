@@ -154,6 +154,36 @@ func TestApiKeyPerModelQuota(t *testing.T) {
 		}
 	})
 
+	t.Run("get_api_key_limits reports when the window resets", func(t *testing.T) {
+		// Computed server-side: CURRENT_DATE is the database's date, and a
+		// browser a timezone away would disagree by a day right at a boundary.
+		var period, start, resets string
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT j ->> 'quota_period', j ->> 'quota_period_start', j ->> 'quota_resets_at'
+				FROM (SELECT api.get_api_key_limits($1) AS j) s`, apiKeyID).
+				Scan(&period, &start, &resets)
+		}); err != nil {
+			t.Fatalf("get_api_key_limits: %v", err)
+		}
+
+		var wantStart, wantReset string
+		if err := db.QueryRowContext(ctx, `
+			SELECT api.api_key_period_start($1)::text, api.api_key_period_reset($1)::text`,
+			period).Scan(&wantStart, &wantReset); err != nil {
+			t.Fatalf("period helpers: %v", err)
+		}
+
+		if start != wantStart || resets != wantReset {
+			t.Fatalf("expected %s..%s, got %s..%s", wantStart, wantReset, start, resets)
+		}
+
+		// The reset is the start of the NEXT window, so it must be later.
+		if resets <= start {
+			t.Fatalf("reset %s must be after the period start %s", resets, start)
+		}
+	})
+
 	t.Run("get_api_key_limits reports per-entry used/remaining and granularity", func(t *testing.T) {
 		var granularity, used, rem string
 		var freeUsed sql.NullString

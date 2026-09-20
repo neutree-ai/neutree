@@ -34,6 +34,24 @@ AS $$
     END;
 $$;
 
+-- 1b) api_key_period_reset: when the current window ends and the counter starts
+--     again. Derived from the period rather than stored, and computed HERE
+--     rather than in the client: CURRENT_DATE is the database's date, and a
+--     browser in another timezone would disagree by a day around a boundary --
+--     exactly when someone is looking to see whether their quota has reset.
+CREATE OR REPLACE FUNCTION api.api_key_period_reset(p_period TEXT)
+RETURNS DATE
+LANGUAGE sql STABLE
+AS $$
+    SELECT CASE p_period
+        WHEN 'daily'   THEN CURRENT_DATE + 1
+        WHEN 'weekly'  THEN (date_trunc('week',  CURRENT_DATE) + interval '1 week')::date
+        WHEN 'monthly' THEN (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
+        WHEN 'yearly'  THEN (date_trunc('year',  CURRENT_DATE) + interval '1 year')::date
+        ELSE (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
+    END;
+$$;
+
 -- 2) api_key_model_period_usage: current-period tokens for one allowed_models
 --    entry. The ledger's detailed_dimensional_usage is keyed
 --    "<endpoint_type>|<endpoint_name>|<model>" (054_usage_statistics_enhance.up.sql:131),
@@ -364,7 +382,11 @@ BEGIN
         ) u;
 
         RETURN jsonb_set(v_limits, '{allowed_models}', COALESCE(v_models, '[]'::jsonb))
-               || jsonb_build_object('quota_granularity', 'per_model', 'quota_period', v_period);
+               || jsonb_build_object(
+                    'quota_granularity', 'per_model',
+                    'quota_period', v_period,
+                    'quota_period_start', api.api_key_period_start(v_period),
+                    'quota_resets_at', api.api_key_period_reset(v_period));
     END IF;
 
     v_limit := (v_limits #>> '{token_quota,limit}')::bigint;
@@ -376,7 +398,11 @@ BEGIN
                 || jsonb_build_object('used', v_used, 'remaining', v_limit - v_used)
         );
     END IF;
-    RETURN v_limits || jsonb_build_object('quota_granularity', 'overall', 'quota_period', v_period);
+    RETURN v_limits || jsonb_build_object(
+        'quota_granularity', 'overall',
+        'quota_period', v_period,
+        'quota_period_start', api.api_key_period_start(v_period),
+        'quota_resets_at', api.api_key_period_reset(v_period));
 END;
 $$;
 
