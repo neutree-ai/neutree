@@ -264,6 +264,7 @@ func TestEndpointVGPUValidationAllowsPostWithoutCapacityPrecheck(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -294,6 +295,7 @@ func TestEndpointVGPUValidationAllowsCustomAcceleratorPost(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -322,6 +324,7 @@ func TestEndpointVGPUValidationAllowsPostWhenProductMemorySpecIsMissing(t *testi
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -350,6 +353,7 @@ func TestEndpointVGPUValidationRejectsPostWithZeroCorePercent(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -383,6 +387,7 @@ func TestEndpointVGPUValidationRejectsCorePercentUnderTemplateMode(t *testing.T)
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -421,6 +426,7 @@ func TestEndpointVGPUValidationRejectsMemoryMiBWhenNotSupported(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -461,6 +467,7 @@ func TestEndpointVGPUValidationAllowsCorePercentUnderCoreMode(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -494,6 +501,7 @@ func TestEndpointVGPUValidationRejectsZeroCorePercentUnderTemplateMode(t *testin
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -528,6 +536,7 @@ func TestEndpointVGPUValidationAllowsCorePercentWhenModeStatusMissing(t *testing
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -558,6 +567,7 @@ func TestEndpointVGPUValidationRejectsPostWhenMemoryMIBExceedsPhysicalCardSpec(t
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -588,6 +598,7 @@ func TestEndpointVGPUValidationReturnsInternalServerErrorOnClusterLookupError(t 
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -623,6 +634,7 @@ func TestEndpointVGPUValidationRejectsNotReadyPost(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -657,6 +669,7 @@ func TestEndpointVGPUValidationAllowsMultiReplicaTotalDemandPost(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 3},
 			"resources": {
 				"gpu": "1",
@@ -688,6 +701,7 @@ func TestEndpointVGPUValidationAllowsPausedPostWhenVirtualizationNotReady(t *tes
 		"metadata": {"name": "endpoint", "workspace": "team-a"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 0},
 			"resources": {
 				"gpu": "1",
@@ -806,6 +820,7 @@ func TestEndpointVGPUValidationResolvesEndpointAndAllowsPatchWithoutCapacityPrec
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -841,6 +856,7 @@ func TestEndpointVGPUValidationReplacesResourcesWithoutInheritingVirtualization(
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "2",
 				"accelerator": {
@@ -883,6 +899,7 @@ func TestEndpointVGPUValidationAllowsSpecReplacementWhenOnlyReplicasAreSupplied(
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 3}
 		}
 	}`
@@ -912,6 +929,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWhenVirtualizationNotReady(t *tes
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 0}
 		}
 	}`
@@ -936,6 +954,7 @@ func TestEndpointVGPUValidationRejectsPausePatchThatChangesCluster(t *testing.T)
 	body := `{
 		"spec": {
 			"cluster": "missing-cluster",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 0}
 		}
 	}`
@@ -963,6 +982,7 @@ func TestEndpointVGPUValidationAllowsPausePatchWithInvalidVGPUResourceShape(t *t
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 0},
 			"resources": {
 				"accelerator": {
@@ -993,6 +1013,7 @@ func TestEndpointVGPUValidationRejectsNegativeReplicaPatch(t *testing.T) {
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": -1}
 		}
 	}`
@@ -1028,6 +1049,7 @@ func TestEndpointVGPUValidationAllowsNonVGPUPatchWhenReplicasChange(t *testing.T
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"replicas": {"num": 3}
 		}
 	}`
@@ -1055,6 +1077,7 @@ func TestEndpointVGPUValidationAllowsPatchFromVGPUToWholeGPU(t *testing.T) {
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1098,6 +1121,7 @@ func TestEndpointVGPUValidationAllowsPatchWhenReplacementProductMemoryIsUnknown(
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1134,6 +1158,7 @@ func TestEndpointVGPUValidationRejectsPatchWithZeroCorePercent(t *testing.T) {
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1188,6 +1213,7 @@ func TestEndpointVGPUValidationAllowsPatchWhenCurrentAvailableCapacityIsZero(t *
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1250,6 +1276,7 @@ func TestEndpointVGPUValidationAllowsWholeGPUToVGPUPatchWhenCurrentAvailableCapa
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1304,6 +1331,7 @@ func TestEndpointVGPUValidationAllowsPatchWhenTargetDeviceCannotPhysicallyFitVGP
 	body := `{
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1361,6 +1389,7 @@ func TestEndpointValidationRejectsPatchThatChangesCluster(t *testing.T) {
 			body: `{
 				"spec": {
 					"cluster": "cluster-b",
+					"engine": {"engine": "vllm", "version": "v0.1"},
 					"resources": {
 						"gpu": "1",
 						"accelerator": {
@@ -1448,7 +1477,10 @@ func TestBuildPostgrestEndpointPatchValidationNew(t *testing.T) {
 func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 	existing := v1.Endpoint{
 		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
-		Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+		Spec: &v1.EndpointSpec{
+			Cluster: "cluster-a",
+			Engine:  &v1.EndpointEngineSpec{Engine: testEngineName, Version: testEngineVersion},
+		},
 	}
 
 	tests := []struct {
@@ -1461,9 +1493,11 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 		expectedListCalls int
 	}{
 		{
-			name:              "same cluster patch",
-			method:            http.MethodPatch,
-			body:              `{"spec":{"cluster":"cluster-a"}}`,
+			name:   "same cluster patch",
+			method: http.MethodPatch,
+			// spec is replaced wholesale, so a patch that keeps the endpoint
+			// deployable resends the engine along with the cluster.
+			body:              `{"spec":{"cluster":"cluster-a","engine":{"engine":"vllm","version":"v0.1"}}}`,
 			expectedStatus:    http.StatusNoContent,
 			expectedHandler:   true,
 			expectedListCalls: 1,
@@ -1485,9 +1519,11 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 			expectedListCalls: 1,
 		},
 		{
-			name:              "post remains allowed",
-			method:            http.MethodPost,
-			body:              `{"metadata":{"name":"new","workspace":"team-a"},"spec":{"cluster":"cluster-b"}}`,
+			name:   "post remains allowed",
+			method: http.MethodPost,
+			// A create carries the whole deploy target, so this body names the
+			// engine as a real one does.
+			body:              `{"metadata":{"name":"new","workspace":"team-a"},"spec":{"cluster":"cluster-b","engine":{"engine":"vllm","version":"v0.1"}}}`,
 			expectedStatus:    http.StatusNoContent,
 			expectedHandler:   true,
 			expectedListCalls: 0,
@@ -1496,7 +1532,12 @@ func TestEndpointVGPUValidationAllowsPatchWithoutClusterChange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clusterStorage := &fakeClusterStorage{endpoints: []v1.Endpoint{existing}}
+			clusterStorage := &fakeClusterStorage{
+				endpoints: []v1.Endpoint{existing},
+				clusters: []v1.Cluster{
+					{Metadata: &v1.Metadata{Name: "cluster-b", Workspace: "team-a"}},
+				},
+			}
 
 			recorder, handlerCalled := runEndpointVGPUValidationWithPath(
 				tt.method,
@@ -1590,6 +1631,7 @@ func TestEndpointValidationSkipsVGPUValidationForDeletedPost(t *testing.T) {
 		"metadata": {"name": "endpoint", "workspace": "team-a", "deletion_timestamp": "2026-08-10T08:30:00Z"},
 		"spec": {
 			"cluster": "cluster-a",
+			"engine": {"engine": "vllm", "version": "v0.1"},
 			"resources": {
 				"gpu": "1",
 				"accelerator": {
@@ -1616,6 +1658,7 @@ func endpointWithVGPU(cluster string, workspace string) *v1.Endpoint {
 		},
 		Spec: &v1.EndpointSpec{
 			Cluster: cluster,
+			Engine:  &v1.EndpointEngineSpec{Engine: testEngineName, Version: testEngineVersion},
 			Resources: vgpuResources("1", "Tesla-T4", map[string]string{
 				v1.AcceleratorVirtualizationMemoryMiBKey:   "4096",
 				v1.AcceleratorVirtualizationCorePercentKey: "50",
@@ -1841,6 +1884,10 @@ type fakeClusterStorage struct {
 	endpointListError  error
 	listOption         storage.ListOption
 	endpointListOption storage.ListOption
+	engines            []v1.Engine
+	engineListCalls    int
+	engineListError    error
+	engineListOption   storage.ListOption
 }
 
 func (s *fakeClusterStorage) CreateCluster(data *v1.Cluster) error {
@@ -1869,6 +1916,38 @@ func (s *fakeClusterStorage) ListCluster(option storage.ListOption) ([]v1.Cluste
 
 	return s.clusters, nil
 }
+
+// ListEngine answers the deploy-target check. The default is the engine every
+// fixture body names, so a test only sets engines to exercise a missing one.
+func (s *fakeClusterStorage) ListEngine(option storage.ListOption) ([]v1.Engine, error) {
+	s.engineListCalls++
+	s.engineListOption = option
+
+	if s.engineListError != nil {
+		return nil, s.engineListError
+	}
+
+	if s.engines == nil {
+		return []v1.Engine{*testEngine()}, nil
+	}
+
+	return s.engines, nil
+}
+
+// testEngine is the engine the handler-level fixtures deploy with.
+func testEngine() *v1.Engine {
+	return &v1.Engine{
+		Metadata: &v1.Metadata{Name: testEngineName, Workspace: "team-a"},
+		Spec: &v1.EngineSpec{
+			Versions: []*v1.EngineVersion{{Version: testEngineVersion}},
+		},
+	}
+}
+
+const (
+	testEngineName    = "vllm"
+	testEngineVersion = "v0.1"
+)
 
 func (s *fakeClusterStorage) CreateEndpoint(data *v1.Endpoint) error {
 	return nil
@@ -2543,4 +2622,205 @@ func TestValidateEndpointPatchModelSourceEmptyVersion(t *testing.T) {
 			assert.Nil(t, err)
 		})
 	}
+}
+
+func TestValidateEndpointDeployTarget(t *testing.T) {
+	cluster := v1.Cluster{Metadata: &v1.Metadata{Name: "cluster-a", Workspace: "team-a"}}
+
+	target := func(cluster string, engine *v1.EndpointEngineSpec) *v1.Endpoint {
+		return &v1.Endpoint{
+			Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+			Spec:     &v1.EndpointSpec{Cluster: cluster, Engine: engine},
+		}
+	}
+	registered := &v1.EndpointEngineSpec{Engine: testEngineName, Version: testEngineVersion}
+
+	t.Run("accepts a registered cluster and engine version", func(t *testing.T) {
+		store := &fakeClusterStorage{clusters: []v1.Cluster{cluster}}
+
+		assert.Nil(t, validateEndpointDeployTarget(store, target("cluster-a", registered)))
+	})
+
+	t.Run("requires spec.engine", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			engine *v1.EndpointEngineSpec
+			hint   string
+		}{
+			{"no engine at all", nil, "spec.engine.engine is required"},
+			{"empty engine name", &v1.EndpointEngineSpec{Version: "v0.1"}, "spec.engine.engine is required"},
+			{"empty version", &v1.EndpointEngineSpec{Engine: testEngineName}, "spec.engine.version is required"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				store := &fakeClusterStorage{clusters: []v1.Cluster{cluster}}
+
+				err := validateEndpointDeployTarget(store, target("cluster-a", tc.engine))
+
+				if assert.NotNil(t, err) {
+					assert.Equal(t, "10232", err.Code)
+					assert.Contains(t, err.Hint, tc.hint)
+				}
+			})
+		}
+	})
+
+	t.Run("rejects a cluster that does not exist in the workspace", func(t *testing.T) {
+		store := &fakeClusterStorage{}
+
+		err := validateEndpointDeployTarget(store, target("no-such-cluster", registered))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "cluster team-a/no-such-cluster not found")
+		}
+		if assert.NotNil(t, store.listOption) {
+			assert.Contains(t, store.listOption.Filters, storage.Filter{
+				Column: "metadata->workspace", Operator: "eq", Value: strconv.Quote("team-a"),
+			})
+		}
+	})
+
+	t.Run("rejects an engine that does not exist in the workspace", func(t *testing.T) {
+		store := &fakeClusterStorage{clusters: []v1.Cluster{cluster}, engines: []v1.Engine{}}
+
+		err := validateEndpointDeployTarget(store, target("cluster-a", registered))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "engine team-a/vllm not found")
+		}
+	})
+
+	t.Run("rejects a version the engine does not publish", func(t *testing.T) {
+		store := &fakeClusterStorage{clusters: []v1.Cluster{cluster}}
+
+		err := validateEndpointDeployTarget(store,
+			target("cluster-a", &v1.EndpointEngineSpec{Engine: testEngineName, Version: "v9.9"}))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "has no version v9.9")
+		}
+	})
+
+	t.Run("reads an engine row with no spec as having no version", func(t *testing.T) {
+		// A malformed row must answer 400, not panic the request.
+		store := &fakeClusterStorage{
+			clusters: []v1.Cluster{cluster},
+			engines:  []v1.Engine{{Metadata: &v1.Metadata{Name: testEngineName, Workspace: "team-a"}}},
+		}
+
+		err := validateEndpointDeployTarget(store, target("cluster-a", registered))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "has no version")
+		}
+	})
+
+	t.Run("leaves an empty cluster to the database trigger", func(t *testing.T) {
+		// spec.cluster is required by validate_endpoint_cluster_name (code
+		// 10010); re-reporting it here would change the code the UI branches on.
+		store := &fakeClusterStorage{}
+
+		err := validateEndpointDeployTarget(store, target("", registered))
+
+		assert.Nil(t, err)
+		assert.Equal(t, 0, store.listCalls)
+	})
+
+	t.Run("reports a lookup failure as an internal error", func(t *testing.T) {
+		store := &fakeClusterStorage{clusters: []v1.Cluster{cluster}, engineListError: assert.AnError}
+
+		err := validateEndpointDeployTarget(store, target("cluster-a", registered))
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, http.StatusInternalServerError, validationErrStatus(err))
+		}
+	})
+}
+
+func TestValidateEndpointPatchEngineScope(t *testing.T) {
+	current := &v1.Endpoint{
+		Metadata: &v1.Metadata{Name: "endpoint", Workspace: "team-a"},
+		Spec: &v1.EndpointSpec{
+			Cluster: "cluster-a",
+			Engine:  &v1.EndpointEngineSpec{Engine: testEngineName, Version: testEngineVersion},
+		},
+	}
+
+	t.Run("skips a patch that carries no spec", func(t *testing.T) {
+		// Nothing in the patch can clear the engine, so nothing is looked up --
+		// which is also what keeps an unchanged cluster from being re-validated.
+		store := &fakeClusterStorage{}
+
+		err := validateEndpointPatchEngine(store, &endpointValidationInput{
+			Patch: v1.Endpoint{Metadata: &v1.Metadata{Name: "endpoint"}},
+			New:   current,
+		})
+
+		assert.Nil(t, err)
+		assert.Equal(t, 0, store.engineListCalls)
+		assert.Equal(t, 0, store.listCalls)
+	})
+
+	t.Run("rejects a spec patch that drops the engine", func(t *testing.T) {
+		// PATCH replaces spec wholesale, so a spec sent without spec.engine
+		// clears it: the endpoint would be left with nothing to deploy.
+		store := &fakeClusterStorage{}
+		cleared := &v1.Endpoint{
+			Metadata: current.Metadata,
+			Spec:     &v1.EndpointSpec{Cluster: "cluster-a"},
+		}
+
+		err := validateEndpointPatchEngine(store, &endpointValidationInput{
+			Patch: v1.Endpoint{Spec: &v1.EndpointSpec{Cluster: "cluster-a"}},
+			New:   cleared,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10232", err.Code)
+			assert.Contains(t, err.Hint, "spec.engine.engine is required")
+		}
+	})
+
+	t.Run("rejects a patch that blanks the engine version", func(t *testing.T) {
+		store := &fakeClusterStorage{}
+		patched := &v1.Endpoint{
+			Metadata: current.Metadata,
+			Spec: &v1.EndpointSpec{
+				Cluster: "cluster-a",
+				Engine:  &v1.EndpointEngineSpec{Engine: testEngineName},
+			},
+		}
+
+		err := validateEndpointPatchEngine(store, &endpointValidationInput{
+			Patch: v1.Endpoint{Spec: &v1.EndpointSpec{Engine: &v1.EndpointEngineSpec{Engine: testEngineName}}},
+			New:   patched,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10232", err.Code)
+			assert.Contains(t, err.Hint, "spec.engine.version is required")
+		}
+	})
+
+	t.Run("rejects a patch that repoints at an unknown engine", func(t *testing.T) {
+		store := &fakeClusterStorage{engines: []v1.Engine{}}
+		next := &v1.EndpointEngineSpec{Engine: "no-such-engine", Version: "v1"}
+		patched := &v1.Endpoint{
+			Metadata: current.Metadata,
+			Spec:     &v1.EndpointSpec{Cluster: "cluster-a", Engine: next},
+		}
+
+		err := validateEndpointPatchEngine(store, &endpointValidationInput{
+			Patch: v1.Endpoint{Spec: &v1.EndpointSpec{Engine: next}},
+			New:   patched,
+		})
+
+		if assert.NotNil(t, err) {
+			assert.Equal(t, "10233", err.Code)
+			assert.Contains(t, err.Hint, "engine team-a/no-such-engine not found")
+		}
+	})
 }
