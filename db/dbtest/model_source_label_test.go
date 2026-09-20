@@ -29,12 +29,17 @@ func TestModelSource(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		ws       = "model-source-ws"
-		ieName   = "ms-internal-ep"
-		ieModel  = "ms-shared-model"
-		eeMixed  = "ms-external-mixed"
-		eeUnset  = "ms-external-unset"
-		eeCustom = "ms-external-custom"
+		ws          = "model-source-ws"
+		ieName      = "ms-internal-ep"
+		ieModel     = "ms-shared-model"
+		eeMixed     = "ms-external-mixed"
+		eeUnset     = "ms-external-unset"
+		eeCustom    = "ms-external-custom"
+		eeViaRef    = "ms-external-via-ref"
+		eeViaRefSet = "ms-external-via-ref-set"
+
+		refModel    = "ms-ref-model"
+		refSetModel = "ms-ref-set-model"
 
 		groupModel   = "ms-group-model"
 		vendorModel  = "ms-vendor-model"
@@ -68,10 +73,21 @@ func TestModelSource(t *testing.T) {
 
 	// insertEE registers an external endpoint exposing the given client-facing
 	// models through one upstream, with the given spec.model_sources JSON.
-	insertEE := func(name string, models []string, modelSources string) error {
+	// endpointRef non-empty makes the upstream point at an internal endpoint
+	// instead of a URL, which is what makes its models internal by construction.
+	insertEEVia := func(name string, models []string, modelSources, endpointRef string) error {
 		mapping := make([]string, 0, len(models))
 		for _, m := range models {
 			mapping = append(mapping, "'"+m+"', 'upstream-model'")
+		}
+
+		upstream := "ROW('https://upstream.example.com')::api.external_endpoint_upstream_spec, " +
+			"ROW('bearer', 'cred')::api.external_endpoint_auth_spec"
+		ref := "NULL"
+
+		if endpointRef != "" {
+			upstream = "NULL, NULL"
+			ref = "'" + endpointRef + "'"
 		}
 
 		_, err := db.ExecContext(ctx, `
@@ -82,10 +98,9 @@ func TestModelSource(t *testing.T) {
 				ROW(
 					ARRAY[
 						ROW(
-							ROW('https://upstream.example.com')::api.external_endpoint_upstream_spec,
-							ROW('bearer', 'cred')::api.external_endpoint_auth_spec,
+							`+upstream+`,
 							jsonb_build_object(`+strings.Join(mapping, ", ")+`),
-							NULL,
+							`+ref+`,
 							'up-1'
 						)::api.external_endpoint_upstream_entry
 					],
@@ -99,6 +114,10 @@ func TestModelSource(t *testing.T) {
 		return err
 	}
 
+	insertEE := func(name string, models []string, modelSources string) error {
+		return insertEEVia(name, models, modelSources, "")
+	}
+
 	// The headline case: ONE endpoint, TWO models, TWO different sources.
 	if err := insertEE(eeMixed, []string{groupModel, vendorModel},
 		`{"`+groupModel+`":"`+groupSource+`","`+vendorModel+`":"`+vendorSource+`"}`); err != nil {
@@ -107,6 +126,18 @@ func TestModelSource(t *testing.T) {
 
 	if err := insertEE(eeUnset, []string{ieModel}, `{}`); err != nil {
 		t.Fatalf("insert external endpoint without sources: %v", err)
+	}
+
+	// An upstream pointing at an internal endpoint: its models are internal by
+	// construction, so the source is derived without the admin saying anything.
+	if err := insertEEVia(eeViaRef, []string{refModel}, `{}`, ieName); err != nil {
+		t.Fatalf("insert endpoint_ref-backed external endpoint: %v", err)
+	}
+
+	// ...and an explicit source still wins over that derivation.
+	if err := insertEEVia(eeViaRefSet, []string{refSetModel},
+		`{"`+refSetModel+`":"`+vendorSource+`"}`, ieName); err != nil {
+		t.Fatalf("insert endpoint_ref-backed external endpoint with a source: %v", err)
 	}
 
 	// Extensibility: an unknown value must be accepted, since the enum is open
@@ -233,6 +264,11 @@ func TestModelSource(t *testing.T) {
 			{eeUnset + "|" + ieModel, "external_endpoint", sql.NullString{}},
 			// An unknown value comes back verbatim.
 			{eeCustom + "|ms-custom-model", "external_endpoint", sql.NullString{String: customSource, Valid: true}},
+			// Fronting an internal endpoint derives internal-shared with nothing
+			// stored -- and NOT self-hosted, which has to stay IE-only.
+			{eeViaRef + "|" + refModel, "external_endpoint", sql.NullString{String: "internal-shared", Valid: true}},
+			// An explicit source still wins over that derivation.
+			{eeViaRefSet + "|" + refSetModel, "external_endpoint", sql.NullString{String: vendorSource, Valid: true}},
 		} {
 			r, ok := got[tc.key]
 			if !ok {

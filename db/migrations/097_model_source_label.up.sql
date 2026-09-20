@@ -107,7 +107,17 @@ AS $$
         k::text                    AS model,
         'external_endpoint'::text  AS source,
         (ee.metadata).name::text   AS endpoint_name,
-        ((ee.spec).model_sources ->> k)::text AS source_label
+        -- An upstream with endpoint_ref is fronting an endpoint this platform
+        -- runs, so the model is internal by construction and the admin should
+        -- not have to say so. It defaults to 'internal-shared' rather than
+        -- 'self-hosted': the row is still an EE row, and self-hosted has to stay
+        -- one-to-one with IE for the allowed_models picker to tell the two rows
+        -- for one model name apart. An explicit entry still wins.
+        COALESCE(
+            (ee.spec).model_sources ->> k,
+            CASE WHEN u.endpoint_ref IS NOT NULL AND trim(u.endpoint_ref) <> ''
+                 THEN 'internal-shared' END
+        )::text AS source_label
     FROM api.external_endpoints ee
     CROSS JOIN LATERAL unnest((ee.spec).upstreams) AS u
     CROSS JOIN LATERAL jsonb_object_keys(u.model_mapping) AS k
