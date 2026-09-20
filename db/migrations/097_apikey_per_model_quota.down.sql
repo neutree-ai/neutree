@@ -64,6 +64,7 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT, UUID[]);
 DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT);
 
 -- 092_api_key_project_folders.up.sql (the last definition before 097)

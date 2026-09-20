@@ -387,19 +387,40 @@ $$;
 --    keys token_limit / remaining are NULL (there is no single pool) while `used`
 --    still carries the key's total period usage.
 --
+--    For a per-model key it also names the MOST UTILISED limited model, because
+--    that is the only single figure the list can honestly show: unlimited models
+--    have no denominator to average in, and two models with different limits
+--    cannot be pooled. A list exists to answer "which key needs attention", and
+--    the answer is the model closest to (or past) its limit.
+--
+--    p_api_key_ids bounds the work. The per-model figures need
+--    detailed_dimensional_usage expanded and joined per allowlist entry, which
+--    costs keys x models x days -- measured at ~1.2s for 1000 keys with 20
+--    limited models each, against ~8ms for the totals alone. Restricted to one
+--    page of keys the same worst case is ~18ms. Callers should pass the page
+--    they are rendering; NULL keeps the whole-workspace behaviour and its cost.
+--
 --    Visibility is unchanged from 092_api_key_project_folders.up.sql: no hard
 --    permission raise, rows are filtered to the caller's own keys unless they hold
 --    workspace:usage-read.
 DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT);
 
-CREATE FUNCTION api.get_api_keys_usage_summary(p_workspace TEXT)
+CREATE FUNCTION api.get_api_keys_usage_summary(
+    p_workspace   TEXT,
+    p_api_key_ids UUID[] DEFAULT NULL
+)
 RETURNS TABLE (
-    api_key_id  UUID,
-    period      TEXT,
-    granularity TEXT,
-    token_limit BIGINT,
-    used        BIGINT,
-    remaining   BIGINT
+    api_key_id       UUID,
+    period           TEXT,
+    granularity      TEXT,
+    token_limit      BIGINT,
+    used             BIGINT,
+    remaining        BIGINT,
+    top_model        TEXT,
+    top_model_type   TEXT,
+    top_model_used   BIGINT,
+    top_model_limit  BIGINT,
+    limited_models   INTEGER
 )
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 AS $$
@@ -411,52 +432,120 @@ BEGIN
     );
 
     RETURN QUERY
-        SELECT
-            k.id,
-            lim.period,
-            lim.granularity,
-            lim.token_limit,
-            COALESCE(SUM((d.spec).total_usage), 0)::bigint AS used,
-            CASE
-                WHEN lim.token_limit IS NULL THEN NULL::bigint
-                ELSE lim.token_limit - COALESCE(SUM((d.spec).total_usage), 0)::bigint
-            END AS remaining
+    WITH visible AS (
+        SELECT k.id,
+               (k.spec).limits AS limits,
+               COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
+               EXISTS (
+                   SELECT 1
+                   FROM jsonb_array_elements(
+                       COALESCE((k.spec).limits -> 'allowed_models', '[]'::jsonb)
+                   ) AS e
+                   WHERE e ->> 'token_limit' IS NOT NULL
+               ) AS has_per_model
         FROM api.api_keys k
-        CROSS JOIN LATERAL (
-            SELECT
-                COALESCE((k.spec).limits #>> '{token_quota,period}', 'monthly') AS period,
-                EXISTS (
-                    SELECT 1
-                    FROM jsonb_array_elements(
-                        COALESCE((k.spec).limits -> 'allowed_models', '[]'::jsonb)
-                    ) AS e
-                    WHERE e ->> 'token_limit' IS NOT NULL
-                ) AS has_per_model
-        ) base
-        CROSS JOIN LATERAL (
-            SELECT
-                base.period,
-                CASE WHEN base.has_per_model THEN 'per_model' ELSE 'overall' END AS granularity,
-                CASE
-                    WHEN base.has_per_model THEN NULL::bigint
-                    ELSE ((k.spec).limits #>> '{token_quota,limit}')::bigint
-                END AS token_limit,
-                api.api_key_period_start(base.period) AS period_start
-        ) lim
-        LEFT JOIN api.api_daily_usage d
-            ON (d.spec).api_key_id = k.id
-           AND (d.spec).usage_date >= lim.period_start
-           AND (d.spec).usage_date <= CURRENT_DATE
         WHERE (k.metadata).workspace = p_workspace
           AND (k.metadata).deletion_timestamp IS NULL
           AND (k.user_id = auth.uid() OR v_can_read_workspace)
-          AND (
-                base.has_per_model
-                OR (
-                    ((k.spec).limits #>> '{token_quota,limit}') IS NOT NULL
-                    AND ((k.spec).limits #>> '{token_quota,limit}')::bigint > 0
-                )
+          AND (p_api_key_ids IS NULL OR k.id = ANY (p_api_key_ids))
+    ),
+    scoped AS (
+        SELECT v.*, api.api_key_period_start(v.period) AS period_start
+        FROM visible v
+        WHERE v.has_per_model
+           OR (
+                (v.limits #>> '{token_quota,limit}') IS NOT NULL
+                AND (v.limits #>> '{token_quota,limit}')::bigint > 0
               )
-        GROUP BY k.id, lim.period, lim.granularity, lim.token_limit;
+    ),
+    -- Whole-key totals: one pass, as before.
+    totals AS (
+        SELECT s.id,
+               COALESCE(SUM((d.spec).total_usage), 0)::bigint AS used
+        FROM scoped s
+        LEFT JOIN api.api_daily_usage d
+               ON (d.spec).api_key_id = s.id
+              AND (d.spec).usage_date >= s.period_start
+              AND (d.spec).usage_date <= CURRENT_DATE
+        GROUP BY s.id
+    ),
+    -- Per-entry figures, only for keys actually on per-model quotas.
+    entries AS (
+        SELECT s.id,
+               s.period_start,
+               e ->> 'model'                     AS model,
+               NULLIF(e ->> 'type', '')          AS ep_type,
+               NULLIF(e ->> 'endpoint_name', '') AS ep_name,
+               (e ->> 'token_limit')::bigint     AS token_limit
+        FROM scoped s
+        CROSS JOIN LATERAL jsonb_array_elements(
+            COALESCE(s.limits -> 'allowed_models', '[]'::jsonb)
+        ) AS e
+        WHERE s.has_per_model
+          AND e ->> 'token_limit' IS NOT NULL
+    ),
+    -- The ledger's detail keys, expanded once for the keys in scope. The first
+    -- segment is the ledger's own spelling of the endpoint type, which is not
+    -- the gateway's -- see api_key_model_period_usage for why they differ.
+    detail AS (
+        SELECT (d.spec).api_key_id AS id,
+               (d.spec).usage_date AS usage_date,
+               split_part(kv.key, '|', 1) AS ledger_type,
+               split_part(kv.key, '|', 2) AS ep_name,
+               substr(kv.key,
+                      length(split_part(kv.key, '|', 1))
+                    + length(split_part(kv.key, '|', 2)) + 3) AS model,
+               COALESCE((kv.value ->> 'total')::bigint, 0) AS used
+        FROM api.api_daily_usage d
+        CROSS JOIN LATERAL jsonb_each(
+            COALESCE((d.spec).detailed_dimensional_usage, '{}'::jsonb)
+        ) AS kv
+        WHERE (d.spec).api_key_id IN (SELECT id FROM entries)
+          AND (d.spec).usage_date <= CURRENT_DATE
+    ),
+    per_entry AS (
+        SELECT e.id, e.model, e.ep_type, e.token_limit,
+               COALESCE(SUM(x.used), 0)::bigint AS used
+        FROM entries e
+        LEFT JOIN detail x
+               ON x.id = e.id
+              AND x.usage_date >= e.period_start
+              AND x.model = e.model
+              AND (e.ep_type IS NULL OR x.ledger_type = CASE e.ep_type
+                       WHEN 'internal' THEN 'endpoint'
+                       WHEN 'external' THEN 'external-endpoint'
+                       ELSE e.ep_type END)
+              AND (e.ep_name IS NULL OR x.ep_name = e.ep_name)
+        GROUP BY e.id, e.model, e.ep_type, e.token_limit
+    ),
+    -- Most utilised entry per key. Over-limit entries sort first by
+    -- construction: their ratio is above 1, which is exactly what a list should
+    -- surface.
+    top AS (
+        SELECT DISTINCT ON (pe.id)
+               pe.id, pe.model, pe.ep_type, pe.used, pe.token_limit
+        FROM per_entry pe
+        ORDER BY pe.id, (pe.used::numeric / NULLIF(pe.token_limit, 0)) DESC NULLS LAST
+    ),
+    counts AS (
+        SELECT id, count(*)::int AS limited_models FROM per_entry GROUP BY id
+    )
+    SELECT s.id,
+           s.period,
+           CASE WHEN s.has_per_model THEN 'per_model' ELSE 'overall' END,
+           CASE WHEN s.has_per_model THEN NULL::bigint
+                ELSE (s.limits #>> '{token_quota,limit}')::bigint END,
+           t.used,
+           CASE WHEN s.has_per_model THEN NULL::bigint
+                ELSE (s.limits #>> '{token_quota,limit}')::bigint - t.used END,
+           top.model,
+           top.ep_type,
+           top.used,
+           top.token_limit,
+           COALESCE(c.limited_models, 0)
+    FROM scoped s
+    JOIN totals t ON t.id = s.id
+    LEFT JOIN top ON top.id = s.id
+    LEFT JOIN counts c ON c.id = s.id;
 END;
 $$;

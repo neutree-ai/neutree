@@ -414,3 +414,122 @@ func TestApiKeyPerModelQuotaEndpointTypeVocabulary(t *testing.T) {
 		t.Fatalf("external: expected remaining 380, got %v", got)
 	}
 }
+
+// TestApiKeysUsageSummaryTopModel covers what the list page reads for a
+// per-model key: the most utilised limited model, which is the only single
+// figure a list can honestly show when models have different limits and some
+// have none at all.
+func TestApiKeysUsageSummaryTopModel(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	user := CreateTestUser(t, "topmodeluser", "topmodel@example.com", "testpassword")
+
+	// deep is the busiest in absolute tokens; glm is the busiest as a RATIO,
+	// which is what "needs attention" means. free has no limit at all and must
+	// not compete, even though it burns the most.
+	const limits = `{"allowed_models":[
+		{"model":"free",  "type":"external", "endpoint_name":"ep-free"},
+		{"model":"deep",  "type":"external", "endpoint_name":"ep-deep", "token_limit":1000},
+		{"model":"glm",   "type":"external", "endpoint_name":"ep-glm",  "token_limit":100}
+	]}`
+
+	var apiKeyID string
+	if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT id FROM api.create_api_key(
+				p_workspace := 'topmodel-ws',
+				p_name := 'topmodel-key',
+				p_quota := 0,
+				p_limits := $1::jsonb
+			)`, limits).Scan(&apiKeyID)
+	}); err != nil {
+		t.Fatalf("create_api_key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_daily_usage WHERE (spec).api_key_id = $1", apiKeyID)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", apiKeyID)
+	})
+
+	seedDetailedUsage(t, db, "topmodel-u1", "topmodel-ws", apiKeyID, map[string]int{
+		"external-endpoint|ep-free|free": 5000, // unlimited: biggest, no denominator
+		"external-endpoint|ep-deep|deep": 400,  // 40% of 1000
+		"external-endpoint|ep-glm|glm":   90,   // 90% of 100  <- the answer
+	})
+
+	type row struct {
+		granularity  string
+		used         int64
+		topModel     sql.NullString
+		topUsed      sql.NullInt64
+		topLimit     sql.NullInt64
+		limitedCount int
+	}
+
+	read := func(t *testing.T, ids any) row {
+		t.Helper()
+
+		var r row
+		if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			return tx.QueryRowContext(ctx, `
+				SELECT granularity, used, top_model, top_model_used, top_model_limit, limited_models
+				FROM api.get_api_keys_usage_summary($1, $2)
+				WHERE api_key_id = $3`, "topmodel-ws", ids, apiKeyID).
+				Scan(&r.granularity, &r.used, &r.topModel, &r.topUsed, &r.topLimit, &r.limitedCount)
+		}); err != nil {
+			t.Fatalf("get_api_keys_usage_summary: %v", err)
+		}
+
+		return r
+	}
+
+	t.Run("names the most utilised limited model, not the busiest one", func(t *testing.T) {
+		r := read(t, nil)
+
+		if r.granularity != "per_model" {
+			t.Fatalf("expected per_model, got %s", r.granularity)
+		}
+		// glm at 90% beats deep at 40%, even though deep burned 4x more tokens.
+		if !r.topModel.Valid || r.topModel.String != "glm" {
+			t.Fatalf("expected top model glm, got %v", r.topModel)
+		}
+		if r.topUsed.Int64 != 90 || r.topLimit.Int64 != 100 {
+			t.Fatalf("expected glm 90/100, got %v/%v", r.topUsed, r.topLimit)
+		}
+		// The unlimited model is excluded from the count: it has no ratio.
+		if r.limitedCount != 2 {
+			t.Fatalf("expected 2 limited models, got %d", r.limitedCount)
+		}
+		// ...but its usage still counts toward the key total.
+		if r.used != 5490 {
+			t.Fatalf("expected total 5490, got %d", r.used)
+		}
+	})
+
+	t.Run("scoping by api key id returns the same figures", func(t *testing.T) {
+		// The id list only bounds the work; it must not change any answer.
+		full := read(t, nil)
+		scoped := read(t, "{"+apiKeyID+"}")
+
+		if scoped != full {
+			t.Fatalf("scoped read differs from full read:\n  full=%+v\n  scoped=%+v", full, scoped)
+		}
+	})
+
+	t.Run("an over-limit model sorts first", func(t *testing.T) {
+		// Ratios above 1 are exactly what a list should surface.
+		if _, err := db.ExecContext(ctx, `
+			UPDATE api.api_daily_usage
+			SET spec.detailed_dimensional_usage =
+				'{"external-endpoint|ep-deep|deep":{"total":2000,"prompt":0,"completion":0},
+				  "external-endpoint|ep-glm|glm":{"total":90,"prompt":0,"completion":0}}'::jsonb
+			WHERE (spec).api_key_id = $1`, apiKeyID); err != nil {
+			t.Fatalf("update usage: %v", err)
+		}
+
+		// deep is now 200% against glm's 90%.
+		if r := read(t, nil); !r.topModel.Valid || r.topModel.String != "deep" {
+			t.Fatalf("expected the over-limit model to win, got %v", r.topModel)
+		}
+	})
+}
