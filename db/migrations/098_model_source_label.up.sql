@@ -55,6 +55,19 @@ BEGIN
     END IF;
 
     FOR v_model IN SELECT jsonb_object_keys((NEW.spec).model_sources) LOOP
+        -- Every value must be a JSON string. The vocabulary stays open, but the
+        -- TYPE does not: ->> would happily render 123 or an object as text, and
+        -- the row would store fine and then fail to unmarshal into Go's
+        -- map[string]string on the next read, taking list/get and the
+        -- controllers down with it.
+        IF jsonb_typeof((NEW.spec).model_sources -> v_model) <> 'string' THEN
+            RAISE sqlstate 'PGRST'
+                USING message = format(
+                    '{"code": "10242","message": "model_sources values must be strings","hint": "model %s: the source vocabulary is open, but a source has to be a string"}',
+                    to_json(v_model)::text),
+                detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+        END IF;
+
         IF ((NEW.spec).model_sources ->> v_model) = 'self-hosted' THEN
             RAISE sqlstate 'PGRST'
                 USING message = format(

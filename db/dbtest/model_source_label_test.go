@@ -168,6 +168,25 @@ func TestModelSource(t *testing.T) {
 		}
 	})
 
+	t.Run("a non-string source value is rejected", func(t *testing.T) {
+		// The vocabulary is open, the TYPE is not: ->> renders 123 as text, so
+		// without this the row stores and then fails to unmarshal into Go's
+		// map[string]string on the next read.
+		for _, bad := range []string{
+			`{"m": 123}`,
+			`{"m": true}`,
+			`{"m": {"nested": "x"}}`,
+			`{"m": ["a"]}`,
+			`{"m": null}`,
+		} {
+			if err := insertEE("ms-external-badtype", []string{"m"}, bad); err == nil {
+				_, _ = db.ExecContext(ctx,
+					"DELETE FROM api.external_endpoints WHERE (metadata).name = 'ms-external-badtype'")
+				t.Fatalf("expected %s to be rejected", bad)
+			}
+		}
+	})
+
 	t.Run("self-hosted is rejected on update too", func(t *testing.T) {
 		_, err := db.ExecContext(ctx, `
 			UPDATE api.external_endpoints
