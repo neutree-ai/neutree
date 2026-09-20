@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TestUsageBreakdownAggregation covers migration 095: aggregate_usage_records
+// TestUsageBreakdownAggregation covers migration 096: aggregate_usage_records
 // carries the cache / reasoning / cost breakdown into api_daily_usage, and
 // get_usage_by_dimension returns it, NULL where it was never recorded.
 func TestUsageBreakdownAggregation(t *testing.T) {
@@ -222,7 +222,7 @@ func TestUsageBreakdownAggregation(t *testing.T) {
 }
 
 // TestUsageBreakdownLegacyBucket checks that a daily bucket aggregated before
-// migration 095 (no breakdown keys) still reads, with NULL breakdown columns.
+// migration 096 (no breakdown keys) still reads, with NULL breakdown columns.
 func TestUsageBreakdownLegacyBucket(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
