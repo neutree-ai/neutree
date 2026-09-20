@@ -11,36 +11,43 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// TestModelSourceLabel covers the NEU-782 model source label.
+// TestModelSource covers the NEU-782 model source.
 //
-// The label rides on the generic metadata.labels map under the fixed key
-// neutree.ai/model-source and is stored ONLY on external endpoints. An internal
-// endpoint's source is derived as 'self-hosted'; 'self-hosted' is rejected on an
-// external endpoint so that it stays one-to-one with IE, which is what keeps the
-// IE row and the EE row for the same model name distinguishable in the
+// It is stored PER MODEL, in spec.model_sources keyed by the client-facing model
+// name, and only on external endpoints. One external endpoint routinely fronts
+// models of different origin (one upstream pointing at an internal endpoint,
+// another at a public API), and a model may even have targets on several
+// upstreams, so neither the endpoint nor the upstream resolves to one source
+// per model.
+//
+// An internal endpoint's source is derived as 'self-hosted'; 'self-hosted' is
+// rejected on an external endpoint so it stays one-to-one with IE, which is what
+// keeps the IE row and the EE row for the same model name distinguishable in the
 // allowed_models picker once the UI drops the internal/external badge.
-func TestModelSourceLabel(t *testing.T) {
+func TestModelSource(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
 
 	const (
-		ws            = "model-source-ws"
-		sourceLabel   = "neutree.ai/model-source"
-		ieName        = "ms-internal-ep"
-		ieModel       = "ms-shared-model"
-		eeLabeled     = "ms-external-labeled"
-		eeUnlabeled   = "ms-external-unlabeled"
-		eeCustom      = "ms-external-custom"
-		customSource  = "some-future-source"
-		labeledSource = "third-party-public"
+		ws       = "model-source-ws"
+		ieName   = "ms-internal-ep"
+		ieModel  = "ms-shared-model"
+		eeMixed  = "ms-external-mixed"
+		eeUnset  = "ms-external-unset"
+		eeCustom = "ms-external-custom"
+
+		groupModel   = "ms-group-model"
+		vendorModel  = "ms-vendor-model"
+		groupSource  = "internal-shared"
+		vendorSource = "third-party-public"
+		customSource = "acme-research-lab"
 	)
 
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(ctx, "DELETE FROM api.endpoints WHERE (metadata).workspace = $1", ws)
 		_, _ = db.ExecContext(ctx, "DELETE FROM api.external_endpoints WHERE (metadata).workspace = $1", ws)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.endpoints WHERE (metadata).workspace = $1", ws)
 	})
 
-	// An internal endpoint serving ieModel. Nothing about the source is stored.
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO api.endpoints (api_version, kind, spec, metadata)
 		VALUES (
@@ -59,9 +66,14 @@ func TestModelSourceLabel(t *testing.T) {
 		t.Fatalf("insert internal endpoint: %v", err)
 	}
 
-	// insertEE registers an external endpoint exposing ieModel, with the given
-	// metadata.labels JSON.
-	insertEE := func(name, labels string) error {
+	// insertEE registers an external endpoint exposing the given client-facing
+	// models through one upstream, with the given spec.model_sources JSON.
+	insertEE := func(name string, models []string, modelSources string) error {
+		mapping := make([]string, 0, len(models))
+		for _, m := range models {
+			mapping = append(mapping, "'"+m+"', 'upstream-model'")
+		}
+
 		_, err := db.ExecContext(ctx, `
 			INSERT INTO api.external_endpoints (api_version, kind, spec, metadata)
 			VALUES (
@@ -72,90 +84,79 @@ func TestModelSourceLabel(t *testing.T) {
 						ROW(
 							ROW('https://upstream.example.com')::api.external_endpoint_upstream_spec,
 							ROW('bearer', 'cred')::api.external_endpoint_auth_spec,
-							jsonb_build_object($4::text, 'upstream-model'),
+							jsonb_build_object(`+strings.Join(mapping, ", ")+`),
 							NULL,
 							'up-1'
 						)::api.external_endpoint_upstream_entry
 					],
 					30,
-					NULL
+					NULL,
+					$3::jsonb
 				)::api.external_endpoint_spec,
-				ROW($1::text, NULL, $2::text, NULL, now(), now(), $3::json, '{}'::json)::api.metadata
-			)`, name, ws, labels, ieModel)
+				ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
+			)`, name, ws, modelSources)
 
 		return err
 	}
 
-	if err := insertEE(eeLabeled, `{"`+sourceLabel+`":"`+labeledSource+`"}`); err != nil {
-		t.Fatalf("insert labeled external endpoint: %v", err)
+	// The headline case: ONE endpoint, TWO models, TWO different sources.
+	if err := insertEE(eeMixed, []string{groupModel, vendorModel},
+		`{"`+groupModel+`":"`+groupSource+`","`+vendorModel+`":"`+vendorSource+`"}`); err != nil {
+		t.Fatalf("insert mixed-source external endpoint: %v", err)
 	}
 
-	if err := insertEE(eeUnlabeled, `{}`); err != nil {
-		t.Fatalf("insert unlabeled external endpoint: %v", err)
+	if err := insertEE(eeUnset, []string{ieModel}, `{}`); err != nil {
+		t.Fatalf("insert external endpoint without sources: %v", err)
 	}
 
 	// Extensibility: an unknown value must be accepted, since the enum is open
 	// and a new source must not need a migration or a code change.
-	if err := insertEE(eeCustom, `{"`+sourceLabel+`":"`+customSource+`"}`); err != nil {
+	if err := insertEE(eeCustom, []string{"ms-custom-model"},
+		`{"ms-custom-model":"`+customSource+`"}`); err != nil {
 		t.Fatalf("insert external endpoint with an unknown source: %v", err)
 	}
 
 	t.Run("self-hosted is rejected on an external endpoint", func(t *testing.T) {
-		err := insertEE("ms-external-selfhosted", `{"`+sourceLabel+`":"self-hosted"}`)
+		err := insertEE("ms-external-selfhosted", []string{"m"}, `{"m":"self-hosted"}`)
 		if err == nil {
 			t.Fatal("expected self-hosted to be rejected on an external endpoint")
 		}
 
 		if !strings.Contains(err.Error(), "self-hosted") {
-			t.Fatalf("unexpected rejection error: %v", err)
+			t.Fatalf("expected the error to name self-hosted, got %v", err)
+		}
+	})
+
+	t.Run("self-hosted is rejected even when other models are fine", func(t *testing.T) {
+		// Keying by model must not let a bad entry through just because it sits
+		// beside good ones.
+		err := insertEE("ms-external-partial", []string{"a", "b"},
+			`{"a":"third-party-public","b":"self-hosted"}`)
+		if err == nil {
+			t.Fatal("expected a self-hosted entry to be rejected among valid ones")
 		}
 	})
 
 	t.Run("self-hosted is rejected on update too", func(t *testing.T) {
 		_, err := db.ExecContext(ctx, `
 			UPDATE api.external_endpoints
-			SET metadata = ROW(
-				(metadata).name, (metadata).display_name, (metadata).workspace,
-				(metadata).deletion_timestamp, (metadata).creation_timestamp, (metadata).update_timestamp,
-				$2::json, (metadata).annotations
-			)::api.metadata
+			SET spec.model_sources = $2::jsonb
 			WHERE (metadata).workspace = $1 AND (metadata).name = $3`,
-			ws, `{"`+sourceLabel+`":"self-hosted"}`, eeLabeled)
+			ws, `{"`+groupModel+`":"self-hosted"}`, eeMixed)
 		if err == nil {
-			t.Fatal("expected self-hosted to be rejected when patched onto an external endpoint")
-		}
-
-		if !strings.Contains(err.Error(), "self-hosted") {
-			t.Fatalf("unexpected rejection error: %v", err)
+			t.Fatal("expected self-hosted to be rejected on update")
 		}
 	})
 
-	t.Run("the source label round-trips on the external endpoint resource", func(t *testing.T) {
-		var got sql.NullString
-		if err := db.QueryRowContext(ctx, `
-			SELECT (metadata).labels::jsonb ->> $3
-			FROM api.external_endpoints
-			WHERE (metadata).workspace = $1 AND (metadata).name = $2`,
-			ws, eeLabeled, sourceLabel).Scan(&got); err != nil {
-			t.Fatalf("read source label off the external endpoint: %v", err)
-		}
-
-		if !got.Valid || got.String != labeledSource {
-			t.Fatalf("expected %q on the resource itself, got %v", labeledSource, got)
-		}
-	})
-
-	// The label has to be readable on the ExternalEndpoint resource itself, not
-	// only through get_workspace_models -- the list and detail pages render it.
-	// It rides along in metadata.labels, so this asserts that PostgREST and the
-	// Go client actually carry it end to end rather than assuming they do.
-	t.Run("the source label is readable through the API (list + detail)", func(t *testing.T) {
+	t.Run("per-model sources round-trip through the API (list + detail)", func(t *testing.T) {
+		// spec.model_sources is a new composite attribute, so this asserts that
+		// PostgREST and the Go client actually carry it end to end.
 		s := NewTestStorage(t)
 
 		ees, err := s.ListExternalEndpoint(storage.ListOption{
 			Filters: []storage.Filter{
 				{Column: "metadata->>workspace", Operator: "eq", Value: ws},
-				{Column: "metadata->>name", Operator: "eq", Value: eeLabeled},
+				{Column: "metadata->>name", Operator: "eq", Value: eeMixed},
 			},
 		})
 		if err != nil {
@@ -166,8 +167,13 @@ func TestModelSourceLabel(t *testing.T) {
 			t.Fatalf("expected exactly one external endpoint, got %d", len(ees))
 		}
 
-		if got := v1.ModelSourceOfExternalEndpoint(&ees[0]); got != labeledSource {
-			t.Fatalf("list: expected source label %q, got %q", labeledSource, got)
+		for _, tc := range []struct{ model, want string }{
+			{groupModel, groupSource},
+			{vendorModel, vendorSource},
+		} {
+			if got := v1.ModelSourceOfExternalEndpoint(&ees[0], tc.model); got != tc.want {
+				t.Fatalf("list: model %s expected %q, got %q", tc.model, tc.want, got)
+			}
 		}
 
 		detail, err := s.GetExternalEndpoint(strconv.Itoa(ees[0].ID))
@@ -175,92 +181,71 @@ func TestModelSourceLabel(t *testing.T) {
 			t.Fatalf("get external endpoint: %v", err)
 		}
 
-		if got := v1.ModelSourceOfExternalEndpoint(detail); got != labeledSource {
-			t.Fatalf("detail: expected source label %q, got %q", labeledSource, got)
+		if got := v1.ModelSourceOfExternalEndpoint(detail, vendorModel); got != vendorSource {
+			t.Fatalf("detail: expected %q, got %q", vendorSource, got)
 		}
 	})
 
-	t.Run("get_workspace_models resolves the source label", func(t *testing.T) {
+	t.Run("get_workspace_models resolves the source per model", func(t *testing.T) {
 		rows, err := db.QueryContext(ctx, `
 			SELECT model, source, endpoint_name, source_label
-			FROM api.get_workspace_models($1)
-			ORDER BY source, endpoint_name`, ws)
+			FROM api.get_workspace_models($1)`, ws)
 		if err != nil {
 			t.Fatalf("get_workspace_models: %v", err)
 		}
 		defer rows.Close()
 
 		type row struct {
-			model    string
-			source   string
-			label    sql.NullString
-			endpoint string
+			source string
+			label  sql.NullString
 		}
 
+		// Keyed by endpoint+model, because one endpoint now yields several rows
+		// that must not collapse into each other.
 		got := map[string]row{}
 
 		for rows.Next() {
-			var r row
-			if err := rows.Scan(&r.model, &r.source, &r.endpoint, &r.label); err != nil {
+			var model, source, endpoint string
+
+			var label sql.NullString
+			if err := rows.Scan(&model, &source, &endpoint, &label); err != nil {
 				t.Fatalf("scan: %v", err)
 			}
 
-			got[r.endpoint] = r
+			got[endpoint+"|"+model] = row{source: source, label: label}
 		}
 
 		if err := rows.Err(); err != nil {
 			t.Fatalf("rows: %v", err)
 		}
 
-		// The internal endpoint row is derived, not stored.
-		ie, ok := got[ieName]
-		if !ok {
-			t.Fatalf("internal endpoint row missing, got %v", got)
-		}
+		for _, tc := range []struct {
+			key        string
+			wantSource string
+			wantLabel  sql.NullString
+		}{
+			// Derived, nothing stored.
+			{ieName + "|" + ieModel, "endpoint", sql.NullString{String: "self-hosted", Valid: true}},
+			// The headline case: two models of ONE endpoint resolving differently.
+			{eeMixed + "|" + groupModel, "external_endpoint", sql.NullString{String: groupSource, Valid: true}},
+			{eeMixed + "|" + vendorModel, "external_endpoint", sql.NullString{String: vendorSource, Valid: true}},
+			// Unset reads as NULL, which the UI shows as its own group.
+			{eeUnset + "|" + ieModel, "external_endpoint", sql.NullString{}},
+			// An unknown value comes back verbatim.
+			{eeCustom + "|ms-custom-model", "external_endpoint", sql.NullString{String: customSource, Valid: true}},
+		} {
+			r, ok := got[tc.key]
+			if !ok {
+				t.Fatalf("row %s missing, got %v", tc.key, got)
+			}
 
-		if ie.source != "endpoint" || !ie.label.Valid || ie.label.String != "self-hosted" {
-			t.Fatalf("expected the internal endpoint to resolve to self-hosted, got source=%s label=%v", ie.source, ie.label)
-		}
+			if r.source != tc.wantSource {
+				t.Fatalf("row %s: expected source %q, got %q", tc.key, tc.wantSource, r.source)
+			}
 
-		// The labeled external endpoint returns what was configured.
-		ee, ok := got[eeLabeled]
-		if !ok {
-			t.Fatalf("labeled external endpoint row missing, got %v", got)
-		}
-
-		if ee.source != "external_endpoint" || !ee.label.Valid || ee.label.String != labeledSource {
-			t.Fatalf("expected %q on the labeled external endpoint, got source=%s label=%v", labeledSource, ee.source, ee.label)
-		}
-
-		// An external endpoint with no label yields NULL, not a derived value.
-		unlabeled, ok := got[eeUnlabeled]
-		if !ok {
-			t.Fatalf("unlabeled external endpoint row missing, got %v", got)
-		}
-
-		if unlabeled.label.Valid {
-			t.Fatalf("expected NULL source_label on an unlabeled external endpoint, got %v", unlabeled.label)
-		}
-
-		// An unknown value survives unchanged -- the enum is open.
-		custom, ok := got[eeCustom]
-		if !ok {
-			t.Fatalf("custom-source external endpoint row missing, got %v", got)
-		}
-
-		if !custom.label.Valid || custom.label.String != customSource {
-			t.Fatalf("expected the unknown source %q to be returned verbatim, got %v", customSource, custom.label)
-		}
-
-		// The IE row and the EE row for the SAME model name are still two
-		// distinguishable rows -- that is the property NEU-783's per-model quota
-		// depends on once the UI drops the internal/external badge.
-		if ie.model != custom.model || ie.model != ieModel {
-			t.Fatalf("expected both rows to be for %q, got ie=%q ee=%q", ieModel, ie.model, custom.model)
-		}
-
-		if ie.label.String == custom.label.String {
-			t.Fatalf("IE and EE rows for the same model must not share a source label")
+			if r.label != tc.wantLabel {
+				t.Fatalf("row %s: expected label %v, got %v", tc.key, tc.wantLabel, r.label)
+			}
 		}
 	})
 }

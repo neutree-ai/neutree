@@ -173,6 +173,23 @@ type ExternalEndpointSpec struct {
 	// legacy per-upstream model_mapping for gateway routing.
 	ModelRoutes []ExternalEndpointModelRoute `json:"model_routes,omitempty"`
 
+	// ModelSources carries each model's source label, keyed by the
+	// CLIENT-FACING model name (a model_mapping key / a ModelRoutes entry's
+	// model) rather than the upstream name.
+	//
+	// Per model, not per endpoint or per upstream, because neither of those
+	// resolves to one source: one endpoint routinely fronts models of different
+	// origin, and a single model may have targets on several upstreams (primary
+	// on a public API, failover onto a self-hosted one). The source is an
+	// assertion about a model, not something derivable from routing.
+	//
+	// A missing entry means "unspecified", which the UI shows as its own group.
+	// "self-hosted" is rejected here — it is derived for internal Endpoints, and
+	// keeping that one-to-one is what lets the API-key model picker tell the
+	// internal and external rows for one model name apart (see
+	// ValidateExternalEndpointModelSources).
+	ModelSources map[string]string `json:"model_sources,omitempty"`
+
 	// Timeout is the request timeout in milliseconds, default 60000
 	Timeout *int `json:"timeout,omitempty"`
 }

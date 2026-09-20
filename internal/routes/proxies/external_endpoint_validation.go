@@ -125,35 +125,30 @@ func validateExternalEndpointName(payload map[string]json.RawMessage, method str
 	return nil
 }
 
-// validateExternalEndpointModelSource rejects the self-hosted source label on
-// an external endpoint. See v1.ValidateExternalEndpointModelSource for why that
-// value has to stay internal-endpoint-only.
+// validateExternalEndpointModelSource rejects the self-hosted source on any of
+// an external endpoint's models. See v1.ValidateExternalEndpointModelSources
+// for why that value has to stay internal-endpoint-only.
 //
-// Only the label actually sent is judged; a payload that carries no labels (a
-// soft delete, a spec-only patch) is left alone. The database trigger
+// Only the sources actually sent are judged; a payload carrying no spec (a soft
+// delete, a metadata-only patch) is left alone. The database trigger
 // api.validate_external_endpoint_model_source is the authoritative guard -- the
 // CLI and every other PostgREST caller reach the same table -- this one only
 // turns the rejection into a clearer API-boundary error.
 func validateExternalEndpointModelSource(payload map[string]json.RawMessage) *validationError {
-	metadataRaw, ok := payload["metadata"]
+	specRaw, ok := payload["spec"]
 	if !ok {
 		return nil
 	}
 
-	var metadata struct {
-		Labels map[string]string `json:"labels"`
+	var spec struct {
+		ModelSources map[string]string `json:"model_sources"`
 	}
 
-	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
 		return invalidExternalEndpointPayloadError(err.Error())
 	}
 
-	source, ok := metadata.Labels[v1.ModelSourceLabel]
-	if !ok {
-		return nil
-	}
-
-	if err := v1.ValidateExternalEndpointModelSource(source); err != nil {
+	if err := v1.ValidateExternalEndpointModelSources(spec.ModelSources); err != nil {
 		return &validationError{
 			Code:    externalEndpointInvalidSourceCode,
 			Message: "invalid external endpoint model source",

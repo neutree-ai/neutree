@@ -32,4 +32,6 @@ AS $$
       AND u.model_mapping IS NOT NULL;
 $$;
 
+ALTER TYPE api.external_endpoint_spec DROP ATTRIBUTE IF EXISTS model_sources;
+
 COMMIT;
