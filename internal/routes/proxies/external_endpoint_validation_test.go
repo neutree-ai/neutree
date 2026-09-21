@@ -221,3 +221,90 @@ func TestValidateExternalEndpointPassesThroughOtherRequests(t *testing.T) {
 		assertExternalEndpointPayloadRejected(t, recorder, reached)
 	})
 }
+
+// TestExternalEndpointModelSourceValidation covers the NEU-782 model source at
+// the API boundary: self-hosted is internal-endpoint-only, everything else --
+// including a value that is not on the preset list -- is accepted, because the
+// enum has to stay extensible. Sources are keyed per client-facing model, so
+// one endpoint's models can carry different ones.
+func TestExternalEndpointModelSourceValidation(t *testing.T) {
+	const name = `"name":"ee-source"`
+
+	assertSourceRejected := func(t *testing.T, recorder *httptest.ResponseRecorder, reached bool) {
+		t.Helper()
+
+		assert.False(t, reached, "request must not reach the storage proxy")
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+
+		var payload validationError
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+
+		assert.Equal(t, externalEndpointInvalidSourceCode, payload.Code)
+		assert.Equal(t, "invalid external endpoint model source", payload.Message)
+		assert.Contains(t, payload.Hint, "self-hosted")
+	}
+
+	t.Run("rejects self-hosted on create", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`},"spec":{"model_sources":{"qwen":"self-hosted"}}}`)
+
+		assertSourceRejected(t, recorder, reached)
+	})
+
+	t.Run("rejects self-hosted on patch", func(t *testing.T) {
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
+			`{"spec":{"model_sources":{"qwen":"self-hosted"}}}`)
+
+		assertSourceRejected(t, recorder, reached)
+	})
+
+	t.Run("rejects self-hosted on any one of several models", func(t *testing.T) {
+		// The point of keying by model: the other entries being fine must not
+		// let a self-hosted one through.
+		recorder, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`},"spec":{"model_sources":{`+
+				`"a":"third-party-public","b":"self-hosted","c":"partner"}}}`)
+
+		assertSourceRejected(t, recorder, reached)
+	})
+
+	t.Run("accepts the other preset values", func(t *testing.T) {
+		for _, source := range []string{"internal-shared", "third-party-public", "partner"} {
+			_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+				`{"metadata":{`+name+`},"spec":{"model_sources":{"qwen":"`+source+`"}}}`)
+
+			assert.True(t, reached, "source %q must be accepted", source)
+		}
+	})
+
+	t.Run("accepts different sources for different models", func(t *testing.T) {
+		// One external endpoint routinely fronts models of different origin --
+		// the reason the source is not stored on the endpoint.
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`},"spec":{"model_sources":{`+
+				`"from-group":"internal-shared","from-vendor":"third-party-public"}}}`)
+
+		assert.True(t, reached)
+	})
+
+	t.Run("accepts an unknown source value", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`},"spec":{"model_sources":{"qwen":"some-future-source"}}}`)
+
+		assert.True(t, reached, "an unlisted source value must still be accepted")
+	})
+
+	t.Run("leaves a payload without model sources alone", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPost,
+			`{"metadata":{`+name+`},"spec":{"timeout":60000}}`)
+
+		assert.True(t, reached)
+	})
+
+	t.Run("leaves a soft delete alone", func(t *testing.T) {
+		_, reached, _ := runExternalEndpointValidation(t, http.MethodPatch,
+			`{"metadata":{"deletion_timestamp":"2024-01-01T00:00:00Z"}}`)
+
+		assert.True(t, reached)
+	})
+}

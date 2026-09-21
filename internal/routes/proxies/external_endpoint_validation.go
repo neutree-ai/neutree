@@ -17,6 +17,7 @@ const (
 
 	externalEndpointInvalidPayloadCode = "10231"
 	externalEndpointInvalidNameCode    = "10232"
+	externalEndpointInvalidSourceCode  = "10240"
 )
 
 // validateExternalEndpoint enforces the metadata.name contract at the API
@@ -69,6 +70,12 @@ func validateExternalEndpoint() gin.HandlerFunc {
 
 				return
 			}
+
+			if validationErr := validateExternalEndpointModelSource(payload); validationErr != nil {
+				rejectExternalEndpoint(c, validationErr)
+
+				return
+			}
 		}
 
 		c.Next()
@@ -113,6 +120,40 @@ func validateExternalEndpointName(payload map[string]json.RawMessage, method str
 
 	if err := v1.ValidateResourceName(externalEndpointKind, name); err != nil {
 		return invalidExternalEndpointNameError(err.Error())
+	}
+
+	return nil
+}
+
+// validateExternalEndpointModelSource rejects the self-hosted source on any of
+// an external endpoint's models. See v1.ValidateExternalEndpointModelSources
+// for why that value has to stay internal-endpoint-only.
+//
+// Only the sources actually sent are judged; a payload carrying no spec (a soft
+// delete, a metadata-only patch) is left alone. The database trigger
+// api.validate_external_endpoint_model_source is the authoritative guard -- the
+// CLI and every other PostgREST caller reach the same table -- this one only
+// turns the rejection into a clearer API-boundary error.
+func validateExternalEndpointModelSource(payload map[string]json.RawMessage) *validationError {
+	specRaw, ok := payload["spec"]
+	if !ok {
+		return nil
+	}
+
+	var spec struct {
+		ModelSources map[string]string `json:"model_sources"`
+	}
+
+	if err := json.Unmarshal(specRaw, &spec); err != nil {
+		return invalidExternalEndpointPayloadError(err.Error())
+	}
+
+	if err := v1.ValidateExternalEndpointModelSources(spec.ModelSources); err != nil {
+		return &validationError{
+			Code:    externalEndpointInvalidSourceCode,
+			Message: "invalid external endpoint model source",
+			Hint:    err.Error(),
+		}
 	}
 
 	return nil
