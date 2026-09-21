@@ -134,6 +134,12 @@ local function fetch_remaining(conf, api_key_id, model, ep_type, ep_name)
     return { remaining = n }
 end
 
+-- Length-prefixed cache-key segment: unambiguous for any byte content.
+local function cache_part(v)
+    v = v or ""
+    return ":" .. #v .. ":" .. v
+end
+
 function QuotaHandler:access(conf)
     local consumer = kong.client.get_consumer()
     if not consumer or not consumer.custom_id or consumer.custom_id == "" then
@@ -143,9 +149,13 @@ function QuotaHandler:access(conf)
     local api_key_id = consumer.custom_id
     local model, ep_type, ep_name = request_dimensions()
     -- Per-model quotas are tracked per (key, model, endpoint), so the cached
-    -- remaining count must be scoped the same way.
+    -- remaining count must be scoped the same way. Length-prefix each part
+    -- rather than joining on a separator: model names are only validated as
+    -- non-empty strings and may contain ":", so a plain join would let
+    -- ("a:internal", "", "") and ("a", "internal", "") share one entry and
+    -- therefore one quota.
     local cache_key = "neutree_quota:" .. api_key_id ..
-        ":" .. (model or "") .. ":" .. (ep_type or "") .. ":" .. (ep_name or "")
+        cache_part(model) .. cache_part(ep_type) .. cache_part(ep_name)
     local ttl = conf.cache_ttl or 5
 
     local gate, err = kong.cache:get(cache_key, { ttl = ttl, neg_ttl = ttl },

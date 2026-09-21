@@ -23,7 +23,7 @@
 --    current window, previously copy-pasted into every usage helper.
 CREATE OR REPLACE FUNCTION api.api_key_period_start(p_period TEXT)
 RETURNS DATE
-LANGUAGE sql IMMUTABLE
+LANGUAGE sql STABLE
 AS $$
     SELECT CASE p_period
         WHEN 'daily'   THEN CURRENT_DATE
@@ -49,6 +49,23 @@ AS $$
         WHEN 'monthly' THEN (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
         WHEN 'yearly'  THEN (date_trunc('year',  CURRENT_DATE) + interval '1 year')::date
         ELSE (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
+    END;
+$$;
+
+-- 1c) api_key_allowed_models: the allowlist as an array, always.
+--     validate_api_key_limits accepts a JSON `null` allowed_models as "unset",
+--     and COALESCE does not replace a JSON null (it is not an SQL NULL), so
+--     `COALESCE(limits -> 'allowed_models', '[]')` still hands a scalar to
+--     jsonb_array_elements -- "cannot extract elements from a scalar". Every
+--     reader goes through here instead.
+CREATE OR REPLACE FUNCTION api.api_key_allowed_models(p_limits JSONB)
+RETURNS JSONB
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN jsonb_typeof(p_limits -> 'allowed_models') = 'array'
+            THEN p_limits -> 'allowed_models'
+        ELSE '[]'::jsonb
     END;
 $$;
 
@@ -147,8 +164,8 @@ BEGIN
                 USING ERRCODE = '22023';
         END IF;
         v_num := v_node::text::numeric;
-        IF v_num <= 0 OR v_num <> trunc(v_num) THEN
-            RAISE EXCEPTION 'Invalid token quota limit: must be a positive integer'
+        IF v_num <= 0 OR v_num <> trunc(v_num) OR v_num > 9223372036854775807 THEN
+            RAISE EXCEPTION 'Invalid token quota limit: must be a positive integer no greater than 9223372036854775807'
                 USING ERRCODE = '22023';
         END IF;
     END IF;
@@ -205,9 +222,14 @@ BEGIN
                     RAISE EXCEPTION 'Invalid allowed_models entry: token_limit must be a positive integer'
                         USING ERRCODE = '22023';
                 END IF;
+                -- Upper bound as well as lower: get_api_key_remaining and
+                -- get_api_key_limits read this back with ::bigint, so a larger
+                -- JSON number would pass validation and then make those RPCs
+                -- raise -- which the quota plugin treats as "unknown" and fails
+                -- open, i.e. an out-of-range limit would mean no limit at all.
                 v_num := (v_node ->> 'token_limit')::numeric;
-                IF v_num <= 0 OR v_num <> trunc(v_num) THEN
-                    RAISE EXCEPTION 'Invalid allowed_models entry: token_limit must be a positive integer'
+                IF v_num <= 0 OR v_num <> trunc(v_num) OR v_num > 9223372036854775807 THEN
+                    RAISE EXCEPTION 'Invalid allowed_models entry: token_limit must be a positive integer no greater than 9223372036854775807'
                         USING ERRCODE = '22023';
                 END IF;
             END IF;
@@ -282,7 +304,7 @@ BEGIN
 
     SELECT EXISTS (
         SELECT 1
-        FROM jsonb_array_elements(COALESCE(v_limits -> 'allowed_models', '[]'::jsonb)) AS e
+        FROM jsonb_array_elements(api.api_key_allowed_models(v_limits)) AS e
         WHERE e ->> 'token_limit' IS NOT NULL
     ) INTO v_has_per_model;
 
@@ -303,7 +325,7 @@ BEGIN
                NULLIF(e ->> 'type', ''),
                NULLIF(e ->> 'endpoint_name', '')
           INTO v_limit, v_entry_type, v_entry_name
-        FROM jsonb_array_elements(COALESCE(v_limits -> 'allowed_models', '[]'::jsonb)) AS e
+        FROM jsonb_array_elements(api.api_key_allowed_models(v_limits)) AS e
         WHERE e ->> 'model' = p_model
           AND e ->> 'token_limit' IS NOT NULL
           AND (NULLIF(e ->> 'type', '')          IS NULL OR NULLIF(e ->> 'type', '')          = p_type)
@@ -355,7 +377,7 @@ BEGIN
 
     SELECT EXISTS (
         SELECT 1
-        FROM jsonb_array_elements(COALESCE(v_limits -> 'allowed_models', '[]'::jsonb)) AS e
+        FROM jsonb_array_elements(api.api_key_allowed_models(v_limits)) AS e
         WHERE e ->> 'token_limit' IS NOT NULL
     ) INTO v_has_per_model;
 
@@ -371,7 +393,7 @@ BEGIN
                    ORDER BY ord
                )
           INTO v_models
-        FROM jsonb_array_elements(v_limits -> 'allowed_models') WITH ORDINALITY AS t(e, ord)
+        FROM jsonb_array_elements(api.api_key_allowed_models(v_limits)) WITH ORDINALITY AS t(e, ord)
         CROSS JOIN LATERAL (
             SELECT CASE
                 WHEN e ->> 'token_limit' IS NULL THEN 0::bigint
@@ -465,7 +487,7 @@ BEGIN
                EXISTS (
                    SELECT 1
                    FROM jsonb_array_elements(
-                       COALESCE((k.spec).limits -> 'allowed_models', '[]'::jsonb)
+                       api.api_key_allowed_models((k.spec).limits)
                    ) AS e
                    WHERE e ->> 'token_limit' IS NOT NULL
                ) AS has_per_model
@@ -505,7 +527,7 @@ BEGIN
                (e ->> 'token_limit')::bigint     AS token_limit
         FROM scoped s
         CROSS JOIN LATERAL jsonb_array_elements(
-            COALESCE(s.limits -> 'allowed_models', '[]'::jsonb)
+            api.api_key_allowed_models(s.limits)
         ) AS e
         WHERE s.has_per_model
           AND e ->> 'token_limit' IS NOT NULL
@@ -530,7 +552,7 @@ BEGIN
           AND (d.spec).usage_date <= CURRENT_DATE
     ),
     per_entry AS (
-        SELECT e.id, e.model, e.ep_type, e.token_limit,
+        SELECT e.id, e.model, e.ep_type, e.ep_name, e.token_limit,
                COALESCE(SUM(x.used), 0)::bigint AS used
         FROM entries e
         LEFT JOIN detail x
@@ -542,7 +564,7 @@ BEGIN
                        WHEN 'external' THEN 'external-endpoint'
                        ELSE e.ep_type END)
               AND (e.ep_name IS NULL OR x.ep_name = e.ep_name)
-        GROUP BY e.id, e.model, e.ep_type, e.token_limit
+        GROUP BY e.id, e.model, e.ep_type, e.ep_name, e.token_limit
     ),
     -- Most utilised entry per key. Over-limit entries sort first by
     -- construction: their ratio is above 1, which is exactly what a list should
@@ -551,7 +573,8 @@ BEGIN
         SELECT DISTINCT ON (pe.id)
                pe.id, pe.model, pe.ep_type, pe.used, pe.token_limit
         FROM per_entry pe
-        ORDER BY pe.id, (pe.used::numeric / NULLIF(pe.token_limit, 0)) DESC NULLS LAST
+        ORDER BY pe.id, (pe.used::numeric / NULLIF(pe.token_limit, 0)) DESC NULLS LAST,
+                 pe.model, pe.ep_type NULLS FIRST, pe.ep_name NULLS FIRST
     ),
     counts AS (
         SELECT id, count(*)::int AS limited_models FROM per_entry GROUP BY id

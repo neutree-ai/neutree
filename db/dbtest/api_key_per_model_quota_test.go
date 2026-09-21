@@ -336,6 +336,56 @@ func TestApiKeyPerModelQuotaValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects a token_limit outside the bigint range", func(t *testing.T) {
+		// get_api_key_remaining reads token_limit back with ::bigint. A larger
+		// number passing validation would make that RPC raise, and the quota
+		// plugin reads a failed lookup as "unknown" and fails open -- so an
+		// out-of-range limit would silently mean no limit at all.
+		for _, bad := range []string{
+			`{"allowed_models":[{"model":"m","token_limit":9223372036854775808}]}`,
+			`{"allowed_models":[{"model":"m","token_limit":1e30}]}`,
+			`{"token_quota":{"limit":9223372036854775808,"period":"monthly"}}`,
+		} {
+			if _, err := create(t, bad); err == nil {
+				t.Fatalf("expected rejection of %s", bad)
+			}
+		}
+	})
+
+	t.Run("reads a JSON null allowed_models without erroring", func(t *testing.T) {
+		// Validation accepts a JSON null allowlist as "unset". COALESCE does not
+		// replace a JSON null -- it is not an SQL NULL -- so a reader that fed
+		// it straight to jsonb_array_elements raised "cannot extract elements
+		// from a scalar", which the gateway sees as a failed lookup and fails
+		// open on.
+		var id string
+		var remaining sql.NullInt64
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			if err := tx.QueryRowContext(ctx, `
+				SELECT id FROM api.create_api_key(
+					p_workspace := 'pmvalid-ws',
+					p_name := 'pmvalid-null-allowlist',
+					p_quota := 0,
+					p_limits := '{"allowed_models":null,"token_quota":{"limit":100,"period":"monthly"}}'::jsonb
+				)`).Scan(&id); err != nil {
+				return err
+			}
+			return tx.QueryRowContext(ctx,
+				"SELECT api.get_api_key_remaining($1::uuid)", id).Scan(&remaining)
+		})
+		t.Cleanup(func() {
+			if id != "" {
+				_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", id)
+			}
+		})
+		if err != nil {
+			t.Fatalf("get_api_key_remaining on a null allowlist: %v", err)
+		}
+		if !remaining.Valid || remaining.Int64 != 100 {
+			t.Fatalf("expected the overall quota to still apply, got %v", remaining)
+		}
+	})
+
 	t.Run("rejects overlapping entries for a limited model", func(t *testing.T) {
 		for _, bad := range []string{
 			// A bare entry is a wildcard, so it overlaps the pinned one.
@@ -562,4 +612,71 @@ func TestApiKeysUsageSummaryTopModel(t *testing.T) {
 			t.Fatalf("expected the over-limit model to win, got %v", r.topModel)
 		}
 	})
+}
+
+// TestApiKeysUsageSummaryPerEndpointEntries pins that two entries for one model
+// which differ only by endpoint stay two entries in the summary. The per-entry
+// grouping originally omitted endpoint_name, so two such entries sharing a
+// token_limit collapsed into a single row whose "used" was the sum of both --
+// reporting a model at twice its real utilisation and undercounting how many
+// limited models the key has.
+func TestApiKeysUsageSummaryPerEndpointEntries(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	user := CreateTestUser(t, "perepuser", "perep@example.com", "testpassword")
+
+	// Same model, same type, SAME limit -- the shape that collapsed.
+	const limits = `{"allowed_models":[
+		{"model":"dual", "type":"external", "endpoint_name":"ep-a", "token_limit":1000},
+		{"model":"dual", "type":"external", "endpoint_name":"ep-b", "token_limit":1000}
+	]}`
+
+	var apiKeyID string
+	if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT id FROM api.create_api_key(
+				p_workspace := 'perep-ws',
+				p_name := 'perep-key',
+				p_quota := 0,
+				p_limits := $1::jsonb
+			)`, limits).Scan(&apiKeyID)
+	}); err != nil {
+		t.Fatalf("create_api_key: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_daily_usage WHERE (spec).api_key_id = $1", apiKeyID)
+		_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", apiKeyID)
+	})
+
+	seedDetailedUsage(t, db, "perep-u1", "perep-ws", apiKeyID, map[string]int{
+		"external-endpoint|ep-a|dual": 300,
+		"external-endpoint|ep-b|dual": 200,
+	})
+
+	var topModel sql.NullString
+	var topUsed, topLimit sql.NullInt64
+	var limitedCount int
+	if err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
+			SELECT top_model, top_model_used, top_model_limit, limited_models
+			FROM api.get_api_keys_usage_summary($1, NULL)
+			WHERE api_key_id = $2`, "perep-ws", apiKeyID).
+			Scan(&topModel, &topUsed, &topLimit, &limitedCount)
+	}); err != nil {
+		t.Fatalf("get_api_keys_usage_summary: %v", err)
+	}
+
+	// Two distinct limited entries, not one merged entry.
+	if limitedCount != 2 {
+		t.Fatalf("expected 2 limited entries, got %d", limitedCount)
+	}
+	// The busier endpoint wins at 300/1000 -- not 500/1000, which is what the
+	// merged row reported.
+	if !topModel.Valid || topModel.String != "dual" {
+		t.Fatalf("expected top model dual, got %v", topModel)
+	}
+	if topUsed.Int64 != 300 || topLimit.Int64 != 1000 {
+		t.Fatalf("expected dual 300/1000, got %v/%v", topUsed, topLimit)
+	}
 }

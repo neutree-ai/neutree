@@ -187,4 +187,5 @@ $$ LANGUAGE plpgsql;
 
 DROP FUNCTION IF EXISTS api.api_key_model_period_usage(UUID, TEXT, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS api.api_key_period_reset(TEXT);
+DROP FUNCTION IF EXISTS api.api_key_allowed_models(JSONB);
 DROP FUNCTION IF EXISTS api.api_key_period_start(TEXT);
