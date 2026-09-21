@@ -198,6 +198,56 @@ func TestModelSource(t *testing.T) {
 		}
 	})
 
+	t.Run("sources for models the endpoint no longer serves are dropped", func(t *testing.T) {
+		// Nothing else prunes them, and the suggestion list is derived from the
+		// sources in use — one deleted model would keep a value alive forever.
+		if err := insertEE("ms-external-orphan", []string{"kept"},
+			`{"kept":"`+vendorSource+`","gone":"retired-lab"}`); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+
+		var stored string
+		if err := db.QueryRowContext(ctx, `
+			SELECT (spec).model_sources::text FROM api.external_endpoints
+			WHERE (metadata).workspace = $1 AND (metadata).name = 'ms-external-orphan'`,
+			ws).Scan(&stored); err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+
+		if strings.Contains(stored, "retired-lab") || strings.Contains(stored, "gone") {
+			t.Fatalf("expected the orphaned entry to be dropped, got %s", stored)
+		}
+
+		if !strings.Contains(stored, vendorSource) {
+			t.Fatalf("expected the live entry to survive, got %s", stored)
+		}
+	})
+
+	t.Run("a spec with nothing readable to prune against is left alone", func(t *testing.T) {
+		// Emptying the map there would compound a worse problem rather than fix
+		// a stale entry.
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO api.external_endpoints (api_version, kind, spec, metadata)
+			VALUES ('v1','ExternalEndpoint',
+				ROW(NULL, 30, NULL, '{"orphan":"kept-anyway"}'::jsonb)::api.external_endpoint_spec,
+				ROW('ms-external-nospec', NULL, $1::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
+			)`, ws); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+
+		var stored string
+		if err := db.QueryRowContext(ctx, `
+			SELECT (spec).model_sources::text FROM api.external_endpoints
+			WHERE (metadata).workspace = $1 AND (metadata).name = 'ms-external-nospec'`,
+			ws).Scan(&stored); err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+
+		if !strings.Contains(stored, "kept-anyway") {
+			t.Fatalf("expected the map to be left alone, got %s", stored)
+		}
+	})
+
 	t.Run("per-model sources round-trip through the API (list + detail)", func(t *testing.T) {
 		// spec.model_sources is a new composite attribute, so this asserts that
 		// PostgREST and the Go client actually carry it end to end.

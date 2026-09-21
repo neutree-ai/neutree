@@ -43,6 +43,8 @@ CREATE OR REPLACE FUNCTION api.validate_external_endpoint_model_source()
 RETURNS TRIGGER AS $$
 DECLARE
     v_model TEXT;
+    v_exposed TEXT[];
+    v_pruned  JSONB;
 BEGIN
     IF (NEW.spec).model_sources IS NULL THEN
         RETURN NEW;
@@ -76,6 +78,44 @@ BEGIN
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
         END IF;
     END LOOP;
+
+    -- Drop sources for models this endpoint no longer serves.
+    --
+    -- Nothing else prunes them: removing a model from the routing leaves its
+    -- source behind for good, and the suggestion list is derived from the
+    -- sources in use — so one deleted model would keep a value alive for
+    -- everyone, forever. Done here rather than in the form because every writer
+    -- reaches this table, the CLI included.
+    --
+    -- Model routes supersede the legacy per-upstream mapping when present, the
+    -- same precedence the gateway applies. When neither is readable there is
+    -- nothing to prune against, so the map is left alone rather than emptied —
+    -- a spec that arrived without upstreams has worse problems than a stale
+    -- source, and silently clearing them would compound it.
+    IF (NEW.spec).model_routes IS NOT NULL
+       AND array_length((NEW.spec).model_routes, 1) > 0 THEN
+        SELECT array_agg(r.model) INTO v_exposed
+        FROM unnest((NEW.spec).model_routes) AS r
+        WHERE r.model IS NOT NULL;
+    ELSIF (NEW.spec).upstreams IS NOT NULL THEN
+        SELECT array_agg(DISTINCT k) INTO v_exposed
+        FROM unnest((NEW.spec).upstreams) AS u,
+             LATERAL jsonb_object_keys(COALESCE(u.model_mapping, '{}'::jsonb)) AS k;
+    END IF;
+
+    IF v_exposed IS NOT NULL THEN
+        SELECT COALESCE(jsonb_object_agg(kv.key, kv.value), '{}'::jsonb)
+          INTO v_pruned
+        FROM jsonb_each((NEW.spec).model_sources) AS kv
+        WHERE kv.key = ANY (v_exposed);
+
+        -- Rebuilt through jsonb_populate_record rather than assigning to
+        -- NEW.spec.model_sources: that form is rejected on PostgreSQL 13, which
+        -- is what the deployed control plane runs, and listing every field of
+        -- the composite instead would break the next time one is added.
+        NEW.spec := jsonb_populate_record(
+            NEW.spec, jsonb_build_object('model_sources', v_pruned));
+    END IF;
 
     RETURN NEW;
 END;
