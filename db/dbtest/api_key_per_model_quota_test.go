@@ -386,6 +386,49 @@ func TestApiKeyPerModelQuotaValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("accepts a period-only token_quota and uses that period", func(t *testing.T) {
+		// A per-model key has a period but no overall amount, and the period is
+		// stored on token_quota. The UI therefore writes { period } with no
+		// limit; without this shape the period could not be persisted at all and
+		// every per-model key silently fell back to monthly.
+		var id string
+		var period string
+		var remaining sql.NullInt64
+		err := execWithContext(t, db, []SetContextFunc{setUserContext(user.ID), setJwtSecretContext()}, func(tx *sql.Tx) error {
+			if err := tx.QueryRowContext(ctx, `
+				SELECT id FROM api.create_api_key(
+					p_workspace := 'pmvalid-ws',
+					p_name := 'pmvalid-period-only',
+					p_quota := 0,
+					p_limits := '{"token_quota":{"period":"weekly"},
+					              "allowed_models":[{"model":"m","token_limit":500}]}'::jsonb
+				)`).Scan(&id); err != nil {
+				return err
+			}
+			if err := tx.QueryRowContext(ctx,
+				"SELECT api.get_api_key_limits($1::uuid) ->> 'quota_period'", id).Scan(&period); err != nil {
+				return err
+			}
+			// No overall amount means the overall quota stays unenforced.
+			return tx.QueryRowContext(ctx,
+				"SELECT api.get_api_key_remaining($1::uuid)", id).Scan(&remaining)
+		})
+		t.Cleanup(func() {
+			if id != "" {
+				_, _ = db.ExecContext(ctx, "DELETE FROM api.api_keys WHERE id = $1", id)
+			}
+		})
+		if err != nil {
+			t.Fatalf("period-only token_quota: %v", err)
+		}
+		if period != "weekly" {
+			t.Fatalf("expected the stored period to be used, got %q", period)
+		}
+		if remaining.Valid {
+			t.Fatalf("expected no overall quota, got %v", remaining.Int64)
+		}
+	})
+
 	t.Run("rejects overlapping entries for a limited model", func(t *testing.T) {
 		for _, bad := range []string{
 			// A bare entry is a wildcard, so it overlaps the pinned one.
