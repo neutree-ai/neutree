@@ -23,6 +23,9 @@ spec:
       {{- end }}
       containers:
         - name: neutree-vmagent
+          env:
+            - name: NEUTREE_KONG_METRICS_HOST
+              value: {{ printf "%s-kong-metrics.%s.svc.%s" (include "neutree.fullname" .) .Release.Namespace .Values.global.clusterDomain | quote }}
           args:
             - "--promscrape.config=/etc/prometheus/prometheus.yml"
             - "--promscrape.configCheckInterval=10s"

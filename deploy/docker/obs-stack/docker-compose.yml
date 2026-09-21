@@ -57,7 +57,7 @@ services:
         max-file: "3"
   grafana:
     container_name: grafana
-    image: grafana/grafana:{{.GrafanaVersion}}
+    image: neutree/neutree-grafana:{{.GrafanaVersion}}
     ports:
       - 3030:3000
     restart: always

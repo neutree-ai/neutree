@@ -4,6 +4,7 @@ local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
+local metrics = require("kong.plugins.neutree-ai-gateway.metrics")
 
 -- JSON array/object policy (NEU-551).
 --
@@ -1291,6 +1292,10 @@ local function handle_anthropic_stream_body()
     ngx.arg[1] = table.concat(output_parts)
 end
 
+function AIGatewayHandler:configure(configs)
+    metrics.configure(configs)
+end
+
 function AIGatewayHandler:access(conf)
     local request_path = kong.request.get_path()
     local suffix = extract_suffix(request_path, conf.route_prefix or "")
@@ -1330,7 +1335,7 @@ function AIGatewayHandler:access(conf)
         kong.ctx.plugin.request_body_raw = request_body
 
         local anthropic_req, err = cjson.decode(request_body)
-        if err or anthropic_req == nil then
+        if err or type(anthropic_req) ~= "table" then
             return anthropic_error(400, "invalid_request_error", "Invalid JSON in request body")
         end
 
@@ -1453,7 +1458,7 @@ function AIGatewayHandler:access(conf)
     kong.ctx.plugin.request_body_raw = request_body
 
     local ai_request, err = cjson.decode(request_body)
-    if err then
+    if err or type(ai_request) ~= "table" then
         return fail(400, "request body is not json format")
     end
 
@@ -1587,6 +1592,8 @@ function AIGatewayHandler:log(conf)
     if kong.ctx.plugin.routing_state then
         routing.finish(kong.ctx.plugin.routing_state)
     end
+
+    metrics.log(conf, kong.ctx.plugin)
 
     -- Emit raw req/res trace for every request (incl. failures).
     local response_body = kong.ctx.plugin.response_body_raw

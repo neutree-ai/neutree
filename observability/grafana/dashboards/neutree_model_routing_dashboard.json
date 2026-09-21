@@ -1,0 +1,2645 @@
+{
+  "uid": "neutree-model-routing",
+  "title": "模型路由监控",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": false,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "hide": 2
+      },
+      {
+        "name": "endpoint_literal",
+        "type": "textbox",
+        "query": "\"\"",
+        "current": {
+          "text": "\"\"",
+          "value": "\"\""
+        },
+        "hide": 2
+      },
+      {
+        "name": "model",
+        "label": "对外模型",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values({__name__=~\"kong_neutree_route_(completed_requests_total|inflight|compiled_targets)\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw}}, virtual_model)",
+          "refId": "ModelVariable"
+        },
+        "definition": "label_values({__name__=~\"kong_neutree_route_(completed_requests_total|inflight|compiled_targets)\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw}}, virtual_model)",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "mode",
+        "label": "调用类型",
+        "type": "custom",
+        "query": "全部类型 : stream|non_stream|unknown, 流式 : stream, 非流式 : non_stream",
+        "current": {
+          "text": "全部类型",
+          "value": "stream|non_stream|unknown"
+        },
+        "options": [
+          {
+            "text": "全部类型",
+            "value": "stream|non_stream|unknown",
+            "selected": true
+          },
+          {
+            "text": "流式",
+            "value": "stream",
+            "selected": false
+          },
+          {
+            "text": "非流式",
+            "value": "non_stream",
+            "selected": false
+          }
+        ],
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 9999,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "options": {
+        "mode": "html",
+        "content": "<style>\n/* ============================================================\n   Grafana Custom Theme\n   ============================================================ */\n\n/* ---------- Typography ---------- */\nbody,\nbutton,\ninput,\nselect,\ntextarea,\ntable,\n[class*=\"panel-title\"],\n[class*=\"panel-content\"] {\n  font-family: Inter, \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif !important;\n}\n\n/* ---------- Dark Mode ---------- */\nbody[class*=\"theme-dark\"],\nbody:not([class*=\"theme-light\"]) {\n  --ui-bg: #08111f;\n  --ui-card: #0f1d2a;\n  --ui-border: rgba(198, 219, 234, 0.14);\n  --ui-input: #20324b;\n  --ui-primary: #268dff;\n  --ui-fg: #e6edf7;\n  --ui-heading: #e6edf7;\n  --ui-title: #cbd5e1;\n  --ui-muted-fg: rgba(182, 199, 224, 0.58);\n  --ui-destructive: #f0685f;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(198, 219, 234, 0.04);\n  --ui-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 20px 0 rgba(2, 7, 12, 0.42);\n  --ui-select-fill: #0f1d2a;\n  --ui-select-border: rgba(198, 219, 234, 0.2);\n  --ui-select-hover-border: rgba(173, 192, 224, 0.42);\n  --ui-select-outstanding: #268dff;\n  --ui-select-hover-fill: rgba(158, 179, 214, 0.18);\n  --ui-select-selected-fill: rgba(38, 141, 255, 0.06);\n  --ui-select-focus-ring: 0 0 0 4px rgba(38, 141, 255, 0.18);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.32);\n  --ui-menu-fill: #0f1d2a;\n  --ui-menu-border: rgba(198, 219, 234, 0.14);\n  --ui-menu-shadow: 0px 18px 42px 0px rgba(0, 0, 0, 0.48), 0px 0px 0px 1px rgba(173, 192, 224, 0.12);\n  --ui-select-text: #e6edf7;\n  --ui-select-text-strong: #f6f9fe;\n}\n\n/* ---------- Light Mode ---------- */\nbody[class*=\"theme-light\"] {\n  --ui-bg: #edf0f7;\n  --ui-card: #ffffff;\n  --ui-border: rgba(12, 40, 73, 0.12);\n  --ui-input: #edf1f4;\n  --ui-primary: #0080ff;\n  --ui-fg: #00122e;\n  --ui-heading: #1f2937;\n  --ui-title: #344054;\n  --ui-muted-fg: rgba(44, 56, 82, 0.6);\n  --ui-destructive: #f0483e;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(36, 41, 46, 0.04);\n  --ui-card-shadow: 0 4px 14px 0 rgba(12, 40, 73, 0.06);\n  --ui-select-fill: #ffffff;\n  --ui-select-border: rgba(12, 40, 73, 0.24);\n  --ui-select-hover-border: rgba(107, 128, 167, 0.6);\n  --ui-select-outstanding: #0080ff;\n  --ui-select-hover-fill: rgba(211, 218, 235, 0.6);\n  --ui-select-selected-fill: rgba(0, 136, 255, 0.04);\n  --ui-select-focus-ring: 0 0 0 4px rgba(0, 136, 255, 0.16);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(44, 56, 82, 0.18);\n  --ui-menu-fill: #ffffff;\n  --ui-menu-border: rgba(211, 218, 235, 0.6);\n  --ui-menu-shadow: 0px 12px 40px 0px rgba(45, 58, 86, 0.3), 0px 0px 10px 0px rgba(107, 125, 153, 0.18);\n  --ui-select-text: #00122e;\n  --ui-select-text-strong: #1d326c;\n}\n\n/* ---------- Global Background ---------- */\nbody,\n.main-view,\n[class*=\"page-wrapper\"]>div>div:first-child {\n  background-color: var(--ui-bg) !important;\n}\n\n/* ---------- Panel Container ---------- */\nsection[class*=\"panel-container\"]:not([class*=\"transparent\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-panel) !important;\n  background-clip: padding-box !important;\n  overflow: hidden !important;\n  box-shadow: var(--ui-card-shadow) !important;\n}\n\n/* ---------- Panel Title ---------- */\n[class*=\"panel-title\"] {\n  color: var(--ui-title) !important;\n  font-size: 13px !important;\n  font-weight: 600 !important;\n}\n\n/* ---------- Padding ---------- */\n/* One visual surface for Grafana's native variables and time controls. */\n[data-testid=\"data-testid dashboard controls\"] {\n  background: var(--ui-card) !important;\n  border: 1px solid var(--ui-border);\n  border-radius: var(--ui-radius-panel);\n  padding: 14px 16px !important;\n  margin-bottom: 16px;\n  gap: 16px;\n  flex-wrap: wrap;\n  align-items: center;\n}\n\n[data-testid=\"data-testid dashboard controls\"] > :first-child {\n  gap: 24px;\n  flex-wrap: wrap;\n}\n\n[data-testid=\"data-testid dashboard controls\"] > :last-child {\n  margin-left: auto;\n}\n\n[class*=\"-canvas-wrapper-old\"] [class*=\"-body\"] {\n  padding: 0 !important;\n  margin-top: -32px !important;\n}\n\n/* ---------- Dashboard Variable Controls ---------- */\n[class*=\"submenu-controls\"],\n[class*=\"SubMenu\"] {\n  background-color: var(--ui-bg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n  z-index: 10 !important;\n  position: relative !important;\n  padding: 8px 8px 8px 16px !important;\n}\n\n/* Variable Container */\n[data-testid=\"data-testid template variable\"] {\n  display: flex !important;\n  align-items: center !important;\n  gap: 0 !important;\n}\n\n/* Variable Label */\n[data-testid=\"data-testid template variable\"]>label {\n  background-color: transparent !important;\n  color: var(--ui-title) !important;\n  font-weight: 600 !important;\n  border: 0 !important;\n  border-radius: 0 !important;\n  font-size: 13px !important;\n  padding: 0 8px 0 0 !important;\n  line-height: 1 !important;\n  white-space: nowrap !important;\n}\n\n/* Variable Dropdown - Outer Wrapper */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:focus-within {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n/* Variable Dropdown - Inner Container */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]>div:not([class*=\"input-suffix\"]):not([class*=\"a11yText\"]) {\n  background-color: transparent !important;\n  border: none !important;\n  border-radius: inherit !important;\n}\n\n/* Variable Value Container */\n[data-testid=\"data-testid template variable\"] [class*=\"select-value-container\"] {\n  background-color: transparent !important;\n  padding: 0 8px !important;\n}\n\n/* Variable Selected Value */\ndiv[class*=\"singleValue\"],\ndiv[class*=\"grafana-select-value-container\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n}\n\n/* Variable Dropdown Arrow */\ndiv[class*=\"input-suffix\"] {\n  color: var(--ui-muted-fg) !important;\n  padding-right: 8px !important;\n}\n\ndiv[class*=\"input-suffix\"] svg {\n  fill: var(--ui-muted-fg) !important;\n}\n\n/* Variable Dropdown Menu (expanded) */\ndiv[class*=\"menu\"],\n[class*=\"options-group\"] {\n  z-index: 1050 !important;\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n/* Dropdown Options */\n[data-testid=\"data-testid Select option\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  height: 32px !important;\n  min-height: 32px !important;\n  max-height: 32px !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n  box-sizing: border-box !important;\n  border-left: 2px solid transparent !important;\n  outline: none !important;\n  overflow: hidden !important;\n}\n\n[data-testid=\"data-testid Select option\"]:hover {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[data-testid=\"data-testid Select option\"][class*=\"focused\"] {\n  color: var(--ui-select-text-strong) !important;\n  background-color: transparent !important;\n  border-left-color: transparent !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"][class*=\"focused\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] [class*=\"option-body\"] {\n  padding: 0 !important;\n  height: 20px !important;\n  min-height: 20px !important;\n  line-height: 20px !important;\n  overflow: hidden !important;\n  text-overflow: ellipsis !important;\n  white-space: nowrap !important;\n}\n\n[data-testid=\"data-testid Select option\"]::before,\n[data-testid=\"data-testid Select option\"]::after {\n  background-image: none !important;\n  background-color: transparent !important;\n}\n\n/* ---------- Legacy Select ---------- */\n.gf-form-select-box__control,\ndiv[class*=\"gf-form-select-box__control\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n.gf-form-select-box__control:hover,\ndiv[class*=\"gf-form-select-box__control\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n.gf-form-select-box__control--is-focused,\ndiv[class*=\"gf-form-select-box__control--is-focused\"] {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n.gf-form-select-box__menu {\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n.gf-form-select-box__option {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-left: 2px solid transparent !important;\n  border-image: none !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n}\n\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-focused,\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-selected {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n  border-image: none !important;\n}\n\n.gf-form-select-box__option--is-selected .fa {\n  color: var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] *,\n.gf-form-select-box__option * {\n  border-radius: 0 !important;\n}\n\n/* ---------- Native Grafana Menus ---------- */\n[role=\"menu\"] [role=\"menuitem\"],\n[role=\"menu\"] [role=\"menuitemradio\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"],\nbutton[data-role=\"menuitem\"] {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  box-shadow: none !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  min-height: 32px !important;\n  height: 32px !important;\n  padding: 6px 8px !important;\n  outline: none !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitemradio\"]:hover,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:hover,\nbutton[data-role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitem\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemradio\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:focus-visible,\nbutton[data-role=\"menuitem\"]:focus-visible {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n  outline: none !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemradio\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"][aria-checked=\"true\"],\nbutton[data-role=\"menuitem\"][aria-checked=\"true\"] {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker Menu ---------- */\n[aria-roledescription=\"Time range selection\"] li {\n  height: 32px !important;\n  line-height: 20px !important;\n}\n\n[aria-roledescription=\"Time range selection\"] label {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  height: 32px !important;\n  line-height: 20px !important;\n  padding: 6px 8px !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[aria-roledescription=\"Time range selection\"] li:hover label,\n[aria-roledescription=\"Time range selection\"] li:focus-within label {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[aria-roledescription=\"Time range selection\"] input:checked + label {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker / Toolbar Buttons ---------- */\nbutton[class*=\"toolbar-button\"],\nbutton[data-testid=\"data-testid TimePicker Open Button\"],\n.button-group > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-button) !important;\n}\n\n/* Button Group Connectors */\n.button-group {\n  gap: 0 !important;\n}\n\n.button-group > button:first-child {\n  border-radius: var(--ui-radius-button) 0 0 var(--ui-radius-button) !important;\n  border-right: none !important;\n}\n\n.button-group > button:last-child {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Refresh Picker ---------- */\n[class*=\"refresh-picker\"] > button,\n[class*=\"RefreshPicker\"] > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n}\n\n[class*=\"refresh-picker\"] > div:last-child > button,\n[class*=\"RefreshPicker\"] > div:last-child > button {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Top Navigation ---------- */\n[class*=\"navbar\"],\nheader[class*=\"page-toolbar\"] {\n  background-color: var(--ui-card) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Inputs / Selects ---------- */\ninput:not([type=\"checkbox\"]):not([type=\"radio\"]),\nselect,\n[class*=\"gf-form-input\"] {\n  border-color: var(--ui-border) !important;\n  border-radius: var(--ui-radius-input) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Tables ---------- */\ntable tbody tr:nth-child(odd) {\n  background-color: color-mix(in srgb, var(--ui-input) 15%, transparent) !important;\n}\n\ntable tbody tr:hover {\n  background-color: var(--ui-table-hover) !important;\n}\n\n[class*=\"tableContentWrapper\"] div[class*=\"row\"]:hover,\n[class*=\"tablePanel\"] div[class*=\"row\"]:hover {\n  background-color: var(--ui-table-hover) !important;\n  transition: background-color 120ms ease !important;\n}\n\ntable th {\n  color: var(--ui-muted-fg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Links ---------- */\na:not([class*=\"btn\"]):not([class*=\"variable\"]) {\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Row Title ---------- */\n.dashboard-row .dashboard-row__title,\n[data-testid^=\"data-testid dashboard-row-title-\"] {\n  color: var(--ui-heading) !important;\n  font-weight: 600 !important;\n}\n\n/* ---------- Tooltip ---------- */\n[class*=\"tooltip\"]:not([class*=\"panel\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Alert ---------- */\n[class*=\"alert-error\"],\n[class*=\"alerting\"] {\n  border-color: var(--ui-destructive) !important;\n}\n\n/* ---------- Scrollbar ---------- */\nhtml,\nbody,\n#root {\n  scrollbar-width: thin !important;\n}\n\nhtml::-webkit-scrollbar,\nbody::-webkit-scrollbar,\n#root::-webkit-scrollbar {\n  width: 6px !important;\n  height: 6px !important;\n}\n\n::-webkit-scrollbar-track {\n  background: transparent;\n}\n\n::-webkit-scrollbar-thumb {\n  background: var(--ui-input);\n  border-radius: 3px;\n}\n\n::-webkit-scrollbar-thumb:hover {\n  background: var(--ui-muted-fg);\n}\n\n/* Hide the injected theme panel itself */\ndiv[data-griditem-key=\"grid-item-9999\"] {\n  visibility: hidden !important;\n}\n/* Row panel counts are Grafana editor bookkeeping, not monitoring data. */\n[data-testid^=\"data-testid dashboard-row-title-\"] + span { display: none; }\n</style>",
+        "code": {
+          "language": "html",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 9,
+      "title": "网关采集状态",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 24,
+        "h": 2
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "已发现实例的采集成功比例，低于 100% 时上述汇总可能不完整。不能证明所有部署实例均已被发现；无数据不表示零流量。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(up{job=\"neutree-gateway\"}) / count(up{job=\"neutree-gateway\"})",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "暂无采集数据",
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "已发现实例采集正常",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 0,
+                "to": 0.999999,
+                "result": {
+                  "text": "部分采集失败，汇总可能不完整",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "background",
+        "graphMode": "none",
+        "orientation": "auto",
+        "text": {
+          "valueSize": 16,
+          "titleSize": 12
+        }
+      }
+    },
+    {
+      "id": 100,
+      "type": "row",
+      "title": "01  总览",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 36,
+      "title": "当前对外模型数",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "当前端点已加载配置中的对外模型总数，跨 Kong 实例去重；不受时间范围、对外模型和调用类型筛选影响。采集不可用时显示 —。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (virtual_model) (kong_neutree_route_compiled_targets{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model!=\"\",gateway_instance!=\"\"} @ now() and on(job,instance) (up{job=\"neutree-gateway\"} @ now() == 1)))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {},
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 1,
+      "title": "调用次数",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "所选时间窗口内已结束的调用次数，包含成功和失败，也包含未选中上游目标的失败请求；正在进行的调用暂不计入。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "成功率",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx / 全部完成请求；无请求显示 —。不代表回答质量或流式完整完成率。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code=~\"2[0-9][0-9]\"}[$__range])) / sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "路由失败次数",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "因没有可用上游或所有上游均达到并发上限，未能分配到上游的调用次数。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream=\"\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "02  对外模型指标",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 37,
+      "title": "各对外模型调用占比",
+      "type": "piechart",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "所选时间窗口内，各所选对外模型完成的调用数及占比，包含成功与失败，并跟随调用类型筛选。无调用时不显示扇区。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])) > 0",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {},
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "pie",
+        "displayLabels": [
+          "name",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "对外模型对比",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "每行一个已识别的对外模型，按成功数降序；当前零流量和历史模型保留。成功为最终 HTTP 2xx，失败为非 2xx；耗时仅统计成功请求，无数据时显示 -。表格列过滤仅影响本表。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"成功数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"失败数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"成功率\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "E",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "F",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "G",
+          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "成功数",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "对外模型"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功率"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P95 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P99 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "平均耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "metric_column"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "model_key": true,
+              "virtual_model": true
+            },
+            "renameByName": {
+              "model_display": "对外模型"
+            },
+            "indexByName": {
+              "model_display": 0,
+              "成功数": 1,
+              "失败数": 2,
+              "成功率": 3,
+              "P95 耗时": 4,
+              "P99 耗时": 5,
+              "平均耗时": 6
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 30,
+      "title": "各对外模型请求速率",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "按请求结束时间统计，包含成功和失败；每分钟请求速率为滑动采样估算值。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:req/min",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 31,
+      "title": "各模型 成功率",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 25,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "按所选路由目标归属统计最终客户端 HTTP 结果，不代表供应商健康，也不保证请求已发至上游。无完成请求时比例留空。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace((((((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__rate_interval]))) or (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "各模型失败请求趋势",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 25,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "每分钟失败请求数，按对外模型和最终 HTTP 状态码区分；仅包含非 2xx。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}} · {{status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:req/min",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "各模型 P95 耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.95, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "各模型 P99 耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 33,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.99, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "各模型平均耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 33,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace(label_replace(label_replace(((sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) / (sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{model_display}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "03  上游模型指标",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 38,
+      "title": "各模型上游调用占比",
+      "type": "volkovlabs-echarts-panel",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "各选中对外模型在时间窗口内的上游调用数与分流比例，包含成功与失败。所有模型在单面板内自动缩放和换行，不分页；悬浮查看模型、上游、调用数与占比。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])) or (sum by (virtual_model) (kong_neutree_route_compiled_targets{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",gateway_instance!=\"\"}) * 0)",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} / {{upstream}} / {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "暂无调用",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {},
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "renderer": "svg",
+        "getOption": "// One ECharts canvas, with responsive cells; no repeated panels or page state.\nconst groups = new Map();\nfor (const frame of context.panel.data.series) {\n  for (const field of frame.fields.filter(f => f.type === 'number')) {\n    const labels = field.labels || {};\n    if (!labels.virtual_model) continue;\n    if (!groups.has(labels.virtual_model)) groups.set(labels.virtual_model, []);\n    const value = Number(field.values[field.values.length - 1]);\n    if (labels.upstream && Number.isFinite(value) && value > 0) {\n      groups.get(labels.virtual_model).push({\n        name: `${labels.upstream} / ${labels.upstream_model}`,\n        value,\n      });\n    }\n  }\n}\nconst models = [...groups.keys()].sort((a, b) => a.localeCompare(b));\nconst fg = context.grafana.theme.isDark ? '#e6edf7' : '#344054';\nconst muted = context.grafana.theme.isDark ? '#9baac0' : '#667085';\nconst empty = context.grafana.theme.isDark ? '#344054' : '#e4e7ec';\nconst palette = ['#73bf69', '#5794f2', '#ff9830', '#b877d9', '#f2495c', '#56c7c7', '#e0b400'];\nconst color = name => {\n  let hash = 0;\n  for (const char of name) hash = ((hash * 31) + char.codePointAt(0)) >>> 0;\n  return palette[hash % palette.length];\n};\nif (!models.length) return { title: { text: '暂无调用', left: 'center', top: 'middle', textStyle: { color: muted, fontSize: 14 } } };\nconst series = models.map(model => {\n  const values = groups.get(model);\n  return {\n    name: model, type: 'pie', center: ['50%', '43%'], radius: '65%',\n    animation: false, minAngle: 0, avoidLabelOverlap: true,\n    label: { show: false }, labelLine: { show: false },\n    itemStyle: { borderColor: context.grafana.theme.isDark ? '#0f1d2a' : '#fff', borderWidth: 1 },\n    data: values.length ? values.map(v => ({ ...v, itemStyle: { color: color(v.name) } }))\n      : [{ name: '暂无调用', value: 1, empty: true, itemStyle: { color: empty } }],\n  };\n});\nfunction layout(columns) {\n  const rows = Math.ceil(models.length / columns);\n  return {\n    title: models.map((model, i) => ({\n      text: model.length > 20 ? model.slice(0, 18) + '…' : model,\n      subtext: groups.get(model).length\n        ? `${Math.round(groups.get(model).reduce((n, v) => n + v.value, 0)).toLocaleString()} 次调用` : '暂无调用',\n      left: `${((i % columns) + 0.5) * 100 / columns}%`,\n      top: `${(Math.floor(i / columns) + 0.76) * 100 / rows}%`,\n      textAlign: 'center', padding: 0, itemGap: 3,\n      textStyle: { color: fg, fontSize: rows > 3 ? 9 : 12, fontWeight: 500 },\n      subtextStyle: { color: muted, fontSize: rows > 3 ? 8 : 11 },\n    })),\n    series: models.map((_, i) => ({\n      left: `${(i % columns) * 100 / columns}%`, top: `${Math.floor(i / columns) * 100 / rows}%`,\n      width: `${100 / columns}%`, height: `${100 / rows}%`,\n    })),\n  };\n}\nreturn {\n  baseOption: {\n    animation: false,\n    tooltip: { trigger: 'item', confine: true, renderMode: 'richText', formatter: p =>\n      p.data.empty ? `${p.seriesName}\\n暂无调用`\n        : `${p.seriesName}\\n${p.name}\\n调用数：${Math.round(p.value).toLocaleString()}\\n占比：${p.percent}%` },\n    ...layout(models.length),\n    // Include data only in the base option; media options update geometry.\n    series: series.map((s, i) => ({ ...s, ...layout(models.length).series[i] })),\n  },\n  media: Array.from({ length: models.length }, (_, i) => ({\n    query: { minWidth: i * 190, ...(i < models.length - 1 ? { maxWidth: (i + 1) * 190 - 1 } : {}) },\n    option: layout(i + 1),\n  })),\n};\n",
+        "editorMode": "code",
+        "themeEditor": {
+          "name": "default",
+          "config": "{}"
+        },
+        "visualEditor": {
+          "dataset": [],
+          "series": []
+        },
+        "map": "none"
+      }
+    },
+    {
+      "id": 8,
+      "title": "上游模型对比",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "每行一个原始（对外模型、上游、上游模型）组合。模型内分流的分母为同模型全部已选中目标的完成请求数（成功与失败合计）；表格列过滤不改变分母。HTTP 结果按路由目标归属，非供应商健康。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"成功数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"模型内分流\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"失败数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "D",
+          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"成功率\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "E",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "G",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "H",
+          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "成功数",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "对外模型"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上游"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上游模型"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "模型内分流"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功率"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P95 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P99 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "平均耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "metric_column"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "virtual_model": "对外模型",
+              "upstream": "上游",
+              "upstream_model": "上游模型"
+            },
+            "indexByName": {
+              "virtual_model": 0,
+              "upstream": 1,
+              "upstream_model": 2,
+              "模型内分流": 3,
+              "成功数": 4,
+              "失败数": 5,
+              "成功率": 6,
+              "P95 耗时": 7,
+              "P99 耗时": 8,
+              "平均耗时": 9
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 9
+      }
+    },
+    {
+      "id": 32,
+      "title": "各上游模型请求速率",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "按请求结束时间统计，包含成功和失败；每分钟请求速率为滑动采样估算值。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "60 * (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval])))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:req/min",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 33,
+      "title": "各上游模型成功率",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "按所选路由目标归属统计最终客户端 HTTP 结果，不代表供应商健康，也不保证请求已发至上游。无完成请求时比例留空。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\",status_code=~\"2[0-9][0-9]\"}[$__rate_interval]))) or (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) * 0) / ((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) > 0)",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 39,
+      "title": "各上游模型失败请求趋势",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 61,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "按所选路由目标和最终 HTTP 状态码区分非 2xx 请求；每分钟失败请求速率为滑动采样估算值。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "60 * sum by (virtual_model,upstream,upstream_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}} · {{status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:req/min",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "各上游 P95 耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "title": "各上游 P99 耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "各上游平均耗时",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) / (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "各上游在途并发（全部调用类型）",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "每个点为跨 Kong 实例汇总的在途请求采样，不是 Provider 全局并发。采集失败可能导致汇总缺失；短于采集间隔的峰值可能遗漏。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "title": "模型内完成请求分流比例",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 77,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "每个对外模型的全部已选中目标完成请求为 100%。完成时间归属可能与配置权重不同；图例开关只影响本图，分母保持。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) / on(virtual_model) group_left() (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval])))",
+          "range": true,
+          "instant": false,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}} · {{upstream}} · {{upstream_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "spanNulls": false
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 35,
+      "title": "同上游负载汇总",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "仅汇总当前选定模型对应的上游负载，不代表 Provider 全局流量；不汇总配置权重或并发上限。",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"成功数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"失败数\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "expr": "label_replace((((((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"成功率\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "D",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "E",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "F",
+          "expr": "label_replace(((((sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "成功数",
+            "desc": true
+          }
+        ]
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上游"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "上游模型"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "失败数"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "成功率"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P95 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "P99 耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": "≥600s（精度受限）"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "平均耗时"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "metric_column"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "model_key": true
+            },
+            "renameByName": {
+              "upstream": "上游",
+              "upstream_model": "上游模型"
+            },
+            "indexByName": {
+              "upstream": 0,
+              "upstream_model": 1,
+              "成功数": 2,
+              "失败数": 3,
+              "成功率": 4,
+              "P95 耗时": 5,
+              "P99 耗时": 6,
+              "平均耗时": 7
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 24,
+        "h": 8
+      }
+    }
+  ],
+  "tags": [
+    "neutree",
+    "model-routing"
+  ],
+  "description": "总览、对外模型与上游模型监控；请求按完成时间和路由目标归属统计。"
+}

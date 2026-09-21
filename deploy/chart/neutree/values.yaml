@@ -3,6 +3,8 @@
 # Declare variables to be passed into your templates.
 
 global:
+  # Cluster DNS suffix used to discover individual Kong metrics endpoints.
+  clusterDomain: cluster.local
   # Global image registry for all components
   # When set, this registry will be used for:
   # - All main chart components (api, core, db, auth, etc.) via global.image.registry
@@ -384,9 +386,9 @@ grafana:
     # -- The Docker registry
     registry: "docker.io"
     # -- Docker image repository
-    repository: grafana/grafana
+    repository: neutree/neutree-grafana
     # Overrides the Grafana image tag whose default is the chart appVersion
-    tag: "11.5.3"
+    tag: "11.5.3-business-charts-6.6.0"
 
   testFramework:
     enabled: false
@@ -399,6 +401,12 @@ grafana:
     enabled: false
 
   grafana.ini:
+    paths:
+      # Bundled plugins must not be hidden by the persistent data volume.
+      plugins: /opt/neutree/grafana-plugins
+    feature_toggles:
+      # Grafana 11: correctly escape quotes in Prometheus variable label values.
+      enable: prometheusSpecialCharsInLabelValues
     auth.anonymous:
       enabled: true
     dashboards:

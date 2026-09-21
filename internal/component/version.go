@@ -23,7 +23,7 @@ const LegacyNeutreeNodeAgent = "v1.1.0-rc.1"
 const NeutreeNodeAgent = "v1.2.0-rc.1"
 
 // Grafana image version.
-const Grafana = "11.5.3"
+const Grafana = "11.5.3-business-charts-6.6.0"
 
 // Vector image version.
 const Vector = "0.47.0-debian"

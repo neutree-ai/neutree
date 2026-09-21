@@ -104,7 +104,7 @@ build-neutree-node-agent:
 	$(GO) build ${NODE_AGENT_GO_BUILD_ARGS} -o bin/neutree-node-agent ./cmd/neutree-node-agent/main.go
 
 # Choice of images to build/push
-ALL_DOCKER_BUILD ?= core api db-scripts
+ALL_DOCKER_BUILD ?= core api db-scripts grafana
 CLUSTER_DOCKER_BUILD ?= runtime node-agent
 
 .PHONY: docker-build-all ## Build all the architecture docker images
@@ -497,3 +497,14 @@ sync-images-list: ## Sync images list for building package
 .PHONY: check-images-list
 check-images-list: ## Check controlplane images list is up to date
 	bash scripts/builder/sync-controlplane-images.sh --check
+
+# Fixed observability image is also included in the offline image list.
+GRAFANA_IMAGE_TAG := 11.5.3-business-charts-6.6.0
+GRAFANA_BASE_IMAGE ?= grafana/grafana:11.5.3
+.PHONY: docker-build-grafana docker-push-grafana docker-push-manifest-grafana
+docker-build-grafana:
+	docker build --platform linux/$(ARCH) --build-arg GRAFANA_BASE_IMAGE=$(GRAFANA_BASE_IMAGE) -t $(IMAGE_PREFIX)neutree-grafana-$(ARCH):$(GRAFANA_IMAGE_TAG) deploy/docker/grafana
+docker-push-grafana:
+	docker push $(IMAGE_PREFIX)neutree-grafana-$(ARCH):$(GRAFANA_IMAGE_TAG)
+docker-push-manifest-grafana:
+	docker buildx imagetools create -t $(IMAGE_PREFIX)neutree-grafana:$(GRAFANA_IMAGE_TAG) $(foreach arch,$(ALL_ARCH),$(IMAGE_PREFIX)neutree-grafana-$(arch):$(GRAFANA_IMAGE_TAG))
