@@ -46,6 +46,7 @@ metadata:
 images:
   - image_name: "neutree/neutree-api"
     tag: "v1.0.0"
+    platform: "linux/amd64"
     image_file: "images/all-images.tar"
 
 Note: This command does not require API connection and can run standalone.
@@ -74,9 +75,10 @@ func runControlPlaneImport(opts *ControlPlaneImportOptions) error {
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
-		PackagePath: opts.packagePath,
-		Workspace:   workspace,
-		ExtractPath: opts.extractPath,
+		PackagePath:                 opts.packagePath,
+		Workspace:                   workspace,
+		ExtractPath:                 opts.extractPath,
+		EnableMultiArchRegistryPush: true,
 	}
 
 	// if not importLocal, set registry info

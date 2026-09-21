@@ -244,7 +244,8 @@ func (i *Importer) pushImages(ctx context.Context, opts *ImportOptions, manifest
 		return nil, errors.Wrap(err, "failed to build image prefix")
 	}
 
-	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest)
+	pushedImages, err := imagePusher.PushImagesToMirrorRegistry(ctx, imagePrefix, registryAuth, manifest,
+		opts.EnableMultiArchRegistryPush, opts.RegistryUser, opts.RegistryPassword)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to push images to mirror registry")
 	}

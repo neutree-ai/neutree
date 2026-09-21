@@ -100,6 +100,11 @@ type ImportOptions struct {
 
 	// ExtractPath is the path to extract the package to (temporary directory)
 	ExtractPath string
+
+	// EnableMultiArchRegistryPush publishes images that declare a platform as
+	// architecture-suffixed child repositories plus an OCI index at the logical tag.
+	// Images without a platform and Engine package imports preserve the existing path.
+	EnableMultiArchRegistryPush bool
 }
 
 // ImportResult contains the result of importing an engine version package

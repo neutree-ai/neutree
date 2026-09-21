@@ -46,6 +46,7 @@ metadata:
 images:
   - image_name: "neutree/neutree-serve"
     tag: "v1.0.0"
+    platform: "linux/amd64"
     image_file: "images/all-images.tar"
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,8 +72,9 @@ func runClusterImport(opts *ClusterImportOptions) error {
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
-		PackagePath: opts.packagePath,
-		ExtractPath: opts.extractPath,
+		PackagePath:                 opts.packagePath,
+		ExtractPath:                 opts.extractPath,
+		EnableMultiArchRegistryPush: true,
 	}
 
 	// if not importLocal, set registry info

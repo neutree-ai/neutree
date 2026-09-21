@@ -9,6 +9,8 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 )
@@ -65,23 +67,43 @@ func (p *ImagePusher) loadImages(ctx context.Context, manifest *PackageManifest,
 }
 
 func (p *ImagePusher) PushImagesToMirrorRegistry(ctx context.Context,
-	mirrorRegistry string, registryAuth string, manifest *PackageManifest) ([]string, error) {
+	mirrorRegistry string, registryAuth string, manifest *PackageManifest, multiArch bool,
+	registryUsername, registryPassword string) ([]string, error) {
 	klog.Infof("Pushing images to mirror registry: %s", mirrorRegistry)
 
 	// Load and push images
-	return p.pushImages(ctx, mirrorRegistry, registryAuth, manifest)
+	return p.pushImages(ctx, mirrorRegistry, registryAuth, manifest, multiArch, registryUsername, registryPassword)
 }
 
 // loadAndPushImages is the internal implementation that loads and pushes images
 func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, registryAuth string,
-	manifest *PackageManifest) ([]string, error) {
+	manifest *PackageManifest, multiArch bool, registryUsername, registryPassword string) ([]string, error) {
 	var pushedImages []string
 	var errs []error
 
 	for _, imgSpec := range manifest.Images {
 		// Build the original and target image references
 		originalImage := fmt.Sprintf("%s:%s", imgSpec.ImageName, imgSpec.Tag)
-		targetImage := p.buildTargetImage(mirrorRegistry, imgSpec)
+		logicalTarget := p.buildTargetImage(mirrorRegistry, imgSpec)
+		targetImage := logicalTarget
+		var platform v1.Platform
+		useMultiArch := imageUsesMultiArchPush(multiArch, imgSpec.Platform)
+
+		if useMultiArch {
+			var err error
+
+			platform, err = multiArchPlatform(imgSpec.Platform)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "image %s:%s", imgSpec.ImageName, imgSpec.Tag))
+				continue
+			}
+
+			targetImage, err = multiArchChildTarget(logicalTarget, platform)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
 
 		// Tag the image with the target registry
 		klog.Infof("Tagging image %s as %s", originalImage, targetImage)
@@ -99,8 +121,27 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 			continue
 		}
 
-		pushedImages = append(pushedImages, targetImage)
-		klog.Infof("Successfully pushed image: %s", targetImage)
+		if useMultiArch {
+			logicalRef, err := name.NewTag(logicalTarget)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "failed to parse logical image"))
+				continue
+			}
+
+			childRef, err := name.NewTag(targetImage)
+			if err != nil {
+				errs = append(errs, errors.Wrapf(err, "failed to parse child image"))
+				continue
+			}
+
+			if err := publishMultiArchIndex(ctx, logicalRef, childRef, platform, registryUsername, registryPassword); err != nil {
+				errs = append(errs, errors.Wrapf(err, "failed to publish multi-architecture index"))
+				continue
+			}
+		}
+
+		pushedImages = append(pushedImages, logicalTarget)
+		klog.Infof("Successfully pushed image: %s", logicalTarget)
 	}
 
 	if len(errs) > 0 {
@@ -108,6 +149,10 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 	}
 
 	return pushedImages, nil
+}
+
+func imageUsesMultiArchPush(enabled bool, platform string) bool {
+	return enabled && platform != ""
 }
 
 // buildTargetImage builds the target image reference with registry and repo
