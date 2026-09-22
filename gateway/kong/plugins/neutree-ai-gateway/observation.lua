@@ -55,7 +55,7 @@ function M.target(target)
     event.routing.selected_target = { upstream = target.upstream, upstream_model = target.upstream_model }
 end
 
-function M.resolve(route_id, path)
+local function resolve(route_id, path)
     local conf = routes[route_id]
     if not conf then return end
     local prefix = conf.route_prefix or ""
@@ -71,6 +71,29 @@ function M.resolve(route_id, path)
         end
     end
     if inference then return { request = { endpoint = prefix }, routing = {} } end
+end
+
+-- Request facts only; the collector decides which outcomes enter each metric.
+function M.request()
+    local event = kong.ctx.shared.neutree_observation
+    if not event then
+        local route = kong.router.get_route()
+        if route then event = resolve(route.id, kong.request.get_path()) end
+    end
+    if not event or not event.routing or not event.request then return end
+    local request = event.request
+    local target = event.routing.selected_target
+    return {
+        endpoint = request.endpoint,
+        virtual_model = request.virtual_model,
+        model_configured = request.model_configured,
+        request_mode = request.request_mode,
+        upstream = target and target.upstream,
+        upstream_model = target and target.upstream_model,
+        gateway_instance = kong.node.get_id(),
+        status_code = kong.response.get_status(),
+        duration_seconds = tonumber(ngx.var.request_time),
+    }
 end
 
 function M.snapshot()
@@ -100,7 +123,7 @@ function M.snapshot()
             end
         end
     end
-    return { models = models, targets = observations }
+    return { models = models, targets = observations, gateway_instance = kong.node.get_id() }
 end
 
 return M

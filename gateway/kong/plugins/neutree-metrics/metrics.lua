@@ -4,26 +4,35 @@ local exporter = require("kong.plugins.prometheus.exporter")
 local M = {}
 local initialized = {}
 
-local function invoke(entry, phase, argument)
-    local callback = entry.collector[phase]
+local function invoke(entry, owner, method, argument)
+    local callback = entry[owner] and entry[owner][method]
     if not callback then return true end
-    local ok, err = pcall(callback, argument)
-    if not ok then
-        kong.log.err("neutree metrics collector ", entry.name, " ", phase, ": ", err)
+    local ok, data, err = pcall(callback, argument)
+    if not ok or err then
+        kong.log.err("neutree metrics ", owner, " ", entry.name, " ", method, ": ", ok and err or data)
+        return false
     end
-    return ok
+    return true, data
 end
 
 local function dispatch(phase, registry)
     local ok = true
     for _, entry in ipairs(collectors) do
         if not initialized[entry] then
-            initialized[entry] = invoke(entry, "init", registry)
+            initialized[entry] = invoke(entry, "collector", "init", registry)
         end
         if not initialized[entry] then
             ok = false
-        elseif phase ~= "init" and not invoke(entry, phase, entry.source) then
-            ok = false
+        elseif phase ~= "init" and entry.collector[phase] then
+            local method = phase == "record" and "request" or "snapshot"
+            local read_ok, data = invoke(entry, "source", method)
+            -- A missing/failed snapshot must clear old gauges. Request counters
+            -- simply skip absent facts. No business schema is imposed here.
+            if phase == "collect" or data ~= nil then
+                local write_ok = invoke(entry, "collector", phase, data)
+                if not write_ok then ok = false end
+            end
+            if not read_ok then ok = false end
         end
     end
     return ok
@@ -40,7 +49,7 @@ function M.log()
     if not registry then return end
     -- Each collector gets one attempt, even if another collector fails.
     kong.ctx.plugin.metrics_recorded = true
-    dispatch("log", registry)
+    dispatch("record", registry)
 end
 
 function M.collect()

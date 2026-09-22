@@ -71,11 +71,11 @@ describe("independent metrics plugin", function()
         observation.configure({ conf })
         collectors = require("kong.plugins.neutree-metrics.collectors")
         assert.are.equal(observation.snapshot, collectors[1].source.snapshot)
-        assert.are.equal(observation.resolve, collectors[1].source.resolve)
+        assert.are.equal(observation.request, collectors[1].source.request)
         assert.are.equal(2, #collectors[1].source.snapshot().models)
         observation.configure(nil)
         assert.are.equal(0, #collectors[1].source.snapshot().models)
-        assert.is_nil(collectors[1].source.resolve("route-1", "/ee/v1/chat/completions"))
+        assert.is_nil(collectors[1].source.request())
     end)
 
     it("records final client failure once without success duration", function()
@@ -172,17 +172,25 @@ describe("independent metrics plugin", function()
         assert.is_nil(next(series.neutree_route_completed_requests_total))
     end)
 
-    it("consumes another provider through the same observation contract", function()
-        collectors[1].source = { snapshot = function() return { models = {
-            { endpoint = "/other", virtual_model = "other-chat", target_count = 0 },
-        }, targets = {} } end }
-        kong.ctx.shared.neutree_observation = {
-            request = { endpoint = "/other", virtual_model = "other-chat", model_configured = true },
-            routing = {}, quota = { allowed = true },
-        }
-        metrics.log(); metrics.log(); metrics.collect()
-        assert.are.equal(1, series.neutree_route_completed_requests_total["/other|other-chat|node-1|||unknown|200"])
-        assert.are.equal(0, series.neutree_route_compiled_targets["/other|other-chat|node-1"])
+    it("consumes only supplied data without reading Kong or ngx state", function()
+        local collector = collectors[1].collector
+        local event = { endpoint = "/other", virtual_model = "other-chat", model_configured = true,
+            gateway_instance = "other-node", status_code = 200, duration_seconds = 2, request_mode = "non_stream" }
+        -- Initialization already supplied the registry. Processing is pure with
+        -- respect to business state; these globals must never be consulted.
+        local saved_kong, saved_ngx = kong, ngx
+        _G.kong, _G.ngx = nil, nil
+        local ok, err = pcall(function()
+            collector.record(event)
+            collector.collect({ gateway_instance = "other-node", models = {
+                { endpoint = "/other", virtual_model = "other-chat", target_count = 0 },
+            }, targets = {} })
+        end)
+        _G.kong, _G.ngx = saved_kong, saved_ngx
+        assert.is_true(ok, err)
+        assert.are.equal(1, series.neutree_route_completed_requests_total["/other|other-chat|other-node|||non_stream|200"])
+        assert.are.equal(2, series.neutree_route_request_duration_seconds["/other|other-chat|other-node|||non_stream"])
+        assert.are.equal(0, series.neutree_route_compiled_targets["/other|other-chat|other-node"])
     end)
 
     it("isolates source exceptions and returned errors, omitting unavailable gauges", function()

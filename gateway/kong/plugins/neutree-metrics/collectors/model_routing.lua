@@ -4,8 +4,8 @@ local completed, duration, inflight, limits, compiled
 local seeded = {}
 local names = { "endpoint", "virtual_model", "gateway_instance", "upstream", "upstream_model" }
 
-local function labels(endpoint, model, upstream, upstream_model)
-    return { endpoint or "", model, kong.node.get_id(), upstream or "", upstream_model or "" }
+local function labels(endpoint, model, upstream, upstream_model, instance)
+    return { endpoint or "", model, instance, upstream or "", upstream_model or "" }
 end
 
 -- Called once per worker by the metrics dispatcher.
@@ -23,9 +23,9 @@ function M.init(prometheus)
         { "endpoint", "virtual_model", "gateway_instance" }, prometheus.LOCAL_STORAGE)
 end
 
-local function seed_target(target, seen)
+local function seed_target(target, seen, instance)
     if target.limit == nil then return end -- draining targets are not configured
-    local values = labels(target.endpoint, target.virtual_model, target.upstream, target.upstream_model)
+    local values = labels(target.endpoint, target.virtual_model, target.upstream, target.upstream_model, instance)
     local key = table.concat(values, "\0")
     seen[key] = true
     if seeded[key] then return end
@@ -35,33 +35,20 @@ local function seed_target(target, seen)
     end
 end
 
-local function resolve_request(source)
-    local event = kong.ctx.shared.neutree_observation
-    if event then return event end
-    local route = kong.router.get_route()
-    if route and source.resolve then
-        return source.resolve(route.id, kong.request.get_path())
-    end
-end
-
-function M.log(source)
-    local event = resolve_request(source)
-    if not event or not event.routing or not event.request then return end
-    local request = event.request
+function M.record(request)
     local model = request.model_configured and request.virtual_model or "unknown"
     if type(model) ~= "string" or model == "" then model = "unknown" end
-    local target = event.routing.selected_target
-    local values = labels(request.endpoint, model, target and target.upstream, target and target.upstream_model)
+    local values = labels(request.endpoint, model, request.upstream, request.upstream_model, request.gateway_instance)
     values[6] = (request.request_mode == "stream" or request.request_mode == "non_stream")
         and request.request_mode or "unknown"
-    local status = kong.response.get_status()
+    local status = request.status_code
     values[7] = type(status) == "number" and status >= 100 and status <= 599 and status == math.floor(status)
         and tostring(status) or "unknown"
     completed:inc(1, values)
     if values[7]:match("^2%d%d$") then
         -- http-log's latencies.request is Nginx request_time in milliseconds.
-        local elapsed = tonumber(ngx.var.request_time)
-        if elapsed and elapsed >= 0 then
+        local elapsed = request.duration_seconds
+        if type(elapsed) == "number" and elapsed >= 0 then
             values[7] = nil
             duration:observe(elapsed, values)
         end
@@ -69,21 +56,21 @@ function M.log(source)
 end
 
 -- Gauges describe the current snapshot, never a previous successful scrape.
-function M.collect(source)
+function M.collect(snapshot)
     inflight:reset()
     limits:reset()
     compiled:reset()
-    local snapshot, err = source.snapshot()
-    if not snapshot then error(err or "routing snapshot is unavailable") end
+    if not snapshot then return end
+    local instance = snapshot.gateway_instance
     local seen = {}
     for _, target in ipairs(snapshot.targets or {}) do
-        local values = labels(target.endpoint, target.virtual_model, target.upstream, target.upstream_model)
+        local values = labels(target.endpoint, target.virtual_model, target.upstream, target.upstream_model, instance)
         inflight:set(target.inflight, values)
         if target.limit ~= nil then limits:set(target.limit, values) end
-        seed_target(target, seen)
+        seed_target(target, seen, instance)
     end
     for _, model in ipairs(snapshot.models or {}) do
-        compiled:set(model.target_count, { model.endpoint, model.virtual_model, kong.node.get_id() })
+        compiled:set(model.target_count, { model.endpoint, model.virtual_model, instance })
     end
     -- Track initialized series only; configuration remains owned by the source.
     seeded = seen

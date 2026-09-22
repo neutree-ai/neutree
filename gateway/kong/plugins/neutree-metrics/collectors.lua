@@ -1,6 +1,13 @@
--- One declaration per metric family. A source is optional for collectors that
--- only read request context. Collectors define init(registry), log(source) and
--- collect(source); unused lifecycle methods may be omitted.
+-- Unified data protocol, one entry per metric family:
+-- source.request() -> request facts in log phase; source.snapshot() -> live facts
+-- at scrape time. Either method may be omitted. Return nil for no data,
+-- nil, err (or throw) for failure. Sources never update metrics.
+-- collector.init(registry), record(data), collect(data) may each be omitted.
+-- record receives only available request data. collect receives nil on absent
+-- or failed snapshots and MUST clear its previous gauges in that case.
+-- Collectors consume data only: no source calls or Kong/ngx state reads.
+-- Both sides are isolated per entry. Export happens once after collection.
+-- New business: implement a source + collector, then add their pair here.
 return {
     {
         name = "model-routing",
