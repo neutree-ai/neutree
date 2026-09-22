@@ -56,7 +56,7 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 		}
 
 		if entry.IsDir() {
-			if relative == "." || relative == "collectors" {
+			if relative == "." || relative == "collectors" || relative == "observation" {
 				return nil
 			}
 

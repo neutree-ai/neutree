@@ -4,7 +4,7 @@ local ai_shared = require("kong.llm.drivers.shared")
 local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
-local observation = require("kong.plugins.neutree-ai-gateway.model_routing")
+local observation = require("kong.plugins.neutree-ai-gateway.observation.model_routing")
 
 -- JSON array/object policy (NEU-551).
 --
