@@ -36,7 +36,7 @@ describe("independent metrics plugin", function()
         }
         package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
         package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
-        package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
+        package.loaded["kong.plugins.neutree-ai-gateway.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
             get = function(_, key) return values[key] end,
@@ -56,7 +56,7 @@ describe("independent metrics plugin", function()
         } }
         -- Load the central declaration before Gateway configures its provider.
         collectors = require("kong.plugins.neutree-metrics.collectors")
-        observation = require("kong.plugins.neutree-ai-gateway.observation")
+        observation = require("kong.plugins.neutree-ai-gateway.model_routing")
         observation.configure({ conf })
         metrics = assert(loadfile(spec_dir .. "../metrics.lua"))()
         metrics.init()
@@ -65,8 +65,8 @@ describe("independent metrics plugin", function()
     it("also loads Gateway before the declaration without registering itself", function()
         package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
         package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
-        package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
-        observation = require("kong.plugins.neutree-ai-gateway.observation")
+        package.loaded["kong.plugins.neutree-ai-gateway.model_routing"] = nil
+        observation = require("kong.plugins.neutree-ai-gateway.model_routing")
         assert.is_nil(package.loaded["kong.plugins.neutree-metrics.collectors"])
         observation.configure({ conf })
         collectors = require("kong.plugins.neutree-metrics.collectors")
