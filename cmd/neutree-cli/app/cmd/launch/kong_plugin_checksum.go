@@ -74,6 +74,7 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 
 		return writeKongPluginChecksumRecord(hasher, filepath.ToSlash(relative), path)
 	})
+
 	if err != nil {
 		return "", err
 	}
