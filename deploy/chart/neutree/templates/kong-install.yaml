@@ -345,7 +345,7 @@ spec:
       labels:
         app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong
       annotations:
-        checksum/neutree-metrics: {{ (.Files.Glob "gateway/kong/plugins/neutree-metrics/*").AsConfig | sha256sum | quote }}
+        checksum/neutree-metrics: {{ printf "%s%s" ((.Files.Glob "gateway/kong/plugins/neutree-metrics/*.lua").AsConfig) ((.Files.Glob "gateway/kong/plugins/neutree-metrics/collectors/*.lua").AsConfig) | sha256sum | quote }}
         checksum/neutree-ai-gateway-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-statistics-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-statistics/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-access-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-access/*").AsConfig | sha256sum | quote }}
@@ -694,6 +694,15 @@ spec:
         - name: neutree-metrics
           configMap:
             name: neutree-metrics
+            items:
+{{ range $path, $_ := .Files.Glob "gateway/kong/plugins/neutree-metrics/*.lua" }}
+              - key: {{ base $path }}
+                path: {{ base $path }}
+{{ end }}
+{{ range $path, $_ := .Files.Glob "gateway/kong/plugins/neutree-metrics/collectors/*.lua" }}
+              - key: {{ printf "collectors.%s" (base $path) }}
+                path: {{ printf "collectors/%s" (base $path) }}
+{{ end }}
         - name: neutree-ai-gateway
           configMap:
             name: neutree-ai-gateway

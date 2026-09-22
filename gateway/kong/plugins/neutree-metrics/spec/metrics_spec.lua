@@ -35,7 +35,7 @@ describe("independent metrics plugin", function()
             collect = function() return 200 end,
         }
         package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
-        package.loaded["kong.plugins.neutree-metrics.model_routing"] = nil
+        package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
@@ -64,7 +64,7 @@ describe("independent metrics plugin", function()
 
     it("also loads Gateway before the declaration without registering itself", function()
         package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
-        package.loaded["kong.plugins.neutree-metrics.model_routing"] = nil
+        package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         observation = require("kong.plugins.neutree-ai-gateway.observation")
         assert.is_nil(package.loaded["kong.plugins.neutree-metrics.collectors"])

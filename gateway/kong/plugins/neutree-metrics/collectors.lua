@@ -5,6 +5,6 @@ return {
     {
         name = "model-routing",
         source = require("kong.plugins.neutree-ai-gateway.observation"),
-        collector = require("kong.plugins.neutree-metrics.model_routing"),
+        collector = require("kong.plugins.neutree-metrics.collectors.model_routing"),
     },
 }

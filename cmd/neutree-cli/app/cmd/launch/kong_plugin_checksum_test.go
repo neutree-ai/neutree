@@ -48,6 +48,13 @@ func TestKongPluginChecksumsIncludeMetricsCollectors(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, before["neutree-metrics"], after["neutree-metrics"])
 	assert.Equal(t, before["neutree-ai-gateway"], after["neutree-ai-gateway"])
+	collectorDir := filepath.Join(pluginsRoot, "neutree-metrics", "collectors")
+	require.NoError(t, os.MkdirAll(collectorDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(collectorDir, "model_routing.lua"), []byte("return {}\n"), 0o600))
+	withCollector, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	assert.NotEqual(t, after["neutree-metrics"], withCollector["neutree-metrics"])
+
 }
 
 func TestKongPluginChecksumsIgnoreNestedPluginFiles(t *testing.T) {
