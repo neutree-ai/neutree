@@ -1,8 +1,8 @@
--- Revert per-model token quota: restore the pre-097 function bodies.
+-- Revert per-model token quota: restore the pre-099 function bodies.
 --
 -- Any token_limit already stored on allowed_models entries is left in the JSONB
 -- (harmless: nothing below reads it, and the restored validator ignores unknown
--- keys), so re-applying 097 does not lose configuration.
+-- keys), so re-applying 099 does not lose configuration.
 
 DROP FUNCTION IF EXISTS api.get_api_key_remaining(UUID, TEXT, TEXT, TEXT);
 
@@ -67,7 +67,7 @@ $$;
 DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT, UUID[]);
 DROP FUNCTION IF EXISTS api.get_api_keys_usage_summary(TEXT);
 
--- 092_api_key_project_folders.up.sql (the last definition before 097)
+-- 092_api_key_project_folders.up.sql (the last definition before 099)
 CREATE FUNCTION api.get_api_keys_usage_summary(p_workspace TEXT)
 RETURNS TABLE (
     api_key_id UUID,
