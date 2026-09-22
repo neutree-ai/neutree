@@ -39,11 +39,11 @@ func TestKongPluginChecksumsOnlyChangesModifiedPlugin(t *testing.T) {
 	assert.Equal(t, before["neutree-ai-quota"], after["neutree-ai-quota"])
 }
 
-func TestKongPluginChecksumsIncludeMetricsSources(t *testing.T) {
+func TestKongPluginChecksumsIncludeMetricsCollectors(t *testing.T) {
 	pluginsRoot := writeKongPluginTree(t)
 	before, err := kongPluginChecksums(pluginsRoot)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(pluginsRoot, "neutree-metrics", "sources.lua"), []byte("return {}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsRoot, "neutree-metrics", "collectors.lua"), []byte("return {}\n"), 0o600))
 	after, err := kongPluginChecksums(pluginsRoot)
 	require.NoError(t, err)
 	assert.NotEqual(t, before["neutree-metrics"], after["neutree-metrics"])

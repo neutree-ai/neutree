@@ -2,7 +2,7 @@ local spec_dir = (debug.getinfo(1, "S").source:sub(2)):match("(.*/)")
 local routing = assert(loadfile(spec_dir .. "../../neutree-ai-gateway/routing.lua"))()
 
 describe("independent metrics plugin", function()
-    local metrics, observation, sources, values, series, conf, enabled, increments, errors, recording_error
+    local metrics, observation, collectors, values, series, conf, enabled, increments, errors, recording_error
     local function request(model, status, target)
         kong.ctx = { shared = {}, plugin = {} }
         observation.start(conf)
@@ -34,7 +34,8 @@ describe("independent metrics plugin", function()
             get_prometheus = function() return enabled and registry or nil end,
             collect = function() return 200 end,
         }
-        package.loaded["kong.plugins.neutree-metrics.sources"] = nil
+        package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
+        package.loaded["kong.plugins.neutree-metrics.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
@@ -54,7 +55,7 @@ describe("independent metrics plugin", function()
             { model = "empty", targets = {} },
         } }
         -- Load the central declaration before Gateway configures its provider.
-        sources = require("kong.plugins.neutree-metrics.sources")
+        collectors = require("kong.plugins.neutree-metrics.collectors")
         observation = require("kong.plugins.neutree-ai-gateway.observation")
         observation.configure({ conf })
         metrics = assert(loadfile(spec_dir .. "../metrics.lua"))()
@@ -62,18 +63,19 @@ describe("independent metrics plugin", function()
     end)
 
     it("also loads Gateway before the declaration without registering itself", function()
-        package.loaded["kong.plugins.neutree-metrics.sources"] = nil
+        package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
+        package.loaded["kong.plugins.neutree-metrics.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         observation = require("kong.plugins.neutree-ai-gateway.observation")
-        assert.is_nil(package.loaded["kong.plugins.neutree-metrics.sources"])
+        assert.is_nil(package.loaded["kong.plugins.neutree-metrics.collectors"])
         observation.configure({ conf })
-        sources = require("kong.plugins.neutree-metrics.sources")
-        assert.are.equal(observation.snapshot, sources["model-routing"].snapshot)
-        assert.are.equal(observation.resolve, sources["model-routing"].resolve)
-        assert.are.equal(2, #sources["model-routing"].snapshot().models)
+        collectors = require("kong.plugins.neutree-metrics.collectors")
+        assert.are.equal(observation.snapshot, collectors[1].source.snapshot)
+        assert.are.equal(observation.resolve, collectors[1].source.resolve)
+        assert.are.equal(2, #collectors[1].source.snapshot().models)
         observation.configure(nil)
-        assert.are.equal(0, #sources["model-routing"].snapshot().models)
-        assert.is_nil(sources["model-routing"].resolve("route-1", "/ee/v1/chat/completions"))
+        assert.are.equal(0, #collectors[1].source.snapshot().models)
+        assert.is_nil(collectors[1].source.resolve("route-1", "/ee/v1/chat/completions"))
     end)
 
     it("records final client failure once without success duration", function()
@@ -171,8 +173,7 @@ describe("independent metrics plugin", function()
     end)
 
     it("consumes another provider through the same observation contract", function()
-        sources["model-routing"] = nil
-        sources.other = { snapshot = function() return { models = {
+        collectors[1].source = { snapshot = function() return { models = {
             { endpoint = "/other", virtual_model = "other-chat", target_count = 0 },
         }, targets = {} } end }
         kong.ctx.shared.neutree_observation = {
@@ -187,13 +188,12 @@ describe("independent metrics plugin", function()
     it("isolates source exceptions and returned errors, omitting unavailable gauges", function()
         metrics.collect()
         ngx.shared.neutree_ai_gateway_inflight = nil
-        sources.broken = { snapshot = function() error("broken source") end }
-        sources.other = { snapshot = function() return { models = {
-            { endpoint = "/other", virtual_model = "ok", target_count = 1 },
-        } } end }
         assert.are.equal(200, metrics.collect())
         assert.is_nil(next(series.neutree_route_inflight))
-        assert.are.equal(1, series.neutree_route_compiled_targets["/other|ok|node-1"])
+        assert.is_nil(next(series.neutree_route_compiled_targets))
+        assert.are.equal(1, #errors)
+        collectors[1].source = { snapshot = function() error("broken source") end }
+        assert.are.equal(200, metrics.collect())
         assert.are.equal(2, #errors)
     end)
 
