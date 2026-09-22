@@ -49,23 +49,29 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 		if walkErr != nil {
 			return walkErr
 		}
+
 		relative, err := filepath.Rel(pluginDir, path)
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() {
 			if relative == "." || relative == "collectors" {
 				return nil
 			}
+
 			return filepath.SkipDir
 		}
+
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
+
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("non-regular file %s", relative)
 		}
+
 		return writeKongPluginChecksumRecord(hasher, filepath.ToSlash(relative), path)
 	})
 	if err != nil {
