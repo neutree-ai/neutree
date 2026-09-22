@@ -374,6 +374,8 @@ services:
     image: kong/kong:{{ .KongVersion }}
     container_name: kong
     labels:
+      neutree.ai/kong-plugin-neutree-metrics-checksum: "{{ .KongPluginMetricsChecksum }}"
+      neutree.ai/kong-plugin-neutree-observability-checksum: "{{ .KongPluginObservabilityChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-gateway-checksum: "{{ .KongPluginGatewayChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-statistics-checksum: "{{ .KongPluginStatisticsChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-access-checksum: "{{ .KongPluginAccessChecksum }}"
@@ -384,7 +386,7 @@ services:
       # for sizing guidance and counter retention behavior.
       KONG_NGINX_HTTP_LUA_SHARED_DICT: "neutree_ai_gateway_inflight ${KONG_INFLIGHT_SHARED_DICT_SIZE:-10m}"
       KONG_NGINX_WORKER_PROCESSES: "{{ .KongWorkerProcesses }}"
-      KONG_PLUGINS: bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota
+      KONG_PLUGINS: bundled,neutree-metrics,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota
       LUA_PATH: "/neutree-kong-plugin/?.lua;;"
       KONG_DATABASE: "postgres"
       KONG_PG_HOST: "postgres"

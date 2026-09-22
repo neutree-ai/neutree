@@ -345,6 +345,8 @@ spec:
       labels:
         app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong
       annotations:
+        checksum/neutree-metrics: {{ (.Files.Glob "gateway/kong/plugins/neutree-metrics/*").AsConfig | sha256sum | quote }}
+        checksum/neutree-observability: {{ (.Files.Glob "gateway/kong/plugins/neutree-observability/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-gateway-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-statistics-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-statistics/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-access-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-access/*").AsConfig | sha256sum | quote }}
@@ -516,13 +518,17 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota"
+          value: "bundled,neutree-metrics,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota"
         args: [ "/bin/bash", "-c", "export KONG_NGINX_DAEMON=on KONG_PREFIX=`mktemp -d` KONG_KEYRING_ENABLED=off; until kong start; do echo 'waiting for db'; sleep 1; done; kong stop"]
         volumeMounts:
           - name: kong-kong-prefix-dir
             mountPath: /kong_prefix/
           - name: kong-kong-tmp
             mountPath: /tmp
+          - name: neutree-metrics
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-metrics
+          - name: neutree-observability
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-observability
           - name: neutree-ai-gateway
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
@@ -614,7 +620,7 @@ spec:
         - name: LUA_PATH
           value: "/neutree-kong-plugin/?.lua;;"
         - name: KONG_PLUGINS
-          value: "bundled,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota"
+          value: "bundled,neutree-metrics,neutree-ai-gateway,neutree-ai-statistics,neutree-ai-access,neutree-ai-quota"
         lifecycle:
           preStop:
             exec:
@@ -643,6 +649,10 @@ spec:
             mountPath: /kong_prefix/
           - name: kong-kong-tmp
             mountPath: /tmp
+          - name: neutree-metrics
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-metrics
+          - name: neutree-observability
+            mountPath: /neutree-kong-plugin/kong/plugins/neutree-observability
           - name: neutree-ai-gateway
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
@@ -686,6 +696,12 @@ spec:
         - name: kong-kong-tmp
           emptyDir:
             sizeLimit: 1Gi
+        - name: neutree-metrics
+          configMap:
+            name: neutree-metrics
+        - name: neutree-observability
+          configMap:
+            name: neutree-observability
         - name: neutree-ai-gateway
           configMap:
             name: neutree-ai-gateway

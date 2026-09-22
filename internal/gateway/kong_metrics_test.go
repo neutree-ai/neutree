@@ -53,5 +53,11 @@ func TestKongInitEnablesMetricsIdempotently(t *testing.T) {
 	assert.Equal(t, "prometheus", *plugin.Name)
 	assert.Nil(t, plugin.Route)
 	assert.Nil(t, plugin.Service)
+	metrics, ok := plugins["neutree-metrics"]
+	require.True(t, ok)
+	assert.Equal(t, "neutree-metrics", *metrics.Name)
+	assert.Nil(t, metrics.Route)
+	assert.Nil(t, metrics.Service)
+	assert.Empty(t, metrics.Config, "business configuration must not be copied to the observer")
 	assert.Equal(t, len(plugins), creates, "reinitialization must not create duplicate plugins")
 }

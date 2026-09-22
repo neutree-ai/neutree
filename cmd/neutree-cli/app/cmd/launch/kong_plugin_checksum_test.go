@@ -86,6 +86,8 @@ func writeKongPluginTree(t *testing.T) string {
 		"neutree-ai-statistics",
 		"neutree-ai-access",
 		"neutree-ai-quota",
+		"neutree-metrics",
+		"neutree-observability",
 	} {
 		pluginDir := filepath.Join(pluginsRoot, plugin)
 		require.NoError(t, os.MkdirAll(pluginDir, 0o755))
