@@ -1,5 +1,4 @@
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
-local sources = require("kong.plugins.neutree-observability.sources")
 local M = {}
 local models, targets, routes = {}, {}, {}
 
@@ -56,7 +55,7 @@ function M.target(target)
     event.routing.selected_target = { upstream = target.upstream, upstream_model = target.upstream_model }
 end
 
-local function resolve(route_id, path)
+function M.resolve(route_id, path)
     local conf = routes[route_id]
     if not conf then return end
     local prefix = conf.route_prefix or ""
@@ -74,7 +73,7 @@ local function resolve(route_id, path)
     if inference then return { request = { endpoint = prefix }, routing = {} } end
 end
 
-local function snapshot()
+function M.snapshot()
     local shared = ngx.shared.neutree_ai_gateway_inflight
     if not shared then return nil, "routing concurrency dictionary is unavailable" end
     local observations = {}
@@ -104,5 +103,4 @@ local function snapshot()
     return { models = models, targets = observations }
 end
 
-sources["model-routing"] = { snapshot = snapshot, resolve = resolve }
 return M

@@ -34,8 +34,8 @@ describe("independent metrics plugin", function()
             get_prometheus = function() return enabled and registry or nil end,
             collect = function() return 200 end,
         }
-        sources = {}
-        package.loaded["kong.plugins.neutree-observability.sources"] = sources
+        package.loaded["kong.plugins.neutree-observability.sources"] = nil
+        package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
             get = function(_, key) return values[key] end,
@@ -53,10 +53,27 @@ describe("independent metrics plugin", function()
             { model = "chat", targets = { { upstream = "a", upstream_model = "real", max_inflight_requests = 2 } } },
             { model = "empty", targets = {} },
         } }
-        observation = assert(loadfile(spec_dir .. "../../neutree-ai-gateway/observation.lua"))()
+        -- Load the central declaration before Gateway configures its provider.
+        sources = require("kong.plugins.neutree-observability.sources")
+        observation = require("kong.plugins.neutree-ai-gateway.observation")
         observation.configure({ conf })
         metrics = assert(loadfile(spec_dir .. "../metrics.lua"))()
         metrics.init()
+    end)
+
+    it("also loads Gateway before the declaration without registering itself", function()
+        package.loaded["kong.plugins.neutree-observability.sources"] = nil
+        package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
+        observation = require("kong.plugins.neutree-ai-gateway.observation")
+        assert.is_nil(package.loaded["kong.plugins.neutree-observability.sources"])
+        observation.configure({ conf })
+        sources = require("kong.plugins.neutree-observability.sources")
+        assert.are.equal(observation.snapshot, sources["model-routing"].snapshot)
+        assert.are.equal(observation.resolve, sources["model-routing"].resolve)
+        assert.are.equal(2, #sources["model-routing"].snapshot().models)
+        observation.configure(nil)
+        assert.are.equal(0, #sources["model-routing"].snapshot().models)
+        assert.is_nil(sources["model-routing"].resolve("route-1", "/ee/v1/chat/completions"))
     end)
 
     it("records final client failure once without success duration", function()
@@ -153,7 +170,7 @@ describe("independent metrics plugin", function()
         assert.is_nil(next(series.neutree_route_completed_requests_total))
     end)
 
-    it("supports another producer without importing gateway implementation", function()
+    it("consumes another provider through the same observation contract", function()
         sources["model-routing"] = nil
         sources.other = { snapshot = function() return { models = {
             { endpoint = "/other", virtual_model = "other-chat", target_count = 0 },
