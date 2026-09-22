@@ -1,6 +1,6 @@
 -- Metric names, labels and aggregation belong to this consumer. Business state
 -- comes only from the public observation contract and read-only sources.
-local sources = require("kong.plugins.neutree-observability.sources")
+local sources = require("kong.plugins.neutree-metrics.sources")
 local M = {}
 local registry, completed, duration, inflight, limits, compiled
 local seeded = {}

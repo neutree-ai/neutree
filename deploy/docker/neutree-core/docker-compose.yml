@@ -375,7 +375,6 @@ services:
     container_name: kong
     labels:
       neutree.ai/kong-plugin-neutree-metrics-checksum: "{{ .KongPluginMetricsChecksum }}"
-      neutree.ai/kong-plugin-neutree-observability-checksum: "{{ .KongPluginObservabilityChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-gateway-checksum: "{{ .KongPluginGatewayChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-statistics-checksum: "{{ .KongPluginStatisticsChecksum }}"
       neutree.ai/kong-plugin-neutree-ai-access-checksum: "{{ .KongPluginAccessChecksum }}"

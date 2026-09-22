@@ -277,7 +277,6 @@ func TestPrepareNeutreeCoreDeployConfigRendersKongPluginChecksumLabels(t *testin
 	require.NoError(t, err)
 	expectedLabels := map[string]string{
 		"neutree.ai/kong-plugin-neutree-metrics-checksum":       expectedChecksums["neutree-metrics"],
-		"neutree.ai/kong-plugin-neutree-observability-checksum": expectedChecksums["neutree-observability"],
 		"neutree.ai/kong-plugin-neutree-ai-gateway-checksum":    expectedChecksums["neutree-ai-gateway"],
 		"neutree.ai/kong-plugin-neutree-ai-statistics-checksum": expectedChecksums["neutree-ai-statistics"],
 		"neutree.ai/kong-plugin-neutree-ai-access-checksum":     expectedChecksums["neutree-ai-access"],

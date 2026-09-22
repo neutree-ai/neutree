@@ -16,7 +16,6 @@ var kongPluginNames = []string{
 	"neutree-ai-access",
 	"neutree-ai-quota",
 	"neutree-metrics",
-	"neutree-observability",
 }
 
 func kongPluginChecksums(pluginsRoot string) (map[string]string, error) {

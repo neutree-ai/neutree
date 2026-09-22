@@ -346,7 +346,6 @@ spec:
         app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong
       annotations:
         checksum/neutree-metrics: {{ (.Files.Glob "gateway/kong/plugins/neutree-metrics/*").AsConfig | sha256sum | quote }}
-        checksum/neutree-observability: {{ (.Files.Glob "gateway/kong/plugins/neutree-observability/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-gateway-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-statistics-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-statistics/*").AsConfig | sha256sum | quote }}
         checksum/neutree-ai-access-plugin: {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-access/*").AsConfig | sha256sum | quote }}
@@ -527,8 +526,6 @@ spec:
             mountPath: /tmp
           - name: neutree-metrics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-metrics
-          - name: neutree-observability
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-observability
           - name: neutree-ai-gateway
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
@@ -651,8 +648,6 @@ spec:
             mountPath: /tmp
           - name: neutree-metrics
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-metrics
-          - name: neutree-observability
-            mountPath: /neutree-kong-plugin/kong/plugins/neutree-observability
           - name: neutree-ai-gateway
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-gateway
           - name: neutree-ai-statistics
@@ -699,9 +694,6 @@ spec:
         - name: neutree-metrics
           configMap:
             name: neutree-metrics
-        - name: neutree-observability
-          configMap:
-            name: neutree-observability
         - name: neutree-ai-gateway
           configMap:
             name: neutree-ai-gateway

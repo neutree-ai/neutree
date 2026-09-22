@@ -34,7 +34,7 @@ describe("independent metrics plugin", function()
             get_prometheus = function() return enabled and registry or nil end,
             collect = function() return 200 end,
         }
-        package.loaded["kong.plugins.neutree-observability.sources"] = nil
+        package.loaded["kong.plugins.neutree-metrics.sources"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
@@ -54,7 +54,7 @@ describe("independent metrics plugin", function()
             { model = "empty", targets = {} },
         } }
         -- Load the central declaration before Gateway configures its provider.
-        sources = require("kong.plugins.neutree-observability.sources")
+        sources = require("kong.plugins.neutree-metrics.sources")
         observation = require("kong.plugins.neutree-ai-gateway.observation")
         observation.configure({ conf })
         metrics = assert(loadfile(spec_dir .. "../metrics.lua"))()
@@ -62,12 +62,12 @@ describe("independent metrics plugin", function()
     end)
 
     it("also loads Gateway before the declaration without registering itself", function()
-        package.loaded["kong.plugins.neutree-observability.sources"] = nil
+        package.loaded["kong.plugins.neutree-metrics.sources"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation"] = nil
         observation = require("kong.plugins.neutree-ai-gateway.observation")
-        assert.is_nil(package.loaded["kong.plugins.neutree-observability.sources"])
+        assert.is_nil(package.loaded["kong.plugins.neutree-metrics.sources"])
         observation.configure({ conf })
-        sources = require("kong.plugins.neutree-observability.sources")
+        sources = require("kong.plugins.neutree-metrics.sources")
         assert.are.equal(observation.snapshot, sources["model-routing"].snapshot)
         assert.are.equal(observation.resolve, sources["model-routing"].resolve)
         assert.are.equal(2, #sources["model-routing"].snapshot().models)
