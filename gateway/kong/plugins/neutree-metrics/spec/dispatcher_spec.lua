@@ -4,7 +4,7 @@ describe("metrics data protocol", function()
     local entries, metrics, registry, errors, exports
     before_each(function()
         entries, registry, errors, exports = {}, {}, {}, 0
-        package.loaded["kong.plugins.neutree-metrics.collectors"] = entries
+        package.loaded["kong.plugins.neutree-metrics.registry"] = entries
         package.loaded["kong.plugins.prometheus.exporter"] = {
             get_prometheus = function() return registry end,
             collect = function() exports = exports + 1; return 200 end,

@@ -1,5 +1,5 @@
 -- Shared lifecycle only: metric semantics belong to the declared collectors.
-local collectors = require("kong.plugins.neutree-metrics.collectors")
+local collectors = require("kong.plugins.neutree-metrics.registry")
 local exporter = require("kong.plugins.prometheus.exporter")
 local M = {}
 local initialized = {}

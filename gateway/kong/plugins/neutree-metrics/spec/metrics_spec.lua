@@ -34,7 +34,7 @@ describe("independent metrics plugin", function()
             get_prometheus = function() return enabled and registry or nil end,
             collect = function() return 200 end,
         }
-        package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
+        package.loaded["kong.plugins.neutree-metrics.registry"] = nil
         package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
@@ -55,7 +55,7 @@ describe("independent metrics plugin", function()
             { model = "empty", targets = {} },
         } }
         -- Load the central declaration before Gateway configures its provider.
-        collectors = require("kong.plugins.neutree-metrics.collectors")
+        collectors = require("kong.plugins.neutree-metrics.registry")
         observation = require("kong.plugins.neutree-ai-gateway.observation.model_routing")
         observation.configure({ conf })
         metrics = assert(loadfile(spec_dir .. "../metrics.lua"))()
@@ -63,13 +63,13 @@ describe("independent metrics plugin", function()
     end)
 
     it("also loads Gateway before the declaration without registering itself", function()
-        package.loaded["kong.plugins.neutree-metrics.collectors"] = nil
+        package.loaded["kong.plugins.neutree-metrics.registry"] = nil
         package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = nil
         package.loaded["kong.plugins.neutree-ai-gateway.observation.model_routing"] = nil
         observation = require("kong.plugins.neutree-ai-gateway.observation.model_routing")
-        assert.is_nil(package.loaded["kong.plugins.neutree-metrics.collectors"])
+        assert.is_nil(package.loaded["kong.plugins.neutree-metrics.registry"])
         observation.configure({ conf })
-        collectors = require("kong.plugins.neutree-metrics.collectors")
+        collectors = require("kong.plugins.neutree-metrics.registry")
         assert.are.equal(observation.snapshot, collectors[1].source.snapshot)
         assert.are.equal(observation.request, collectors[1].source.request)
         assert.are.equal(2, #collectors[1].source.snapshot().models)
