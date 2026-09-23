@@ -1234,7 +1234,7 @@
     {
       "id": 38,
       "title": "各模型上游调用占比",
-      "type": "volkovlabs-echarts-panel",
+      "type": "barchart",
       "gridPos": {
         "x": 0,
         "y": 42,
@@ -1245,15 +1245,15 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "各选中对外模型在时间窗口内，按所选上游目标归属的调用数与分流比例，包含成功与失败。所有模型在单面板内自动缩放和换行，不分页。",
+      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每条横条合计为 100%，颜色代表上游 / 上游模型；悬停查看调用次数。仅展示有调用且已选中上游的记录；无调用模型和未选中上游的请求请查看明细及总览。",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])) or (sum by (virtual_model) (kong_neutree_route_compiled_targets{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}) * 0)",
+          "expr": "label_join((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
           "range": false,
           "instant": true,
-          "format": "time_series",
-          "legendFormat": "{{virtual_model}} / {{upstream}} / {{upstream_model}}"
+          "format": "table",
+          "legendFormat": ""
         }
       ],
       "fieldConfig": {
@@ -1264,25 +1264,78 @@
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {},
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 85,
+            "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          },
           "decimals": 0
         },
         "overrides": []
       },
       "options": {
-        "renderer": "svg",
-        "getOption": "// One ECharts canvas, with responsive cells; no repeated panels or page state.\nconst groups = new Map();\nfor (const frame of context.panel.data.series) {\n  for (const field of frame.fields.filter(f => f.type === 'number')) {\n    const labels = field.labels || {};\n    if (!labels.virtual_model) continue;\n    if (!groups.has(labels.virtual_model)) groups.set(labels.virtual_model, []);\n    const value = Number(field.values[field.values.length - 1]);\n    if (labels.upstream && Number.isFinite(value) && value > 0) {\n      groups.get(labels.virtual_model).push({\n        name: `${labels.upstream} / ${labels.upstream_model}`,\n        value,\n      });\n    }\n  }\n}\nconst models = [...groups.keys()].sort((a, b) => a.localeCompare(b));\nconst fg = context.grafana.theme.isDark ? '#e6edf7' : '#344054';\nconst muted = context.grafana.theme.isDark ? '#9baac0' : '#667085';\nconst empty = context.grafana.theme.isDark ? '#344054' : '#e4e7ec';\nconst palette = ['#73bf69', '#5794f2', '#ff9830', '#b877d9', '#f2495c', '#56c7c7', '#e0b400'];\nconst color = name => {\n  let hash = 0;\n  for (const char of name) hash = ((hash * 31) + char.codePointAt(0)) >>> 0;\n  return palette[hash % palette.length];\n};\nif (!models.length) return { title: { text: '暂无调用', left: 'center', top: 'middle', textStyle: { color: muted, fontSize: 14 } } };\nconst series = models.map(model => {\n  const values = groups.get(model);\n  return {\n    name: model, type: 'pie', center: ['50%', '43%'], radius: '65%',\n    animation: false, minAngle: 0, avoidLabelOverlap: true,\n    label: { show: false }, labelLine: { show: false },\n    itemStyle: { borderColor: context.grafana.theme.isDark ? '#0f1d2a' : '#fff', borderWidth: 1 },\n    data: values.length ? values.map(v => ({ ...v, itemStyle: { color: color(v.name) } }))\n      : [{ name: '暂无调用', value: 1, empty: true, itemStyle: { color: empty } }],\n  };\n});\nfunction layout(columns) {\n  const rows = Math.ceil(models.length / columns);\n  return {\n    title: models.map((model, i) => ({\n      text: model.length > 20 ? model.slice(0, 18) + '…' : model,\n      subtext: groups.get(model).length\n        ? `${Math.round(groups.get(model).reduce((n, v) => n + v.value, 0)).toLocaleString()} 次调用` : '暂无调用',\n      left: `${((i % columns) + 0.5) * 100 / columns}%`,\n      top: `${(Math.floor(i / columns) + 0.76) * 100 / rows}%`,\n      textAlign: 'center', padding: 0, itemGap: 3,\n      textStyle: { color: fg, fontSize: rows > 3 ? 9 : 12, fontWeight: 500 },\n      subtextStyle: { color: muted, fontSize: rows > 3 ? 8 : 11 },\n    })),\n    series: models.map((_, i) => ({\n      left: `${(i % columns) * 100 / columns}%`, top: `${Math.floor(i / columns) * 100 / rows}%`,\n      width: `${100 / columns}%`, height: `${100 / rows}%`,\n    })),\n  };\n}\nreturn {\n  baseOption: {\n    animation: false,\n    tooltip: { trigger: 'item', confine: true, renderMode: 'richText', formatter: p =>\n      p.data.empty ? `${p.seriesName}\\n暂无调用`\n        : `${p.seriesName}\\n${p.name}\\n调用数：${Math.round(p.value).toLocaleString()}\\n占比：${p.percent}%` },\n    ...layout(models.length),\n    // Include data only in the base option; media options update geometry.\n    series: series.map((s, i) => ({ ...s, ...layout(models.length).series[i] })),\n  },\n  media: Array.from({ length: models.length }, (_, i) => ({\n    query: { minWidth: i * 190, ...(i < models.length - 1 ? { maxWidth: (i + 1) * 190 - 1 } : {}) },\n    option: layout(i + 1),\n  })),\n};\n",
-        "editorMode": "code",
-        "themeEditor": {
-          "name": "default",
-          "config": "{}"
+        "orientation": "horizontal",
+        "xField": "对外模型",
+        "stacking": "percent",
+        "showValue": "never",
+        "groupWidth": 0.75,
+        "barWidth": 0.85,
+        "barRadius": 0,
+        "fullHighlight": true,
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         },
-        "visualEditor": {
-          "dataset": [],
-          "series": []
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
         },
-        "map": "none"
-      }
+        "xTickLabelSpacing": 0
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "upstream_target",
+            "rowField": "virtual_model",
+            "valueField": "Value",
+            "emptyValue": "null"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "virtual_model\\upstream_target": "对外模型"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "对外模型",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
     },
     {
       "id": 8,
