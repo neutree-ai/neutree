@@ -556,6 +556,7 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	if curPlugin.Config == nil {
 		curPlugin.Config = kong.Configuration{}
 	}
+
 	if plugin.Config == nil {
 		plugin.Config = kong.Configuration{}
 	}
