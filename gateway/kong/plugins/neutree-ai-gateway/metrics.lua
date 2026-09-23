@@ -3,7 +3,7 @@
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
 local M = {}
 local registry, completed, duration, inflight, limits, compiled
-local targets, models = {}, {}
+local targets, models, seeded = {}, {}, {}
 local names = { "endpoint", "virtual_model", "gateway_instance", "upstream", "upstream_model" }
 
 local function labels(endpoint, model, upstream, upstream_model)
@@ -39,8 +39,7 @@ local function seed(endpoint, model, upstream, upstream_model)
 end
 
 local function configure(new_configs)
-    targets, models = {}, {}
-    local ready = ensure_metrics()
+    local next_targets, next_models = {}, {}
     for _, conf in ipairs(new_configs or {}) do
         if conf.model_routes then
             local scope = conf.route_prefix or ""
@@ -48,24 +47,43 @@ local function configure(new_configs)
             for _, route in ipairs(conf.model_routes) do
                 declared[route.model] = #(route.targets or {})
                 for _, target in ipairs(route.targets or {}) do
-                    targets[routing.target_key({ scope = scope, route = route }, target)] = {
+                    next_targets[routing.target_key({ scope = scope, route = route }, target)] = {
                         labels = labels(scope, route.model, target.upstream, target.upstream_model),
                         limit = target.max_inflight_requests or 0,
                     }
-                    if ready then seed(scope, route.model, target.upstream, target.upstream_model) end
                 end
             end
-            models[scope] = declared
+            next_models[scope] = declared
         end
     end
+    targets, models = next_targets, next_models
+    ensure_metrics()
+end
+
+local function is_inference(conf)
+    local path = kong.request.get_path()
+    local prefix = conf.route_prefix or ""
+    if path:sub(1, #prefix) ~= prefix then return false end
+    local suffix = path:sub(#prefix + 1)
+    if suffix == "/anthropic/v1/messages" or suffix == "/anthropic/v1/messages/" then return true end
+    for _, endpoint in ipairs({ "/v1/chat/completions", "/v1/embeddings", "/v1/rerank" }) do
+        if suffix == endpoint and (not conf.route_type or conf.route_type == endpoint) then return true end
+    end
+    return false
 end
 
 local function record(conf, ctx)
-    if conf.model_routes == nil or ctx.route_metrics_recorded then return end
+    if conf.model_routes == nil or ctx.route_metrics_recorded or not is_inference(conf) then return end
     if not ensure_metrics() then return end
     ctx.route_metrics_recorded = true
     local scope = conf.route_prefix or ""
-    local model = ctx.request_model or ""
+    local model = "unknown"
+    -- Use this request's configuration, not the latest configuration snapshot.
+    if type(ctx.request_model) == "string" and ctx.request_model ~= "" then
+        for _, route in ipairs(conf.model_routes) do
+            if route.model == ctx.request_model then model = ctx.request_model; break end
+        end
+    end
     local target = ctx.routing_state and ctx.routing_state.current
     local values = labels(scope, model, target and target.upstream, target and target.upstream_model)
     values[6] = ctx.is_stream == nil and "unknown" or (ctx.is_stream and "stream" or "non_stream")
@@ -94,20 +112,28 @@ end
 function M.configure(new_configs) safely(configure, new_configs) end
 function M.log(conf, ctx) safely(record, conf, ctx) end
 
-function M.collect()
-    local shared = ngx.shared.neutree_ai_gateway_inflight
-    if not shared or not ensure_metrics() then
-        return kong.response.exit(503, { message = "Routing metrics are not initialized" })
-    end
+local function reset_gauges()
     inflight:reset()
     limits:reset()
     compiled:reset()
+end
+
+local function collect_state()
+    local shared = ngx.shared.neutree_ai_gateway_inflight
+    if not shared then error("routing concurrency dictionary is unavailable") end
+    local seen = {}
     for key, target in pairs(targets) do
-        inflight:set(shared:get(key) or 0, target.labels)
+        local value, err = shared:get(key)
+        if err then error(err) end
+        inflight:set(value or 0, target.labels)
         limits:set(target.limit, target.labels)
+        seen[key] = true
+        if not seeded[key] then
+            local v = target.labels
+            seed(v[1], v[2], v[4], v[5])
+        end
     end
-    -- Removed targets with active leases remain observable while draining.
-    -- Never delete/reset admission keys: another worker may still hold a lease.
+    -- Removed targets retain active leases, without a current configuration limit.
     for _, key in ipairs(shared:get_keys(0)) do
         if not targets[key] then
             local scope, model, upstream, upstream_model = key:match("^([^%z]*)%z([^%z]*)%z([^%z]*)%z([^%z]*)$")
@@ -122,7 +148,20 @@ function M.collect()
             compiled:set(count, { scope, model, kong.node.get_id() })
         end
     end
-    require("kong.plugins.prometheus.exporter").collect()
+    seeded = seen
+end
+
+function M.collect()
+    if not ensure_metrics() then
+        return kong.response.exit(503, { message = "Routing metrics are not initialized" })
+    end
+    reset_gauges()
+    -- Omit unavailable state, but still export request counters and other metrics.
+    if not safely(collect_state) then reset_gauges() end
+    local ok, result = pcall(require("kong.plugins.prometheus.exporter").collect)
+    if ok then return result end
+    kong.log.err("routing metrics export failed: ", result)
+    return kong.response.exit(503, { message = "Metrics export failed" })
 end
 
 return M

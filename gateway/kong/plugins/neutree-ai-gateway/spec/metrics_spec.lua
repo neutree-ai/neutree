@@ -23,7 +23,7 @@ describe("routing observation contract", function()
         registry.counter, registry.histogram, registry.gauge = metric, metric, metric
         package.loaded["kong.plugins.prometheus.exporter"] = {
             get_prometheus = function() return enabled and registry or nil end,
-            collect = function() end,
+            collect = function() return 200 end,
         }
         package.loaded["kong.plugins.neutree-ai-gateway.routing"] = routing
         _G.ngx = { var = { request_time = "1.25" }, shared = { neutree_ai_gateway_inflight = {
@@ -31,6 +31,7 @@ describe("routing observation contract", function()
             get_keys = function() local keys = {}; for key in pairs(values) do keys[#keys + 1] = key end; return keys end,
         } } }
         _G.kong = {
+            request = { get_path = function() return "/ee/v1/chat/completions" end },
             node = { get_id = function() return "node-1" end },
             log = { err = function() end },
             response = { get_status = function() return 200 end, exit = function(status) return status end },
@@ -74,17 +75,51 @@ describe("routing observation contract", function()
         assert.is_nil(next(series.neutree_route_request_duration_seconds))
     end)
 
-    it("preserves requested model names, including unconfigured models", function()
-        for i = 1, 100 do
-            metrics.log(conf, { request_model = "unknown-" .. i })
-            assert.are.equal(1, series.neutree_route_completed_requests_total[
-                "/ee|unknown-" .. i .. "|node-1|||unknown|200"])
+    it("bounds unconfigured, missing and invalid model names to unknown", function()
+        for i = 1, 100 do metrics.log(conf, { request_model = "unknown-" .. i }) end
+        for _, model in ipairs({ "", false, 123, {} }) do metrics.log(conf, { request_model = model }) end
+        metrics.log(conf, {})
+        assert.are.equal(105, series.neutree_route_completed_requests_total["/ee|unknown|node-1|||unknown|200"])
+    end)
+
+    it("excludes model lists and unrelated paths even before access executes", function()
+        kong.response.get_status = function() return 401 end
+        metrics.log(conf, {})
+        for _, path in ipairs({ "/ee/v1/models", "/ee/anthropic/v1/models", "/ee/health", "/other/v1/chat/completions" }) do
+            kong.request.get_path = function() return path end
+            metrics.log(conf, {})
         end
+        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee|unknown|node-1|||unknown|401"])
+    end)
+
+    it("omits unavailable gauges without losing counters or failing the scrape", function()
+        metrics.log(conf, ctx)
         metrics.collect()
-        assert.is_nil(series.neutree_route_compiled_targets["/ee|unresolved|node-1"])
+        ngx.shared.neutree_ai_gateway_inflight.get = function() return nil, "broken store" end
+        assert.are.equal(200, metrics.collect())
+        assert.is_nil(next(series.neutree_route_inflight))
+        assert.is_nil(next(series.neutree_route_inflight_limit))
+        assert.is_nil(next(series.neutree_route_compiled_targets))
+        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee|chat|node-1|||non_stream|200"])
+        ngx.shared.neutree_ai_gateway_inflight = nil
+        assert.are.equal(200, metrics.collect())
+    end)
+
+    it("retains the previous configuration if replacement construction fails", function()
+        metrics.configure({ { model_routes = { false } } })
+        metrics.collect()
         assert.are.equal(1, series.neutree_route_compiled_targets["/ee|chat|node-1"])
-        metrics.log(conf, { request_model = "unresolved" })
-        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee|unresolved|node-1|||unknown|200"])
+    end)
+
+    it("uses the in-flight request configuration after a model is removed", function()
+        metrics.configure({})
+        metrics.log(conf, ctx)
+        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee|chat|node-1|||non_stream|200"])
+    end)
+
+    it("returns 503 if the exporter fails", function()
+        package.loaded["kong.plugins.prometheus.exporter"].collect = function() error("export failed") end
+        assert.are.equal(503, metrics.collect())
     end)
 
     it("retains draining inflight after removal but stops publishing a current limit", function()
@@ -102,6 +137,7 @@ describe("routing observation contract", function()
     end)
 
     it("scrapes current gauges without reseeding counters", function()
+        metrics.collect()
         local seeded = increments
         local key = routing.target_key({ scope = "/ee", route = conf.model_routes[1] }, conf.model_routes[1].targets[1])
         values[key] = 2
@@ -126,7 +162,7 @@ describe("routing observation contract", function()
         conf.model_routes = {}
         kong.response.get_status = function() return 400 end
         metrics.log(conf, {})
-        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee||node-1|||unknown|400"])
+        assert.are.equal(1, series.neutree_route_completed_requests_total["/ee|unknown|node-1|||unknown|400"])
         assert.is_nil(next(series.neutree_route_request_duration_seconds))
     end)
 

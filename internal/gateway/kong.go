@@ -553,6 +553,13 @@ func (k *Kong) syncPlugin(plugin *kong.Plugin) error {
 	// Merge desired config into current to preserve Kong's internal fields,
 	// then normalize both sides to handle Kong's storage quirks
 	// (explicit nulls for unset fields, nil maps stored as empty objects {}).
+	if curPlugin.Config == nil {
+		curPlugin.Config = kong.Configuration{}
+	}
+	if plugin.Config == nil {
+		plugin.Config = kong.Configuration{}
+	}
+
 	err = util.JsonMerge(curPlugin.Config, plugin.Config, &plugin.Config)
 	if err != nil {
 		return errors.Wrapf(err, "failed to merge plugin config")
