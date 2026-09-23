@@ -1,13 +1,14 @@
 -- Routing metrics share Kong's exporter and the admission counter. No second
 -- concurrency ledger.
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
+local observation = require("kong.plugins.neutree-ai-gateway.observation.model_routing")
 local M = {}
 local registry, completed, duration, inflight, limits, compiled
 local targets, models, seeded = {}, {}, {}
 local names = { "endpoint", "virtual_model", "gateway_instance", "upstream", "upstream_model" }
 
-local function labels(endpoint, model, upstream, upstream_model)
-    return { endpoint or "", model, kong.node.get_id(), upstream or "", upstream_model or "" }
+local function labels(endpoint, model, upstream, upstream_model, instance)
+    return { endpoint or "", model, instance or kong.node.get_id(), upstream or "", upstream_model or "" }
 end
 
 -- Register once per worker; configuration updates reuse these metric objects.
@@ -60,41 +61,20 @@ local function configure(new_configs)
     ensure_metrics()
 end
 
-local function is_inference(conf)
-    local path = kong.request.get_path()
-    local prefix = conf.route_prefix or ""
-    if path:sub(1, #prefix) ~= prefix then return false end
-    local suffix = path:sub(#prefix + 1)
-    if suffix == "/anthropic/v1/messages" or suffix == "/anthropic/v1/messages/" then return true end
-    for _, endpoint in ipairs({ "/v1/chat/completions", "/v1/embeddings", "/v1/rerank" }) do
-        if suffix == endpoint and (not conf.route_type or conf.route_type == endpoint) then return true end
-    end
-    return false
-end
-
-local function record(conf, ctx)
-    if conf.model_routes == nil or ctx.route_metrics_recorded or not is_inference(conf) then return end
-    if not ensure_metrics() then return end
-    ctx.route_metrics_recorded = true
-    local scope = conf.route_prefix or ""
-    local model = "unknown"
-    -- Use this request's configuration, not the latest configuration snapshot.
-    if type(ctx.request_model) == "string" and ctx.request_model ~= "" then
-        for _, route in ipairs(conf.model_routes) do
-            if route.model == ctx.request_model then model = ctx.request_model; break end
-        end
-    end
-    local target = ctx.routing_state and ctx.routing_state.current
-    local values = labels(scope, model, target and target.upstream, target and target.upstream_model)
-    values[6] = ctx.is_stream == nil and "unknown" or (ctx.is_stream and "stream" or "non_stream")
-    local status = kong.response.get_status()
+local function record(request)
+    local model = request.model_configured and request.virtual_model or "unknown"
+    if type(model) ~= "string" or model == "" then model = "unknown" end
+    local values = labels(request.endpoint, model, request.upstream, request.upstream_model, request.gateway_instance)
+    values[6] = (request.request_mode == "stream" or request.request_mode == "non_stream")
+        and request.request_mode or "unknown"
+    local status = request.status_code
     values[7] = type(status) == "number" and status >= 100 and status <= 599 and status == math.floor(status)
         and tostring(status) or "unknown"
     completed:inc(1, values)
     if values[7]:match("^2%d%d$") then
         -- http-log's latencies.request is Nginx request_time in milliseconds.
-        local elapsed = tonumber(ngx.var.request_time)
-        if elapsed and elapsed >= 0 then
+        local elapsed = request.duration_seconds
+        if type(elapsed) == "number" and elapsed >= 0 then
             values[7] = nil
             duration:observe(elapsed, values)
         end
@@ -110,7 +90,16 @@ local function safely(fn, ...)
 end
 
 function M.configure(new_configs) safely(configure, new_configs) end
-function M.log(conf, ctx) safely(record, conf, ctx) end
+function M.log(conf)
+    safely(function()
+        local ctx = kong.ctx.plugin
+        if ctx.route_metrics_recorded then return end
+        local data = observation.request(conf)
+        if not data or not ensure_metrics() then return end
+        ctx.route_metrics_recorded = true
+        record(data)
+    end)
+end
 
 local function reset_gauges()
     inflight:reset()

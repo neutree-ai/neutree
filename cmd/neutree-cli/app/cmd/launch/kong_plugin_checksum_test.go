@@ -98,3 +98,17 @@ func writeKongPluginTree(t *testing.T) string {
 
 	return pluginsRoot
 }
+
+func TestKongPluginChecksumsIncludeObservationSources(t *testing.T) {
+	pluginsRoot := writeKongPluginTree(t)
+	before, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+
+	sourceDir := filepath.Join(pluginsRoot, "neutree-ai-gateway", "observation")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "model_routing.lua"), []byte("return {}\n"), 0o600))
+
+	after, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	assert.NotEqual(t, before["neutree-ai-gateway"], after["neutree-ai-gateway"])
+}

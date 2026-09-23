@@ -5,6 +5,7 @@ local ai_driver = require("kong.llm.drivers.openai")
 local strip = require("kong.tools.string").strip
 local routing = require("kong.plugins.neutree-ai-gateway.routing")
 local metrics = require("kong.plugins.neutree-ai-gateway.metrics")
+local observation = require("kong.plugins.neutree-ai-gateway.observation.model_routing")
 
 -- JSON array/object policy (NEU-551).
 --
@@ -1322,6 +1323,7 @@ function AIGatewayHandler:access(conf)
             return
         end
 
+        observation.start(conf)
         local content_type = kong.request.get_header("Content-Type") or "application/json"
         if not string.find(content_type, "application/json", nil, true) then
             return anthropic_error(400, "invalid_request_error", "Content-Type must be application/json")
@@ -1348,6 +1350,7 @@ function AIGatewayHandler:access(conf)
         kong.ctx.shared.neutree_request_model = anthropic_req.model
         kong.ctx.plugin.response_model = nil
         kong.ctx.plugin.is_stream = anthropic_req.stream == true
+        observation.model(conf, anthropic_req.model, anthropic_req.stream == true)
         kong.ctx.plugin.route_type = "/v1/chat/completions"
 
         if conf.model_routes or conf.upstreams then
@@ -1364,6 +1367,7 @@ function AIGatewayHandler:access(conf)
             end
 
             kong.ctx.plugin.routing_state = state
+            if not state.legacy then observation.target(state.current) end
             matched_entry = target_entry(conf, state)
             local _, route_err = set_upstream_target(matched_entry)
             if route_err then
@@ -1444,6 +1448,7 @@ function AIGatewayHandler:access(conf)
     end
 
     kong.ctx.plugin.route_type = route_type
+    observation.start(conf)
 
     local content_type = kong.request.get_header("Content-Type") or "application/json"
     if not string.find(content_type, "application/json", nil, true) then
@@ -1468,6 +1473,7 @@ function AIGatewayHandler:access(conf)
     -- model mapping, since they cannot reliably re-read the body afterwards.
     kong.ctx.shared.neutree_request_model = ai_request.model
     kong.ctx.plugin.is_stream = ai_request.stream == true
+    observation.model(conf, ai_request.model, ai_request.stream == true)
 
     if conf.model_routes or conf.upstreams then
         if not ai_request.model or ai_request.model == "" then
@@ -1487,6 +1493,7 @@ function AIGatewayHandler:access(conf)
         end
 
         kong.ctx.plugin.routing_state = state
+        if not state.legacy then observation.target(state.current) end
         matched_entry = target_entry(conf, state)
         local _, route_err = set_upstream_target(matched_entry)
         if route_err then
@@ -1593,7 +1600,7 @@ function AIGatewayHandler:log(conf)
         routing.finish(kong.ctx.plugin.routing_state)
     end
 
-    metrics.log(conf, kong.ctx.plugin)
+    metrics.log(conf)
 
     -- Emit raw req/res trace for every request (incl. failures).
     local response_body = kong.ctx.plugin.response_body_raw
