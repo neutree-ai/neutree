@@ -386,9 +386,9 @@ grafana:
     # -- The Docker registry
     registry: "docker.io"
     # -- Docker image repository
-    repository: neutree/neutree-grafana
+    repository: grafana/grafana
     # Overrides the Grafana image tag whose default is the chart appVersion
-    tag: "11.5.3-business-charts-6.6.0"
+    tag: "11.5.3"
 
   testFramework:
     enabled: false
@@ -401,9 +401,6 @@ grafana:
     enabled: false
 
   grafana.ini:
-    paths:
-      # Bundled plugins must not be hidden by the persistent data volume.
-      plugins: /opt/neutree/grafana-plugins
     feature_toggles:
       # Grafana 11: correctly escape quotes in Prometheus variable label values.
       enable: prometheusSpecialCharsInLabelValues
