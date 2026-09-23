@@ -29,14 +29,14 @@ end
 
 function M.start(conf)
     if not conf.model_routes then return end
-    local event = kong.ctx.shared.neutree_observation or {}
-    kong.ctx.shared.neutree_observation = event
+    local event = kong.ctx.shared.neutree_ai_gateway_model_routing or {}
+    kong.ctx.shared.neutree_ai_gateway_model_routing = event
     event.request = { endpoint = conf.route_prefix or "" }
     event.routing = {}
 end
 
 function M.model(conf, model, stream)
-    local event = kong.ctx.shared.neutree_observation
+    local event = kong.ctx.shared.neutree_ai_gateway_model_routing
     if not conf.model_routes or not event then return end
     local request = event.request
     request.virtual_model = type(model) == "string" and model or nil
@@ -50,7 +50,7 @@ function M.model(conf, model, stream)
 end
 
 function M.target(target)
-    local event = kong.ctx.shared.neutree_observation
+    local event = kong.ctx.shared.neutree_ai_gateway_model_routing
     if not event or not event.routing then return end
     event.routing.selected_target = { upstream = target.upstream, upstream_model = target.upstream_model }
 end
@@ -75,7 +75,7 @@ end
 
 -- Request facts only; the collector decides which outcomes enter each metric.
 function M.request()
-    local event = kong.ctx.shared.neutree_observation
+    local event = kong.ctx.shared.neutree_ai_gateway_model_routing
     if not event then
         local route = kong.router.get_route()
         if route then event = resolve(route.id, kong.request.get_path()) end

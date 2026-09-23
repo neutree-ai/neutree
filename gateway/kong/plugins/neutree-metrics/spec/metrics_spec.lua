@@ -219,14 +219,14 @@ describe("independent metrics plugin", function()
         recording_error = true
         assert.has_no.errors(metrics.log)
         assert.are.equal(1, #errors)
-        assert.are.equal("a", kong.ctx.shared.neutree_observation.routing.selected_target.upstream)
+        assert.are.equal("a", kong.ctx.shared.neutree_ai_gateway_model_routing.routing.selected_target.upstream)
         assert.is_nil(next(series.neutree_route_completed_requests_total))
     end)
 
     it("publishes facts without exposing leases or needing an exporter", function()
         enabled = false
         request("chat", 200, { upstream = "a", upstream_model = "real", lease = function() end })
-        assert.are.same({ upstream = "a", upstream_model = "real" }, kong.ctx.shared.neutree_observation.routing.selected_target)
+        assert.are.same({ upstream = "a", upstream_model = "real" }, kong.ctx.shared.neutree_ai_gateway_model_routing.routing.selected_target)
         assert.is_nil(next(series.neutree_route_completed_requests_total))
     end)
 end)
