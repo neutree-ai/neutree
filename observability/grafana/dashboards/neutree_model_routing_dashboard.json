@@ -1245,11 +1245,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每条横条合计为 100%，颜色代表上游 / 上游模型；悬停查看调用次数。仅展示有调用且已选中上游的记录；无调用模型和未选中上游的请求请查看明细及总览。",
+      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每条横条合计为 100%，颜色代表上游 / 上游模型；悬停查看分流比例，调用次数见下方明细。仅展示有调用且已选中上游的记录；无调用模型和未选中上游的请求请查看明细及总览。",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_join((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
+          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) / on (virtual_model) group_left (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
           "range": false,
           "instant": true,
           "format": "table",
@@ -1258,7 +1258,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "percentunit",
           "min": 0,
           "noValue": "暂无调用",
           "color": {
@@ -1281,7 +1281,8 @@
               "legend": false
             }
           },
-          "decimals": 0
+          "decimals": 1,
+          "max": 1
         },
         "overrides": []
       },
