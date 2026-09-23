@@ -1249,7 +1249,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) / on (virtual_model) group_left (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
+          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) / on (virtual_model) group_left() (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
           "range": false,
           "instant": true,
           "format": "table",
