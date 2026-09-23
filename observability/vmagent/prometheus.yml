@@ -46,5 +46,5 @@ scrape_configs:
       port: 8100
   metric_relabel_configs:
     - source_labels: [__name__]
-      regex: 'kong_neutree_route_.*'
+      regex: 'kong_neutree_.*'
       action: keep
