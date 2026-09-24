@@ -35,3 +35,16 @@ scrape_configs:
       regex: 'ray_sglang[:_](.+)'
       target_label: __name__
       replacement: 'sglang:$1'
+
+- job_name: 'neutree-gateway'
+  scrape_interval: 5s
+  scrape_timeout: 5s
+  metrics_path: /metrics/neutree
+  dns_sd_configs:
+    - names: ['%{NEUTREE_KONG_METRICS_HOST}']
+      type: A
+      port: 8100
+  metric_relabel_configs:
+    - source_labels: [__name__]
+      regex: 'kong_neutree_.*'
+      action: keep

@@ -39,6 +39,39 @@ func TestKongPluginChecksumsOnlyChangesModifiedPlugin(t *testing.T) {
 	assert.Equal(t, before["neutree-ai-quota"], after["neutree-ai-quota"])
 }
 
+func TestKongPluginChecksumsIncludeMetricsCollectors(t *testing.T) {
+	pluginsRoot := writeKongPluginTree(t)
+	before, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsRoot, "neutree-metrics", "registry.lua"), []byte("return {}\n"), 0o600))
+	after, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	assert.NotEqual(t, before["neutree-metrics"], after["neutree-metrics"])
+	assert.Equal(t, before["neutree-ai-gateway"], after["neutree-ai-gateway"])
+	collectorDir := filepath.Join(pluginsRoot, "neutree-metrics", "collectors")
+	require.NoError(t, os.MkdirAll(collectorDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(collectorDir, "model_routing.lua"), []byte("return {}\n"), 0o600))
+	withCollector, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	assert.NotEqual(t, after["neutree-metrics"], withCollector["neutree-metrics"])
+
+}
+
+func TestKongPluginChecksumsIncludeObservationSources(t *testing.T) {
+	pluginsRoot := writeKongPluginTree(t)
+	before, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+
+	sourceDir := filepath.Join(pluginsRoot, "neutree-ai-gateway", "observation")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "model_routing.lua"), []byte("return {}\n"), 0o600))
+
+	after, err := kongPluginChecksums(pluginsRoot)
+	require.NoError(t, err)
+	assert.NotEqual(t, before["neutree-ai-gateway"], after["neutree-ai-gateway"])
+	assert.Equal(t, before["neutree-metrics"], after["neutree-metrics"])
+}
+
 func TestKongPluginChecksumsIgnoreNestedPluginFiles(t *testing.T) {
 	pluginsRoot := writeKongPluginTree(t)
 	nestedFile := filepath.Join(pluginsRoot, "neutree-ai-gateway", "spec", "handler_spec.lua")
@@ -86,6 +119,7 @@ func writeKongPluginTree(t *testing.T) string {
 		"neutree-ai-statistics",
 		"neutree-ai-access",
 		"neutree-ai-quota",
+		"neutree-metrics",
 	} {
 		pluginDir := filepath.Join(pluginsRoot, plugin)
 		require.NoError(t, os.MkdirAll(pluginDir, 0o755))

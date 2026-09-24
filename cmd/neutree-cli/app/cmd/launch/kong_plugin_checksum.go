@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -15,6 +16,7 @@ var kongPluginNames = []string{
 	"neutree-ai-statistics",
 	"neutree-ai-access",
 	"neutree-ai-quota",
+	"neutree-metrics",
 }
 
 func kongPluginChecksums(pluginsRoot string) (map[string]string, error) {
@@ -42,35 +44,39 @@ func kongPluginChecksum(pluginDir string) (string, error) {
 		return "", fmt.Errorf("expected directory %s", pluginDir)
 	}
 
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		return "", err
-	}
-
 	hasher := sha256.New()
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err = filepath.WalkDir(pluginDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 
-		if entry.Type()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("non-regular file %s", entry.Name())
+		relative, err := filepath.Rel(pluginDir, path)
+		if err != nil {
+			return err
+		}
+
+		if entry.IsDir() {
+			if relative == "." || relative == "collectors" || relative == "observation" {
+				return nil
+			}
+
+			return filepath.SkipDir
 		}
 
 		info, err := entry.Info()
 		if err != nil {
-			return "", err
+			return err
 		}
 
 		if !info.Mode().IsRegular() {
-			return "", fmt.Errorf("non-regular file %s", entry.Name())
+			return fmt.Errorf("non-regular file %s", relative)
 		}
 
-		path := filepath.Join(pluginDir, entry.Name())
-		if err := writeKongPluginChecksumRecord(hasher, entry.Name(), path); err != nil {
-			return "", err
-		}
+		return writeKongPluginChecksumRecord(hasher, filepath.ToSlash(relative), path)
+	})
+
+	if err != nil {
+		return "", err
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
