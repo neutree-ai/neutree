@@ -563,11 +563,11 @@ func validateEndpointAcceleratorMetricContract(body, endpointName, expectedVDevi
 		return err
 	}
 
-	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_tx_bytes_total"); err != nil {
+	if err := validateGaugeAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_tx_bytes"); err != nil {
 		return err
 	}
 
-	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_rx_bytes_total"); err != nil {
+	if err := validateGaugeAcceleratorMetric(families, allocationLabels, "neutree_accelerator_pcie_rx_bytes"); err != nil {
 		return err
 	}
 
@@ -727,6 +727,26 @@ func validatePhysicalAcceleratorMetric(
 	}
 
 	return validateMetricHasValue(metricName, metric)
+}
+
+// validateGaugeAcceleratorMetric additionally pins the metric type: an
+// instantaneous value published as a counter would make rate() the documented
+// way to read it and silently change the unit of the series.
+func validateGaugeAcceleratorMetric(
+	families map[string]*dto.MetricFamily,
+	allocationLabels map[string]string,
+	metricName string,
+) error {
+	if err := validatePhysicalAcceleratorMetric(families, allocationLabels, metricName); err != nil {
+		return err
+	}
+
+	family := families[metricName]
+	if family.GetType() != dto.MetricType_GAUGE {
+		return fmt.Errorf("metric %s type = %s, want GAUGE", metricName, family.GetType())
+	}
+
+	return nil
 }
 
 func findMetricByLabels(

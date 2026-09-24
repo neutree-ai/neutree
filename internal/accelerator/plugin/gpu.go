@@ -63,8 +63,8 @@ DCGM_FI_PROF_PIPE_FP64_ACTIVE, gauge, Ratio of cycles the FP64 pipe is active.
 DCGM_FI_PROF_PIPE_FP32_ACTIVE, gauge, Ratio of cycles the FP32 pipe is active.
 DCGM_FI_PROF_PIPE_FP16_ACTIVE, gauge, Ratio of cycles the FP16 pipe is active.
 DCGM_FI_PROF_DRAM_ACTIVE, gauge, Ratio of cycles the device memory interface is active.
-DCGM_FI_PROF_PCIE_TX_BYTES, counter, Total number of bytes transmitted through PCIe TX via NVML.
-DCGM_FI_PROF_PCIE_RX_BYTES, counter, Total number of bytes received through PCIe RX via NVML.
+DCGM_FI_PROF_PCIE_TX_BYTES, gauge, The rate of data transmitted over the PCIe bus in bytes per second.
+DCGM_FI_PROF_PCIE_RX_BYTES, gauge, The rate of data received over the PCIe bus in bytes per second.
 DCGM_FI_PROF_NVLINK_RX_BYTES, counter, Total number of bytes received through NVLink.
 DCGM_FI_PROF_NVLINK_TX_BYTES, counter, Total number of bytes transmitted through NVLink.
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.

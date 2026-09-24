@@ -75,6 +75,24 @@ func TestMetricsCollectorDropsEndpointAcceleratorSamplesWithoutUUID(t *testing.T
 	require.NotContains(t, output, `neutree_endpoint_replica_accelerator_utilization_ratio{`)
 }
 
+func TestMetricsCollectorRendersPCIeThroughputAsGauge(t *testing.T) {
+	output := renderCollectorMetrics(t, []normalizer.Sample{{
+		Name: "neutree_accelerator_pcie_tx_bytes",
+		Labels: map[string]string{
+			"cluster_type":      "kubernetes",
+			"node":              "node-a",
+			"accelerator_type":  "nvidia_gpu",
+			"accelerator_uuid":  "GPU-abc",
+			"accelerator_index": "0",
+			"product":           "A100",
+		},
+		Value: 4096,
+	}})
+
+	require.Contains(t, output, "# TYPE neutree_accelerator_pcie_tx_bytes gauge")
+	require.Contains(t, output, `neutree_accelerator_pcie_tx_bytes{accelerator_index="0",accelerator_type="nvidia_gpu",accelerator_uuid="GPU-abc",cluster_type="kubernetes",node="node-a",product="A100"} 4096`)
+}
+
 func TestMetricsCollectorRendersAdapterOwnedDescriptor(t *testing.T) {
 	output := renderCollectorMetricsWithDescriptors(t, []normalizer.Sample{{
 		Name: "neutree_node_accelerator_vendor_info",
