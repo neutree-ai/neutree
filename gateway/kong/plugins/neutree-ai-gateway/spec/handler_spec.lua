@@ -204,3 +204,32 @@ describe("routing counter errors at protocol boundaries", function()
         end)
     end
 end)
+
+describe("routing trace metadata", function()
+    local previous_kong, previous_ngx
+    before_each(function()
+        previous_kong, previous_ngx = _G.kong, _G.ngx
+    end)
+    after_each(function()
+        _G.kong, _G.ngx = previous_kong, previous_ngx
+    end)
+    it("exports a bodyless rejection and its model before success-only usage", function()
+        local values = {}
+        _G.ngx = { var = { request_time = "0.01" } }
+        _G.kong = {
+            ctx = { plugin = { request_model = "not-configured", routing_decision = {
+                result = "unassigned", reason = "model_not_found",
+            } }, shared = { neutree_ai_gateway_model_routing = { request = {}, routing = {} } } },
+            service = { response = { get_status = function() return nil end } },
+            response = { get_status = function() return 400 end },
+            node = { get_id = function() return "node-a" end },
+            log = { set_serialize_value = function(k, v) values[k] = v end },
+        }
+        handler:log({ model_routes = {} })
+        assert.are.equal("not-configured", values["ai.trace.request_model"])
+        assert.are.equal("unassigned", values["ai.trace.routing"].result)
+        assert.are.equal("node-a", values["ai.trace.routing"].gateway_instance)
+        assert.is_nil(values["ai.trace.request_body"])
+        assert.is_nil(values["ai.statistics.meta"])
+    end)
+end)

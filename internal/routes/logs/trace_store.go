@@ -50,7 +50,7 @@ func newTraceStore(deps *Dependencies) *traceStore {
 const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
 	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
-	"finish_reason, stream, user_agent, duration_ms, body_truncated"
+	"finish_reason, stream, user_agent, duration_ms, body_truncated, routing"
 
 // fullProjection extends listProjection with the large request/response body
 // columns plus the chunked-body metadata needed to reassemble oversized
@@ -81,6 +81,14 @@ const (
 // traceFilters are the caller-facing list filters. The store translates them
 // to LogsQL; handlers never build query fragments themselves.
 type traceFilters struct {
+	RequestModel    string
+	Upstream        string
+	UpstreamModel   string
+	GatewayInstance string
+	RoutingResult   string
+	RoutingReason   string
+	RequestMode     string
+
 	EndpointName string
 	EndpointType string
 	Status       string
@@ -119,6 +127,30 @@ func (f traceFilters) clauses() []string {
 			"(request_model:=%s OR response_model:=%s)",
 			logsQLQuoteValue(f.Model), logsQLQuoteValue(f.Model),
 		))
+	}
+
+	if f.RequestModel != "" {
+		out = append(out, fmt.Sprintf("request_model:=%s", logsQLQuoteValue(f.RequestModel)))
+	}
+	if f.Upstream != "" {
+		out = append(out, fmt.Sprintf("upstream:=%s", logsQLQuoteValue(f.Upstream)))
+	}
+	if f.UpstreamModel != "" {
+		out = append(out, fmt.Sprintf("upstream_model:=%s", logsQLQuoteValue(f.UpstreamModel)))
+	}
+	if f.GatewayInstance != "" {
+		out = append(out, fmt.Sprintf("gateway_instance:=%s", logsQLQuoteValue(f.GatewayInstance)))
+	}
+	if f.RoutingResult != "" {
+		out = append(out, fmt.Sprintf("routing_result:=%s", logsQLQuoteValue(f.RoutingResult)))
+	}
+	if f.RoutingReason != "" {
+		out = append(out, fmt.Sprintf("routing_reason:=%s", logsQLQuoteValue(f.RoutingReason)))
+	}
+	if f.RequestMode == "stream" {
+		out = append(out, `(request_mode:="stream" OR (request_mode:="" stream:="true"))`)
+	} else if f.RequestMode == "non_stream" {
+		out = append(out, `(request_mode:="non_stream" OR (request_mode:="" stream:="false"))`)
 	}
 
 	return out
@@ -618,6 +650,8 @@ func parseFloatLoose(s string) float64 {
 // vlRecord matches the shape Vector writes to VictoriaLogs.
 // All values come back as strings; we coerce types we care about.
 type vlRecord struct {
+	Routing string `json:"routing"`
+
 	Time             string `json:"_time"`
 	Stream           string `json:"_stream,omitempty"`
 	RequestID        string `json:"request_id"`
@@ -667,6 +701,14 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 		ResponseBody:  r.ResponseBody,
 		BodyTruncated: r.BodyTruncated == stringTrue,
 		bodyChunked:   r.BodyChunked == stringTrue,
+	}
+
+	if r.Routing != "" {
+		var decision TraceRouting
+		// Malformed optional evidence must not hide an otherwise readable log.
+		if json.Unmarshal([]byte(r.Routing), &decision) == nil && decision.Result != "" {
+			t.Routing = &decision
+		}
 	}
 
 	if n, err := strconv.Atoi(r.RequestChunks); err == nil {

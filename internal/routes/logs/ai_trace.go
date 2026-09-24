@@ -14,6 +14,29 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+// TraceRouting is the decision captured during this request, not current config.
+// Candidate evidence is bounded at ingestion and included in lists and exports.
+type TraceRouting struct {
+	Result          string               `json:"result"`
+	Reason          string               `json:"reason,omitempty"`
+	GatewayInstance string               `json:"gateway_instance,omitempty"`
+	Selected        *TraceRoutingTarget  `json:"selected,omitempty"`
+	Skipped         []TraceRoutingTarget `json:"skipped,omitempty"`
+	SkippedTotal    int                  `json:"skipped_total,omitempty"`
+}
+
+// Inflight is the local count immediately before this request's admission.
+// nil means the counter could not be observed; a zero limit means unlimited.
+type TraceRoutingTarget struct {
+	Upstream            string `json:"upstream"`
+	UpstreamModel       string `json:"upstream_model"`
+	Priority            int    `json:"priority"`
+	Weight              int    `json:"weight"`
+	MaxInflightRequests int    `json:"max_inflight_requests"`
+	Inflight            *int   `json:"inflight,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+}
+
 // AITrace is one inference trace record returned to the SPA.
 //
 // Mirrors the shape Vector pushes to VictoriaLogs, with response_status
@@ -21,25 +44,26 @@ import (
 // leaves RequestBody/ResponseBody empty — they are large and unused by the
 // list view; the detail endpoint populates them for a single record.
 type AITrace struct {
-	RequestID        string `json:"request_id"`
-	Time             string `json:"time"`
-	Workspace        string `json:"workspace"`
-	EndpointType     string `json:"endpoint_type"`
-	EndpointName     string `json:"endpoint_name"`
-	APIKeyID         string `json:"api_key_id,omitempty"`
-	RequestURI       string `json:"request_uri,omitempty"`
-	RequestModel     string `json:"request_model,omitempty"`
-	ResponseModel    string `json:"response_model,omitempty"`
-	ResponseStatus   int    `json:"response_status"`
-	PromptTokens     *int   `json:"prompt_tokens,omitempty"`
-	CompletionTokens *int   `json:"completion_tokens,omitempty"`
-	TotalTokens      *int   `json:"total_tokens,omitempty"`
-	FinishReason     string `json:"finish_reason,omitempty"`
-	Stream           bool   `json:"stream"`
-	UserAgent        string `json:"user_agent,omitempty"`
-	DurationMs       *int   `json:"duration_ms,omitempty"`
-	RequestBody      string `json:"request_body,omitempty"`
-	ResponseBody     string `json:"response_body,omitempty"`
+	Routing          *TraceRouting `json:"routing,omitempty"`
+	RequestID        string        `json:"request_id"`
+	Time             string        `json:"time"`
+	Workspace        string        `json:"workspace"`
+	EndpointType     string        `json:"endpoint_type"`
+	EndpointName     string        `json:"endpoint_name"`
+	APIKeyID         string        `json:"api_key_id,omitempty"`
+	RequestURI       string        `json:"request_uri,omitempty"`
+	RequestModel     string        `json:"request_model,omitempty"`
+	ResponseModel    string        `json:"response_model,omitempty"`
+	ResponseStatus   int           `json:"response_status"`
+	PromptTokens     *int          `json:"prompt_tokens,omitempty"`
+	CompletionTokens *int          `json:"completion_tokens,omitempty"`
+	TotalTokens      *int          `json:"total_tokens,omitempty"`
+	FinishReason     string        `json:"finish_reason,omitempty"`
+	Stream           bool          `json:"stream"`
+	UserAgent        string        `json:"user_agent,omitempty"`
+	DurationMs       *int          `json:"duration_ms,omitempty"`
+	RequestBody      string        `json:"request_body,omitempty"`
+	ResponseBody     string        `json:"response_body,omitempty"`
 
 	// BodyTruncated marks a record whose bodies exceeded the ingestion cap and
 	// were cut off by Vector; the stored bodies are a prefix of the originals.
@@ -392,6 +416,14 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		filters := traceFilters{
+			RequestModel:    strings.TrimSpace(c.Query("request_model")),
+			Upstream:        strings.TrimSpace(c.Query("upstream")),
+			UpstreamModel:   strings.TrimSpace(c.Query("upstream_model")),
+			GatewayInstance: strings.TrimSpace(c.Query("gateway_instance")),
+			RoutingResult:   strings.TrimSpace(c.Query("routing_result")),
+			RoutingReason:   strings.TrimSpace(c.Query("routing_reason")),
+			RequestMode:     strings.TrimSpace(c.Query("request_mode")),
+
 			EndpointName: strings.TrimSpace(c.Query("endpoint_name")),
 			EndpointType: strings.TrimSpace(c.Query("endpoint_type")),
 			Status:       strings.TrimSpace(c.Query("status")),

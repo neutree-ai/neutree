@@ -209,3 +209,42 @@ describe("unlimited target observation", function()
         routing.finish(state)
     end)
 end)
+
+describe("request routing evidence", function()
+    it("captures pre-admission capacity without credentials, independently of later releases", function()
+        local conf = { model_routes = {{ model = "chat", targets = {
+            { upstream = "a", upstream_model = "m", priority = 0, max_inflight_requests = 1, api_key = "secret" },
+            { upstream = "b", upstream_model = "m2", priority = 1, weight = 3 },
+        }}} }
+        local values = {}
+        local env = { shared = shared(values) }
+        local first = assert(routing.begin(conf, "chat", env))
+        assert(routing.next(first))
+        local second = assert(routing.begin(conf, "chat", env))
+        assert.are.equal("b", assert(routing.next(second)).upstream)
+        routing.finish(first)
+        routing.finish(second)
+        assert.are.equal("selected", second.decision.result)
+        assert.are.equal("capacity_filtered", second.decision.reason)
+        assert.are.equal(1, second.decision.skipped_total)
+        assert.are.same({ upstream = "a", upstream_model = "m", priority = 0,
+            weight = 1, max_inflight_requests = 1, inflight = 1, reason = "capacity_exhausted" }, second.decision.skipped[1])
+        assert.are.equal(0, second.decision.selected.inflight)
+        assert.are.equal(3, second.decision.selected.weight)
+        assert.are.equal(1, second.decision.selected.priority)
+    end)
+
+    it("bounds evidence while preserving the real skipped count and result", function()
+        local targets = {}
+        for i = 1, 40 do targets[i] = { upstream = "u" .. i, upstream_model = "m", max_inflight_requests = 1 } end
+        local state = assert(routing.begin({model_routes = {{model = "m", targets = targets}}}, "m",
+            { shared = { incr = function(_, _, amount) return amount == 1 and 2 or 1 end } }))
+        local target, reason = routing.next(state)
+        assert.is_nil(target)
+        assert.are.equal("capacity_exhausted", reason)
+        assert.are.equal("unassigned", state.decision.result)
+        assert.are.equal(reason, state.decision.reason)
+        assert.are.equal(40, state.decision.skipped_total)
+        assert.are.equal(32, #state.decision.skipped)
+    end)
+end)
