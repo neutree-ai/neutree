@@ -231,7 +231,7 @@ func (o *options) acceleratorEvidenceProviders(
 		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
 			NodeIP:       o.nodeIP,
-			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
+			ProcFSRoot:   o.procFSRoot,
 		}
 
 		return nil, rayProvider

@@ -10,17 +10,6 @@ import (
 
 const defaultProcFSRoot = "/proc"
 
-// ProcessEnvReader observes the raw environment of a local process.
-type ProcessEnvReader interface {
-	Env(pid int) (map[string]string, error)
-}
-
-type ProcessEnvReaderFunc func(pid int) (map[string]string, error)
-
-func (f ProcessEnvReaderFunc) Env(pid int) (map[string]string, error) {
-	return f(pid)
-}
-
 type ProcFSEnvReader struct {
 	Root string
 }
@@ -59,10 +48,21 @@ type ProcessDescendantReader interface {
 	DescendantPIDs(ancestorPID int) ([]int, error)
 }
 
-type ProcessDescendantReaderFunc func(ancestorPID int) ([]int, error)
+// newProcessTree returns the topology source for one collection: a snapshot of
+// the tree at root, or the per-call reader when the tree cannot be read - which
+// fails the way a missing /proc always did, and which callers already tolerate.
+//
+// It is a constructor rather than an accessor on purpose. Building the snapshot
+// is a read of every process on the node, so its lifetime has to be the
+// collection: a value built once and kept would answer from the tree as it was
+// when it was built.
+func newProcessTree(root string) ProcessDescendantReader {
+	reader, err := NewCachedProcessDescendantReader(root)
+	if err == nil {
+		return reader
+	}
 
-func (f ProcessDescendantReaderFunc) DescendantPIDs(ancestorPID int) ([]int, error) {
-	return f(ancestorPID)
+	return ProcFSProcessTreeReader{Root: root}
 }
 
 type ProcFSProcessTreeReader struct {
@@ -135,7 +135,7 @@ func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReade
 		return CachedProcessDescendantReader{}, err
 	}
 
-	snapshot := CachedProcessDescendantReader{
+	reader := CachedProcessDescendantReader{
 		childrenByPID: make(map[int][]int, len(entries)),
 	}
 
@@ -154,10 +154,10 @@ func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReade
 			continue
 		}
 
-		snapshot.childrenByPID[parentPID] = append(snapshot.childrenByPID[parentPID], pid)
+		reader.childrenByPID[parentPID] = append(reader.childrenByPID[parentPID], pid)
 	}
 
-	return snapshot, nil
+	return reader, nil
 }
 
 // DescendantPIDs returns the ancestor followed by its descendants, sorted

@@ -13,6 +13,11 @@ import (
 )
 
 func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeProcStatusFile(t, root, 1234, 100)
+	writeProcStatusFile(t, root, 2345, 1234)
+	writeProcEnvironFile(t, root, 1234, "VENDOR_VISIBLE_DEVICES=0")
+
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
 			nodes: []v1.NodeSummary{{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}}},
@@ -32,15 +37,8 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 				"actor-a": {ActorID: "actor-a", NodeID: "node-a", PID: 1234, RequiredResources: map[string]float64{"vendor.com/accelerator": 1}},
 			},
 		},
-		NodeIP: "10.0.0.10",
-		ProcEnv: ProcessEnvReaderFunc(func(pid int) (map[string]string, error) {
-			require.Equal(t, 1234, pid)
-			return map[string]string{"VENDOR_VISIBLE_DEVICES": "0"}, nil
-		}),
-		ProcessDescendants: ProcessDescendantReaderFunc(func(pid int) ([]int, error) {
-			require.Equal(t, 1234, pid)
-			return []int{2345, 1234}, nil
-		}),
+		NodeIP:     "10.0.0.10",
+		ProcFSRoot: root,
 	}
 
 	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
@@ -53,6 +51,7 @@ func TestRayServeAllocationProviderBuildsStaticAcceleratorEvidence(t *testing.T)
 	assert.Equal(t, "actor-a", evidence.RayEvidence.Replicas[0].ActorID)
 	assert.Equal(t, map[string]interface{}{"num_gpus": 0.5}, evidence.RayEvidence.Replicas[0].DeploymentOptions)
 	assert.Equal(t, []int{1234, 2345}, evidence.RayEvidence.ActorProcesses[1234].DescendantPIDs)
+	assert.Equal(t, 100, evidence.RayEvidence.ActorProcesses[1234].ParentPID)
 	assert.Equal(t, "0", evidence.RayEvidence.ActorProcesses[1234].Environment["VENDOR_VISIBLE_DEVICES"])
 }
 
@@ -64,12 +63,9 @@ func TestRayServeAllocationProviderKeepsActorEvidenceWhenApplicationsFail(t *tes
 			actors:          map[string]dashboard.Actor{"actor-a": {ActorID: "actor-a", NodeID: "node-a", PID: 1234}},
 		},
 		NodeIP: "10.0.0.10",
-		ProcEnv: ProcessEnvReaderFunc(func(int) (map[string]string, error) {
-			return nil, errors.New("process disappeared")
-		}),
-		ProcessDescendants: ProcessDescendantReaderFunc(func(pid int) ([]int, error) {
-			return []int{pid}, nil
-		}),
+		// Readable but empty: the actor's PID is not in it, so every per-process
+		// read misses the way it does once the process is gone.
+		ProcFSRoot: t.TempDir(),
 	}
 
 	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
@@ -83,6 +79,9 @@ func TestRayServeAllocationProviderKeepsActorEvidenceWhenApplicationsFail(t *tes
 }
 
 func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing.T) {
+	root := t.TempDir()
+	writeProcStatusFile(t, root, 1234, 1)
+
 	provider := RayServeAllocationProvider{
 		Dashboard: &fakeRayDashboardService{
 			nodes: []v1.NodeSummary{{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}}},
@@ -103,12 +102,8 @@ func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing
 			},
 		},
 		NodeIP: "10.0.0.10",
-		ProcEnv: ProcessEnvReaderFunc(func(int) (map[string]string, error) {
-			return nil, errors.New("process disappeared")
-		}),
-		ProcessDescendants: ProcessDescendantReaderFunc(func(pid int) ([]int, error) {
-			return []int{pid}, nil
-		}),
+		// Only the live actor's PID exists: the dead one's process is gone.
+		ProcFSRoot: root,
 	}
 
 	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
@@ -144,14 +139,11 @@ func TestRayServeAllocationProviderWithoutNodeIPReturnsEmptyEvidence(t *testing.
 }
 
 func TestRayEvidenceHelpersHandleProcRoots(t *testing.T) {
-	provider := RayServeAllocationProvider{
-		ProcEnv:            ProcFSEnvReader{Root: "/custom/proc"},
-		ProcessDescendants: ProcFSProcessTreeReader{Root: "/custom/descendants"},
-	}
+	provider := RayServeAllocationProvider{ProcFSRoot: "/custom/proc"}
 
 	assert.Equal(t, "/custom/proc", provider.procFSRoot())
-	assert.NotNil(t, provider.processEnvReader())
-	assert.NotNil(t, provider.processDescendantReader())
+	assert.Equal(t, "/custom/proc", provider.processEnvReader().Root)
+	assert.Equal(t, defaultProcFSRoot, (RayServeAllocationProvider{}).procFSRoot())
 	assert.Nil(t, (RayServeAllocationProvider{}).dashboardService())
 }
 

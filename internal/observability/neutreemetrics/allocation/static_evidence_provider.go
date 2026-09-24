@@ -14,11 +14,14 @@ import (
 // static-cluster adapter. It does not infer accelerator ownership; the selected
 // adapter joins this evidence with vendor exporter data using its own rules.
 type RayServeAllocationProvider struct {
-	Dashboard          dashboard.DashboardService
-	DashboardURL       string
-	NodeIP             string
-	ProcEnv            ProcessEnvReader
-	ProcessDescendants ProcessDescendantReader
+	Dashboard    dashboard.DashboardService
+	DashboardURL string
+	NodeIP       string
+	// ProcFSRoot is the /proc mount this provider reads. Everything it builds -
+	// the environment reader, the process tree snapshot, the parent lookup - is
+	// rooted here, which is why the root is an input and not something recovered
+	// from a reader by type assertion.
+	ProcFSRoot string
 }
 
 func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
@@ -71,7 +74,7 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	envReader := p.processEnvReader()
-	descendantReader := p.processDescendantReader()
+	descendantReader := newProcessTree(p.procFSRoot())
 	actorProcesses := make(map[int]adapter.ProcessInfo, len(liveActors))
 
 	for _, actor := range liveActors {
@@ -271,39 +274,13 @@ func (p RayServeAllocationProvider) rayNodeID(service dashboard.DashboardService
 	return rayserve.NodeIDByIP(service, p.NodeIP)
 }
 
-func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
-	if p.ProcEnv != nil {
-		return p.ProcEnv
-	}
-
-	return ProcFSEnvReader{}
-}
-
-// processDescendantReader resolves the topology source for one collection.
-//
-// It is called once per collection, and building the snapshot here is what makes
-// every actor share a single enumeration of /proc instead of paying for its own.
-// An injected reader is returned untouched; a snapshot that cannot be built
-// degrades to the per-call reader, which fails the way a missing /proc always
-// did and which the actor loop already tolerates.
-func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantReader {
-	if p.ProcessDescendants != nil {
-		return p.ProcessDescendants
-	}
-
-	root := p.procFSRoot()
-
-	snapshot, err := NewCachedProcessDescendantReader(root)
-	if err != nil {
-		return ProcFSProcessTreeReader{Root: root}
-	}
-
-	return snapshot
+func (p RayServeAllocationProvider) processEnvReader() ProcFSEnvReader {
+	return ProcFSEnvReader{Root: p.procFSRoot()}
 }
 
 func (p RayServeAllocationProvider) actorProcessInfo(
 	pid int,
-	envReader ProcessEnvReader,
+	envReader ProcFSEnvReader,
 	descendantReader ProcessDescendantReader,
 ) (adapter.ProcessInfo, bool) {
 	if pid <= 0 {
@@ -326,15 +303,11 @@ func (p RayServeAllocationProvider) actorProcessInfo(
 }
 
 func (p RayServeAllocationProvider) procFSRoot() string {
-	if reader, ok := p.ProcEnv.(ProcFSEnvReader); ok && strings.TrimSpace(reader.Root) != "" {
-		return reader.Root
+	if strings.TrimSpace(p.ProcFSRoot) == "" {
+		return defaultProcFSRoot
 	}
 
-	if reader, ok := p.ProcessDescendants.(ProcFSProcessTreeReader); ok && strings.TrimSpace(reader.Root) != "" {
-		return reader.Root
-	}
-
-	return defaultProcFSRoot
+	return p.ProcFSRoot
 }
 
 func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
