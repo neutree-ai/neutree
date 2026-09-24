@@ -97,10 +97,6 @@ transforms:
       req_body = to_string(.ai."trace".request_body) ?? ""
       resp_body = to_string(.ai."trace".response_body) ?? ""
 
-      request_mode = .ai."trace".request_mode
-      if !exists(.ai."trace".request_mode) {
-          request_mode = if .ai."trace".stream == true { "stream" } else { "non_stream" }
-      }
       rec = {
           # VictoriaLogs rejects records without a non-empty `_msg`. Failed
           # requests often carry no response body, so `_msg` must be a field
@@ -119,7 +115,6 @@ transforms:
           # fields and must distinguish "no token/latency data" from a real 0.
           "api_key_id":     .consumer.custom_id || "",
           "request_uri":    .request.uri || "",
-          "request_mode": request_mode,
           "upstream": .ai."trace".upstream || "",
           "upstream_model": .ai."trace".upstream_model || "",
           "request_model":  .ai."trace".request_model || .ai."statistics".meta.request_model || "",

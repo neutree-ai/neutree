@@ -115,7 +115,6 @@ Examples:
 	f.StringVar(&opts.filter.RequestModel, "request-model", "", "Filter by request model")
 	f.StringVar(&opts.filter.Upstream, "upstream", "", "Filter by upstream")
 	f.StringVar(&opts.filter.UpstreamModel, "upstream-model", "", "Filter by upstream model")
-	f.StringVar(&opts.filter.RequestMode, "request-mode", "", "Filter by request mode")
 
 	cmd.MarkFlagsMutuallyExclusive("workspace", "all-workspaces")
 

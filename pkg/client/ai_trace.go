@@ -71,7 +71,6 @@ type TraceListFilters struct {
 	RequestModel  string
 	Upstream      string
 	UpstreamModel string
-	RequestMode   string
 
 	EndpointName string
 	EndpointType string
@@ -127,7 +126,6 @@ func (s *TracesService) ListPage(workspace string, filters TraceListFilters, bef
 	setIfNotEmpty(params, "request_model", filters.RequestModel)
 	setIfNotEmpty(params, "upstream", filters.Upstream)
 	setIfNotEmpty(params, "upstream_model", filters.UpstreamModel)
-	setIfNotEmpty(params, "request_mode", filters.RequestMode)
 
 	setIfNotEmpty(params, "start", filters.Start)
 

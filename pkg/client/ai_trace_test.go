@@ -22,7 +22,6 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		require.Equal(t, "client-model", q.Get("request_model"))
 		require.Equal(t, "id/with & spaces", q.Get("request_id"))
 		require.Equal(t, "provider", q.Get("upstream"))
-		require.Equal(t, "stream", q.Get("request_mode"))
 		require.Equal(t, "2026-07-01T00:00:00Z", q.Get("start"))
 		// before takes precedence over the filter's End.
 		require.Equal(t, "2026-07-14T00:00:00Z", q.Get("before"))
@@ -45,7 +44,6 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		RequestModel: "client-model",
 		RequestID:    "id/with & spaces",
 		Upstream:     "provider",
-		RequestMode:  "stream",
 		Start:        "2026-07-01T00:00:00Z",
 		End:          "2026-07-10T00:00:00Z", // must be ignored when before is set
 	}, "2026-07-14T00:00:00Z", 100, true)

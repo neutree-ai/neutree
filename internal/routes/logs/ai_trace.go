@@ -398,7 +398,6 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 			RequestModel:  strings.TrimSpace(c.Query("request_model")),
 			Upstream:      strings.TrimSpace(c.Query("upstream")),
 			UpstreamModel: strings.TrimSpace(c.Query("upstream_model")),
-			RequestMode:   strings.TrimSpace(c.Query("request_mode")),
 
 			EndpointName: strings.TrimSpace(c.Query("endpoint_name")),
 			EndpointType: strings.TrimSpace(c.Query("endpoint_type")),

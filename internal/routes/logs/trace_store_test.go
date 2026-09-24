@@ -310,7 +310,7 @@ func TestDestinationAndScopedRequestIDFilter(t *testing.T) {
 	fake := &fakeVL{responses: []string{string(record)}}
 	server := fake.server(t)
 	defer server.Close()
-	rows, err := newTestStore(server.URL).List(`workspace:="ws" endpoint_type:="external-endpoint"`, traceFilters{RequestID: `a" OR *`, RequestModel: "client-model", Upstream: "b", UpstreamModel: "m2", RequestMode: "non_stream"}, 10, true, timeWindow{})
+	rows, err := newTestStore(server.URL).List(`workspace:="ws" endpoint_type:="external-endpoint"`, traceFilters{RequestID: `a" OR *`, RequestModel: "client-model", Upstream: "b", UpstreamModel: "m2"}, 10, true, timeWindow{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "client-model", rows[0].RequestModel)
@@ -319,7 +319,6 @@ func TestDestinationAndScopedRequestIDFilter(t *testing.T) {
 	require.Equal(t, "m2", rows[0].UpstreamModel)
 	require.Contains(t, fake.queries[0], `workspace:="ws" endpoint_type:="external-endpoint"`)
 	require.Contains(t, fake.queries[0], `request_id:="a\" OR *"`)
-	require.Contains(t, fake.queries[0], `stream:="false"`)
 	require.Contains(t, fake.queries[0], `upstream:="b"`)
 	require.Contains(t, fake.queries[0], `upstream_model:="m2"`)
 }

@@ -1621,8 +1621,6 @@ function AIGatewayHandler:log(conf)
     end
     -- Whether the client requested a streaming response.
     kong.log.set_serialize_value("ai.trace.stream", kong.ctx.plugin.is_stream == true)
-    kong.log.set_serialize_value("ai.trace.request_mode", kong.ctx.plugin.is_stream == nil and "unknown"
-        or (kong.ctx.plugin.is_stream and "stream" or "non_stream"))
 
     -- Request identity and destination also belong to failed/bodyless logs,
     -- independent of the success-only token accounting below.

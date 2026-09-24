@@ -85,7 +85,6 @@ type traceFilters struct {
 	RequestModel  string
 	Upstream      string
 	UpstreamModel string
-	RequestMode   string
 
 	EndpointName string
 	EndpointType string
@@ -141,12 +140,6 @@ func (f traceFilters) clauses() []string {
 
 	if f.UpstreamModel != "" {
 		out = append(out, fmt.Sprintf("upstream_model:=%s", logsQLQuoteValue(f.UpstreamModel)))
-	}
-
-	if f.RequestMode == "stream" {
-		out = append(out, `(request_mode:="stream" OR (request_mode:="" stream:="true"))`)
-	} else if f.RequestMode == "non_stream" {
-		out = append(out, `(request_mode:="non_stream" OR (request_mode:="" stream:="false"))`)
 	}
 
 	return out
