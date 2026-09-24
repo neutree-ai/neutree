@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -144,4 +145,24 @@ func TestUsageJSONWriterEmitsValidArray(t *testing.T) {
 func TestUsageUnsupportedFormat(t *testing.T) {
 	_, err := newUsageWriter("xml", &bytes.Buffer{})
 	require.Error(t, err)
+}
+
+func TestCSVDestination(t *testing.T) {
+	var buf bytes.Buffer
+	w, err := newTraceWriter("csv", &buf)
+	require.NoError(t, err)
+	require.NoError(t, w.Write(client.AITrace{RequestID: "a", Upstream: "provider", UpstreamModel: "model"}))
+	require.NoError(t, w.Close())
+	rows, err := csv.NewReader(&buf).ReadAll()
+	require.NoError(t, err)
+	for i, column := range rows[0] {
+		switch column {
+		case "upstream":
+			require.Equal(t, "provider", rows[1][i])
+		case "upstream_model":
+			require.Equal(t, "model", rows[1][i])
+		}
+	}
+	require.Contains(t, rows[0], "upstream")
+	require.Contains(t, rows[0], "upstream_model")
 }

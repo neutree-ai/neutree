@@ -21,6 +21,8 @@ import (
 // leaves RequestBody/ResponseBody empty — they are large and unused by the
 // list view; the detail endpoint populates them for a single record.
 type AITrace struct {
+	Upstream         string `json:"upstream,omitempty"`
+	UpstreamModel    string `json:"upstream_model,omitempty"`
 	RequestID        string `json:"request_id"`
 	Time             string `json:"time"`
 	Workspace        string `json:"workspace"`
@@ -392,6 +394,11 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		filters := traceFilters{
+			RequestID:     strings.TrimSpace(c.Query("request_id")),
+			RequestModel:  strings.TrimSpace(c.Query("request_model")),
+			Upstream:      strings.TrimSpace(c.Query("upstream")),
+			UpstreamModel: strings.TrimSpace(c.Query("upstream_model")),
+
 			EndpointName: strings.TrimSpace(c.Query("endpoint_name")),
 			EndpointType: strings.TrimSpace(c.Query("endpoint_type")),
 			Status:       strings.TrimSpace(c.Query("status")),
