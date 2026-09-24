@@ -94,16 +94,6 @@
           }
         ],
         "hide": 0
-      },
-      {
-        "name": "logs_url",
-        "type": "textbox",
-        "query": "",
-        "current": {
-          "text": "",
-          "value": ""
-        },
-        "hide": 2
       }
     ]
   },
@@ -1476,16 +1466,6 @@
               {
                 "id": "custom.inspect",
                 "value": true
-              },
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "title": "查看调用日志",
-                    "url": "${logs_url:raw}&from=${__from}&to=${__to}&request_model=${__data.fields[\"对外模型\"]:percentencode}&upstream=${__data.fields[\"上游\"]:percentencode}&upstream_model=${__data.fields[\"上游模型\"]:percentencode}",
-                    "targetBlank": true
-                  }
-                ]
               }
             ]
           },
