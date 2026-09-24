@@ -130,7 +130,7 @@ data:
               # fields and must distinguish "no token/latency data" from a real 0.
               "api_key_id":     .consumer.custom_id || "",
               "request_uri":    .request.uri || "",
-              "request_mode": .ai."trace".request_mode || if .ai."trace".stream == true { "stream" } else { "non_stream" },
+              "request_mode": .ai."trace".request_mode || (if .ai."trace".stream == true { "stream" } else { "non_stream" }),
               "routing_result": .ai."trace".routing.result || "",
               "routing_reason": .ai."trace".routing.reason || "",
               "upstream": .ai."trace".routing.selected.upstream || "",
