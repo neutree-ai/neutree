@@ -30,53 +30,31 @@ const AllWorkspaces = "_all_"
 // MaxTracePageSize is the largest page the list endpoint accepts per request.
 const MaxTracePageSize = 500
 
-// TraceRouting is the decision captured during this request, not current config.
-// Candidate evidence is bounded at ingestion and included in lists and exports.
-type TraceRouting struct {
-	Result          string               `json:"result"`
-	Reason          string               `json:"reason,omitempty"`
-	GatewayInstance string               `json:"gateway_instance,omitempty"`
-	Selected        *TraceRoutingTarget  `json:"selected,omitempty"`
-	Skipped         []TraceRoutingTarget `json:"skipped,omitempty"`
-	SkippedTotal    int                  `json:"skipped_total,omitempty"`
-}
-
-// Inflight is the local count immediately before this request's admission.
-// nil means the counter could not be observed; a zero limit means unlimited.
-type TraceRoutingTarget struct {
-	Upstream            string `json:"upstream"`
-	UpstreamModel       string `json:"upstream_model"`
-	Priority            int    `json:"priority"`
-	Weight              int    `json:"weight"`
-	MaxInflightRequests int    `json:"max_inflight_requests"`
-	Inflight            *int   `json:"inflight,omitempty"`
-	Reason              string `json:"reason,omitempty"`
-}
-
 // AITrace is one inference trace (access log) record. Mirrors the server-side
 // shape in internal/routes/logs/ai_trace.go. The list endpoint leaves
 // RequestBody/ResponseBody empty; the detail endpoint populates them.
 type AITrace struct {
-	Routing          *TraceRouting `json:"routing,omitempty"`
-	RequestID        string        `json:"request_id"`
-	Time             string        `json:"time"`
-	Workspace        string        `json:"workspace"`
-	EndpointType     string        `json:"endpoint_type"`
-	EndpointName     string        `json:"endpoint_name"`
-	APIKeyID         string        `json:"api_key_id,omitempty"`
-	RequestURI       string        `json:"request_uri,omitempty"`
-	RequestModel     string        `json:"request_model,omitempty"`
-	ResponseModel    string        `json:"response_model,omitempty"`
-	ResponseStatus   int           `json:"response_status"`
-	PromptTokens     *int          `json:"prompt_tokens,omitempty"`
-	CompletionTokens *int          `json:"completion_tokens,omitempty"`
-	TotalTokens      *int          `json:"total_tokens,omitempty"`
-	FinishReason     string        `json:"finish_reason,omitempty"`
-	Stream           bool          `json:"stream"`
-	UserAgent        string        `json:"user_agent,omitempty"`
-	DurationMs       *int          `json:"duration_ms,omitempty"`
-	RequestBody      string        `json:"request_body,omitempty"`
-	ResponseBody     string        `json:"response_body,omitempty"`
+	Upstream         string `json:"upstream,omitempty"`
+	UpstreamModel    string `json:"upstream_model,omitempty"`
+	RequestID        string `json:"request_id"`
+	Time             string `json:"time"`
+	Workspace        string `json:"workspace"`
+	EndpointType     string `json:"endpoint_type"`
+	EndpointName     string `json:"endpoint_name"`
+	APIKeyID         string `json:"api_key_id,omitempty"`
+	RequestURI       string `json:"request_uri,omitempty"`
+	RequestModel     string `json:"request_model,omitempty"`
+	ResponseModel    string `json:"response_model,omitempty"`
+	ResponseStatus   int    `json:"response_status"`
+	PromptTokens     *int   `json:"prompt_tokens,omitempty"`
+	CompletionTokens *int   `json:"completion_tokens,omitempty"`
+	TotalTokens      *int   `json:"total_tokens,omitempty"`
+	FinishReason     string `json:"finish_reason,omitempty"`
+	Stream           bool   `json:"stream"`
+	UserAgent        string `json:"user_agent,omitempty"`
+	DurationMs       *int   `json:"duration_ms,omitempty"`
+	RequestBody      string `json:"request_body,omitempty"`
+	ResponseBody     string `json:"response_body,omitempty"`
 
 	// BodyTruncated marks a record whose bodies exceeded the server's storage
 	// cap and were cut off at ingestion; BodyIncomplete marks one for which
@@ -89,13 +67,11 @@ type AITrace struct {
 // TraceListFilters are the optional server-side filters for a list query. Empty
 // fields are omitted from the request.
 type TraceListFilters struct {
-	RequestModel    string
-	Upstream        string
-	UpstreamModel   string
-	GatewayInstance string
-	RoutingResult   string
-	RoutingReason   string
-	RequestMode     string
+	RequestID     string
+	RequestModel  string
+	Upstream      string
+	UpstreamModel string
+	RequestMode   string
 
 	EndpointName string
 	EndpointType string
@@ -147,12 +123,10 @@ func (s *TracesService) ListPage(workspace string, filters TraceListFilters, bef
 	setIfNotEmpty(params, "api_key_id", filters.APIKeyID)
 	setIfNotEmpty(params, "finish_reason", filters.FinishReason)
 	setIfNotEmpty(params, "model", filters.Model)
+	setIfNotEmpty(params, "request_id", filters.RequestID)
 	setIfNotEmpty(params, "request_model", filters.RequestModel)
 	setIfNotEmpty(params, "upstream", filters.Upstream)
 	setIfNotEmpty(params, "upstream_model", filters.UpstreamModel)
-	setIfNotEmpty(params, "gateway_instance", filters.GatewayInstance)
-	setIfNotEmpty(params, "routing_result", filters.RoutingResult)
-	setIfNotEmpty(params, "routing_reason", filters.RoutingReason)
 	setIfNotEmpty(params, "request_mode", filters.RequestMode)
 
 	setIfNotEmpty(params, "start", filters.Start)

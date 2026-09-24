@@ -304,34 +304,33 @@ func timeMustParse(t *testing.T, s string) time.Time {
 	return parsed
 }
 
-func TestRoutingEvidenceAndScopedFilters(t *testing.T) {
-	decision := `{"result":"selected","reason":"capacity_filtered","gateway_instance":"node-a","selected":{"upstream":"b","upstream_model":"m2","priority":1,"weight":1,"max_inflight_requests":0,"inflight":0},"skipped":[{"upstream":"a","upstream_model":"m1","priority":0,"weight":1,"max_inflight_requests":1,"inflight":1,"reason":"capacity_exhausted"}],"skipped_total":1}`
-	record, err := json.Marshal(map[string]string{"request_id": "r", "request_model": "client-model", "response_status": "502", "routing_result": "selected", "routing_reason": "capacity_filtered", "upstream": "b", "upstream_model": "m2", "gateway_instance": "node-a", "routing": decision})
+func TestDestinationAndScopedRequestIDFilter(t *testing.T) {
+	record, err := json.Marshal(map[string]string{"request_id": "r", "request_model": "client-model", "response_status": "502", "upstream": "b", "upstream_model": "m2"})
 	require.NoError(t, err)
 	fake := &fakeVL{responses: []string{string(record)}}
 	server := fake.server(t)
 	defer server.Close()
-	rows, err := newTestStore(server.URL).List(`workspace:="ws" endpoint_type:="external-endpoint"`, traceFilters{RequestModel: `a" OR *`, Upstream: "b", UpstreamModel: "m2", GatewayInstance: "node-a", RoutingResult: "selected", RoutingReason: "capacity_filtered", RequestMode: "non_stream"}, 10, true, timeWindow{})
+	rows, err := newTestStore(server.URL).List(`workspace:="ws" endpoint_type:="external-endpoint"`, traceFilters{RequestID: `a" OR *`, RequestModel: "client-model", Upstream: "b", UpstreamModel: "m2", RequestMode: "non_stream"}, 10, true, timeWindow{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.NotNil(t, rows[0].Routing)
 	require.Equal(t, "client-model", rows[0].RequestModel)
 	require.Equal(t, 502, rows[0].ResponseStatus)
-	require.Equal(t, "b", rows[0].Routing.Selected.Upstream)
-	require.Equal(t, 0, *rows[0].Routing.Selected.Inflight)
-	require.Equal(t, 1, *rows[0].Routing.Skipped[0].Inflight)
+	require.Equal(t, "b", rows[0].Upstream)
+	require.Equal(t, "m2", rows[0].UpstreamModel)
 	require.Contains(t, fake.queries[0], `workspace:="ws" endpoint_type:="external-endpoint"`)
-	require.Contains(t, fake.queries[0], `request_model:="a\" OR *"`)
+	require.Contains(t, fake.queries[0], `request_id:="a\" OR *"`)
 	require.Contains(t, fake.queries[0], `stream:="false"`)
 	require.Contains(t, fake.queries[0], `upstream:="b"`)
-	require.Contains(t, fake.queries[0], `routing_result:="selected"`)
+	require.Contains(t, fake.queries[0], `upstream_model:="m2"`)
 }
 
-func TestRoutingMetadataCompatibility(t *testing.T) {
+func TestDestinationCompatibility(t *testing.T) {
 	old, ok := decodeVLRecord([]byte(`{"request_id":"old","response_status":"200"}`))
 	require.True(t, ok)
-	require.Nil(t, old.Routing)
-	summary, ok := decodeVLRecord([]byte(`{"request_id":"new","routing_result":"unassigned","routing_reason":"capacity_exhausted","routing":"broken"}`))
+	require.Empty(t, old.Upstream)
+	require.Empty(t, old.UpstreamModel)
+	previous, ok := decodeVLRecord([]byte(`{"request_id":"previous","upstream":"provider","upstream_model":"model","routing":"broken"}`))
 	require.True(t, ok)
-	require.Nil(t, summary.Routing)
+	require.Equal(t, "provider", previous.Upstream)
+	require.Equal(t, "model", previous.UpstreamModel)
 }

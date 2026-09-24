@@ -83,7 +83,7 @@ transforms:
     type: filter
     inputs:
       - parse_kong_logs
-    condition: exists(.ai."trace".request_body) || exists(.ai."trace".response_body) || exists(.ai."trace".routing)
+    condition: exists(.ai."trace".request_body) || exists(.ai."trace".response_body) || exists(.ai."trace".upstream)
   prepare_trace_payload:
     type: remap
     inputs:
@@ -101,7 +101,6 @@ transforms:
       if !exists(.ai."trace".request_mode) {
           request_mode = if .ai."trace".stream == true { "stream" } else { "non_stream" }
       }
-      routing = if exists(.ai."trace".routing) { encode_json(.ai."trace".routing) } else { "" }
       rec = {
           # VictoriaLogs rejects records without a non-empty `_msg`. Failed
           # requests often carry no response body, so `_msg` must be a field
@@ -121,12 +120,8 @@ transforms:
           "api_key_id":     .consumer.custom_id || "",
           "request_uri":    .request.uri || "",
           "request_mode": request_mode,
-          "routing_result": .ai."trace".routing.result || "",
-          "routing_reason": .ai."trace".routing.reason || "",
-          "upstream": .ai."trace".routing.selected.upstream || "",
-          "upstream_model": .ai."trace".routing.selected.upstream_model || "",
-          "gateway_instance": .ai."trace".routing.gateway_instance || "",
-          "routing": routing,
+          "upstream": .ai."trace".upstream || "",
+          "upstream_model": .ai."trace".upstream_model || "",
           "request_model":  .ai."trace".request_model || .ai."statistics".meta.request_model || "",
           "response_model": .ai."trace".response_model || .ai."statistics".meta.response_model || "",
           "response_status": .response.status,

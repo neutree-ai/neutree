@@ -206,9 +206,6 @@ local function begin_routing(conf, model)
     local state, err = routing.begin(conf, model, {
         shared = ngx.shared and ngx.shared.neutree_ai_gateway_inflight,
     })
-    -- Retain failed selections too; there may be no target but useful capacity
-    -- evidence. This is request-local data, independent of metrics collection.
-    kong.ctx.plugin.routing_decision = state and state.decision or { result = "unassigned", reason = err }
     if not state then
         return nil, err
     end
@@ -1627,7 +1624,7 @@ function AIGatewayHandler:log(conf)
     kong.log.set_serialize_value("ai.trace.request_mode", kong.ctx.plugin.is_stream == nil and "unknown"
         or (kong.ctx.plugin.is_stream and "stream" or "non_stream"))
 
-    -- Request identity and route decisions also belong to failed/bodyless logs,
+    -- Request identity and destination also belong to failed/bodyless logs,
     -- independent of the success-only token accounting below.
     if type(kong.ctx.plugin.request_model) == "string" then
         kong.log.set_serialize_value("ai.trace.request_model", kong.ctx.plugin.request_model)
@@ -1635,11 +1632,10 @@ function AIGatewayHandler:log(conf)
     if type(kong.ctx.plugin.response_model) == "string" then
         kong.log.set_serialize_value("ai.trace.response_model", kong.ctx.plugin.response_model)
     end
-    if conf.model_routes and observation.request() then
-        local decision = kong.ctx.plugin.routing_decision or { result = "not_evaluated" }
-        decision.gateway_instance = kong.node.get_id()
-        if decision.skipped then decision.skipped = json_array(decision.skipped) end
-        kong.log.set_serialize_value("ai.trace.routing", decision)
+    local request = conf.model_routes and observation.request()
+    if request then
+        kong.log.set_serialize_value("ai.trace.upstream", request.upstream or "")
+        kong.log.set_serialize_value("ai.trace.upstream_model", request.upstream_model or "")
     end
 
     if response_status ~= 200 then

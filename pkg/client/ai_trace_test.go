@@ -20,6 +20,7 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		require.Equal(t, "my-ep", q.Get("endpoint_name"))
 		require.Equal(t, "qwen", q.Get("model"))
 		require.Equal(t, "client-model", q.Get("request_model"))
+		require.Equal(t, "id/with & spaces", q.Get("request_id"))
 		require.Equal(t, "provider", q.Get("upstream"))
 		require.Equal(t, "stream", q.Get("request_mode"))
 		require.Equal(t, "2026-07-01T00:00:00Z", q.Get("start"))
@@ -42,6 +43,7 @@ func TestTracesListPageBuildsQueryAndParsesResponse(t *testing.T) {
 		EndpointName: "my-ep",
 		Model:        "qwen",
 		RequestModel: "client-model",
+		RequestID:    "id/with & spaces",
 		Upstream:     "provider",
 		RequestMode:  "stream",
 		Start:        "2026-07-01T00:00:00Z",

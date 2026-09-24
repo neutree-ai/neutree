@@ -111,12 +111,10 @@ Examples:
 	f.StringVar(&opts.filter.Status, "status", "", "Filter by HTTP response status")
 	f.StringVar(&opts.filter.APIKeyID, "api-key-id", "", "Filter by API key ID")
 	f.StringVar(&opts.filter.FinishReason, "finish-reason", "", "Filter by finish reason")
+	f.StringVar(&opts.filter.RequestID, "request-id", "", "Filter by exact request ID")
 	f.StringVar(&opts.filter.RequestModel, "request-model", "", "Filter by request model")
 	f.StringVar(&opts.filter.Upstream, "upstream", "", "Filter by upstream")
 	f.StringVar(&opts.filter.UpstreamModel, "upstream-model", "", "Filter by upstream model")
-	f.StringVar(&opts.filter.GatewayInstance, "gateway-instance", "", "Filter by gateway instance")
-	f.StringVar(&opts.filter.RoutingResult, "routing-result", "", "Filter by routing result")
-	f.StringVar(&opts.filter.RoutingReason, "routing-reason", "", "Filter by routing reason")
 	f.StringVar(&opts.filter.RequestMode, "request-mode", "", "Filter by request mode")
 
 	cmd.MarkFlagsMutuallyExclusive("workspace", "all-workspaces")

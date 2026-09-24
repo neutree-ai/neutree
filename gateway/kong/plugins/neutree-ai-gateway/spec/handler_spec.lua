@@ -217,9 +217,7 @@ describe("routing trace metadata", function()
         local values = {}
         _G.ngx = { var = { request_time = "0.01" } }
         _G.kong = {
-            ctx = { plugin = { request_model = "not-configured", routing_decision = {
-                result = "unassigned", reason = "model_not_found",
-            } }, shared = { neutree_ai_gateway_model_routing = { request = {}, routing = {} } } },
+            ctx = { plugin = { request_model = "not-configured" }, shared = { neutree_ai_gateway_model_routing = { request = {}, routing = {} } } },
             service = { response = { get_status = function() return nil end } },
             response = { get_status = function() return 400 end },
             node = { get_id = function() return "node-a" end },
@@ -227,9 +225,20 @@ describe("routing trace metadata", function()
         }
         handler:log({ model_routes = {} })
         assert.are.equal("not-configured", values["ai.trace.request_model"])
-        assert.are.equal("unassigned", values["ai.trace.routing"].result)
-        assert.are.equal("node-a", values["ai.trace.routing"].gateway_instance)
+        assert.are.equal("", values["ai.trace.upstream"])
+        assert.are.equal("", values["ai.trace.upstream_model"])
+        assert.is_nil(values["ai.trace.routing"])
         assert.is_nil(values["ai.trace.request_body"])
         assert.is_nil(values["ai.statistics.meta"])
+
+        -- A failed upstream response still identifies the selected destination.
+        kong.ctx.shared.neutree_ai_gateway_model_routing.routing.selected_target = {
+            upstream = "provider", upstream_model = "mapped-model", api_key = "must-not-export",
+        }
+        handler:log({ model_routes = {} })
+        assert.are.equal("provider", values["ai.trace.upstream"])
+        assert.are.equal("mapped-model", values["ai.trace.upstream_model"])
+        assert.is_nil(values["ai.trace.api_key"])
+        assert.is_nil(values["ai.trace.routing"])
     end)
 end)

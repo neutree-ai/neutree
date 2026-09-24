@@ -147,16 +147,22 @@ func TestUsageUnsupportedFormat(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCSVRoutingEvidence(t *testing.T) {
+func TestCSVDestination(t *testing.T) {
 	var buf bytes.Buffer
 	w, err := newTraceWriter("csv", &buf)
 	require.NoError(t, err)
-	routing := &client.TraceRouting{Result: "selected", Reason: "capacity_filtered", Selected: &client.TraceRoutingTarget{Upstream: "provider", UpstreamModel: "model"}, SkippedTotal: 1, Skipped: []client.TraceRoutingTarget{{Upstream: "full", Reason: "capacity_exhausted"}}}
-	require.NoError(t, w.Write(client.AITrace{RequestID: "a", Routing: routing}))
+	require.NoError(t, w.Write(client.AITrace{RequestID: "a", Upstream: "provider", UpstreamModel: "model"}))
 	require.NoError(t, w.Close())
 	rows, err := csv.NewReader(&buf).ReadAll()
 	require.NoError(t, err)
-	var decoded client.TraceRouting
-	require.NoError(t, json.Unmarshal([]byte(rows[1][len(csvHeader)-1]), &decoded))
-	require.Equal(t, *routing, decoded)
+	for i, column := range rows[0] {
+		switch column {
+		case "upstream":
+			require.Equal(t, "provider", rows[1][i])
+		case "upstream_model":
+			require.Equal(t, "model", rows[1][i])
+		}
+	}
+	require.Contains(t, rows[0], "upstream")
+	require.Contains(t, rows[0], "upstream_model")
 }
