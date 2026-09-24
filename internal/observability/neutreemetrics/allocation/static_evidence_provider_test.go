@@ -83,6 +83,10 @@ func TestRayServeAllocationProviderKeepsActorEvidenceWhenApplicationsFail(t *tes
 }
 
 func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing.T) {
+	if keepStale() {
+		t.Skip("NEUTREE_STATIC_KEEP_STALE=true keeps the stale actors this asserts against")
+	}
+
 	root := t.TempDir()
 	writeProcStatusFile(t, root, 1234, 1)
 
@@ -140,6 +144,10 @@ func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing
 // the snapshot attempt report itself - an absent warning is the evidence that
 // nothing was built.
 func TestRayServeAllocationProviderBuildsNoTreeWhenNothingIsProbed(t *testing.T) {
+	if legacyTree() {
+		t.Skip("NEUTREE_STATIC_TREE=legacy reads per query, so there is no snapshot to skip")
+	}
+
 	var logs bytes.Buffer
 
 	// SetOutput alone is a no-op while klog still logs to stderr, which is its

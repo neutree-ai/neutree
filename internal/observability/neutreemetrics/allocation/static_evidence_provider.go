@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/klog/v2"
 
@@ -29,6 +30,12 @@ type RayServeAllocationProvider struct {
 func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.StaticEvidence, error) {
+	// Test branch: one line per collection, so two modes can be compared on the
+	// same node against the same actor population.
+	started := time.Now()
+
+	resetProbe()
+
 	service := p.dashboardService()
 	if service == nil {
 		// dashboardService reports why it could not build one.
@@ -86,11 +93,13 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	// while the state API still lists it its lingering replica keeps it a valid
 	// candidate whose device attribution then fails - which the adapter reads as
 	// incomplete evidence.
+	filterStale := !keepStale()
+
 	liveActors := make([]dashboard.Actor, 0, len(actors))
 	liveActorIDs := make(map[string]struct{}, len(actors))
 
 	for _, actor := range actors {
-		if actorStateIsDead(actor.State) {
+		if filterStale && actorStateIsDead(actor.State) {
 			continue
 		}
 
@@ -125,6 +134,9 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	var replicas []adapter.RayReplica
+
+	replicaCount := 0
+
 	if applicationsErr == nil {
 		// Join replicas to the actors that survived, so both halves of this
 		// evidence set describe the same things. The adapter reads a replica it
@@ -132,8 +144,17 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		// suppressing the node's entire allocation view rather than reporting a
 		// partial one - so one stale replica blanks the node-level metrics for
 		// every endpoint on the node.
-		replicas = replicasWithLiveActors(rayReplicasFromApplications(applications, nodeID), liveActorIDs)
+		all := rayReplicasFromApplications(applications, nodeID)
+		replicaCount = len(all)
+
+		if filterStale {
+			all = replicasWithLiveActors(all, liveActorIDs)
+		}
+
+		replicas = all
 	}
+
+	reportCollection(len(actors), len(liveActors), replicaCount, len(replicas), started)
 
 	return adapter.StaticEvidence{
 		// A missing Serve application response cannot distinguish an empty

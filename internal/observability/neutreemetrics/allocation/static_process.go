@@ -66,6 +66,11 @@ type ProcessDescendantReader interface {
 // collection: a value built once and kept would answer from the tree as it was
 // when it was built.
 func newProcessTree(root string) ProcessDescendantReader {
+	// Test branch: the real reader this replaced, for a side-by-side run.
+	if legacyTree() {
+		return ProcFSProcessTreeReader{Root: root}
+	}
+
 	reader, err := NewCachedProcessDescendantReader(root)
 	if err == nil {
 		return reader
@@ -89,6 +94,8 @@ func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) 
 	if root == "" {
 		root = defaultProcFSRoot
 	}
+
+	countReadDir()
 
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -140,6 +147,8 @@ func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReade
 	if root == "" {
 		root = defaultProcFSRoot
 	}
+
+	countReadDir()
 
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -258,6 +267,8 @@ func isDescendant(root string, pid, ancestorPID int) (bool, error) {
 }
 
 func processParentPID(root string, pid int) (int, bool, error) {
+	countStatusRead()
+
 	raw, err := os.ReadFile(filepath.Join(root, strconv.Itoa(pid), "status"))
 	if os.IsNotExist(err) {
 		return 0, false, nil

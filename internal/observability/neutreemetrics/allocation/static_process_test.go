@@ -160,6 +160,10 @@ func TestNewProcessTreeRejectsASnapshotItCannotReadFully(t *testing.T) {
 }
 
 func TestNewProcessTreeSelectsTheReaderForTheRoot(t *testing.T) {
+	if legacyTree() {
+		t.Skip("NEUTREE_STATIC_TREE=legacy selects the per-call reader for every root")
+	}
+
 	readable := t.TempDir()
 	writeProcStatusFile(t, readable, 100, 1)
 
