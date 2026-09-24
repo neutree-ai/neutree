@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -225,13 +226,19 @@ func (o *options) acceleratorEvidenceProviders(
 		return kubernetesProvider, nil
 	case v1.SSHClusterType:
 		if o.rayDashboardURL == "" {
+			// Reported where the decision is made: no provider is built without
+			// a URL, so the provider itself can never say this.
+			klog.Warningf(
+				"No Ray dashboard URL configured: static clusters will collect no accelerator evidence",
+			)
+
 			return nil, nil
 		}
 
 		rayProvider := allocation.RayServeAllocationProvider{
 			DashboardURL: o.rayDashboardURL,
 			NodeIP:       o.nodeIP,
-			ProcEnv:      allocation.ProcFSEnvReader{Root: o.procFSRoot},
+			ProcFSRoot:   o.procFSRoot,
 		}
 
 		return nil, rayProvider
