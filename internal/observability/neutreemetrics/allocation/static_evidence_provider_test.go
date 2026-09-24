@@ -82,6 +82,60 @@ func TestRayServeAllocationProviderKeepsActorEvidenceWhenApplicationsFail(t *tes
 	assert.Empty(t, evidence.RayEvidence.ActorProcesses[1234].Environment)
 }
 
+func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing.T) {
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes: []v1.NodeSummary{{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}}},
+			applications: &dashboard.RayServeApplicationsResponse{Applications: map[string]dashboard.RayServeApplicationStatus{
+				"default_chat": {
+					Deployments: map[string]dashboard.Deployment{
+						"Backend": {Replicas: []dashboard.Replica{
+							{NodeID: "node-a", ActorID: "actor-live", ReplicaID: "replica-live"},
+							{NodeID: "node-a", ActorID: "actor-dead", ReplicaID: "replica-dead"},
+							{NodeID: "node-a", ActorID: "actor-gone", ReplicaID: "replica-gone"},
+						}},
+					},
+				},
+			}},
+			actors: map[string]dashboard.Actor{
+				"actor-live": {ActorID: "actor-live", NodeID: "node-a", PID: 1234, State: "ALIVE"},
+				"actor-dead": {ActorID: "actor-dead", NodeID: "node-a", PID: 5678, State: "DEAD"},
+			},
+		},
+		NodeIP: "10.0.0.10",
+		ProcEnv: ProcessEnvReaderFunc(func(int) (map[string]string, error) {
+			return nil, errors.New("process disappeared")
+		}),
+		ProcessDescendants: ProcessDescendantReaderFunc(func(pid int) ([]int, error) {
+			return []int{pid}, nil
+		}),
+	}
+
+	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, evidence.RayEvidence.Actors, 1)
+	assert.Equal(t, "actor-live", evidence.RayEvidence.Actors[0].ActorID)
+
+	// A DEAD actor runs no process, so it cannot be holding accelerator memory.
+	// A replica whose actor is absent is equally unallocated — the process that
+	// would own the device is gone. Both must drop out, and dropping them here
+	// keeps the two sides of this evidence set in agreement instead of leaving
+	// the adapter to read the mismatch as incomplete evidence and suppress the
+	// node's whole allocation view.
+	replicaIDs := make([]string, 0, len(evidence.RayEvidence.Replicas))
+	for _, replica := range evidence.RayEvidence.Replicas {
+		replicaIDs = append(replicaIDs, replica.ReplicaID)
+	}
+
+	assert.Equal(t, []string{"replica-live"}, replicaIDs)
+
+	_, probed := evidence.RayEvidence.ActorProcesses[5678]
+	assert.False(t, probed, "a dead actor must not be probed for its process tree")
+	_, probed = evidence.RayEvidence.ActorProcesses[1234]
+	assert.True(t, probed)
+}
+
 func TestRayServeAllocationProviderWithoutNodeIPReturnsEmptyEvidence(t *testing.T) {
 	evidence, err := (RayServeAllocationProvider{Dashboard: &fakeRayDashboardService{}}).StaticAcceleratorEvidence(context.Background())
 

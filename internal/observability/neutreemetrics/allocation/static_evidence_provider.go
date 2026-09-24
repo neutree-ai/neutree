@@ -50,11 +50,31 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		actors = append(actors, actorsResp.Data.Result.Result...)
 	}
 
-	envReader := p.processEnvReader()
-	descendantReader := p.processDescendantReader()
-	actorProcesses := make(map[int]adapter.ProcessInfo, len(actors))
+	// Ray's State API keeps reporting an actor as DEAD until it is reaped, so a
+	// busy node accumulates them. A DEAD actor has no process left to read, and
+	// while the state API still lists it its lingering replica keeps it a valid
+	// candidate whose device attribution then fails - which the adapter reads as
+	// incomplete evidence.
+	liveActors := make([]dashboard.Actor, 0, len(actors))
+	liveActorIDs := make(map[string]struct{}, len(actors))
 
 	for _, actor := range actors {
+		if actorStateIsDead(actor.State) {
+			continue
+		}
+
+		liveActors = append(liveActors, actor)
+
+		if actorID := strings.TrimSpace(actor.ActorID); actorID != "" {
+			liveActorIDs[actorID] = struct{}{}
+		}
+	}
+
+	envReader := p.processEnvReader()
+	descendantReader := p.processDescendantReader()
+	actorProcesses := make(map[int]adapter.ProcessInfo, len(liveActors))
+
+	for _, actor := range liveActors {
 		if actor.PID <= 0 {
 			continue
 		}
@@ -67,7 +87,13 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 
 	var replicas []adapter.RayReplica
 	if applicationsErr == nil {
-		replicas = rayReplicasFromApplications(applications, nodeID)
+		// Join replicas to the actors that survived, so both halves of this
+		// evidence set describe the same things. The adapter reads a replica it
+		// cannot match as incomplete evidence, and answers incomplete evidence by
+		// suppressing the node's entire allocation view rather than reporting a
+		// partial one - so one stale replica blanks the node-level metrics for
+		// every endpoint on the node.
+		replicas = replicasWithLiveActors(rayReplicasFromApplications(applications, nodeID), liveActorIDs)
 	}
 
 	return adapter.StaticEvidence{
@@ -75,11 +101,36 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		// endpoint set from unavailable allocation evidence.
 		AllocationAvailable: applicationsErr == nil && applications != nil,
 		RayEvidence: adapter.RayEvidence{
-			Actors:         rayActorsFromDashboard(actors),
+			Actors:         rayActorsFromDashboard(liveActors),
 			Replicas:       replicas,
 			ActorProcesses: actorProcesses,
 		},
 	}, nil
+}
+
+// actorStateIsDead reports whether the Ray State API marked an actor as
+// terminated. DEAD is its terminal state; every other state still describes an
+// actor that can own a device, so an unrecognised or absent state is kept.
+func actorStateIsDead(state string) bool {
+	return strings.EqualFold(strings.TrimSpace(state), "DEAD")
+}
+
+// replicasWithLiveActors drops replicas whose actor did not survive.
+func replicasWithLiveActors(
+	replicas []adapter.RayReplica,
+	liveActorIDs map[string]struct{},
+) []adapter.RayReplica {
+	result := make([]adapter.RayReplica, 0, len(replicas))
+
+	for _, replica := range replicas {
+		if _, ok := liveActorIDs[strings.TrimSpace(replica.ActorID)]; !ok {
+			continue
+		}
+
+		result = append(result, replica)
+	}
+
+	return result
 }
 
 func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
