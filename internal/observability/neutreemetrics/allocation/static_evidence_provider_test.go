@@ -1,12 +1,16 @@
 package allocation
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -129,6 +133,57 @@ func TestRayServeAllocationProviderExcludesDeadActorsAndTheirReplicas(t *testing
 	assert.False(t, probed, "a dead actor must not be probed for its process tree")
 	_, probed = evidence.RayEvidence.ActorProcesses[1234]
 	assert.True(t, probed)
+}
+
+// A snapshot is a read of every process on the node, so a collection with no
+// actor to probe must not build one. The root below cannot be read, which makes
+// the snapshot attempt report itself - an absent warning is the evidence that
+// nothing was built.
+func TestRayServeAllocationProviderBuildsNoTreeWhenNothingIsProbed(t *testing.T) {
+	var logs bytes.Buffer
+
+	// SetOutput alone is a no-op while klog still logs to stderr, which is its
+	// default: output() then never reads file[]. Both are needed, and both are
+	// restored.
+	klog.LogToStderr(false)
+	klog.SetOutput(&logs)
+
+	t.Cleanup(func() {
+		klog.LogToStderr(true)
+		klog.SetOutput(os.Stderr)
+	})
+
+	provider := RayServeAllocationProvider{
+		Dashboard: &fakeRayDashboardService{
+			nodes:  []v1.NodeSummary{{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}}},
+			actors: map[string]dashboard.Actor{},
+		},
+		NodeIP:     "10.0.0.10",
+		ProcFSRoot: filepath.Join(t.TempDir(), "gone"),
+	}
+
+	evidence, err := provider.StaticAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+
+	klog.Flush()
+	assert.Empty(t, evidence.RayEvidence.ActorProcesses)
+	assert.NotContains(t, logs.String(), "Falling back to per-call process tree reads")
+
+	// The control: the same unreadable root with an actor to probe does build,
+	// and says so. Without it the assertion above could pass on a capture that
+	// simply never sees anything.
+	provider.Dashboard = &fakeRayDashboardService{
+		nodes:  []v1.NodeSummary{{IP: "10.0.0.10", Raylet: v1.Raylet{NodeID: "node-a", State: v1.AliveNodeState}}},
+		actors: map[string]dashboard.Actor{"actor-a": {ActorID: "actor-a", NodeID: "node-a", PID: 1234}},
+	}
+
+	_, err = provider.StaticAcceleratorEvidence(context.Background())
+
+	require.NoError(t, err)
+
+	klog.Flush()
+	assert.Contains(t, logs.String(), "Falling back to per-call process tree reads")
 }
 
 func TestRayServeAllocationProviderWithoutNodeIPReturnsEmptyEvidence(t *testing.T) {

@@ -139,6 +139,26 @@ func TestCachedProcessDescendantReaderReplacesProcFSProcessTreeReader(t *testing
 	})
 }
 
+// A process whose status cannot be read - as opposed to one that has exited -
+// leaves the snapshot unable to answer for the processes beneath it. Returning
+// it anyway would under-report descendants with nothing said, so the build fails
+// and the caller falls back to per-query reads, where each miss is reported.
+func TestNewProcessTreeRejectsASnapshotItCannotReadFully(t *testing.T) {
+	root := t.TempDir()
+	writeProcStatusFile(t, root, 100, 1)
+
+	// A directory where a process's status file belongs: the root reads fine,
+	// this one entry does not.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "200", "status"), 0o755))
+
+	_, err := NewCachedProcessDescendantReader(root)
+	require.Error(t, err)
+
+	_, ok := newProcessTree(root).(ProcFSProcessTreeReader)
+
+	assert.True(t, ok, "an unreadable entry should fall back to the per-call reader")
+}
+
 func TestNewProcessTreeSelectsTheReaderForTheRoot(t *testing.T) {
 	readable := t.TempDir()
 	writeProcStatusFile(t, readable, 100, 1)

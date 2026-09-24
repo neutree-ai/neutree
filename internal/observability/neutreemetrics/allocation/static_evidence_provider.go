@@ -102,12 +102,20 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	}
 
 	envReader := p.processEnvReader()
-	descendantReader := newProcessTree(p.procFSRoot())
 	actorProcesses := make(map[int]adapter.ProcessInfo, len(liveActors))
+
+	// Built on first use. A snapshot is a read of every process on the node, and
+	// a node with no actor to probe - idle, or every actor already dead - should
+	// not pay for one it will never query.
+	var descendantReader ProcessDescendantReader
 
 	for _, actor := range liveActors {
 		if actor.PID <= 0 {
 			continue
+		}
+
+		if descendantReader == nil {
+			descendantReader = newProcessTree(p.procFSRoot())
 		}
 
 		info, ok := p.actorProcessInfo(actor.PID, envReader, descendantReader)
@@ -292,8 +300,9 @@ func (p RayServeAllocationProvider) dashboardService() dashboard.DashboardServic
 	}
 
 	if strings.TrimSpace(p.DashboardURL) == "" {
-		klog.Warningf("Static accelerator evidence is skipped: no Ray dashboard URL is configured")
-
+		// Not reported here: the node agent never builds this provider without a
+		// URL - acceleratorEvidenceProviders reports that where it decides. A
+		// provider assembled by hand and left empty simply has nowhere to read.
 		return nil
 	}
 

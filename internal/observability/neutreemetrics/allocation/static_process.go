@@ -154,7 +154,17 @@ func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReade
 		}
 
 		parentPID, ok, err := processParentPID(root, pid)
-		if err != nil || !ok {
+		// A process that exited while the tree was being read is expected and
+		// simply drops out. Anything else means this snapshot cannot be trusted
+		// to be complete, and a caller that silently gets fewer descendants than
+		// exist would go on to under-report allocations - so fail the build and
+		// let the caller fall back to reading per query, where each miss is
+		// reported.
+		if err != nil {
+			return CachedProcessDescendantReader{}, err
+		}
+
+		if !ok {
 			continue
 		}
 
