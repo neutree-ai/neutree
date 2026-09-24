@@ -132,21 +132,27 @@ func (f traceFilters) clauses() []string {
 	if f.RequestModel != "" {
 		out = append(out, fmt.Sprintf("request_model:=%s", logsQLQuoteValue(f.RequestModel)))
 	}
+
 	if f.Upstream != "" {
 		out = append(out, fmt.Sprintf("upstream:=%s", logsQLQuoteValue(f.Upstream)))
 	}
+
 	if f.UpstreamModel != "" {
 		out = append(out, fmt.Sprintf("upstream_model:=%s", logsQLQuoteValue(f.UpstreamModel)))
 	}
+
 	if f.GatewayInstance != "" {
 		out = append(out, fmt.Sprintf("gateway_instance:=%s", logsQLQuoteValue(f.GatewayInstance)))
 	}
+
 	if f.RoutingResult != "" {
 		out = append(out, fmt.Sprintf("routing_result:=%s", logsQLQuoteValue(f.RoutingResult)))
 	}
+
 	if f.RoutingReason != "" {
 		out = append(out, fmt.Sprintf("routing_reason:=%s", logsQLQuoteValue(f.RoutingReason)))
 	}
+
 	if f.RequestMode == "stream" {
 		out = append(out, `(request_mode:="stream" OR (request_mode:="" stream:="true"))`)
 	} else if f.RequestMode == "non_stream" {

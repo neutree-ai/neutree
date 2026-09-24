@@ -129,10 +129,12 @@ var csvHeader = []string{
 // export was run with --with-body.
 func traceCSVRow(t client.AITrace) []string {
 	routing := ""
+
 	if t.Routing != nil {
 		data, _ := json.Marshal(t.Routing)
 		routing = string(data)
 	}
+
 	return []string{
 		t.RequestID, t.Time, t.Workspace, t.EndpointType, t.EndpointName,
 		t.APIKeyID, t.RequestURI, t.RequestModel, t.ResponseModel,
