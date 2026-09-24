@@ -228,12 +228,26 @@ func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
 	return ProcFSEnvReader{}
 }
 
+// processDescendantReader resolves the topology source for one collection.
+//
+// It is called once per collection, and building the snapshot here is what makes
+// every actor share a single enumeration of /proc instead of paying for its own.
+// An injected reader is returned untouched; a snapshot that cannot be built
+// degrades to the per-call reader, which fails the way a missing /proc always
+// did and which the actor loop already tolerates.
 func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantReader {
 	if p.ProcessDescendants != nil {
 		return p.ProcessDescendants
 	}
 
-	return ProcFSProcessTreeReader{Root: p.procFSRoot()}
+	root := p.procFSRoot()
+
+	snapshot, err := NewCachedProcessDescendantReader(root)
+	if err != nil {
+		return ProcFSProcessTreeReader{Root: root}
+	}
+
+	return snapshot
 }
 
 func (p RayServeAllocationProvider) actorProcessInfo(

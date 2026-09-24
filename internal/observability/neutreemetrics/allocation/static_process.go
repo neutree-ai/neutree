@@ -109,6 +109,99 @@ func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) 
 	return pids, nil
 }
 
+// CachedProcessDescendantReader answers every descendant query from one
+// snapshot of the process tree, taken when it was created.
+//
+// It exists because a collection asks about every actor on a node, and each
+// answer used to cost a full enumeration of /proc plus a parent walk per
+// process. One snapshot serves them all.
+//
+// A snapshot is a point-in-time view, so its lifetime belongs to the caller:
+// build one per collection and drop it. The type is immutable once built, which
+// is why there is no lazy build and no sync.Once - a shared instance would
+// answer from a stale tree forever, and immutability makes that mistake obvious
+// rather than silent.
+type CachedProcessDescendantReader struct {
+	childrenByPID map[int][]int
+}
+
+func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReader, error) {
+	if root == "" {
+		root = defaultProcFSRoot
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return CachedProcessDescendantReader{}, err
+	}
+
+	snapshot := CachedProcessDescendantReader{
+		childrenByPID: make(map[int][]int, len(entries)),
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		parentPID, ok, err := processParentPID(root, pid)
+		if err != nil || !ok {
+			continue
+		}
+
+		snapshot.childrenByPID[parentPID] = append(snapshot.childrenByPID[parentPID], pid)
+	}
+
+	return snapshot, nil
+}
+
+// DescendantPIDs returns the ancestor followed by its descendants, sorted
+// ascending, matching the shape ProcFSProcessTreeReader produces.
+//
+// PID 1 intentionally reports no descendants: ProcFSProcessTreeReader stops its
+// parent walk at init and so can never match PID 1 as an ancestor. Preserving
+// that keeps this a pure performance change.
+func (r CachedProcessDescendantReader) DescendantPIDs(ancestorPID int) ([]int, error) {
+	if ancestorPID <= 0 {
+		return nil, nil
+	}
+
+	if ancestorPID == 1 {
+		return []int{ancestorPID}, nil
+	}
+
+	pids := []int{ancestorPID}
+	visited := map[int]struct{}{ancestorPID: {}}
+	pending := []int{ancestorPID}
+
+	// A walk, not a recursive descent: the parent links are read one process at
+	// a time, so churn can in principle produce a cycle and this must terminate.
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+
+		for _, child := range r.childrenByPID[current] {
+			if _, seen := visited[child]; seen {
+				continue
+			}
+
+			visited[child] = struct{}{}
+
+			pids = append(pids, child)
+			pending = append(pending, child)
+		}
+	}
+
+	sort.Ints(pids)
+
+	return pids, nil
+}
+
 func isDescendant(root string, pid, ancestorPID int) (bool, error) {
 	if pid <= 0 || ancestorPID <= 0 {
 		return false, nil
