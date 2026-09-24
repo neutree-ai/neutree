@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	pprof "net/http/pprof"
 	"net/url"
 	"strings"
 	"time"
@@ -144,6 +145,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/v1/node/device-snapshot", s.handleNodeDeviceSnapshot)
+
+	// Profiling is served from the listener the node agent already has, so
+	// profiling a node needs no port opened for it. Registered explicitly rather
+	// than by importing net/http/pprof for its side effect, which would publish
+	// whatever any dependency registered on DefaultServeMux as well.
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	return mux
 }

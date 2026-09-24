@@ -25,6 +25,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+// Profiling is served from the listener the node agent already has, so reaching
+// a node to profile it opens no further port.
+func TestServerServesPprofOnItsHandler(t *testing.T) {
+	server, err := NewServer(Config{})
+	require.NoError(t, err)
+
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline"} {
+		resp, err := http.Get(httpServer.URL + path)
+
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		assert.Equalf(t, http.StatusOK, resp.StatusCode, "GET %s", path)
+	}
+}
+
 func TestServerHealthAndMetrics(t *testing.T) {
 	nodeExporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/metrics", r.URL.Path)
