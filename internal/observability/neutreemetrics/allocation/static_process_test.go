@@ -51,6 +51,38 @@ func TestProcFSProcessTreeReaderRejectsInvalidAncestor(t *testing.T) {
 	assert.Nil(t, pids)
 }
 
+// The fallback is only worth falling back to if it reports what the snapshot
+// refused to answer. A status read that fails for any reason other than the
+// process having exited leaves this list short, and a short list returned as a
+// complete one under-reports descendants - which is exactly what the caller
+// cannot tell apart.
+func TestProcFSProcessTreeReaderReportsAStatusItCannotRead(t *testing.T) {
+	root := t.TempDir()
+	writeProcStatusFile(t, root, 100, 1)
+
+	// A directory where a process's status file belongs: the root reads fine,
+	// this one entry does not.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "200", "status"), 0o755))
+
+	_, err := (ProcFSProcessTreeReader{Root: root}).DescendantPIDs(100)
+
+	require.Error(t, err, "an unreadable status must not come back as a complete tree")
+}
+
+// A process that exited while the tree was being read is ordinary churn: it is
+// not in the tree any more, and skipping it says nothing false about the rest.
+func TestProcFSProcessTreeReaderSkipsAProcessThatExited(t *testing.T) {
+	root := t.TempDir()
+	writeProcStatusFile(t, root, 100, 1)
+	writeProcStatusFile(t, root, 200, 100)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "300"), 0o755))
+
+	pids, err := (ProcFSProcessTreeReader{Root: root}).DescendantPIDs(100)
+
+	require.NoError(t, err)
+	assert.Equal(t, []int{100, 200}, pids)
+}
+
 // writeProcStatusFile lays down one process entry of a fake /proc tree.
 func writeProcStatusFile(t *testing.T, root string, pid, parentPID int) {
 	t.Helper()

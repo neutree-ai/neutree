@@ -108,7 +108,15 @@ func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) 
 		}
 
 		isDescendant, err := isDescendant(root, pid, ancestorPID)
-		if err != nil || !isDescendant {
+		// The same rule the snapshot build follows: a process that exited
+		// mid-walk is ordinary churn and drops out, but any other failure means
+		// the list would come back short, and a caller that cannot tell short
+		// from complete under-reports allocations.
+		if err != nil {
+			return nil, err
+		}
+
+		if !isDescendant {
 			continue
 		}
 
