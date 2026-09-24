@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"k8s.io/klog/v2"
+
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
@@ -28,12 +30,28 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.StaticEvidence, error) {
 	service := p.dashboardService()
-	if service == nil || p.NodeIP == "" {
+	if service == nil {
+		// dashboardService reports why it could not build one.
+		return adapter.StaticEvidence{}, nil
+	}
+
+	if p.NodeIP == "" {
+		klog.Warningf("Static accelerator evidence is skipped: no node IP is configured")
+
 		return adapter.StaticEvidence{}, nil
 	}
 
 	nodeID, err := p.rayNodeID(service)
 	if err != nil || nodeID == "" {
+		// A failed lookup reaches the caller as an error and is logged there;
+		// an empty node ID returns silently, so it is the one to report here.
+		if err == nil {
+			klog.Warningf(
+				"Static accelerator evidence is skipped: node %q is not in the Ray dashboard's node list",
+				p.NodeIP,
+			)
+		}
+
 		return adapter.StaticEvidence{}, err
 	}
 
@@ -46,6 +64,16 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 
 	if err != nil {
 		return adapter.StaticEvidence{}, err
+	}
+
+	// Without serve applications the replicas cannot be resolved, so this
+	// collection will carry actors but no allocations - and the adapter answers
+	// that by emitting nothing at all, quietly.
+	if applicationsErr != nil {
+		klog.Warningf(
+			"Static accelerator evidence for node %q has no serve applications: %v",
+			p.NodeIP, applicationsErr,
+		)
 	}
 
 	actors := []dashboard.Actor{}
@@ -264,6 +292,8 @@ func (p RayServeAllocationProvider) dashboardService() dashboard.DashboardServic
 	}
 
 	if strings.TrimSpace(p.DashboardURL) == "" {
+		klog.Warningf("Static accelerator evidence is skipped: no Ray dashboard URL is configured")
+
 		return nil
 	}
 
@@ -278,6 +308,14 @@ func (p RayServeAllocationProvider) processEnvReader() ProcFSEnvReader {
 	return ProcFSEnvReader{Root: p.procFSRoot()}
 }
 
+// Each read below is silent on its own: the actor keeps its place and the field
+// is simply left out. The actor's process being unreadable is worth a line when
+// it happens - it is what makes the adapter drop the candidate and mark the
+// collection incomplete - and naming the PID is the part that helps.
+//
+// A node reaps processes between listing its actors and reading them, so a line
+// or two here is ordinary churn. Every actor reporting it means the tree being
+// read is not the one they live in.
 func (p RayServeAllocationProvider) actorProcessInfo(
 	pid int,
 	envReader ProcFSEnvReader,
@@ -287,16 +325,25 @@ func (p RayServeAllocationProvider) actorProcessInfo(
 		return adapter.ProcessInfo{}, false
 	}
 
+	descendants, err := actorDescendantPIDs(descendantReader, pid)
+	if err != nil {
+		klog.Warningf("No process tree for actor %d: %v", pid, err)
+	}
+
 	info := adapter.ProcessInfo{
 		PID:            pid,
-		DescendantPIDs: actorDescendantPIDs(descendantReader, pid),
+		DescendantPIDs: descendants,
 	}
 	if env, err := envReader.Env(pid); err == nil {
 		info.Environment = env
+	} else {
+		klog.Warningf("No environment for actor %d: %v", pid, err)
 	}
 
 	if parentPID, ok, err := processParentPID(p.procFSRoot(), pid); err == nil && ok {
 		info.ParentPID = parentPID
+	} else {
+		klog.Warningf("No parent for actor %d", pid)
 	}
 
 	return info, true
@@ -310,15 +357,18 @@ func (p RayServeAllocationProvider) procFSRoot() string {
 	return p.ProcFSRoot
 }
 
-func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
+// actorDescendantPIDs degrades to the actor's own PID when the tree cannot be
+// read, and returns the reason alongside it so the caller can total the misses
+// instead of each one going unreported.
+func actorDescendantPIDs(reader ProcessDescendantReader, pid int) ([]int, error) {
 	pids := []int{pid}
 	if reader == nil {
-		return pids
+		return pids, nil
 	}
 
 	descendants, err := reader.DescendantPIDs(pid)
 	if err != nil {
-		return pids
+		return pids, err
 	}
 
 	seen := map[int]struct{}{pid: {}}
@@ -337,5 +387,5 @@ func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
 
 	sort.Ints(pids)
 
-	return pids
+	return pids, nil
 }

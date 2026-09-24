@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 const defaultProcFSRoot = "/proc"
@@ -61,6 +63,8 @@ func newProcessTree(root string) ProcessDescendantReader {
 	if err == nil {
 		return reader
 	}
+
+	klog.Warningf("Falling back to per-call process tree reads: cannot snapshot %s: %v", root, err)
 
 	return ProcFSProcessTreeReader{Root: root}
 }
