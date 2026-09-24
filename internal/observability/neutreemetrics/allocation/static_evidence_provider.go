@@ -313,7 +313,7 @@ func (p RayServeAllocationProvider) rayNodeID(service dashboard.DashboardService
 	return rayserve.NodeIDByIP(service, p.NodeIP)
 }
 
-func (p RayServeAllocationProvider) processEnvReader() ProcFSEnvReader {
+func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
 	return ProcFSEnvReader{Root: p.procFSRoot()}
 }
 
@@ -327,7 +327,7 @@ func (p RayServeAllocationProvider) processEnvReader() ProcFSEnvReader {
 // read is not the one they live in.
 func (p RayServeAllocationProvider) actorProcessInfo(
 	pid int,
-	envReader ProcFSEnvReader,
+	envReader ProcessEnvReader,
 	descendantReader ProcessDescendantReader,
 ) (adapter.ProcessInfo, bool) {
 	if pid <= 0 {

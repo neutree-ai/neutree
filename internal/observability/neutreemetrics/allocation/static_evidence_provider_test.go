@@ -197,7 +197,10 @@ func TestRayEvidenceHelpersHandleProcRoots(t *testing.T) {
 	provider := RayServeAllocationProvider{ProcFSRoot: "/custom/proc"}
 
 	assert.Equal(t, "/custom/proc", provider.procFSRoot())
-	assert.Equal(t, "/custom/proc", provider.processEnvReader().Root)
+	envReader, ok := provider.processEnvReader().(ProcFSEnvReader)
+
+	require.True(t, ok)
+	assert.Equal(t, "/custom/proc", envReader.Root)
 	assert.Equal(t, defaultProcFSRoot, (RayServeAllocationProvider{}).procFSRoot())
 	assert.Nil(t, (RayServeAllocationProvider{}).dashboardService())
 }

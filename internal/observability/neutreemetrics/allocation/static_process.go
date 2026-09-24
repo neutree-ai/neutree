@@ -12,6 +12,13 @@ import (
 
 const defaultProcFSRoot = "/proc"
 
+// ProcessEnvReader observes the raw environment of a local process. The provider
+// builds one, but it takes one in turn, so another source of process state can
+// be substituted without touching the collection itself.
+type ProcessEnvReader interface {
+	Env(pid int) (map[string]string, error)
+}
+
 type ProcFSEnvReader struct {
 	Root string
 }
