@@ -4,6 +4,8 @@ local function target_key(state, target)
     return table.concat({ state.scope or "", state.route.model, target.upstream, target.upstream_model }, "\0")
 end
 
+M.target_key = target_key
+
 local function candidates(state)
     local selected, priority
     for _, target in ipairs(state.route.targets or {}) do
@@ -38,10 +40,6 @@ end
 
 local function capacity_lease(state, target)
     local maximum = target.max_inflight_requests or 0
-    if maximum <= 0 then
-        return function() end
-    end
-
     local shared = state.env and state.env.shared
     if not shared then
         return function() end
@@ -50,9 +48,14 @@ local function capacity_lease(state, target)
     local key = target_key(state, target)
     local value, err = shared:incr(key, 1, 0)
     if not value then
+        if maximum <= 0 then
+            -- Counting an unlimited target is best effort; admission is unchanged.
+            if kong then kong.log.err("routing concurrency observation failed: ", err) end
+            return function() end
+        end
         return nil, "counter_unavailable", err
     end
-    if value > maximum then
+    if maximum > 0 and value > maximum then
         shared:incr(key, -1, value)
         return nil, "capacity_exhausted"
     end

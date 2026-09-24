@@ -185,3 +185,27 @@ describe("routing lease release", function()
         routing.finish(second)
     end)
 end)
+
+describe("unlimited target observation", function()
+    it("counts concurrent leases and releases each once", function()
+        local values = {}
+        local conf = { model_routes = {{ model = "chat", targets = {{ upstream = "a", upstream_model = "real" }} }} }
+        local env = { shared = shared(values) }
+        local a, b = assert(routing.begin(conf, "chat", env)), assert(routing.begin(conf, "chat", env))
+        assert(routing.next(a)); assert(routing.next(b))
+        local key = routing.target_key(a, a.current)
+        assert.are.equal(2, values[key])
+        routing.finish(a); routing.finish(a)
+        assert.are.equal(1, values[key])
+        routing.finish(b)
+        assert.are.equal(0, values[key])
+    end)
+
+    it("does not reject an unlimited target when observation storage fails", function()
+        local state = assert(routing.begin({ model_routes = {{ model = "chat", targets = {{ upstream = "a", upstream_model = "real" }} }} }, "chat", {
+            shared = { incr = function() return nil, "no memory" end },
+        }))
+        assert(routing.next(state))
+        routing.finish(state)
+    end)
+end)

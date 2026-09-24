@@ -2,6 +2,10 @@ apiVersion: v1
 kind: ConfigMap
 data:
 {{ (.Files.Glob "gateway/kong/plugins/neutree-ai-gateway/*").AsConfig | indent 2 }}
+{{ range $path, $_ := .Files.Glob "gateway/kong/plugins/neutree-ai-gateway/observation/*.lua" }}
+  {{ printf "observation.%s" (base $path) }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{ end }}
 metadata:
   labels:
     app.kubernetes.io/component: kong-plugin
