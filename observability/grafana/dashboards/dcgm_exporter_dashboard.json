@@ -1635,7 +1635,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "GPU Dashboard",
+  "title": "Nvidia GPU Dashboard",
   "uid": "nvidia-dcgm-dashboard",
   "version": 2,
   "weekStart": ""

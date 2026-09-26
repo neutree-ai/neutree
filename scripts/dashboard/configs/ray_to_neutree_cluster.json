@@ -20,5 +20,12 @@
 
   "custom_rules": [],
 
-  "variables": []
+  "variables": [],
+
+  "variable_overrides": [
+    {
+      "name": "Cluster",
+      "description": "Filter queries to a specific Neutree cluster. Neutree attaches the cluster label to every scrape target."
+    }
+  ]
 }

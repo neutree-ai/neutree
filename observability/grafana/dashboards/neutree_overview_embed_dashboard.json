@@ -166,6 +166,7 @@
     },
     {
       "datasource": "${datasource}",
+      "description": "Counts vLLM and SGLang requests only; requests served by other engines are not included.",
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
@@ -201,6 +202,7 @@
     },
     {
       "datasource": "${datasource}",
+      "description": "Covers vLLM and SGLang requests only; requests served by other engines are not included.",
       "fieldConfig": {
         "defaults": {
           "unit": "s",
