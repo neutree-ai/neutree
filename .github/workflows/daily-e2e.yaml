@@ -1,0 +1,587 @@
+name: Daily E2E
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Daily Quick Start target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - amd64-k8s
+          - arm64-k8s
+          - amd64-vm
+          - amd64-l20-k8s
+          - amd64-t4-static
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-quick-start-e2e
+  queue: max
+
+env:
+  E2E_CLI_BINARY: ${{ github.workspace }}/bin/neutree-cli
+  E2E_GINKGO_ARGS: --ginkgo.fail-on-empty
+
+jobs:
+  amd64_k8s:
+    name: amd64 K8s
+    if: github.event_name == 'schedule' || github.event.inputs.target == 'all' || github.event.inputs.target == 'amd64-k8s'
+    runs-on:
+      - self-hosted
+      - linux
+      - neutree-e2e
+      - amd64-k8s
+    environment: e2e-amd64-k8s
+    timeout-minutes: 40
+    env:
+      E2E_DAILY_TARGET: amd64-k8s
+      E2E_PROFILE_B64: ${{ secrets.E2E_PROFILE_B64 }}
+      E2E_RUNTIME_REF: ${{ vars.E2E_RUNTIME_REF }}
+      NEUTREE_API_KEY: ${{ secrets.NEUTREE_API_KEY }}
+      NEUTREE_SERVER_URL: ${{ secrets.NEUTREE_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate E2E profile
+        run: |
+          set -euo pipefail
+          scripts/e2e/generate-profile.sh \
+            --output "$RUNNER_TEMP/e2e-profile.yaml" \
+            --github-env "$GITHUB_ENV"
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Run daily Quick Start E2E
+        id: run
+        run: |
+          set -euo pipefail
+          run_log="$RUNNER_TEMP/daily-e2e-amd64-k8s.raw.log"
+          : "${E2E_RUNTIME_REF:?E2E_RUNTIME_REF must be set}"
+          start_epoch="$(date +%s)"
+          set +e
+          (
+            set -euo pipefail
+            printf 'target=%s\n' "$E2E_DAILY_TARGET"
+            printf 'runtime_ref=%s\n' "$E2E_RUNTIME_REF"
+            make e2e-test \
+              LABEL_FILTER='cluster && k8s && lifecycle && C2613101' \
+              E2E_TIMEOUT=20m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+            make e2e-test \
+              LABEL_FILTER='external-endpoint && openai && (C2642174 || C2642175)' \
+              E2E_TIMEOUT=20m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+          ) >"$run_log" 2>&1
+          exit_code=$?
+          set -e
+          duration_seconds=$(( $(date +%s) - start_epoch ))
+          {
+            printf 'raw_log=%s\n' "$run_log"
+            printf 'exit_code=%s\n' "$exit_code"
+            printf 'duration_seconds=%s\n' "$duration_seconds"
+          } >>"$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Sanitize daily E2E log
+        id: sanitize
+        if: always()
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/daily-e2e-amd64-k8s.raw.log"
+          sanitized_log="$RUNNER_TEMP/daily-e2e-amd64-k8s.sanitized.log"
+          if [[ -f "$raw_log" ]]; then
+            scripts/e2e/sanitize-e2e-log.sh "$raw_log" "$sanitized_log"
+            cat "$sanitized_log"
+          fi
+          printf 'path=%s\n' "$sanitized_log" >>"$GITHUB_OUTPUT"
+
+      - name: Summarize daily E2E
+        if: always()
+        run: |
+          {
+            echo "## Daily Quick Start E2E"
+            echo "- Target: \`$E2E_DAILY_TARGET\`"
+            echo "- Checkout SHA: \`${{ github.sha }}\`"
+            echo "- Runtime ref: \`$E2E_RUNTIME_REF\`"
+            echo "- Duration: \`${{ steps.run.outputs.duration_seconds || 'not recorded' }}s\`"
+            echo "- Exit code: \`${{ steps.run.outputs.exit_code || 'not recorded' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized daily E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-e2e-amd64-k8s-log
+          path: ${{ steps.sanitize.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup daily E2E files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_PROFILE_PATH:-}" ]]; then
+            rm -f -- "$E2E_PROFILE_PATH"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/daily-e2e-amd64-k8s.raw.log" \
+            "$RUNNER_TEMP/daily-e2e-amd64-k8s.sanitized.log"
+
+  arm64_k8s:
+    name: arm64 K8s
+    if: github.event_name == 'schedule' || github.event.inputs.target == 'all' || github.event.inputs.target == 'arm64-k8s'
+    runs-on:
+      - self-hosted
+      - linux
+      - neutree-e2e
+      - arm64-k8s
+    environment: e2e-arm64-k8s
+    timeout-minutes: 30
+    env:
+      E2E_DAILY_TARGET: arm64-k8s
+      E2E_PROFILE_B64: ${{ secrets.E2E_PROFILE_B64 }}
+      E2E_RUNTIME_REF: ${{ vars.E2E_RUNTIME_REF }}
+      NEUTREE_API_KEY: ${{ secrets.NEUTREE_API_KEY }}
+      NEUTREE_SERVER_URL: ${{ secrets.NEUTREE_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate E2E profile
+        run: |
+          set -euo pipefail
+          scripts/e2e/generate-profile.sh \
+            --output "$RUNNER_TEMP/e2e-profile.yaml" \
+            --github-env "$GITHUB_ENV"
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Run daily Quick Start E2E
+        id: run
+        run: |
+          set -euo pipefail
+          run_log="$RUNNER_TEMP/daily-e2e-arm64-k8s.raw.log"
+          : "${E2E_RUNTIME_REF:?E2E_RUNTIME_REF must be set}"
+          start_epoch="$(date +%s)"
+          set +e
+          (
+            set -euo pipefail
+            printf 'target=%s\n' "$E2E_DAILY_TARGET"
+            printf 'runtime_ref=%s\n' "$E2E_RUNTIME_REF"
+            make e2e-test \
+              LABEL_FILTER='cluster && k8s && lifecycle && C2613101' \
+              E2E_TIMEOUT=20m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+          ) >"$run_log" 2>&1
+          exit_code=$?
+          set -e
+          duration_seconds=$(( $(date +%s) - start_epoch ))
+          {
+            printf 'raw_log=%s\n' "$run_log"
+            printf 'exit_code=%s\n' "$exit_code"
+            printf 'duration_seconds=%s\n' "$duration_seconds"
+          } >>"$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Sanitize daily E2E log
+        id: sanitize
+        if: always()
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/daily-e2e-arm64-k8s.raw.log"
+          sanitized_log="$RUNNER_TEMP/daily-e2e-arm64-k8s.sanitized.log"
+          if [[ -f "$raw_log" ]]; then
+            scripts/e2e/sanitize-e2e-log.sh "$raw_log" "$sanitized_log"
+            cat "$sanitized_log"
+          fi
+          printf 'path=%s\n' "$sanitized_log" >>"$GITHUB_OUTPUT"
+
+      - name: Summarize daily E2E
+        if: always()
+        run: |
+          {
+            echo "## Daily Quick Start E2E"
+            echo "- Target: \`$E2E_DAILY_TARGET\`"
+            echo "- Checkout SHA: \`${{ github.sha }}\`"
+            echo "- Runtime ref: \`$E2E_RUNTIME_REF\`"
+            echo "- Duration: \`${{ steps.run.outputs.duration_seconds || 'not recorded' }}s\`"
+            echo "- Exit code: \`${{ steps.run.outputs.exit_code || 'not recorded' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized daily E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-e2e-arm64-k8s-log
+          path: ${{ steps.sanitize.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup daily E2E files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_PROFILE_PATH:-}" ]]; then
+            rm -f -- "$E2E_PROFILE_PATH"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/daily-e2e-arm64-k8s.raw.log" \
+            "$RUNNER_TEMP/daily-e2e-arm64-k8s.sanitized.log"
+
+  amd64_vm:
+    name: amd64 VM
+    if: github.event_name == 'schedule' || github.event.inputs.target == 'all' || github.event.inputs.target == 'amd64-vm'
+    runs-on:
+      - self-hosted
+      - linux
+      - neutree-e2e
+      - amd64-vm
+    environment: e2e-amd64-vm
+    timeout-minutes: 45
+    env:
+      E2E_DAILY_TARGET: amd64-vm
+      E2E_PROFILE_B64: ${{ secrets.E2E_PROFILE_B64 }}
+      E2E_RUNTIME_REF: ${{ vars.E2E_RUNTIME_REF }}
+      NEUTREE_API_KEY: ${{ secrets.NEUTREE_API_KEY }}
+      NEUTREE_SERVER_URL: ${{ secrets.NEUTREE_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate E2E profile
+        run: |
+          set -euo pipefail
+          scripts/e2e/generate-profile.sh \
+            --output "$RUNNER_TEMP/e2e-profile.yaml" \
+            --github-env "$GITHUB_ENV"
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Run daily Quick Start E2E
+        id: run
+        run: |
+          set -euo pipefail
+          run_log="$RUNNER_TEMP/daily-e2e-amd64-vm.raw.log"
+          : "${E2E_RUNTIME_REF:?E2E_RUNTIME_REF must be set}"
+          start_epoch="$(date +%s)"
+          set +e
+          (
+            set -euo pipefail
+            printf 'target=%s\n' "$E2E_DAILY_TARGET"
+            printf 'runtime_ref=%s\n' "$E2E_RUNTIME_REF"
+            make e2e-test \
+              LABEL_FILTER='control-plane && deploy && online' \
+              E2E_TIMEOUT=30m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+          ) >"$run_log" 2>&1
+          exit_code=$?
+          set -e
+          duration_seconds=$(( $(date +%s) - start_epoch ))
+          {
+            printf 'raw_log=%s\n' "$run_log"
+            printf 'exit_code=%s\n' "$exit_code"
+            printf 'duration_seconds=%s\n' "$duration_seconds"
+          } >>"$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Sanitize daily E2E log
+        id: sanitize
+        if: always()
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/daily-e2e-amd64-vm.raw.log"
+          sanitized_log="$RUNNER_TEMP/daily-e2e-amd64-vm.sanitized.log"
+          if [[ -f "$raw_log" ]]; then
+            scripts/e2e/sanitize-e2e-log.sh "$raw_log" "$sanitized_log"
+            cat "$sanitized_log"
+          fi
+          printf 'path=%s\n' "$sanitized_log" >>"$GITHUB_OUTPUT"
+
+      - name: Summarize daily E2E
+        if: always()
+        run: |
+          {
+            echo "## Daily Quick Start E2E"
+            echo "- Target: \`$E2E_DAILY_TARGET\`"
+            echo "- Checkout SHA: \`${{ github.sha }}\`"
+            echo "- Runtime ref: \`$E2E_RUNTIME_REF\`"
+            echo "- Duration: \`${{ steps.run.outputs.duration_seconds || 'not recorded' }}s\`"
+            echo "- Exit code: \`${{ steps.run.outputs.exit_code || 'not recorded' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized daily E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-e2e-amd64-vm-log
+          path: ${{ steps.sanitize.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup daily E2E files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_PROFILE_PATH:-}" ]]; then
+            rm -f -- "$E2E_PROFILE_PATH"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/daily-e2e-amd64-vm.raw.log" \
+            "$RUNNER_TEMP/daily-e2e-amd64-vm.sanitized.log"
+
+  amd64_l20_k8s:
+    name: amd64 L20 K8s
+    if: github.event_name == 'schedule' || github.event.inputs.target == 'all' || github.event.inputs.target == 'amd64-l20-k8s'
+    runs-on:
+      - self-hosted
+      - linux
+      - neutree-e2e
+      - amd64-l20-k8s
+    environment: e2e-amd64-l20-k8s
+    timeout-minutes: 45
+    env:
+      E2E_DAILY_TARGET: amd64-l20-k8s
+      E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT: ${{ vars.E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT }}
+      E2E_PROFILE_B64: ${{ secrets.E2E_PROFILE_B64 }}
+      E2E_RUNTIME_REF: ${{ vars.E2E_RUNTIME_REF }}
+      NEUTREE_API_KEY: ${{ secrets.NEUTREE_API_KEY }}
+      NEUTREE_SERVER_URL: ${{ secrets.NEUTREE_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate E2E profile
+        run: |
+          set -euo pipefail
+          scripts/e2e/generate-profile.sh \
+            --output "$RUNNER_TEMP/e2e-profile.yaml" \
+            --github-env "$GITHUB_ENV"
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Run daily Quick Start E2E
+        id: run
+        run: |
+          set -euo pipefail
+          run_log="$RUNNER_TEMP/daily-e2e-amd64-l20-k8s.raw.log"
+          : "${E2E_RUNTIME_REF:?E2E_RUNTIME_REF must be set}"
+          : "${E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT:?E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT must be set}"
+          start_epoch="$(date +%s)"
+          set +e
+          (
+            set -euo pipefail
+            printf 'target=%s\n' "$E2E_DAILY_TARGET"
+            printf 'runtime_ref=%s\n' "$E2E_RUNTIME_REF"
+            printf 'expected_accelerator_product=%s\n' "$E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT"
+            make e2e-test \
+              LABEL_FILTER='endpoint && k8s && inference && chat && sglang && C2649559' \
+              E2E_TIMEOUT=30m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+          ) >"$run_log" 2>&1
+          exit_code=$?
+          set -e
+          duration_seconds=$(( $(date +%s) - start_epoch ))
+          {
+            printf 'raw_log=%s\n' "$run_log"
+            printf 'exit_code=%s\n' "$exit_code"
+            printf 'duration_seconds=%s\n' "$duration_seconds"
+          } >>"$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Sanitize daily E2E log
+        id: sanitize
+        if: always()
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/daily-e2e-amd64-l20-k8s.raw.log"
+          sanitized_log="$RUNNER_TEMP/daily-e2e-amd64-l20-k8s.sanitized.log"
+          if [[ -f "$raw_log" ]]; then
+            scripts/e2e/sanitize-e2e-log.sh "$raw_log" "$sanitized_log"
+            cat "$sanitized_log"
+          fi
+          printf 'path=%s\n' "$sanitized_log" >>"$GITHUB_OUTPUT"
+
+      - name: Summarize daily E2E
+        if: always()
+        run: |
+          {
+            echo "## Daily Quick Start E2E"
+            echo "- Target: \`$E2E_DAILY_TARGET\`"
+            echo "- Checkout SHA: \`${{ github.sha }}\`"
+            echo "- Runtime ref: \`$E2E_RUNTIME_REF\`"
+            echo "- Expected accelerator product: \`$E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT\`"
+            echo "- Duration: \`${{ steps.run.outputs.duration_seconds || 'not recorded' }}s\`"
+            echo "- Exit code: \`${{ steps.run.outputs.exit_code || 'not recorded' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized daily E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-e2e-amd64-l20-k8s-log
+          path: ${{ steps.sanitize.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup daily E2E files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_PROFILE_PATH:-}" ]]; then
+            rm -f -- "$E2E_PROFILE_PATH"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/daily-e2e-amd64-l20-k8s.raw.log" \
+            "$RUNNER_TEMP/daily-e2e-amd64-l20-k8s.sanitized.log"
+
+  amd64_t4_static:
+    name: amd64 T4 static
+    needs:
+      - amd64_l20_k8s
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' || github.event.inputs.target == 'all' || github.event.inputs.target == 'amd64-t4-static') &&
+      (needs.amd64_l20_k8s.result == 'success' || needs.amd64_l20_k8s.result == 'skipped')
+    runs-on:
+      - self-hosted
+      - linux
+      - neutree-e2e
+      - amd64-t4-static
+    environment: e2e-amd64-t4-static
+    timeout-minutes: 45
+    env:
+      E2E_DAILY_TARGET: amd64-t4-static
+      E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT: ${{ vars.E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT }}
+      E2E_PROFILE_B64: ${{ secrets.E2E_PROFILE_B64 }}
+      E2E_RUNTIME_REF: ${{ vars.E2E_RUNTIME_REF }}
+      NEUTREE_API_KEY: ${{ secrets.NEUTREE_API_KEY }}
+      NEUTREE_SERVER_URL: ${{ secrets.NEUTREE_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate E2E profile
+        run: |
+          set -euo pipefail
+          scripts/e2e/generate-profile.sh \
+            --output "$RUNNER_TEMP/e2e-profile.yaml" \
+            --github-env "$GITHUB_ENV"
+
+      - name: Build neutree-cli
+        run: make build-neutree-cli
+
+      - name: Run daily Quick Start E2E
+        id: run
+        run: |
+          set -euo pipefail
+          run_log="$RUNNER_TEMP/daily-e2e-amd64-t4-static.raw.log"
+          : "${E2E_RUNTIME_REF:?E2E_RUNTIME_REF must be set}"
+          : "${E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT:?E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT must be set}"
+          start_epoch="$(date +%s)"
+          set +e
+          (
+            set -euo pipefail
+            printf 'target=%s\n' "$E2E_DAILY_TARGET"
+            printf 'runtime_ref=%s\n' "$E2E_RUNTIME_REF"
+            printf 'expected_accelerator_product=%s\n' "$E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT"
+            make e2e-test \
+              LABEL_FILTER='endpoint && ssh && inference && chat && !sglang && !inference-error' \
+              E2E_TIMEOUT=25m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+            make e2e-test \
+              LABEL_FILTER='cli && apply && C2642183' \
+              E2E_TIMEOUT=15m \
+              E2E_GINKGO_ARGS="$E2E_GINKGO_ARGS"
+          ) >"$run_log" 2>&1
+          exit_code=$?
+          set -e
+          duration_seconds=$(( $(date +%s) - start_epoch ))
+          {
+            printf 'raw_log=%s\n' "$run_log"
+            printf 'exit_code=%s\n' "$exit_code"
+            printf 'duration_seconds=%s\n' "$duration_seconds"
+          } >>"$GITHUB_OUTPUT"
+          exit "$exit_code"
+
+      - name: Sanitize daily E2E log
+        id: sanitize
+        if: always()
+        run: |
+          set -euo pipefail
+          raw_log="$RUNNER_TEMP/daily-e2e-amd64-t4-static.raw.log"
+          sanitized_log="$RUNNER_TEMP/daily-e2e-amd64-t4-static.sanitized.log"
+          if [[ -f "$raw_log" ]]; then
+            scripts/e2e/sanitize-e2e-log.sh "$raw_log" "$sanitized_log"
+            cat "$sanitized_log"
+          fi
+          printf 'path=%s\n' "$sanitized_log" >>"$GITHUB_OUTPUT"
+
+      - name: Summarize daily E2E
+        if: always()
+        run: |
+          {
+            echo "## Daily Quick Start E2E"
+            echo "- Target: \`$E2E_DAILY_TARGET\`"
+            echo "- Checkout SHA: \`${{ github.sha }}\`"
+            echo "- Runtime ref: \`$E2E_RUNTIME_REF\`"
+            echo "- Expected accelerator product: \`$E2E_DAILY_EXPECTED_ACCELERATOR_PRODUCT\`"
+            echo "- Duration: \`${{ steps.run.outputs.duration_seconds || 'not recorded' }}s\`"
+            echo "- Exit code: \`${{ steps.run.outputs.exit_code || 'not recorded' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized daily E2E log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-e2e-amd64-t4-static-log
+          path: ${{ steps.sanitize.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup daily E2E files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_PROFILE_PATH:-}" ]]; then
+            rm -f -- "$E2E_PROFILE_PATH"
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/daily-e2e-amd64-t4-static.raw.log" \
+            "$RUNNER_TEMP/daily-e2e-amd64-t4-static.sanitized.log"

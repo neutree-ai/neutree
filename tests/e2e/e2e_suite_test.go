@@ -12,6 +12,10 @@ import (
 
 func TestE2E(t *testing.T) {
 	if Cfg.ServerURL == "" || Cfg.APIKey == "" {
+		if isDailyQuickStartRun() {
+			t.Fatal("Daily Quick Start E2E requires NEUTREE_SERVER_URL and NEUTREE_API_KEY")
+		}
+
 		t.Skip("Skipping E2E tests: NEUTREE_SERVER_URL and NEUTREE_API_KEY must be set")
 	}
 	RegisterFailHandler(Fail)
@@ -22,6 +26,13 @@ var _ = BeforeSuite(func() {
 	By("Loading profile from E2E_PROFILE_PATH (if set)")
 	err := LoadProfile()
 	Expect(err).NotTo(HaveOccurred())
+
+	By("Validating daily Quick Start E2E configuration (when enabled)")
+	err = validateDailyQuickStartFromEnv()
+	Expect(err).NotTo(HaveOccurred())
+	if target := dailyQuickStartTarget(); target != "" {
+		By(fmt.Sprintf("Daily Quick Start target=%s run_id=%s resource_prefix=e2e-*-%s", target, Cfg.RunID, Cfg.RunID))
+	}
 
 	By("Building neutree-cli binary")
 	BuildCLI()

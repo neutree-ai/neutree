@@ -1145,6 +1145,14 @@ func clusterAcceleratorProduct(c v1.Cluster) string {
 func getClusterAccelerator(clusterName string) (accType, accProduct string) {
 	c := getClusterFullJSON(clusterName)
 
+	if isDailyGPUTarget(dailyQuickStartTarget()) {
+		expectedProduct := strings.TrimSpace(os.Getenv(envDailyExpectedAcceleratorProduct))
+		accType, accProduct, err := selectDailyExpectedAccelerator(c, expectedProduct)
+		Expect(err).NotTo(HaveOccurred())
+
+		return accType, accProduct
+	}
+
 	accType = clusterAcceleratorType(c)
 	accProduct = clusterAcceleratorProduct(c)
 
