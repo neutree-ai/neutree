@@ -65,6 +65,26 @@ func TestNvidiaBuildMetricSamplesUsesAdapterEndpointUsage(t *testing.T) {
 	})
 }
 
+func TestNvidiaBuildMetricSamplesEmitsPCIeThroughputAsRateSamples(t *testing.T) {
+	raw := nvidiaDCGMFixture("GPU-a", "A100", "0", 62, 2048, 81920) +
+		"DCGM_FI_PROF_PCIE_TX_BYTES{gpu=\"0\",UUID=\"GPU-a\",modelName=\"A100\"} 4096\n" +
+		"DCGM_FI_PROF_PCIE_RX_BYTES{gpu=\"0\",UUID=\"GPU-a\",modelName=\"A100\"} 2048\n"
+
+	samples := nvidiaBuildMetricSamples(
+		adapter.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"},
+		raw,
+		nil,
+		nil,
+		nil,
+	)
+
+	tx := requireNvidiaSample(t, samples, "neutree_accelerator_pcie_tx_bytes", map[string]string{"accelerator_uuid": "GPU-a"})
+	rx := requireNvidiaSample(t, samples, "neutree_accelerator_pcie_rx_bytes", map[string]string{"accelerator_uuid": "GPU-a"})
+
+	assert.Equal(t, 4096.0, tx.Value)
+	assert.Equal(t, 2048.0, rx.Value)
+}
+
 func TestNvidiaBuildMetricSamplesKeepsRepeatedAllocationsDistinctByVDeviceIndex(t *testing.T) {
 	labels := adapter.CanonicalLabels{ClusterType: "kubernetes", Node: "node-a"}
 	samples := nvidiaBuildMetricSamples(

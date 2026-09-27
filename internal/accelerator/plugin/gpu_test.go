@@ -408,6 +408,22 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.NotContains(t, collectors, "DCGM_FI_DEV_P2P_NVLINK_STATUS")
 }
 
+func TestGPUAcceleratorPluginDeclaresPCIeThroughputAsGauge(t *testing.T) {
+	p := &GPUAcceleratorPlugin{}
+
+	profile, err := p.GetAcceleratorProfile(context.Background())
+	require.NoError(t, err)
+	require.Len(t, profile.MetricsExporter.ConfigFiles, 1)
+
+	collectors := profile.MetricsExporter.ConfigFiles[0].Content
+
+	for _, field := range []string{"DCGM_FI_PROF_PCIE_TX_BYTES", "DCGM_FI_PROF_PCIE_RX_BYTES"} {
+		assert.Contains(t, collectors, field+", gauge,")
+	}
+
+	assert.Contains(t, collectors, "bytes per second")
+}
+
 func TestGPUAcceleratorPluginProfileExporterRuntimeExplicit(t *testing.T) {
 	// The exporter/node-agent previously received only --gpus all without an
 	// explicit runtime handler, which left GPU injection to Docker's default

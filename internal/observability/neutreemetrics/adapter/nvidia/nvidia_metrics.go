@@ -111,13 +111,13 @@ func nvidiaNormalizeAcceleratorSamples(labels adapter.CanonicalLabels, raw strin
 			})
 		case "DCGM_FI_PROF_PCIE_TX_BYTES":
 			result = append(result, adapter.Sample{
-				Name:   "neutree_accelerator_pcie_tx_bytes_total",
+				Name:   "neutree_accelerator_pcie_tx_bytes",
 				Labels: metricLabels,
 				Value:  promtext.Value(sample),
 			})
 		case "DCGM_FI_PROF_PCIE_RX_BYTES":
 			result = append(result, adapter.Sample{
-				Name:   "neutree_accelerator_pcie_rx_bytes_total",
+				Name:   "neutree_accelerator_pcie_rx_bytes",
 				Labels: metricLabels,
 				Value:  promtext.Value(sample),
 			})
