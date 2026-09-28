@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"k8s.io/klog/v2"
+
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/ray/rayserve"
 	"github.com/neutree-ai/neutree/pkg/nodeagent/adapter"
@@ -14,23 +16,42 @@ import (
 // static-cluster adapter. It does not infer accelerator ownership; the selected
 // adapter joins this evidence with vendor exporter data using its own rules.
 type RayServeAllocationProvider struct {
-	Dashboard          dashboard.DashboardService
-	DashboardURL       string
-	NodeIP             string
-	ProcEnv            ProcessEnvReader
-	ProcessDescendants ProcessDescendantReader
+	Dashboard    dashboard.DashboardService
+	DashboardURL string
+	NodeIP       string
+	// ProcFSRoot is the /proc mount this provider reads. Everything it builds -
+	// the environment reader, the process tree snapshot, the parent lookup - is
+	// rooted here, which is why the root is an input and not something recovered
+	// from a reader by type assertion.
+	ProcFSRoot string
 }
 
 func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 	ctx context.Context,
 ) (adapter.StaticEvidence, error) {
 	service := p.dashboardService()
-	if service == nil || p.NodeIP == "" {
+	if service == nil {
+		// dashboardService reports why it could not build one.
+		return adapter.StaticEvidence{}, nil
+	}
+
+	if p.NodeIP == "" {
+		klog.Warningf("Static accelerator evidence is skipped: no node IP is configured")
+
 		return adapter.StaticEvidence{}, nil
 	}
 
 	nodeID, err := p.rayNodeID(service)
 	if err != nil || nodeID == "" {
+		// A failed lookup reaches the caller as an error and is logged there;
+		// an empty node ID returns silently, so it is the one to report here.
+		if err == nil {
+			klog.Warningf(
+				"Static accelerator evidence is skipped: node %q is not in the Ray dashboard's node list",
+				p.NodeIP,
+			)
+		}
+
 		return adapter.StaticEvidence{}, err
 	}
 
@@ -45,18 +66,56 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		return adapter.StaticEvidence{}, err
 	}
 
+	// Without serve applications the replicas cannot be resolved, so this
+	// collection will carry actors but no allocations - and the adapter answers
+	// that by emitting nothing at all, quietly.
+	if applicationsErr != nil {
+		klog.Warningf(
+			"Static accelerator evidence for node %q has no serve applications: %v",
+			p.NodeIP, applicationsErr,
+		)
+	}
+
 	actors := []dashboard.Actor{}
 	if actorsResp != nil {
 		actors = append(actors, actorsResp.Data.Result.Result...)
 	}
 
-	envReader := p.processEnvReader()
-	descendantReader := p.processDescendantReader()
-	actorProcesses := make(map[int]adapter.ProcessInfo, len(actors))
+	// Ray's State API keeps reporting an actor as DEAD until it is reaped, so a
+	// busy node accumulates them. A DEAD actor has no process left to read, and
+	// while the state API still lists it its lingering replica keeps it a valid
+	// candidate whose device attribution then fails - which the adapter reads as
+	// incomplete evidence.
+	liveActors := make([]dashboard.Actor, 0, len(actors))
+	liveActorIDs := make(map[string]struct{}, len(actors))
 
 	for _, actor := range actors {
+		if actorStateIsDead(actor.State) {
+			continue
+		}
+
+		liveActors = append(liveActors, actor)
+
+		if actorID := strings.TrimSpace(actor.ActorID); actorID != "" {
+			liveActorIDs[actorID] = struct{}{}
+		}
+	}
+
+	envReader := p.processEnvReader()
+	actorProcesses := make(map[int]adapter.ProcessInfo, len(liveActors))
+
+	// Built on first use. A snapshot is a read of every process on the node, and
+	// a node with no actor to probe - idle, or every actor already dead - should
+	// not pay for one it will never query.
+	var descendantReader ProcessDescendantReader
+
+	for _, actor := range liveActors {
 		if actor.PID <= 0 {
 			continue
+		}
+
+		if descendantReader == nil {
+			descendantReader = newProcessTree(p.procFSRoot())
 		}
 
 		info, ok := p.actorProcessInfo(actor.PID, envReader, descendantReader)
@@ -67,7 +126,13 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 
 	var replicas []adapter.RayReplica
 	if applicationsErr == nil {
-		replicas = rayReplicasFromApplications(applications, nodeID)
+		// Join replicas to the actors that survived, so both halves of this
+		// evidence set describe the same things. The adapter reads a replica it
+		// cannot match as incomplete evidence, and answers incomplete evidence by
+		// suppressing the node's entire allocation view rather than reporting a
+		// partial one - so one stale replica blanks the node-level metrics for
+		// every endpoint on the node.
+		replicas = replicasWithLiveActors(rayReplicasFromApplications(applications, nodeID), liveActorIDs)
 	}
 
 	return adapter.StaticEvidence{
@@ -75,11 +140,36 @@ func (p RayServeAllocationProvider) StaticAcceleratorEvidence(
 		// endpoint set from unavailable allocation evidence.
 		AllocationAvailable: applicationsErr == nil && applications != nil,
 		RayEvidence: adapter.RayEvidence{
-			Actors:         rayActorsFromDashboard(actors),
+			Actors:         rayActorsFromDashboard(liveActors),
 			Replicas:       replicas,
 			ActorProcesses: actorProcesses,
 		},
 	}, nil
+}
+
+// actorStateIsDead reports whether the Ray State API marked an actor as
+// terminated. DEAD is its terminal state; every other state still describes an
+// actor that can own a device, so an unrecognised or absent state is kept.
+func actorStateIsDead(state string) bool {
+	return strings.EqualFold(strings.TrimSpace(state), "DEAD")
+}
+
+// replicasWithLiveActors drops replicas whose actor did not survive.
+func replicasWithLiveActors(
+	replicas []adapter.RayReplica,
+	liveActorIDs map[string]struct{},
+) []adapter.RayReplica {
+	result := make([]adapter.RayReplica, 0, len(replicas))
+
+	for _, replica := range replicas {
+		if _, ok := liveActorIDs[strings.TrimSpace(replica.ActorID)]; !ok {
+			continue
+		}
+
+		result = append(result, replica)
+	}
+
+	return result
 }
 
 func rayActorsFromDashboard(actors []dashboard.Actor) []adapter.RayActor {
@@ -210,6 +300,9 @@ func (p RayServeAllocationProvider) dashboardService() dashboard.DashboardServic
 	}
 
 	if strings.TrimSpace(p.DashboardURL) == "" {
+		// Not reported here: the node agent never builds this provider without a
+		// URL - acceleratorEvidenceProviders reports that where it decides. A
+		// provider assembled by hand and left empty simply has nowhere to read.
 		return nil
 	}
 
@@ -221,21 +314,17 @@ func (p RayServeAllocationProvider) rayNodeID(service dashboard.DashboardService
 }
 
 func (p RayServeAllocationProvider) processEnvReader() ProcessEnvReader {
-	if p.ProcEnv != nil {
-		return p.ProcEnv
-	}
-
-	return ProcFSEnvReader{}
+	return ProcFSEnvReader{Root: p.procFSRoot()}
 }
 
-func (p RayServeAllocationProvider) processDescendantReader() ProcessDescendantReader {
-	if p.ProcessDescendants != nil {
-		return p.ProcessDescendants
-	}
-
-	return ProcFSProcessTreeReader{Root: p.procFSRoot()}
-}
-
+// Each read below is silent on its own: the actor keeps its place and the field
+// is simply left out. The actor's process being unreadable is worth a line when
+// it happens - it is what makes the adapter drop the candidate and mark the
+// collection incomplete - and naming the PID is the part that helps.
+//
+// A node reaps processes between listing its actors and reading them, so a line
+// or two here is ordinary churn. Every actor reporting it means the tree being
+// read is not the one they live in.
 func (p RayServeAllocationProvider) actorProcessInfo(
 	pid int,
 	envReader ProcessEnvReader,
@@ -245,42 +334,50 @@ func (p RayServeAllocationProvider) actorProcessInfo(
 		return adapter.ProcessInfo{}, false
 	}
 
+	descendants, err := actorDescendantPIDs(descendantReader, pid)
+	if err != nil {
+		klog.Warningf("No process tree for actor %d: %v", pid, err)
+	}
+
 	info := adapter.ProcessInfo{
 		PID:            pid,
-		DescendantPIDs: actorDescendantPIDs(descendantReader, pid),
+		DescendantPIDs: descendants,
 	}
 	if env, err := envReader.Env(pid); err == nil {
 		info.Environment = env
+	} else {
+		klog.Warningf("No environment for actor %d: %v", pid, err)
 	}
 
 	if parentPID, ok, err := processParentPID(p.procFSRoot(), pid); err == nil && ok {
 		info.ParentPID = parentPID
+	} else {
+		klog.Warningf("No parent for actor %d", pid)
 	}
 
 	return info, true
 }
 
 func (p RayServeAllocationProvider) procFSRoot() string {
-	if reader, ok := p.ProcEnv.(ProcFSEnvReader); ok && strings.TrimSpace(reader.Root) != "" {
-		return reader.Root
+	if strings.TrimSpace(p.ProcFSRoot) == "" {
+		return defaultProcFSRoot
 	}
 
-	if reader, ok := p.ProcessDescendants.(ProcFSProcessTreeReader); ok && strings.TrimSpace(reader.Root) != "" {
-		return reader.Root
-	}
-
-	return defaultProcFSRoot
+	return p.ProcFSRoot
 }
 
-func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
+// actorDescendantPIDs degrades to the actor's own PID when the tree cannot be
+// read, and returns the reason alongside it so the caller can total the misses
+// instead of each one going unreported.
+func actorDescendantPIDs(reader ProcessDescendantReader, pid int) ([]int, error) {
 	pids := []int{pid}
 	if reader == nil {
-		return pids
+		return pids, nil
 	}
 
 	descendants, err := reader.DescendantPIDs(pid)
 	if err != nil {
-		return pids
+		return pids, err
 	}
 
 	seen := map[int]struct{}{pid: {}}
@@ -299,5 +396,5 @@ func actorDescendantPIDs(reader ProcessDescendantReader, pid int) []int {
 
 	sort.Ints(pids)
 
-	return pids
+	return pids, nil
 }

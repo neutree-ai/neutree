@@ -6,19 +6,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 const defaultProcFSRoot = "/proc"
 
-// ProcessEnvReader observes the raw environment of a local process.
+// ProcessEnvReader observes the raw environment of a local process. The provider
+// builds one, but it takes one in turn, so another source of process state can
+// be substituted without touching the collection itself.
 type ProcessEnvReader interface {
 	Env(pid int) (map[string]string, error)
-}
-
-type ProcessEnvReaderFunc func(pid int) (map[string]string, error)
-
-func (f ProcessEnvReaderFunc) Env(pid int) (map[string]string, error) {
-	return f(pid)
 }
 
 type ProcFSEnvReader struct {
@@ -59,10 +57,23 @@ type ProcessDescendantReader interface {
 	DescendantPIDs(ancestorPID int) ([]int, error)
 }
 
-type ProcessDescendantReaderFunc func(ancestorPID int) ([]int, error)
+// newProcessTree returns the topology source for one collection: a snapshot of
+// the tree at root, or the per-call reader when the tree cannot be read - which
+// fails the way a missing /proc always did, and which callers already tolerate.
+//
+// It is a constructor rather than an accessor on purpose. Building the snapshot
+// is a read of every process on the node, so its lifetime has to be the
+// collection: a value built once and kept would answer from the tree as it was
+// when it was built.
+func newProcessTree(root string) ProcessDescendantReader {
+	reader, err := NewCachedProcessDescendantReader(root)
+	if err == nil {
+		return reader
+	}
 
-func (f ProcessDescendantReaderFunc) DescendantPIDs(ancestorPID int) ([]int, error) {
-	return f(ancestorPID)
+	klog.Warningf("Falling back to per-call process tree reads: cannot snapshot %s: %v", root, err)
+
+	return ProcFSProcessTreeReader{Root: root}
 }
 
 type ProcFSProcessTreeReader struct {
@@ -97,11 +108,122 @@ func (r ProcFSProcessTreeReader) DescendantPIDs(ancestorPID int) ([]int, error) 
 		}
 
 		isDescendant, err := isDescendant(root, pid, ancestorPID)
-		if err != nil || !isDescendant {
+		// The same rule the snapshot build follows: a process that exited
+		// mid-walk is ordinary churn and drops out, but any other failure means
+		// the list would come back short, and a caller that cannot tell short
+		// from complete under-reports allocations.
+		if err != nil {
+			return nil, err
+		}
+
+		if !isDescendant {
 			continue
 		}
 
 		pids = append(pids, pid)
+	}
+
+	sort.Ints(pids)
+
+	return pids, nil
+}
+
+// CachedProcessDescendantReader answers every descendant query from one
+// snapshot of the process tree, taken when it was created.
+//
+// It exists because a collection asks about every actor on a node, and each
+// answer used to cost a full enumeration of /proc plus a parent walk per
+// process. One snapshot serves them all.
+//
+// A snapshot is a point-in-time view, so its lifetime belongs to the caller:
+// build one per collection and drop it. The type is immutable once built, which
+// is why there is no lazy build and no sync.Once - a shared instance would
+// answer from a stale tree forever, and immutability makes that mistake obvious
+// rather than silent.
+type CachedProcessDescendantReader struct {
+	childrenByPID map[int][]int
+}
+
+func NewCachedProcessDescendantReader(root string) (CachedProcessDescendantReader, error) {
+	if root == "" {
+		root = defaultProcFSRoot
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return CachedProcessDescendantReader{}, err
+	}
+
+	reader := CachedProcessDescendantReader{
+		childrenByPID: make(map[int][]int, len(entries)),
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+
+		parentPID, ok, err := processParentPID(root, pid)
+		// A process that exited while the tree was being read is expected and
+		// simply drops out. Anything else means this snapshot cannot be trusted
+		// to be complete, and a caller that silently gets fewer descendants than
+		// exist would go on to under-report allocations - so fail the build and
+		// let the caller fall back to reading per query, where each miss is
+		// reported.
+		if err != nil {
+			return CachedProcessDescendantReader{}, err
+		}
+
+		if !ok {
+			continue
+		}
+
+		reader.childrenByPID[parentPID] = append(reader.childrenByPID[parentPID], pid)
+	}
+
+	return reader, nil
+}
+
+// DescendantPIDs returns the ancestor followed by its descendants, sorted
+// ascending, matching the shape ProcFSProcessTreeReader produces.
+//
+// PID 1 intentionally reports no descendants: ProcFSProcessTreeReader stops its
+// parent walk at init and so can never match PID 1 as an ancestor. Preserving
+// that keeps this a pure performance change.
+func (r CachedProcessDescendantReader) DescendantPIDs(ancestorPID int) ([]int, error) {
+	if ancestorPID <= 0 {
+		return nil, nil
+	}
+
+	if ancestorPID == 1 {
+		return []int{ancestorPID}, nil
+	}
+
+	pids := []int{ancestorPID}
+	visited := map[int]struct{}{ancestorPID: {}}
+	pending := []int{ancestorPID}
+
+	// A walk, not a recursive descent: the parent links are read one process at
+	// a time, so churn can in principle produce a cycle and this must terminate.
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+
+		for _, child := range r.childrenByPID[current] {
+			if _, seen := visited[child]; seen {
+				continue
+			}
+
+			visited[child] = struct{}{}
+
+			pids = append(pids, child)
+			pending = append(pending, child)
+		}
 	}
 
 	sort.Ints(pids)
