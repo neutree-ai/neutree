@@ -487,42 +487,42 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"Successes\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"Failures\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"Success rate\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"P95 latency\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "F",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"P99 latency\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "G",
-          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"Average latency\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -530,13 +530,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "Successes",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -550,7 +544,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Exposed model"
+              "options": "exposed_model"
             },
             "properties": [
               {
@@ -570,13 +564,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Successes"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -603,13 +601,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Failures"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -636,13 +638,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Success rate"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -669,13 +675,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 latency"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -721,13 +731,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 latency"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -773,13 +787,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Average latency"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -815,6 +833,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -841,17 +863,28 @@
               "virtual_model": true
             },
             "renameByName": {
-              "model_display": "Exposed model"
+              "model_display": "exposed_model"
             },
             "indexByName": {
               "model_display": 0,
-              "Successes": 1,
-              "Failures": 2,
-              "Success rate": 3,
-              "P95 latency": 4,
-              "P99 latency": 5,
-              "Average latency": 6
+              "success_count": 1,
+              "failure_count": 2,
+              "success_rate": 3,
+              "p95_latency": 4,
+              "p99_latency": 5,
+              "average_latency": 6
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
@@ -1237,7 +1270,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Share within model"
+              "options": "call_share"
             },
             "properties": [
               {
@@ -1270,6 +1303,34 @@
                   "mode": "fixed",
                   "fixedColor": "blue"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "Share within model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposed_model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Exposed model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstream_target"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Upstream / model"
               }
             ]
           }
@@ -1277,13 +1338,7 @@
       },
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "Exposed model",
-            "desc": false
-          }
-        ]
+        "cellHeight": "sm"
       },
       "transformations": [
         {
@@ -1300,10 +1355,21 @@
               "Value": 2
             },
             "renameByName": {
-              "virtual_model": "Exposed model",
-              "upstream_target": "Upstream / model",
-              "Value": "Share within model"
+              "virtual_model": "exposed_model",
+              "upstream_target": "upstream_target",
+              "Value": "call_share"
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "exposed_model",
+                "desc": false
+              }
+            ]
           }
         }
       ]
@@ -1320,49 +1386,49 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"Successes\", \"\", \"\")",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"Model routing share\", \"\", \"\")",
+          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"routing_share\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"Failures\", \"\", \"\")",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "D",
-          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"Success rate\", \"\", \"\")",
+          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 latency\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "G",
-          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 latency\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "H",
-          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"Average latency\", \"\", \"\")",
+          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -1370,13 +1436,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "Successes",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -1390,7 +1450,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Exposed model"
+              "options": "exposed_model"
             },
             "properties": [
               {
@@ -1410,13 +1470,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Upstream"
+              "options": "upstream"
             },
             "properties": [
               {
@@ -1436,13 +1500,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Upstream model"
+              "options": "upstream_model"
             },
             "properties": [
               {
@@ -1462,13 +1530,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Successes"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -1495,13 +1567,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Model routing share"
+              "options": "routing_share"
             },
             "properties": [
               {
@@ -1551,13 +1627,17 @@
                   "mode": "fixed",
                   "fixedColor": "blue"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "Model routing share"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Failures"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -1584,13 +1664,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Success rate"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -1617,13 +1701,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 latency"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -1669,13 +1757,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 latency"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -1721,13 +1813,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Average latency"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -1763,6 +1859,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -1787,22 +1887,33 @@
               "Time": true
             },
             "renameByName": {
-              "virtual_model": "Exposed model",
-              "upstream": "Upstream",
-              "upstream_model": "Upstream model"
+              "virtual_model": "exposed_model",
+              "upstream": "upstream",
+              "upstream_model": "upstream_model"
             },
             "indexByName": {
               "virtual_model": 0,
               "upstream": 1,
               "upstream_model": 2,
-              "Model routing share": 3,
-              "Successes": 4,
-              "Failures": 5,
-              "Success rate": 6,
-              "P95 latency": 7,
-              "P99 latency": 8,
-              "Average latency": 9
+              "routing_share": 3,
+              "success_count": 4,
+              "failure_count": 5,
+              "success_rate": 6,
+              "p95_latency": 7,
+              "p99_latency": 8,
+              "average_latency": 9
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
@@ -2258,42 +2369,42 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"Successes\", \"\", \"\")",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"Failures\", \"\", \"\")",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((((((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"Success rate\", \"\", \"\")",
+          "expr": "label_replace((((((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "D",
-          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 latency\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 latency\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "F",
-          "expr": "label_replace(((((sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"Average latency\", \"\", \"\")",
+          "expr": "label_replace(((((sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -2301,13 +2412,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "Successes",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -2321,7 +2426,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Upstream"
+              "options": "upstream"
             },
             "properties": [
               {
@@ -2341,13 +2446,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Upstream model"
+              "options": "upstream_model"
             },
             "properties": [
               {
@@ -2367,13 +2476,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Successes"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -2400,13 +2513,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Failures"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -2433,13 +2550,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Success rate"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -2466,13 +2587,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 latency"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -2518,13 +2643,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 latency"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -2570,13 +2699,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "Average latency"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -2612,6 +2745,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -2637,19 +2774,30 @@
               "model_key": true
             },
             "renameByName": {
-              "upstream": "Upstream",
-              "upstream_model": "Upstream model"
+              "upstream": "upstream",
+              "upstream_model": "upstream_model"
             },
             "indexByName": {
               "upstream": 0,
               "upstream_model": 1,
-              "Successes": 2,
-              "Failures": 3,
-              "Success rate": 4,
-              "P95 latency": 5,
-              "P99 latency": 6,
-              "Average latency": 7
+              "success_count": 2,
+              "failure_count": 3,
+              "success_rate": 4,
+              "p95_latency": 5,
+              "p99_latency": 6,
+              "average_latency": 7
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
