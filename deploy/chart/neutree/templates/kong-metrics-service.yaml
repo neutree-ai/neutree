@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "neutree.fullname" . }}-kong-metrics
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  # Discover each Kong pod rather than sampling a load-balanced service address.
+  clusterIP: None
+  ports:
+    - name: status
+      port: 8100
+      targetPort: status
+  selector:
+    app.kubernetes.io/component: {{ include "neutree.fullname" . }}-kong

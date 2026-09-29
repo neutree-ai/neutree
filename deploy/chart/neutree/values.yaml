@@ -3,6 +3,8 @@
 # Declare variables to be passed into your templates.
 
 global:
+  # Cluster DNS suffix used to discover individual Kong metrics endpoints.
+  clusterDomain: cluster.local
   # Global image registry for all components
   # When set, this registry will be used for:
   # - All main chart components (api, core, db, auth, etc.) via global.image.registry
@@ -399,6 +401,9 @@ grafana:
     enabled: false
 
   grafana.ini:
+    feature_toggles:
+      # Grafana 11: correctly escape quotes in Prometheus variable label values.
+      enable: prometheusSpecialCharsInLabelValues
     auth.anonymous:
       enabled: true
     dashboards:
