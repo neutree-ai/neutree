@@ -119,9 +119,33 @@ python3 dashboard_converter.py <config_file> [dashboard_dir]
 
   "filter_rules": [],
   "custom_rules": [],
-  "variables": []
+  "variables": [],
+
+  "variable_overrides": [
+    {
+      "name": "Cluster",
+      "description": "Filter queries to a specific Neutree cluster."
+    }
+  ]
 }
 ```
+
+**Notes on the schema:**
+
+- `metric_rules` / `filter_rules` / `custom_rules` are applied to **query fields only** —
+  panel `expr` values and, for variables carried over from upstream, `definition` and
+  `query` / `query.query`. They are never applied to `description`, where the same words
+  are prose and a rule like `sglang_x` → `sglang:x` would corrupt them.
+- `variable_overrides` replaces a template variable's `description` by name. Use it to
+  restate upstream wording in Neutree terms; matching by name means the replacement lands
+  regardless of how upstream rewords the original text.
+- Variables are **carried over from upstream only when `variables` is empty and
+  `keep_datasource_variable` is false**. Defining any variable switches to the replace
+  branch, which discards every upstream variable. `convert_ray_to_neutree.py` depends on
+  the carry-over branch, so its config must keep both settings as they are.
+- Each `convert_*.py` script loads its rules from the JSON in `configs/`, so that file is
+  the single definition and there is nothing to keep in sync by hand. The scripts resolve
+  it relative to their own location and therefore work from any working directory.
 
 ## Dashboard Locations
 

@@ -10,7 +10,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Callable, Any
+from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass, field
 
 
@@ -41,6 +41,19 @@ class VariableTemplate:
 
 
 @dataclass
+class VariableOverride:
+    """Replace selected fields of an existing template variable, matched by name.
+
+    Conversion rules only reach query fields, so a variable description carried
+    over from upstream keeps naming upstream metrics and labels. Matching by name
+    instead of by pattern means the replacement lands no matter how upstream
+    rewords the original text.
+    """
+    name: str
+    description: Optional[str] = None
+
+
+@dataclass
 class DashboardConversionConfig:
     """Dashboard conversion configuration"""
     name: str
@@ -57,6 +70,7 @@ class DashboardConversionConfig:
     # Template variables
     variables: List[VariableTemplate] = field(default_factory=list)
     keep_datasource_variable: bool = True
+    variable_overrides: List[VariableOverride] = field(default_factory=list)
 
 
 class DashboardConverter:
@@ -93,6 +107,43 @@ class DashboardConverter:
         if 'targets' in panel:
             panel['targets'] = [self.convert_target(t) for t in panel['targets']]
         return panel
+
+    def convert_variable(self, variable: dict) -> dict:
+        """Convert a single template variable.
+
+        Only the query-bearing fields are rewritten: a rule that renames a metric
+        or a label would corrupt a description, where the same words are prose.
+        """
+        if isinstance(variable.get('definition'), str):
+            variable['definition'] = self.convert_expression(variable['definition'])
+
+        query = variable.get('query')
+        if isinstance(query, str):
+            variable['query'] = self.convert_expression(query)
+        elif isinstance(query, dict) and isinstance(query.get('query'), str):
+            query['query'] = self.convert_expression(query['query'])
+
+        return variable
+
+    def apply_variable_overrides(self, dashboard: dict) -> None:
+        """Apply per-name overrides to the dashboard's template variables"""
+        if not self.config.variable_overrides:
+            return
+
+        templating = dashboard.get('templating')
+        variables = templating.get('list') if isinstance(templating, dict) else None
+        if not isinstance(variables, list):
+            return
+
+        overrides = {override.name: override for override in self.config.variable_overrides}
+
+        for variable in variables:
+            override = overrides.get(variable.get('name'))
+            if override is None:
+                continue
+
+            if override.description is not None:
+                variable['description'] = override.description
 
     def create_variable(self, template: VariableTemplate) -> dict:
         """Create variable configuration from template"""
@@ -176,11 +227,25 @@ class DashboardConverter:
         if 'panels' in dashboard:
             dashboard['panels'] = [self.convert_panel(p) for p in dashboard['panels']]
 
-        # Replace template variables
+        # Replace template variables. Which branch runs is load-bearing: a config
+        # with neither `variables` nor `keep_datasource_variable` carries the
+        # upstream variables over, and they therefore need converting below.
+        # Adding a single VariableTemplate flips this to the replace branch, which
+        # discards the upstream variables wholesale — including a $Cluster that
+        # panel expressions still reference.
         if self.config.variables or self.config.keep_datasource_variable:
             if 'templating' not in dashboard:
                 dashboard['templating'] = {}
             dashboard['templating']['list'] = self.create_variables()
+        else:
+            # Upstream variables are carried over untouched, so they still name
+            # upstream metrics and labels. Run them through the same rules.
+            templating = dashboard.get('templating')
+            if isinstance(templating, dict) and isinstance(templating.get('list'), list):
+                templating['list'] = [self.convert_variable(v) for v in templating['list']]
+
+        # Overrides run last so they reach both carried-over and generated variables.
+        self.apply_variable_overrides(dashboard)
 
         # Update UID (if specified)
         if self.config.uid:
@@ -240,6 +305,10 @@ def load_config_from_file(config_file: str) -> DashboardConversionConfig:
         VariableTemplate(**var) for var in data.get('variables', [])
     ]
 
+    variable_overrides = [
+        VariableOverride(**override) for override in data.get('variable_overrides', [])
+    ]
+
     return DashboardConversionConfig(
         name=data['name'],
         description=data['description'],
@@ -250,7 +319,8 @@ def load_config_from_file(config_file: str) -> DashboardConversionConfig:
         filter_rules=filter_rules,
         custom_rules=custom_rules,
         variables=variables,
-        keep_datasource_variable=data.get('keep_datasource_variable', True)
+        keep_datasource_variable=data.get('keep_datasource_variable', True),
+        variable_overrides=variable_overrides
     )
 
 
