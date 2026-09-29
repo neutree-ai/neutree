@@ -123,6 +123,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Contains(t, rayHead.Args[0], "--block")
 	assert.NotContains(t, rayHead.Args[0], "tail -f /dev/null")
 	assert.Contains(t, rayHead.Args[0], "--dashboard-port=8265")
+	assert.Contains(t, rayHead.Args[0], "--node-ip-address=10.0.0.10")
 	assert.Contains(t, rayHead.Args[0], v1.NeutreeServingVersionLabel)
 	assert.NotContains(t, rayHead.Args[0], "--autoscaling-config")
 	require.NotNil(t, rayHead.HealthCheck)
@@ -262,6 +263,10 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-serve:v1.2.0", rayWorker.Image)
 	require.Len(t, rayWorker.Args, 1)
 	assert.Contains(t, rayWorker.Args[0], "python /home/ray/start.py --address=10.0.0.10:6379")
+	// Only the head pins its advertised address. A worker's own address is not
+	// known where its start command is built, and pointing a worker at the head's
+	// address would corrupt the cluster view. Workers keep Ray's auto-detection.
+	assert.NotContains(t, rayWorker.Args[0], "--node-ip-address")
 	assert.NotContains(t, rayWorker.Args[0], "ray_container")
 	assert.NotContains(t, rayWorker.Args[0], "while true")
 	assert.Contains(t, rayWorker.Args[0], "--block")

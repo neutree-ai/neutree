@@ -154,6 +154,7 @@ func rayStartCommand(
 	if role == v1.StaticNodeRoleHead {
 		parts = append(parts, strings.Join([]string{
 			"python /home/ray/start.py --head --port=6379 --dashboard-host=0.0.0.0",
+			rayNodeIPAddressArg(cluster),
 			commonArgs,
 			fmt.Sprintf("--dashboard-port=%d", v1.RayDashboardPort),
 			"--ray-client-server-port=10001",
@@ -170,6 +171,26 @@ func rayStartCommand(
 	}
 
 	return strings.Join(parts, " && ")
+}
+
+// rayNodeIPAddressArg pins the address the head advertises to the cluster to the
+// configured head IP instead of letting Ray auto-detect it. The controller's
+// dashboard URL, the node agent's --node-ip and worker bootstrap via --address
+// all already use that IP, so pinning it keeps one consistent address per node.
+// It matters when the configured head IP is not what Ray would auto-detect, such
+// as a NAT address on a host whose own interfaces carry a private one.
+//
+// Ray 2.53.0 binds its gRPC servers to 127.0.0.1 or 0.0.0.0 and never to this
+// value, so the address does not have to exist on the host. Upstream Ray later
+// made the raylet bind this value directly; bumping Ray past that turns a NAT
+// address here into a startup failure.
+func rayNodeIPAddressArg(cluster *v1.StaticNodeCluster) string {
+	headIP := staticNodeClusterHeadIP(cluster)
+	if headIP == "" {
+		return ""
+	}
+
+	return "--node-ip-address=" + headIP
 }
 
 func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) string {
