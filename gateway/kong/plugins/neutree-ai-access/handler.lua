@@ -9,6 +9,8 @@
 --                        the IE/EE endpoint it hit must match some entry. Empty
 --                        type/endpoint_name = any endpoint of that model. An unset
 --                        list means unrestricted; an empty [] means deny-all.
+--                        The model list names no model, so the list does not
+--                        apply to it (see is_model_list_request).
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- The plugin is attached only when the key actually has access limits, so an
@@ -53,6 +55,45 @@ local function request_model()
         end
     end
     return nil
+end
+
+-- is_model_list_request reports whether this request asks for the endpoint's
+-- model list rather than for a model to be served. Such a request carries no
+-- model, so the allowlist -- a statement about which models may be *called* --
+-- has nothing to judge: enforcing it there answers model_not_permitted to a
+-- client that asked for no model, and makes the model list unusable for every
+-- key that has an allowlist. Inference paths always name a model and stay
+-- enforced.
+--
+-- Matched on the end of the request path, because the client-facing route prefix
+-- (/workspace/<ws>/endpoint/<ep>, .../external-endpoint/<ee>) precedes the API
+-- suffix, and the Anthropic alias ends with the same suffix. Only the end of the
+-- path decides: /v1/modelsx and /v1/models-x stay enforced.
+-- kong.request.get_path() is the normalized, query-free path -- the same value
+-- neutree-ai-gateway matches its own route suffix against -- so a request cannot
+-- arrive here looking like a model list and still be routed as an inference
+-- call further down.
+--
+-- The retrieve form (/v1/models/{id}) is deliberately not included: it names a
+-- model, so the allowlist keeps judging it.
+local MODELS_PATH_SUFFIX = "/v1/models"
+
+local function is_model_list_request()
+    -- GET only: listing is a read, and no engine defines a mutating call at this
+    -- path, so a body-less request of another method must not buy the exemption.
+    if kong.request.get_method() ~= "GET" then
+        return false
+    end
+
+    local path = kong.request.get_path() or ""
+
+    -- Tolerate the trailing-slash spelling of the same endpoint, which is the
+    -- other shape neutree-ai-gateway answers a model list for.
+    if path:sub(-1) == "/" then
+        path = path:sub(1, -2)
+    end
+
+    return path:sub(-#MODELS_PATH_SUFFIX) == MODELS_PATH_SUFFIX
 end
 
 -- allow_match reports whether the request (model + the IE/EE endpoint it hit) is
@@ -110,8 +151,10 @@ function AccessHandler:access(conf)
     --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
     --    request model must be present and in it. An explicit empty [] therefore
     --    denies every model (deny-all). Guard on the value being a table so null
-    --    stays unrestricted while [] enforces.
-    if type(conf.allowed_models) == "table" then
+    --    stays unrestricted while [] enforces. The model list is not a model
+    --    call at all, so the list never applies to it -- not even a deny-all []
+    --    -- and it reaches the endpoint's own model list instead.
+    if type(conf.allowed_models) == "table" and not is_model_list_request() then
         local model = request_model()
         local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
         local ep_name = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_name

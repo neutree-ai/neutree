@@ -63,6 +63,11 @@ end
 -- gateway plugin has rewritten the body, the model in it is the UPSTREAM name,
 -- which is not what quotas are keyed by. Where no stash exists no rewrite
 -- happened either, so the body still carries the client-facing name.
+--
+-- Model-discovery requests (a model list) reach here with model = nil on purpose:
+-- the access plugin lets them past its allowlist because they call no model, so
+-- there is nothing for a per-model quota to charge and the control plane resolves
+-- them as unlimited.
 local function request_dimensions()
     local shared = kong.ctx.shared or {}
     local model = str_or_nil(shared.neutree_request_model)
