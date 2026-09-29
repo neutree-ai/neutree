@@ -513,8 +513,9 @@
       "type": "number"
     },
     "kv_cache_memory_bytes": {
-      "description": "Size of KV Cache per GPU in bytes",
-      "type": "integer"
+      "description": "Size of KV Cache per GPU in bytes. Supports integer bytes or human-readable values such as 8G",
+      "type": ["integer", "string"],
+      "pattern": "^(?:\\d+|\\d+(?:\\.\\d+)?[kmgt]|\\d+[KMGT])$"
     },
     "max_num_batched_tokens": {
       "description": "Maximum number of batched tokens per iteration",
