@@ -72,7 +72,7 @@ func CreateTestUser(t *testing.T, username, email, password string) *TestUser {
 		t.Fatalf("failed to create service token: %v", err)
 	}
 
-	client := gotrue.New("", "").WithCustomGoTrueURL("http://localhost:9999").WithToken(*token)
+	client := gotrue.New("", "").WithCustomGoTrueURL(getEnvOrDefault("GOTRUE_URL", "http://localhost:9999")).WithToken(*token)
 
 	resp, err := client.AdminCreateUser(types.AdminCreateUserRequest{
 		Email:        email,

@@ -40,6 +40,7 @@ type Cluster struct {
 }
 
 type ClusterSpec struct {
+	ZCache *ZCacheSpec `json:"zcache,omitempty" yaml:"zcache,omitempty"`
 	// currently supports "ssh" and "kubernetes" cluster types
 	Type                      string                         `json:"type"`
 	Config                    *ClusterConfig                 `json:"config"`
@@ -183,11 +184,12 @@ type ModelCache struct {
 }
 
 type ClusterStatus struct {
-	Phase              ClusterPhase `json:"phase,omitempty"`
-	Image              string       `json:"image,omitempty"`
-	DashboardURL       string       `json:"dashboard_url,omitempty"`
-	LastTransitionTime string       `json:"last_transition_time,omitempty"`
-	ErrorMessage       string       `json:"error_message,omitempty"`
+	ZCache             *ZCacheStatus `json:"zcache,omitempty"`
+	Phase              ClusterPhase  `json:"phase,omitempty"`
+	Image              string        `json:"image,omitempty"`
+	DashboardURL       string        `json:"dashboard_url,omitempty"`
+	LastTransitionTime string        `json:"last_transition_time,omitempty"`
+	ErrorMessage       string        `json:"error_message,omitempty"`
 	// the number of ready nodes in the cluster.
 	ReadyNodes int `json:"ready_nodes,omitempty"`
 	// the desired number of nodes in the cluster.
