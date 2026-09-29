@@ -8,7 +8,6 @@ python3 ./convert_vllm_dashboard.py
 # vLLM so the dashboard picks up Neutree multi-tenant filter variables.
 mv -f sglang-upstream/sglang-dashboard.json sglang-upstream/grafana.json
 python3 ./convert_sglang_dashboard.py
-python3 ./convert_ray_to_neutree.py ray-upstream/data_grafana_dashboard.json output/data_grafana_dashboard.json
 python3 ./convert_ray_to_neutree.py ray-upstream/default_grafana_dashboard.json output/default_grafana_dashboard.json
 python3 ./convert_ray_to_neutree.py ray-upstream/serve_deployment_grafana_dashboard.json output/serve_deployment_grafana_dashboard.json
 python3 ./convert_ray_to_neutree.py ray-upstream/serve_grafana_dashboard.json output/serve_grafana_dashboard.json
