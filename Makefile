@@ -222,7 +222,7 @@ GATEWAY_PLUGIN_DIR ?= gateway/kong/plugins/neutree-ai-gateway
 GATEWAY_LUA_TEST_IMAGE ?= neutree-gateway-lua-test:latest
 
 .PHONY: gateway-lua-test
-gateway-lua-test: ## Run gateway and metrics Lua unit tests (LuaJIT + busted, in Docker)
+gateway-lua-test: ## Run the Kong plugin Lua unit tests (LuaJIT + busted, in Docker)
 	docker build --progress=plain -t $(GATEWAY_LUA_TEST_IMAGE) $(GATEWAY_PLUGIN_DIR)/spec
 	docker run --rm -v $(CURDIR)/gateway:/gateway -w /gateway/kong/plugins/neutree-ai-gateway $(GATEWAY_LUA_TEST_IMAGE) sh spec/run.sh
 

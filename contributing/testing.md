@@ -15,6 +15,14 @@
 
 `testing/mocks`, `pkg/model_registry/mocks`, `pkg/storage/mocks`, `pkg/command/mocks`, `internal/orchestrator/mocks`, `internal/cluster/mocks`, `internal/ray/dashboard/mocks`, `internal/registry/mocks`, `controllers/mocks`, `internal/observability/monitoring/mocks`, `internal/observability/config/mocks`, `internal/gateway/mocks`, `internal/accelerator/mocks`, `internal/auth/mocks`, `internal/util/mocks`.
 
+## Kong Plugin Lua Tests
+
+- **Framework**: `busted` under LuaJIT (the OpenResty/Kong runtime) with the luarocks `lua-cjson` — the cjson fork Kong itself ships.
+- **Location**: `gateway/kong/plugins/<plugin>/spec/*_spec.lua`, beside the plugin. Kong only loads `handler.lua` / `schema.lua` (plus whatever the plugin's chart ConfigMap lists) from the plugin directory, so a `spec/` subdirectory never ships.
+- **Command**: `make gateway-lua-test` — builds one toolchain image from `gateway/kong/plugins/neutree-ai-gateway/spec/Dockerfile` and runs that directory's `spec/run.sh`, which names the spec directories it covers on its busted invocation. Add a plugin's spec directory to that list to have it run in CI.
+- **Style**: stub the Kong PDK as globals before loading the handler, then drive its public entry points (`handler:access(conf)`), so tests pin the plugin's decision for a request shape rather than the shape of its internals.
+- **Priorities are load-bearing**: `PRIORITY` decides which plugin enforces first (Kong runs high to low within a phase, and `kong.response.exit` aborts the rest of the phase). `internal/gateway/kong_plugin_priority_test.go` pins the values; read it before reasoning about ordering.
+
 ## Python Tests (co-located)
 
 Python tests use `test_<module>.py` naming and live **in the same directory as the source file** (not a separate `tests/`).
