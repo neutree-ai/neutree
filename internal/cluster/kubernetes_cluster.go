@@ -19,12 +19,14 @@ import (
 	"github.com/neutree-ai/neutree/internal/cluster/component/router"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 var _ ClusterReconcile = &NativeKubernetesClusterReconciler{}
 
 type NativeKubernetesClusterReconciler struct {
+	cacheProvider         clustercache.Provider
 	storage               storage.Storage
 	acceleratorMgr        accelerator.Manager
 	metricsRemoteWriteURL string
@@ -122,6 +124,10 @@ func (c *NativeKubernetesClusterReconciler) reconcile(reconcileCtx *ReconcileCon
 			errs = append(errs, err)
 		}
 	}
+
+	// Cache health is reported in its own status; ordinary inference must not
+	// be blocked by an optional Runtime or its control-plane installation.
+	c.reconcileCache(reconcileCtx)
 
 	if len(errs) > 0 {
 		return utilerrors.NewAggregate(errs)
@@ -291,6 +297,10 @@ func (c *NativeKubernetesClusterReconciler) reconcileDelete(reconcileCtx *Reconc
 
 	if ns.DeletionTimestamp != nil {
 		return errors.New("waiting for namespace deletion")
+	}
+
+	if err := c.deleteCache(reconcileCtx); err != nil {
+		return err
 	}
 
 	if err := c.deleteClusterComponents(reconcileCtx); err != nil {

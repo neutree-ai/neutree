@@ -188,7 +188,7 @@ func TestValidateClusterSoftDelete(t *testing.T) {
 
 			proxyCalled := false
 			router := gin.New()
-			router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 				proxyCalled = true
 
 				forwardedBody, err := io.ReadAll(c.Request.Body)
@@ -280,7 +280,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.GET("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.GET("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -299,7 +299,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -320,7 +320,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -344,7 +344,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -367,7 +367,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -392,7 +392,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -428,7 +428,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -469,7 +469,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -498,7 +498,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -530,7 +530,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -560,7 +560,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -599,7 +599,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		}}}}, nil).Once()
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -630,7 +630,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			body, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
@@ -670,7 +670,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		body := `{"spec":{"type":"kubernetes","version":"v1.1.0","config":{"kubernetes_config":{"kubeconfig":null}}}}`
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			forwardedBody, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
@@ -690,7 +690,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -719,7 +719,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -743,7 +743,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -767,7 +767,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -789,7 +789,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -811,7 +811,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -838,7 +838,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -865,7 +865,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -905,7 +905,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -931,7 +931,7 @@ func TestValidateClusterRequestMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -1327,7 +1327,7 @@ func testValidateClusterAcceleratorVirtualizationBody(t *testing.T) {
 
 			proxyCalled := false
 			router := gin.New()
-			router.Handle(method, "/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+			router.Handle(method, "/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 				proxyCalled = true
 				c.Status(http.StatusNoContent)
 			})
@@ -2004,7 +2004,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2053,7 +2053,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2096,7 +2096,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2131,7 +2131,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2172,7 +2172,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		}}}}, nil).Once()
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2196,7 +2196,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		}}, nil).Once()
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2217,7 +2217,7 @@ func testValidateClusterAcceleratorVirtualizationMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2249,7 +2249,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.POST("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.POST("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2280,7 +2280,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2316,7 +2316,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2352,7 +2352,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 				proxyCalled := false
 				router := gin.New()
-				router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+				router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 					proxyCalled = true
 					c.Status(http.StatusNoContent)
 				})
@@ -2387,7 +2387,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2423,7 +2423,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2459,7 +2459,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2495,7 +2495,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2526,7 +2526,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 				proxyCalled := false
 				router := gin.New()
-				router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+				router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 					proxyCalled = true
 					c.Status(http.StatusNoContent)
 				})
@@ -2556,7 +2556,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2592,7 +2592,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2628,7 +2628,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2659,7 +2659,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2680,7 +2680,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2711,7 +2711,7 @@ func testValidateClusterConfigurationUpdateMiddleware(t *testing.T) {
 		body := `{"metadata":{"name":"cluster"},"spec":{"version":"v1.1.0"}}`
 		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			restoredBody, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
 			assert.Equal(t, body, string(restoredBody))
@@ -2746,7 +2746,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		mockStorage := storageMocks.NewMockStorage(t)
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2779,7 +2779,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2809,7 +2809,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2837,7 +2837,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 
 		proxyCalled := false
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			proxyCalled = true
 			c.Status(http.StatusNoContent)
 		})
@@ -2868,7 +2868,7 @@ func testValidateClusterVersionUpdateMiddleware(t *testing.T) {
 		body := `{"metadata":{"name":"cluster"},"spec":{"version":"v1.1.0"}}`
 		originalBody := &trackingReadCloser{Reader: strings.NewReader(body)}
 		router := gin.New()
-		router.PATCH("/clusters", validateClusterRequest(mockStorage), func(c *gin.Context) {
+		router.PATCH("/clusters", validateClusterRequest(mockStorage, false), func(c *gin.Context) {
 			restoredBody, err := io.ReadAll(c.Request.Body)
 			assert.NoError(t, err)
 			assert.Equal(t, body, string(restoredBody))
@@ -3342,4 +3342,31 @@ func sameFilters(actual, expected []storage.Filter) bool {
 	}
 
 	return true
+}
+
+func TestClusterCacheAdmission(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			for _, method := range []string{http.MethodPost, http.MethodPatch} {
+				t.Run(fmt.Sprintf("supported=%v/enabled=%v/%s", supported, enabled, method), func(t *testing.T) {
+					s := storageMocks.NewMockStorage(t)
+					current := &v1.Cluster{ID: 1, Metadata: &v1.Metadata{Name: "compute", Workspace: "default"}, Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType, Version: "v1.2.0"}}
+					if method == http.MethodPatch {
+						s.On("ListCluster", mock.Anything).Return([]v1.Cluster{*current}, nil).Once()
+					}
+					router := gin.New()
+					called := false
+					router.Handle(method, "/clusters", validateClusterRequest(s, supported), func(c *gin.Context) { called = true; c.Status(http.StatusNoContent) })
+					body := fmt.Sprintf(`{"spec":{"type":"kubernetes","version":"v1.2.0","zcache":{"enabled":%v,"l1_size_gib":1,"target_nodes":["worker"]}}}`, enabled)
+					recorder := httptest.NewRecorder()
+					router.ServeHTTP(recorder, httptest.NewRequest(method, "/clusters?id=eq.1", strings.NewReader(body)))
+					assert.Equal(t, supported || !enabled, called, recorder.Body.String())
+					if !supported && enabled {
+						assert.Equal(t, http.StatusBadRequest, recorder.Code)
+						assert.Contains(t, recorder.Body.String(), "ZCache is not supported")
+					}
+				})
+			}
+		}
+	}
 }
