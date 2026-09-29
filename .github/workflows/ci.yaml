@@ -67,5 +67,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Run neutree-ai-gateway Lua unit tests
+      - name: Run the Kong plugin Lua unit tests
         run: make gateway-lua-test

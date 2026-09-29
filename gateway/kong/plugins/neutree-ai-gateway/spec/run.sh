@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run the neutree-ai-gateway Lua unit tests.
+# Run the Lua unit tests of the plugins named on the busted invocation below.
 #
 # The tests must run under LuaJIT (the OpenResty/Kong runtime), not PUC Lua 5.1:
 # handler.lua uses `goto`/labels and `string.buffer`, which PUC 5.1 cannot even
@@ -15,7 +15,9 @@ plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$plugin_dir"
 
 # Load all producers, the neutral contract and the consumer in one namespace.
-eval "$(luarocks path)"
+# Ask for the 5.1 trees explicitly: the rocks are installed for LuaJIT, which is
+# not necessarily the interpreter luarocks defaults to.
+eval "$(luarocks --lua-version=5.1 path 2>/dev/null || luarocks path)"
 gateway_dir=$(CDPATH= cd -- "$plugin_dir/../../.." && pwd)
 export LUA_PATH="$gateway_dir/?.lua;$LUA_PATH"
 
@@ -28,4 +30,4 @@ if [ -z "$busted_bin" ]; then
     exit 1
 fi
 
-exec luajit "$busted_bin" spec/ ../neutree-metrics/spec/ "$@"
+exec luajit "$busted_bin" spec/ ../neutree-metrics/spec/ ../neutree-ai-access/spec/ "$@"
