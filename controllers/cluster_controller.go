@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -33,6 +34,7 @@ type ClusterController struct {
 }
 
 type ClusterControllerOption struct {
+	CacheProvider         clustercache.Provider
 	Storage               storage.Storage
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
@@ -50,9 +52,11 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		obsCollectConfigManager: opt.ObsCollectConfigManager,
 		metricsRemoteWriteURL:   opt.MetricsRemoteWriteURL,
 
-		gw:                  opt.Gw,
-		acceleratorManager:  opt.AcceleratorManager,
-		newClusterReconcile: cluster.NewReconcile,
+		gw:                 opt.Gw,
+		acceleratorManager: opt.AcceleratorManager,
+		newClusterReconcile: func(c *v1.Cluster, a accelerator.Manager, s storage.Storage, url string) (cluster.ClusterReconcile, error) {
+			return cluster.NewReconcile(c, a, s, url, cluster.WithCacheProvider(opt.CacheProvider))
+		},
 	}
 
 	c.syncHandler = c.sync
@@ -240,6 +244,7 @@ func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.Clus
 	}
 
 	if obj.Status != nil {
+		newStatus.ZCache = obj.Status.ZCache
 		newStatus.Initialized = obj.Status.Initialized
 		newStatus.DashboardURL = obj.Status.DashboardURL
 		newStatus.NodeProvisionStatus = obj.Status.NodeProvisionStatus

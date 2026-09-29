@@ -29,6 +29,7 @@ func NewClusterControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		clusterController, err := controllers.NewClusterController(
 			&controllers.ClusterControllerOption{
+				CacheProvider:           opts.config.ClusterCacheProvider,
 				Storage:                 opts.config.Storage,
 				Gw:                      opts.config.Gateway,
 				AcceleratorManager:      opts.config.AcceleratorManager,
