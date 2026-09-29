@@ -1,12 +1,9 @@
 package controllers
 
 import (
-	"errors"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
-	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -160,7 +157,7 @@ func TestStaticNodeClusterControllerReconcileWaitsForStaleNodeDeletion(t *testin
 	assert.Contains(t, updatedMetadata, "13")
 }
 
-func TestStaticNodeClusterControllerReconcileRequiresRayVerificationBeforeReady(t *testing.T) {
+func TestStaticNodeClusterControllerReconcileReadyWithoutRayNodeIPCheck(t *testing.T) {
 	updatedStatus := map[string]*v1.StaticNodeCluster{}
 	nodes := []v1.StaticNode{
 		controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
@@ -177,8 +174,6 @@ func TestStaticNodeClusterControllerReconcileRequiresRayVerificationBeforeReady(
 		}).
 		Return(nil).
 		Maybe()
-	mockDashboard := mockStaticNodeClusterDashboard(t)
-	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
 	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
 		Storage: mockStorage,
 	})
@@ -190,9 +185,11 @@ func TestStaticNodeClusterControllerReconcileRequiresRayVerificationBeforeReady(
 	status := updatedStatus["7"]
 	require.NotNil(t, status)
 	require.NotNil(t, status.Status)
-	assert.Equal(t, v1.StaticNodeClusterPhaseProvisioning, status.Status.Phase)
-	assert.Contains(t, status.Status.ErrorMessage, "ray cluster verification failed")
-	assert.Contains(t, status.Status.ErrorMessage, "connection refused")
+	// Readiness is driven by the static node phases alone. The controller no
+	// longer queries the Ray dashboard, so an unreachable dashboard endpoint
+	// cannot hold a fully ready cluster back.
+	assert.Equal(t, v1.StaticNodeClusterPhaseReady, status.Status.Phase)
+	assert.Empty(t, status.Status.ErrorMessage)
 }
 
 func TestStaticNodeClusterControllerReconcileDoesNotUpdateStaticNodeStatusOnUpsert(t *testing.T) {
@@ -229,42 +226,6 @@ func TestStaticNodeClusterControllerReconcileDoesNotUpdateStaticNodeStatusOnUpse
 	assert.Nil(t, updated.Status)
 	require.NotNil(t, updated.Spec)
 	assert.Equal(t, "static-a", updated.Spec.Cluster)
-}
-
-func TestStaticNodeClusterControllerReconcileFailsReadyClusterWhenRayVerificationFails(t *testing.T) {
-	updatedStatus := map[string]*v1.StaticNodeCluster{}
-	nodes := []v1.StaticNode{
-		controllerStaticClusterNode("head-0", v1.StaticNodeRoleHead, v1.StaticNodePhaseReady),
-		controllerStaticClusterNode("worker-0", v1.StaticNodeRoleWorker, v1.StaticNodePhaseReady),
-	}
-	mockStorage := newMockStaticNodeClusterStorage(t, nodes)
-	mockStaticNodeUpdatesPreservingStatus(mockStorage, nodes)
-	mockStorage.On("UpdateStaticNodeCluster", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
-			data := args.Get(1).(*v1.StaticNodeCluster)
-			if data != nil && data.Status != nil {
-				updatedStatus[args.Get(0).(string)] = data
-			}
-		}).
-		Return(nil).
-		Maybe()
-	mockDashboard := mockStaticNodeClusterDashboard(t)
-	mockDashboard.On("ListNodes").Return(nil, errors.New("connection refused")).Once()
-	controller, err := NewStaticNodeClusterController(&StaticNodeClusterControllerOption{
-		Storage: mockStorage,
-	})
-	require.NoError(t, err)
-
-	cluster := controllerStaticNodeCluster()
-	cluster.Status = &v1.StaticNodeClusterStatus{Phase: v1.StaticNodeClusterPhaseReady}
-	err = controller.Reconcile(cluster)
-
-	require.NoError(t, err)
-	status := updatedStatus["7"]
-	require.NotNil(t, status)
-	require.NotNil(t, status.Status)
-	assert.Equal(t, v1.StaticNodeClusterPhaseFailed, status.Status.Phase)
-	assert.Contains(t, status.Status.ErrorMessage, "ray cluster verification failed")
 }
 
 func TestStaticNodeClusterControllerDeletePropagatesForceDeleteToNodes(t *testing.T) {
@@ -320,21 +281,6 @@ func newMockStaticNodeClusterStorage(t *testing.T, nodes []v1.StaticNode) *stora
 	mockStorage.On("DeleteStaticNodeCluster", mock.Anything).Return(nil).Maybe()
 
 	return mockStorage
-}
-
-func mockStaticNodeClusterDashboard(t *testing.T) *dashboardmocks.MockDashboardService {
-	t.Helper()
-
-	mockDashboard := dashboardmocks.NewMockDashboardService(t)
-	prevFactory := dashboard.NewDashboardService
-	dashboard.NewDashboardService = func(string) dashboard.DashboardService {
-		return mockDashboard
-	}
-	t.Cleanup(func() {
-		dashboard.NewDashboardService = prevFactory
-	})
-
-	return mockDashboard
 }
 
 func mockStaticNodeUpdatesPreservingStatus(mockStorage *storagemocks.MockStorage, nodes []v1.StaticNode) {

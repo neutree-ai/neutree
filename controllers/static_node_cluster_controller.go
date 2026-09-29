@@ -131,7 +131,6 @@ func (c *StaticNodeClusterController) reconcileNormal(
 	}
 
 	status = c.aggregator.Aggregate(cluster, latestNodes, desiredNodePlans)
-	status = c.aggregator.RequireRayClusterReady(ctx, cluster, status)
 
 	return nil
 }

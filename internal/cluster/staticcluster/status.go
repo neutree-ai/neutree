@@ -1,16 +1,12 @@
 package staticcluster
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 
-	"github.com/pkg/errors"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 )
 
 func joinStatusMessages(current string, messages ...string) string {
@@ -117,78 +113,6 @@ func (a StatusAggregator) Aggregate(
 	status.ErrorMessage = staticNodeClusterErrorMessage(ctx, phase)
 
 	return status
-}
-
-func (a StatusAggregator) RequireRayClusterReady(
-	ctx context.Context,
-	cluster *v1.StaticNodeCluster,
-	status v1.StaticNodeClusterStatus,
-) v1.StaticNodeClusterStatus {
-	if status.Phase != v1.StaticNodeClusterPhaseReady {
-		return status
-	}
-
-	if err := verifyRayCluster(ctx, cluster); err == nil {
-		return status
-	} else {
-		status.ErrorMessage = joinStatusMessages(status.ErrorMessage, "ray cluster verification failed: "+err.Error())
-	}
-
-	if cluster != nil && cluster.Status != nil && cluster.Status.Phase == v1.StaticNodeClusterPhaseReady {
-		status.Phase = v1.StaticNodeClusterPhaseFailed
-	} else {
-		status.Phase = v1.StaticNodeClusterPhaseProvisioning
-	}
-
-	return status
-}
-
-func verifyRayCluster(_ context.Context, cluster *v1.StaticNodeCluster) error {
-	nodes, err := dashboard.NewDashboardService(DashboardURL(cluster)).ListNodes()
-	if err != nil {
-		return errors.Wrap(err, "failed to list ray nodes")
-	}
-
-	aliveByIP := map[string]struct{}{}
-
-	for _, node := range nodes {
-		if node.Raylet.State != v1.AliveNodeState {
-			continue
-		}
-
-		aliveByIP[node.IP] = struct{}{}
-	}
-
-	missing := missingDesiredRayNodeIPs(cluster, aliveByIP)
-	if len(missing) > 0 {
-		return errors.Errorf("ray nodes are not alive: %v", missing)
-	}
-
-	return nil
-}
-
-func missingDesiredRayNodeIPs(cluster *v1.StaticNodeCluster, aliveByIP map[string]struct{}) []string {
-	if cluster == nil || cluster.Spec == nil {
-		return nil
-	}
-
-	missing := make([]string, 0)
-
-	for _, node := range cluster.Spec.Nodes {
-		if node.IP == "" {
-			continue
-		}
-
-		if _, ok := aliveByIP[node.IP]; ok {
-			continue
-		}
-
-		missing = append(missing, node.IP)
-	}
-
-	sort.Strings(missing)
-
-	return missing
 }
 
 func buildStaticNodeClusterStatusContext(
