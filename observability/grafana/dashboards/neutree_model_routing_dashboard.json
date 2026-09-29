@@ -1206,18 +1206,18 @@
     {
       "id": 38,
       "title": "各模型上游调用占比",
-      "type": "barchart",
+      "type": "table",
       "gridPos": {
         "x": 0,
         "y": 42,
         "w": 24,
-        "h": 10
+        "h": 6
       },
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每条横条合计为 100%，颜色代表上游 / 上游模型；悬停查看分流比例，调用次数见下方明细。仅展示有调用且已选中上游的记录；无调用模型和未选中上游的请求请查看明细及总览。",
+      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每行显示一个上游目标，占比以该对外模型已选中上游的调用总数为分母。仅展示有调用的目标；同一模型各行占比合计为 100%。",
       "targets": [
         {
           "refId": "A",
@@ -1230,82 +1230,83 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "noValue": "暂无调用",
-          "color": {
-            "mode": "palette-classic"
-          },
+          "noValue": "—",
           "custom": {
-            "lineWidth": 0,
-            "fillOpacity": 85,
-            "gradientMode": "none",
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            }
-          },
-          "decimals": 1,
-          "max": 1
+            "align": "auto",
+            "filterable": true
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "模型内调用占比"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "orientation": "horizontal",
-        "xField": "对外模型",
-        "stacking": "percent",
-        "showValue": "never",
-        "groupWidth": 0.75,
-        "barWidth": 0.85,
-        "barRadius": 0,
-        "fullHighlight": true,
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "xTickLabelSpacing": 0
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "对外模型",
+            "desc": false
+          }
+        ]
       },
       "transformations": [
         {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "upstream_target",
-            "rowField": "virtual_model",
-            "valueField": "Value",
-            "emptyValue": "null"
-          }
-        },
-        {
           "id": "organize",
           "options": {
+            "excludeByName": {
+              "Time": true,
+              "upstream": true,
+              "upstream_model": true
+            },
+            "indexByName": {
+              "virtual_model": 0,
+              "upstream_target": 1,
+              "Value": 2
+            },
             "renameByName": {
-              "virtual_model\\upstream_target": "对外模型"
+              "virtual_model": "对外模型",
+              "upstream_target": "上游 / 上游模型",
+              "Value": "模型内调用占比"
             }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "对外模型",
-                "desc": false
-              }
-            ]
           }
         }
       ]
@@ -1810,7 +1811,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 48,
         "w": 24,
         "h": 9
       }
@@ -1821,7 +1822,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 61,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1875,7 +1876,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 61,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1930,7 +1931,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 61,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1984,7 +1985,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 69,
+        "y": 65,
         "w": 8,
         "h": 8
       },
@@ -2038,7 +2039,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 69,
+        "y": 65,
         "w": 8,
         "h": 8
       },
@@ -2092,7 +2093,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 69,
+        "y": 65,
         "w": 8,
         "h": 8
       },
@@ -2146,7 +2147,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 77,
+        "y": 73,
         "w": 12,
         "h": 8
       },
@@ -2200,7 +2201,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 77,
+        "y": 73,
         "w": 12,
         "h": 8
       },
@@ -2657,7 +2658,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 85,
+        "y": 81,
         "w": 24,
         "h": 8
       }
