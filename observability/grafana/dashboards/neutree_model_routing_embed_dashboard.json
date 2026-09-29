@@ -487,13 +487,10 @@
           "values": false
         },
         "pieType": "pie",
-        "displayLabels": [
-          "name",
-          "percent"
-        ],
+        "displayLabels": [],
         "legend": {
           "displayMode": "table",
-          "placement": "right",
+          "placement": "bottom",
           "showLegend": true,
           "values": [
             "value",
