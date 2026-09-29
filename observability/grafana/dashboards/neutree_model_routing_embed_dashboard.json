@@ -1,0 +1,1479 @@
+{
+  "uid": "neutree-model-routing-embed",
+  "title": "Model routing monitoring (compact)",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": false,
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "hide": 2
+      },
+      {
+        "name": "endpoint_literal",
+        "type": "textbox",
+        "query": "\"\"",
+        "current": {
+          "text": "\"\"",
+          "value": "\"\""
+        },
+        "hide": 2
+      },
+      {
+        "name": "model",
+        "label": "Exposed model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values({__name__=~\"kong_neutree_route_(completed_requests_total|inflight|compiled_targets)\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw}}, virtual_model)",
+          "refId": "ModelVariable"
+        },
+        "definition": "label_values({__name__=~\"kong_neutree_route_(completed_requests_total|inflight|compiled_targets)\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw}}, virtual_model)",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 9999,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "options": {
+        "mode": "html",
+        "content": "<style>\n/* ============================================================\n   Grafana Custom Theme\n   ============================================================ */\n\n/* ---------- Typography ---------- */\nbody,\nbutton,\ninput,\nselect,\ntextarea,\ntable,\n[class*=\"panel-title\"],\n[class*=\"panel-content\"] {\n  font-family: Inter, \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif !important;\n}\n\n/* ---------- Dark Mode ---------- */\nbody[class*=\"theme-dark\"],\nbody:not([class*=\"theme-light\"]) {\n  --ui-bg: #08111f;\n  --ui-card: #0f1d2a;\n  --ui-border: rgba(198, 219, 234, 0.14);\n  --ui-input: #20324b;\n  --ui-primary: #268dff;\n  --ui-fg: #e6edf7;\n  --ui-heading: #e6edf7;\n  --ui-title: #cbd5e1;\n  --ui-muted-fg: rgba(182, 199, 224, 0.58);\n  --ui-destructive: #f0685f;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(198, 219, 234, 0.04);\n  --ui-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 20px 0 rgba(2, 7, 12, 0.42);\n  --ui-select-fill: #0f1d2a;\n  --ui-select-border: rgba(198, 219, 234, 0.2);\n  --ui-select-hover-border: rgba(173, 192, 224, 0.42);\n  --ui-select-outstanding: #268dff;\n  --ui-select-hover-fill: rgba(158, 179, 214, 0.18);\n  --ui-select-selected-fill: rgba(38, 141, 255, 0.06);\n  --ui-select-focus-ring: 0 0 0 4px rgba(38, 141, 255, 0.18);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.32);\n  --ui-menu-fill: #0f1d2a;\n  --ui-menu-border: rgba(198, 219, 234, 0.14);\n  --ui-menu-shadow: 0px 18px 42px 0px rgba(0, 0, 0, 0.48), 0px 0px 0px 1px rgba(173, 192, 224, 0.12);\n  --ui-select-text: #e6edf7;\n  --ui-select-text-strong: #f6f9fe;\n}\n\n/* ---------- Light Mode ---------- */\nbody[class*=\"theme-light\"] {\n  --ui-bg: #edf0f7;\n  --ui-card: #ffffff;\n  --ui-border: rgba(12, 40, 73, 0.12);\n  --ui-input: #edf1f4;\n  --ui-primary: #0080ff;\n  --ui-fg: #00122e;\n  --ui-heading: #1f2937;\n  --ui-title: #344054;\n  --ui-muted-fg: rgba(44, 56, 82, 0.6);\n  --ui-destructive: #f0483e;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(36, 41, 46, 0.04);\n  --ui-card-shadow: 0 4px 14px 0 rgba(12, 40, 73, 0.06);\n  --ui-select-fill: #ffffff;\n  --ui-select-border: rgba(12, 40, 73, 0.24);\n  --ui-select-hover-border: rgba(107, 128, 167, 0.6);\n  --ui-select-outstanding: #0080ff;\n  --ui-select-hover-fill: rgba(211, 218, 235, 0.6);\n  --ui-select-selected-fill: rgba(0, 136, 255, 0.04);\n  --ui-select-focus-ring: 0 0 0 4px rgba(0, 136, 255, 0.16);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(44, 56, 82, 0.18);\n  --ui-menu-fill: #ffffff;\n  --ui-menu-border: rgba(211, 218, 235, 0.6);\n  --ui-menu-shadow: 0px 12px 40px 0px rgba(45, 58, 86, 0.3), 0px 0px 10px 0px rgba(107, 125, 153, 0.18);\n  --ui-select-text: #00122e;\n  --ui-select-text-strong: #1d326c;\n}\n\n/* ---------- Global Background ---------- */\nbody,\n.main-view,\n[class*=\"page-wrapper\"]>div>div:first-child {\n  background-color: var(--ui-bg) !important;\n}\n\n/* ---------- Panel Container ---------- */\nsection[class*=\"panel-container\"]:not([class*=\"transparent\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-panel) !important;\n  background-clip: padding-box !important;\n  overflow: hidden !important;\n  box-shadow: var(--ui-card-shadow) !important;\n}\n\n/* ---------- Panel Title ---------- */\n[class*=\"panel-title\"] {\n  color: var(--ui-title) !important;\n  font-size: 13px !important;\n  font-weight: 600 !important;\n}\n\n/* ---------- Padding ---------- */\n/* One visual surface for Grafana's native variables and time controls. */\n[data-testid=\"data-testid dashboard controls\"] {\n  background: var(--ui-card) !important;\n  border: 1px solid var(--ui-border);\n  border-radius: var(--ui-radius-panel);\n  padding: 14px 16px !important;\n  margin-bottom: 16px;\n  gap: 16px;\n  flex-wrap: wrap;\n  align-items: center;\n}\n\n[data-testid=\"data-testid dashboard controls\"] > :first-child {\n  gap: 24px;\n  flex-wrap: wrap;\n}\n\n[data-testid=\"data-testid dashboard controls\"] > :last-child {\n  margin-left: auto;\n}\n\n[class*=\"-canvas-wrapper-old\"] [class*=\"-body\"] {\n  padding: 0 !important;\n  margin-top: -32px !important;\n}\n\n/* ---------- Dashboard Variable Controls ---------- */\n[class*=\"submenu-controls\"],\n[class*=\"SubMenu\"] {\n  background-color: var(--ui-bg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n  z-index: 10 !important;\n  position: relative !important;\n  padding: 8px 8px 8px 16px !important;\n}\n\n/* Variable Container */\n[data-testid=\"data-testid template variable\"] {\n  display: flex !important;\n  align-items: center !important;\n  gap: 0 !important;\n}\n\n/* Variable Label */\n[data-testid=\"data-testid template variable\"]>label {\n  background-color: transparent !important;\n  color: var(--ui-title) !important;\n  font-weight: 600 !important;\n  border: 0 !important;\n  border-radius: 0 !important;\n  font-size: 13px !important;\n  padding: 0 8px 0 0 !important;\n  line-height: 1 !important;\n  white-space: nowrap !important;\n}\n\n/* Variable Dropdown - Outer Wrapper */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:focus-within {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n/* Variable Dropdown - Inner Container */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]>div:not([class*=\"input-suffix\"]):not([class*=\"a11yText\"]) {\n  background-color: transparent !important;\n  border: none !important;\n  border-radius: inherit !important;\n}\n\n/* Variable Value Container */\n[data-testid=\"data-testid template variable\"] [class*=\"select-value-container\"] {\n  background-color: transparent !important;\n  padding: 0 8px !important;\n}\n\n/* Variable Selected Value */\ndiv[class*=\"singleValue\"],\ndiv[class*=\"grafana-select-value-container\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n}\n\n/* Variable Dropdown Arrow */\ndiv[class*=\"input-suffix\"] {\n  color: var(--ui-muted-fg) !important;\n  padding-right: 8px !important;\n}\n\ndiv[class*=\"input-suffix\"] svg {\n  fill: var(--ui-muted-fg) !important;\n}\n\n/* Variable Dropdown Menu (expanded) */\ndiv[class*=\"menu\"],\n[class*=\"options-group\"] {\n  z-index: 1050 !important;\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n/* Dropdown Options */\n[data-testid=\"data-testid Select option\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  height: 32px !important;\n  min-height: 32px !important;\n  max-height: 32px !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n  box-sizing: border-box !important;\n  border-left: 2px solid transparent !important;\n  outline: none !important;\n  overflow: hidden !important;\n}\n\n[data-testid=\"data-testid Select option\"]:hover {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[data-testid=\"data-testid Select option\"][class*=\"focused\"] {\n  color: var(--ui-select-text-strong) !important;\n  background-color: transparent !important;\n  border-left-color: transparent !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"][class*=\"focused\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] [class*=\"option-body\"] {\n  padding: 0 !important;\n  height: 20px !important;\n  min-height: 20px !important;\n  line-height: 20px !important;\n  overflow: hidden !important;\n  text-overflow: ellipsis !important;\n  white-space: nowrap !important;\n}\n\n[data-testid=\"data-testid Select option\"]::before,\n[data-testid=\"data-testid Select option\"]::after {\n  background-image: none !important;\n  background-color: transparent !important;\n}\n\n/* ---------- Legacy Select ---------- */\n.gf-form-select-box__control,\ndiv[class*=\"gf-form-select-box__control\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n.gf-form-select-box__control:hover,\ndiv[class*=\"gf-form-select-box__control\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n.gf-form-select-box__control--is-focused,\ndiv[class*=\"gf-form-select-box__control--is-focused\"] {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n.gf-form-select-box__menu {\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n.gf-form-select-box__option {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-left: 2px solid transparent !important;\n  border-image: none !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n}\n\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-focused,\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-selected {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n  border-image: none !important;\n}\n\n.gf-form-select-box__option--is-selected .fa {\n  color: var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] *,\n.gf-form-select-box__option * {\n  border-radius: 0 !important;\n}\n\n/* ---------- Native Grafana Menus ---------- */\n[role=\"menu\"] [role=\"menuitem\"],\n[role=\"menu\"] [role=\"menuitemradio\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"],\nbutton[data-role=\"menuitem\"] {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  box-shadow: none !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  min-height: 32px !important;\n  height: 32px !important;\n  padding: 6px 8px !important;\n  outline: none !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitemradio\"]:hover,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:hover,\nbutton[data-role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitem\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemradio\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:focus-visible,\nbutton[data-role=\"menuitem\"]:focus-visible {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n  outline: none !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemradio\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"][aria-checked=\"true\"],\nbutton[data-role=\"menuitem\"][aria-checked=\"true\"] {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker Menu ---------- */\n[aria-roledescription=\"Time range selection\"] li {\n  height: 32px !important;\n  line-height: 20px !important;\n}\n\n[aria-roledescription=\"Time range selection\"] label {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  height: 32px !important;\n  line-height: 20px !important;\n  padding: 6px 8px !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[aria-roledescription=\"Time range selection\"] li:hover label,\n[aria-roledescription=\"Time range selection\"] li:focus-within label {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[aria-roledescription=\"Time range selection\"] input:checked + label {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker / Toolbar Buttons ---------- */\nbutton[class*=\"toolbar-button\"],\nbutton[data-testid=\"data-testid TimePicker Open Button\"],\n.button-group > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-button) !important;\n}\n\n/* Button Group Connectors */\n.button-group {\n  gap: 0 !important;\n}\n\n.button-group > button:first-child {\n  border-radius: var(--ui-radius-button) 0 0 var(--ui-radius-button) !important;\n  border-right: none !important;\n}\n\n.button-group > button:last-child {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Refresh Picker ---------- */\n[class*=\"refresh-picker\"] > button,\n[class*=\"RefreshPicker\"] > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n}\n\n[class*=\"refresh-picker\"] > div:last-child > button,\n[class*=\"RefreshPicker\"] > div:last-child > button {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Top Navigation ---------- */\n[class*=\"navbar\"],\nheader[class*=\"page-toolbar\"] {\n  background-color: var(--ui-card) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Inputs / Selects ---------- */\ninput:not([type=\"checkbox\"]):not([type=\"radio\"]),\nselect,\n[class*=\"gf-form-input\"] {\n  border-color: var(--ui-border) !important;\n  border-radius: var(--ui-radius-input) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Tables ---------- */\ntable tbody tr:nth-child(odd) {\n  background-color: color-mix(in srgb, var(--ui-input) 15%, transparent) !important;\n}\n\ntable tbody tr:hover {\n  background-color: var(--ui-table-hover) !important;\n}\n\n[class*=\"tableContentWrapper\"] div[class*=\"row\"]:hover,\n[class*=\"tablePanel\"] div[class*=\"row\"]:hover {\n  background-color: var(--ui-table-hover) !important;\n  transition: background-color 120ms ease !important;\n}\n\ntable th {\n  color: var(--ui-muted-fg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Links ---------- */\na:not([class*=\"btn\"]):not([class*=\"variable\"]) {\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Row Title ---------- */\n.dashboard-row .dashboard-row__title,\n[data-testid^=\"data-testid dashboard-row-title-\"] {\n  color: var(--ui-heading) !important;\n  font-weight: 600 !important;\n}\n\n/* ---------- Tooltip ---------- */\n[class*=\"tooltip\"]:not([class*=\"panel\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Alert ---------- */\n[class*=\"alert-error\"],\n[class*=\"alerting\"] {\n  border-color: var(--ui-destructive) !important;\n}\n\n/* ---------- Scrollbar ---------- */\nhtml,\nbody,\n#root {\n  scrollbar-width: thin !important;\n}\n\nhtml::-webkit-scrollbar,\nbody::-webkit-scrollbar,\n#root::-webkit-scrollbar {\n  width: 6px !important;\n  height: 6px !important;\n}\n\n::-webkit-scrollbar-track {\n  background: transparent;\n}\n\n::-webkit-scrollbar-thumb {\n  background: var(--ui-input);\n  border-radius: 3px;\n}\n\n::-webkit-scrollbar-thumb:hover {\n  background: var(--ui-muted-fg);\n}\n\n/* Hide the injected theme panel itself */\ndiv[data-griditem-key=\"grid-item-9999\"] {\n  visibility: hidden !important;\n}\n/* Row panel counts are Grafana editor bookkeeping, not monitoring data. */\n[data-testid^=\"data-testid dashboard-row-title-\"] + span { display: none; }\n</style>",
+        "code": {
+          "language": "html",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 36,
+      "title": "Configured exposed models",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Total exposed models in the endpoint's loaded configuration, deduplicated across Kong instances. Independent of the time range and model filter. Shows a dash when collection is unavailable.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (virtual_model) (kong_neutree_route_compiled_targets{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model!=\"\",gateway_instance!=\"\"} @ now() and on(job,instance) (up{job=\"neutree-gateway\"} @ now() == 1)))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {},
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 1,
+      "title": "Completed calls",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Completed calls in the selected time range, including successes, failures and failures without an upstream target. In-flight calls are excluded. Early failures before model resolution are attributed to unknown.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Success rate",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Final HTTP 2xx responses divided by all completed requests. Shows a dash when there are no requests. Does not measure answer quality or complete streaming responses.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range])) / sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Gateway failures",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Requests that failed in the gateway before upstream assignment, including authentication failures, unknown models, unavailable upstreams and insufficient capacity.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 37,
+      "title": "Calls by exposed model",
+      "type": "piechart",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Completed calls and shares for selected exposed models in the selected time range, including successes and failures. Models without calls have no slice.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])) > 0",
+          "range": false,
+          "instant": true,
+          "format": "time_series",
+          "legendFormat": "{{virtual_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {},
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "pie",
+        "displayLabels": [],
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Exposed model comparison",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "One row per named exposed model, sorted by successes. Includes current models with zero traffic and historical models. Success means final HTTP 2xx; failure means non-2xx. Latency includes successful requests only; missing values show a dash. Unknown requests appear in overview and failure trends, not as a separate model. Column filters affect this table only.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_count\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"failure_count\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_rate\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "E",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p95_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "F",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p99_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "G",
+          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"average_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposed_model"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success_count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failure_count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": ">=600s (limited precision)"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": ">=600s (limited precision)"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "average_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "metric_column"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "model_key": true,
+              "virtual_model": true
+            },
+            "renameByName": {
+              "model_display": "exposed_model"
+            },
+            "indexByName": {
+              "model_display": 0,
+              "success_count": 1,
+              "failure_count": 2,
+              "success_rate": 3,
+              "p95_latency": 4,
+              "p99_latency": 5,
+              "average_latency": 6
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 16,
+        "h": 7
+      }
+    },
+    {
+      "id": 38,
+      "title": "Upstream call shares by model",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Upstream call distribution per exposed model in the selected time range, including successes and failures. Each row represents one upstream target. Shares use all completed calls with a selected upstream for that model as the denominator. Only targets with calls are shown; shares for each model total 100%.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) / on (virtual_model) group_left() (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
+          "range": false,
+          "instant": true,
+          "format": "table",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "—",
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "call_share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "Share within model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposed_model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Exposed model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstream_target"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Upstream / model"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "upstream": true,
+              "upstream_model": true
+            },
+            "indexByName": {
+              "virtual_model": 0,
+              "upstream_target": 1,
+              "Value": 2
+            },
+            "renameByName": {
+              "virtual_model": "exposed_model",
+              "upstream_target": "upstream_target",
+              "Value": "call_share"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "exposed_model",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Upstream model comparison",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "One row per original exposed-model, upstream and upstream-model combination. Model routing shares use all completed requests with a selected target for that model, including successes and failures. Column filters do not change the denominator. HTTP outcomes are attributed to routing targets and do not measure provider health.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"success_count\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"routing_share\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "C",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"failure_count\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "D",
+          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"success_rate\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "E",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p95_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "G",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p99_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        },
+        {
+          "refId": "H",
+          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
+          "range": false,
+          "instant": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "—",
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposed_model"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstream"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstream_model"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.inspect",
+                "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success_count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "routing_share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "Model routing share"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failure_count"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "—"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.width",
+                "value": 115
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": ">=600s (limited precision)"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "range",
+                    "options": {
+                      "from": 600,
+                      "to": 1e+20,
+                      "result": {
+                        "text": ">=600s (limited precision)"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "average_latency"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.width",
+                "value": 135
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "-"
+                      }
+                    }
+                  },
+                  {
+                    "type": "special",
+                    "options": {
+                      "match": "null+nan",
+                      "result": {
+                        "text": "-"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
+              }
+            ]
+          }
+        ]
+      },
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "metric_column"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "virtual_model": "exposed_model",
+              "upstream": "upstream",
+              "upstream_model": "upstream_model"
+            },
+            "indexByName": {
+              "virtual_model": 0,
+              "upstream": 1,
+              "upstream_model": 2,
+              "routing_share": 3,
+              "success_count": 4,
+              "failure_count": 5,
+              "success_rate": 6,
+              "p95_latency": 7,
+              "p99_latency": 8,
+              "average_latency": 9
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 24,
+        "h": 7
+      }
+    }
+  ],
+  "tags": [
+    "neutree",
+    "model-routing"
+  ],
+  "description": "Overview, exposed model and upstream model monitoring. Requests are attributed by completion time and selected routing target."
+}

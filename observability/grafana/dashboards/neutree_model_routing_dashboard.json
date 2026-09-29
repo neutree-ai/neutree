@@ -1,6 +1,6 @@
 {
   "uid": "neutree-model-routing",
-  "title": "模型路由监控",
+  "title": "Model routing monitoring",
   "schemaVersion": 39,
   "version": 1,
   "editable": false,
@@ -44,7 +44,7 @@
       },
       {
         "name": "model",
-        "label": "对外模型",
+        "label": "Exposed model",
         "type": "query",
         "datasource": {
           "type": "prometheus",
@@ -65,34 +65,6 @@
           "value": "$__all"
         },
         "options": [],
-        "hide": 0
-      },
-      {
-        "name": "mode",
-        "label": "调用类型",
-        "type": "custom",
-        "query": "全部类型 : stream|non_stream|unknown, 流式 : stream, 非流式 : non_stream",
-        "current": {
-          "text": "全部类型",
-          "value": "stream|non_stream|unknown"
-        },
-        "options": [
-          {
-            "text": "全部类型",
-            "value": "stream|non_stream|unknown",
-            "selected": true
-          },
-          {
-            "text": "流式",
-            "value": "stream",
-            "selected": false
-          },
-          {
-            "text": "非流式",
-            "value": "non_stream",
-            "selected": false
-          }
-        ],
         "hide": 0
       }
     ]
@@ -121,7 +93,7 @@
     },
     {
       "id": 9,
-      "title": "网关采集状态",
+      "title": "Gateway scrape status",
       "type": "stat",
       "gridPos": {
         "x": 0,
@@ -133,7 +105,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "已发现实例的采集成功比例，低于 100% 时上述汇总可能不完整。不能证明所有部署实例均已被发现；无数据不表示零流量。",
+      "description": "Scrape success ratio for discovered instances. Below 100%, aggregates may be incomplete. This does not confirm that every deployed instance was discovered. No data does not mean zero traffic.",
       "targets": [
         {
           "refId": "A",
@@ -148,7 +120,7 @@
         "defaults": {
           "unit": "percentunit",
           "min": 0,
-          "noValue": "暂无采集数据",
+          "noValue": "No scrape data",
           "color": {
             "mode": "thresholds"
           },
@@ -171,7 +143,7 @@
               "type": "value",
               "options": {
                 "1": {
-                  "text": "已发现实例采集正常",
+                  "text": "Discovered instances are being scraped",
                   "color": "green"
                 }
               }
@@ -182,7 +154,7 @@
                 "from": 0,
                 "to": 0.999999,
                 "result": {
-                  "text": "部分采集失败，汇总可能不完整",
+                  "text": "Some scrapes failed; totals may be incomplete",
                   "color": "red"
                 }
               }
@@ -212,7 +184,7 @@
     {
       "id": 100,
       "type": "row",
-      "title": "01  总览",
+      "title": "01  Overview",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -224,7 +196,7 @@
     },
     {
       "id": 36,
-      "title": "当前对外模型数",
+      "title": "Configured exposed models",
       "type": "stat",
       "gridPos": {
         "x": 0,
@@ -236,7 +208,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "当前端点已加载配置中的对外模型总数，跨 Kong 实例去重；不受时间范围、对外模型和调用类型筛选影响。采集不可用时显示 —。",
+      "description": "Total exposed models in the endpoint's loaded configuration, deduplicated across Kong instances. Independent of the time range and model filter. Shows a dash when collection is unavailable.",
       "targets": [
         {
           "refId": "A",
@@ -276,7 +248,7 @@
     },
     {
       "id": 1,
-      "title": "调用次数",
+      "title": "Completed calls",
       "type": "stat",
       "gridPos": {
         "x": 6,
@@ -288,11 +260,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "所选时间窗口内已结束的调用次数，包含成功和失败，也包含未选中上游目标的失败请求；正在进行的调用暂不计入。 模型尚未解析的提前失败计入 unknown。",
+      "description": "Completed calls in the selected time range, including successes, failures and failures without an upstream target. In-flight calls are excluded. Early failures before model resolution are attributed to unknown.",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))",
           "range": false,
           "instant": true,
           "format": "time_series",
@@ -327,7 +299,7 @@
     },
     {
       "id": 2,
-      "title": "成功率",
+      "title": "Success rate",
       "type": "stat",
       "gridPos": {
         "x": 12,
@@ -339,11 +311,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx / 全部完成请求；无请求显示 —。不代表回答质量或流式完整完成率。",
+      "description": "Final HTTP 2xx responses divided by all completed requests. Shows a dash when there are no requests. Does not measure answer quality or complete streaming responses.",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code=~\"2[0-9][0-9]\"}[$__range])) / sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range])) / sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))",
           "range": false,
           "instant": true,
           "format": "time_series",
@@ -378,7 +350,7 @@
     },
     {
       "id": 5,
-      "title": "网关失败次数",
+      "title": "Gateway failures",
       "type": "stat",
       "gridPos": {
         "x": 18,
@@ -390,11 +362,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "请求在网关阶段失败且未分配上游的次数，包括鉴权失败、模型不存在、无可用上游及容量不足。",
+      "description": "Requests that failed in the gateway before upstream assignment, including authentication failures, unknown models, unavailable upstreams and insufficient capacity.",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))",
+          "expr": "sum (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))",
           "range": false,
           "instant": true,
           "format": "time_series",
@@ -430,7 +402,7 @@
     {
       "id": 101,
       "type": "row",
-      "title": "02  对外模型指标",
+      "title": "02  Exposed models",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -442,23 +414,23 @@
     },
     {
       "id": 37,
-      "title": "各对外模型调用占比",
+      "title": "Calls by exposed model",
       "type": "piechart",
       "gridPos": {
         "x": 0,
         "y": 9,
-        "w": 24,
-        "h": 8
+        "w": 8,
+        "h": 7
       },
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "所选时间窗口内，各所选对外模型完成的调用数及占比，包含成功与失败，并跟随调用类型筛选。无调用时不显示扇区。",
+      "description": "Completed calls and shares for selected exposed models in the selected time range, including successes and failures. Models without calls have no slice.",
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])) > 0",
+          "expr": "sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])) > 0",
           "range": false,
           "instant": true,
           "format": "time_series",
@@ -487,13 +459,10 @@
           "values": false
         },
         "pieType": "pie",
-        "displayLabels": [
-          "name",
-          "percent"
-        ],
+        "displayLabels": [],
         "legend": {
           "displayMode": "table",
-          "placement": "right",
+          "placement": "bottom",
           "showLegend": true,
           "values": [
             "value",
@@ -508,52 +477,52 @@
     },
     {
       "id": 13,
-      "title": "对外模型对比",
+      "title": "Exposed model comparison",
       "type": "table",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "每行一个具名对外模型，按成功数降序；当前零流量和历史模型保留。成功为最终 HTTP 2xx，失败为非 2xx；耗时仅统计成功请求，无数据时显示 -。unknown 请求计入总览和失败趋势，不单列为模型。表格列过滤仅影响本表。",
+      "description": "One row per named exposed model, sorted by successes. Includes current models with zero traffic and historical models. Success means final HTTP 2xx; failure means non-2xx. Latency includes successful requests only; missing values show a dash. Unknown requests appear in overview and failure trends, not as a separate model. Column filters affect this table only.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"成功数\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code=~\"2[0-9][0-9]\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"失败数\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"成功率\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((((((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__range]))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.95, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "F",
-          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace((((histogram_quantile(0.99, sum by (le,virtual_model) (increase(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "G",
-          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "expr": "label_replace((label_replace(label_replace(label_replace(((((sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model) (increase(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"}[$__range]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -561,13 +530,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "成功数",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -581,7 +544,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "对外模型"
+              "options": "exposed_model"
             },
             "properties": [
               {
@@ -601,13 +564,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功数"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -634,13 +601,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "失败数"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -667,13 +638,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -700,13 +675,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 耗时"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -747,18 +726,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 耗时"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -799,18 +782,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -846,6 +833,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -872,34 +863,45 @@
               "virtual_model": true
             },
             "renameByName": {
-              "model_display": "对外模型"
+              "model_display": "exposed_model"
             },
             "indexByName": {
               "model_display": 0,
-              "成功数": 1,
-              "失败数": 2,
-              "成功率": 3,
-              "P95 耗时": 4,
-              "P99 耗时": 5,
-              "平均耗时": 6
+              "success_count": 1,
+              "failure_count": 2,
+              "success_rate": 3,
+              "p95_latency": 4,
+              "p99_latency": 5,
+              "average_latency": 6
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
       "gridPos": {
-        "x": 0,
-        "y": 17,
-        "w": 24,
-        "h": 8
+        "x": 8,
+        "y": 9,
+        "w": 16,
+        "h": 7
       }
     },
     {
       "id": 30,
-      "title": "各对外模型请求速率",
+      "title": "Exposed model request rate",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -907,11 +909,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按请求结束时间统计，包含成功和失败；每分钟请求速率为滑动采样估算值。",
+      "description": "Calls attributed by completion time, including successes and failures. Per-minute request rates are estimated over a sliding window.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -949,11 +951,11 @@
     },
     {
       "id": 31,
-      "title": "各模型 成功率",
+      "title": "Model success rate",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 25,
+        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -961,11 +963,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按所选路由目标归属统计最终客户端 HTTP 结果，不代表供应商健康，也不保证请求已发至上游。无完成请求时比例留空。",
+      "description": "Final client HTTP outcomes attributed to the selected routing target. This does not measure provider health or guarantee that a request reached the upstream. Empty when no requests completed.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace((((((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\"}[$__rate_interval]))) or (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace((((((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\"}[$__rate_interval]))) or (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval]))) or (sum by (virtual_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1004,11 +1006,11 @@
     },
     {
       "id": 6,
-      "title": "各模型失败请求趋势",
+      "title": "Model failure rate",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 25,
+        "y": 16,
         "w": 8,
         "h": 8
       },
@@ -1016,11 +1018,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "每分钟失败请求数，按对外模型和最终 HTTP 状态码区分；仅包含非 2xx。",
+      "description": "Failed requests per minute by exposed model and final HTTP status, including non-2xx responses only.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace((60 * (sum by (virtual_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1058,11 +1060,11 @@
     },
     {
       "id": 3,
-      "title": "各模型 P95 耗时",
+      "title": "Model P95 latency",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 24,
         "w": 8,
         "h": 8
       },
@@ -1070,11 +1072,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.95, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.95, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1112,11 +1114,11 @@
     },
     {
       "id": 14,
-      "title": "各模型 P99 耗时",
+      "title": "Model P99 latency",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 33,
+        "y": 24,
         "w": 8,
         "h": 8
       },
@@ -1124,11 +1126,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.99, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace((histogram_quantile(0.99, sum by (le,virtual_model) (rate(kong_neutree_route_request_duration_seconds_bucket{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1166,11 +1168,11 @@
     },
     {
       "id": 15,
-      "title": "各模型平均耗时",
+      "title": "Model average latency",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 33,
+        "y": 24,
         "w": 8,
         "h": 8
       },
@@ -1178,11 +1180,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace(label_replace(label_replace(((sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) / (sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"未识别或缺失\", \"virtual_model\", \"^$\")",
+          "expr": "label_replace(label_replace(label_replace(((sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_sum{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval]))) / (sum by (virtual_model) (rate(kong_neutree_route_request_duration_seconds_count{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))), \"model_key\", \"model:$1\", \"virtual_model\", \"(.*)\"), \"model_display\", \"$1\", \"virtual_model\", \"(.+)\"), \"model_display\", \"Unknown or missing\", \"virtual_model\", \"^$\")",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1221,11 +1223,11 @@
     {
       "id": 103,
       "type": "row",
-      "title": "03  上游模型指标",
+      "title": "03  Upstream models",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 32,
         "w": 24,
         "h": 1
       },
@@ -1233,23 +1235,23 @@
     },
     {
       "id": 38,
-      "title": "各模型上游调用占比",
-      "type": "barchart",
+      "title": "Upstream call shares by model",
+      "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 33,
         "w": 24,
-        "h": 10
+        "h": 6
       },
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "各对外模型在所选时间窗口内的上游调用分布，包含成功与失败。每条横条合计为 100%，颜色代表上游 / 上游模型；悬停查看分流比例，调用次数见下方明细。仅展示有调用且已选中上游的记录；无调用模型和未选中上游的请求请查看明细及总览。",
+      "description": "Upstream call distribution per exposed model in the selected time range, including successes and failures. Each row represents one upstream target. Shares use all completed calls with a selected upstream for that model as the denominator. Only targets with calls are shown; shares for each model total 100%.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))) / on (virtual_model) group_left() (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\",request_mode=~\"${mode}\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
+          "expr": "label_join(((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) / on (virtual_model) group_left() (sum by (virtual_model) (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",virtual_model!=\"\",virtual_model!=\"unknown\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))))) > 0, \"upstream_target\", \" / \", \"upstream\", \"upstream_model\")",
           "range": false,
           "instant": true,
           "format": "table",
@@ -1258,70 +1260,104 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "noValue": "暂无调用",
-          "color": {
-            "mode": "palette-classic"
-          },
+          "noValue": "—",
           "custom": {
-            "lineWidth": 0,
-            "fillOpacity": 85,
-            "gradientMode": "none",
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "axisColorMode": "text",
-            "axisBorderShow": false,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            }
-          },
-          "decimals": 1,
-          "max": 1
+            "align": "auto",
+            "filterable": true
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "call_share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "Share within model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposed_model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Exposed model"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "upstream_target"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Upstream / model"
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "orientation": "horizontal",
-        "xField": "对外模型",
-        "stacking": "percent",
-        "showValue": "never",
-        "groupWidth": 0.75,
-        "barWidth": 0.85,
-        "barRadius": 0,
-        "fullHighlight": true,
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        },
-        "legend": {
-          "showLegend": true,
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "xTickLabelSpacing": 0
+        "showHeader": true,
+        "cellHeight": "sm"
       },
       "transformations": [
         {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "upstream_target",
-            "rowField": "virtual_model",
-            "valueField": "Value",
-            "emptyValue": "null"
-          }
-        },
-        {
           "id": "organize",
           "options": {
+            "excludeByName": {
+              "Time": true,
+              "upstream": true,
+              "upstream_model": true
+            },
+            "indexByName": {
+              "virtual_model": 0,
+              "upstream_target": 1,
+              "Value": 2
+            },
             "renameByName": {
-              "virtual_model\\upstream_target": "对外模型"
+              "virtual_model": "exposed_model",
+              "upstream_target": "upstream_target",
+              "Value": "call_share"
             }
           }
         },
@@ -1330,7 +1366,7 @@
           "options": {
             "sort": [
               {
-                "field": "对外模型",
+                "field": "exposed_model",
                 "desc": false
               }
             ]
@@ -1340,59 +1376,59 @@
     },
     {
       "id": 8,
-      "title": "上游模型对比",
+      "title": "Upstream model comparison",
       "type": "table",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "每行一个原始（对外模型、上游、上游模型）组合。模型内分流的分母为同模型全部已选中目标的完成请求数（成功与失败合计）；表格列过滤不改变分母。HTTP 结果按路由目标归属，非供应商健康。",
+      "description": "One row per original exposed-model, upstream and upstream-model combination. Model routing shares use all completed requests with a selected target for that model, including successes and failures. Column filters do not change the denominator. HTTP outcomes are attributed to routing targets and do not measure provider health.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"成功数\", \"\", \"\")",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"模型内分流\", \"\", \"\")",
+          "expr": "label_replace(((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) / on(virtual_model) group_left() (sum by (virtual_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"routing_share\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"失败数\", \"\", \"\")",
+          "expr": "label_replace((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "D",
-          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"成功率\", \"\", \"\")",
+          "expr": "label_replace((((((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "G",
-          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "H",
-          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "expr": "label_replace(((((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (virtual_model,upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (virtual_model,upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -1400,13 +1436,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "成功数",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -1420,7 +1450,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "对外模型"
+              "options": "exposed_model"
             },
             "properties": [
               {
@@ -1440,13 +1470,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Exposed model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "上游"
+              "options": "upstream"
             },
             "properties": [
               {
@@ -1466,13 +1500,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "上游模型"
+              "options": "upstream_model"
             },
             "properties": [
               {
@@ -1492,13 +1530,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功数"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -1525,13 +1567,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "模型内分流"
+              "options": "routing_share"
             },
             "properties": [
               {
@@ -1581,13 +1627,17 @@
                   "mode": "fixed",
                   "fixedColor": "blue"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "Model routing share"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "失败数"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -1614,13 +1664,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -1647,13 +1701,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 耗时"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -1694,18 +1752,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 耗时"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -1746,18 +1808,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -1793,6 +1859,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -1817,39 +1887,50 @@
               "Time": true
             },
             "renameByName": {
-              "virtual_model": "对外模型",
-              "upstream": "上游",
-              "upstream_model": "上游模型"
+              "virtual_model": "exposed_model",
+              "upstream": "upstream",
+              "upstream_model": "upstream_model"
             },
             "indexByName": {
               "virtual_model": 0,
               "upstream": 1,
               "upstream_model": 2,
-              "模型内分流": 3,
-              "成功数": 4,
-              "失败数": 5,
-              "成功率": 6,
-              "P95 耗时": 7,
-              "P99 耗时": 8,
-              "平均耗时": 9
+              "routing_share": 3,
+              "success_count": 4,
+              "failure_count": 5,
+              "success_rate": 6,
+              "p95_latency": 7,
+              "p99_latency": 8,
+              "average_latency": 9
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 39,
         "w": 24,
-        "h": 9
+        "h": 7
       }
     },
     {
       "id": 32,
-      "title": "各上游模型请求速率",
+      "title": "Upstream model request rate",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 61,
+        "y": 46,
         "w": 8,
         "h": 8
       },
@@ -1857,11 +1938,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按请求结束时间统计，包含成功和失败；每分钟请求速率为滑动采样估算值。",
+      "description": "Calls attributed by completion time, including successes and failures. Per-minute request rates are estimated over a sliding window.",
       "targets": [
         {
           "refId": "A",
-          "expr": "60 * (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval])))",
+          "expr": "60 * (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1899,11 +1980,11 @@
     },
     {
       "id": 33,
-      "title": "各上游模型成功率",
+      "title": "Upstream model success rate",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 61,
+        "y": 46,
         "w": 8,
         "h": 8
       },
@@ -1911,11 +1992,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按所选路由目标归属统计最终客户端 HTTP 结果，不代表供应商健康，也不保证请求已发至上游。无完成请求时比例留空。",
+      "description": "Final client HTTP outcomes attributed to the selected routing target. This does not measure provider health or guarantee that a request reached the upstream. Empty when no requests completed.",
       "targets": [
         {
           "refId": "A",
-          "expr": "((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\",status_code=~\"2[0-9][0-9]\"}[$__rate_interval]))) or (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) * 0) / ((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) > 0)",
+          "expr": "((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\",status_code=~\"2[0-9][0-9]\"}[$__rate_interval]))) or (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__rate_interval]))) * 0) / ((sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__rate_interval]))) > 0)",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -1954,11 +2035,11 @@
     },
     {
       "id": 39,
-      "title": "各上游模型失败请求趋势",
+      "title": "Upstream model failure rate",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 61,
+        "y": 46,
         "w": 8,
         "h": 8
       },
@@ -1966,11 +2047,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "按所选路由目标和最终 HTTP 状态码区分非 2xx 请求；每分钟失败请求速率为滑动采样估算值。",
+      "description": "Non-2xx requests by selected routing target and final HTTP status. Per-minute failure rates are estimated over a sliding window.",
       "targets": [
         {
           "refId": "A",
-          "expr": "60 * sum by (virtual_model,upstream,upstream_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval]))",
+          "expr": "60 * sum by (virtual_model,upstream,upstream_model,status_code) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\",status_code!~\"2[0-9][0-9]\",status_code!=\"\"}[$__rate_interval]))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -2008,11 +2089,11 @@
     },
     {
       "id": 20,
-      "title": "各上游 P95 耗时",
+      "title": "Upstream P95 latency",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 69,
+        "y": 54,
         "w": 8,
         "h": 8
       },
@@ -2020,11 +2101,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -2062,11 +2143,11 @@
     },
     {
       "id": 21,
-      "title": "各上游 P99 耗时",
+      "title": "Upstream P99 latency",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
-        "y": 69,
+        "y": 54,
         "w": 8,
         "h": 8
       },
@@ -2074,11 +2155,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le,virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -2116,11 +2197,11 @@
     },
     {
       "id": 22,
-      "title": "各上游平均耗时",
+      "title": "Upstream average latency",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
-        "y": 69,
+        "y": 54,
         "w": 8,
         "h": 8
       },
@@ -2128,11 +2209,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "最终 HTTP 2xx 请求的耗时（含流式输出），不是上游纯服务时延。曲线为滑动窗口统计；无成功样本留空。P95/P99 达到 600s 时超出有限直方图桶精度。",
+      "description": "Latency of final HTTP 2xx requests, including streaming output, not upstream-only service latency. Curves use a sliding window and are empty without successful samples. P95/P99 at 600s exceed finite histogram bucket precision.",
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval]))) / (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__rate_interval])))",
+          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval]))) / (sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -2170,11 +2251,11 @@
     },
     {
       "id": 4,
-      "title": "各上游在途并发（全部调用类型）",
+      "title": "Upstream in-flight requests (all call types)",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 77,
+        "y": 62,
         "w": 12,
         "h": 8
       },
@@ -2182,7 +2263,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "每个点为跨 Kong 实例汇总的在途请求采样，不是 Provider 全局并发。采集失败可能导致汇总缺失；短于采集间隔的峰值可能遗漏。",
+      "description": "Each point samples in-flight requests summed across Kong instances, not provider-wide concurrency. Scrape failures may cause missing totals; peaks shorter than the scrape interval may be missed.",
       "targets": [
         {
           "refId": "A",
@@ -2224,11 +2305,11 @@
     },
     {
       "id": 34,
-      "title": "模型内完成请求分流比例",
+      "title": "Completed request shares within each model",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 77,
+        "y": 62,
         "w": 12,
         "h": 8
       },
@@ -2236,11 +2317,11 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "每个对外模型的全部已选中目标完成请求为 100%。完成时间归属可能与配置权重不同；图例开关只影响本图，分母保持。",
+      "description": "All completed requests with a selected target total 100% for each exposed model. Completion-time attribution can differ from configured weights. Legend toggles affect this chart only; the denominator stays unchanged.",
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval]))) / on(virtual_model) group_left() (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__rate_interval])))",
+          "expr": "(sum by (virtual_model,upstream,upstream_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__rate_interval]))) / on(virtual_model) group_left() (sum by (virtual_model) (rate(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__rate_interval])))",
           "range": true,
           "instant": false,
           "format": "time_series",
@@ -2278,52 +2359,52 @@
     },
     {
       "id": 35,
-      "title": "同上游负载汇总",
+      "title": "Combined upstream load",
       "type": "table",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "仅汇总当前选定模型对应的上游负载，不代表 Provider 全局流量；不汇总配置权重或并发上限。",
+      "description": "Aggregates upstream load for the selected models only, not provider-wide traffic. Configured weights and concurrency limits are not aggregated.",
       "targets": [
         {
           "refId": "A",
-          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"成功数\", \"\", \"\")",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{status_code=~\"2[0-9][0-9]\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)), \"metric_column\", \"success_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "B",
-          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"失败数\", \"\", \"\")",
+          "expr": "label_replace((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0)), \"metric_column\", \"failure_count\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "C",
-          "expr": "label_replace((((((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"成功率\", \"\", \"\")",
+          "expr": "label_replace((((((((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) - (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",status_code!~\"2[0-9][0-9]\",upstream!=\"\"}[$__range]))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0))) / (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"success_rate\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "D",
-          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P95 耗时\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.95, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p95_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "E",
-          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"P99 耗时\", \"\", \"\")",
+          "expr": "label_replace((((histogram_quantile(0.99, sum by (le,upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_bucket{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"p99_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
         },
         {
           "refId": "F",
-          "expr": "label_replace(((((sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range]))) / (sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",request_mode=~\"${mode}\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"平均耗时\", \"\", \"\")",
+          "expr": "label_replace(((((sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_sum{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range]))) / (sum by (upstream,upstream_model) (increase(kong_neutree_route_request_duration_seconds_count{upstream!=\"\",job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"}[$__range])))) or (((sum by (upstream,upstream_model) (increase(kong_neutree_route_completed_requests_total{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\",upstream!=\"\"}[$__range]))) or (sum by (upstream,upstream_model) (kong_neutree_route_inflight{job=\"neutree-gateway\",endpoint=${endpoint_literal:raw},virtual_model=~\"$model\",gateway_instance!=\"\"} and on(job,instance) (up{job=\"neutree-gateway\"} == 1))) * 0)) * 0 - 1)), \"metric_column\", \"average_latency\", \"\", \"\")",
           "range": false,
           "instant": true,
           "format": "time_series"
@@ -2331,13 +2412,7 @@
       ],
       "options": {
         "showHeader": true,
-        "cellHeight": "sm",
-        "sortBy": [
-          {
-            "displayName": "成功数",
-            "desc": true
-          }
-        ]
+        "cellHeight": "sm"
       },
       "fieldConfig": {
         "defaults": {
@@ -2351,7 +2426,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "上游"
+              "options": "upstream"
             },
             "properties": [
               {
@@ -2371,13 +2446,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "上游模型"
+              "options": "upstream_model"
             },
             "properties": [
               {
@@ -2397,13 +2476,17 @@
               {
                 "id": "custom.inspect",
                 "value": true
+              },
+              {
+                "id": "displayName",
+                "value": "Upstream model"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功数"
+              "options": "success_count"
             },
             "properties": [
               {
@@ -2430,13 +2513,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Successes"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "失败数"
+              "options": "failure_count"
             },
             "properties": [
               {
@@ -2463,13 +2550,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Failures"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率"
+              "options": "success_rate"
             },
             "properties": [
               {
@@ -2496,13 +2587,17 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Success rate"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P95 耗时"
+              "options": "p95_latency"
             },
             "properties": [
               {
@@ -2543,18 +2638,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P95 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "P99 耗时"
+              "options": "p99_latency"
             },
             "properties": [
               {
@@ -2595,18 +2694,22 @@
                       "from": 600,
                       "to": 1e+20,
                       "result": {
-                        "text": "≥600s（精度受限）"
+                        "text": ">=600s (limited precision)"
                       }
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "P99 latency"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时"
+              "options": "average_latency"
             },
             "properties": [
               {
@@ -2642,6 +2745,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Average latency"
               }
             ]
           }
@@ -2667,25 +2774,36 @@
               "model_key": true
             },
             "renameByName": {
-              "upstream": "上游",
-              "upstream_model": "上游模型"
+              "upstream": "upstream",
+              "upstream_model": "upstream_model"
             },
             "indexByName": {
               "upstream": 0,
               "upstream_model": 1,
-              "成功数": 2,
-              "失败数": 3,
-              "成功率": 4,
-              "P95 耗时": 5,
-              "P99 耗时": 6,
-              "平均耗时": 7
+              "success_count": 2,
+              "failure_count": 3,
+              "success_rate": 4,
+              "p95_latency": 5,
+              "p99_latency": 6,
+              "average_latency": 7
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "success_count",
+                "desc": true
+              }
+            ]
           }
         }
       ],
       "gridPos": {
         "x": 0,
-        "y": 85,
+        "y": 70,
         "w": 24,
         "h": 8
       }
@@ -2695,5 +2813,5 @@
     "neutree",
     "model-routing"
   ],
-  "description": "总览、对外模型与上游模型监控；请求按完成时间和路由目标归属统计。"
+  "description": "Overview, exposed model and upstream model monitoring. Requests are attributed by completion time and selected routing target."
 }
