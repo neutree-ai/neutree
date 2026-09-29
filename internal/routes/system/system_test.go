@@ -2,6 +2,7 @@ package system
 
 import (
 	"encoding/json"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -191,5 +192,17 @@ func TestValidateAndCleanURL(t *testing.T) {
 				assert.Equal(t, tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestCacheCapabilityDefaultsOff(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		router := gin.New()
+		router.GET("/info", handleSystemInfo(&Dependencies{ClusterCacheSupported: supported}))
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/info", nil))
+		var info SystemInfo
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &info))
+		require.Equal(t, supported, info.Capabilities.ZCache)
 	}
 }

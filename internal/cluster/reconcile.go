@@ -13,6 +13,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -54,8 +55,13 @@ type ReconcileContext struct {
 	logger klog.Logger
 }
 
+// WithCacheProvider installs the optional distribution cache implementation.
+func WithCacheProvider(provider clustercache.Provider) func(*NativeKubernetesClusterReconciler) {
+	return func(r *NativeKubernetesClusterReconciler) { r.cacheProvider = provider }
+}
+
 func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
-	s storage.Storage, metricsRemoteWriteURL string) (ClusterReconcile, error) {
+	s storage.Storage, metricsRemoteWriteURL string, options ...func(*NativeKubernetesClusterReconciler)) (ClusterReconcile, error) {
 	switch cluster.Spec.Type {
 	case v1.SSHClusterType:
 		legacy := &sshRayClusterReconciler{
@@ -79,7 +85,12 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 
 		return legacy, nil
 	case v1.KubernetesClusterType:
-		return NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL), nil
+		r := NewNativeKubernetesClusterReconciler(s, acceleratorManager, metricsRemoteWriteURL)
+		for _, option := range options {
+			option(r)
+		}
+
+		return r, nil
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}

@@ -63,7 +63,7 @@ type ValidationInput[T any] struct {
 	Operation   clusterValidationOperation
 }
 
-func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
+func validateClusterRequest(s storage.Storage, cacheSupported bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -94,6 +94,16 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 		if validationErr := prepareClusterValidationInput(s, input); validationErr != nil {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
+
+			return
+		}
+
+		if input.New != nil && input.New.Spec != nil && input.New.Spec.ZCache != nil && input.New.Spec.ZCache.Enabled && !cacheSupported {
+			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{
+				Code:    "10208",
+				Message: "ZCache is not supported by this control plane",
+				Hint:    "Use a distribution with a cluster cache provider to enable ZCache",
+			})
 
 			return
 		}
@@ -1048,7 +1058,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	validation := validateClusterRequest(deps.Storage)
+	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheSupported)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validation, handler)
