@@ -50,7 +50,7 @@ func newTraceStore(deps *Dependencies) *traceStore {
 const listProjection = "_time, request_id, workspace, endpoint_type, " +
 	"endpoint_name, api_key_id, request_uri, request_model, response_model, " +
 	"response_status, prompt_tokens, completion_tokens, total_tokens, " +
-	"finish_reason, stream, user_agent, duration_ms, body_truncated"
+	"finish_reason, stream, user_agent, duration_ms, body_truncated, upstream, upstream_model"
 
 // fullProjection extends listProjection with the large request/response body
 // columns plus the chunked-body metadata needed to reassemble oversized
@@ -81,6 +81,11 @@ const (
 // traceFilters are the caller-facing list filters. The store translates them
 // to LogsQL; handlers never build query fragments themselves.
 type traceFilters struct {
+	RequestID     string
+	RequestModel  string
+	Upstream      string
+	UpstreamModel string
+
 	EndpointName string
 	EndpointType string
 	Status       string
@@ -119,6 +124,22 @@ func (f traceFilters) clauses() []string {
 			"(request_model:=%s OR response_model:=%s)",
 			logsQLQuoteValue(f.Model), logsQLQuoteValue(f.Model),
 		))
+	}
+
+	if f.RequestID != "" {
+		out = append(out, fmt.Sprintf("request_id:=%s", logsQLQuoteValue(f.RequestID)))
+	}
+
+	if f.RequestModel != "" {
+		out = append(out, fmt.Sprintf("request_model:=%s", logsQLQuoteValue(f.RequestModel)))
+	}
+
+	if f.Upstream != "" {
+		out = append(out, fmt.Sprintf("upstream:=%s", logsQLQuoteValue(f.Upstream)))
+	}
+
+	if f.UpstreamModel != "" {
+		out = append(out, fmt.Sprintf("upstream_model:=%s", logsQLQuoteValue(f.UpstreamModel)))
 	}
 
 	return out
@@ -618,6 +639,9 @@ func parseFloatLoose(s string) float64 {
 // vlRecord matches the shape Vector writes to VictoriaLogs.
 // All values come back as strings; we coerce types we care about.
 type vlRecord struct {
+	Upstream      string `json:"upstream"`
+	UpstreamModel string `json:"upstream_model"`
+
 	Time             string `json:"_time"`
 	Stream           string `json:"_stream,omitempty"`
 	RequestID        string `json:"request_id"`
@@ -652,6 +676,8 @@ func decodeVLRecord(line []byte) (AITrace, bool) {
 
 	t := AITrace{
 		RequestID:     r.RequestID,
+		Upstream:      r.Upstream,
+		UpstreamModel: r.UpstreamModel,
 		Time:          r.Time,
 		Workspace:     r.Workspace,
 		EndpointType:  r.EndpointType,

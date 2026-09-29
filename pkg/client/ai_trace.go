@@ -34,6 +34,8 @@ const MaxTracePageSize = 500
 // shape in internal/routes/logs/ai_trace.go. The list endpoint leaves
 // RequestBody/ResponseBody empty; the detail endpoint populates them.
 type AITrace struct {
+	Upstream         string `json:"upstream,omitempty"`
+	UpstreamModel    string `json:"upstream_model,omitempty"`
 	RequestID        string `json:"request_id"`
 	Time             string `json:"time"`
 	Workspace        string `json:"workspace"`
@@ -65,6 +67,11 @@ type AITrace struct {
 // TraceListFilters are the optional server-side filters for a list query. Empty
 // fields are omitted from the request.
 type TraceListFilters struct {
+	RequestID     string
+	RequestModel  string
+	Upstream      string
+	UpstreamModel string
+
 	EndpointName string
 	EndpointType string
 	Status       string
@@ -115,6 +122,11 @@ func (s *TracesService) ListPage(workspace string, filters TraceListFilters, bef
 	setIfNotEmpty(params, "api_key_id", filters.APIKeyID)
 	setIfNotEmpty(params, "finish_reason", filters.FinishReason)
 	setIfNotEmpty(params, "model", filters.Model)
+	setIfNotEmpty(params, "request_id", filters.RequestID)
+	setIfNotEmpty(params, "request_model", filters.RequestModel)
+	setIfNotEmpty(params, "upstream", filters.Upstream)
+	setIfNotEmpty(params, "upstream_model", filters.UpstreamModel)
+
 	setIfNotEmpty(params, "start", filters.Start)
 
 	// `before` (cursor) takes precedence over an explicit End: it is the upper

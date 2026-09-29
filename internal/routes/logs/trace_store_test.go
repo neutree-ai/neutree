@@ -303,3 +303,33 @@ func timeMustParse(t *testing.T, s string) time.Time {
 
 	return parsed
 }
+
+func TestDestinationAndScopedRequestIDFilter(t *testing.T) {
+	record, err := json.Marshal(map[string]string{"request_id": "r", "request_model": "client-model", "response_status": "502", "upstream": "b", "upstream_model": "m2"})
+	require.NoError(t, err)
+	fake := &fakeVL{responses: []string{string(record)}}
+	server := fake.server(t)
+	defer server.Close()
+	rows, err := newTestStore(server.URL).List(`workspace:="ws" endpoint_type:="external-endpoint"`, traceFilters{RequestID: `a" OR *`, RequestModel: "client-model", Upstream: "b", UpstreamModel: "m2"}, 10, true, timeWindow{})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "client-model", rows[0].RequestModel)
+	require.Equal(t, 502, rows[0].ResponseStatus)
+	require.Equal(t, "b", rows[0].Upstream)
+	require.Equal(t, "m2", rows[0].UpstreamModel)
+	require.Contains(t, fake.queries[0], `workspace:="ws" endpoint_type:="external-endpoint"`)
+	require.Contains(t, fake.queries[0], `request_id:="a\" OR *"`)
+	require.Contains(t, fake.queries[0], `upstream:="b"`)
+	require.Contains(t, fake.queries[0], `upstream_model:="m2"`)
+}
+
+func TestDestinationCompatibility(t *testing.T) {
+	old, ok := decodeVLRecord([]byte(`{"request_id":"old","response_status":"200"}`))
+	require.True(t, ok)
+	require.Empty(t, old.Upstream)
+	require.Empty(t, old.UpstreamModel)
+	previous, ok := decodeVLRecord([]byte(`{"request_id":"previous","upstream":"provider","upstream_model":"model","routing":"broken"}`))
+	require.True(t, ok)
+	require.Equal(t, "provider", previous.Upstream)
+	require.Equal(t, "model", previous.UpstreamModel)
+}

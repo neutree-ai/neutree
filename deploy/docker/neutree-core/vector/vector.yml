@@ -83,7 +83,7 @@ transforms:
     type: filter
     inputs:
       - parse_kong_logs
-    condition: exists(.ai."trace".request_body) || exists(.ai."trace".response_body)
+    condition: exists(.ai."trace".request_body) || exists(.ai."trace".response_body) || exists(.ai."trace".upstream)
   prepare_trace_payload:
     type: remap
     inputs:
@@ -115,8 +115,10 @@ transforms:
           # fields and must distinguish "no token/latency data" from a real 0.
           "api_key_id":     .consumer.custom_id || "",
           "request_uri":    .request.uri || "",
-          "request_model":  .ai."statistics".meta.request_model || "",
-          "response_model": .ai."statistics".meta.response_model || "",
+          "upstream": .ai."trace".upstream || "",
+          "upstream_model": .ai."trace".upstream_model || "",
+          "request_model":  .ai."trace".request_model || .ai."statistics".meta.request_model || "",
+          "response_model": .ai."trace".response_model || .ai."statistics".meta.response_model || "",
           "response_status": .response.status,
           "prompt_tokens":     .ai."statistics".usage.prompt_tokens,
           "completion_tokens": .ai."statistics".usage.completion_tokens,
