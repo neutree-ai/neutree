@@ -311,6 +311,12 @@ EOF
 for image in "${IMAGES_TO_PULL[@]}"; do
     read -r image_name image_tag <<< "$(split_image_ref "$image")"
 
+    # An untagged reference is pulled and saved under the implicit "latest" tag,
+    # so record that: an empty tag fails manifest validation on import.
+    if [[ -z "$image_tag" ]]; then
+        image_tag="latest"
+    fi
+
     # Get image information
     digest=$(docker inspect --format='{{.Id}}' "$image" 2>/dev/null || echo "")
     size=$(docker inspect --format='{{.Size}}' "$image" 2>/dev/null || echo "0")

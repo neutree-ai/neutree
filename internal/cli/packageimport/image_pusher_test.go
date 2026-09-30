@@ -147,6 +147,27 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			},
 			expected: "registry.example.com/neutree/team/img:v3.0.0",
 		},
+		{
+			// Same legacy spelling for an image that was saved without a tag:
+			// the tag field is non-empty, so validation lets it through, but the
+			// reference carries no tag of its own. The archive holds it under
+			// Docker's implicit latest.
+			name:        "legacy manifest for an untagged image from a ported registry",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "harbor.example.cn",
+				Tag:       "5443/team/img",
+			},
+			expected: "registry.example.com/neutree/team/img:latest",
+		},
+		{
+			name:        "untagged image from a ported registry",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "harbor.example.cn:5443/team/img",
+			},
+			expected: "registry.example.com/neutree/team/img:latest",
+		},
 	}
 
 	for _, tt := range tests {

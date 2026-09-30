@@ -114,6 +114,16 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 func (p *ImagePusher) buildTargetImage(imagePrefix string, imgSpec *ImageSpec) string {
 	name, tag := imageNameAndTag(imgSpec)
 
+	// A reference without a tag is Docker's implicit "latest". Name it:
+	// the target is what the mirror stores and a cluster pulls, so it cannot
+	// carry an empty tag. The case is reachable from a manifest written before
+	// the tag separator was fixed, which recorded an untagged image from a
+	// registry with a port as image_name "harbor.example.cn" + tag
+	// "5443/team/img" — a non-empty tag, so validation lets it through.
+	if tag == "" {
+		tag = "latest"
+	}
+
 	// Remove any existing registry from the image name
 	imageName := extractImageNameWithoutRegistry(name)
 
