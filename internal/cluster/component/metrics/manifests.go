@@ -610,7 +610,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	}
 	nodeAgentImage := "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 
-	selection, err := component.SelectNodeAgent(m.cluster.GetVersion(), nil)
+	selection, err := component.SelectNodeAgent(m.cluster.GetVersion())
 
 	if err == nil && selection.Image != "" {
 		nodeAgentImage = selection.Image

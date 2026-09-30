@@ -5,41 +5,82 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestSelectNodeAgentUsesLegacyImageForLegacyVersions(t *testing.T) {
-	for _, version := range []string{"v1.1.0", "v1.1.1", "v1.1.1-rc.1"} {
-		t.Run(version, func(t *testing.T) {
-			selection, err := SelectNodeAgent(version, &v1.NodeAgentRuntimeProfile{Image: "registry.example.com/neutree/neutree-node-agent:v1.2.0"})
+func TestSelectNodeAgent(t *testing.T) {
+	const (
+		legacyImage  = "neutree/neutree-node-agent:v1.1.0-rc.1"
+		pinnedImage  = "neutree/neutree-node-agent:v1.2.0-rc.1"
+		currentImage = "neutree/neutree-node-agent:v1.2.1-rc.1"
+	)
+
+	tests := []struct {
+		name     string
+		version  string
+		contract NodeAgentContract
+		image    string
+	}{
+		{
+			name:     "no version",
+			version:  "",
+			contract: NodeAgentContractLegacy,
+			image:    legacyImage,
+		},
+		{
+			name:     "last legacy version",
+			version:  "v1.1.1",
+			contract: NodeAgentContractLegacy,
+			image:    legacyImage,
+		},
+		{
+			name:     "legacy prerelease",
+			version:  "v1.1.1-rc.1",
+			contract: NodeAgentContractLegacy,
+			image:    legacyImage,
+		},
+		{
+			name:     "first profile version",
+			version:  "v1.1.2",
+			contract: NodeAgentContractProfile,
+			image:    pinnedImage,
+		},
+		{
+			name:     "last pinned version",
+			version:  "v1.2.0",
+			contract: NodeAgentContractProfile,
+			image:    pinnedImage,
+		},
+		{
+			name:     "pinned prerelease",
+			version:  "v1.2.0-rc.1",
+			contract: NodeAgentContractProfile,
+			image:    pinnedImage,
+		},
+		{
+			name:     "first version on the current image",
+			version:  "v1.2.1",
+			contract: NodeAgentContractProfile,
+			image:    currentImage,
+		},
+		{
+			name:     "open ended tier",
+			version:  "v9.9.9",
+			contract: NodeAgentContractProfile,
+			image:    currentImage,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selection, err := SelectNodeAgent(tt.version)
 			require.NoError(t, err)
-			assert.Equal(t, NodeAgentContractLegacy, selection.Contract)
-			assert.Equal(t, defaultLegacyNodeAgentImage(), selection.Image)
+			assert.Equal(t, tt.contract, selection.Contract)
+			assert.Equal(t, tt.image, selection.Image)
 		})
 	}
 }
 
-func TestSelectNodeAgentUsesDefaultProfileImageWhenProfileMissing(t *testing.T) {
-	for _, version := range []string{"v1.1.2", "v1.2.0-alpha.3"} {
-		t.Run(version, func(t *testing.T) {
-			selection, err := SelectNodeAgent(version, nil)
-			require.NoError(t, err)
-			assert.Equal(t, NodeAgentContractProfile, selection.Contract)
-			assert.Equal(t, defaultProfileNodeAgentImage(), selection.Image)
-		})
-	}
-}
-
-func TestSelectNodeAgentUsesProfileImageForNewerVersions(t *testing.T) {
-	selection, err := SelectNodeAgent("v1.1.2", &v1.NodeAgentRuntimeProfile{Image: "registry.example.com/neutree/neutree-node-agent:v1.2.0"})
-	require.NoError(t, err)
-	assert.Equal(t, NodeAgentContractProfile, selection.Contract)
-	assert.Equal(t, "registry.example.com/neutree/neutree-node-agent:v1.2.0", selection.Image)
-}
-
-func TestSelectNodeAgentRejectsEmptyProfileImage(t *testing.T) {
-	_, err := SelectNodeAgent("v1.1.2", &v1.NodeAgentRuntimeProfile{})
+func TestSelectNodeAgentRejectsUnparsableVersion(t *testing.T) {
+	_, err := SelectNodeAgent("not-a-version")
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "node agent profile image is required")
 }

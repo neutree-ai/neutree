@@ -18,9 +18,14 @@ const NodeExporter = "v1.8.2"
 // legacy CLI contract rendered for clusters up to v1.1.1.
 const LegacyNeutreeNodeAgent = "v1.1.0-rc.1"
 
-// NeutreeNodeAgent is the profile-selected NodeAgent image for clusters newer
-// than v1.1.1.
-const NeutreeNodeAgent = "v1.2.0-rc.1"
+// NeutreeNodeAgentV120 is the NodeAgent image pinned for clusters from v1.1.2
+// through v1.2.0. Those clusters predate version-aware image selection, so they
+// keep the image they were released with.
+const NeutreeNodeAgentV120 = "v1.2.0-rc.1"
+
+// NeutreeNodeAgent is the NodeAgent image running on clusters newer than
+// v1.2.0.
+const NeutreeNodeAgent = "v1.2.1-rc.1"
 
 // Grafana image version.
 const Grafana = "11.5.3"
