@@ -186,6 +186,23 @@ mkdir -p "${PACKAGE_DIR}/images"
 MERGED_IMAGE_LIST="${TEMP_DIR}/images.txt"
 > "$MERGED_IMAGE_LIST"
 
+# split_image_ref <ref>
+#
+# Prints the image name and tag of a reference, separated by a space; the tag
+# is empty when the reference has none. The tag separator is the last ":" and
+# only when it follows the last "/", so a registry host carrying a port
+# ("harbor.example.cn:5443/team/img:v1") keeps its port instead of being cut at
+# the first colon.
+split_image_ref() {
+    local ref="$1"
+
+    if [[ "${ref##*/}" == *:* ]]; then
+        echo "${ref%:*} ${ref##*:}"
+    else
+        echo "$ref"
+    fi
+}
+
 for list_file in "${IMAGE_LIST_FILES[@]}"; do
     if [[ ! -f "$list_file" ]]; then
         log_error "Image list file not found: $list_file"
@@ -201,19 +218,15 @@ for list_file in "${IMAGE_LIST_FILES[@]}"; do
 
         # If the image contains neutree
         if [[ "$line" =~ neutree ]]; then
-            # Extract image name and tag
-            if [[ "$line" =~ ^([^:]+):(.+)$ ]]; then
-                image_name="${BASH_REMATCH[1]}"
-                image_tag="${BASH_REMATCH[2]}"
+            read -r image_name image_tag <<< "$(split_image_ref "$line")"
 
+            if [[ -n "$image_tag" ]]; then
                 # Replace "latest" in tag with version
                 new_tag="${image_tag//latest/${VERSION}}"
                 echo "${image_name}:${new_tag}" >> "$MERGED_IMAGE_LIST"
-            elif [[ "$line" =~ ^[^:]+$ ]]; then
-                # If no tag, default to version
-                echo "${line}:${VERSION}" >> "$MERGED_IMAGE_LIST"
             else
-                echo "$line" >> "$MERGED_IMAGE_LIST"
+                # If no tag, default to version
+                echo "${image_name}:${VERSION}" >> "$MERGED_IMAGE_LIST"
             fi
         else
             # Non-neutree images remain unchanged
@@ -296,7 +309,7 @@ EOF
 
 # Add image information to manifest
 for image in "${IMAGES_TO_PULL[@]}"; do
-    IFS=':' read -r image_name image_tag <<< "$image"
+    read -r image_name image_tag <<< "$(split_image_ref "$image")"
 
     # Get image information
     digest=$(docker inspect --format='{{.Id}}' "$image" 2>/dev/null || echo "")

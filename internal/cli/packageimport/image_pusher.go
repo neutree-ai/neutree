@@ -80,7 +80,7 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 
 	for _, imgSpec := range manifest.Images {
 		// Build the original and target image references
-		originalImage := fmt.Sprintf("%s:%s", imgSpec.ImageName, imgSpec.Tag)
+		originalImage := buildImageRef(imgSpec)
 		targetImage := p.buildTargetImage(mirrorRegistry, imgSpec)
 
 		// Tag the image with the target registry
@@ -112,14 +112,52 @@ func (p *ImagePusher) pushImages(ctx context.Context, mirrorRegistry string, reg
 
 // buildTargetImage builds the target image reference with registry and repo
 func (p *ImagePusher) buildTargetImage(imagePrefix string, imgSpec *ImageSpec) string {
-	// Remove any existing registry from the image name
-	imageName := extractImageNameWithoutRegistry(imgSpec.ImageName)
+	name, tag := imageNameAndTag(imgSpec)
 
-	if shouldAddDockerHubLibraryPrefix(imgSpec.ImageName, imageName) {
+	// Remove any existing registry from the image name
+	imageName := extractImageNameWithoutRegistry(name)
+
+	if shouldAddDockerHubLibraryPrefix(name, imageName) {
 		imageName = "library/" + imageName
 	}
 
-	return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, imgSpec.Tag)
+	return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, tag)
+}
+
+// buildImageRef returns the full reference of a manifest image — the reference
+// the package archive holds it under — by joining the manifest's two fields.
+func buildImageRef(imgSpec *ImageSpec) string {
+	if imgSpec.Tag == "" {
+		return imgSpec.ImageName
+	}
+
+	return imgSpec.ImageName + ":" + imgSpec.Tag
+}
+
+// imageNameAndTag splits a manifest image into its name and tag.
+//
+// The two fields are joined before splitting, because they are not necessarily
+// split where the reference is: builds before the tag separator was fixed
+// recorded "harbor.example.cn:5443/team/img:v1" as image_name
+// "harbor.example.cn" plus tag "5443/team/img:v1". Joining restores the
+// reference the archive holds, and re-splitting then yields the name and tag
+// the mirror push needs.
+func imageNameAndTag(imgSpec *ImageSpec) (name, tag string) {
+	return splitImageTag(buildImageRef(imgSpec))
+}
+
+// splitImageTag cuts a reference at its tag. The separator is the last ":" and
+// only when it follows the last "/", so the port of a registry host stays part
+// of the name and a reference without a tag keeps its name whole.
+func splitImageTag(ref string) (name, tag string) {
+	lastSlash := strings.LastIndex(ref, "/")
+	lastColon := strings.LastIndex(ref, ":")
+
+	if lastColon > lastSlash {
+		return ref[:lastColon], ref[lastColon+1:]
+	}
+
+	return ref, ""
 }
 
 func shouldAddDockerHubLibraryPrefix(originalImageName, imageName string) bool {

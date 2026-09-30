@@ -125,12 +125,113 @@ func TestImagePusherBuildTargetImage(t *testing.T) {
 			},
 			expected: "registry.example.com/postgres:v13.0.0",
 		},
+		{
+			name:        "registry with port and nested repository path",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "harbor.example.cn:5443/team/img",
+				Tag:       "v3.0.0",
+			},
+			expected: "registry.example.com/neutree/team/img:v3.0.0",
+		},
+		{
+			// Packages built before build-package.sh split the reference at the
+			// first colon, so the registry port and path landed in the tag.
+			// Both spellings must resolve to the same target: a mirror must not
+			// end up with the same image under two repositories.
+			name:        "legacy manifest storing a registry port in the tag",
+			imagePrefix: "registry.example.com/neutree",
+			imgSpec: &ImageSpec{
+				ImageName: "harbor.example.cn",
+				Tag:       "5443/team/img:v3.0.0",
+			},
+			expected: "registry.example.com/neutree/team/img:v3.0.0",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := pusher.buildTargetImage(tt.imagePrefix, tt.imgSpec)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestImagePusherBuildImageRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		imgSpec  *ImageSpec
+		expected string
+	}{
+		{
+			name:     "name and tag",
+			imgSpec:  &ImageSpec{ImageName: "neutree/router", Tag: "v1.2.1-alpha.1"},
+			expected: "neutree/router:v1.2.1-alpha.1",
+		},
+		{
+			name:     "registry with port and nested repository path",
+			imgSpec:  &ImageSpec{ImageName: "harbor.example.cn:5443/team/img", Tag: "v3.0.0"},
+			expected: "harbor.example.cn:5443/team/img:v3.0.0",
+		},
+		{
+			// The archive holds the image under this reference, so the tag
+			// command has to name it exactly as the legacy manifest spelled it.
+			name:     "legacy manifest storing a registry port in the tag",
+			imgSpec:  &ImageSpec{ImageName: "harbor.example.cn", Tag: "5443/team/img:v3.0.0"},
+			expected: "harbor.example.cn:5443/team/img:v3.0.0",
+		},
+		{
+			name:     "no tag",
+			imgSpec:  &ImageSpec{ImageName: "neutree/router"},
+			expected: "neutree/router",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, buildImageRef(tt.imgSpec))
+		})
+	}
+}
+
+func TestSplitImageTag(t *testing.T) {
+	tests := []struct {
+		name         string
+		ref          string
+		expectedName string
+		expectedTag  string
+	}{
+		{
+			name:         "name and tag",
+			ref:          "neutree/router:v1.2.1-alpha.1",
+			expectedName: "neutree/router",
+			expectedTag:  "v1.2.1-alpha.1",
+		},
+		{
+			name:         "registry with port",
+			ref:          "harbor.example.cn:5443/team/img:v3.0.0",
+			expectedName: "harbor.example.cn:5443/team/img",
+			expectedTag:  "v3.0.0",
+		},
+		{
+			name:         "registry with port and no tag",
+			ref:          "harbor.example.cn:5443/team/img",
+			expectedName: "harbor.example.cn:5443/team/img",
+			expectedTag:  "",
+		},
+		{
+			name:         "no tag",
+			ref:          "postgres",
+			expectedName: "postgres",
+			expectedTag:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, tag := splitImageTag(tt.ref)
+			assert.Equal(t, tt.expectedName, name)
+			assert.Equal(t, tt.expectedTag, tag)
 		})
 	}
 }
