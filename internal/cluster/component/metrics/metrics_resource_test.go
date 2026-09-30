@@ -654,7 +654,7 @@ func TestBuildMetricsResourcesIncludesNodeAgentDaemonSet(t *testing.T) {
 		"cluster":   "test-cluster",
 		"workspace": "test-workspace",
 	}, nodeAgent.Spec.Selector.MatchLabels)
-	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.2.0-rc.1",
+	assert.Equal(t, "test-image-prefix/neutree/neutree-node-agent:v1.2.1-rc.1",
 		nodeAgent.Spec.Template.Spec.Containers[0].Image)
 	assert.Equal(t, "neutree-node-agent", nodeAgent.Spec.Template.Spec.ServiceAccountName)
 	assert.Assert(t, len(nodeAgent.Spec.Template.Spec.NodeSelector) == 0)

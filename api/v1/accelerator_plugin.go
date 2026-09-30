@@ -91,8 +91,8 @@ type AcceleratorProfile struct {
 	ClusterRuntime *RuntimeConfig `json:"cluster_runtime,omitempty"`
 	// EngineRuntime describes how inference engine containers should access the accelerator.
 	EngineRuntime *RuntimeConfig `json:"engine_runtime,omitempty"`
-	// NodeAgentRuntime describes the image and runtime access required only by
-	// the NodeAgent. It is intentionally independent from MetricsExporter.Runtime
+	// NodeAgentRuntime describes the runtime access required only by the
+	// NodeAgent. It is intentionally independent from MetricsExporter.Runtime
 	// so renderers cannot inherit exporter privilege or mounts implicitly.
 	NodeAgentRuntime *NodeAgentRuntimeProfile `json:"node_agent_runtime,omitempty"`
 	// VirtualizationMetricsTarget identifies the vendor-managed monitor whose
@@ -141,10 +141,13 @@ const AcceleratorExporterPodSelectorEnvKey = "NEUTREE_ACCELERATOR_EXPORTER_POD_S
 // namespace for NodeAgent's local accelerator-exporter discovery.
 const AcceleratorExporterNamespaceEnvKey = "NEUTREE_ACCELERATOR_EXPORTER_NAMESPACE"
 
-// NodeAgentRuntimeProfile declares the image and backend-specific NodeAgent access
+// NodeAgentRuntimeProfile declares the backend-specific NodeAgent access
 // contract for an explicit accelerator profile.
 type NodeAgentRuntimeProfile struct {
-	// Image is the NodeAgent image used by clusters newer than v1.1.1.
+	// Image is retained for wire compatibility and has no effect.
+	//
+	// Deprecated: the control plane selects the NodeAgent image from the cluster
+	// version alone, so setting this field changes nothing.
 	Image string `json:"image,omitempty"`
 	// Privileged requests privileged execution on backends that support it.
 	Privileged bool `json:"privileged,omitempty"`
