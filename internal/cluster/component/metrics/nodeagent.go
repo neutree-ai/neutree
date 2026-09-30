@@ -47,12 +47,7 @@ func selectedMetricsNodeAgent(
 		}
 	}
 
-	var profile *v1.NodeAgentRuntimeProfile
-	if selectedPlan != nil {
-		profile = selectedPlan.NodeAgentRuntime
-	}
-
-	selection, err := component.SelectNodeAgent(clusterVersion, profile)
+	selection, err := component.SelectNodeAgent(clusterVersion)
 
 	if err != nil {
 		return metricsNodeAgent{}, err

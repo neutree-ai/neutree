@@ -189,7 +189,7 @@ func buildNodeAgentComponent(
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) (v1.NodeComponentSpec, error) {
-	selection, err := selectedNodeAgent(cluster.Spec.Version, profile)
+	selection, err := component.SelectNodeAgent(cluster.Spec.Version)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
@@ -271,20 +271,8 @@ func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
 	)
 }
 
-func selectedNodeAgent(
-	clusterVersion string,
-	profile *v1.AcceleratorProfile,
-) (component.NodeAgentSelection, error) {
-	var nodeAgentProfile *v1.NodeAgentRuntimeProfile
-	if profile != nil {
-		nodeAgentProfile = profile.NodeAgentRuntime
-	}
-
-	return component.SelectNodeAgent(clusterVersion, nodeAgentProfile)
-}
-
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	selection, err := selectedNodeAgent(cluster.Spec.Version, nil)
+	selection, err := component.SelectNodeAgent(cluster.Spec.Version)
 	if err != nil || selection.Image == "" {
 		return "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 	}

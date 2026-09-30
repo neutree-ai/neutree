@@ -1,19 +1,26 @@
 package component
 
 import (
-	"fmt"
 	"strings"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
-const ProfileImageVersionGate = "v1.1.1"
-
+// NodeAgentContract is the parameter surface the control plane renders for a
+// NodeAgent. NodeAgent releases differ in the flags and environment they
+// accept, so the contract is pinned to the cluster version that selects it
+// rather than negotiated at runtime.
 type NodeAgentContract string
 
 const (
-	NodeAgentContractLegacy  NodeAgentContract = "legacy"
+	// NodeAgentContractLegacy is the surface NodeAgent up to v1.1.1 accepts: the
+	// legacy cluster type with an explicit metrics mode, no accelerator target
+	// flags, and no profile environment.
+	NodeAgentContractLegacy NodeAgentContract = "legacy"
+
+	// NodeAgentContractProfile is the surface NodeAgent v1.1.2 and newer accepts:
+	// the per-backend cluster type, the accelerator target flags, and the
+	// environment the selected accelerator profile declares.
 	NodeAgentContractProfile NodeAgentContract = "profile"
 )
 
@@ -22,61 +29,83 @@ type NodeAgentSelection struct {
 	Image    string
 }
 
-// SelectNodeAgent resolves the CLI contract and image that a cluster version
-// supports. Newer clusters use a supplied profile image when present.
-func SelectNodeAgent(version string, profile *v1.NodeAgentRuntimeProfile) (NodeAgentSelection, error) {
-	supportsProfile, err := SupportsNodeAgentProfileContract(version)
+// nodeAgentTier is one rung of the NodeAgent version ladder.
+type nodeAgentTier struct {
+	// maxVersion is the last cluster version in the tier. Empty means the tier is
+	// open ended and covers every newer version.
+	maxVersion string
+	// contract is the parameter surface the image in this tier accepts.
+	contract NodeAgentContract
+	image    string
+}
+
+// nodeAgentTiers is the ladder, oldest tier first. A cluster version picks the
+// first tier it does not exceed, so the cluster version alone decides both the
+// CLI contract and the image; an accelerator profile has no say.
+//
+// The last tier is open ended, so shipping a new image is a one line change to
+// NeutreeNodeAgent in version.go and nothing here moves.
+var nodeAgentTiers = []nodeAgentTier{
+	{
+		maxVersion: "v1.1.1",
+		contract:   NodeAgentContractLegacy,
+		image:      nodeAgentImage(LegacyNeutreeNodeAgent),
+	},
+	{
+		maxVersion: "v1.2.0",
+		contract:   NodeAgentContractProfile,
+		image:      nodeAgentImage(NeutreeNodeAgentV120),
+	},
+	{
+		contract: NodeAgentContractProfile,
+		image:    nodeAgentImage(NeutreeNodeAgent),
+	},
+}
+
+// SelectNodeAgent resolves the CLI contract and image for a cluster version.
+func SelectNodeAgent(version string) (NodeAgentSelection, error) {
+	tier, err := pickNodeAgentTier(version)
 	if err != nil {
 		return NodeAgentSelection{}, err
 	}
 
-	if !supportsProfile {
-		return NodeAgentSelection{
-			Contract: NodeAgentContractLegacy,
-			Image:    defaultLegacyNodeAgentImage(),
-		}, nil
-	}
-
-	if profile == nil {
-		return NodeAgentSelection{
-			Contract: NodeAgentContractProfile,
-			Image:    defaultProfileNodeAgentImage(),
-		}, nil
-	}
-
-	if strings.TrimSpace(profile.Image) == "" {
-		return NodeAgentSelection{}, fmt.Errorf("node agent profile image is required for cluster versions newer than %s", ProfileImageVersionGate)
-	}
-
 	return NodeAgentSelection{
-		Contract: NodeAgentContractProfile,
-		Image:    profile.Image,
+		Contract: tier.contract,
+		Image:    tier.image,
 	}, nil
 }
 
-func SupportsNodeAgentProfileContract(version string) (bool, error) {
+func pickNodeAgentTier(version string) (nodeAgentTier, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
-		return false, nil
+		// A cluster without a version predates every tier.
+		return nodeAgentTiers[0], nil
 	}
 
 	baseVersion, err := semver.BaseVersion(version)
 	if err != nil {
-		return false, err
+		return nodeAgentTier{}, err
 	}
 
-	legacyOrOlder, err := semver.LessThan(baseVersion, "v1.1.2")
-	if err != nil {
-		return false, err
+	for _, tier := range nodeAgentTiers {
+		if tier.maxVersion == "" {
+			return tier, nil
+		}
+
+		exceedsTier, err := semver.LessThan(tier.maxVersion, baseVersion)
+		if err != nil {
+			return nodeAgentTier{}, err
+		}
+
+		if !exceedsTier {
+			return tier, nil
+		}
 	}
 
-	return !legacyOrOlder, nil
+	// nodeAgentTiers always ends with an open ended tier.
+	return nodeAgentTiers[len(nodeAgentTiers)-1], nil
 }
 
-func defaultLegacyNodeAgentImage() string {
-	return "neutree/neutree-node-agent:" + LegacyNeutreeNodeAgent
-}
-
-func defaultProfileNodeAgentImage() string {
-	return "neutree/neutree-node-agent:" + NeutreeNodeAgent
+func nodeAgentImage(version string) string {
+	return "neutree/neutree-node-agent:" + version
 }

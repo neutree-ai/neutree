@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
@@ -324,7 +323,6 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	containerRuntime, err := p.GetContainerRuntimeConfig()
 	require.NoError(t, err)
 	assert.Equal(t, containerRuntime, *profile.EngineRuntime)
-	assert.Equal(t, "neutree/neutree-node-agent:"+component.NeutreeNodeAgent, profile.NodeAgentRuntime.Image)
 	assert.True(t, profile.NodeAgentRuntime.Privileged)
 	assert.Equal(t, map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"}, profile.NodeAgentRuntime.Env)
 	assert.Equal(t, []corev1.Capability{corev1.Capability("SYS_ADMIN")}, profile.NodeAgentRuntime.Capabilities.Add)

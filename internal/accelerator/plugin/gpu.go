@@ -13,7 +13,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
-	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
@@ -233,7 +232,6 @@ func (p *GPUAcceleratorPlugin) GetAcceleratorProfile(ctx context.Context) (*v1.A
 		ClusterRuntime:  &clusterRuntime,
 		EngineRuntime:   &engineRuntime,
 		NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-			Image:      "neutree/neutree-node-agent:" + component.NeutreeNodeAgent,
 			Privileged: true,
 			Env: map[string]string{
 				"NVIDIA_VISIBLE_DEVICES": "all",
