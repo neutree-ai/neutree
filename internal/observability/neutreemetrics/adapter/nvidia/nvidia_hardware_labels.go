@@ -1,7 +1,6 @@
 package nvidia
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,22 +51,6 @@ func nvidiaUnknownHardwareLiteral(value string) bool {
 		strings.EqualFold(value, nvidiaUnknownLabelValue) ||
 		strings.EqualFold(value, "N/A") ||
 		strings.EqualFold(value, "[Not Supported]")
-}
-
-func nvidiaFormatCUDADriverVersion(value float64) string {
-	version := int64(value)
-	if version <= 0 {
-		return ""
-	}
-
-	major := version / 1000
-	minor := (version % 1000) / 10
-
-	if major <= 0 {
-		return ""
-	}
-
-	return fmt.Sprintf("%d.%d", major, minor)
 }
 
 func nvidiaNUMANodeFromSysFS(root, pciBusID string) string {
