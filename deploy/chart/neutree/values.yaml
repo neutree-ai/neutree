@@ -112,7 +112,7 @@ auth:
   image:
     registry: ""
     repository: supabase/gotrue
-    tag: "v2.170.0"
+    tag: "v2.197.0"
     pullPolicy: IfNotPresent
   resources:
     requests:

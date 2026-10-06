@@ -8,7 +8,7 @@ neutree/neutree-core:latest
 neutree/neutree-db-scripts:latest
 postgres:13
 postgrest/postgrest:v14.0
-supabase/gotrue:v2.170.0
+supabase/gotrue:v2.197.0
 supabase/postgres-meta:v0.86.0
 timberio/vector:0.47.0-debian
 victoriametrics/victoria-logs:v1.50.0

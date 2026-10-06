@@ -17,7 +17,7 @@ services:
       retries: 10
 
   auth:
-    image: supabase/gotrue:v2.170.0
+    image: supabase/gotrue:v2.197.0
     container_name: neutree-auth-test
     ports:
       - "9999:9999"
