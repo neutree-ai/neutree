@@ -26,6 +26,8 @@ func TestZCacheAdmissionAndStatusRoundTrip(t *testing.T) {
 		name   string
 		config string
 	}{
+		{"invalid control-plane request", `{"enabled":false,"control_plane":{"version":"v1","request_id":"invalid"}}`},
+		{"missing control-plane version", `{"enabled":false,"control_plane":{"request_id":"a45b9a71-7734-454c-bba9-bef0a4f6b919"}}`},
 		{"disabled malformed capacity", `{"enabled":false,"l1_size_gib":"broken"}`},
 		{"invalid node name", `{"enabled":true,"l1_size_gib":1,"target_nodes":["worker..a"]}`},
 		{"string capacity", `{"enabled":true,"l1_size_gib":"8","target_nodes":["worker-a"]}`},
@@ -50,12 +52,12 @@ func TestZCacheAdmissionAndStatusRoundTrip(t *testing.T) {
 	require.Equal(t, http.StatusCreated, code, body)
 	// Patch desired configuration, then persist controller status. Whole composite
 	// writes must retain zcache rather than silently dropping the new attribute.
-	spec["zcache"] = json.RawMessage(`{"enabled":true,"l1_size_gib":1,"target_nodes":["worker-a"]}`)
+	spec["zcache"] = json.RawMessage(`{"enabled":true,"l1_size_gib":1,"target_nodes":["worker-a"],"control_plane":{"version":"test-v1","request_id":"a45b9a71-7734-454c-bba9-bef0a4f6b919"}}`)
 	data, err = json.Marshal(map[string]interface{}{"spec": spec})
 	require.NoError(t, err)
 	code, body = postgrestRequest(t, http.MethodPatch, "/clusters?metadata->>name=eq.zcache-contract", string(data))
 	require.Equal(t, http.StatusOK, code, body)
-	code, body = postgrestRequest(t, http.MethodPatch, "/clusters?metadata->>name=eq.zcache-contract", `{"status":{"phase":"Running","zcache":{"phase":"Reconciling","nodes":[{"name":"worker-a","runtime":"Ready"}],"change":{"operation_id":"op-test","phase":"Running"}}}}`)
+	code, body = postgrestRequest(t, http.MethodPatch, "/clusters?metadata->>name=eq.zcache-contract", `{"status":{"phase":"Running","zcache":{"control_plane":{"version":"test-v1","phase":"Succeeded","ready":true},"phase":"Reconciling","nodes":[{"name":"worker-a","runtime":"Ready"}],"change":{"operation_id":"op-test","phase":"Running"}}}}`)
 	require.Equal(t, http.StatusOK, code, body)
 	code, body = postgrestRequest(t, http.MethodGet, "/clusters?metadata->>name=eq.zcache-contract", "")
 	require.Equal(t, http.StatusOK, code, body)
@@ -75,4 +77,20 @@ func TestZCacheAdmissionAndStatusRoundTrip(t *testing.T) {
 	require.Equal(t, 1, rows[0].Spec.ZCache.L1)
 	require.Equal(t, []string{"worker-a"}, rows[0].Spec.ZCache.Nodes)
 	require.Contains(t, string(rows[0].Status.ZCache), "op-test", fmt.Sprint(rows))
+	require.Contains(t, string(rows[0].Status.ZCache), "test-v1")
+	// Version changes cannot reuse an already submitted request identity.
+	var patch map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &patch))
+	patchSpec := patch["spec"].(map[string]interface{})
+	cp := patchSpec["zcache"].(map[string]interface{})["control_plane"].(map[string]interface{})
+	cp["version"] = "test-v2"
+	data, err = json.Marshal(patch)
+	require.NoError(t, err)
+	code, body = postgrestRequest(t, http.MethodPatch, "/clusters?metadata->>name=eq.zcache-contract", string(data))
+	require.Equal(t, http.StatusBadRequest, code, body)
+	cp["request_id"] = "b45b9a71-7734-454c-bba9-bef0a4f6b919"
+	data, err = json.Marshal(patch)
+	require.NoError(t, err)
+	code, body = postgrestRequest(t, http.MethodPatch, "/clusters?metadata->>name=eq.zcache-contract", string(data))
+	require.Equal(t, http.StatusOK, code, body)
 }
