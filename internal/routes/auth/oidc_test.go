@@ -17,21 +17,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/supabase-community/gotrue-go/types"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	authmocks "github.com/neutree-ai/neutree/internal/auth/mocks"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 	"github.com/neutree-ai/neutree/pkg/identity/oidc/oidctest"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 const (
-	testOIDCID       = "keycloak"
-	testUIURL        = "http://ui.example.org/"
-	testRedirectTo   = "http://ui.example.org/models?tab=all"
-	testCallbackPath = "/api/v1/auth/oidc/callback"
-	testCallbackURL  = "https://neutree.example.org" + testCallbackPath
+	testOIDCID         = "keycloak"
+	testOIDCLinkSource = "oidc:keycloak"
+	testUIURL          = "http://ui.example.org/"
+	testRedirectTo     = "http://ui.example.org/models?tab=all"
+	testCallbackPath   = "/api/v1/auth/oidc/callback"
+	testCallbackURL    = "https://neutree.example.org" + testCallbackPath
 )
 
 type oidcTestEnv struct {
@@ -39,8 +40,26 @@ type oidcTestEnv struct {
 	storage  *storagemocks.MockStorage
 	client   *authmocks.MockClient
 	sessions *authmocks.MockSessionIssuer
-	login    *OIDCLogin
+	sources  *LoginSources
 	engine   *gin.Engine
+}
+
+func oidcSourceFor(name string, idp *oidctest.Provider, enabled bool) v1.IdentitySource {
+	return v1.IdentitySource{
+		ID:       2,
+		Metadata: &v1.Metadata{Name: name},
+		Spec: &v1.IdentitySourceSpec{
+			Type:    v1.IdentitySourceTypeOIDC,
+			Enabled: enabled,
+			OIDC: &v1.IdentitySourceOIDCSpec{
+				Issuer:           idp.Issuer(),
+				ClientID:         "neutree",
+				CACert:           string(idp.CAPEM()),
+				RedirectURL:      testCallbackURL,
+				AllowedRedirects: []string{testUIURL, "https://other.example.org/console"},
+			},
+		},
+	}
 }
 
 func newOIDCTestEnv(t *testing.T) *oidcTestEnv {
@@ -51,28 +70,17 @@ func newOIDCTestEnv(t *testing.T) *oidcTestEnv {
 	idp := oidctest.New(t, "neutree", "client-secret")
 	idp.Claims = map[string]any{"preferred_username": "kc.alice", "name": "KC Alice", "email": "alice@example.org"}
 
-	rp, err := oidc.New(oidc.Config{
-		Issuer:       idp.Issuer(),
-		ClientID:     "neutree",
-		ClientSecret: "client-secret",
-		RedirectURL:  testCallbackURL,
-		Scopes:       []string{"openid", "profile", "email"},
-		RootCAs:      idp.CAPEM(),
-		Claims:       oidc.ClaimMapping{Username: "preferred_username", DisplayName: "name", Email: "email"},
-	})
-	require.NoError(t, err)
-
-	login, err := NewOIDCLogin(testOIDCID, rp, testCallbackURL, []string{testUIURL, "https://other.example.org/console"}, testJWTSecret)
-	require.NoError(t, err)
-
 	e := &oidcTestEnv{
 		idp:      idp,
 		storage:  storagemocks.NewMockStorage(t),
 		client:   authmocks.NewMockClient(t),
 		sessions: authmocks.NewMockSessionIssuer(t),
-		login:    login,
 		engine:   gin.New(),
 	}
+
+	expectSource(e.storage, oidcSourceFor(testOIDCID, idp, true), &storage.IdentitySourceSecrets{OIDCClientSecret: "client-secret"})
+
+	e.sources = newTestLoginSources(t, e.storage)
 
 	RegisterAuthRoutes(e.engine.Group("/api/v1"), nil, &Dependencies{
 		AuthEndpoint: "http://gotrue.invalid",
@@ -80,7 +88,7 @@ func newOIDCTestEnv(t *testing.T) *oidcTestEnv {
 		Storage:      e.storage,
 		AuthClient:   e.client,
 		Sessions:     e.sessions,
-		OIDC:         login,
+		Sources:      e.sources,
 	})
 
 	return e
@@ -105,7 +113,7 @@ func (e *oidcTestEnv) get(t *testing.T, target string, cookies ...*http.Cookie) 
 func (e *oidcTestEnv) authorize(t *testing.T) (string, *http.Cookie) {
 	t.Helper()
 
-	w := e.get(t, "/api/v1/auth/oidc/authorize?redirect_to="+url.QueryEscape(testRedirectTo))
+	w := e.get(t, "/api/v1/auth/oidc/authorize?source="+testOIDCID+"&redirect_to="+url.QueryEscape(testRedirectTo))
 	require.Equal(t, http.StatusFound, w.Code)
 
 	cookie := stateCookie(t, w)
@@ -199,8 +207,10 @@ func TestOIDCAuthorize(t *testing.T) {
 	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
 	assert.Equal(t, int(oidcStateTTL/time.Second), cookie.MaxAge)
 
-	state, err := e.login.codec.open(cookie.Value, time.Now())
+	source, state, err := e.sources.codec.open(cookie.Value, time.Now())
 	require.NoError(t, err)
+	assert.Equal(t, testOIDCID, source)
+	assert.True(t, strings.HasPrefix(cookie.Value, testOIDCID+"."), "the cookie names its source")
 	assert.Equal(t, queryParam(t, authURL, "state"), state.State)
 	assert.Equal(t, queryParam(t, authURL, "nonce"), state.Nonce)
 	assert.Equal(t, testRedirectTo, state.RedirectTo)
@@ -240,7 +250,7 @@ func TestOIDCAuthorize_RedirectAllowList(t *testing.T) {
 		t.Run(tc.redirectTo, func(t *testing.T) {
 			e := newOIDCTestEnv(t)
 
-			w := e.get(t, "/api/v1/auth/oidc/authorize?redirect_to="+url.QueryEscape(tc.redirectTo))
+			w := e.get(t, "/api/v1/auth/oidc/authorize?source="+testOIDCID+"&redirect_to="+url.QueryEscape(tc.redirectTo))
 
 			if tc.allowed {
 				assert.Equal(t, http.StatusFound, w.Code)
@@ -257,7 +267,7 @@ func TestOIDCCallback_FirstLoginCreatesUserAndLink(t *testing.T) {
 	e := newOIDCTestEnv(t)
 	userID := uuid.New()
 
-	e.storage.EXPECT().GetExternalIdentity("oidc:keycloak", e.externalID()).Return(nil, storage.ErrResourceNotFound).Once()
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).Return(nil, storage.ErrResourceNotFound).Once()
 	e.client.EXPECT().AdminCreateUser(mock.MatchedBy(func(req types.AdminCreateUserRequest) bool {
 		_, hasUsername := req.UserMetadata["username"]
 
@@ -271,7 +281,7 @@ func TestOIDCCallback_FirstLoginCreatesUserAndLink(t *testing.T) {
 			req.AppMetadata["identity_source"] == "oidc"
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	e.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
-		Source: "oidc:keycloak", ExternalID: e.externalID(), UserID: userID.String(),
+		Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID.String(),
 	}).Return(nil).Once()
 	e.expectEmail(userID.String(), e.placeholderEmail())
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).
@@ -296,8 +306,8 @@ func TestOIDCCallback_LaterLoginUsesLink(t *testing.T) {
 	e := newOIDCTestEnv(t)
 	userID := uuid.NewString()
 
-	e.storage.EXPECT().GetExternalIdentity("oidc:keycloak", e.externalID()).
-		Return(&storage.ExternalIdentity{Source: "oidc:keycloak", ExternalID: e.externalID(), UserID: userID}, nil).Once()
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
+		Return(&storage.ExternalIdentity{Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID}, nil).Once()
 	e.expectEmail(userID, e.placeholderEmail())
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).
 		Return(&internalauth.MagicLink{UserID: userID, HashedToken: "hashed-token"}, nil).Once()
@@ -312,7 +322,7 @@ func TestOIDCCallback_LoginAfterEmailChangedInGoTrue(t *testing.T) {
 	e := newOIDCTestEnv(t)
 	userID := uuid.NewString()
 
-	e.storage.EXPECT().GetExternalIdentity("oidc:keycloak", e.externalID()).
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
 		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
 	e.expectEmail(userID, "renamed@example.org")
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, "renamed@example.org").
@@ -338,7 +348,7 @@ func TestOIDCCallback_GetUserFailsClosed(t *testing.T) {
 			e := newOIDCTestEnv(t)
 			userID := uuid.New()
 
-			e.storage.EXPECT().GetExternalIdentity("oidc:keycloak", e.externalID()).
+			e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
 				Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
 			e.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).Return(tc.user, tc.err).Once()
 
@@ -354,7 +364,7 @@ func TestOIDCCallback_MagicLinkForAnotherUserFailsClosed(t *testing.T) {
 	e := newOIDCTestEnv(t)
 	userID := uuid.NewString()
 
-	e.storage.EXPECT().GetExternalIdentity("oidc:keycloak", e.externalID()).
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
 		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
 	e.expectEmail(userID, e.placeholderEmail())
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).
@@ -383,7 +393,7 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 			callback: func(t *testing.T, e *oidcTestEnv, authURL string, _ *http.Cookie) *httptest.ResponseRecorder {
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}})
 			},
-			wantBase:     testUIURL,
+			wantBase:     "",
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
@@ -402,16 +412,16 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}}, &forged)
 			},
-			wantBase:     testUIURL,
+			wantBase:     "",
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
 			name: "expired cookie",
 			callback: func(t *testing.T, e *oidcTestEnv, authURL string, cookie *http.Cookie) *httptest.ResponseRecorder {
-				e.login.now = func() time.Time { return time.Now().Add(oidcStateTTL + time.Minute) }
+				e.sources.now = func() time.Time { return time.Now().Add(oidcStateTTL + time.Minute) }
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}}, cookie)
 			},
-			wantBase:     testUIURL,
+			wantBase:     "",
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
@@ -457,6 +467,15 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 
 			w := tc.callback(t, e, authURL, cookie)
 
+			// Without an opened state there is nowhere trusted to redirect to.
+			if tc.wantBase == "" {
+				assert.Equal(t, http.StatusBadRequest, w.Code)
+				assert.Equal(t, tc.wantErrorKey, errorBody(t, w))
+				assert.Empty(t, w.Header().Get("Location"))
+
+				return
+			}
+
 			base, fragment := redirectFragment(t, w)
 			assert.Equal(t, tc.wantBase, base)
 			assert.Equal(t, url.Values{"error": {tc.wantErrorKey}}, fragment)
@@ -465,31 +484,36 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 }
 
 func TestOIDCStateCodec(t *testing.T) {
-	codec, err := newStateCodec(testJWTSecret, testOIDCID)
+	codec, err := newStateCodec(testJWTSecret)
 	require.NoError(t, err)
 
 	state := &oidcLoginState{State: "s", Nonce: "n", Verifier: "v", RedirectTo: testUIURL, ExpiresAt: time.Now().Add(time.Minute).Unix()}
-	sealed, err := codec.seal(state)
+	sealed, err := codec.seal(testOIDCID, state)
 	require.NoError(t, err)
 
-	opened, err := codec.open(sealed, time.Now())
+	source, opened, err := codec.open(sealed, time.Now())
 	require.NoError(t, err)
+	assert.Equal(t, testOIDCID, source)
 	assert.Equal(t, state, opened)
 
-	_, err = codec.open(sealed, time.Now().Add(2*time.Minute))
+	_, _, err = codec.open(sealed, time.Now().Add(2*time.Minute))
 	assert.ErrorIs(t, err, errInvalidLoginState, "expired")
 
-	otherSecret, err := newStateCodec("another-secret", testOIDCID)
+	otherSecret, err := newStateCodec("another-secret")
 	require.NoError(t, err)
-	_, err = otherSecret.open(sealed, time.Now())
+	_, _, err = otherSecret.open(sealed, time.Now())
 	assert.ErrorIs(t, err, errInvalidLoginState, "another key")
 
-	otherProvider, err := newStateCodec(testJWTSecret, "another-idp")
-	require.NoError(t, err)
-	_, err = otherProvider.open(sealed, time.Now())
-	assert.ErrorIs(t, err, errInvalidLoginState, "another provider")
+	// The source name is bound into the ciphertext: relabelling a state sealed
+	// for one source does not make it open for another.
+	_, ciphertext, _ := strings.Cut(sealed, ".")
+	_, _, err = codec.open("another-idp."+ciphertext, time.Now())
+	assert.ErrorIs(t, err, errInvalidLoginState, "another source")
 
-	_, err = newStateCodec("", testOIDCID)
+	_, _, err = codec.open(ciphertext, time.Now())
+	assert.ErrorIs(t, err, errInvalidLoginState, "no source")
+
+	_, err = newStateCodec("")
 	assert.Error(t, err)
 }
 
@@ -498,21 +522,19 @@ func TestOIDCPlaceholderEmail(t *testing.T) {
 		oidcPlaceholderEmail("keycloak", "https://idp.example.org/realms/neutree", "248289761001"))
 }
 
-func TestNewOIDCLogin_Invalid(t *testing.T) {
-	cases := map[string]struct {
-		id, callback string
-		allowed      []string
-	}{
-		"bad id":                {"Key Cloak", testCallbackURL, []string{testUIURL}},
-		"no allowed redirects":  {testOIDCID, testCallbackURL, nil},
-		"relative redirect":     {testOIDCID, testCallbackURL, []string{"/ui/"}},
-		"redirect with query":   {testOIDCID, testCallbackURL, []string{testUIURL + "?a=b"}},
-		"callback without path": {testOIDCID, "https://neutree.example.org", []string{testUIURL}},
+func TestParseOIDCAllowedRedirects_Invalid(t *testing.T) {
+	cases := map[string][]string{
+		"none":          nil,
+		"relative":      {"/ui/"},
+		"with query":    {testUIURL + "?a=b"},
+		"with fragment": {testUIURL + "#a"},
+		"with user":     {"http://user@ui.example.org/"},
+		"not http":      {"ftp://ui.example.org/"},
 	}
 
-	for name, tc := range cases {
+	for name, allowed := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewOIDCLogin(tc.id, nil, tc.callback, tc.allowed, testJWTSecret)
+			_, err := parseOIDCAllowedRedirects(allowed)
 			assert.Error(t, err)
 		})
 	}

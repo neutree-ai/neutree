@@ -293,6 +293,35 @@ func (a *Authenticator) Authenticate(ctx context.Context, username, password str
 	return a.mapEntry(entry)
 }
 
+// Ping checks that the directory is reachable and accepts the service account:
+// it dials and binds as BindDN, and searches nothing. It is the connection
+// test of an administrator's configuration; errors are classified like those of
+// Authenticate (ErrConnection, ErrTLS, ErrServiceBindFailed).
+func (a *Authenticator) Ping(ctx context.Context) error {
+	conn, err := a.dial(ctx)
+	if err != nil {
+		if errors.Is(err, ErrConnection) || errors.Is(err, ErrTLS) || errors.Is(err, ErrInvalidConfig) {
+			return err
+		}
+
+		return connectionError("dial", err)
+	}
+
+	var closeOnce sync.Once
+	closeConn := func() { closeOnce.Do(func() { _ = conn.Close() }) }
+
+	defer closeConn()
+
+	stop := context.AfterFunc(ctx, closeConn)
+	defer stop()
+
+	if err := conn.Bind(a.cfg.BindDN, a.cfg.BindPassword); err != nil {
+		return a.operationError(ctx, ErrServiceBindFailed, "service bind", err)
+	}
+
+	return nil
+}
+
 func (a *Authenticator) searchUser(ctx context.Context, conn goldap.Client, username string) (*goldap.Entry, error) {
 	filter := strings.ReplaceAll(a.cfg.UserFilter, UsernamePlaceholder, goldap.EscapeFilter(username))
 	req := goldap.NewSearchRequest(

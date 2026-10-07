@@ -68,7 +68,11 @@ func testIdentity() *ldap.Identity {
 	}
 }
 
-const testPlaceholderEmail = "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@ldap.neutree.local"
+const (
+	testLDAPSource       = "corp-ldap"
+	testLDAPLinkSource   = "ldap:corp-ldap"
+	testPlaceholderEmail = "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@corp-ldap.ldap.neutree.local"
+)
 
 func (d *ldapTestDeps) serve(t *testing.T, ldapEnabled bool, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -81,7 +85,10 @@ func (d *ldapTestDeps) serve(t *testing.T, ldapEnabled bool, method, path, body 
 		AuthClient:   d.client,
 	}
 	if ldapEnabled {
-		deps.LDAP = d.ldap
+		expectSource(d.storage, ldapSource(testLDAPSource, true), &storage.IdentitySourceSecrets{LDAPBindPassword: "svc"})
+
+		deps.Sources = newTestLoginSources(t, d.storage)
+		deps.Sources.newLDAP = func(ldap.Config) (LDAPAuthenticator, error) { return d.ldap, nil }
 		deps.Sessions = d.sessions
 	}
 
@@ -99,7 +106,7 @@ func (d *ldapTestDeps) serve(t *testing.T, ldapEnabled bool, method, path, body 
 func (d *ldapTestDeps) login(t *testing.T) *httptest.ResponseRecorder {
 	t.Helper()
 
-	return d.serve(t, true, http.MethodPost, "/api/v1/auth/ldap/token", `{"username":"alice","password":"pw"}`)
+	return d.serve(t, true, http.MethodPost, "/api/v1/auth/ldap/token", `{"source":"corp-ldap","username":"alice","password":"pw"}`)
 }
 
 // expectEmail makes GoTrue report email as the current email of userID.
@@ -130,7 +137,7 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	userID := uuid.New()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
 	d.client.EXPECT().AdminCreateUser(mock.MatchedBy(func(req types.AdminCreateUserRequest) bool {
 		_, hasUsername := req.UserMetadata["username"]
 
@@ -144,7 +151,7 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 			req.AppMetadata["identity_source"] == "ldap"
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
-		Source: "ldap", ExternalID: testIdentity().ExternalID, UserID: userID.String(),
+		Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String(),
 	}).Return(nil).Once()
 	d.expectSession(userID.String())
 
@@ -158,8 +165,8 @@ func TestLDAPToken_LaterLoginUsesLink(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	userID := uuid.NewString()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
-		Return(&storage.ExternalIdentity{Source: "ldap", ExternalID: testIdentity().ExternalID, UserID: userID}, nil).Once()
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
+		Return(&storage.ExternalIdentity{Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID}, nil).Once()
 	d.expectSession(userID)
 
 	w := d.login(t)
@@ -173,7 +180,7 @@ func TestLDAPToken_LoginAfterEmailChangedInGoTrue(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	userID := uuid.NewString()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
 		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
 	d.expectEmail(userID, "renamed@example.org")
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, "renamed@example.org").
@@ -191,7 +198,7 @@ func TestLDAPToken_GetUserFailsClosed(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	userID := uuid.New()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
 		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
 	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).Return(nil, errors.New("gotrue down")).Once()
 
@@ -206,7 +213,7 @@ func TestLDAPToken_MagicLinkForAnotherUserFailsClosed(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	userID := uuid.NewString()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
 		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
 	d.expectEmail(userID, testPlaceholderEmail)
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
@@ -264,12 +271,12 @@ func TestLDAPToken_LinkInsertLosesRace(t *testing.T) {
 	orphan := uuid.New()
 	winner := uuid.NewString()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
 	d.client.EXPECT().AdminCreateUser(mock.Anything).Return(&types.AdminCreateUserResponse{User: types.User{ID: orphan}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(mock.Anything).
 		Return(fmt.Errorf("(23505) duplicate key: %w", storage.ErrResourceConflict)).Once()
 	d.client.EXPECT().AdminDeleteUser(types.AdminDeleteUserRequest{UserID: orphan}).Return(nil).Once()
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
 		Return(&storage.ExternalIdentity{UserID: winner}, nil).Once()
 	d.expectSession(winner)
 
@@ -282,7 +289,7 @@ func TestLDAPToken_LinkInsertFailsDeletesOrphan(t *testing.T) {
 	d := newLDAPTestDeps(t)
 	orphan := uuid.New()
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
 	d.client.EXPECT().AdminCreateUser(mock.Anything).Return(&types.AdminCreateUserResponse{User: types.User{ID: orphan}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(mock.Anything).Return(errors.New("postgrest down")).Once()
 	d.client.EXPECT().AdminDeleteUser(types.AdminDeleteUserRequest{UserID: orphan}).Return(nil).Once()
@@ -297,9 +304,9 @@ func TestLDAPToken_CreateUserLosesRace(t *testing.T) {
 	winner := uuid.NewString()
 
 	// The concurrent login holds the placeholder email, then links it.
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Twice()
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Twice()
 	d.client.EXPECT().AdminCreateUser(mock.Anything).Return(nil, errors.New("422: email_exists")).Once()
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
 		Return(&storage.ExternalIdentity{UserID: winner}, nil).Once()
 	d.expectSession(winner)
 
@@ -311,7 +318,7 @@ func TestLDAPToken_CreateUserLosesRace(t *testing.T) {
 func TestLDAPToken_CreateUserFails(t *testing.T) {
 	d := newLDAPTestDeps(t)
 
-	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound)
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound)
 	d.client.EXPECT().AdminCreateUser(mock.Anything).Return(nil, errors.New("gotrue down")).Once()
 
 	w := d.login(t)

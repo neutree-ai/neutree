@@ -543,3 +543,73 @@ func TestNoNeutreeImports(t *testing.T) {
 		assert.True(t, strings.HasPrefix(path, "github.com/go-ldap/ldap/"), "unexpected import %q", path)
 	}
 }
+
+func TestPing(t *testing.T) {
+	cases := []struct {
+		name      string
+		cfg       func() Config
+		conn      *fakeConn
+		dialErr   error
+		wantErr   error
+		wantBinds []string
+	}{
+		{
+			name:      "service account binds",
+			cfg:       openLDAPConfig,
+			conn:      &fakeConn{},
+			wantBinds: []string{serviceDN},
+		},
+		{
+			name: "wrong service password",
+			cfg: func() Config {
+				cfg := openLDAPConfig()
+				cfg.BindPassword = "wrong"
+
+				return cfg
+			},
+			conn:      &fakeConn{},
+			wantErr:   ErrServiceBindFailed,
+			wantBinds: []string{serviceDN},
+		},
+		{
+			name:    "dial fails",
+			cfg:     openLDAPConfig,
+			dialErr: &net.OpError{Op: "dial", Err: errors.New("connection refused")},
+			wantErr: ErrConnection,
+		},
+		{
+			name:    "untrusted certificate",
+			cfg:     openLDAPConfig,
+			dialErr: goldap.NewError(goldap.ErrorNetwork, x509.UnknownAuthorityError{}),
+			wantErr: ErrTLS,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			auth, err := New(tc.cfg(), func(context.Context) (goldap.Client, error) {
+				if tc.dialErr != nil {
+					return nil, tc.dialErr
+				}
+
+				return tc.conn, nil
+			})
+			require.NoError(t, err)
+
+			err = auth.Ping(context.Background())
+
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.wantErr)
+				assert.NotContains(t, err.Error(), servicePassword)
+			}
+
+			if tc.conn != nil {
+				assert.Equal(t, tc.wantBinds, tc.conn.binds)
+				assert.Empty(t, tc.conn.searches, "a ping searches nothing")
+				assert.Equal(t, 1, tc.conn.closed)
+			}
+		})
+	}
+}

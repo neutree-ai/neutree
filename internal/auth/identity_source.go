@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"regexp"
 	"slices"
 )
 
@@ -12,20 +11,19 @@ const (
 	// key of its own.
 	IdentitySourceKey = "identity_source"
 
-	// LDAPSource is the identity source of LDAP accounts, both in app_metadata
-	// and in external_identities. There is a single LDAP directory for now.
+	// LDAPSource and OIDCSource are the identity_source app_metadata values of
+	// users from an LDAP or an OpenID Connect IdentitySource: the source's type,
+	// which selects the fields neutree must not change for the user. The
+	// account's link in external_identities is keyed by LinkSource instead, so
+	// each IdentitySource keeps its own links.
 	LDAPSource = "ldap"
-
-	// OIDCSource is the identity source of OpenID Connect accounts in
-	// app_metadata. Their external_identities source is OIDCLinkSource of the
-	// provider, so each configured provider keeps its own links.
 	OIDCSource = "oidc"
 )
 
-// OIDCLinkSource returns the external_identities source of the OpenID Connect
-// provider with the given ID.
-func OIDCLinkSource(providerID string) string {
-	return OIDCSource + ":" + providerID
+// LinkSource returns the external_identities source of the accounts of the
+// IdentitySource of the given type and name, e.g. ldap:corp-ldap.
+func LinkSource(sourceType, name string) string {
+	return sourceType + ":" + name
 }
 
 // externallyManagedFields lists, per identity source, the GoTrue account fields
@@ -55,14 +53,4 @@ func ExternallyManagedFields(source string) []string {
 // ManagesField reports whether source owns the GoTrue account field.
 func ManagesField(source, field string) bool {
 	return slices.Contains(externallyManagedFields[source], field)
-}
-
-// oidcProviderIDPattern is a DNS label: the provider ID becomes part of the
-// placeholder email domain of its users.
-var oidcProviderIDPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-
-// ValidOIDCProviderID reports whether id can name an OpenID Connect provider:
-// lowercase letters, digits and inner '-', at most 32 characters.
-func ValidOIDCProviderID(id string) bool {
-	return oidcProviderIDPattern.MatchString(id)
 }

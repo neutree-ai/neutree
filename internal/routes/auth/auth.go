@@ -24,13 +24,10 @@ type Dependencies struct {
 	AuthConfig   middleware.AuthConfig
 	Storage      storage.Storage
 	AuthClient   auth.Client
-	// LDAP is nil when no LDAP directory is configured; the LDAP login route is
-	// then not registered.
-	LDAP LDAPAuthenticator
-	// OIDC is nil when no OpenID Connect provider is configured; the OIDC login
-	// routes are then not registered.
-	OIDC *OIDCLogin
-	// Sessions is required when LDAP or OIDC is set.
+	// Sources resolves the LDAP and OIDC identity sources users log in with.
+	// When nil, the LDAP and OIDC login routes are not registered.
+	Sources *LoginSources
+	// Sessions is required when Sources is set.
 	Sessions auth.SessionIssuer
 }
 
@@ -68,12 +65,11 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	// logged in.
 	authGroup.GET("/identity-sources", handleListLoginIdentitySources(deps))
 
-	if deps.LDAP != nil {
+	// Identity sources are read from the database at login, so the routes exist
+	// whether or not any source is configured yet.
+	if deps.Sources != nil {
 		authGroup.POST("/ldap/token", handleLDAPToken(deps))
-	}
-
-	if deps.OIDC != nil {
-		authGroup.GET("/oidc/authorize", handleOIDCAuthorize(deps.OIDC))
+		authGroup.GET("/oidc/authorize", handleOIDCAuthorize(deps))
 		authGroup.GET("/oidc/callback", handleOIDCCallback(deps))
 	}
 }

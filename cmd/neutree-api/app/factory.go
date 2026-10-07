@@ -20,8 +20,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/internal/util"
-	"github.com/neutree-ai/neutree/pkg/identity/ldap"
-	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -100,31 +98,13 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 			AuthClient:   authClient,
 		}
 
-		if ldapConfig := deps.Config.LDAP; ldapConfig != nil {
-			authenticator, err := ldap.New(*ldapConfig, ldap.NewDialer(*ldapConfig))
-			if err != nil {
-				return fmt.Errorf("init LDAP authenticator: %w", err)
-			}
-
-			authDeps.LDAP = authenticator
+		// LDAP and OIDC logins read their identity sources from the database.
+		authDeps.Sources, err = auth.NewLoginSources(deps.Config.Storage, deps.Config.AuthConfig.JwtSecret, auth.DefaultLoginSourceTTL)
+		if err != nil {
+			return fmt.Errorf("init identity source logins: %w", err)
 		}
 
-		if oidcConfig := deps.Config.OIDC; oidcConfig != nil {
-			rp, err := oidc.New(oidcConfig.Provider)
-			if err != nil {
-				return fmt.Errorf("init OIDC relying party: %w", err)
-			}
-
-			authDeps.OIDC, err = auth.NewOIDCLogin(oidcConfig.ID, rp, oidcConfig.Provider.RedirectURL,
-				oidcConfig.AllowedRedirects, deps.Config.AuthConfig.JwtSecret)
-			if err != nil {
-				return fmt.Errorf("init OIDC login: %w", err)
-			}
-		}
-
-		if authDeps.LDAP != nil || authDeps.OIDC != nil {
-			authDeps.Sessions = internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken)
-		}
+		authDeps.Sessions = internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken)
 
 		register(deps.Group, deps.Middlewares, authDeps)
 
