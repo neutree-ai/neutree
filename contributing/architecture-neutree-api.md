@@ -27,7 +27,7 @@ Two route categories:
 | `/dashboard-proxy/:workspace/:name/*path` | Reverse-proxy to a Ray dashboard | `RegisterRayDashboardProxyRoutes` |
 | `/k8s-proxy/:workspace/:name/*path` | Authenticated reverse-proxy to a cluster's Kubernetes API server | `RegisterKubernetesProxyRoutes` |
 | `/endpoint-logs/...` | Endpoint log streaming | `RegisterEndpointLogsRoutes` |
-| `/auth/...` | GoTrue token issue/refresh | `RegisterAuthRoutes` |
+| `/auth/...` | GoTrue token issue/refresh; LDAP login at `/auth/ldap/token`, registered only when `--ldap-url` is set; `PUT /auth/user` refuses changes to fields an external identity source manages (`externallyManagedFields`) | `RegisterAuthRoutes` |
 | `/credentials/...` | Image registry / model registry credential access | `RegisterCredentialsRoutes` |
 | `/system/...` | Health, version, system info | `RegisterSystemRoutes` |
 | `/models/...` | OpenAI-compatible model listing | `RegisterModelsRoutes` |

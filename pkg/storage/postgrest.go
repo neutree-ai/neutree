@@ -1119,3 +1119,36 @@ func (s *postgrestStorage) ListExternalEndpoint(option ListOption) ([]v1.Externa
 
 	return response, err
 }
+
+// uniqueViolationCode is the Postgres SQLSTATE for a unique constraint failure.
+// postgrest-go turns the PostgREST error body into "(<code>) <message>".
+const uniqueViolationCode = "(23505)"
+
+func (s *postgrestStorage) GetExternalIdentity(source, externalID string) (*ExternalIdentity, error) {
+	var response []ExternalIdentity
+
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id", "", false).
+		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error {
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Insert(data, false, "", "minimal", "").Execute()
+	if err != nil && strings.Contains(err.Error(), uniqueViolationCode) {
+		return errors.Wrap(ErrResourceConflict, err.Error())
+	}
+
+	return err
+}

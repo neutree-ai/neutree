@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/identity/ldap"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -41,4 +42,7 @@ type APIConfig struct {
 	GrafanaURL       string
 	AITraceStoreURL  string
 	Version          string
+
+	// LDAP is the directory users log in with; nil disables LDAP login.
+	LDAP *ldap.Config
 }

@@ -12,6 +12,8 @@ import (
 
 var (
 	ErrResourceNotFound = errors.New("resource not found")
+	// ErrResourceConflict means a write collided with a unique constraint.
+	ErrResourceConflict = errors.New("resource conflict")
 )
 
 const (
@@ -31,6 +33,7 @@ const (
 	EXTERNAL_ENDPOINT_TABLE   = "external_endpoints"
 	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
 	STATIC_NODE_TABLE         = "static_nodes"
+	EXTERNAL_IDENTITY_TABLE   = "external_identities"
 )
 
 type ImageRegistryStorage interface {
@@ -224,6 +227,25 @@ type StaticNodeStorage interface {
 	UpdateStaticNode(id string, data *v1.StaticNode) error
 }
 
+// ExternalIdentity links an account in an external directory to a neutree
+// user. It is internal bookkeeping for login, not an API resource.
+type ExternalIdentity struct {
+	// Source names the directory, e.g. "ldap".
+	Source string `json:"source"`
+	// ExternalID is the directory's stable ID for the account, never a name.
+	ExternalID string `json:"external_id"`
+	UserID     string `json:"user_id"`
+}
+
+type ExternalIdentityStorage interface {
+	// GetExternalIdentity returns the link for an external account, or
+	// ErrResourceNotFound when the account is not linked.
+	GetExternalIdentity(source, externalID string) (*ExternalIdentity, error)
+	// CreateExternalIdentity links an external account to a user. It returns an
+	// error wrapping ErrResourceConflict when the account is already linked.
+	CreateExternalIdentity(data *ExternalIdentity) error
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -240,6 +262,7 @@ type Storage interface {
 	ExternalEndpointStorage
 	StaticNodeClusterStorage
 	StaticNodeStorage
+	ExternalIdentityStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

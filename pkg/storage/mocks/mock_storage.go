@@ -357,6 +357,52 @@ func (_c *MockStorage_CreateExternalEndpoint_Call) RunAndReturn(run func(*v1.Ext
 	return _c
 }
 
+// CreateExternalIdentity provides a mock function with given fields: data
+func (_m *MockStorage) CreateExternalIdentity(data *storage.ExternalIdentity) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateExternalIdentity")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.ExternalIdentity) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateExternalIdentity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateExternalIdentity'
+type MockStorage_CreateExternalIdentity_Call struct {
+	*mock.Call
+}
+
+// CreateExternalIdentity is a helper method to define mock.On call
+//   - data *storage.ExternalIdentity
+func (_e *MockStorage_Expecter) CreateExternalIdentity(data interface{}) *MockStorage_CreateExternalIdentity_Call {
+	return &MockStorage_CreateExternalIdentity_Call{Call: _e.mock.On("CreateExternalIdentity", data)}
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.ExternalIdentity))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) Return(_a0 error) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateImageRegistry provides a mock function with given fields: data
 func (_m *MockStorage) CreateImageRegistry(data *v1.ImageRegistry) error {
 	ret := _m.Called(data)
@@ -1842,6 +1888,65 @@ func (_c *MockStorage_GetExternalEndpoint_Call) Return(_a0 *v1.ExternalEndpoint,
 }
 
 func (_c *MockStorage_GetExternalEndpoint_Call) RunAndReturn(run func(string) (*v1.ExternalEndpoint, error)) *MockStorage_GetExternalEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetExternalIdentity provides a mock function with given fields: source, externalID
+func (_m *MockStorage) GetExternalIdentity(source string, externalID string) (*storage.ExternalIdentity, error) {
+	ret := _m.Called(source, externalID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExternalIdentity")
+	}
+
+	var r0 *storage.ExternalIdentity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (*storage.ExternalIdentity, error)); ok {
+		return rf(source, externalID)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) *storage.ExternalIdentity); ok {
+		r0 = rf(source, externalID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.ExternalIdentity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(source, externalID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetExternalIdentity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExternalIdentity'
+type MockStorage_GetExternalIdentity_Call struct {
+	*mock.Call
+}
+
+// GetExternalIdentity is a helper method to define mock.On call
+//   - source string
+//   - externalID string
+func (_e *MockStorage_Expecter) GetExternalIdentity(source interface{}, externalID interface{}) *MockStorage_GetExternalIdentity_Call {
+	return &MockStorage_GetExternalIdentity_Call{Call: _e.mock.On("GetExternalIdentity", source, externalID)}
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) Run(run func(source string, externalID string)) *MockStorage_GetExternalIdentity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) Return(_a0 *storage.ExternalIdentity, _a1 error) *MockStorage_GetExternalIdentity_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) RunAndReturn(run func(string, string) (*storage.ExternalIdentity, error)) *MockStorage_GetExternalIdentity_Call {
 	_c.Call.Return(run)
 	return _c
 }
