@@ -85,6 +85,7 @@ func serveUpdateUser(t *testing.T, authHeader, body string) (*httptest.ResponseR
 
 func TestUpdateUser_IdentitySourcePolicy(t *testing.T) {
 	ldapToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email", auth.IdentitySourceKey: auth.LDAPSource})
+	oidcToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email", auth.IdentitySourceKey: auth.OIDCSource})
 	localToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email"})
 	forgedToken := "Bearer " + signTestToken(t, "another-secret", map[string]any{auth.IdentitySourceKey: auth.LDAPSource})
 
@@ -103,6 +104,10 @@ func TestUpdateUser_IdentitySourcePolicy(t *testing.T) {
 		{"ldap user metadata only", ldapToken, `{"data":{"theme":"dark"}}`, http.StatusOK, true},
 		{"ldap user null password", ldapToken, `{"password":null,"data":{"theme":"dark"}}`, http.StatusOK, true},
 		{"ldap user invalid body", ldapToken, `not json`, http.StatusBadRequest, false},
+		{"oidc user password", oidcToken, `{"password":"new-password"}`, http.StatusForbidden, false},
+		{"oidc user email", oidcToken, `{"email":"alice@example.org"}`, http.StatusForbidden, false},
+		{"oidc user phone", oidcToken, `{"phone":"+15550100"}`, http.StatusForbidden, false},
+		{"oidc user metadata only", oidcToken, `{"data":{"theme":"dark"}}`, http.StatusOK, true},
 		{"local user password", localToken, `{"password":"new-password"}`, http.StatusOK, true},
 		{"local user email", localToken, `{"email":"bob@example.org"}`, http.StatusOK, true},
 		{"missing token", "", `{"password":"new-password"}`, http.StatusOK, true},
@@ -123,7 +128,7 @@ func TestUpdateUser_IdentitySourcePolicy(t *testing.T) {
 			}
 
 			if tc.wantStatus == http.StatusForbidden {
-				assert.Contains(t, errorBody(t, w), "managed by the ldap identity source")
+				assert.Regexp(t, "managed by the (ldap|oidc) identity source", errorBody(t, w))
 			}
 		})
 	}

@@ -27,7 +27,10 @@ type Dependencies struct {
 	// LDAP is nil when no LDAP directory is configured; the LDAP login route is
 	// then not registered.
 	LDAP LDAPAuthenticator
-	// Sessions is required when LDAP is set.
+	// OIDC is nil when no OpenID Connect provider is configured; the OIDC login
+	// routes are then not registered.
+	OIDC *OIDCLogin
+	// Sessions is required when LDAP or OIDC is set.
 	Sessions auth.SessionIssuer
 }
 
@@ -59,11 +62,15 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	authGroup.GET("/user", handleAuthProxy(deps))      // getUser
 	authGroup.PUT("/user", handleUpdateUser(deps))     // updateUser (password)
 	authGroup.POST("/logout", handleAuthProxy(deps))   // signOut
-	authGroup.GET("/authorize", handleAuthProxy(deps)) // OAuth authorize
-	authGroup.GET("/callback", handleAuthProxy(deps))  // OAuth callback
+	authGroup.POST("/verify", handleVerifyProxy(deps)) // verifyOtp, finishes an OIDC login
 
 	if deps.LDAP != nil {
 		authGroup.POST("/ldap/token", handleLDAPToken(deps))
+	}
+
+	if deps.OIDC != nil {
+		authGroup.GET("/oidc/authorize", handleOIDCAuthorize(deps.OIDC))
+		authGroup.GET("/oidc/callback", handleOIDCCallback(deps))
 	}
 }
 
@@ -201,6 +208,36 @@ func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	}
 
 	return body
+}
+
+// handleVerifyProxy proxies /verify for magic link tokens only, which is how an
+// OIDC login ends. GoTrue's other token types belong to flows neutree does not
+// expose through this route.
+func handleVerifyProxy(deps *Dependencies) gin.HandlerFunc {
+	proxyHandler := proxies.CreateProxyHandler(deps.AuthEndpoint, "verify", nil)
+
+	return func(c *gin.Context) {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		c.Request.Body.Close()
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+			return
+		}
+
+		var body struct {
+			Type string `json:"type"`
+		}
+
+		if err := json.Unmarshal(bodyBytes, &body); err != nil || body.Type != "magiclink" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "only magiclink verification is supported"})
+			return
+		}
+
+		request.RestoreBody(c, bodyBytes)
+
+		proxyHandler(c)
+	}
 }
 
 // handleAuthProxy proxies requests to the GoTrue backend

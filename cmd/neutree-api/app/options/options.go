@@ -22,6 +22,7 @@ type Options struct {
 	API      *APIOptions
 	External *ExternalOptions
 	LDAP     *LDAPOptions
+	OIDC     *OIDCOptions
 }
 
 // NewOptions creates new options with default values
@@ -32,6 +33,7 @@ func NewOptions() *Options {
 		API:      NewAPIOptions(),
 		External: NewExternalOptions(),
 		LDAP:     NewLDAPOptions(),
+		OIDC:     NewOIDCOptions(),
 	}
 }
 
@@ -42,6 +44,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	o.API.AddFlags(fs)
 	o.External.AddFlags(fs)
 	o.LDAP.AddFlags(fs)
+	o.OIDC.AddFlags(fs)
 }
 
 // Validate validates all options
@@ -64,6 +67,10 @@ func (o *Options) Validate() error {
 
 	if err := o.LDAP.Validate(); err != nil {
 		return fmt.Errorf("ldap options validation failed: %w", err)
+	}
+
+	if err := o.OIDC.Validate(); err != nil {
+		return fmt.Errorf("oidc options validation failed: %w", err)
 	}
 
 	return nil
@@ -110,6 +117,11 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		return nil, fmt.Errorf("failed to build ldap config: %w", err)
 	}
 
+	oidcConfig, err := o.OIDC.OIDCConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build oidc config: %w", err)
+	}
+
 	return &config.APIConfig{
 		Storage:    s,
 		GinEngine:  engine,
@@ -131,6 +143,7 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		GrafanaURL:       grafanaExternalURL,
 		AITraceStoreURL:  o.External.AITraceStoreURL,
 		LDAP:             ldapConfig,
+		OIDC:             oidcConfig,
 		Version:          version.Get().AppVersion,
 	}, nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/identity/ldap"
+	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -106,6 +107,22 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 			}
 
 			authDeps.LDAP = authenticator
+		}
+
+		if oidcConfig := deps.Config.OIDC; oidcConfig != nil {
+			rp, err := oidc.New(oidcConfig.Provider)
+			if err != nil {
+				return fmt.Errorf("init OIDC relying party: %w", err)
+			}
+
+			authDeps.OIDC, err = auth.NewOIDCLogin(oidcConfig.ID, rp, oidcConfig.Provider.RedirectURL,
+				oidcConfig.AllowedRedirects, deps.Config.AuthConfig.JwtSecret)
+			if err != nil {
+				return fmt.Errorf("init OIDC login: %w", err)
+			}
+		}
+
+		if authDeps.LDAP != nil || authDeps.OIDC != nil {
 			authDeps.Sessions = internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken)
 		}
 

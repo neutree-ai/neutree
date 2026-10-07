@@ -102,7 +102,14 @@ func (d *ldapTestDeps) login(t *testing.T) *httptest.ResponseRecorder {
 	return d.serve(t, true, http.MethodPost, "/api/v1/auth/ldap/token", `{"username":"alice","password":"pw"}`)
 }
 
+// expectEmail makes GoTrue report email as the current email of userID.
+func (d *ldapTestDeps) expectEmail(userID, email string) {
+	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: uuid.MustParse(userID)}).
+		Return(&types.AdminGetUserResponse{User: types.User{ID: uuid.MustParse(userID), Email: email}}, nil).Once()
+}
+
 func (d *ldapTestDeps) expectSession(userID string) {
+	d.expectEmail(userID, testPlaceholderEmail)
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
 		Return(&internalauth.MagicLink{UserID: userID, HashedToken: "hash"}, nil).Once()
 	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
@@ -162,11 +169,46 @@ func TestLDAPToken_LaterLoginUsesLink(t *testing.T) {
 	d.client.AssertNotCalled(t, "AdminCreateUser", mock.Anything)
 }
 
-func TestLDAPToken_MagicLinkForAnotherUserFailsClosed(t *testing.T) {
+func TestLDAPToken_LoginAfterEmailChangedInGoTrue(t *testing.T) {
 	d := newLDAPTestDeps(t)
+	userID := uuid.NewString()
 
 	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
-		Return(&storage.ExternalIdentity{UserID: uuid.NewString()}, nil).Once()
+		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
+	d.expectEmail(userID, "renamed@example.org")
+	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, "renamed@example.org").
+		Return(&internalauth.MagicLink{UserID: userID, HashedToken: "hash"}, nil).Once()
+	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
+
+	w := d.login(t)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, testSession, w.Body.String())
+	d.client.AssertNotCalled(t, "AdminCreateUser", mock.Anything)
+}
+
+func TestLDAPToken_GetUserFailsClosed(t *testing.T) {
+	d := newLDAPTestDeps(t)
+	userID := uuid.New()
+
+	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).Return(nil, errors.New("gotrue down")).Once()
+
+	w := d.login(t)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, msgInternalError, errorBody(t, w))
+	d.sessions.AssertNotCalled(t, "GenerateMagicLink", mock.Anything, mock.Anything)
+}
+
+func TestLDAPToken_MagicLinkForAnotherUserFailsClosed(t *testing.T) {
+	d := newLDAPTestDeps(t)
+	userID := uuid.NewString()
+
+	d.storage.EXPECT().GetExternalIdentity("ldap", testIdentity().ExternalID).
+		Return(&storage.ExternalIdentity{UserID: userID}, nil).Once()
+	d.expectEmail(userID, testPlaceholderEmail)
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
 		Return(&internalauth.MagicLink{UserID: uuid.NewString(), HashedToken: "hash"}, nil).Once()
 
@@ -289,6 +331,8 @@ func TestAuthRoutes_Registration(t *testing.T) {
 		{"ldap route present with LDAP", true, "/api/v1/auth/ldap/token", true},
 		{"signup route gone", false, "/api/v1/auth/signup", false},
 		{"signup route gone with LDAP", true, "/api/v1/auth/signup", false},
+		{"GoTrue authorize proxy gone", false, "/api/v1/auth/authorize", false},
+		{"GoTrue callback proxy gone", false, "/api/v1/auth/callback", false},
 	}
 
 	for _, tc := range cases {
