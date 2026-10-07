@@ -318,3 +318,99 @@ func TestDeriveUserProfileName(t *testing.T) {
 		})
 	}
 }
+
+func userProfileEmail(t *testing.T, id string) string {
+	t.Helper()
+
+	var email string
+	if err := GetTestDB(t).QueryRowContext(context.Background(),
+		`SELECT (spec).email FROM api.user_profiles WHERE id = $1`, id).Scan(&email); err != nil {
+		t.Fatalf("no user profile for %s: %v", id, err)
+	}
+
+	return email
+}
+
+// TestUserProfileExternalEmail covers how spec.email is chosen (migration 103):
+// an externally managed user (app_metadata.identity_source) gets its directory
+// mail from user_metadata.email instead of the placeholder in auth.users.email;
+// everyone else keeps auth.users.email. The GoTrue admin API sets app_metadata
+// after the insert, so the external cases go through the update trigger.
+func TestUserProfileExternalEmail(t *testing.T) {
+	run := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	cases := []struct {
+		desc string
+		body map[string]any
+		want string
+	}{
+		{
+			desc: "external user with a directory mail gets the directory mail",
+			body: map[string]any{
+				"email":         "ext-mail-" + run + "@ldap.neutree.local",
+				"email_confirm": true,
+				"app_metadata":  map[string]any{"identity_source": "ldap"},
+				"user_metadata": map[string]any{
+					"preferred_username": "ext-mail-" + run,
+					"email":              "ext.mail." + run + "@corp.test.local",
+				},
+			},
+			want: "ext.mail." + run + "@corp.test.local",
+		},
+		{
+			desc: "any identity source counts, not only ldap",
+			body: map[string]any{
+				"email":         "ext-other-" + run + "@ldap.neutree.local",
+				"email_confirm": true,
+				"app_metadata":  map[string]any{"identity_source": "other-directory"},
+				"user_metadata": map[string]any{
+					"preferred_username": "ext-other-" + run,
+					"email":              "ext.other." + run + "@corp.test.local",
+				},
+			},
+			want: "ext.other." + run + "@corp.test.local",
+		},
+		{
+			desc: "external user without a directory mail keeps the placeholder",
+			body: map[string]any{
+				"email":         "ext-nomail-" + run + "@ldap.neutree.local",
+				"email_confirm": true,
+				"app_metadata":  map[string]any{"identity_source": "ldap"},
+				"user_metadata": map[string]any{"preferred_username": "ext-nomail-" + run, "email": ""},
+			},
+			want: "ext-nomail-" + run + "@ldap.neutree.local",
+		},
+		{
+			desc: "local user keeps auth.users.email",
+			body: map[string]any{
+				"email":         "local-" + run + "@corp.test.local",
+				"password":      "Passw0rd-" + run,
+				"email_confirm": true,
+				"user_metadata": map[string]any{"username": "local-" + run},
+			},
+			want: "local-" + run + "@corp.test.local",
+		},
+		{
+			desc: "user_metadata.email without an identity source is ignored",
+			body: map[string]any{
+				"email":         "sso-mail-" + run + "@corp.test.local",
+				"email_confirm": true,
+				"user_metadata": map[string]any{
+					"preferred_username": "sso-mail-" + run,
+					"email":              "other." + run + "@corp.test.local",
+				},
+			},
+			want: "sso-mail-" + run + "@corp.test.local",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			id := createSSOShapedUser(t, tc.body)
+
+			if got := userProfileEmail(t, id); got != tc.want {
+				t.Errorf("spec.email = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
