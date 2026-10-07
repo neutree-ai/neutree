@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -17,6 +20,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/identity/ldap"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -88,12 +92,24 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 
 		authClient := gotrue.New("", "").WithCustomGoTrueURL(deps.Config.AuthEndpoint).WithToken(*jwtToken)
 
-		register(deps.Group, deps.Middlewares, &auth.Dependencies{
+		authDeps := &auth.Dependencies{
 			AuthEndpoint: deps.Config.AuthEndpoint,
 			AuthConfig:   deps.Config.AuthConfig,
 			Storage:      deps.Config.Storage,
 			AuthClient:   authClient,
-		})
+		}
+
+		if ldapConfig := deps.Config.LDAP; ldapConfig != nil {
+			authenticator, err := ldap.New(*ldapConfig, ldap.NewDialer(*ldapConfig))
+			if err != nil {
+				return fmt.Errorf("init LDAP authenticator: %w", err)
+			}
+
+			authDeps.LDAP = authenticator
+			authDeps.Sessions = internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken)
+		}
+
+		register(deps.Group, deps.Middlewares, authDeps)
 
 		return nil
 	}

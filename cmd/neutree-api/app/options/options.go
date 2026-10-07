@@ -21,6 +21,7 @@ type Options struct {
 	Storage  *StorageOptions
 	API      *APIOptions
 	External *ExternalOptions
+	LDAP     *LDAPOptions
 }
 
 // NewOptions creates new options with default values
@@ -30,6 +31,7 @@ func NewOptions() *Options {
 		Storage:  NewStorageOptions(),
 		API:      NewAPIOptions(),
 		External: NewExternalOptions(),
+		LDAP:     NewLDAPOptions(),
 	}
 }
 
@@ -39,6 +41,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	o.Storage.AddFlags(fs)
 	o.API.AddFlags(fs)
 	o.External.AddFlags(fs)
+	o.LDAP.AddFlags(fs)
 }
 
 // Validate validates all options
@@ -57,6 +60,10 @@ func (o *Options) Validate() error {
 
 	if err := o.External.Validate(); err != nil {
 		return fmt.Errorf("external options validation failed: %w", err)
+	}
+
+	if err := o.LDAP.Validate(); err != nil {
+		return fmt.Errorf("ldap options validation failed: %w", err)
 	}
 
 	return nil
@@ -98,6 +105,11 @@ func (o *Options) Config() (*config.APIConfig, error) {
 
 	klog.Infof("Transformed grafana external url: %s", grafanaExternalURL)
 
+	ldapConfig, err := o.LDAP.LDAPConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build ldap config: %w", err)
+	}
+
 	return &config.APIConfig{
 		Storage:    s,
 		GinEngine:  engine,
@@ -118,6 +130,7 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		AuthEndpoint:     o.External.AuthEndpoint,
 		GrafanaURL:       grafanaExternalURL,
 		AITraceStoreURL:  o.External.AITraceStoreURL,
+		LDAP:             ldapConfig,
 		Version:          version.Get().AppVersion,
 	}, nil
 }

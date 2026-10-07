@@ -24,6 +24,11 @@ type Dependencies struct {
 	AuthConfig   middleware.AuthConfig
 	Storage      storage.Storage
 	AuthClient   auth.Client
+	// LDAP is nil when no LDAP directory is configured; the LDAP login route is
+	// then not registered.
+	LDAP LDAPAuthenticator
+	// Sessions is required when LDAP is set.
+	Sessions auth.SessionIssuer
 }
 
 // RegisterAuthRoutes registers authentication-related routes
@@ -47,15 +52,19 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	}
 
 	// Public GoTrue proxy routes - no authentication required
-	// Only expose endpoints actually used by the client
+	// Only expose endpoints actually used by the client. There is no /signup:
+	// users are created by an admin or by an SSO login, never by themselves.
 	authGroup.POST("/token", handleTokenProxy(deps))   // signInWithPassword, token refresh
-	authGroup.POST("/signup", handleAuthProxy(deps))   // signUp
 	authGroup.POST("/recover", handleAuthProxy(deps))  // resetPasswordForEmail
 	authGroup.GET("/user", handleAuthProxy(deps))      // getUser
-	authGroup.PUT("/user", handleAuthProxy(deps))      // updateUser (password)
+	authGroup.PUT("/user", handleUpdateUser(deps))     // updateUser (password)
 	authGroup.POST("/logout", handleAuthProxy(deps))   // signOut
 	authGroup.GET("/authorize", handleAuthProxy(deps)) // OAuth authorize
 	authGroup.GET("/callback", handleAuthProxy(deps))  // OAuth callback
+
+	if deps.LDAP != nil {
+		authGroup.POST("/ldap/token", handleLDAPToken(deps))
+	}
 }
 
 func handleCreateUser(deps *Dependencies) gin.HandlerFunc {
