@@ -7,6 +7,7 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/identity/ldap"
+	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -45,4 +46,17 @@ type APIConfig struct {
 
 	// LDAP is the directory users log in with; nil disables LDAP login.
 	LDAP *ldap.Config
+	// OIDC is the OpenID Connect provider users log in with; nil disables OIDC
+	// login.
+	OIDC *OIDCConfig
+}
+
+// OIDCConfig configures OIDC login.
+type OIDCConfig struct {
+	// ID names the provider in user links and in new users' placeholder emails;
+	// keep it stable once users have logged in, or they are linked anew.
+	ID       string
+	Provider oidc.Config
+	// AllowedRedirects are the UI URLs a login may return to.
+	AllowedRedirects []string
 }

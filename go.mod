@@ -8,12 +8,14 @@ require (
 	github.com/NVIDIA/go-nvml v0.13.3-0
 	github.com/anthropics/anthropic-sdk-go v1.26.0
 	github.com/compose-spec/compose-go v1.20.2
+	github.com/coreos/go-oidc/v3 v3.15.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-units v0.5.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/gin-contrib/static v1.1.5
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-co-op/gocron/v2 v2.16.2
+	github.com/go-jose/go-jose/v4 v4.1.2
 	github.com/go-ldap/ldap/v3 v3.4.12
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/go-containerregistry v0.20.3
@@ -38,6 +40,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	go.openly.dev/pointy v1.3.0
 	golang.org/x/crypto v0.40.0
+	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.16.0
 	golang.org/x/text v0.27.0
 	google.golang.org/grpc v1.67.0
@@ -160,7 +163,6 @@ require (
 	golang.org/x/arch v0.16.0 // indirect
 	golang.org/x/exp v0.0.0-20250207012021-f9890c6ad9f3 // indirect
 	golang.org/x/net v0.41.0 // indirect
-	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/term v0.33.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
