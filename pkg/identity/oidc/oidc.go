@@ -13,8 +13,10 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -27,6 +29,9 @@ import (
 
 // DefaultTimeout bounds each request to the provider when Config.Timeout is zero.
 const DefaultTimeout = 10 * time.Second
+
+// maxJWKSBytes bounds the key set Ping reads.
+const maxJWKSBytes = 1 << 20
 
 // ScopeOpenID must be among the requested scopes; without it the provider
 // answers with plain OAuth 2.0 and no ID token.
@@ -49,6 +54,9 @@ var (
 	// ErrUserInfo means the claims missing from the ID token could not be read
 	// from the userinfo endpoint.
 	ErrUserInfo = errors.New("oidc: userinfo request failed")
+	// ErrJWKS means the provider's signing keys could not be fetched, or the
+	// key set holds no key.
+	ErrJWKS = errors.New("oidc: JWKS fetch failed")
 )
 
 // Config describes the provider and how its claims map to an Identity.
@@ -193,6 +201,54 @@ func (rp *RelyingParty) discover(ctx context.Context) (*gooidc.Provider, error) 
 	rp.provider = provider
 
 	return provider, nil
+}
+
+// Ping checks that the provider is reachable and configured as expected: it
+// fetches the discovery document afresh (the cached one used for logins is
+// left alone) and the signing key set it points to. It does not use the client
+// secret; a wrong secret only shows at the code exchange of a login.
+func (rp *RelyingParty) Ping(ctx context.Context) error {
+	provider, err := gooidc.NewProvider(gooidc.ClientContext(ctx, rp.httpClient), rp.cfg.Issuer)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrDiscovery, err)
+	}
+
+	var claims struct {
+		JWKSURI string `json:"jwks_uri"`
+	}
+
+	if err := provider.Claims(&claims); err != nil || claims.JWKSURI == "" {
+		return fmt.Errorf("%w: discovery document has no jwks_uri", ErrDiscovery)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claims.JWKSURI, nil)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrJWKS, err)
+	}
+
+	resp, err := rp.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrJWKS, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: %s answered %s", ErrJWKS, claims.JWKSURI, resp.Status)
+	}
+
+	var keySet struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJWKSBytes)).Decode(&keySet); err != nil {
+		return fmt.Errorf("%w: decode %s: %w", ErrJWKS, claims.JWKSURI, err)
+	}
+
+	if len(keySet.Keys) == 0 {
+		return fmt.Errorf("%w: %s holds no key", ErrJWKS, claims.JWKSURI)
+	}
+
+	return nil
 }
 
 func (rp *RelyingParty) oauth2Config(provider *gooidc.Provider) *oauth2.Config {

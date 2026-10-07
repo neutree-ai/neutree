@@ -386,3 +386,26 @@ func builtinModelRegistryConfig(opts *ControllerOptions) model_registry.BuiltinC
 
 	return opts.config.ModelRegistryConfig.Builtin
 }
+
+func NewIdentitySourceControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		identitySourceController, err := controllers.NewIdentitySourceController(&controllers.IdentitySourceControllerOption{
+			Storage: opts.config.Storage,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create identity source controller")
+		}
+
+		ctrl := controllers.NewController(opts.name,
+			controllers.WithWorkers(opts.config.ControllerConfig.Workers),
+			controllers.WithBeforeReconcileHook(opts.beforeHooks),
+			controllers.WithAfterReconcileHook(opts.afterHooks),
+			controllers.WithReconciler(identitySourceController),
+			controllers.WithObject(&v1.IdentitySource{}),
+			controllers.WithScheme(opts.scheme),
+			controllers.WithStorage(opts.storage),
+		)
+
+		return ctrl, nil
+	}
+}

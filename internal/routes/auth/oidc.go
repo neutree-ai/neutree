@@ -19,12 +19,13 @@ import (
 	"golang.org/x/oauth2"
 	"k8s.io/klog/v2"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 )
 
 // oidcEmailDomain is the parent domain of OIDC users' placeholder emails; each
-// provider gets the subdomain <provider id>.oidc.neutree.local.
+// identity source gets the subdomain <source name>.oidc.neutree.local.
 const oidcEmailDomain = "oidc.neutree.local"
 
 // Error codes the callback puts in the redirect fragment as error=<code>. They
@@ -35,6 +36,9 @@ const (
 	oidcErrIdPUnavailable = "idp_unavailable"
 	oidcErrLoginFailed    = "login_failed"
 	oidcErrServerError    = "server_error"
+	// oidcErrSourceUnavailable means the identity source the login started
+	// with was disabled or deleted before it finished.
+	oidcErrSourceUnavailable = "source_unavailable"
 )
 
 // OIDCRelyingParty runs the code flow with the provider; *oidc.RelyingParty
@@ -44,58 +48,10 @@ type OIDCRelyingParty interface {
 	Exchange(ctx context.Context, code, verifier, nonce string) (*oidc.Identity, error)
 }
 
-// OIDCLogin is the OpenID Connect provider users log in with.
-type OIDCLogin struct {
-	id    string
-	rp    OIDCRelyingParty
-	codec *stateCodec
-	// allowedRedirects are the UI locations a login may return to; the first
-	// one is the default.
-	allowedRedirects []*url.URL
-	cookiePath       string
-	cookieSecure     bool
-	now              func() time.Time
-}
-
-// NewOIDCLogin checks the login settings. id names the provider in links and in
-// the placeholder emails of new users; keep it stable, since users linked under
-// another id are not found again. callbackURL is the public URL of
-// the callback route, registered with the provider. allowedRedirects are
-// absolute URLs; a login may return to any URL under one of them. stateSecret
-// keys the login state cookie.
-func NewOIDCLogin(id string, rp OIDCRelyingParty, callbackURL string, allowedRedirects []string, stateSecret string) (*OIDCLogin, error) {
-	if !auth.ValidOIDCProviderID(id) {
-		return nil, fmt.Errorf("invalid OIDC provider ID %q", id)
-	}
-
-	callback, err := url.Parse(callbackURL)
-	if err != nil || callback.Path == "" {
-		return nil, fmt.Errorf("invalid OIDC callback URL %q", callbackURL)
-	}
-
-	login := &OIDCLogin{
-		id:           id,
-		rp:           rp,
-		cookiePath:   callback.Path,
-		cookieSecure: callback.Scheme == "https",
-		now:          time.Now,
-	}
-
-	if login.allowedRedirects, err = ParseOIDCAllowedRedirects(allowedRedirects); err != nil {
-		return nil, err
-	}
-
-	if login.codec, err = newStateCodec(stateSecret, id); err != nil {
-		return nil, err
-	}
-
-	return login, nil
-}
-
-// ParseOIDCAllowedRedirects parses the UI locations an OIDC login may return
+// parseOIDCAllowedRedirects parses the UI locations an OIDC login may return
 // to. Each must be an absolute http(s) URL without query or fragment; its path
 // is a prefix, so it gets a trailing '/'.
-func ParseOIDCAllowedRedirects(raws []string) ([]*url.URL, error) {
+func parseOIDCAllowedRedirects(raws []string) ([]*url.URL, error) {
 	if len(raws) == 0 {
 		return nil, errors.New("at least one allowed OIDC redirect is required")
 	}
@@ -118,83 +74,133 @@ func ParseOIDCAllowedRedirects(raws []string) ([]*url.URL, error) {
 	return allowed, nil
 }
 
-// handleOIDCAuthorize starts a login: it remembers the login in the state
-// cookie and sends the browser to the provider.
-func handleOIDCAuthorize(o *OIDCLogin) gin.HandlerFunc {
+// handleOIDCAuthorize starts a login with the OIDC identity source named by
+// the source query parameter (optional while exactly one is enabled): it
+// remembers the login in the state cookie and sends the browser to the
+// provider. Until the source and redirect_to are known to be good there is no
+// safe place to redirect to, so those failures answer with JSON.
+func handleOIDCAuthorize(deps *Dependencies) gin.HandlerFunc {
+	sources := deps.Sources
+
 	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+
+		source, err := sources.resolve(c.Query("source"), v1.IdentitySourceTypeOIDC)
+		if err != nil {
+			status, msg := sourceErrorResponse("OIDC", c.Query("source"), err)
+			c.JSON(status, gin.H{"error": msg})
+
+			return
+		}
+
+		o := source.oidc
+
 		redirectTo, ok := o.allowedRedirect(c.Query("redirect_to"))
 		if !ok {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "redirect_to is not an allowed redirect target"})
 			return
 		}
 
-		c.Header("Cache-Control", "no-store")
-
-		state, err := o.newLoginState(redirectTo)
+		state, err := newLoginState(redirectTo, sources.now())
 		if err != nil {
-			klog.Errorf("OIDC login via %s: new login state: %v", o.id, err)
-			o.redirectWithError(c, redirectTo, oidcErrServerError)
+			klog.Errorf("OIDC login via %s: new login state: %v", o.name, err)
+			redirectWithError(c, redirectTo, oidcErrServerError)
 
 			return
 		}
 
 		authURL, err := o.rp.AuthCodeURL(c.Request.Context(), state.State, state.Nonce, state.Verifier)
 		if err != nil {
-			klog.Errorf("OIDC login via %s: %v", o.id, err)
-			o.redirectWithError(c, redirectTo, oidcErrIdPUnavailable)
+			klog.Errorf("OIDC login via %s: %v", o.name, err)
+			redirectWithError(c, redirectTo, oidcErrIdPUnavailable)
 
 			return
 		}
 
-		sealed, err := o.codec.seal(state)
+		sealed, err := sources.codec.seal(o.name, state)
 		if err != nil {
-			klog.Errorf("OIDC login via %s: seal login state: %v", o.id, err)
-			o.redirectWithError(c, redirectTo, oidcErrServerError)
+			klog.Errorf("OIDC login via %s: seal login state: %v", o.name, err)
+			redirectWithError(c, redirectTo, oidcErrServerError)
 
 			return
 		}
 
-		o.setStateCookie(c, sealed, int(oidcStateTTL/time.Second))
+		setStateCookie(c, o.cookiePath, o.cookieSecure, sealed, int(oidcStateTTL/time.Second))
 		c.Redirect(http.StatusFound, authURL)
 	}
 }
 
-// handleOIDCCallback finishes a login. The provider's account is linked to a
-// GoTrue user like an LDAP account, and the browser goes back to the UI with a
-// one-time magic link token in the URL fragment, which the UI exchanges on
-// /auth/verify for a session. The fragment never reaches a server, so the
-// token stays out of access logs and Referer headers.
+// handleOIDCCallback finishes a login. One callback URL serves every OIDC
+// source: the source is the one the state cookie was sealed for, never a
+// request parameter. The provider's account is linked to a GoTrue user like an
+// LDAP account, and the browser goes back to the UI with a one-time magic link
+// token in the URL fragment, which the UI exchanges on /auth/verify for a
+// session. The fragment never reaches a server, so the token stays out of
+// access logs and Referer headers.
 func handleOIDCCallback(deps *Dependencies) gin.HandlerFunc {
-	o := deps.OIDC
+	sources := deps.Sources
 
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 
-		state, err := o.takeLoginState(c)
+		// The state is good for one callback only. The cookie is cleared on the
+		// path it was set for, which is the path of this request.
+		cookie, err := c.Request.Cookie(oidcStateCookie)
+		if err == nil {
+			setStateCookie(c, c.Request.URL.Path, c.Request.TLS != nil, "", -1)
+		}
+
 		if err != nil {
-			klog.Infof("OIDC callback of %s rejected: %v", o.id, err)
-			o.redirectWithError(c, o.allowedRedirects[0].String(), oidcErrInvalidState)
+			klog.Infof("OIDC callback rejected: no login state cookie")
+			c.JSON(http.StatusBadRequest, gin.H{"error": oidcErrInvalidState})
+
+			return
+		}
+
+		// Nothing in an unopened state can be trusted, not even where to send the
+		// browser back.
+		name, state, err := sources.codec.open(cookie.Value, sources.now())
+		if err != nil {
+			klog.Infof("OIDC callback rejected: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": oidcErrInvalidState})
 
 			return
 		}
 
 		if subtle.ConstantTimeCompare([]byte(c.Query("state")), []byte(state.State)) != 1 {
-			klog.Infof("OIDC callback of %s rejected: state does not match the login state cookie", o.id)
-			o.redirectWithError(c, state.RedirectTo, oidcErrInvalidState)
+			klog.Infof("OIDC callback of %s rejected: state does not match the login state cookie", name)
+			redirectWithError(c, state.RedirectTo, oidcErrInvalidState)
 
 			return
 		}
 
+		source, err := sources.get(name, v1.IdentitySourceTypeOIDC)
+		if err != nil {
+			if errors.Is(err, errSourceNotFound) {
+				klog.Infof("OIDC callback of %s rejected: the identity source is gone or disabled", name)
+				redirectWithError(c, state.RedirectTo, oidcErrSourceUnavailable)
+
+				return
+			}
+
+			klog.Errorf("OIDC callback of %s: %v", name, err)
+			redirectWithError(c, state.RedirectTo, oidcErrIdPUnavailable)
+
+			return
+		}
+
+		o := source.oidc
+
 		if idpErr := c.Query("error"); idpErr != "" {
-			klog.Infof("OIDC login via %s refused by the provider: %s: %s", o.id, idpErr, c.Query("error_description"))
-			o.redirectWithError(c, state.RedirectTo, oidcErrIdPError)
+			klog.Infof("OIDC login via %s refused by the provider: %s: %s", o.name, idpErr, c.Query("error_description"))
+			redirectWithError(c, state.RedirectTo, oidcErrIdPError)
 
 			return
 		}
 
 		fragment, code := o.finishLogin(c.Request.Context(), deps, c.Query("code"), state)
 		if code != "" {
-			o.redirectWithError(c, state.RedirectTo, code)
+			redirectWithError(c, state.RedirectTo, code)
 			return
 		}
 
@@ -204,15 +210,15 @@ func handleOIDCCallback(deps *Dependencies) gin.HandlerFunc {
 
 // finishLogin redeems the code and returns the redirect fragment carrying the
 // magic link token, or an error code.
-func (o *OIDCLogin) finishLogin(ctx context.Context, deps *Dependencies, code string, state *oidcLoginState) (string, string) {
+func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code string, state *oidcLoginState) (string, string) {
 	if code == "" {
-		klog.Infof("OIDC callback of %s rejected: no code", o.id)
+		klog.Infof("OIDC callback of %s rejected: no code", o.name)
 		return "", oidcErrLoginFailed
 	}
 
 	identity, err := o.rp.Exchange(ctx, code, state.Verifier, state.Nonce)
 	if err != nil {
-		klog.Warningf("OIDC login via %s failed: %v", o.id, err)
+		klog.Warningf("OIDC login via %s failed: %v", o.name, err)
 
 		if errors.Is(err, oidc.ErrDiscovery) {
 			return "", oidcErrIdPUnavailable
@@ -222,7 +228,7 @@ func (o *OIDCLogin) finishLogin(ctx context.Context, deps *Dependencies, code st
 	}
 
 	if identity.Issuer == "" || identity.Subject == "" {
-		klog.Warningf("OIDC login via %s failed: ID token has no issuer or subject", o.id)
+		klog.Warningf("OIDC login via %s failed: ID token has no issuer or subject", o.name)
 		return "", oidcErrLoginFailed
 	}
 
@@ -232,21 +238,21 @@ func (o *OIDCLogin) finishLogin(ctx context.Context, deps *Dependencies, code st
 	}
 
 	userID, err := ensureExternalUser(ctx, deps, externalAccount{
-		Source:         auth.OIDCLinkSource(o.id),
+		Source:         auth.LinkSource(auth.OIDCSource, o.name),
 		ExternalID:     oidcExternalID(identity.Issuer, identity.Subject),
 		IdentitySource: auth.OIDCSource,
-		Email:          oidcPlaceholderEmail(o.id, identity.Issuer, identity.Subject),
+		Email:          oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
 		Metadata:       externalUserMetadata(identity.Username, identity.DisplayName, identity.Email),
 		LogName:        logName,
 	})
 	if err != nil {
-		klog.Errorf("OIDC login of %q via %s: link user: %v", logName, o.id, err)
+		klog.Errorf("OIDC login of %q via %s: link user: %v", logName, o.name, err)
 		return "", oidcErrServerError
 	}
 
 	link, err := magicLinkFor(ctx, deps, userID)
 	if err != nil {
-		klog.Errorf("OIDC login of %q via %s (user %s): %v", logName, o.id, userID, err)
+		klog.Errorf("OIDC login of %q via %s (user %s): %v", logName, o.name, userID, err)
 		return "", oidcErrServerError
 	}
 
@@ -262,12 +268,12 @@ func oidcExternalID(issuer, subject string) string {
 
 // oidcPlaceholderEmail is the GoTrue email of a provider account. The subject
 // may hold any character, so the local part is a hash of the external ID.
-func oidcPlaceholderEmail(providerID, issuer, subject string) string {
+func oidcPlaceholderEmail(sourceName, issuer, subject string) string {
 	sum := sha256.Sum256([]byte(oidcExternalID(issuer, subject)))
-	return hex.EncodeToString(sum[:])[:32] + "@" + providerID + "." + oidcEmailDomain
+	return hex.EncodeToString(sum[:])[:32] + "@" + sourceName + "." + oidcEmailDomain
 }
 
-func (o *OIDCLogin) newLoginState(redirectTo string) (*oidcLoginState, error) {
+func newLoginState(redirectTo string, now time.Time) (*oidcLoginState, error) {
 	state, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -283,30 +289,17 @@ func (o *OIDCLogin) newLoginState(redirectTo string) (*oidcLoginState, error) {
 		Nonce:      nonce,
 		Verifier:   oauth2.GenerateVerifier(),
 		RedirectTo: redirectTo,
-		ExpiresAt:  o.now().Add(oidcStateTTL).Unix(),
+		ExpiresAt:  now.Add(oidcStateTTL).Unix(),
 	}, nil
 }
 
-// takeLoginState reads the login state cookie and clears it, so the state is
-// good for one callback only.
-func (o *OIDCLogin) takeLoginState(c *gin.Context) (*oidcLoginState, error) {
-	cookie, err := c.Request.Cookie(oidcStateCookie)
-	if err != nil {
-		return nil, fmt.Errorf("%w: no login state cookie", errInvalidLoginState)
-	}
-
-	o.setStateCookie(c, "", -1)
-
-	return o.codec.open(cookie.Value, o.now())
-}
-
-func (o *OIDCLogin) setStateCookie(c *gin.Context, value string, maxAge int) {
+func setStateCookie(c *gin.Context, path string, secure bool, value string, maxAge int) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     oidcStateCookie,
 		Value:    value,
-		Path:     o.cookiePath,
+		Path:     path,
 		MaxAge:   maxAge,
-		Secure:   o.cookieSecure,
+		Secure:   secure,
 		HttpOnly: true,
 		// Lax, not Strict: the provider sends the browser back with a top-level
 		// cross-site GET, which must carry the cookie.
@@ -314,13 +307,13 @@ func (o *OIDCLogin) setStateCookie(c *gin.Context, value string, maxAge int) {
 	})
 }
 
-func (o *OIDCLogin) redirectWithError(c *gin.Context, redirectTo, code string) {
+func redirectWithError(c *gin.Context, redirectTo, code string) {
 	c.Redirect(http.StatusFound, redirectTo+"#"+url.Values{"error": {code}}.Encode())
 }
 
 // allowedRedirect returns the normalized redirect target, or false when it is
 // not under an allowed redirect. An empty target is the first allowed one.
-func (o *OIDCLogin) allowedRedirect(raw string) (string, bool) {
+func (o *oidcSource) allowedRedirect(raw string) (string, bool) {
 	if raw == "" {
 		return o.allowedRedirects[0].String(), true
 	}

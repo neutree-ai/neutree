@@ -45,6 +45,9 @@ type Provider struct {
 	Nonce string
 	// Lifetime is how long the ID token is valid; negative issues an expired token.
 	Lifetime time.Duration
+	// JWKSStatus, when set, is the status the key set endpoint answers with,
+	// and the body is then empty.
+	JWKSStatus int
 
 	key *rsa.PrivateKey
 
@@ -135,6 +138,11 @@ func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (p *Provider) jwks(w http.ResponseWriter, _ *http.Request) {
+	if p.JWKSStatus != 0 {
+		w.WriteHeader(p.JWKSStatus)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{
 		{Key: &p.key.PublicKey, KeyID: keyID, Algorithm: string(jose.RS256), Use: "sig"},
 	}})

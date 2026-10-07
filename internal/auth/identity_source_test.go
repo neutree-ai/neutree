@@ -18,14 +18,7 @@ func TestManagesField(t *testing.T) {
 	assert.False(t, ManagesField("", "password"), "local users manage their own password")
 }
 
-func TestOIDCProviderID(t *testing.T) {
-	assert.Equal(t, "oidc:keycloak", OIDCLinkSource("keycloak"))
-
-	for _, id := range []string{"keycloak", "a", "corp-sso", "idp2"} {
-		assert.True(t, ValidOIDCProviderID(id), id)
-	}
-
-	for _, id := range []string{"", "Keycloak", "-sso", "sso-", "corp_sso", "corp.sso", "a23456789012345678901234567890123"} {
-		assert.False(t, ValidOIDCProviderID(id), id)
-	}
+func TestLinkSource(t *testing.T) {
+	assert.Equal(t, "ldap:corp-ldap", LinkSource(LDAPSource, "corp-ldap"))
+	assert.Equal(t, "oidc:keycloak", LinkSource(OIDCSource, "keycloak"))
 }

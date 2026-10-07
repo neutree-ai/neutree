@@ -2,6 +2,7 @@ package oidc_test
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -182,4 +183,59 @@ func TestDiscovery_UntrustedCertificate(t *testing.T) {
 	_, err = rp.AuthCodeURL(context.Background(), "s", "n", "v")
 
 	assert.ErrorIs(t, err, oidc.ErrDiscovery)
+}
+
+func TestPing(t *testing.T) {
+	t.Run("reachable", func(t *testing.T) {
+		idp := oidctest.New(t, testClientID, testClientSecret)
+
+		assert.NoError(t, newRP(t, idp).Ping(context.Background()))
+	})
+
+	t.Run("untrusted certificate", func(t *testing.T) {
+		idp := oidctest.New(t, testClientID, testClientSecret)
+
+		rp, err := oidc.New(oidc.Config{
+			Issuer:      idp.Issuer(),
+			ClientID:    testClientID,
+			RedirectURL: testRedirectURL,
+			Scopes:      []string{"openid"},
+		})
+		require.NoError(t, err)
+
+		assert.ErrorIs(t, rp.Ping(context.Background()), oidc.ErrDiscovery)
+	})
+
+	t.Run("issuer mismatch", func(t *testing.T) {
+		idp := oidctest.New(t, testClientID, testClientSecret)
+
+		rp, err := oidc.New(oidc.Config{
+			Issuer:      idp.Issuer() + "/realms/other",
+			ClientID:    testClientID,
+			RedirectURL: testRedirectURL,
+			Scopes:      []string{"openid"},
+			RootCAs:     idp.CAPEM(),
+		})
+		require.NoError(t, err)
+
+		assert.ErrorIs(t, rp.Ping(context.Background()), oidc.ErrDiscovery)
+	})
+
+	t.Run("key set unavailable", func(t *testing.T) {
+		idp := oidctest.New(t, testClientID, testClientSecret)
+		idp.JWKSStatus = http.StatusInternalServerError
+
+		assert.ErrorIs(t, newRP(t, idp).Ping(context.Background()), oidc.ErrJWKS)
+	})
+
+	t.Run("does not pin the discovery a login uses", func(t *testing.T) {
+		idp := oidctest.New(t, testClientID, testClientSecret)
+		rp := newRP(t, idp)
+
+		require.NoError(t, rp.Ping(context.Background()))
+
+		authURL, err := rp.AuthCodeURL(context.Background(), "s", "n", "verifier-0123456789-0123456789-0123456789-0123")
+		require.NoError(t, err)
+		assert.Contains(t, authURL, idp.Issuer())
+	})
 }

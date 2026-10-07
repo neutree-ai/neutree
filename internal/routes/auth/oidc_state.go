@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/hkdf"
@@ -41,18 +42,20 @@ type oidcLoginState struct {
 	ExpiresAt  int64  `json:"e"`
 }
 
-// stateCodec encrypts and authenticates login states with AES-256-GCM.
+// stateCodec encrypts and authenticates login states with AES-256-GCM. A
+// sealed state is "<source name>.<ciphertext>": the callback learns from it
+// which identity source to finish the login with, and the name is bound into
+// the ciphertext as additional data, so a state sealed for one source does not
+// open for another.
 type stateCodec struct {
 	aead cipher.AEAD
-	// aad binds a sealed state to the cookie and the provider it was made for.
-	aad []byte
 }
 
 // newStateCodec derives the cookie key from secret with HKDF-SHA256. secret is
 // the JWT secret neutree-api already shares with GoTrue and PostgREST: it is
 // the same on every replica and needs no extra provisioning, and HKDF keeps
 // the derived key independent of the secret's other uses.
-func newStateCodec(secret, providerID string) (*stateCodec, error) {
+func newStateCodec(secret string) (*stateCodec, error) {
 	if secret == "" {
 		return nil, errors.New("state cookie secret is empty")
 	}
@@ -72,10 +75,15 @@ func newStateCodec(secret, providerID string) (*stateCodec, error) {
 		return nil, err
 	}
 
-	return &stateCodec{aead: aead, aad: []byte(oidcStateCookie + "|" + providerID)}, nil
+	return &stateCodec{aead: aead}, nil
 }
 
-func (s *stateCodec) seal(state *oidcLoginState) (string, error) {
+// stateAAD binds a sealed state to the cookie and the identity source it was made for.
+func stateAAD(source string) []byte {
+	return []byte(oidcStateCookie + "|" + source)
+}
+
+func (s *stateCodec) seal(source string, state *oidcLoginState) (string, error) {
 	plaintext, err := json.Marshal(state)
 	if err != nil {
 		return "", err
@@ -86,17 +94,32 @@ func (s *stateCodec) seal(state *oidcLoginState) (string, error) {
 		return "", err
 	}
 
-	return base64.RawURLEncoding.EncodeToString(s.aead.Seal(nonce, nonce, plaintext, s.aad)), nil
+	return source + "." + base64.RawURLEncoding.EncodeToString(s.aead.Seal(nonce, nonce, plaintext, stateAAD(source))), nil
 }
 
-// open decrypts a sealed state and checks that it has not expired.
-func (s *stateCodec) open(value string, now time.Time) (*oidcLoginState, error) {
+// open decrypts a sealed state, checks that it has not expired, and returns
+// it with the identity source it was sealed for.
+func (s *stateCodec) open(value string, now time.Time) (string, *oidcLoginState, error) {
+	source, sealed, found := strings.Cut(value, ".")
+	if !found || source == "" {
+		return "", nil, fmt.Errorf("%w: malformed", errInvalidLoginState)
+	}
+
+	state, err := s.openFor(source, sealed, now)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return source, state, nil
+}
+
+func (s *stateCodec) openFor(source, value string, now time.Time) (*oidcLoginState, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil || len(raw) < s.aead.NonceSize() {
 		return nil, fmt.Errorf("%w: malformed", errInvalidLoginState)
 	}
 
-	plaintext, err := s.aead.Open(nil, raw[:s.aead.NonceSize()], raw[s.aead.NonceSize():], s.aad)
+	plaintext, err := s.aead.Open(nil, raw[:s.aead.NonceSize()], raw[s.aead.NonceSize():], stateAAD(source))
 	if err != nil {
 		return nil, fmt.Errorf("%w: does not authenticate", errInvalidLoginState)
 	}
