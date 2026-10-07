@@ -64,6 +64,10 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	authGroup.POST("/logout", handleAuthProxy(deps))   // signOut
 	authGroup.POST("/verify", handleVerifyProxy(deps)) // verifyOtp, finishes an OIDC login
 
+	// The login page lists the identity sources it offers before anyone is
+	// logged in.
+	authGroup.GET("/identity-sources", handleListLoginIdentitySources(deps))
+
 	if deps.LDAP != nil {
 		authGroup.POST("/ldap/token", handleLDAPToken(deps))
 	}
