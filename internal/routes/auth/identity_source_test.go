@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 )
 
@@ -83,9 +84,9 @@ func serveUpdateUser(t *testing.T, authHeader, body string) (*httptest.ResponseR
 }
 
 func TestUpdateUser_IdentitySourcePolicy(t *testing.T) {
-	ldapToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email", identitySourceKey: ldapSource})
+	ldapToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email", auth.IdentitySourceKey: auth.LDAPSource})
 	localToken := "Bearer " + signTestToken(t, testJWTSecret, map[string]any{"provider": "email"})
-	forgedToken := "Bearer " + signTestToken(t, "another-secret", map[string]any{identitySourceKey: ldapSource})
+	forgedToken := "Bearer " + signTestToken(t, "another-secret", map[string]any{auth.IdentitySourceKey: auth.LDAPSource})
 
 	cases := []struct {
 		name        string
