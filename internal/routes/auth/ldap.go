@@ -13,6 +13,7 @@ import (
 	"github.com/supabase-community/gotrue-go/types"
 	"k8s.io/klog/v2"
 
+	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/pkg/identity/ldap"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -118,7 +119,7 @@ func ldapPlaceholderEmail(externalID string) string {
 // ensureLDAPUser returns the GoTrue user linked to the directory account,
 // creating and linking one on the account's first login.
 func ensureLDAPUser(ctx context.Context, deps *Dependencies, identity *ldap.Identity) (string, error) {
-	link, err := deps.Storage.GetExternalIdentity(ldapSource, identity.ExternalID)
+	link, err := deps.Storage.GetExternalIdentity(auth.LDAPSource, identity.ExternalID)
 	if err == nil {
 		return link.UserID, nil
 	}
@@ -146,7 +147,7 @@ func createLDAPUser(ctx context.Context, deps *Dependencies, identity *ldap.Iden
 		Email:        ldapPlaceholderEmail(identity.ExternalID),
 		EmailConfirm: true,
 		UserMetadata: metadata,
-		AppMetadata:  map[string]any{identitySourceKey: ldapSource},
+		AppMetadata:  map[string]any{auth.IdentitySourceKey: auth.LDAPSource},
 	})
 	if err != nil {
 		// A concurrent first login of the same account created the user first, so
@@ -161,7 +162,7 @@ func createLDAPUser(ctx context.Context, deps *Dependencies, identity *ldap.Iden
 	userID := created.ID.String()
 
 	err = deps.Storage.CreateExternalIdentity(&storage.ExternalIdentity{
-		Source:     ldapSource,
+		Source:     auth.LDAPSource,
 		ExternalID: identity.ExternalID,
 		UserID:     userID,
 	})
@@ -181,7 +182,7 @@ func createLDAPUser(ctx context.Context, deps *Dependencies, identity *ldap.Iden
 	}
 
 	// Another login linked the account first; use its user.
-	link, err := deps.Storage.GetExternalIdentity(ldapSource, identity.ExternalID)
+	link, err := deps.Storage.GetExternalIdentity(auth.LDAPSource, identity.ExternalID)
 	if err != nil {
 		return "", fmt.Errorf("look up link after losing the race: %w", err)
 	}
@@ -195,7 +196,7 @@ func waitForLink(ctx context.Context, store storage.Storage, externalID string) 
 	for attempt := 0; attempt < linkRetryAttempts; attempt++ {
 		var link *storage.ExternalIdentity
 
-		link, err = store.GetExternalIdentity(ldapSource, externalID)
+		link, err = store.GetExternalIdentity(auth.LDAPSource, externalID)
 		if err == nil {
 			return link, nil
 		}

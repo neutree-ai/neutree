@@ -59,6 +59,7 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 			name:  "PENDING -> CREATED (success)",
 			input: testUserProfile(userID, v1.UserProfilePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.MatchedBy(func(req types.AdminUpdateUserRequest) bool {
 					return req.Email == "test@example.com" && req.EmailConfirm == true
 				})).Return(&types.AdminUpdateUserResponse{}, nil).Once()
@@ -77,6 +78,7 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 			name:  "No status -> CREATED (success)",
 			input: testUserProfile(userID, ""),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.Anything).Return(&types.AdminUpdateUserResponse{}, nil).Once()
 
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
@@ -91,6 +93,7 @@ func TestUserProfileController_Sync_Creation(t *testing.T) {
 			name:  "PENDING -> CREATED (GoTrue sync failed)",
 			input: testUserProfile(userID, v1.UserProfilePhasePENDING),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.Anything).Return(nil, assert.AnError).Once()
 
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
@@ -348,6 +351,12 @@ func TestUserProfileController_DeleteGoTrueUser(t *testing.T) {
 	}
 }
 
+// expectLocalUser makes the auth backend report a user without an identity
+// source.
+func expectLocalUser(a *authmocks.MockClient) {
+	a.On("AdminGetUser", mock.Anything).Return(&types.AdminGetUserResponse{}, nil).Once()
+}
+
 func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
 	userID := uuid.New().String()
 
@@ -368,6 +377,7 @@ func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
 				return up
 			}(),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.MatchedBy(func(req types.AdminUpdateUserRequest) bool {
 					return req.Email == "newemail@example.com" && req.EmailConfirm == true
 				})).Return(&types.AdminUpdateUserResponse{}, nil).Once()
@@ -392,6 +402,7 @@ func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
 				return up
 			}(),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.Anything).Return(nil, assert.AnError).Once()
 
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
@@ -411,6 +422,7 @@ func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
 				return up
 			}(),
 			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				expectLocalUser(a)
 				a.On("AdminUpdateUser", mock.Anything).Return(&types.AdminUpdateUserResponse{}, nil).Once()
 
 				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
@@ -437,6 +449,92 @@ func TestUserProfileController_Sync_EmailUpdate(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestUserProfileController_Sync_ExternalUser(t *testing.T) {
+	userID := uuid.New().String()
+	userUUID, _ := uuid.Parse(userID)
+
+	changedEmail := func() *v1.UserProfile {
+		up := testUserProfile(userID, v1.UserProfilePhaseCREATED)
+		up.Spec.Email = "alice@example.com"
+		up.Status.SyncedSpec = &v1.UserProfileSpec{Email: "old@example.com"}
+
+		return up
+	}
+
+	tests := []struct {
+		name      string
+		input     *v1.UserProfile
+		mockSetup func(*storagemocks.MockStorage, *authmocks.MockClient)
+		wantErr   bool
+	}{
+		{
+			name:  "LDAP user -> email not synced, CREATED",
+			input: changedEmail(),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminGetUser", types.AdminGetUserRequest{UserID: userUUID}).Return(&types.AdminGetUserResponse{
+					User: types.User{AppMetadata: map[string]any{"identity_source": "ldap"}},
+				}, nil).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseCREATED &&
+						up.Status.SyncedSpec != nil &&
+						up.Status.SyncedSpec.Email == "alice@example.com"
+				})).Return(nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:  "LDAP user PENDING -> email not synced, CREATED",
+			input: testUserProfile(userID, v1.UserProfilePhasePENDING),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminGetUser", mock.Anything).Return(&types.AdminGetUserResponse{
+					User: types.User{AppMetadata: map[string]any{"identity_source": "ldap"}},
+				}, nil).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil && up.Status.Phase == v1.UserProfilePhaseCREATED
+				})).Return(nil).Once()
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Get user fails -> no sync, FAILED",
+			input: changedEmail(),
+			mockSetup: func(s *storagemocks.MockStorage, a *authmocks.MockClient) {
+				a.On("AdminGetUser", mock.Anything).Return(nil, assert.AnError).Once()
+
+				s.On("UpdateUserProfile", userID, mock.MatchedBy(func(up *v1.UserProfile) bool {
+					return up.Status != nil &&
+						up.Status.Phase == v1.UserProfilePhaseFAILED &&
+						up.Status.SyncedSpec != nil &&
+						up.Status.SyncedSpec.Email == "old@example.com"
+				})).Return(nil).Once()
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := storagemocks.NewMockStorage(t)
+			mockAuthClient := authmocks.NewMockClient(t)
+			tt.mockSetup(mockStorage, mockAuthClient)
+
+			controller := newTestUserProfileController(mockStorage, mockAuthClient)
+			err := controller.sync(tt.input)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			mockAuthClient.AssertNotCalled(t, "AdminUpdateUser", mock.Anything)
 		})
 	}
 }
