@@ -34,6 +34,7 @@ const (
 	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
 	STATIC_NODE_TABLE         = "static_nodes"
 	EXTERNAL_IDENTITY_TABLE   = "external_identities"
+	IDENTITY_SOURCE_TABLE     = "identity_sources"
 )
 
 type ImageRegistryStorage interface {
@@ -246,6 +247,35 @@ type ExternalIdentityStorage interface {
 	CreateExternalIdentity(data *ExternalIdentity) error
 }
 
+// IdentitySourceSecrets are the decrypted secrets of an identity source. A
+// secret that is not stored is empty.
+type IdentitySourceSecrets struct {
+	LDAPBindPassword string `json:"ldap_bind_password"`
+	OIDCClientSecret string `json:"oidc_client_secret"`
+}
+
+type IdentitySourceStorage interface {
+	// CreateIdentitySource creates a new identity source in the database.
+	CreateIdentitySource(data *v1.IdentitySource) error
+	// DeleteIdentitySource deletes an identity source by its ID.
+	DeleteIdentitySource(id string) error
+	// UpdateIdentitySource updates an existing identity source. Secrets left
+	// empty keep their stored value.
+	UpdateIdentitySource(id string, data *v1.IdentitySource) error
+	// GetIdentitySource retrieves an identity source by its ID. Its secrets
+	// are never returned.
+	GetIdentitySource(id string) (*v1.IdentitySource, error)
+	// ListIdentitySource retrieves a list of identity sources with optional filters.
+	ListIdentitySource(option ListOption) ([]v1.IdentitySource, error)
+	// ListLoginIdentitySources returns the enabled identity sources that are
+	// not being deleted, with only what the login page shows.
+	ListLoginIdentitySources() ([]v1.LoginIdentitySource, error)
+	// GetIdentitySourceSecrets decrypts the secrets of the identity source with
+	// the given name. It returns ErrResourceNotFound when there is no such
+	// source or it is being deleted.
+	GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -263,6 +293,7 @@ type Storage interface {
 	StaticNodeClusterStorage
 	StaticNodeStorage
 	ExternalIdentityStorage
+	IdentitySourceStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

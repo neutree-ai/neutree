@@ -1152,3 +1152,69 @@ func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error 
 
 	return err
 }
+
+func (s *postgrestStorage) CreateIdentitySource(data *v1.IdentitySource) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteIdentitySource(id string) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateIdentitySource(id string, data *v1.IdentitySource) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) GetIdentitySource(id string) (*v1.IdentitySource, error) {
+	var response []v1.IdentitySource
+
+	responseContent, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListIdentitySource(option ListOption) ([]v1.IdentitySource, error) {
+	var response []v1.IdentitySource
+	err := s.genericList(IDENTITY_SOURCE_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) ListLoginIdentitySources() ([]v1.LoginIdentitySource, error) {
+	response := []v1.LoginIdentitySource{}
+	if err := s.CallDatabaseFunction("list_login_identity_sources", map[string]interface{}{}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (s *postgrestStorage) GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error) {
+	var response []IdentitySourceSecrets
+	if err := s.CallDatabaseFunction("get_identity_source_secrets", map[string]interface{}{"p_name": name}, &response); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}

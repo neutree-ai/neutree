@@ -403,6 +403,52 @@ func (_c *MockStorage_CreateExternalIdentity_Call) RunAndReturn(run func(*storag
 	return _c
 }
 
+// CreateIdentitySource provides a mock function with given fields: data
+func (_m *MockStorage) CreateIdentitySource(data *v1.IdentitySource) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateIdentitySource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.IdentitySource) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateIdentitySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateIdentitySource'
+type MockStorage_CreateIdentitySource_Call struct {
+	*mock.Call
+}
+
+// CreateIdentitySource is a helper method to define mock.On call
+//   - data *v1.IdentitySource
+func (_e *MockStorage_Expecter) CreateIdentitySource(data interface{}) *MockStorage_CreateIdentitySource_Call {
+	return &MockStorage_CreateIdentitySource_Call{Call: _e.mock.On("CreateIdentitySource", data)}
+}
+
+func (_c *MockStorage_CreateIdentitySource_Call) Run(run func(data *v1.IdentitySource)) *MockStorage_CreateIdentitySource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.IdentitySource))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateIdentitySource_Call) Return(_a0 error) *MockStorage_CreateIdentitySource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateIdentitySource_Call) RunAndReturn(run func(*v1.IdentitySource) error) *MockStorage_CreateIdentitySource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateImageRegistry provides a mock function with given fields: data
 func (_m *MockStorage) CreateImageRegistry(data *v1.ImageRegistry) error {
 	ret := _m.Called(data)
@@ -1089,6 +1135,52 @@ func (_c *MockStorage_DeleteExternalEndpoint_Call) Return(_a0 error) *MockStorag
 }
 
 func (_c *MockStorage_DeleteExternalEndpoint_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteExternalEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteIdentitySource provides a mock function with given fields: id
+func (_m *MockStorage) DeleteIdentitySource(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteIdentitySource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteIdentitySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteIdentitySource'
+type MockStorage_DeleteIdentitySource_Call struct {
+	*mock.Call
+}
+
+// DeleteIdentitySource is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteIdentitySource(id interface{}) *MockStorage_DeleteIdentitySource_Call {
+	return &MockStorage_DeleteIdentitySource_Call{Call: _e.mock.On("DeleteIdentitySource", id)}
+}
+
+func (_c *MockStorage_DeleteIdentitySource_Call) Run(run func(id string)) *MockStorage_DeleteIdentitySource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteIdentitySource_Call) Return(_a0 error) *MockStorage_DeleteIdentitySource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteIdentitySource_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteIdentitySource_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1951,6 +2043,122 @@ func (_c *MockStorage_GetExternalIdentity_Call) RunAndReturn(run func(string, st
 	return _c
 }
 
+// GetIdentitySource provides a mock function with given fields: id
+func (_m *MockStorage) GetIdentitySource(id string) (*v1.IdentitySource, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIdentitySource")
+	}
+
+	var r0 *v1.IdentitySource
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.IdentitySource, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.IdentitySource); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.IdentitySource)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetIdentitySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIdentitySource'
+type MockStorage_GetIdentitySource_Call struct {
+	*mock.Call
+}
+
+// GetIdentitySource is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetIdentitySource(id interface{}) *MockStorage_GetIdentitySource_Call {
+	return &MockStorage_GetIdentitySource_Call{Call: _e.mock.On("GetIdentitySource", id)}
+}
+
+func (_c *MockStorage_GetIdentitySource_Call) Run(run func(id string)) *MockStorage_GetIdentitySource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetIdentitySource_Call) Return(_a0 *v1.IdentitySource, _a1 error) *MockStorage_GetIdentitySource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetIdentitySource_Call) RunAndReturn(run func(string) (*v1.IdentitySource, error)) *MockStorage_GetIdentitySource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetIdentitySourceSecrets provides a mock function with given fields: name
+func (_m *MockStorage) GetIdentitySourceSecrets(name string) (*storage.IdentitySourceSecrets, error) {
+	ret := _m.Called(name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetIdentitySourceSecrets")
+	}
+
+	var r0 *storage.IdentitySourceSecrets
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*storage.IdentitySourceSecrets, error)); ok {
+		return rf(name)
+	}
+	if rf, ok := ret.Get(0).(func(string) *storage.IdentitySourceSecrets); ok {
+		r0 = rf(name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.IdentitySourceSecrets)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetIdentitySourceSecrets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIdentitySourceSecrets'
+type MockStorage_GetIdentitySourceSecrets_Call struct {
+	*mock.Call
+}
+
+// GetIdentitySourceSecrets is a helper method to define mock.On call
+//   - name string
+func (_e *MockStorage_Expecter) GetIdentitySourceSecrets(name interface{}) *MockStorage_GetIdentitySourceSecrets_Call {
+	return &MockStorage_GetIdentitySourceSecrets_Call{Call: _e.mock.On("GetIdentitySourceSecrets", name)}
+}
+
+func (_c *MockStorage_GetIdentitySourceSecrets_Call) Run(run func(name string)) *MockStorage_GetIdentitySourceSecrets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetIdentitySourceSecrets_Call) Return(_a0 *storage.IdentitySourceSecrets, _a1 error) *MockStorage_GetIdentitySourceSecrets_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetIdentitySourceSecrets_Call) RunAndReturn(run func(string) (*storage.IdentitySourceSecrets, error)) *MockStorage_GetIdentitySourceSecrets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetImageRegistry provides a mock function with given fields: id
 func (_m *MockStorage) GetImageRegistry(id string) (*v1.ImageRegistry, error) {
 	ret := _m.Called(id)
@@ -2705,6 +2913,64 @@ func (_c *MockStorage_ListExternalEndpoint_Call) RunAndReturn(run func(storage.L
 	return _c
 }
 
+// ListIdentitySource provides a mock function with given fields: option
+func (_m *MockStorage) ListIdentitySource(option storage.ListOption) ([]v1.IdentitySource, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListIdentitySource")
+	}
+
+	var r0 []v1.IdentitySource
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.IdentitySource, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.IdentitySource); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.IdentitySource)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListIdentitySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIdentitySource'
+type MockStorage_ListIdentitySource_Call struct {
+	*mock.Call
+}
+
+// ListIdentitySource is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListIdentitySource(option interface{}) *MockStorage_ListIdentitySource_Call {
+	return &MockStorage_ListIdentitySource_Call{Call: _e.mock.On("ListIdentitySource", option)}
+}
+
+func (_c *MockStorage_ListIdentitySource_Call) Run(run func(option storage.ListOption)) *MockStorage_ListIdentitySource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListIdentitySource_Call) Return(_a0 []v1.IdentitySource, _a1 error) *MockStorage_ListIdentitySource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListIdentitySource_Call) RunAndReturn(run func(storage.ListOption) ([]v1.IdentitySource, error)) *MockStorage_ListIdentitySource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImageRegistry provides a mock function with given fields: option
 func (_m *MockStorage) ListImageRegistry(option storage.ListOption) ([]v1.ImageRegistry, error) {
 	ret := _m.Called(option)
@@ -2759,6 +3025,63 @@ func (_c *MockStorage_ListImageRegistry_Call) Return(_a0 []v1.ImageRegistry, _a1
 }
 
 func (_c *MockStorage_ListImageRegistry_Call) RunAndReturn(run func(storage.ListOption) ([]v1.ImageRegistry, error)) *MockStorage_ListImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListLoginIdentitySources provides a mock function with no fields
+func (_m *MockStorage) ListLoginIdentitySources() ([]v1.LoginIdentitySource, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLoginIdentitySources")
+	}
+
+	var r0 []v1.LoginIdentitySource
+	var r1 error
+	if rf, ok := ret.Get(0).(func() ([]v1.LoginIdentitySource, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() []v1.LoginIdentitySource); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.LoginIdentitySource)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListLoginIdentitySources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLoginIdentitySources'
+type MockStorage_ListLoginIdentitySources_Call struct {
+	*mock.Call
+}
+
+// ListLoginIdentitySources is a helper method to define mock.On call
+func (_e *MockStorage_Expecter) ListLoginIdentitySources() *MockStorage_ListLoginIdentitySources_Call {
+	return &MockStorage_ListLoginIdentitySources_Call{Call: _e.mock.On("ListLoginIdentitySources")}
+}
+
+func (_c *MockStorage_ListLoginIdentitySources_Call) Run(run func()) *MockStorage_ListLoginIdentitySources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListLoginIdentitySources_Call) Return(_a0 []v1.LoginIdentitySource, _a1 error) *MockStorage_ListLoginIdentitySources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListLoginIdentitySources_Call) RunAndReturn(run func() ([]v1.LoginIdentitySource, error)) *MockStorage_ListLoginIdentitySources_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3516,6 +3839,53 @@ func (_c *MockStorage_UpdateExternalEndpoint_Call) Return(_a0 error) *MockStorag
 }
 
 func (_c *MockStorage_UpdateExternalEndpoint_Call) RunAndReturn(run func(string, *v1.ExternalEndpoint) error) *MockStorage_UpdateExternalEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateIdentitySource provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateIdentitySource(id string, data *v1.IdentitySource) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIdentitySource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.IdentitySource) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateIdentitySource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIdentitySource'
+type MockStorage_UpdateIdentitySource_Call struct {
+	*mock.Call
+}
+
+// UpdateIdentitySource is a helper method to define mock.On call
+//   - id string
+//   - data *v1.IdentitySource
+func (_e *MockStorage_Expecter) UpdateIdentitySource(id interface{}, data interface{}) *MockStorage_UpdateIdentitySource_Call {
+	return &MockStorage_UpdateIdentitySource_Call{Call: _e.mock.On("UpdateIdentitySource", id, data)}
+}
+
+func (_c *MockStorage_UpdateIdentitySource_Call) Run(run func(id string, data *v1.IdentitySource)) *MockStorage_UpdateIdentitySource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.IdentitySource))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateIdentitySource_Call) Return(_a0 error) *MockStorage_UpdateIdentitySource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateIdentitySource_Call) RunAndReturn(run func(string, *v1.IdentitySource) error) *MockStorage_UpdateIdentitySource_Call {
 	_c.Call.Return(run)
 	return _c
 }
