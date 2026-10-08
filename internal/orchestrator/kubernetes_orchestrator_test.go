@@ -1038,6 +1038,13 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 	if objs.Items[0].GetName() != "test-endpoint" {
 		t.Errorf("Expected deployment name 'test-endpoint', got '%s'", objs.Items[0].GetName())
 	}
+
+	var deployment appsv1.Deployment
+	require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objs.Items[0].Object, &deployment))
+	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers)
+	require.NotNil(t, deployment.Spec.Template.Spec.Containers[0].ReadinessProbe)
+	require.NotNil(t, deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet)
+	assert.Equal(t, "/openapi.json", deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
 }
 
 func TestKubernetesOrchestrator_getImageForAccelerator(t *testing.T) {

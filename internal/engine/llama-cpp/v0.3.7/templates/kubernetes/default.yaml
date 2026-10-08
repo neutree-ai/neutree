@@ -130,7 +130,7 @@ spec:
             failureThreshold: {{ .StartupProbeFailureThreshold }}
           readinessProbe:
             httpGet:
-              path: /v1/models
+              path: /openapi.json
               port: 8000
             initialDelaySeconds: 5
             timeoutSeconds: 5
