@@ -96,7 +96,7 @@ func TestIdentitySourceCreateValidation(t *testing.T) {
 				http.MethodPost, "/api/v1/identity_sources", tt.body)
 
 			assert.Equal(t, http.StatusBadRequest, rec.ResponseRecorder.Code)
-			assert.Contains(t, rec.ResponseRecorder.Body.String(), `"code":"10260"`)
+			assert.Contains(t, rec.ResponseRecorder.Body.String(), `"code":"10261"`)
 			assert.Contains(t, rec.ResponseRecorder.Body.String(), tt.wantHint)
 			assert.False(t, upstream.called.Load(), "an invalid identity source must not reach PostgREST")
 		})
