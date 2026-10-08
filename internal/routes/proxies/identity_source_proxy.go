@@ -10,7 +10,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-const identitySourceInvalidCode = "10260"
+const identitySourceInvalidCode = "10261"
 
 // RegisterIdentitySourceRoutes registers identity source routes. The secrets
 // (spec.ldap.bind_password, spec.oidc.client_secret) are masked in responses
