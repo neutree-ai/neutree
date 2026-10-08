@@ -1,5 +1,6 @@
 // Package ldap authenticates users against an LDAP directory (OpenLDAP, Active Directory)
-// with the search-then-bind flow.
+// with the search-then-bind flow. Directory reads the whole directory (departments,
+// groups, users) into an orgsync.Snapshot for an organization sync.
 package ldap
 
 import (
@@ -69,6 +70,9 @@ type Config struct {
 	// UserFilter must contain UsernamePlaceholder, e.g. "(&(objectClass=inetOrgPerson)(uid={username}))".
 	UserFilter string
 	Attributes AttributeMapping
+
+	// Sync configures Directory (organization sync); Authenticator ignores it.
+	Sync SyncConfig
 }
 
 // AttributeMapping names the directory attributes read into an Identity.
