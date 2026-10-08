@@ -24,6 +24,11 @@ type Dependencies struct {
 	AuthConfig   middleware.AuthConfig
 	Storage      storage.Storage
 	AuthClient   auth.Client
+	// Sources resolves the LDAP and OIDC identity sources users log in with.
+	// When nil, the LDAP and OIDC login routes are not registered.
+	Sources *LoginSources
+	// Sessions is required when Sources is set.
+	Sessions auth.SessionIssuer
 }
 
 // RegisterAuthRoutes registers authentication-related routes
@@ -47,15 +52,26 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	}
 
 	// Public GoTrue proxy routes - no authentication required
-	// Only expose endpoints actually used by the client
+	// Only expose endpoints actually used by the client. There is no /signup:
+	// users are created by an admin or by an SSO login, never by themselves.
 	authGroup.POST("/token", handleTokenProxy(deps))   // signInWithPassword, token refresh
-	authGroup.POST("/signup", handleAuthProxy(deps))   // signUp
 	authGroup.POST("/recover", handleAuthProxy(deps))  // resetPasswordForEmail
 	authGroup.GET("/user", handleAuthProxy(deps))      // getUser
-	authGroup.PUT("/user", handleAuthProxy(deps))      // updateUser (password)
+	authGroup.PUT("/user", handleUpdateUser(deps))     // updateUser (password)
 	authGroup.POST("/logout", handleAuthProxy(deps))   // signOut
-	authGroup.GET("/authorize", handleAuthProxy(deps)) // OAuth authorize
-	authGroup.GET("/callback", handleAuthProxy(deps))  // OAuth callback
+	authGroup.POST("/verify", handleVerifyProxy(deps)) // verifyOtp, finishes an OIDC login
+
+	// The login page lists the identity sources it offers before anyone is
+	// logged in.
+	authGroup.GET("/identity-sources", handleListLoginIdentitySources(deps))
+
+	// Identity sources are read from the database at login, so the routes exist
+	// whether or not any source is configured yet.
+	if deps.Sources != nil {
+		authGroup.POST("/ldap/token", handleLDAPToken(deps))
+		authGroup.GET("/oidc/authorize", handleOIDCAuthorize(deps))
+		authGroup.GET("/oidc/callback", handleOIDCCallback(deps))
+	}
 }
 
 func handleCreateUser(deps *Dependencies) gin.HandlerFunc {
@@ -192,6 +208,36 @@ func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	}
 
 	return body
+}
+
+// handleVerifyProxy proxies /verify for magic link tokens only, which is how an
+// OIDC login ends. GoTrue's other token types belong to flows neutree does not
+// expose through this route.
+func handleVerifyProxy(deps *Dependencies) gin.HandlerFunc {
+	proxyHandler := proxies.CreateProxyHandler(deps.AuthEndpoint, "verify", nil)
+
+	return func(c *gin.Context) {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		c.Request.Body.Close()
+
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+			return
+		}
+
+		var body struct {
+			Type string `json:"type"`
+		}
+
+		if err := json.Unmarshal(bodyBytes, &body); err != nil || body.Type != "magiclink" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "only magiclink verification is supported"})
+			return
+		}
+
+		request.RestoreBody(c, bodyBytes)
+
+		proxyHandler(c)
+	}
 }
 
 // handleAuthProxy proxies requests to the GoTrue backend

@@ -27,12 +27,14 @@ Two route categories:
 | `/dashboard-proxy/:workspace/:name/*path` | Reverse-proxy to a Ray dashboard | `RegisterRayDashboardProxyRoutes` |
 | `/k8s-proxy/:workspace/:name/*path` | Authenticated reverse-proxy to a cluster's Kubernetes API server | `RegisterKubernetesProxyRoutes` |
 | `/endpoint-logs/...` | Endpoint log streaming | `RegisterEndpointLogsRoutes` |
-| `/auth/...` | GoTrue token issue/refresh | `RegisterAuthRoutes` |
+| `/auth/...` | GoTrue token issue/refresh; LDAP login at `/auth/ldap/token` and OIDC login at `/auth/oidc/authorize` + `/auth/oidc/callback`, both against the `IdentitySource` named by `source` (optional while exactly one of that type is enabled), read from the database per login with a short in-process cache (`LoginSources`) so config changes need no restart; one callback URL serves every OIDC source, whose name is sealed into the state cookie; the callback hands the UI a magic link token in the redirect fragment for `/auth/verify` (which proxies `type=magiclink` only); GoTrue's own OAuth `/authorize` and `/callback` are not exposed; `PUT /auth/user` refuses changes to fields an external identity source manages (`externallyManagedFields`); `GET /auth/identity-sources` is the unauthenticated login-page list of enabled `IdentitySource`s (name, display name, type only, from the `api.list_login_identity_sources` RPC) | `RegisterAuthRoutes` |
 | `/credentials/...` | Image registry / model registry credential access | `RegisterCredentialsRoutes` |
 | `/system/...` | Health, version, system info | `RegisterSystemRoutes` |
 | `/models/...` | OpenAI-compatible model listing | `RegisterModelsRoutes` |
 | `/clusters/...` | Cluster operations beyond raw PostgREST CRUD | `RegisterClusterRoutes` |
 | `/rest/rpc/:path` | PostgREST RPC passthrough | `RegisterPostgrestRPCProxyRoutes` |
+
+An OIDC `IdentitySource`'s `spec.oidc.allowed_redirects` must contain the UI root URL (the UI uses hash routing, so every UI location is under the root); its first entry is also where a callback with an unreadable state cookie sends the browser with `#error=invalid_state`.
 
 ## Authentication
 

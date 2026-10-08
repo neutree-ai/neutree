@@ -59,6 +59,12 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// GetGoTrueURL returns the base URL of the GoTrue instance started by
+// `make db-test`. Tests talk to it directly, not through neutree-api.
+func GetGoTrueURL() string {
+	return getEnvOrDefault("GOTRUE_URL", "http://localhost:9999")
+}
+
 type TestUser struct {
 	ID    string
 	Email string
@@ -72,7 +78,7 @@ func CreateTestUser(t *testing.T, username, email, password string) *TestUser {
 		t.Fatalf("failed to create service token: %v", err)
 	}
 
-	client := gotrue.New("", "").WithCustomGoTrueURL("http://localhost:9999").WithToken(*token)
+	client := gotrue.New("", "").WithCustomGoTrueURL(GetGoTrueURL()).WithToken(*token)
 
 	resp, err := client.AdminCreateUser(types.AdminCreateUserRequest{
 		Email:        email,
