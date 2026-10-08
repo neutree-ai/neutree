@@ -391,9 +391,12 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 		{
 			name: "missing state cookie",
 			callback: func(t *testing.T, e *oidcTestEnv, authURL string, _ *http.Cookie) *httptest.ResponseRecorder {
+				e.storage.EXPECT().ListLoginIdentitySources().
+					Return([]v1.LoginIdentitySource{{Name: testOIDCID, Type: v1.IdentitySourceTypeOIDC}}, nil).Once()
+
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}})
 			},
-			wantBase:     "",
+			wantBase:     testUIURL,
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
@@ -412,7 +415,7 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}}, &forged)
 			},
-			wantBase:     "",
+			wantBase:     testUIURL,
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
@@ -421,7 +424,7 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 				e.sources.now = func() time.Time { return time.Now().Add(oidcStateTTL + time.Minute) }
 				return e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}}, cookie)
 			},
-			wantBase:     "",
+			wantBase:     testUIURL,
 			wantErrorKey: oidcErrInvalidState,
 		},
 		{
@@ -466,15 +469,6 @@ func TestOIDCCallback_Rejected(t *testing.T) {
 			authURL, cookie := e.authorize(t)
 
 			w := tc.callback(t, e, authURL, cookie)
-
-			// Without an opened state there is nowhere trusted to redirect to.
-			if tc.wantBase == "" {
-				assert.Equal(t, http.StatusBadRequest, w.Code)
-				assert.Equal(t, tc.wantErrorKey, errorBody(t, w))
-				assert.Empty(t, w.Header().Get("Location"))
-
-				return
-			}
 
 			base, fragment := redirectFragment(t, w)
 			assert.Equal(t, tc.wantBase, base)

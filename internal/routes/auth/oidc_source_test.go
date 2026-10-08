@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -54,7 +55,9 @@ func (e *oidcTestEnv) addSource(t *testing.T, name string) *oidctest.Provider {
 // A state cookie sealed for one source, relabelled for another, does not open.
 func TestOIDCCallback_CookieRelabelledForAnotherSource(t *testing.T) {
 	e := newOIDCTestEnv(t)
-	e.addSource(t, "other-idp")
+	other := oidcSourceFor("other-idp", oidctest.New(t, "neutree", "client-secret"), true)
+	other.Spec.OIDC.AllowedRedirects = []string{"https://other.example.org/console", testUIURL}
+	expectSource(e.storage, other, &storage.IdentitySourceSecrets{OIDCClientSecret: "client-secret"})
 
 	authURL, cookie := e.authorize(t)
 	_, ciphertext, _ := strings.Cut(cookie.Value, ".")
@@ -64,8 +67,9 @@ func TestOIDCCallback_CookieRelabelledForAnotherSource(t *testing.T) {
 
 	w := e.callback(t, url.Values{"code": {e.idp.Login(t, authURL)}, "state": {queryParam(t, authURL, "state")}}, &forged)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Equal(t, oidcErrInvalidState, errorBody(t, w))
+	base, fragment := redirectFragment(t, w)
+	assert.Equal(t, "https://other.example.org/console/", base, "the fallback of the source the cookie names")
+	assert.Equal(t, url.Values{"error": {oidcErrInvalidState}}, fragment)
 	e.storage.AssertNotCalled(t, "GetExternalIdentity", mock.Anything, mock.Anything)
 }
 
@@ -120,4 +124,102 @@ func TestOIDCPlaceholderEmail_PerSource(t *testing.T) {
 	assert.True(t, strings.HasSuffix(a, "@keycloak.oidc.neutree.local"))
 	assert.True(t, strings.HasSuffix(b, "@corp-sso.oidc.neutree.local"))
 	assert.Equal(t, strings.Split(a, "@")[0], strings.Split(b, "@")[0])
+}
+
+// A callback whose state cookie cannot be read redirects with invalid_state to
+// a fallback that is never taken from the request: an allowed redirect of the
+// source the cookie names, else of the only enabled OIDC source, else "/".
+func TestOIDCCallback_UnreadableStateFallback(t *testing.T) {
+	oneOIDC := []v1.LoginIdentitySource{
+		{Name: "corp-ldap", Type: v1.IdentitySourceTypeLDAP},
+		{Name: testOIDCID, Type: v1.IdentitySourceTypeOIDC},
+	}
+	twoOIDC := append(oneOIDC, v1.LoginIdentitySource{Name: "other-idp", Type: v1.IdentitySourceTypeOIDC})
+
+	cases := []struct {
+		name     string
+		cookie   string // "" sends no cookie
+		setup    func(e *oidcTestEnv)
+		wantBase string
+	}{
+		{
+			name: "no cookie, one enabled OIDC source",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListLoginIdentitySources().Return(oneOIDC, nil).Once()
+			},
+			wantBase: testUIURL,
+		},
+		{
+			name: "no cookie, several enabled OIDC sources",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListLoginIdentitySources().Return(twoOIDC, nil).Once()
+			},
+			wantBase: "/",
+		},
+		{
+			name: "no cookie, no enabled OIDC source",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListLoginIdentitySources().Return(oneOIDC[:1], nil).Once()
+			},
+			wantBase: "/",
+		},
+		{
+			name: "no cookie, listing sources fails",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListLoginIdentitySources().Return(nil, errors.New("db down")).Once()
+			},
+			wantBase: "/",
+		},
+		{
+			name:     "garbage cookie naming the source",
+			cookie:   testOIDCID + ".garbage",
+			wantBase: testUIURL,
+		},
+		{
+			name:   "cookie naming an unknown source",
+			cookie: "nope.garbage",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListIdentitySource(matchSourceName("nope")).Return(nil, nil).Once()
+				e.storage.EXPECT().ListLoginIdentitySources().Return(twoOIDC, nil).Once()
+			},
+			wantBase: "/",
+		},
+		{
+			name:   "cookie naming an LDAP source",
+			cookie: "corp-ldap.garbage",
+			setup: func(e *oidcTestEnv) {
+				expectSource(e.storage, ldapSource("corp-ldap", true), &storage.IdentitySourceSecrets{})
+				e.storage.EXPECT().ListLoginIdentitySources().Return(oneOIDC, nil).Once()
+			},
+			wantBase: testUIURL,
+		},
+		{
+			name:   "cookie with an invalid source name",
+			cookie: "../evil.example.org.garbage",
+			setup: func(e *oidcTestEnv) {
+				e.storage.EXPECT().ListLoginIdentitySources().Return(twoOIDC, nil).Once()
+			},
+			wantBase: "/",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newOIDCTestEnv(t)
+			if tc.setup != nil {
+				tc.setup(e)
+			}
+
+			var cookies []*http.Cookie
+			if tc.cookie != "" {
+				cookies = append(cookies, &http.Cookie{Name: oidcStateCookie, Value: tc.cookie})
+			}
+
+			w := e.callback(t, url.Values{"code": {"code"}, "state": {"https://evil.example.org/"}}, cookies...)
+
+			base, fragment := redirectFragment(t, w)
+			assert.Equal(t, tc.wantBase, base)
+			assert.Equal(t, url.Values{"error": {oidcErrInvalidState}}, fragment)
+		})
+	}
 }

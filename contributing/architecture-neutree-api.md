@@ -34,6 +34,8 @@ Two route categories:
 | `/clusters/...` | Cluster operations beyond raw PostgREST CRUD | `RegisterClusterRoutes` |
 | `/rest/rpc/:path` | PostgREST RPC passthrough | `RegisterPostgrestRPCProxyRoutes` |
 
+An OIDC `IdentitySource`'s `spec.oidc.allowed_redirects` must contain the UI root URL (the UI uses hash routing, so every UI location is under the root); its first entry is also where a callback with an unreadable state cookie sends the browser with `#error=invalid_state`.
+
 ## Authentication
 
 All routes except `/auth/*` go through a single `auth` middleware (`internal/middleware/auth.go`), wired in `cmd/neutree-api/app/builder.go` via the `defaultRoutesToMiddlewares` map. The middleware accepts two credential forms on the `Authorization` header:
