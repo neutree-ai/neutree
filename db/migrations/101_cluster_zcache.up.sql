@@ -13,7 +13,7 @@ BEGIN
     IF (NEW.spec).type <> 'kubernetes' OR jsonb_typeof(config) <> 'object' THEN
         RAISE EXCEPTION 'zcache requires a Kubernetes cluster and an object configuration' USING ERRCODE = '22023';
     END IF;
-    IF config - ARRAY['enabled', 'l1_size_gib', 'target_nodes'] <> '{}'::jsonb
+    IF config - ARRAY['enabled', 'l1_size_gib', 'target_nodes', 'control_plane'] <> '{}'::jsonb
         OR jsonb_typeof(config->'enabled') IS DISTINCT FROM 'boolean' THEN
         RAISE EXCEPTION 'invalid zcache configuration fields' USING ERRCODE = '22023';
     END IF;
@@ -39,6 +39,21 @@ BEGIN
                 OR (item #>> '{}') !~ '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
         ) OR (SELECT count(DISTINCT item) FROM jsonb_array_elements(nodes) AS item) <> jsonb_array_length(nodes) THEN
             RAISE EXCEPTION 'zcache.target_nodes must contain unique Kubernetes node names' USING ERRCODE = '22023';
+        END IF;
+    END IF;
+    IF config ? 'control_plane' THEN
+        IF jsonb_typeof(config->'control_plane') IS DISTINCT FROM 'object'
+            OR (config->'control_plane') - ARRAY['version', 'request_id'] <> '{}'::jsonb
+            OR jsonb_typeof(config#>'{control_plane,version}') IS DISTINCT FROM 'string'
+            OR length(config#>>'{control_plane,version}') NOT BETWEEN 1 AND 128
+            OR jsonb_typeof(config#>'{control_plane,request_id}') IS DISTINCT FROM 'string'
+            OR (config#>>'{control_plane,request_id}') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+            RAISE EXCEPTION 'zcache.control_plane requires a version and a UUID request_id' USING ERRCODE = '22023';
+        END IF;
+        IF TG_OP = 'UPDATE' AND (OLD.spec).zcache::jsonb ? 'control_plane'
+            AND config#>>'{control_plane,request_id}' = (OLD.spec).zcache::jsonb#>>'{control_plane,request_id}'
+            AND config#>>'{control_plane,version}' IS DISTINCT FROM (OLD.spec).zcache::jsonb#>>'{control_plane,version}' THEN
+            RAISE EXCEPTION 'a new control-plane version requires a new request_id' USING ERRCODE = '22023';
         END IF;
     END IF;
     RETURN NEW;
