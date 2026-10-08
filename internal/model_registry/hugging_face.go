@@ -52,6 +52,24 @@ const (
 // write and detail operations are not implemented against it.
 var errHuggingFaceNotSupported = errors.Wrap(ErrNotSupported, "operation not supported for Hugging Face registry")
 
+// errHuggingFaceFileNotFound is the ErrNotFound for a file that is absent from
+// a repository and revision that do exist. It is still ErrNotFound to every
+// caller; the narrower identity is for GetModelDetail, where a model without a
+// config.json is an answer and a model that is not there is not.
+var errHuggingFaceFileNotFound = errors.Wrap(ErrNotFound, "file is not in the repository")
+
+const (
+	// hubErrorCodeHeader is where the Hub says what a 404 is about. A file path
+	// answers the same status for a missing repository, revision and file; this
+	// header is the only thing that tells them apart.
+	hubErrorCodeHeader = "X-Error-Code"
+	// hubErrorCodeRepoNotFound is sent to a request carrying a token. An
+	// anonymous request for a repository that does not exist is answered 401
+	// instead, so that private names are not disclosed.
+	hubErrorCodeRepoNotFound     = "RepoNotFound"
+	hubErrorCodeRevisionNotFound = "RevisionNotFound"
+)
+
 var (
 	// ErrUnauthorized is returned when the hub refused the request over
 	// credentials: no token where one is needed, or one that is expired or lacks
@@ -284,7 +302,10 @@ func (hf *huggingFace) GetModelVersion(name, version string) (*v1.ModelVersion, 
 // rather than failing the request: a detail view is useful without it.
 func (hf *huggingFace) GetModelDetail(name, version string) (*v1.ModelVersion, error) {
 	raw, err := hf.fetchFile(name, version, configFile)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if err != nil && !errors.Is(err, errHuggingFaceFileNotFound) {
+		// This includes a repository or revision that does not exist: swallowing
+		// those would render a typo as a real checkpoint that happens to say
+		// nothing about itself.
 		return nil, err
 	}
 
@@ -369,9 +390,10 @@ func (hf *huggingFace) parameterCount(name, version string) (int64, bool) {
 // GetReadme fetches the model card, returned exactly as stored, front matter
 // and all.
 //
-// A repository with no README and a repository that does not exist both answer
-// 404 on a file path, so both surface as ErrNotFound; the hub gives no way to
-// tell them apart here.
+// A repository with no README, a revision that does not exist and — for a
+// request carrying a token — a repository that does not exist all answer 404 on
+// a file path, and all surface as ErrNotFound. Only the sentence differs: see
+// fetchFile.
 func (hf *huggingFace) GetReadme(name, version string) (*Readme, error) {
 	raw, err := hf.fetchFile(name, version, readmeFileName)
 	if err != nil {
@@ -496,6 +518,12 @@ func (hf *huggingFace) responseError(resp *http.Response, context string) error 
 // fetchFile reads one file out of a hub repository, capped at MaxReadmeBytes.
 // The cap applies to every file: these are small metadata files, and the read is
 // from a server this deployment does not control.
+//
+// Every 404 is ErrNotFound, and the hub says in X-Error-Code which thing was
+// missing. A missing repository or revision is reported as that; anything else,
+// including a 404 from a mirror that does not send the header, is the file
+// itself being absent (errHuggingFaceFileNotFound), which is the only miss a
+// caller may treat as a real answer about an existing model.
 func (hf *huggingFace) fetchFile(name, version, file string) ([]byte, error) {
 	requestURL := fmt.Sprintf("%s/%s/resolve/%s/%s", hf.url, name, url.PathEscape(hf.revision(version)), file)
 
@@ -515,7 +543,16 @@ func (hf *huggingFace) fetchFile(name, version, file string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, errors.Wrapf(ErrNotFound, "model %s has no %s on the Hugging Face Hub", name, file)
+		switch resp.Header.Get(hubErrorCodeHeader) {
+		case hubErrorCodeRepoNotFound:
+			return nil, errors.Wrapf(ErrNotFound, "model %s does not exist on the Hugging Face Hub", name)
+		case hubErrorCodeRevisionNotFound:
+			return nil, errors.Wrapf(ErrNotFound,
+				"model %s has no revision %q on the Hugging Face Hub", name, hf.revision(version))
+		default:
+			return nil, errors.Wrapf(errHuggingFaceFileNotFound,
+				"model %s has no %s on the Hugging Face Hub", name, file)
+		}
 	}
 
 	if resp.StatusCode != http.StatusOK {

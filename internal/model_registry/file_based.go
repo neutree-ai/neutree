@@ -117,8 +117,21 @@ func (s *bentomlStore) ListModels(options ListOption) (*ModelPage, error) {
 	return convertBentoMLModelsToGeneralModels(bentomlModels, options), nil
 }
 
-func (s *bentomlStore) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
+// getModel reads a model's descriptor, reporting a model or version the store
+// does not hold as ErrNotFound. The bentoml package cannot name that sentinel
+// itself — it is imported from here — so its own is translated at this one
+// place.
+func (s *bentomlStore) getModel(name, version string) (*bentoml.ModelYAML, error) {
 	model, err := bentoml.GetModelDetail(s.path, name, version)
+	if errors.Is(err, bentoml.ErrModelNotFound) {
+		return nil, errors.Wrap(ErrNotFound, err.Error())
+	}
+
+	return model, err
+}
+
+func (s *bentomlStore) GetModelVersion(name, version string) (*v1.ModelVersion, error) {
+	model, err := s.getModel(name, version)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +140,7 @@ func (s *bentomlStore) GetModelVersion(name, version string) (*v1.ModelVersion, 
 }
 
 func (s *bentomlStore) GetModelDetail(name, version string) (*v1.ModelVersion, error) {
-	model, err := bentoml.GetModelDetail(s.path, name, version)
+	model, err := s.getModel(name, version)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +159,7 @@ func (s *bentomlStore) GetModelDetail(name, version string) (*v1.ModelVersion, e
 }
 
 func (s *bentomlStore) GetReadme(name, version string) (*Readme, error) {
-	model, err := bentoml.GetModelDetail(s.path, name, version)
+	model, err := s.getModel(name, version)
 	if err != nil {
 		return nil, err
 	}

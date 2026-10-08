@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func TestListModelsWithContextReturnsCanceledContext(t *testing.T) {
@@ -138,4 +140,60 @@ func TestCreateArchiveWithProgressChecksums(t *testing.T) {
 		// Checksum should match the actual content in the archive
 		assert.Equal(t, sha256Hex(actualYAML), rec.Hash)
 	})
+}
+
+// "Not in the store" is the one read failure a caller answers differently, so
+// it has to be told apart from the store being unreadable.
+func TestGetModelDetailTellsAMissingModelFromAnUnreadableStore(t *testing.T) {
+	home := t.TempDir()
+
+	stored := filepath.Join(home, "models", "qwen3", "v1")
+	require.NoError(t, os.MkdirAll(stored, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stored, ModelYAMLFileName),
+		[]byte("name: qwen3\nversion: v1\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "models", "qwen3", v1.LatestVersion), []byte("v1\n"), 0o600))
+
+	// A model directory that was created but never given a latest pointer.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "models", "half-pushed", "v1"), 0o755))
+	// A latest pointer that cannot be read as a file.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "models", "broken", v1.LatestVersion), 0o755))
+
+	cases := []struct {
+		name         string
+		model        string
+		version      string
+		wantNotFound bool
+		wantErr      bool
+	}{
+		{name: "stored version", model: "qwen3", version: "v1"},
+		{name: "stored model by latest", model: "qwen3", version: v1.LatestVersion},
+		{name: "no such model", model: "nope", version: v1.LatestVersion, wantErr: true, wantNotFound: true},
+		{name: "no such model, version named", model: "nope", version: "v1", wantErr: true, wantNotFound: true},
+		{name: "directory without a latest pointer", model: "half-pushed", version: "", wantErr: true, wantNotFound: true},
+		{name: "no such version", model: "qwen3", version: "v2", wantErr: true, wantNotFound: true},
+		{name: "unreadable latest pointer", model: "broken", version: v1.LatestVersion, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model, err := GetModelDetail(home, tc.model, tc.version)
+
+			if !tc.wantErr {
+				require.NoError(t, err)
+				require.Equal(t, "v1", model.Version)
+
+				return
+			}
+
+			require.Error(t, err)
+			require.Nil(t, model)
+			require.Contains(t, err.Error(), tc.model)
+
+			if tc.wantNotFound {
+				require.ErrorIs(t, err, ErrModelNotFound)
+			} else {
+				require.NotErrorIs(t, err, ErrModelNotFound)
+			}
+		})
+	}
 }

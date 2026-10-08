@@ -16,7 +16,8 @@ import (
 )
 
 // The stubs below reproduce what www.modelscope.cn was measured to do on
-// 2026-08-12; nothing here touches the network.
+// 2026-08-12 and, where the hub has since changed its answer, on 2026-10-08;
+// nothing here touches the network.
 
 const modelScopeTestURL = "https://www.modelscope.cn"
 
@@ -529,18 +530,87 @@ func countOccurrences(values []string, want string) int {
 }
 
 // A repository with no config.json is a real answer, not a failure: plenty of
-// things on the hub are not transformers checkpoints.
+// things on the hub are not transformers checkpoints. It holds whichever way the
+// hub reports the missing file.
 func TestModelScope_GetModelDetailWithoutConfig(t *testing.T) {
-	client, _ := requestRecorder(http.StatusNotFound,
-		`{"Code":10990101007,"Message":"获取模型文件失败，文件内容为空","Success":false}`)
-	ms := &modelScope{url: modelScopeTestURL, client: client}
+	for _, shape := range modelScopeHubShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			repo := populatedRepo()
+			repo.currentHub = shape.currentHub
+			delete(repo.files, "/config.json")
+			ms := &modelScope{url: modelScopeTestURL, client: repo.client()}
 
-	version, err := ms.GetModelDetail("owner/not-a-checkpoint", v1.LatestVersion)
-	require.NoError(t, err)
+			version, err := ms.GetModelDetail("owner/not-a-checkpoint", v1.LatestVersion)
+			require.NoError(t, err)
 
-	assert.Empty(t, version.Info.Architecture)
-	assert.Contains(t, version.Info.MissingFields, v1.ModelInfoFieldArchitecture)
-	assert.Contains(t, version.Info.MissingFields, v1.ModelInfoFieldParameterCount)
+			assert.Empty(t, version.Info.Architecture)
+			assert.Contains(t, version.Info.MissingFields, v1.ModelInfoFieldArchitecture)
+			assert.Contains(t, version.Info.MissingFields, v1.ModelInfoFieldParameterCount)
+		})
+	}
+}
+
+// A repository that does not exist is not a checkpoint that says nothing about
+// itself. Both endpoints answer 404 for it, and that used to come back as a
+// model whose every field was missing.
+func TestModelScope_GetModelDetailRejectsAMissingRepository(t *testing.T) {
+	for _, shape := range modelScopeHubShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			repo := &modelScopeRepo{absent: true, currentHub: shape.currentHub}
+			ms := &modelScope{url: modelScopeTestURL, client: repo.client()}
+
+			version, err := ms.GetModelDetail("Qwen/zzz-not-real-repo", v1.LatestVersion)
+
+			assert.Nil(t, version)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrNotFound)
+
+			_, err = ms.GetReadme("Qwen/zzz-not-real-repo", v1.LatestVersion)
+			assert.ErrorIs(t, err, ErrNotFound)
+		})
+	}
+}
+
+// The hub failing is not the hub saying something is absent. A 500 that is not
+// the "no such file" answer stays an error, in the hub's own words, and the tree
+// is not asked to explain it.
+func TestModelScope_GetModelDetailKeepsAHubFailureAFailure(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{
+			name:   "500 with another code",
+			status: http.StatusInternalServerError,
+			body:   `{"Code":10990100000,"Message":"internal error","Success":false}`,
+			want:   "internal error",
+		},
+		{
+			name:   "500 that is not an envelope",
+			status: http.StatusInternalServerError,
+			body:   "upstream connect error",
+			want:   "upstream connect error",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, requested := requestRecorder(tc.status, tc.body)
+			ms := &modelScope{url: modelScopeTestURL, client: client}
+
+			_, err := ms.GetModelDetail("Qwen/Qwen2.5-0.5B-Instruct", "v1.0.0")
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrNotFound)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Len(t, *requested, 1)
+
+			_, err = ms.GetReadme("Qwen/Qwen2.5-0.5B-Instruct", "v1.0.0")
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrNotFound)
+		})
+	}
 }
 
 // A refusal is not a missing checkpoint, and the difference decides whether the
@@ -875,9 +945,22 @@ func TestModelScope_IsPublic(t *testing.T) {
 }
 
 // modelScopeRepo answers the two file endpoints the way the hub does, so a test
-// can exercise the disagreement between them: the file endpoint 404s on an
-// unknown revision, the tree endpoint answers 200 with a null list.
+// can exercise the disagreement between them. The hub has been measured doing
+// this two ways:
+//
+//	                          file endpoint        tree endpoint
+//	2026-08  unknown revision 404                  200, null file list
+//	         missing file     404                  200, files
+//	2026-10  unknown revision 500, code …1007      404, error envelope
+//	         missing file     500, code …1007      200, files
+//	both     no such repo     404                  404, error envelope
+//
+// currentHub selects the 2026-10 behaviour.
 type modelScopeRepo struct {
+	// currentHub answers the way the hub was measured to in 2026-10.
+	currentHub bool
+	// absent makes the repository one that does not exist.
+	absent bool
 	// revisions maps a revision to the files it holds. A revision absent from the
 	// map is one the repository does not have. The empty string is the default.
 	revisions map[string][]map[string]interface{}
@@ -893,8 +976,21 @@ func (r *modelScopeRepo) client() *http.Client {
 
 		revision := req.URL.Query().Get("Revision")
 		files, known := r.revisions[revision]
+		isTree := strings.HasSuffix(req.URL.Path, modelScopeRepoFilesPath)
 
-		if strings.HasSuffix(req.URL.Path, modelScopeRepoFilesPath) {
+		switch {
+		case r.absent && isTree:
+			return jsonResponse(http.StatusNotFound,
+				`{"Code":10010205001,"Message":"获取模型目录树失败，信息：record not found","Success":false}`), nil
+		case r.absent:
+			return jsonResponse(http.StatusNotFound, modelScopeNoSuchFile), nil
+		case r.currentHub && isTree && !known:
+			return jsonResponse(http.StatusNotFound,
+				`{"Code":10990101004,"Message":"获取模型目录树失败，信息：unihub GET /repos/models/tree: `+
+					`http=404 code=404 message=failed to list repo tree (all offset): 404 Not Found","Success":false}`), nil
+		}
+
+		if isTree {
 			// The trap: an unknown revision is not an error here. It is a success
 			// whose file list happens to be null.
 			payload := map[string]interface{}{
@@ -915,13 +1011,30 @@ func (r *modelScopeRepo) client() *http.Client {
 
 		content, ok := r.files[revision+"/"+req.URL.Query().Get("FilePath")]
 		if !ok {
-			// Missing file and unknown revision are the same answer here.
-			return jsonResponse(http.StatusNotFound,
-				`{"Code":10990101007,"Message":"获取模型文件失败，文件内容为空","Success":false}`), nil
+			// Missing file and unknown revision are the same answer here, under
+			// either status.
+			status := http.StatusNotFound
+			if r.currentHub {
+				status = http.StatusInternalServerError
+			}
+
+			return jsonResponse(status, modelScopeNoSuchFile), nil
 		}
 
 		return jsonResponse(http.StatusOK, content), nil
 	}}}
+}
+
+// modelScopeNoSuchFile is the file endpoint's body for a file it cannot serve.
+const modelScopeNoSuchFile = `{"Code":10990101007,"Message":"获取模型文件失败，文件内容为空","Success":false}`
+
+// modelScopeHubShapes runs a test against both measured behaviours of the hub.
+var modelScopeHubShapes = []struct {
+	name       string
+	currentHub bool
+}{
+	{name: "hub as measured 2026-08"},
+	{name: "hub as measured 2026-10", currentHub: true},
 }
 
 // A repository whose default revision holds config.json and README.md.
@@ -1020,6 +1133,37 @@ func TestModelScope_GetModelDetailRejectsAnUnknownRevision(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrNotFound)
 	assert.Contains(t, err.Error(), "no revision", "the reader has to be told which of the two it was")
+}
+
+// The same typo against the hub as it answers now: the file endpoint says 500
+// and the tree endpoint 404. Reading the 500 as "the hub is down" reported a
+// mistyped revision as a server error.
+func TestModelScope_UnknownRevisionOnTheCurrentHubIsNotFound(t *testing.T) {
+	repo := populatedRepo()
+	repo.currentHub = true
+	ms := &modelScope{url: modelScopeTestURL, client: repo.client()}
+
+	version, err := ms.GetModelDetail("Qwen/Qwen2.5-0.5B-Instruct", "zzz-not-real")
+	assert.Nil(t, version)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	_, err = ms.GetReadme("Qwen/Qwen2.5-0.5B-Instruct", "zzz-not-real")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	_, err = ms.listRepoFiles("Qwen/Qwen2.5-0.5B-Instruct", "zzz-not-real")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	// A revision that is there but has no README still says that, not "no revision".
+	_, err = ms.GetReadme("Qwen/Qwen2.5-0.5B-Instruct", "v1.0.0")
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.Contains(t, err.Error(), "has no README.md")
+
+	// And one that is there with its config.json is read as before.
+	version, err = ms.GetModelDetail("Qwen/Qwen2.5-0.5B-Instruct", "v1.0.0")
+	require.NoError(t, err)
+	assert.Equal(t, "v1.0.0", version.Name)
 }
 
 // The other half: a repository that really has no config.json still answers, with

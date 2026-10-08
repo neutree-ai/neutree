@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kmount "k8s.io/utils/mount"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/nfs"
 )
 
@@ -108,6 +109,10 @@ func TestNFSMissingModelOnAHealthyMountStaysNotFound(t *testing.T) {
 	_, err := registry.GetModelVersion("qwen3", "v2")
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrStorageUnavailable)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	_, err = registry.GetModelDetail("nope", v1.LatestVersion)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // The reported failure: three concurrent readers of one registry, and whichever
