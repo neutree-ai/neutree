@@ -22,6 +22,52 @@ func (_m *MockStorage) EXPECT() *MockStorage_Expecter {
 	return &MockStorage_Expecter{mock: &_m.Mock}
 }
 
+// AddTeamMember provides a mock function with given fields: data
+func (_m *MockStorage) AddTeamMember(data *storage.TeamMember) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddTeamMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.TeamMember) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_AddTeamMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddTeamMember'
+type MockStorage_AddTeamMember_Call struct {
+	*mock.Call
+}
+
+// AddTeamMember is a helper method to define mock.On call
+//   - data *storage.TeamMember
+func (_e *MockStorage_Expecter) AddTeamMember(data interface{}) *MockStorage_AddTeamMember_Call {
+	return &MockStorage_AddTeamMember_Call{Call: _e.mock.On("AddTeamMember", data)}
+}
+
+func (_c *MockStorage_AddTeamMember_Call) Run(run func(data *storage.TeamMember)) *MockStorage_AddTeamMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.TeamMember))
+	})
+	return _c
+}
+
+func (_c *MockStorage_AddTeamMember_Call) Return(_a0 error) *MockStorage_AddTeamMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_AddTeamMember_Call) RunAndReturn(run func(*storage.TeamMember) error) *MockStorage_AddTeamMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CallDatabaseFunction provides a mock function with given fields: name, params, result
 func (_m *MockStorage) CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error {
 	ret := _m.Called(name, params, result)
@@ -633,6 +679,52 @@ func (_c *MockStorage_CreateModelRegistry_Call) RunAndReturn(run func(*v1.ModelR
 	return _c
 }
 
+// CreateOrgUnit provides a mock function with given fields: data
+func (_m *MockStorage) CreateOrgUnit(data *v1.OrgUnit) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateOrgUnit")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.OrgUnit) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateOrgUnit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateOrgUnit'
+type MockStorage_CreateOrgUnit_Call struct {
+	*mock.Call
+}
+
+// CreateOrgUnit is a helper method to define mock.On call
+//   - data *v1.OrgUnit
+func (_e *MockStorage_Expecter) CreateOrgUnit(data interface{}) *MockStorage_CreateOrgUnit_Call {
+	return &MockStorage_CreateOrgUnit_Call{Call: _e.mock.On("CreateOrgUnit", data)}
+}
+
+func (_c *MockStorage_CreateOrgUnit_Call) Run(run func(data *v1.OrgUnit)) *MockStorage_CreateOrgUnit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.OrgUnit))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateOrgUnit_Call) Return(_a0 error) *MockStorage_CreateOrgUnit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateOrgUnit_Call) RunAndReturn(run func(*v1.OrgUnit) error) *MockStorage_CreateOrgUnit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateRole provides a mock function with given fields: data
 func (_m *MockStorage) CreateRole(data *v1.Role) error {
 	ret := _m.Called(data)
@@ -813,6 +905,52 @@ func (_c *MockStorage_CreateStaticNodeCluster_Call) Return(_a0 error) *MockStora
 }
 
 func (_c *MockStorage_CreateStaticNodeCluster_Call) RunAndReturn(run func(*v1.StaticNodeCluster) error) *MockStorage_CreateStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateTeam provides a mock function with given fields: data
+func (_m *MockStorage) CreateTeam(data *v1.Team) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateTeam")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Team) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateTeam_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateTeam'
+type MockStorage_CreateTeam_Call struct {
+	*mock.Call
+}
+
+// CreateTeam is a helper method to define mock.On call
+//   - data *v1.Team
+func (_e *MockStorage_Expecter) CreateTeam(data interface{}) *MockStorage_CreateTeam_Call {
+	return &MockStorage_CreateTeam_Call{Call: _e.mock.On("CreateTeam", data)}
+}
+
+func (_c *MockStorage_CreateTeam_Call) Run(run func(data *v1.Team)) *MockStorage_CreateTeam_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.Team))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateTeam_Call) Return(_a0 error) *MockStorage_CreateTeam_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateTeam_Call) RunAndReturn(run func(*v1.Team) error) *MockStorage_CreateTeam_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1369,6 +1507,52 @@ func (_c *MockStorage_DeleteModelRegistry_Call) RunAndReturn(run func(string) er
 	return _c
 }
 
+// DeleteOrgUnitMember provides a mock function with given fields: userID
+func (_m *MockStorage) DeleteOrgUnitMember(userID string) error {
+	ret := _m.Called(userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteOrgUnitMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteOrgUnitMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteOrgUnitMember'
+type MockStorage_DeleteOrgUnitMember_Call struct {
+	*mock.Call
+}
+
+// DeleteOrgUnitMember is a helper method to define mock.On call
+//   - userID string
+func (_e *MockStorage_Expecter) DeleteOrgUnitMember(userID interface{}) *MockStorage_DeleteOrgUnitMember_Call {
+	return &MockStorage_DeleteOrgUnitMember_Call{Call: _e.mock.On("DeleteOrgUnitMember", userID)}
+}
+
+func (_c *MockStorage_DeleteOrgUnitMember_Call) Run(run func(userID string)) *MockStorage_DeleteOrgUnitMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteOrgUnitMember_Call) Return(_a0 error) *MockStorage_DeleteOrgUnitMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteOrgUnitMember_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteOrgUnitMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteRole provides a mock function with given fields: id
 func (_m *MockStorage) DeleteRole(id string) error {
 	ret := _m.Called(id)
@@ -1549,6 +1733,53 @@ func (_c *MockStorage_DeleteStaticNodeCluster_Call) Return(_a0 error) *MockStora
 }
 
 func (_c *MockStorage_DeleteStaticNodeCluster_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteTeamMember provides a mock function with given fields: teamID, userID
+func (_m *MockStorage) DeleteTeamMember(teamID int, userID string) error {
+	ret := _m.Called(teamID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteTeamMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int, string) error); ok {
+		r0 = rf(teamID, userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteTeamMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteTeamMember'
+type MockStorage_DeleteTeamMember_Call struct {
+	*mock.Call
+}
+
+// DeleteTeamMember is a helper method to define mock.On call
+//   - teamID int
+//   - userID string
+func (_e *MockStorage_Expecter) DeleteTeamMember(teamID interface{}, userID interface{}) *MockStorage_DeleteTeamMember_Call {
+	return &MockStorage_DeleteTeamMember_Call{Call: _e.mock.On("DeleteTeamMember", teamID, userID)}
+}
+
+func (_c *MockStorage_DeleteTeamMember_Call) Run(run func(teamID int, userID string)) *MockStorage_DeleteTeamMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteTeamMember_Call) Return(_a0 error) *MockStorage_DeleteTeamMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteTeamMember_Call) RunAndReturn(run func(int, string) error) *MockStorage_DeleteTeamMember_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2391,6 +2622,64 @@ func (_c *MockStorage_GetModelRegistry_Call) RunAndReturn(run func(string) (*v1.
 	return _c
 }
 
+// GetOrgUnit provides a mock function with given fields: id
+func (_m *MockStorage) GetOrgUnit(id string) (*v1.OrgUnit, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetOrgUnit")
+	}
+
+	var r0 *v1.OrgUnit
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.OrgUnit, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.OrgUnit); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.OrgUnit)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetOrgUnit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetOrgUnit'
+type MockStorage_GetOrgUnit_Call struct {
+	*mock.Call
+}
+
+// GetOrgUnit is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetOrgUnit(id interface{}) *MockStorage_GetOrgUnit_Call {
+	return &MockStorage_GetOrgUnit_Call{Call: _e.mock.On("GetOrgUnit", id)}
+}
+
+func (_c *MockStorage_GetOrgUnit_Call) Run(run func(id string)) *MockStorage_GetOrgUnit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetOrgUnit_Call) Return(_a0 *v1.OrgUnit, _a1 error) *MockStorage_GetOrgUnit_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetOrgUnit_Call) RunAndReturn(run func(string) (*v1.OrgUnit, error)) *MockStorage_GetOrgUnit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRole provides a mock function with given fields: id
 func (_m *MockStorage) GetRole(id string) (*v1.Role, error) {
 	ret := _m.Called(id)
@@ -2503,6 +2792,64 @@ func (_c *MockStorage_GetRoleAssignment_Call) Return(_a0 *v1.RoleAssignment, _a1
 }
 
 func (_c *MockStorage_GetRoleAssignment_Call) RunAndReturn(run func(string) (*v1.RoleAssignment, error)) *MockStorage_GetRoleAssignment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetTeam provides a mock function with given fields: id
+func (_m *MockStorage) GetTeam(id string) (*v1.Team, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTeam")
+	}
+
+	var r0 *v1.Team
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.Team, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.Team); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Team)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetTeam_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTeam'
+type MockStorage_GetTeam_Call struct {
+	*mock.Call
+}
+
+// GetTeam is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetTeam(id interface{}) *MockStorage_GetTeam_Call {
+	return &MockStorage_GetTeam_Call{Call: _e.mock.On("GetTeam", id)}
+}
+
+func (_c *MockStorage_GetTeam_Call) Run(run func(id string)) *MockStorage_GetTeam_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetTeam_Call) Return(_a0 *v1.Team, _a1 error) *MockStorage_GetTeam_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetTeam_Call) RunAndReturn(run func(string) (*v1.Team, error)) *MockStorage_GetTeam_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3260,6 +3607,238 @@ func (_c *MockStorage_ListModelRegistry_Call) RunAndReturn(run func(storage.List
 	return _c
 }
 
+// ListOrgUnit provides a mock function with given fields: option
+func (_m *MockStorage) ListOrgUnit(option storage.ListOption) ([]v1.OrgUnit, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOrgUnit")
+	}
+
+	var r0 []v1.OrgUnit
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.OrgUnit, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.OrgUnit); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.OrgUnit)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListOrgUnit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOrgUnit'
+type MockStorage_ListOrgUnit_Call struct {
+	*mock.Call
+}
+
+// ListOrgUnit is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListOrgUnit(option interface{}) *MockStorage_ListOrgUnit_Call {
+	return &MockStorage_ListOrgUnit_Call{Call: _e.mock.On("ListOrgUnit", option)}
+}
+
+func (_c *MockStorage_ListOrgUnit_Call) Run(run func(option storage.ListOption)) *MockStorage_ListOrgUnit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnit_Call) Return(_a0 []v1.OrgUnit, _a1 error) *MockStorage_ListOrgUnit_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnit_Call) RunAndReturn(run func(storage.ListOption) ([]v1.OrgUnit, error)) *MockStorage_ListOrgUnit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListOrgUnitMember provides a mock function with given fields: option
+func (_m *MockStorage) ListOrgUnitMember(option storage.ListOption) ([]storage.OrgUnitMember, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOrgUnitMember")
+	}
+
+	var r0 []storage.OrgUnitMember
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]storage.OrgUnitMember, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []storage.OrgUnitMember); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]storage.OrgUnitMember)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListOrgUnitMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOrgUnitMember'
+type MockStorage_ListOrgUnitMember_Call struct {
+	*mock.Call
+}
+
+// ListOrgUnitMember is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListOrgUnitMember(option interface{}) *MockStorage_ListOrgUnitMember_Call {
+	return &MockStorage_ListOrgUnitMember_Call{Call: _e.mock.On("ListOrgUnitMember", option)}
+}
+
+func (_c *MockStorage_ListOrgUnitMember_Call) Run(run func(option storage.ListOption)) *MockStorage_ListOrgUnitMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitMember_Call) Return(_a0 []storage.OrgUnitMember, _a1 error) *MockStorage_ListOrgUnitMember_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitMember_Call) RunAndReturn(run func(storage.ListOption) ([]storage.OrgUnitMember, error)) *MockStorage_ListOrgUnitMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListOrgUnitSubtree provides a mock function with given fields: orgUnitID
+func (_m *MockStorage) ListOrgUnitSubtree(orgUnitID int) ([]v1.OrgUnit, error) {
+	ret := _m.Called(orgUnitID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOrgUnitSubtree")
+	}
+
+	var r0 []v1.OrgUnit
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int) ([]v1.OrgUnit, error)); ok {
+		return rf(orgUnitID)
+	}
+	if rf, ok := ret.Get(0).(func(int) []v1.OrgUnit); ok {
+		r0 = rf(orgUnitID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.OrgUnit)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int) error); ok {
+		r1 = rf(orgUnitID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListOrgUnitSubtree_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOrgUnitSubtree'
+type MockStorage_ListOrgUnitSubtree_Call struct {
+	*mock.Call
+}
+
+// ListOrgUnitSubtree is a helper method to define mock.On call
+//   - orgUnitID int
+func (_e *MockStorage_Expecter) ListOrgUnitSubtree(orgUnitID interface{}) *MockStorage_ListOrgUnitSubtree_Call {
+	return &MockStorage_ListOrgUnitSubtree_Call{Call: _e.mock.On("ListOrgUnitSubtree", orgUnitID)}
+}
+
+func (_c *MockStorage_ListOrgUnitSubtree_Call) Run(run func(orgUnitID int)) *MockStorage_ListOrgUnitSubtree_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitSubtree_Call) Return(_a0 []v1.OrgUnit, _a1 error) *MockStorage_ListOrgUnitSubtree_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitSubtree_Call) RunAndReturn(run func(int) ([]v1.OrgUnit, error)) *MockStorage_ListOrgUnitSubtree_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListOrgUnitSubtreeMembers provides a mock function with given fields: orgUnitID
+func (_m *MockStorage) ListOrgUnitSubtreeMembers(orgUnitID int) ([]storage.OrgUnitMember, error) {
+	ret := _m.Called(orgUnitID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOrgUnitSubtreeMembers")
+	}
+
+	var r0 []storage.OrgUnitMember
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int) ([]storage.OrgUnitMember, error)); ok {
+		return rf(orgUnitID)
+	}
+	if rf, ok := ret.Get(0).(func(int) []storage.OrgUnitMember); ok {
+		r0 = rf(orgUnitID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]storage.OrgUnitMember)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int) error); ok {
+		r1 = rf(orgUnitID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListOrgUnitSubtreeMembers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOrgUnitSubtreeMembers'
+type MockStorage_ListOrgUnitSubtreeMembers_Call struct {
+	*mock.Call
+}
+
+// ListOrgUnitSubtreeMembers is a helper method to define mock.On call
+//   - orgUnitID int
+func (_e *MockStorage_Expecter) ListOrgUnitSubtreeMembers(orgUnitID interface{}) *MockStorage_ListOrgUnitSubtreeMembers_Call {
+	return &MockStorage_ListOrgUnitSubtreeMembers_Call{Call: _e.mock.On("ListOrgUnitSubtreeMembers", orgUnitID)}
+}
+
+func (_c *MockStorage_ListOrgUnitSubtreeMembers_Call) Run(run func(orgUnitID int)) *MockStorage_ListOrgUnitSubtreeMembers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitSubtreeMembers_Call) Return(_a0 []storage.OrgUnitMember, _a1 error) *MockStorage_ListOrgUnitSubtreeMembers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListOrgUnitSubtreeMembers_Call) RunAndReturn(run func(int) ([]storage.OrgUnitMember, error)) *MockStorage_ListOrgUnitSubtreeMembers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListRole provides a mock function with given fields: option
 func (_m *MockStorage) ListRole(option storage.ListOption) ([]v1.Role, error) {
 	ret := _m.Called(option)
@@ -3492,6 +4071,122 @@ func (_c *MockStorage_ListStaticNodeCluster_Call) RunAndReturn(run func(storage.
 	return _c
 }
 
+// ListTeam provides a mock function with given fields: option
+func (_m *MockStorage) ListTeam(option storage.ListOption) ([]v1.Team, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListTeam")
+	}
+
+	var r0 []v1.Team
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.Team, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.Team); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.Team)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListTeam_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListTeam'
+type MockStorage_ListTeam_Call struct {
+	*mock.Call
+}
+
+// ListTeam is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListTeam(option interface{}) *MockStorage_ListTeam_Call {
+	return &MockStorage_ListTeam_Call{Call: _e.mock.On("ListTeam", option)}
+}
+
+func (_c *MockStorage_ListTeam_Call) Run(run func(option storage.ListOption)) *MockStorage_ListTeam_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListTeam_Call) Return(_a0 []v1.Team, _a1 error) *MockStorage_ListTeam_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListTeam_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Team, error)) *MockStorage_ListTeam_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListTeamMember provides a mock function with given fields: option
+func (_m *MockStorage) ListTeamMember(option storage.ListOption) ([]storage.TeamMember, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListTeamMember")
+	}
+
+	var r0 []storage.TeamMember
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]storage.TeamMember, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []storage.TeamMember); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]storage.TeamMember)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListTeamMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListTeamMember'
+type MockStorage_ListTeamMember_Call struct {
+	*mock.Call
+}
+
+// ListTeamMember is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListTeamMember(option interface{}) *MockStorage_ListTeamMember_Call {
+	return &MockStorage_ListTeamMember_Call{Call: _e.mock.On("ListTeamMember", option)}
+}
+
+func (_c *MockStorage_ListTeamMember_Call) Run(run func(option storage.ListOption)) *MockStorage_ListTeamMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListTeamMember_Call) Return(_a0 []storage.TeamMember, _a1 error) *MockStorage_ListTeamMember_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListTeamMember_Call) RunAndReturn(run func(storage.ListOption) ([]storage.TeamMember, error)) *MockStorage_ListTeamMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListUserProfile provides a mock function with given fields: option
 func (_m *MockStorage) ListUserProfile(option storage.ListOption) ([]v1.UserProfile, error) {
 	ret := _m.Called(option)
@@ -3604,6 +4299,52 @@ func (_c *MockStorage_ListWorkspace_Call) Return(_a0 []v1.Workspace, _a1 error) 
 }
 
 func (_c *MockStorage_ListWorkspace_Call) RunAndReturn(run func(storage.ListOption) ([]v1.Workspace, error)) *MockStorage_ListWorkspace_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetOrgUnitMember provides a mock function with given fields: data
+func (_m *MockStorage) SetOrgUnitMember(data *storage.OrgUnitMember) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetOrgUnitMember")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.OrgUnitMember) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_SetOrgUnitMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetOrgUnitMember'
+type MockStorage_SetOrgUnitMember_Call struct {
+	*mock.Call
+}
+
+// SetOrgUnitMember is a helper method to define mock.On call
+//   - data *storage.OrgUnitMember
+func (_e *MockStorage_Expecter) SetOrgUnitMember(data interface{}) *MockStorage_SetOrgUnitMember_Call {
+	return &MockStorage_SetOrgUnitMember_Call{Call: _e.mock.On("SetOrgUnitMember", data)}
+}
+
+func (_c *MockStorage_SetOrgUnitMember_Call) Run(run func(data *storage.OrgUnitMember)) *MockStorage_SetOrgUnitMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.OrgUnitMember))
+	})
+	return _c
+}
+
+func (_c *MockStorage_SetOrgUnitMember_Call) Return(_a0 error) *MockStorage_SetOrgUnitMember_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_SetOrgUnitMember_Call) RunAndReturn(run func(*storage.OrgUnitMember) error) *MockStorage_SetOrgUnitMember_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4078,6 +4819,53 @@ func (_c *MockStorage_UpdateModelRegistry_Call) RunAndReturn(run func(string, *v
 	return _c
 }
 
+// UpdateOrgUnit provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateOrgUnit(id string, data *v1.OrgUnit) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateOrgUnit")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.OrgUnit) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateOrgUnit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateOrgUnit'
+type MockStorage_UpdateOrgUnit_Call struct {
+	*mock.Call
+}
+
+// UpdateOrgUnit is a helper method to define mock.On call
+//   - id string
+//   - data *v1.OrgUnit
+func (_e *MockStorage_Expecter) UpdateOrgUnit(id interface{}, data interface{}) *MockStorage_UpdateOrgUnit_Call {
+	return &MockStorage_UpdateOrgUnit_Call{Call: _e.mock.On("UpdateOrgUnit", id, data)}
+}
+
+func (_c *MockStorage_UpdateOrgUnit_Call) Run(run func(id string, data *v1.OrgUnit)) *MockStorage_UpdateOrgUnit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.OrgUnit))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateOrgUnit_Call) Return(_a0 error) *MockStorage_UpdateOrgUnit_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateOrgUnit_Call) RunAndReturn(run func(string, *v1.OrgUnit) error) *MockStorage_UpdateOrgUnit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateRole provides a mock function with given fields: id, data
 func (_m *MockStorage) UpdateRole(id string, data *v1.Role) error {
 	ret := _m.Called(id, data)
@@ -4262,6 +5050,53 @@ func (_c *MockStorage_UpdateStaticNodeCluster_Call) Return(_a0 error) *MockStora
 }
 
 func (_c *MockStorage_UpdateStaticNodeCluster_Call) RunAndReturn(run func(string, *v1.StaticNodeCluster) error) *MockStorage_UpdateStaticNodeCluster_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateTeam provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateTeam(id string, data *v1.Team) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateTeam")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Team) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateTeam_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateTeam'
+type MockStorage_UpdateTeam_Call struct {
+	*mock.Call
+}
+
+// UpdateTeam is a helper method to define mock.On call
+//   - id string
+//   - data *v1.Team
+func (_e *MockStorage_Expecter) UpdateTeam(id interface{}, data interface{}) *MockStorage_UpdateTeam_Call {
+	return &MockStorage_UpdateTeam_Call{Call: _e.mock.On("UpdateTeam", id, data)}
+}
+
+func (_c *MockStorage_UpdateTeam_Call) Run(run func(id string, data *v1.Team)) *MockStorage_UpdateTeam_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.Team))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateTeam_Call) Return(_a0 error) *MockStorage_UpdateTeam_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateTeam_Call) RunAndReturn(run func(string, *v1.Team) error) *MockStorage_UpdateTeam_Call {
 	_c.Call.Return(run)
 	return _c
 }

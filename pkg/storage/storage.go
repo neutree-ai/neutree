@@ -35,6 +35,10 @@ const (
 	STATIC_NODE_TABLE         = "static_nodes"
 	EXTERNAL_IDENTITY_TABLE   = "external_identities"
 	IDENTITY_SOURCE_TABLE     = "identity_sources"
+	ORG_UNIT_TABLE            = "org_units"
+	ORG_UNIT_MEMBER_TABLE     = "org_unit_members"
+	TEAM_TABLE                = "teams"
+	TEAM_MEMBER_TABLE         = "team_members"
 )
 
 type ImageRegistryStorage interface {
@@ -276,6 +280,76 @@ type IdentitySourceStorage interface {
 	GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error)
 }
 
+// OrgUnitMember puts a user into an OrgUnit, the user's primary department.
+// A user has at most one. It is a plain table row, not an API resource.
+type OrgUnitMember struct {
+	UserID    string `json:"user_id"`
+	OrgUnitID int    `json:"org_unit_id"`
+	// IdentitySource is the IdentitySource whose sync wrote the row; empty
+	// when an admin assigned a local account by hand.
+	IdentitySource string `json:"identity_source,omitempty"`
+	// AssignedAt is set by the database when the user is put into an OrgUnit.
+	AssignedAt string `json:"assigned_at,omitempty"`
+}
+
+// TeamMember puts a user into a Team. A user can be in any number of Teams.
+type TeamMember struct {
+	TeamID    int    `json:"team_id"`
+	UserID    string `json:"user_id"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// OrgUnitStorage reads and writes OrgUnits and their members. OrgUnits are
+// written by directory sync only and are never deleted: a removed department
+// gets status.phase Inactive.
+type OrgUnitStorage interface {
+	// CreateOrgUnit creates an OrgUnit. The database computes its path.
+	CreateOrgUnit(data *v1.OrgUnit) error
+	// UpdateOrgUnit updates an OrgUnit. A changed spec.parent moves its
+	// subtree; the database re-paths every descendant.
+	UpdateOrgUnit(id string, data *v1.OrgUnit) error
+	// GetOrgUnit retrieves an OrgUnit by its ID.
+	GetOrgUnit(id string) (*v1.OrgUnit, error)
+	// ListOrgUnit retrieves OrgUnits with optional filters.
+	ListOrgUnit(option ListOption) ([]v1.OrgUnit, error)
+	// ListOrgUnitSubtree returns the OrgUnit with the given ID and all its
+	// descendants, Inactive ones included.
+	ListOrgUnitSubtree(orgUnitID int) ([]v1.OrgUnit, error)
+
+	// SetOrgUnitMember puts a user into an OrgUnit, replacing the user's
+	// previous one.
+	SetOrgUnitMember(data *OrgUnitMember) error
+	// DeleteOrgUnitMember takes a user out of their OrgUnit.
+	DeleteOrgUnitMember(userID string) error
+	// ListOrgUnitMember retrieves OrgUnit memberships with optional filters.
+	ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error)
+	// ListOrgUnitSubtreeMembers returns the members of the OrgUnit with the
+	// given ID and of all its descendants.
+	ListOrgUnitSubtreeMembers(orgUnitID int) ([]OrgUnitMember, error)
+}
+
+// TeamStorage reads and writes Teams and their members. Teams are written by
+// directory sync only and are never deleted: a removed group gets
+// status.phase Inactive.
+type TeamStorage interface {
+	// CreateTeam creates a Team.
+	CreateTeam(data *v1.Team) error
+	// UpdateTeam updates a Team.
+	UpdateTeam(id string, data *v1.Team) error
+	// GetTeam retrieves a Team by its ID.
+	GetTeam(id string) (*v1.Team, error)
+	// ListTeam retrieves Teams with optional filters.
+	ListTeam(option ListOption) ([]v1.Team, error)
+
+	// AddTeamMember puts a user into a Team; adding an existing member is a
+	// no-op.
+	AddTeamMember(data *TeamMember) error
+	// DeleteTeamMember takes a user out of a Team.
+	DeleteTeamMember(teamID int, userID string) error
+	// ListTeamMember retrieves Team memberships with optional filters.
+	ListTeamMember(option ListOption) ([]TeamMember, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -294,6 +368,8 @@ type Storage interface {
 	StaticNodeStorage
 	ExternalIdentityStorage
 	IdentitySourceStorage
+	OrgUnitStorage
+	TeamStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

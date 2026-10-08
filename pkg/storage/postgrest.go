@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -1217,4 +1218,137 @@ func (s *postgrestStorage) GetIdentitySourceSecrets(name string) (*IdentitySourc
 	}
 
 	return &response[0], nil
+}
+
+func (s *postgrestStorage) CreateOrgUnit(data *v1.OrgUnit) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Insert(data, false, "", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateOrgUnit(id string, data *v1.OrgUnit) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Update(data, "minimal", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) GetOrgUnit(id string) (*v1.OrgUnit, error) {
+	var response []v1.OrgUnit
+
+	responseContent, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListOrgUnit(option ListOption) ([]v1.OrgUnit, error) {
+	var response []v1.OrgUnit
+	err := s.genericList(ORG_UNIT_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) ListOrgUnitSubtree(orgUnitID int) ([]v1.OrgUnit, error) {
+	response := []v1.OrgUnit{}
+	if err := s.CallDatabaseFunction("org_unit_subtree", map[string]interface{}{"p_org_unit_id": orgUnitID}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (s *postgrestStorage) SetOrgUnitMember(data *OrgUnitMember) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_MEMBER_TABLE).Insert(data, true, "user_id", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteOrgUnitMember(userID string) error {
+	_, _, err := s.postgrestClient.From(ORG_UNIT_MEMBER_TABLE).Delete("minimal", "").Filter("user_id", "eq", userID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error) {
+	var response []OrgUnitMember
+	err := s.genericList(ORG_UNIT_MEMBER_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) ListOrgUnitSubtreeMembers(orgUnitID int) ([]OrgUnitMember, error) {
+	response := []OrgUnitMember{}
+	if err := s.CallDatabaseFunction("org_unit_subtree_members", map[string]interface{}{"p_org_unit_id": orgUnitID}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (s *postgrestStorage) CreateTeam(data *v1.Team) error {
+	_, _, err := s.postgrestClient.From(TEAM_TABLE).Insert(data, false, "", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateTeam(id string, data *v1.Team) error {
+	_, _, err := s.postgrestClient.From(TEAM_TABLE).Update(data, "minimal", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) GetTeam(id string) (*v1.Team, error) {
+	var response []v1.Team
+
+	responseContent, _, err := s.postgrestClient.From(TEAM_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListTeam(option ListOption) ([]v1.Team, error) {
+	var response []v1.Team
+	err := s.genericList(TEAM_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) AddTeamMember(data *TeamMember) error {
+	_, _, err := s.postgrestClient.From(TEAM_MEMBER_TABLE).Insert(data, true, "team_id,user_id", "minimal", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteTeamMember(teamID int, userID string) error {
+	_, _, err := s.postgrestClient.From(TEAM_MEMBER_TABLE).Delete("minimal", "").
+		Filter("team_id", "eq", strconv.Itoa(teamID)).Filter("user_id", "eq", userID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListTeamMember(option ListOption) ([]TeamMember, error) {
+	var response []TeamMember
+	err := s.genericList(TEAM_MEMBER_TABLE, &response, option)
+
+	return response, err
 }
