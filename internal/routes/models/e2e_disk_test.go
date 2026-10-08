@@ -188,3 +188,39 @@ func TestListModels_ResponseOrderIsStableFromDisk(t *testing.T) {
 
 	assert.Equal(t, []string{"alpha", "beta", "gamma", "mu", "omega", "zeta"}, first)
 }
+
+// A model or version the store does not hold is the client's 404, all the way
+// from the directory tree to the response.
+func TestGetModel_MissingFromDiskIsNotFound(t *testing.T) {
+	home := t.TempDir()
+	writeCheckpoint(t, home, "qwen3", "v1", "", nil)
+	// A model directory that was created but never given a latest pointer.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "models", "half-pushed", "v1"), 0o755))
+
+	cases := []struct {
+		name    string
+		model   string
+		version string
+	}{
+		{name: "no such model", model: "nope"},
+		{name: "directory without a latest pointer", model: "half-pushed"},
+		{name: "no such version", model: "qwen3", version: "v2"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, w := createMockContext("default", "test-registry", tc.model, "")
+			if tc.version != "" {
+				setVersionQuery(c, tc.version)
+			}
+
+			getModel(diskRegistryDeps(t, home))(c)
+
+			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+
+			var response map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			assert.Equal(t, reasonNotFound, response["reason"])
+		})
+	}
+}

@@ -63,6 +63,13 @@ const (
 	// default is still read correctly; that branch would only be reported under
 	// its own name rather than as "latest".
 	modelScopeDefaultRevision = "master"
+
+	// modelScopeFileMissingCode is the envelope code of the file endpoint's
+	// "获取模型文件失败，文件内容为空" — it has no such file to serve. The HTTP
+	// status beside it is not a reliable guide: measured in 2026-10 it is 404 for
+	// a repository that does not exist but 500 for a file or a revision that
+	// does not, where it used to be 404 for all three.
+	modelScopeFileMissingCode = 10990101007
 )
 
 // Where a ModelScope model's files come from, for whoever wires the download
@@ -403,7 +410,12 @@ type modelScopeRepoTree struct {
 // empty repository is a real, separate answer and comes back as an empty slice
 // with no error; only the hub's own "I have nothing to say about this revision"
 // is an error. A repository that does not exist at all is a plain 404 and is
-// mapped by responseError.
+// mapped to ErrNotFound by responseError.
+//
+// The hub has since been measured (2026-10) answering an unknown revision with
+// that same 404 and an error envelope instead of the null list. Both shapes end
+// up as ErrNotFound; the null-list check stays for a hub or mirror that still
+// answers the old way.
 func (ms *modelScope) listRepoFiles(name, version string) ([]ModelScopeRepoFile, error) {
 	params := url.Values{}
 	// Root selects a subtree; empty means the repository root.
@@ -452,10 +464,10 @@ func (ms *modelScope) describeRevision(version string) string {
 	return v1.LatestVersion
 }
 
-// missingRevision reports the revision as absent, or nil if it is not provably
-// absent.
+// missingRevision reports the revision — or the whole repository — as absent,
+// or nil if it is not provably absent.
 //
-// The file endpoint answers the same 404 for a file that is not in the
+// The file endpoint answers the same miss for a file that is not in the
 // repository and for a revision that does not exist, so "no config.json" and
 // "you spelled the branch wrong" arrive identical. The tree endpoint can tell
 // them apart, so it is asked — once, and only on a miss.
@@ -540,9 +552,11 @@ func (ms *modelScope) GetReadme(name, version string) (*Readme, error) {
 // own default, and a wrong guess is not a different name for the same thing —
 // it is a 404 (see modelScopeDefaultRevision).
 //
-// The 404 this maps to ErrNotFound is ambiguous: it is the same answer for a
+// The miss this maps to ErrNotFound is ambiguous: it is the same answer for a
 // file that is absent and for a revision that never existed. Callers that report
-// the miss to a user resolve it with missingRevision.
+// the miss to a user resolve it with missingRevision. It arrives as a 404 or as
+// a 500 carrying modelScopeFileMissingCode; any other 500 is the hub failing and
+// stays an error.
 func (ms *modelScope) fetchFile(name, version, file string) ([]byte, error) {
 	params := url.Values{}
 	params.Set("FilePath", file)
@@ -565,7 +579,7 @@ func (ms *modelScope) fetchFile(name, version, file string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound || modelScopeFileMissing(resp) {
 		return nil, errors.Wrapf(ErrNotFound, "model %s has no %s on ModelScope", name, file)
 	}
 
@@ -575,6 +589,22 @@ func (ms *modelScope) fetchFile(name, version, file string) ([]byte, error) {
 
 	// A file is served as its own bytes, not wrapped in the JSON envelope.
 	return io.ReadAll(io.LimitReader(resp.Body, MaxReadmeBytes+1))
+}
+
+// modelScopeFileMissing reports whether a 500 from the file endpoint is the hub
+// saying it has no such file rather than the hub failing.
+func modelScopeFileMissing(resp *http.Response) bool {
+	if resp.StatusCode != http.StatusInternalServerError {
+		return false
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, hubErrorBodyLimit)) //nolint:errcheck
+	// Put back what was read: when this is a real failure, responseError quotes it.
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+
+	var envelope modelScopeEnvelope
+
+	return json.Unmarshal(body, &envelope) == nil && envelope.Code == modelScopeFileMissingCode
 }
 
 // revision maps a version onto the hub's wire name for it, and returns "" for
@@ -673,10 +703,12 @@ func (ms *modelScope) doWithRetry(req *http.Request) (*http.Response, error) {
 }
 
 // responseError turns a non-OK response into an error a caller can act on.
-// Credentials and throttling get their own types because the remedies differ;
-// anything else keeps the hub's own words.
+// Credentials, throttling and "it is not there" get their own types because the
+// remedies differ; anything else keeps the hub's own words.
 func (ms *modelScope) responseError(resp *http.Response, context string) error {
 	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return errors.Wrapf(ErrNotFound, "%s: %s%s", context, resp.Status, modelScopeErrorDetail(resp))
 	case http.StatusUnauthorized, http.StatusForbidden:
 		hint := "a token is required"
 		if ms.apiToken != "" {

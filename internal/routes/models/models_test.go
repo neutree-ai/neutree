@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	pkgerrors "github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -398,50 +399,68 @@ func TestGetModel_Success(t *testing.T) {
 	mockModelRegistry.AssertExpectations(t)
 }
 
-func TestGetModel_NotFound(t *testing.T) {
-	// Setup mocks
-	mockStorage, mockModelRegistry := setupMocks(t)
-
-	// Create handler dependencies
-	deps := &Dependencies{
-		Storage: mockStorage,
-		TempDirFunc: func() (string, error) {
-			return t.TempDir(), nil
+// What the registry could not answer decides the status: a model or version that
+// is not there is the client's 404, a refusal over credentials is something to
+// fix in the registry's configuration, and only a failure nobody can classify is
+// a server error.
+func TestGetModel_RegistryErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantReason string
+	}{
+		{
+			name:       "the model or version is not in the registry",
+			err:        pkgerrors.Wrap(model_registry.ErrNotFound, "model non-existent-model"),
+			wantStatus: http.StatusNotFound,
+			wantReason: reasonNotFound,
+		},
+		{
+			name:       "the registry rejected our credentials",
+			err:        pkgerrors.Wrap(model_registry.ErrUnauthorized, "a token is required"),
+			wantStatus: http.StatusBadRequest,
+			wantReason: reasonUnauthorized,
+		},
+		{
+			name:       "the registry failed",
+			err:        errors.New("502 bad gateway"),
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
-	// Create test context
-	c, w := createMockContext("default", "test-registry", "non-existent-model", "")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockStorage, mockModelRegistry := setupMocks(t)
+			deps := &Dependencies{Storage: mockStorage}
 
-	// Prepare mock data
-	modelRegistry := v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{
-			Type: "bentoml",
-		},
+			c, w := createMockContext("default", "test-registry", "non-existent-model", "")
+
+			mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{{
+				Spec: &v1.ModelRegistrySpec{Type: "bentoml"},
+			}}, nil)
+			mockModelRegistry.On("Connect").Return(nil)
+			mockModelRegistry.On("Disconnect").Return(nil)
+			mockModelRegistry.On("GetModelDetail", "non-existent-model", v1.LatestVersion).Return(nil, tc.err)
+
+			getModel(deps)(c)
+
+			assert.Equal(t, tc.wantStatus, w.Code)
+
+			var response map[string]any
+			assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			assert.Contains(t, response["message"], "Failed to get model")
+
+			if tc.wantReason == "" {
+				assert.NotContains(t, response, "reason")
+			} else {
+				assert.Equal(t, tc.wantReason, response["reason"])
+			}
+
+			mockStorage.AssertExpectations(t)
+			mockModelRegistry.AssertExpectations(t)
+		})
 	}
-
-	// Configure mock behaviors
-	mockStorage.On("ListModelRegistry", mock.Anything).Return([]v1.ModelRegistry{modelRegistry}, nil)
-	mockModelRegistry.On("Connect").Return(nil)
-	mockModelRegistry.On("Disconnect").Return(nil)
-	mockError := errors.New("model not found")
-	mockModelRegistry.On("GetModelDetail", "non-existent-model", v1.LatestVersion).Return(nil, mockError)
-
-	// Call the handler function directly
-	handlerFunc := getModel(deps)
-	handlerFunc(c)
-
-	// Verify the results
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-
-	var response map[string]any
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
-	assert.Contains(t, response["message"], "Failed to get model")
-
-	// Verify mock expectations
-	mockStorage.AssertExpectations(t)
-	mockModelRegistry.AssertExpectations(t)
 }
 
 func TestDeleteModel_Success(t *testing.T) {

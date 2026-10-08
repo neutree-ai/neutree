@@ -1,10 +1,14 @@
 package model_registry
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 func Test_newFileTypeModelRegistry(t *testing.T) {
@@ -156,4 +160,53 @@ func Test_newNFSTypeModelRegistry(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A model or version the store does not hold is ErrNotFound on every read, so
+// the API can answer 404 instead of a server error.
+func TestFileBasedReadsReportAMissingModelAsNotFound(t *testing.T) {
+	store := storeWithModels(t, "qwen3")
+	// A model directory that was created but never given a latest pointer.
+	require.NoError(t, os.MkdirAll(filepath.Join(store.path, "models", "half-pushed", "v1"), 0o755))
+
+	cases := []struct {
+		name    string
+		model   string
+		version string
+	}{
+		{name: "no such model", model: "nope", version: v1.LatestVersion},
+		{name: "no such model, version named", model: "nope", version: "v1"},
+		{name: "directory without a latest pointer", model: "half-pushed", version: v1.LatestVersion},
+		{name: "no such version", model: "qwen3", version: "v2"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := store.GetModelDetail(tc.model, tc.version)
+			require.ErrorIs(t, err, ErrNotFound)
+			assert.Contains(t, err.Error(), tc.model)
+
+			_, err = store.GetModelVersion(tc.model, tc.version)
+			require.ErrorIs(t, err, ErrNotFound)
+
+			_, err = store.GetReadme(tc.model, tc.version)
+			require.ErrorIs(t, err, ErrNotFound)
+		})
+	}
+
+	// And a model that is there still answers.
+	detail, err := store.GetModelDetail("qwen3", v1.LatestVersion)
+	require.NoError(t, err)
+	assert.Equal(t, "v1", detail.Name)
+}
+
+// A store that cannot be read is not a store that lacks the model.
+func TestFileBasedReadFailureIsNotNotFound(t *testing.T) {
+	store := storeWithModels(t, "qwen3")
+	require.NoError(t, os.WriteFile(filepath.Join(store.path, "models", "qwen3", "v1", "model.yaml"),
+		[]byte("name: [unterminated"), 0o600))
+
+	_, err := store.GetModelDetail("qwen3", "v1")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotFound)
 }

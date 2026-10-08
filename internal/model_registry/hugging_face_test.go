@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type MockRoundTripper struct {
@@ -588,6 +589,122 @@ func TestHuggingFace_GetModelDetailWithoutConfig(t *testing.T) {
 	assert.Contains(t, detail.Info.MissingFields, v1.ModelInfoFieldArchitecture)
 	assert.Contains(t, detail.Info.MissingFields, v1.ModelInfoFieldParameterCount)
 	assert.Contains(t, detail.Info.MissingFields, v1.ModelInfoFieldNumHiddenLayers)
+}
+
+// hubMiss is the Hub's 404 for a file path, saying in X-Error-Code what it is
+// that was not found.
+func hubMiss(code string) (int, http.Header) {
+	header := make(http.Header)
+	if code != "" {
+		header.Set("X-Error-Code", code)
+	}
+
+	return http.StatusNotFound, header
+}
+
+// The Hub answers 404 on a file path for three different things. Only one of
+// them — the file itself, in a repository and revision that exist — describes a
+// model; the other two are a name that points at nothing, and rendering those as
+// a checkpoint with every field missing shows a typo as a real model.
+func TestHuggingFace_GetModelDetailTellsMissingThingsApart(t *testing.T) {
+	cases := []struct {
+		name      string
+		errorCode string
+		token     string
+		version   string
+		wantMiss  string
+	}{
+		{
+			// Measured anonymously against huggingface.co.
+			name:      "revision does not exist",
+			errorCode: "RevisionNotFound",
+			version:   "zzz-not-real",
+			wantMiss:  `no revision "zzz-not-real"`,
+		},
+		{
+			// Only a request carrying a token is told this; see
+			// TestHuggingFace_GetModelDetailAnonymousRefusalStaysUnauthorized.
+			name:      "repository does not exist",
+			errorCode: "RepoNotFound",
+			token:     "hf_good",
+			version:   v1.LatestVersion,
+			wantMiss:  "does not exist",
+		},
+		{
+			name:      "repository and revision exist, config.json does not",
+			errorCode: "EntryNotFound",
+			version:   v1.LatestVersion,
+		},
+		{
+			// A mirror that drops the header must not turn every repository without
+			// a config.json into a missing one.
+			name:    "a 404 that does not say what was missing",
+			version: v1.LatestVersion,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, header := hubMiss(tc.errorCode)
+			client, _ := responderFor(status, "Not Found", header)
+			hf := &huggingFace{url: "https://huggingface.co", client: client, apiToken: tc.token}
+
+			detail, err := hf.GetModelDetail("someone/some-model", tc.version)
+
+			if tc.wantMiss != "" {
+				require.Error(t, err)
+				assert.Nil(t, detail)
+				assert.ErrorIs(t, err, ErrNotFound)
+				assert.Contains(t, err.Error(), tc.wantMiss)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Contains(t, detail.Info.MissingFields, v1.ModelInfoFieldArchitecture)
+			assert.Contains(t, detail.Info.MissingFields, v1.ModelInfoFieldParameterCount)
+		})
+	}
+}
+
+// An anonymous request for a repository that does not exist is answered 401, not
+// 404: the Hub will not say whether a name is private or absent. That stays a
+// request for a token, which is the only thing the user can act on.
+func TestHuggingFace_GetModelDetailAnonymousRefusalStaysUnauthorized(t *testing.T) {
+	client, _ := responderFor(http.StatusUnauthorized, "Invalid username or password.", nil)
+	hf := &huggingFace{url: "https://huggingface.co", client: client}
+
+	_, err := hf.GetModelDetail("someone/private-or-absent", v1.LatestVersion)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnauthorized)
+	assert.NotErrorIs(t, err, ErrNotFound)
+}
+
+// The card has no "answer anyway" case, so every miss is ErrNotFound — but the
+// sentence still names what was missing.
+func TestHuggingFace_GetReadmeMissIsAlwaysNotFound(t *testing.T) {
+	cases := []struct {
+		name      string
+		errorCode string
+		want      string
+	}{
+		{name: "no card", errorCode: "EntryNotFound", want: "has no README.md"},
+		{name: "no such revision", errorCode: "RevisionNotFound", want: "no revision"},
+		{name: "no such repository", errorCode: "RepoNotFound", want: "does not exist"},
+		{name: "unexplained 404", want: "has no README.md"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, header := hubMiss(tc.errorCode)
+			client, _ := responderFor(status, "Not Found", header)
+			hf := &huggingFace{url: "https://huggingface.co", client: client}
+
+			_, err := hf.GetReadme("someone/some-model", "v1")
+			assert.ErrorIs(t, err, ErrNotFound)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
 // "It needs a token" is a different thing from "it broke", and only the first

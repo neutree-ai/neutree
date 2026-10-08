@@ -44,12 +44,20 @@ const (
 	ModelJSONFileName = "model.json"
 )
 
+// ErrModelNotFound is returned when the store was read and the model, or the
+// requested version of it, is not in it. Callers test for it with errors.Is;
+// any other read failure is a statement about the storage, not its contents.
+var ErrModelNotFound = errors.New("not found in the BentoML store")
+
 // GetModelDetail gets detailed information about a specific model.
 //
 // It decodes the whole model.yaml. An earlier narrower struct dropped everything
 // but name/version/module/size/creation_time, which meant the labels and
 // metadata a user writes into model.yaml — and which the export/import round
 // trip faithfully preserves — could not be read back anywhere.
+//
+// A model with no latest pointer and a version with no model.yaml both wrap
+// ErrModelNotFound.
 func GetModelDetail(homePath, modelName, version string) (*ModelYAML, error) {
 	actualVersion := version
 
@@ -59,7 +67,7 @@ func GetModelDetail(homePath, modelName, version string) (*ModelYAML, error) {
 		data, err := os.ReadFile(latestPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, errors.Errorf("model %s not found", modelName)
+				return nil, errors.Wrapf(ErrModelNotFound, "model %s", modelName)
 			}
 
 			return nil, errors.Wrap(err, "failed to read latest version file")
@@ -74,7 +82,7 @@ func GetModelDetail(homePath, modelName, version string) (*ModelYAML, error) {
 	data, err := os.ReadFile(yamlPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.Errorf("model %s:%s not found", modelName, actualVersion)
+			return nil, errors.Wrapf(ErrModelNotFound, "model %s:%s", modelName, actualVersion)
 		}
 
 		return nil, errors.Wrap(err, "failed to read model.yaml")
