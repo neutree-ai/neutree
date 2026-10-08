@@ -4394,6 +4394,52 @@ func (_c *MockStorage_ListWorkspace_Call) RunAndReturn(run func(storage.ListOpti
 	return _c
 }
 
+// RevokeUserSessions provides a mock function with given fields: userID
+func (_m *MockStorage) RevokeUserSessions(userID string) error {
+	ret := _m.Called(userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RevokeUserSessions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_RevokeUserSessions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RevokeUserSessions'
+type MockStorage_RevokeUserSessions_Call struct {
+	*mock.Call
+}
+
+// RevokeUserSessions is a helper method to define mock.On call
+//   - userID string
+func (_e *MockStorage_Expecter) RevokeUserSessions(userID interface{}) *MockStorage_RevokeUserSessions_Call {
+	return &MockStorage_RevokeUserSessions_Call{Call: _e.mock.On("RevokeUserSessions", userID)}
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) Run(run func(userID string)) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) Return(_a0 error) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_RevokeUserSessions_Call) RunAndReturn(run func(string) error) *MockStorage_RevokeUserSessions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SetOrgUnitMember provides a mock function with given fields: data
 func (_m *MockStorage) SetOrgUnitMember(data *storage.OrgUnitMember) error {
 	ret := _m.Called(data)

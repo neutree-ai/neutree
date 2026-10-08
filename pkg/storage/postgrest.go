@@ -1228,6 +1228,12 @@ func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource string) ([
 	return response, nil
 }
 
+func (s *postgrestStorage) RevokeUserSessions(userID string) error {
+	var ended int
+
+	return s.CallDatabaseFunction("revoke_user_sessions", map[string]interface{}{"p_user_id": userID}, &ended)
+}
+
 func nullIfEmpty(v string) interface{} {
 	if v == "" {
 		return nil

@@ -298,6 +298,10 @@ type ExternalIdentityStorage interface {
 	// identity source of the given name, with the department and teams its
 	// sync gave the user.
 	ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error)
+	// RevokeUserSessions ends every GoTrue session of the user and deletes its
+	// refresh tokens. Access tokens already issued stay valid until they
+	// expire.
+	RevokeUserSessions(userID string) error
 }
 
 // IdentitySourceSecrets are the decrypted secrets of an identity source. A

@@ -322,9 +322,10 @@ func (s *IdentitySourceLDAPSyncSpec) validate() error {
 }
 
 // SyncEnabled reports whether the organization sync of the source runs:
-// it is an LDAP source with spec.sync.enabled.
+// it is an enabled LDAP source with spec.sync.enabled. Disabling the source
+// pauses its sync and keeps the sync settings.
 func (s *IdentitySourceSpec) SyncEnabled() bool {
-	return s != nil && s.Type == IdentitySourceTypeLDAP && s.LDAP != nil && s.Sync != nil && s.Sync.Enabled
+	return s != nil && s.Enabled && s.Type == IdentitySourceTypeLDAP && s.LDAP != nil && s.Sync != nil && s.Sync.Enabled
 }
 
 // SyncInterval returns the sync period, with the default for an empty one.
