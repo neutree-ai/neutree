@@ -152,17 +152,17 @@ func handleOIDCCallback(deps *Dependencies) gin.HandlerFunc {
 
 		if err != nil {
 			klog.Infof("OIDC callback rejected: no login state cookie")
-			c.JSON(http.StatusBadRequest, gin.H{"error": oidcErrInvalidState})
+			redirectWithError(c, sources.fallbackRedirect(""), oidcErrInvalidState)
 
 			return
 		}
 
 		// Nothing in an unopened state can be trusted, not even where to send the
-		// browser back.
+		// browser back, so the browser goes to a fallback from an allow list.
 		name, state, err := sources.codec.open(cookie.Value, sources.now())
 		if err != nil {
 			klog.Infof("OIDC callback rejected: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": oidcErrInvalidState})
+			redirectWithError(c, sources.fallbackRedirect(cookie.Value), oidcErrInvalidState)
 
 			return
 		}
@@ -305,6 +305,30 @@ func setStateCookie(c *gin.Context, path string, secure bool, value string, maxA
 		// cross-site GET, which must carry the cookie.
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// fallbackRedirect is where a callback whose login state cannot be read sends
+// the browser. The redirect_to of the login is unknown then, so it is never
+// taken from the request; the target is always an allowed redirect of an
+// enabled OIDC source, or the same-origin root:
+//
+//   - the first allowed redirect of the source the unreadable cookie names
+//     before its '.', when that is an enabled OIDC source. The name is not
+//     authenticated, but it only selects among allowed redirects;
+//   - otherwise the first allowed redirect of the only enabled OIDC source;
+//   - otherwise "/", which neutree-api serves the UI on.
+func (s *LoginSources) fallbackRedirect(sealed string) string {
+	if name, _, found := strings.Cut(sealed, "."); found && name != "" {
+		if source, err := s.get(name, v1.IdentitySourceTypeOIDC); err == nil {
+			return source.oidc.allowedRedirects[0].String()
+		}
+	}
+
+	if source, err := s.resolve("", v1.IdentitySourceTypeOIDC); err == nil {
+		return source.oidc.allowedRedirects[0].String()
+	}
+
+	return "/"
 }
 
 func redirectWithError(c *gin.Context, redirectTo, code string) {
