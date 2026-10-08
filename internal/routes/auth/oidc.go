@@ -238,13 +238,15 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		logName = identity.Subject
 	}
 
-	account := externalAccount{
+	account := auth.ExternalAccount{
 		Source:             auth.LinkSource(auth.OIDCSource, o.name),
 		ExternalID:         oidcExternalID(identity.Issuer, identity.Subject),
 		IdentitySource:     auth.OIDCSource,
 		IdentitySourceName: o.name,
 		Email:              oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
-		Profile:            auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
+		Username:           identity.Username,
+		DisplayName:        identity.DisplayName,
+		SourceEmail:        identity.Email,
 		LogName:            logName,
 	}
 
@@ -266,7 +268,7 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 	}
 
 	if !created {
-		refreshExternalUser(deps, account, user, account.Profile)
+		refreshExternalUser(deps, account, user)
 	}
 
 	link, err := magicLinkFor(ctx, deps, user)
@@ -286,7 +288,7 @@ func oidcExternalID(issuer, subject string) string {
 }
 
 func oidcPlaceholderEmail(sourceName, issuer, subject string) string {
-	return placeholderEmail(sourceName, oidcEmailDomain, oidcExternalID(issuer, subject))
+	return auth.PlaceholderEmail(sourceName, oidcEmailDomain, oidcExternalID(issuer, subject))
 }
 
 func newLoginState(redirectTo string, now time.Time) (*oidcLoginState, error) {
