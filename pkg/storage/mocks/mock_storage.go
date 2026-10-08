@@ -3318,6 +3318,65 @@ func (_c *MockStorage_ListIdentitySource_Call) RunAndReturn(run func(storage.Lis
 	return _c
 }
 
+// ListIdentitySourceSyncUsers provides a mock function with given fields: identitySource, linkSource
+func (_m *MockStorage) ListIdentitySourceSyncUsers(identitySource string, linkSource string) ([]storage.IdentitySourceSyncUser, error) {
+	ret := _m.Called(identitySource, linkSource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListIdentitySourceSyncUsers")
+	}
+
+	var r0 []storage.IdentitySourceSyncUser
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) ([]storage.IdentitySourceSyncUser, error)); ok {
+		return rf(identitySource, linkSource)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) []storage.IdentitySourceSyncUser); ok {
+		r0 = rf(identitySource, linkSource)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]storage.IdentitySourceSyncUser)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(identitySource, linkSource)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListIdentitySourceSyncUsers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIdentitySourceSyncUsers'
+type MockStorage_ListIdentitySourceSyncUsers_Call struct {
+	*mock.Call
+}
+
+// ListIdentitySourceSyncUsers is a helper method to define mock.On call
+//   - identitySource string
+//   - linkSource string
+func (_e *MockStorage_Expecter) ListIdentitySourceSyncUsers(identitySource interface{}, linkSource interface{}) *MockStorage_ListIdentitySourceSyncUsers_Call {
+	return &MockStorage_ListIdentitySourceSyncUsers_Call{Call: _e.mock.On("ListIdentitySourceSyncUsers", identitySource, linkSource)}
+}
+
+func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) Run(run func(identitySource string, linkSource string)) *MockStorage_ListIdentitySourceSyncUsers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) Return(_a0 []storage.IdentitySourceSyncUser, _a1 error) *MockStorage_ListIdentitySourceSyncUsers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) RunAndReturn(run func(string, string) ([]storage.IdentitySourceSyncUser, error)) *MockStorage_ListIdentitySourceSyncUsers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImageRegistry provides a mock function with given fields: option
 func (_m *MockStorage) ListImageRegistry(option storage.ListOption) ([]v1.ImageRegistry, error) {
 	ret := _m.Called(option)
@@ -4580,6 +4639,52 @@ func (_c *MockStorage_UpdateExternalEndpoint_Call) Return(_a0 error) *MockStorag
 }
 
 func (_c *MockStorage_UpdateExternalEndpoint_Call) RunAndReturn(run func(string, *v1.ExternalEndpoint) error) *MockStorage_UpdateExternalEndpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateExternalIdentitySync provides a mock function with given fields: data
+func (_m *MockStorage) UpdateExternalIdentitySync(data *storage.ExternalIdentity) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateExternalIdentitySync")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.ExternalIdentity) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateExternalIdentitySync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateExternalIdentitySync'
+type MockStorage_UpdateExternalIdentitySync_Call struct {
+	*mock.Call
+}
+
+// UpdateExternalIdentitySync is a helper method to define mock.On call
+//   - data *storage.ExternalIdentity
+func (_e *MockStorage_Expecter) UpdateExternalIdentitySync(data interface{}) *MockStorage_UpdateExternalIdentitySync_Call {
+	return &MockStorage_UpdateExternalIdentitySync_Call{Call: _e.mock.On("UpdateExternalIdentitySync", data)}
+}
+
+func (_c *MockStorage_UpdateExternalIdentitySync_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_UpdateExternalIdentitySync_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.ExternalIdentity))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateExternalIdentitySync_Call) Return(_a0 error) *MockStorage_UpdateExternalIdentitySync_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateExternalIdentitySync_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_UpdateExternalIdentitySync_Call {
 	_c.Call.Return(run)
 	return _c
 }

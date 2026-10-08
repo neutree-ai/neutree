@@ -240,6 +240,34 @@ type ExternalIdentity struct {
 	// ExternalID is the directory's stable ID for the account, never a name.
 	ExternalID string `json:"external_id"`
 	UserID     string `json:"user_id"`
+	// Username and Email are the source's values last applied to the user;
+	// empty when unknown.
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	// SyncDeactivated is set when the organization sync deactivated the
+	// user: SyncDeactivatedBanned when it banned the user,
+	// SyncDeactivatedKept when the user was already banned otherwise.
+	SyncDeactivated string `json:"sync_deactivated,omitempty"`
+}
+
+const (
+	SyncDeactivatedBanned = "banned"
+	SyncDeactivatedKept   = "kept"
+)
+
+// IdentitySourceSyncUser is a user linked to an identity source as the
+// organization sync compares it with the directory.
+type IdentitySourceSyncUser struct {
+	ExternalID      string `json:"external_id"`
+	UserID          string `json:"user_id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	DisplayName     string `json:"display_name"`
+	SyncDeactivated string `json:"sync_deactivated"`
+	// OrgUnitExternalID is the department the sync put the user in.
+	OrgUnitExternalID string `json:"org_unit_external_id"`
+	// TeamExternalIDs are the teams of the identity source the user is in.
+	TeamExternalIDs []string `json:"team_external_ids"`
 }
 
 type ExternalIdentityStorage interface {
@@ -249,6 +277,13 @@ type ExternalIdentityStorage interface {
 	// CreateExternalIdentity links an external account to a user. It returns an
 	// error wrapping ErrResourceConflict when the account is already linked.
 	CreateExternalIdentity(data *ExternalIdentity) error
+	// UpdateExternalIdentitySync writes Username, Email and SyncDeactivated
+	// of the link (source, external ID); an empty value is stored as NULL.
+	UpdateExternalIdentitySync(data *ExternalIdentity) error
+	// ListIdentitySourceSyncUsers returns every user linked under linkSource
+	// (e.g. ldap:corp-ldap) with the department and teams the sync of the
+	// identity source named identitySource gave it.
+	ListIdentitySourceSyncUsers(identitySource, linkSource string) ([]IdentitySourceSyncUser, error)
 }
 
 // IdentitySourceSecrets are the decrypted secrets of an identity source. A

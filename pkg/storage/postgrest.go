@@ -1154,6 +1154,39 @@ func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error 
 	return err
 }
 
+func (s *postgrestStorage) UpdateExternalIdentitySync(data *ExternalIdentity) error {
+	update := map[string]interface{}{
+		"username":         nullIfEmpty(data.Username),
+		"email":            nullIfEmpty(data.Email),
+		"sync_deactivated": nullIfEmpty(data.SyncDeactivated),
+	}
+
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
+		Filter("source", "eq", data.Source).Filter("external_id", "eq", data.ExternalID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource, linkSource string) ([]IdentitySourceSyncUser, error) {
+	response := []IdentitySourceSyncUser{}
+	if err := s.CallDatabaseFunction("list_identity_source_sync_users", map[string]interface{}{
+		"p_identity_source": identitySource,
+		"p_link_source":     linkSource,
+	}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func nullIfEmpty(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+
+	return v
+}
+
 func (s *postgrestStorage) CreateIdentitySource(data *v1.IdentitySource) error {
 	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Insert(data, true, "", "", "").Execute()
 
