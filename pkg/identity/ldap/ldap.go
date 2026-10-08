@@ -1,9 +1,12 @@
 // Package ldap authenticates users against an LDAP directory (OpenLDAP, Active Directory)
-// with the search-then-bind flow and maps the user entry to an Identity.
+// with the search-then-bind flow and maps the user entry to an Identity. Directory reads
+// the whole directory (departments, groups, users) into an orgsync.Snapshot for an
+// organization sync.
 //
-// The package is deliberately self-contained: it imports only the standard library and
-// github.com/go-ldap/ldap/v3, so it can be reused outside neutree. It does no logging;
-// callers log the returned errors, which never contain the password.
+// The package is deliberately self-contained: it imports only the standard library,
+// github.com/go-ldap/ldap/v3 and its sibling pkg/identity/orgsync, so it can be reused
+// outside neutree. It does no logging; callers log the returned errors, which never
+// contain the password.
 package ldap
 
 import (
@@ -76,6 +79,9 @@ type Config struct {
 	// UserFilter must contain UsernamePlaceholder, e.g. "(&(objectClass=inetOrgPerson)(uid={username}))".
 	UserFilter string
 	Attributes AttributeMapping
+
+	// Sync configures Directory (organization sync); Authenticator ignores it.
+	Sync SyncConfig
 }
 
 // AttributeMapping names the directory attributes read into an Identity.
