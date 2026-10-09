@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -63,7 +64,7 @@ var endpointValidationConfigs = map[endpointValidationOperation]endpointValidati
 	endpointValidationSoftDelete: {},
 }
 
-func validateEndpoint(store storage.Storage) gin.HandlerFunc {
+func validateEndpoint(store storage.Storage, providers ...clustercache.EndpointProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -90,6 +91,28 @@ func validateEndpoint(store storage.Storage) gin.HandlerFunc {
 		for _, validator := range config.Validators {
 			if validationErr := validator(store, input); validationErr != nil {
 				c.JSON(validationErrStatus(validationErr), validationErr)
+				c.Abort()
+
+				return
+			}
+		}
+
+		if input.Operation != endpointValidationSoftDelete && input.New.Spec.ZCache != nil {
+			var provider clustercache.EndpointProvider
+			if len(providers) > 0 {
+				provider = providers[0]
+			}
+
+			cluster, resolveErr := resolveEndpointCluster(store, input.New)
+			if resolveErr != nil {
+				c.JSON(validationErrStatus(resolveErr), resolveErr)
+				c.Abort()
+
+				return
+			}
+
+			if err := clustercache.Validate(input.New, cluster, provider); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"message": err.Error(), "code": "INVALID_CACHE_CONFIGURATION"})
 				c.Abort()
 
 				return

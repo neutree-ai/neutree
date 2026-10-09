@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
 
@@ -22,6 +24,7 @@ import (
 
 type Dependencies struct {
 	ClusterCacheProviders *clustercache.Providers
+	EndpointCacheProvider clustercache.EndpointProvider
 	Storage               storage.Storage
 	StorageAccessURL      string
 	AuthEndpoint          string
