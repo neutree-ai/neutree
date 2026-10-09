@@ -18,10 +18,6 @@
       "description": "Whether to return the post-processing token support for each sample",
       "type": "boolean"
     },
-    "model_weights": {
-      "description": "Path to model weights separate from config",
-      "type": "string"
-    },
     "served_model_name": {
       "description": "The model name(s) used in the API",
       "type": [
@@ -1056,11 +1052,6 @@
         "error"
       ]
     },
-    "enable_mm_processor_stats": {
-      "default": false,
-      "description": "Enable multi-modal processor statistics",
-      "type": "boolean"
-    },
     "scheduling_policy": {
       "default": "fcfs",
       "description": "The scheduling policy to use",
@@ -1092,10 +1083,6 @@
     "engram_config": {
       "description": "N-gram embedding storage and sharding settings",
       "type": "object"
-    },
-    "mamba_config": {
-      "type": "object",
-      "description": "Mamba config"
     },
     "kernel_config": {
       "description": "Kernel configuration",

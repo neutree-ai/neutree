@@ -111,6 +111,11 @@ func TestGetVLLMV0_31_0EngineSchema(t *testing.T) {
 		"api_key",
 		"sse_keep_alive_interval",
 		"enable_scale_out",
+		// Engine-internal fields with no `vllm serve` flag; the Kubernetes template
+		// would render them into a command line vLLM rejects.
+		"model_weights",
+		"enable_mm_processor_stats",
+		"mamba_config",
 	} {
 		if _, ok := props[key]; ok {
 			t.Errorf("schema must not include unsupported or obsolete property %q", key)
