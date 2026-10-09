@@ -41,8 +41,8 @@ BEGIN
             IF (TG_OP = 'INSERT' OR NOT COALESCE(((OLD.spec).zcache::jsonb->>'enabled')::boolean, false))
                 AND (cache_status->>'phase' IS DISTINCT FROM 'Applied'
                     OR NOT COALESCE((cache_status#>>'{current,enabled}')::boolean, false)
-                    OR NOT COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb) @> cache_config->'target_nodes'
-                    OR NOT cache_config->'target_nodes' @> COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb)) THEN
+                    OR NOT (COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb) @> (cache_config->'target_nodes'))
+                    OR NOT ((cache_config->'target_nodes') @> COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb))) THEN
                 RAISE EXCEPTION 'wait for the cluster cache node pool to finish applying before enabling inference cache' USING ERRCODE = '22023';
             END IF;
         END IF;
