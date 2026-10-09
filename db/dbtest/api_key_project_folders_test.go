@@ -28,7 +28,7 @@ func grantWorkspaceRead(t *testing.T, db *sql.DB, userID, suffix string) {
 		VALUES (
 			'v1', 'RoleAssignment',
 			ROW($1, NULL, NULL, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
+			ROW($2::uuid, NULL, TRUE, $3, NULL)::api.role_assignment_spec
 		)
 	`, roleName+"-assignment", userID, roleName); err != nil {
 		t.Fatalf("grant workspace read (assignment): %v", err)
