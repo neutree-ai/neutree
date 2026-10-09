@@ -20,10 +20,9 @@ import (
 // upstreams, so neither the endpoint nor the upstream resolves to one source
 // per model.
 //
-// An internal endpoint's source is derived as 'self-hosted'; 'self-hosted' is
-// rejected on an external endpoint so it stays one-to-one with IE, which is what
-// keeps the IE row and the EE row for the same model name distinguishable in the
-// allowed_models picker once the UI drops the internal/external badge.
+// An internal endpoint's source is derived as 'self-hosted'. An external
+// endpoint may store the same value for a model that fronts one, and derives it
+// for a model reached through an endpoint_ref upstream.
 func TestModelSource(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
@@ -43,7 +42,7 @@ func TestModelSource(t *testing.T) {
 
 		groupModel   = "ms-group-model"
 		vendorModel  = "ms-vendor-model"
-		groupSource  = "internal-shared"
+		groupSource  = "private-access"
 		vendorSource = "third-party-public"
 		customSource = "acme-research-lab"
 	)
@@ -147,24 +146,10 @@ func TestModelSource(t *testing.T) {
 		t.Fatalf("insert external endpoint with an unknown source: %v", err)
 	}
 
-	t.Run("self-hosted is rejected on an external endpoint", func(t *testing.T) {
-		err := insertEE("ms-external-selfhosted", []string{"m"}, `{"m":"self-hosted"}`)
-		if err == nil {
-			t.Fatal("expected self-hosted to be rejected on an external endpoint")
-		}
-
-		if !strings.Contains(err.Error(), "self-hosted") {
-			t.Fatalf("expected the error to name self-hosted, got %v", err)
-		}
-	})
-
-	t.Run("self-hosted is rejected even when other models are fine", func(t *testing.T) {
-		// Keying by model must not let a bad entry through just because it sits
-		// beside good ones.
-		err := insertEE("ms-external-partial", []string{"a", "b"},
-			`{"a":"third-party-public","b":"self-hosted"}`)
-		if err == nil {
-			t.Fatal("expected a self-hosted entry to be rejected among valid ones")
+	t.Run("self-hosted is accepted on an external endpoint", func(t *testing.T) {
+		// An external endpoint can front a model this platform serves itself.
+		if err := insertEE("ms-external-selfhosted", []string{"m"}, `{"m":"self-hosted"}`); err != nil {
+			t.Fatalf("expected self-hosted to be accepted on an external endpoint, got %v", err)
 		}
 	})
 
@@ -187,14 +172,13 @@ func TestModelSource(t *testing.T) {
 		}
 	})
 
-	t.Run("self-hosted is rejected on update too", func(t *testing.T) {
-		_, err := db.ExecContext(ctx, `
+	t.Run("self-hosted is accepted on update too", func(t *testing.T) {
+		if _, err := db.ExecContext(ctx, `
 			UPDATE api.external_endpoints
 			SET spec.model_sources = $2::jsonb
-			WHERE (metadata).workspace = $1 AND (metadata).name = $3`,
-			ws, `{"`+groupModel+`":"self-hosted"}`, eeMixed)
-		if err == nil {
-			t.Fatal("expected self-hosted to be rejected on update")
+			WHERE (metadata).workspace = $1 AND (metadata).name = 'ms-external-selfhosted'`,
+			ws, `{"m":"self-hosted"}`); err != nil {
+			t.Fatalf("expected self-hosted to be accepted on update, got %v", err)
 		}
 	})
 
@@ -333,9 +317,11 @@ func TestModelSource(t *testing.T) {
 			{eeUnset + "|" + ieModel, "external_endpoint", sql.NullString{}},
 			// An unknown value comes back verbatim.
 			{eeCustom + "|ms-custom-model", "external_endpoint", sql.NullString{String: customSource, Valid: true}},
-			// Fronting an internal endpoint derives internal-shared with nothing
-			// stored -- and NOT self-hosted, which has to stay IE-only.
-			{eeViaRef + "|" + refModel, "external_endpoint", sql.NullString{String: "internal-shared", Valid: true}},
+			// Fronting an internal endpoint derives self-hosted with nothing
+			// stored.
+			{eeViaRef + "|" + refModel, "external_endpoint", sql.NullString{String: "self-hosted", Valid: true}},
+			// A stored self-hosted comes back as stored.
+			{"ms-external-selfhosted|m", "external_endpoint", sql.NullString{String: "self-hosted", Valid: true}},
 			// An explicit source still wins over that derivation.
 			{eeViaRefSet + "|" + refSetModel, "external_endpoint", sql.NullString{String: vendorSource, Valid: true}},
 		} {

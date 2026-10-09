@@ -184,10 +184,6 @@ type ExternalEndpointSpec struct {
 	// assertion about a model, not something derivable from routing.
 	//
 	// A missing entry means "unspecified", which the UI shows as its own group.
-	// "self-hosted" is rejected here — it is derived for internal Endpoints, and
-	// keeping that one-to-one is what lets the API-key model picker tell the
-	// internal and external rows for one model name apart (see
-	// ValidateExternalEndpointModelSources).
 	ModelSources map[string]string `json:"model_sources,omitempty"`
 
 	// Timeout is the request timeout in milliseconds, default 60000
