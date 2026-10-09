@@ -90,7 +90,7 @@ func TestHasPermissionCommunityBehaviour(t *testing.T) {
 			INSERT INTO api.role_assignments (api_version, kind, metadata, spec)
 			VALUES ('v1', 'RoleAssignment',
 				ROW('hp-hooks-scoped-ra', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-				ROW($1::uuid, 'default', FALSE, 'hp-hooks-scoped-role')::api.role_assignment_spec)
+				ROW($1::uuid, 'default', FALSE, 'hp-hooks-scoped-role', NULL)::api.role_assignment_spec)
 		`, scopedUser)
 		return err
 	})
