@@ -200,6 +200,7 @@ services:
     networks:
       - neutree
     restart: always
+    stop_grace_period: 60s
     depends_on:
        postgrest:
           condition: service_started
@@ -236,6 +237,7 @@ services:
     networks:
       - neutree
     restart: always
+    stop_grace_period: 60s
     depends_on:
       postgrest:
         condition: service_started

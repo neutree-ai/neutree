@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/compose-spec/compose-go/cli"
 	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
@@ -302,6 +303,40 @@ func TestPrepareNeutreeCoreDeployConfigRendersKongPluginChecksumLabels(t *testin
 		for label := range expectedLabels {
 			assert.NotContains(t, service.Labels, label, "unexpected Kong plugin checksum label on %s", service.Name)
 		}
+	}
+}
+
+func TestPrepareNeutreeCoreDeployConfigRendersControlPlaneStopGracePeriod(t *testing.T) {
+	workDir := t.TempDir()
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    workDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+	project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
+		ConfigPaths: []string{filepath.Join(workDir, "neutree-core", "docker-compose.yml")},
+	})
+	require.NoError(t, err)
+
+	for _, serviceName := range []string{"neutree-core", "neutree-api"} {
+		found := false
+		for _, service := range project.Services {
+			if service.Name == serviceName {
+				found = true
+				require.NotNil(t, service.StopGracePeriod, "missing stop grace period for %s", serviceName)
+				assert.Equal(t, time.Minute, time.Duration(*service.StopGracePeriod), serviceName)
+				break
+			}
+		}
+
+		require.True(t, found, "missing service %s", serviceName)
 	}
 }
 
@@ -702,6 +737,35 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 	})
 
 	require.NoError(t, err)
+	mockExecutor.AssertExpectations(t)
+}
+
+func TestInstallNeutreeCoreSingleNodeByDockerUsesStopTimeout(t *testing.T) {
+	workDir := t.TempDir()
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    workDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+	wantArgs := []string{
+		"compose", "-p", "neutree-core", "-f",
+		filepath.Join(workDir, "neutree-core", "docker-compose.yml"),
+		"up", "-d", "--timeout", "60",
+	}
+
+	mockExecutor := &mocks.MockExecutor{}
+	mockExecutor.On("Execute", mock.Anything, "docker", mock.Anything).
+		Run(func(args mock.Arguments) {
+			assert.Equal(t, wantArgs, args.Get(2).([]string))
+		}).
+		Return([]byte("success"), nil)
+
+	require.NoError(t, installNeutreeCoreSingleNodeByDocker(mockExecutor, options))
 	mockExecutor.AssertExpectations(t)
 }
 

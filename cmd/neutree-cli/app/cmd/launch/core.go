@@ -49,6 +49,10 @@ const (
 	// defaultKongWorkerProcesses keeps Kong's PostgreSQL connection demand from
 	// scaling with host CPU count unless an operator explicitly opts in to auto.
 	defaultKongWorkerProcesses = "2"
+
+	// controlPlaneComposeStopTimeoutSeconds lets NFS/RPC cleanup complete while
+	// Compose replaces an existing control-plane container.
+	controlPlaneComposeStopTimeoutSeconds = "60"
 )
 
 var kongWorkerProcessesPattern = regexp.MustCompile(`^(auto|[1-9][0-9]*)$`)
@@ -182,8 +186,12 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 		return errors.Wrap(err, "prepare neutree core launch config failed")
 	}
 
-	output, err := exector.Execute(context.Background(), "docker",
-		[]string{"compose", "-p", "neutree-core", "-f", filepath.Join(options.workDir, "neutree-core", "docker-compose.yml"), "up", "-d"})
+	composeFilePath := filepath.Join(options.workDir, "neutree-core", "docker-compose.yml")
+
+	output, err := exector.Execute(context.Background(), "docker", []string{
+		"compose", "-p", "neutree-core", "-f", composeFilePath,
+		"up", "-d", "--timeout", controlPlaneComposeStopTimeoutSeconds,
+	})
 	if err != nil {
 		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
 	}
