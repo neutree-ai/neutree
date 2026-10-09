@@ -6,12 +6,18 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
-// RoleAssignmentSpec defines the desired state of RoleAssignment
+// RoleAssignmentSpec defines the desired state of RoleAssignment.
+//
+// A role assignment has one scope: Global, a Workspace, or an OrgUnit subtree
+// (OrgUnit is the metadata.name of the OrgUnit; Global is false and Workspace
+// empty). An OrgUnit scope grants the role's permissions only on the users and
+// OrgUnits of that subtree; the community edition rejects it.
 type RoleAssignmentSpec struct {
 	UserID    string `json:"user_id"` // UUID represented as string
 	Workspace string `json:"workspace,omitempty"`
 	Global    bool   `json:"global,omitempty"`
 	Role      string `json:"role"`
+	OrgUnit   string `json:"org_unit,omitempty"`
 }
 
 // RoleAssignmentPhase represents the current phase of a RoleAssignment.

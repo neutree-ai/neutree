@@ -63,7 +63,7 @@ func createUserWithPermissions(t *testing.T, tx *sql.Tx, username, email string,
 			'v1',
 			'RoleAssignment',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::uuid, NULL, TRUE, $3)::api.role_assignment_spec
+			ROW($2::uuid, NULL, TRUE, $3, NULL)::api.role_assignment_spec
 		)
 	`, username+"-role-assignment", user.ID, roleName)
 	if err != nil {

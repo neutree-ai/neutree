@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -15,12 +14,6 @@ import (
 )
 
 const (
-	// ldapEmailDomain is the parent domain of LDAP users' placeholder emails;
-	// each identity source gets the subdomain <source name>.ldap.neutree.local.
-	// GoTrue needs an email to issue a session, and the directory email cannot
-	// be used: it may be missing, change, or already belong to a local user.
-	ldapEmailDomain = "ldap.neutree.local"
-
 	msgInvalidCredentials = "invalid username or password"
 	msgDirectoryDown      = "directory service unavailable"
 	msgInternalError      = "internal error"
@@ -84,6 +77,13 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		session, err := issueSession(ctx, deps, userID)
+		if errors.Is(err, errUserDisabled) {
+			klog.Infof("LDAP login of %q via %s rejected: user %s is disabled", identity.Username, source.name, userID)
+			c.JSON(http.StatusForbidden, gin.H{"error": msgUserDisabled})
+
+			return
+		}
+
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s (user %s): issue session: %v", identity.Username, source.name, userID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
@@ -133,19 +133,9 @@ func ldapErrorResponse(source, username string, err error) (int, string) {
 	}
 }
 
-func ldapPlaceholderEmail(sourceName, externalID string) string {
-	return strings.ToLower(externalID) + "@" + sourceName + "." + ldapEmailDomain
-}
-
 // ensureLDAPUser returns the GoTrue user linked to the directory account,
 // creating and linking one on the account's first login.
 func ensureLDAPUser(ctx context.Context, deps *Dependencies, sourceName string, identity *ldap.Identity) (string, error) {
-	return ensureExternalUser(ctx, deps, externalAccount{
-		Source:         auth.LinkSource(auth.LDAPSource, sourceName),
-		ExternalID:     identity.ExternalID,
-		IdentitySource: auth.LDAPSource,
-		Email:          ldapPlaceholderEmail(sourceName, identity.ExternalID),
-		Metadata:       externalUserMetadata(identity.Username, identity.DisplayName, identity.Email),
-		LogName:        identity.Username,
-	})
+	return ensureExternalUser(ctx, deps,
+		auth.LDAPAccount(sourceName, identity.ExternalID, identity.Username, identity.DisplayName, identity.Email))
 }

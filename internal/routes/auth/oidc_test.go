@@ -282,6 +282,7 @@ func TestOIDCCallback_FirstLoginCreatesUserAndLink(t *testing.T) {
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	e.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID.String(),
+		Username: "kc.alice", Email: "alice@example.org",
 	}).Return(nil).Once()
 	e.expectEmail(userID.String(), e.placeholderEmail())
 	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).

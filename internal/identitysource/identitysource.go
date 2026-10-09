@@ -54,6 +54,24 @@ func LDAPConfig(spec *v1.IdentitySourceLDAPSpec, bindPassword string) ldap.Confi
 		cfg.Attributes.MemberOf = strings.TrimSpace(attrs.MemberOf)
 	}
 
+	if sync := spec.Sync; sync != nil {
+		cfg.Sync = ldap.SyncConfig{
+			OrgUnitBaseDN:        strings.TrimSpace(sync.OrgUnitBaseDN),
+			OrgUnitFilter:        strings.TrimSpace(sync.OrgUnitFilter),
+			OrgUnitNameAttribute: strings.TrimSpace(sync.OrgUnitNameAttribute),
+			GroupBaseDN:          strings.TrimSpace(sync.GroupBaseDN),
+			GroupFilter:          strings.TrimSpace(sync.GroupFilter),
+			GroupNameAttribute:   strings.TrimSpace(sync.GroupNameAttribute),
+			GroupMemberAttribute: strings.TrimSpace(sync.GroupMemberAttribute),
+			UserListFilter:       strings.TrimSpace(sync.UserListFilter),
+			DisabledUserFilter:   strings.TrimSpace(sync.DisabledUserFilter),
+		}
+
+		if sync.PageSize > 0 {
+			cfg.Sync.PageSize = uint32(sync.PageSize) //nolint:gosec // positive and bounded by the column type
+		}
+	}
+
 	return cfg
 }
 
