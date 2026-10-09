@@ -36,6 +36,7 @@ type ServerConfig struct {
 }
 
 type CoreConfig struct {
+	EndpointCacheProvider   clustercache.EndpointProvider
 	ClusterCacheProvider    clustercache.Provider
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage

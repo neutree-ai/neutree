@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
 
@@ -27,6 +29,7 @@ import (
 )
 
 const (
+	deploymentKind                   = "Deployment"
 	annEndpointSpecHash              = "neutree.ai/endpoint-spec-hash"
 	annNeutreeVersion                = "neutree.ai/neutree-version"
 	containerFailureRestartThreshold = 5
@@ -46,15 +49,17 @@ const (
 var _ Orchestrator = &kubernetesOrchestrator{}
 
 type kubernetesOrchestrator struct {
-	storage storage.Storage
+	endpointCacheProvider clustercache.EndpointProvider
+	storage               storage.Storage
 
 	acceleratorMgr accelerator.Manager
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
-		storage:        opts.Storage,
-		acceleratorMgr: opts.AcceleratorMgr,
+		storage:               opts.Storage,
+		endpointCacheProvider: opts.EndpointCacheProvider,
+		acceleratorMgr:        opts.AcceleratorMgr,
 	}
 }
 
@@ -281,6 +286,10 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		return errors.Wrapf(err, "failed to build deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
+	if err := k.configureEndpointCache(ctx, deploymentObjects); err != nil {
+		return err
+	}
+
 	applier := deploy.NewKubernetesDeployer(
 		ctx.ctrClient,
 		namespace,
@@ -297,7 +306,7 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		WithMutate(func(obj *unstructured.Unstructured) error {
 			// Inject spec hash and NeutreeVersion as annotations on the Deployment
 			// so they are included in the SSA apply and managed by the field owner.
-			if obj.GetKind() == "Deployment" {
+			if obj.GetKind() == deploymentKind {
 				ann := obj.GetAnnotations()
 				if ann == nil {
 					ann = make(map[string]string)
@@ -516,7 +525,19 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 		return nil, errors.Wrapf(err, "failed to get kubernetes client for cluster %s", deployedCluster.Metadata.Name)
 	}
 
-	return k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), deployedCluster, endpoint)
+	status, err := k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), deployedCluster, endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	if endpoint.Status != nil && endpoint.Status.ZCache != nil {
+		status.ZCache, err = observeEndpointCache(ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return status, nil
 }
 
 func (k *kubernetesOrchestrator) getEndpointStats(

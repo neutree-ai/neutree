@@ -64,7 +64,8 @@ func TestModelSource(t *testing.T) {
 				ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
 				ROW('4', '2', NULL, '16')::api.resource_spec,
 				ROW(1)::api.replica_spec,
-				NULL, NULL, NULL
+				NULL, NULL, NULL,
+				NULL
 			)::api.endpoint_spec,
 			ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
 		)`, ieName, ws, ieModel); err != nil {

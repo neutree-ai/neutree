@@ -34,7 +34,8 @@ func TestEndpointStatusSortPriority(t *testing.T) {
 					ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
 					ROW('4', '2', NULL, '16')::api.resource_spec,
 					ROW(1)::api.replica_spec,
-					NULL, NULL, NULL
+					NULL, NULL, NULL,
+					NULL
 				)::api.endpoint_spec,
 				ROW($1::text, NULL, $2::text, NULL, created, created, '{}'::json, '{}'::json)::api.metadata
 			FROM (SELECT '2026-01-01T00:00:00Z'::timestamptz + make_interval(mins => $3) AS created) t`, name, ws, minute); err != nil {
