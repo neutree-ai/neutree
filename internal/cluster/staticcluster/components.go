@@ -29,7 +29,7 @@ func buildNodeComponents(
 		role = node.Spec.Role
 	}
 
-	components := []v1.NodeComponentSpec{buildRayComponent(cluster, role, profile)}
+	components := []v1.NodeComponentSpec{buildRayComponent(cluster, node, role, profile)}
 	metricsComponents, err := buildMetricsComponents(cluster, node, role, profile, metricsRemoteWriteURL)
 
 	if err != nil {
@@ -45,6 +45,7 @@ func withComponentConfigHashes(components []v1.NodeComponentSpec) []v1.NodeCompo
 
 func buildRayComponent(
 	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
 	role v1.StaticNodeRole,
 	profile *v1.AcceleratorProfile,
 ) v1.NodeComponentSpec {
@@ -58,7 +59,7 @@ func buildRayComponent(
 			Name:             rayHeadComponentName,
 			Image:            image,
 			Command:          command,
-			Args:             []string{rayStartCommand(cluster, role)},
+			Args:             []string{rayStartCommand(cluster, node, role)},
 			Env:              env,
 			DockerRunOptions: dockerRunOptions,
 			HealthCheck: &v1.NodeComponentHealthCheck{
@@ -71,7 +72,7 @@ func buildRayComponent(
 		Name:             rayWorkerComponentName,
 		Image:            image,
 		Command:          command,
-		Args:             []string{rayStartCommand(cluster, role)},
+		Args:             []string{rayStartCommand(cluster, node, role)},
 		Env:              env,
 		DockerRunOptions: dockerRunOptions,
 		HealthCheck: &v1.NodeComponentHealthCheck{
@@ -134,6 +135,7 @@ func clusterRuntimeImageSuffix(profile *v1.AcceleratorProfile) string {
 
 func rayStartCommand(
 	cluster *v1.StaticNodeCluster,
+	node *v1.StaticNode,
 	role v1.StaticNodeRole,
 ) string {
 	parts := []string{
@@ -150,6 +152,12 @@ func rayStartCommand(
 		"--runtime-env-agent-port=56999",
 		fmt.Sprintf("--metrics-export-port=%d", v1.RayletMetricsPort),
 	}, " ")
+
+	// Ray otherwise auto-detects the node IP from the default route, which on a
+	// multi-homed node can differ from the spec IP that cluster verification expects.
+	if node != nil && node.Spec != nil && node.Spec.IP != "" {
+		commonArgs += " --node-ip-address=" + node.Spec.IP
+	}
 
 	if role == v1.StaticNodeRoleHead {
 		parts = append(parts, strings.Join([]string{
