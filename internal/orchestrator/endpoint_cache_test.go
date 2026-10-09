@@ -30,4 +30,12 @@ func TestCacheDependencyWaitsForOldPods(t *testing.T) {
 	observed, err = observeEndpointCache(c, "ns", e)
 	require.NoError(t, err)
 	require.False(t, observed.InUse)
+
+	zero := int32(0)
+	dep.Spec.Replicas = &zero
+	dep.Spec.Template.Labels = map[string]string{clustercache.EndpointLabel: "true"}
+	require.NoError(t, c.Update(context.Background(), dep))
+	observed, err = observeEndpointCache(c, "ns", e)
+	require.NoError(t, err)
+	require.False(t, observed.InUse, "a paused old template with no Pods no longer uses cache")
 }
