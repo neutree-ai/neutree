@@ -25,6 +25,7 @@ type StaticConfig struct {
 type APIConfig struct {
 	// ClusterCacheProviders is set only by distributions that install a cache provider.
 	ClusterCacheProviders *clustercache.Providers
+	EndpointCacheProvider clustercache.EndpointProvider
 	// Core dependencies
 	Storage    storage.Storage
 	GinEngine  *gin.Engine

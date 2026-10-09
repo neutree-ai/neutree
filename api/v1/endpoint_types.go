@@ -37,7 +37,21 @@ type ReplicaSpec struct {
 	Num *int `json:"num,omitempty"`
 }
 
+// EndpointZCacheSpec opts an inference instance into the distribution's cache integration.
+type EndpointZCacheSpec struct {
+	Enabled        bool     `json:"enabled"`
+	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty"`
+}
+
+// EndpointZCacheStatus tracks the deployment dependency, not cache connectivity.
+// Generation is assigned by storage and prevents stale observations releasing a dependency.
+type EndpointZCacheStatus struct {
+	Generation int64 `json:"generation"`
+	InUse      bool  `json:"in_use"`
+}
+
 type EndpointSpec struct {
+	ZCache            *EndpointZCacheSpec `json:"zcache,omitempty"`
 	Cluster           string              `json:"cluster,omitempty"`
 	Model             *ModelSpec          `json:"model,omitempty"`
 	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
@@ -62,10 +76,11 @@ const (
 )
 
 type EndpointStatus struct {
-	Phase              EndpointPhase `json:"phase,omitempty"`
-	ServiceURL         string        `json:"service_url,omitempty"`
-	LastTransitionTime string        `json:"last_transition_time,omitempty"`
-	ErrorMessage       string        `json:"error_message,omitempty"`
+	ZCache             *EndpointZCacheStatus `json:"zcache,omitempty"`
+	Phase              EndpointPhase         `json:"phase,omitempty"`
+	ServiceURL         string                `json:"service_url,omitempty"`
+	LastTransitionTime string                `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                `json:"error_message,omitempty"`
 	// ModelDownloadCompletedHash is reserved for future model download tracking extensions,
 	// such as node- or replica-level completion metadata. It must not be used alone as
 	// proof that the current node or replica has completed downloading.
