@@ -76,7 +76,8 @@ func observeEndpointCache(c client.Client, namespace string, endpoint *v1.Endpoi
 		return nil, err
 	}
 
-	if err == nil && dep.Spec.Template.Labels[clustercache.EndpointLabel] == cacheDependencyLabelValue {
+	if err == nil && (dep.Spec.Replicas == nil || *dep.Spec.Replicas > 0) &&
+		dep.Spec.Template.Labels[clustercache.EndpointLabel] == cacheDependencyLabelValue {
 		status.InUse = true
 	}
 
