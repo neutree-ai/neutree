@@ -9,6 +9,7 @@ DECLARE
     old_status jsonb;
     incoming_status jsonb := (NEW.status).zcache::jsonb;
     cache_config jsonb;
+    cache_status jsonb;
     generation bigint;
 BEGIN
     IF TG_OP = 'UPDATE' THEN old_status := (OLD.status).zcache::jsonb; END IF;
@@ -30,12 +31,19 @@ BEGIN
 
     IF TG_OP = 'INSERT' OR to_jsonb(NEW.spec) IS DISTINCT FROM to_jsonb(OLD.spec) THEN
         IF COALESCE((config->>'enabled')::boolean, false) THEN
-            SELECT (spec).zcache::jsonb INTO cache_config FROM api.clusters
+            SELECT (spec).zcache::jsonb, (status).zcache::jsonb INTO cache_config, cache_status FROM api.clusters
             WHERE (metadata).name = (NEW.spec).cluster AND (metadata).workspace = (NEW.metadata).workspace
             AND (metadata).deletion_timestamp IS NULL AND (spec).type = 'kubernetes'
             FOR UPDATE;
             IF NOT COALESCE((cache_config->>'enabled')::boolean, false) THEN
                 RAISE EXCEPTION 'enable cluster cache before using it in an inference instance' USING ERRCODE = '22023';
+            END IF;
+            IF (TG_OP = 'INSERT' OR NOT COALESCE(((OLD.spec).zcache::jsonb->>'enabled')::boolean, false))
+                AND (cache_status->>'phase' IS DISTINCT FROM 'Applied'
+                    OR NOT COALESCE((cache_status#>>'{current,enabled}')::boolean, false)
+                    OR NOT COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb) @> cache_config->'target_nodes'
+                    OR NOT cache_config->'target_nodes' @> COALESCE(cache_status#>'{current,target_nodes}', '[]'::jsonb)) THEN
+                RAISE EXCEPTION 'wait for the cluster cache node pool to finish applying before enabling inference cache' USING ERRCODE = '22023';
             END IF;
         END IF;
         IF COALESCE((config->>'enabled')::boolean, false) OR old_status IS NOT NULL THEN

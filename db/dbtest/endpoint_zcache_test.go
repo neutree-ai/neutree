@@ -24,6 +24,8 @@ func TestEndpointCacheDependencyGeneration(t *testing.T) {
 	insert("image_registries", "cache-test-images", `{"url":"https://registry.example","repository":"neutree"}`)
 	insert("model_registries", "cache-test-models", `{"type":"hugging-face","url":"https://huggingface.co"}`)
 	clusterID := insert("clusters", "cache-test-cluster", `{"type":"kubernetes","image_registry":"cache-test-images","version":"v1.2.0","config":{"kubernetes_config":{"kubeconfig":"dGVzdA==","router":{"access_mode":"NodePort","replicas":1,"resources":{"cpu":"1","memory":"1Gi"}}}},"zcache":{"enabled":true,"l1_size_gib":1,"target_nodes":["worker-a","worker-b"]}}`)
+	_, err = tx.Exec(`UPDATE api.clusters SET status.zcache=jsonb_build_object('phase','Applied','current',(spec).zcache)::json WHERE id=$1`, clusterID)
+	require.NoError(t, err)
 	endpointID := insert("endpoints", "cache-test-endpoint", `{"cluster":"cache-test-cluster","model":{"registry":"cache-test-models","name":"qwen","version":"main","task":"text-generation"},"engine":{"engine":"vllm","version":"v0.24.0"},"resources":{"cpu":"1","memory":"1Gi"},"replicas":{"num":0},"zcache":{"enabled":true,"timeout_seconds":2}}`)
 	checkBlocked := func() {
 		t.Helper()
