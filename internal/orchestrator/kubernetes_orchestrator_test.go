@@ -3959,6 +3959,10 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 		templateKey string
 	}{
 		{
+			name:        "vllm-v0.31.0",
+			templateKey: "vllm-v0.31.0",
+		},
+		{
 			name:        "vllm-v0.24.0",
 			templateKey: "vllm-v0.24.0",
 		},
@@ -4061,6 +4065,10 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 		name        string
 		templateKey string
 	}{
+		{
+			name:        "vllm-v0.31.0",
+			templateKey: "vllm-v0.31.0",
+		},
 		{
 			name:        "vllm-v0.24.0",
 			templateKey: "vllm-v0.24.0",

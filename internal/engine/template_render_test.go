@@ -32,6 +32,11 @@ func TestVLLMTemplateTaskTranslation(t *testing.T) {
 			version:  "v0.24.0",
 			template: vllmV0_24_0DeployTemplate,
 		},
+		{
+			name:     "vllm v0.31.0",
+			version:  "v0.31.0",
+			template: vllmV0_31_0DeployTemplate,
+		},
 	}
 
 	tests := []struct {
@@ -137,6 +142,10 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 			template: vllmV0_24_0DeployTemplate,
 		},
 		{
+			name:     "vllm v0.31.0",
+			template: vllmV0_31_0DeployTemplate,
+		},
+		{
 			name:     "sglang v0.5.10",
 			template: sglangV0_5_10DeployTemplate,
 		},
@@ -177,6 +186,10 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 			template: vllmV0_24_0DeployTemplate,
 		},
 		{
+			name:     "vllm v0.31.0",
+			template: vllmV0_31_0DeployTemplate,
+		},
+		{
 			name:     "sglang v0.5.10",
 			template: sglangV0_5_10DeployTemplate,
 		},
@@ -205,20 +218,32 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 }
 
 func TestVLLMTemplatePreservesListEngineArgs(t *testing.T) {
-	vars := newTestVLLMVars("v0.24.0", "text-generation")
-	vars["EngineArgs"] = map[string]any{
-		"served_model_name": []any{"test-model", "neu-vllm-list-alias"},
+	templates := []struct {
+		version  string
+		template string
+	}{
+		{version: "v0.24.0", template: vllmV0_24_0DeployTemplate},
+		{version: "v0.31.0", template: vllmV0_31_0DeployTemplate},
 	}
 
-	objs, err := util.RenderKubernetesManifest(vllmV0_24_0DeployTemplate, vars)
-	require.NoError(t, err)
+	for _, tmpl := range templates {
+		t.Run(tmpl.version, func(t *testing.T) {
+			vars := newTestVLLMVars(tmpl.version, "text-generation")
+			vars["EngineArgs"] = map[string]any{
+				"served_model_name": []any{"test-model", "neu-vllm-list-alias"},
+			}
 
-	deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
-	cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
+			objs, err := util.RenderKubernetesManifest(tmpl.template, vars)
+			require.NoError(t, err)
 
-	assert.Equal(t, "test-model", flagValue(cmd, "--served_model_name"), "full cmd=%v", cmd)
-	assert.Contains(t, cmd, "neu-vllm-list-alias", "full cmd=%v", cmd)
-	assert.NotContains(t, cmd, `["test-model","neu-vllm-list-alias"]`, "full cmd=%v", cmd)
+			deploy := mustFindRenderedObject(t, objs.Items, "Deployment", "ep-test")
+			cmd := mustExtractContainerCommand(t, deploy.Object, "vllm-engine")
+
+			assert.Equal(t, "test-model", flagValue(cmd, "--served_model_name"), "full cmd=%v", cmd)
+			assert.Contains(t, cmd, "neu-vllm-list-alias", "full cmd=%v", cmd)
+			assert.NotContains(t, cmd, `["test-model","neu-vllm-list-alias"]`, "full cmd=%v", cmd)
+		})
+	}
 }
 
 // newTestVLLMVars returns the minimum render variables the current vLLM
