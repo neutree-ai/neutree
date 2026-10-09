@@ -11,6 +11,7 @@ DECLARE
     cache_config jsonb;
     cache_status jsonb;
     generation bigint;
+    updated_status api.endpoint_status;
 BEGIN
     IF TG_OP = 'UPDATE' THEN old_status := (OLD.status).zcache::jsonb; END IF;
     IF config IS NOT NULL AND config <> 'null'::jsonb THEN
@@ -48,13 +49,17 @@ BEGIN
         END IF;
         IF COALESCE((config->>'enabled')::boolean, false) OR old_status IS NOT NULL THEN
             generation := COALESCE((old_status->>'generation')::bigint, 0) + 1;
-            NEW.status.zcache := jsonb_build_object('generation', generation, 'in_use', true)::json;
+            updated_status := NEW.status;
+            updated_status.zcache := jsonb_build_object('generation', generation, 'in_use', true)::json;
+            NEW.status := updated_status;
         END IF;
     ELSIF old_status IS NOT NULL THEN
         -- Status-only writes on errors preserve the reservation. Observations
         -- from a previous spec must never release a newer deployment's claim.
         IF incoming_status IS NULL OR incoming_status->>'generation' IS DISTINCT FROM old_status->>'generation' THEN
-            NEW.status.zcache := old_status::json;
+            updated_status := NEW.status;
+            updated_status.zcache := old_status::json;
+            NEW.status := updated_status;
         END IF;
     END IF;
     RETURN NEW;
