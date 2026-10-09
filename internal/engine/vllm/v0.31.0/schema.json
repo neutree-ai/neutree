@@ -1517,11 +1517,6 @@
       "description": "Include usage on every request",
       "type": "boolean"
     },
-    "sse_keep_alive_interval": {
-      "default": 0,
-      "description": "Send an SSE keep-alive comment line every this many seconds when a `/v1/chat/completions` or `/v1/completions` streaming response is idle (queued, prefill, or between tokens), to prevent reverse proxies/tunnels with read timeouts from closing the connection",
-      "type": "integer"
-    },
     "enable_tokenizer_info_endpoint": {
       "default": false,
       "description": "Enable /get_tokenizer_info endpoint",
@@ -1564,11 +1559,6 @@
     "log_error_stack": {
       "default": false,
       "description": "Log stack trace of error responses",
-      "type": "boolean"
-    },
-    "enable_scale_out": {
-      "default": false,
-      "description": "If set to True, register the scale-out endpoints (`/render`, `/derender`, and `/inference/v1/generate`) on `vllm serve`",
       "type": "boolean"
     },
     "fingerprint_mode": {

@@ -109,6 +109,8 @@ func TestGetVLLMV0_31_0EngineSchema(t *testing.T) {
 		"host",
 		"port",
 		"api_key",
+		"sse_keep_alive_interval",
+		"enable_scale_out",
 	} {
 		if _, ok := props[key]; ok {
 			t.Errorf("schema must not include unsupported or obsolete property %q", key)
