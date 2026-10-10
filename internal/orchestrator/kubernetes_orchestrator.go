@@ -286,7 +286,13 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		return errors.Wrapf(err, "failed to build deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
-	if err := k.configureEndpointCache(ctx, deploymentObjects); err != nil {
+	// Keep cache connection inputs stable until the user changes the endpoint spec.
+	var cacheDeployment *appsv1.Deployment
+	if existingDep.UID != "" && (existingDep.Annotations[annEndpointSpecHash] == "" || existingDep.Annotations[annEndpointSpecHash] == currentSpecHash) {
+		cacheDeployment = existingDep
+	}
+
+	if err := k.configureEndpointCache(ctx, deploymentObjects, cacheDeployment); err != nil {
 		return err
 	}
 
