@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -32,6 +33,12 @@ const (
 	containerFailureRestartThreshold = 5
 	modelDownloaderInitContainerName = "model-downloader"
 )
+
+// podUnschedulableGracePeriod is how long a pod may stay Unschedulable before
+// the endpoint is reported Failed. Scheduling often recovers on its own (a PVC
+// still binding, a node joining or freeing capacity), so within this window
+// the endpoint stays Deploying.
+const podUnschedulableGracePeriod = 3 * time.Minute
 
 // Kubernetes does not expose these kubelet container reasons as corev1 constants.
 // Keep the standard reason strings centralized so status checks and tests share one definition.
@@ -642,6 +649,9 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 
 	// Otherwise, still deploying
 	errorMessage := k.buildDeploymentErrorMessage(dep)
+	if pending := pendingUnschedulableMessages(pods); len(pending) > 0 {
+		errorMessage = "waiting for pod scheduling: " + strings.Join(pending, "; ") + "; " + errorMessage
+	}
 
 	return &v1.EndpointStatus{
 		Phase:        v1.EndpointPhaseDEPLOYING,
@@ -849,19 +859,55 @@ func (k *kubernetesOrchestrator) checkPodFailures(pods []corev1.Pod) (bool, stri
 			errorMsg = append(errorMsg, msgs...)
 		}
 
-		// Check for pod scheduling failures
-		for _, cond := range pod.Status.Conditions {
-			if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse {
-				if cond.Reason == "Unschedulable" {
-					failed = true
+		// Check for pod scheduling failures that outlasted the grace period
+		if msg, since, ok := podUnschedulable(pod); ok && time.Since(since) >= podUnschedulableGracePeriod {
+			failed = true
 
-					errorMsg = append(errorMsg, fmt.Sprintf("Pod '%s' is unschedulable: %s", pod.Name, cond.Message))
-				}
-			}
+			errorMsg = append(errorMsg, msg)
 		}
 	}
 
 	return failed, strings.Join(errorMsg, "; ")
+}
+
+// podUnschedulable reports whether the scheduler currently cannot place the
+// pod, with the message to surface and the time it has been unschedulable
+// since. The scheduler keeps LastTransitionTime while the condition stays
+// False, so it marks the start of the current unschedulable stretch.
+func podUnschedulable(pod corev1.Pod) (string, time.Time, bool) {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type != corev1.PodScheduled || cond.Status != corev1.ConditionFalse ||
+			cond.Reason != corev1.PodReasonUnschedulable {
+			continue
+		}
+
+		since := cond.LastTransitionTime.Time
+		if since.IsZero() {
+			since = pod.CreationTimestamp.Time
+		}
+
+		return fmt.Sprintf("Pod '%s' is unschedulable: %s", pod.Name, cond.Message), since, true
+	}
+
+	return "", time.Time{}, false
+}
+
+// pendingUnschedulableMessages lists the pods that are Unschedulable but still
+// inside the grace period, so a Deploying endpoint can say what it waits for.
+func pendingUnschedulableMessages(pods []corev1.Pod) []string {
+	var msgs []string
+
+	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		if msg, since, ok := podUnschedulable(pod); ok && time.Since(since) < podUnschedulableGracePeriod {
+			msgs = append(msgs, msg)
+		}
+	}
+
+	return msgs
 }
 
 // containerFailureContext returns the current waiting/terminated reason and
