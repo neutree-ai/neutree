@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"fmt"
 
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -21,9 +23,10 @@ type Orchestrator interface {
 }
 
 type Options struct {
-	Cluster        *v1.Cluster
-	Storage        storage.Storage
-	AcceleratorMgr accelerator.Manager
+	EndpointCacheProvider clustercache.EndpointProvider
+	Cluster               *v1.Cluster
+	Storage               storage.Storage
+	AcceleratorMgr        accelerator.Manager
 }
 
 type NewOrchestratorFunc func(opts Options) (Orchestrator, error)

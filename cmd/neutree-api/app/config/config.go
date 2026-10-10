@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -22,6 +23,7 @@ type StaticConfig struct {
 
 // APIConfig holds the main API configuration
 type APIConfig struct {
+	EndpointCacheProvider clustercache.EndpointProvider
 	// ClusterCacheSupported is set only by distributions that install a cache provider.
 	ClusterCacheSupported bool
 	// Core dependencies

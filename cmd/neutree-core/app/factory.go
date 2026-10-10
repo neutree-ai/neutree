@@ -84,9 +84,10 @@ func NewEngineControllerFactory() ControllerFactory {
 func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
-			Storage:        opts.config.Storage,
-			Gw:             opts.config.Gateway,
-			AcceleratorMgr: opts.config.AcceleratorManager,
+			EndpointCacheProvider: opts.config.EndpointCacheProvider,
+			Storage:               opts.config.Storage,
+			Gw:                    opts.config.Gateway,
+			AcceleratorMgr:        opts.config.AcceleratorManager,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")
