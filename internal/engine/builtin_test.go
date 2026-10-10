@@ -46,7 +46,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		for _, v := range e.Spec.Versions {
 			gotVersions = append(gotVersions, v.Version)
 			switch v.Version {
-			case "v0.17.1", "v0.24.0":
+			case "v0.17.1", "v0.24.0", "v0.31.0":
 				img, ok := v.Images["nvidia_gpu"]
 				if !ok {
 					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
@@ -64,6 +64,14 @@ func TestGetBuiltinEngines(t *testing.T) {
 						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
 					}
 				}
+				if v.Version == "v0.31.0" {
+					if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
+						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
+					}
+					if got, want := img.Tag, "v0.31.0-ray2.53.0"; got != want {
+						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
+					}
+				}
 				if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
 					t.Errorf("vllm %s missing kubernetes deploy template", v.Version)
 				} else if _, ok := k8sTemplates["default"]; !ok {
@@ -73,13 +81,17 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 
 		sort.Strings(gotVersions)
-		if want := []string{"v0.17.1", "v0.24.0"}; !reflect.DeepEqual(gotVersions, want) {
+		if want := []string{"v0.17.1", "v0.24.0", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
 			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
 		}
 	}
 
 	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
 		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
+	}
+
+	if _, err := GetDeployTemplate("vllm-v0.31.0"); err != nil {
+		t.Fatalf("DeployTemplates lookup for vLLM v0.31.0 failed: %v", err)
 	}
 
 	for _, retiredVersion := range []string{"v0.8.5", "v0.11.2"} {
