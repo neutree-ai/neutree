@@ -17,7 +17,7 @@ import (
 
 const cacheDependencyLabelValue = "true"
 
-func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext, objects *unstructured.UnstructuredList) error {
+func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext, objects *unstructured.UnstructuredList, existing *appsv1.Deployment) error {
 	if !clustercache.Enabled(ctx.Endpoint) {
 		return nil
 	}
@@ -39,7 +39,7 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 			return err
 		}
 
-		if err := k.endpointCacheProvider.Configure(ctx.Endpoint, ctx.Cluster, &dep); err != nil {
+		if err := k.endpointCacheProvider.Configure(ctx.Endpoint, ctx.Cluster, &dep, existing); err != nil {
 			return err
 		}
 
