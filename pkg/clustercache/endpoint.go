@@ -16,7 +16,7 @@ const DefaultTimeoutSeconds = 5.0
 // persisted Endpoint spec or owns the normal inference Deployment lifecycle.
 type EndpointProvider interface {
 	Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error
-	Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, deployment *appsv1.Deployment) error
+	Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, deployment, existing *appsv1.Deployment) error
 }
 
 func Enabled(endpoint *v1.Endpoint) bool {
