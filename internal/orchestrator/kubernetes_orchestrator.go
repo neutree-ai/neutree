@@ -38,7 +38,7 @@ const (
 // the endpoint is reported Failed. Scheduling often recovers on its own (a PVC
 // still binding, a node joining or freeing capacity), so within this window
 // the endpoint stays Deploying.
-const podUnschedulableGracePeriod = 5 * time.Minute
+const podUnschedulableGracePeriod = 3 * time.Minute
 
 // Kubernetes does not expose these kubelet container reasons as corev1 constants.
 // Keep the standard reason strings centralized so status checks and tests share one definition.
