@@ -52,4 +52,19 @@ func TestEndpointCacheDependencyGeneration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = tx.Exec(`UPDATE api.clusters SET spec.zcache='{"enabled":false,"l1_size_gib":1,"target_nodes":["worker-a","worker-b"]}' WHERE id=$1`, clusterID)
 	require.NoError(t, err)
+	for _, config := range []string{
+		`{"provider":"vllm-native","options":[]}`,
+		`{"provider":"","options":{}}`,
+		`{"provider":"vllm-native","extra":true}`,
+	} {
+		_, err = tx.Exec(`SAVEPOINT invalid_cache`)
+		require.NoError(t, err)
+		_, err = tx.Exec(`UPDATE api.endpoints SET spec.kv_cache=$1 WHERE id=$2`, config, endpointID)
+		require.ErrorContains(t, err, "invalid endpoint KV cache configuration")
+		_, err = tx.Exec(`ROLLBACK TO SAVEPOINT invalid_cache`)
+		require.NoError(t, err)
+	}
+	_, err = tx.Exec(`UPDATE api.endpoints SET spec.kv_cache='{"provider":"vllm-native","options":{"cpu_memory_gib":0.5}}' WHERE id=$1`, endpointID)
+	require.NoError(t, err)
+
 }

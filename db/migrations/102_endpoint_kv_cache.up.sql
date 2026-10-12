@@ -1,6 +1,26 @@
 ALTER TYPE api.endpoint_spec ADD ATTRIBUTE kv_cache json;
 ALTER TYPE api.endpoint_status ADD ATTRIBUTE zcache json;
 
+CREATE FUNCTION api.validate_endpoint_kv_cache() RETURNS trigger AS $$
+DECLARE
+    config jsonb := (NEW.spec).kv_cache::jsonb;
+BEGIN
+    IF config IS NOT NULL AND config <> 'null'::jsonb THEN
+        IF jsonb_typeof(config) <> 'object'
+            OR config - ARRAY['provider', 'options'] <> '{}'::jsonb
+            OR jsonb_typeof(config->'provider') IS DISTINCT FROM 'string'
+            OR config->>'provider' = ''
+            OR (config ? 'options' AND jsonb_typeof(config->'options') IS DISTINCT FROM 'object') THEN
+            RAISE EXCEPTION 'invalid endpoint KV cache configuration' USING ERRCODE = '22023';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER validate_endpoint_kv_cache BEFORE INSERT OR UPDATE OF spec ON api.endpoints
+FOR EACH ROW EXECUTE FUNCTION api.validate_endpoint_kv_cache();
+
 -- Lock the cluster row for cache admission. Cluster changes already lock that
 -- same row, so two API replicas cannot admit a dependency while disabling it.
 CREATE FUNCTION api.guard_endpoint_zcache() RETURNS trigger AS $$
@@ -14,15 +34,6 @@ DECLARE
     updated_status api.endpoint_status;
 BEGIN
     IF TG_OP = 'UPDATE' THEN old_status := (OLD.status).zcache::jsonb; END IF;
-    IF config IS NOT NULL AND config <> 'null'::jsonb THEN
-        IF jsonb_typeof(config) <> 'object'
-            OR config - ARRAY['provider', 'options'] <> '{}'::jsonb
-            OR jsonb_typeof(config->'provider') IS DISTINCT FROM 'string'
-            OR config->>'provider' = ''
-            OR (config ? 'options' AND jsonb_typeof(config->'options') IS DISTINCT FROM 'object') THEN
-            RAISE EXCEPTION 'invalid endpoint KV cache configuration' USING ERRCODE = '22023';
-        END IF;
-    END IF;
 
     IF TG_OP = 'INSERT' OR to_jsonb(NEW.spec) IS DISTINCT FROM to_jsonb(OLD.spec) THEN
         IF COALESCE(config->>'provider' = 'zcache', false) THEN
