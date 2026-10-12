@@ -22,10 +22,6 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 		return nil
 	}
 
-	if err := kvcache.Validate(ctx.Endpoint, ctx.Cluster, k.kvCacheProviders); err != nil {
-		return err
-	}
-
 	provider, err := k.kvCacheProviders.Get(ctx.Endpoint.Spec.KVCache.Provider)
 	if err != nil {
 		return err
@@ -65,7 +61,7 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 	}
 
 	if count != 1 {
-		return fmt.Errorf("cluster cache requires a single inference Deployment")
+		return fmt.Errorf("KV cache requires a single inference Deployment")
 	}
 
 	return nil
