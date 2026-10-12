@@ -11,7 +11,10 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-const ZCacheDependencyLabel = "neutree.ai/uses-cluster-cache"
+const (
+	ZCacheDependencyLabel      = "neutree.ai/uses-cluster-cache"
+	ZCacheDependencyLabelValue = "true"
+)
 
 type Provider interface {
 	Validate(*v1.Endpoint, *v1.Cluster) error
