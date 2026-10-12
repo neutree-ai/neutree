@@ -26,7 +26,7 @@ func TestEndpointCacheDependencyGeneration(t *testing.T) {
 	clusterID := insert("clusters", "cache-test-cluster", `{"type":"kubernetes","image_registry":"cache-test-images","version":"v1.2.0","config":{"kubernetes_config":{"kubeconfig":"dGVzdA==","router":{"access_mode":"NodePort","replicas":1,"resources":{"cpu":"1","memory":"1Gi"}}}},"zcache":{"enabled":true,"l1_size_gib":1,"target_nodes":["worker-a","worker-b"]}}`)
 	_, err = tx.Exec(`UPDATE api.clusters SET status.zcache=jsonb_build_object('phase','Applied','current',(spec).zcache)::json WHERE id=$1`, clusterID)
 	require.NoError(t, err)
-	endpointID := insert("endpoints", "cache-test-endpoint", `{"cluster":"cache-test-cluster","model":{"registry":"cache-test-models","name":"qwen","version":"main","task":"text-generation"},"engine":{"engine":"vllm","version":"v0.24.0"},"resources":{"cpu":"1","memory":"1Gi"},"replicas":{"num":0},"zcache":{"enabled":true,"timeout_seconds":2}}`)
+	endpointID := insert("endpoints", "cache-test-endpoint", `{"cluster":"cache-test-cluster","model":{"registry":"cache-test-models","name":"qwen","version":"main","task":"text-generation"},"engine":{"engine":"vllm","version":"v0.24.0"},"resources":{"cpu":"1","memory":"1Gi"},"replicas":{"num":0},"kv_cache":{"provider":"zcache","options":{"timeout_seconds":2}}}`)
 	checkBlocked := func() {
 		t.Helper()
 		_, err = tx.Exec(`SAVEPOINT guard_test`)
@@ -37,7 +37,7 @@ func TestEndpointCacheDependencyGeneration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	checkBlocked() // Paused desired instances still depend on cache.
-	_, err = tx.Exec(`UPDATE api.endpoints SET spec.zcache='{"enabled":false}' WHERE id=$1`, endpointID)
+	_, err = tx.Exec(`UPDATE api.endpoints SET spec.kv_cache='{"provider":"vllm-native","options":{"cpu_memory_gib":0.25}}' WHERE id=$1`, endpointID)
 	require.NoError(t, err)
 	checkBlocked() // Saving off does not release running old Pods.
 	_, err = tx.Exec(`UPDATE api.endpoints SET status.zcache='{"generation":1,"in_use":false}' WHERE id=$1`, endpointID)

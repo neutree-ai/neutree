@@ -1,12 +1,13 @@
 package config
 
 import (
+ "github.com/neutree-ai/neutree/pkg/clustercache"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -25,7 +26,7 @@ type StaticConfig struct {
 type APIConfig struct {
 	// ClusterCacheProviders is set only by distributions that install a cache provider.
 	ClusterCacheProviders *clustercache.Providers
-	EndpointCacheProvider clustercache.EndpointProvider
+	KVCacheProviders kvcache.Providers
 	// Core dependencies
 	Storage    storage.Storage
 	GinEngine  *gin.Engine

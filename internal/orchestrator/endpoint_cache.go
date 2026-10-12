@@ -12,20 +12,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 )
 
 const cacheDependencyLabelValue = "true"
 
 func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext, objects *unstructured.UnstructuredList) error {
-	if !clustercache.Enabled(ctx.Endpoint) {
+	if ctx.Endpoint.Spec.KVCache == nil {
 		return nil
 	}
 
-	if err := clustercache.Validate(ctx.Endpoint, ctx.Cluster, k.endpointCacheProvider); err != nil {
+	if err := kvcache.Validate(ctx.Endpoint, ctx.Cluster, k.kvCacheProviders); err != nil {
 		return err
 	}
 
+	provider, err := k.kvCacheProviders.Get(ctx.Endpoint.Spec.KVCache.Provider)
+	if err != nil {
+		return err
+	}
 	count := 0
 
 	for i := range objects.Items {
@@ -39,15 +43,17 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 			return err
 		}
 
-		if err := k.endpointCacheProvider.Configure(ctx.Endpoint, ctx.Cluster, &dep); err != nil {
+		if err := provider.Configure(ctx.Endpoint, ctx.Cluster, &dep); err != nil {
 			return err
 		}
 
-		if dep.Spec.Template.Labels == nil {
-			dep.Spec.Template.Labels = map[string]string{}
-		}
+		if ctx.Endpoint.Spec.KVCache.Provider == "zcache" {
+			if dep.Spec.Template.Labels == nil {
+				dep.Spec.Template.Labels = map[string]string{}
+			}
 
-		dep.Spec.Template.Labels[clustercache.EndpointLabel] = cacheDependencyLabelValue
+			dep.Spec.Template.Labels[kvcache.ZCacheDependencyLabel] = cacheDependencyLabelValue
+		}
 
 		converted, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&dep)
 		if err != nil {
@@ -77,7 +83,7 @@ func observeEndpointCache(c client.Client, namespace string, endpoint *v1.Endpoi
 	}
 
 	if err == nil && (dep.Spec.Replicas == nil || *dep.Spec.Replicas > 0) &&
-		dep.Spec.Template.Labels[clustercache.EndpointLabel] == cacheDependencyLabelValue {
+		dep.Spec.Template.Labels[kvcache.ZCacheDependencyLabel] == cacheDependencyLabelValue {
 		status.InUse = true
 	}
 
@@ -88,7 +94,7 @@ func observeEndpointCache(c client.Client, namespace string, endpoint *v1.Endpoi
 	}
 
 	for _, pod := range pods.Items {
-		if pod.Labels[clustercache.EndpointLabel] == cacheDependencyLabelValue {
+		if pod.Labels[kvcache.ZCacheDependencyLabel] == cacheDependencyLabelValue {
 			status.InUse = true
 		}
 	}

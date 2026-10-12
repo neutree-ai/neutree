@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,9 +19,9 @@ func TestCacheDependencyWaitsForOldPods(t *testing.T) {
 	require.NoError(t, corev1.AddToScheme(s))
 	require.NoError(t, appsv1.AddToScheme(s))
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", Namespace: "ns", Labels: map[string]string{"app": "inference", "endpoint": "test", clustercache.EndpointLabel: "true"}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", Namespace: "ns", Labels: map[string]string{"app": "inference", "endpoint": "test", kvcache.ZCacheDependencyLabel: "true"}}}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(dep, pod).Build()
-	e := &v1.Endpoint{Metadata: &v1.Metadata{Name: "test"}, Spec: &v1.EndpointSpec{ZCache: &v1.EndpointZCacheSpec{Enabled: false}}, Status: &v1.EndpointStatus{ZCache: &v1.EndpointZCacheStatus{Generation: 4, InUse: true}}}
+	e := &v1.Endpoint{Metadata: &v1.Metadata{Name: "test"}, Spec: &v1.EndpointSpec{KVCache: nil}, Status: &v1.EndpointStatus{ZCache: &v1.EndpointZCacheStatus{Generation: 4, InUse: true}}}
 	observed, err := observeEndpointCache(c, "ns", e)
 	require.NoError(t, err)
 	require.True(t, observed.InUse)
@@ -33,7 +33,7 @@ func TestCacheDependencyWaitsForOldPods(t *testing.T) {
 
 	zero := int32(0)
 	dep.Spec.Replicas = &zero
-	dep.Spec.Template.Labels = map[string]string{clustercache.EndpointLabel: "true"}
+	dep.Spec.Template.Labels = map[string]string{kvcache.ZCacheDependencyLabel: "true"}
 	require.NoError(t, c.Update(context.Background(), dep))
 	observed, err = observeEndpointCache(c, "ns", e)
 	require.NoError(t, err)

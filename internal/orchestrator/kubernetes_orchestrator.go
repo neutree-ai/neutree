@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -56,17 +56,17 @@ const (
 var _ Orchestrator = &kubernetesOrchestrator{}
 
 type kubernetesOrchestrator struct {
-	endpointCacheProvider clustercache.EndpointProvider
-	storage               storage.Storage
+	kvCacheProviders kvcache.Providers
+	storage          storage.Storage
 
 	acceleratorMgr accelerator.Manager
 }
 
 func newKubernetesOrchestrator(opts Options) *kubernetesOrchestrator {
 	return &kubernetesOrchestrator{
-		storage:               opts.Storage,
-		endpointCacheProvider: opts.EndpointCacheProvider,
-		acceleratorMgr:        opts.AcceleratorMgr,
+		storage:          opts.Storage,
+		kvCacheProviders: opts.KVCacheProviders,
+		acceleratorMgr:   opts.AcceleratorMgr,
 	}
 }
 

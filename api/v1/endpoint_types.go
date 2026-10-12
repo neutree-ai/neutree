@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -37,10 +38,10 @@ type ReplicaSpec struct {
 	Num *int `json:"num,omitempty"`
 }
 
-// EndpointZCacheSpec opts an inference instance into the distribution's cache integration.
-type EndpointZCacheSpec struct {
-	Enabled        bool     `json:"enabled"`
-	TimeoutSeconds *float64 `json:"timeout_seconds,omitempty"`
+// EndpointKVCacheSpec selects an optional KV cache integration.
+type EndpointKVCacheSpec struct {
+	Provider string          `json:"provider"`
+	Options  json.RawMessage `json:"options,omitempty"`
 }
 
 // EndpointZCacheStatus tracks the deployment dependency, not cache connectivity.
@@ -51,15 +52,15 @@ type EndpointZCacheStatus struct {
 }
 
 type EndpointSpec struct {
-	ZCache            *EndpointZCacheSpec `json:"zcache,omitempty"`
-	Cluster           string              `json:"cluster,omitempty"`
-	Model             *ModelSpec          `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
-	Resources         *ResourceSpec       `json:"resources,omitempty"`
-	Replicas          ReplicaSpec         `json:"replicas,omitempty"`
-	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
-	Variables         map[string]any      `json:"variables,omitempty"`
-	Env               map[string]string   `json:"env,omitempty"`
+	KVCache           *EndpointKVCacheSpec `json:"kv_cache,omitempty"`
+	Cluster           string               `json:"cluster,omitempty"`
+	Model             *ModelSpec           `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec  `json:"engine,omitempty"`
+	Resources         *ResourceSpec        `json:"resources,omitempty"`
+	Replicas          ReplicaSpec          `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any       `json:"deployment_options,omitempty"`
+	Variables         map[string]any       `json:"variables,omitempty"`
+	Env               map[string]string    `json:"env,omitempty"`
 }
 
 type EndpointPhase string
