@@ -11,19 +11,19 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-type Native struct{}
+type VLLMNative struct{}
 
-type NativeOptions struct {
+type VLLMNativeOptions struct {
 	CPUMemoryGiB float64 `json:"cpu_memory_gib"`
 }
 
-func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
+func (VLLMNative) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
 
 	if cluster.Spec.Type != v1.KubernetesClusterType || endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
 		return fmt.Errorf("native KV cache requires vLLM on Kubernetes")
 	}
 
-	var options NativeOptions
+	var options VLLMNativeOptions
 
 	if err := DecodeOptions(endpoint.Spec.KVCache.Options, &options); err != nil {
 		return fmt.Errorf("native KV cache options: %w", err)
@@ -43,7 +43,7 @@ func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
 
 	if args, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
 		for name := range args {
-			if nativeManagedArg(name) {
+			if vllmNativeManagedArg(name) {
 				return fmt.Errorf("remove custom %s before enabling managed KV cache", name)
 			}
 		}
@@ -52,19 +52,19 @@ func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
 	return nil
 }
 
-func nativeManagedArg(arg string) bool {
+func vllmNativeManagedArg(arg string) bool {
 	name := strings.SplitN(strings.ReplaceAll(strings.TrimLeft(arg, "-"), "_", "-"), "=", 2)[0]
 
 	return name == "kv-transfer-config" || name == "kv-offloading-size" || name == "kv-offloading-backend"
 }
 
-func (n Native) Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment) error {
+func (n VLLMNative) Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment) error {
 
 	if err := n.Validate(endpoint, cluster); err != nil {
 		return err
 	}
 
-	var options NativeOptions
+	var options VLLMNativeOptions
 
 	if err := DecodeOptions(endpoint.Spec.KVCache.Options, &options); err != nil {
 		return err
@@ -77,7 +77,7 @@ func (n Native) Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv
 		}
 
 		for _, arg := range append(append([]string{}, container.Command...), container.Args...) {
-			if nativeManagedArg(arg) {
+			if vllmNativeManagedArg(arg) {
 				return fmt.Errorf("engine template already supplies KV cache configuration")
 			}
 		}

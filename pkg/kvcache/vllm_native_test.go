@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestNativeConfiguration(t *testing.T) {
+func TestVLLMNativeConfiguration(t *testing.T) {
 	memory := "4"
 	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
 		Resources: &v1.ResourceSpec{Memory: &memory},
@@ -21,7 +21,7 @@ func TestNativeConfiguration(t *testing.T) {
 	dep.Spec.Template.Spec.Containers = []corev1.Container{{Name: "vllm", Image: "original-image", Args: []string{"--model", "test"}}}
 	dep.Spec.Template.Spec.NodeSelector = map[string]string{"gpu": "t4"}
 	require.NoError(t, Validate(endpoint, cluster, nil))
-	require.NoError(t, (Native{}).Configure(endpoint, cluster, dep))
+	require.NoError(t, (VLLMNative{}).Configure(endpoint, cluster, dep))
 	require.Equal(t, "original-image", dep.Spec.Template.Spec.Containers[0].Image)
 	require.Equal(t, []string{"--model", "test", "--kv-offloading-backend", "native", "--kv-offloading-size", "0.25"}, dep.Spec.Template.Spec.Containers[0].Args)
 	require.Equal(t, map[string]string{"gpu": "t4"}, dep.Spec.Template.Spec.NodeSelector)
