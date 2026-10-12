@@ -169,7 +169,7 @@ func handleTokenProxy(deps *Dependencies) gin.HandlerFunc {
 }
 
 // resolveEmailByUsername tries to resolve the email field by looking up the username in user profiles.
-// It is only called for password grant requests.
+// It is only called for password grant requests. The names of external users are not resolved.
 func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	var reqBody map[string]interface{}
 	if err := json.Unmarshal(body, &reqBody); err != nil {
@@ -196,6 +196,14 @@ func resolveEmailByUsername(store storage.Storage, body []byte) []byte {
 	}
 
 	if len(profiles) == 0 {
+		return body
+	}
+
+	// An external user's profile email is the directory's, not its GoTrue
+	// login email, and such a user has no password anyway. Resolving it could
+	// only log in a local user who happens to own that email, so the name is
+	// left alone: the login fails as it does for a name nobody has.
+	if profiles[0].Metadata != nil && profiles[0].Metadata.Labels[auth.IdentitySourceLabel] != "" {
 		return body
 	}
 

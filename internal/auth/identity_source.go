@@ -18,6 +18,12 @@ const (
 	// each IdentitySource keeps its own links.
 	LDAPSource = "ldap"
 	OIDCSource = "oidc"
+
+	// IdentitySourceLabel is the read-only user profile label naming the
+	// identity source of an external user. The database sets it from
+	// app_metadata on every profile write (migration 106), so no write can
+	// add, change or remove it; local users never have it.
+	IdentitySourceLabel = "neutree.ai/identity-source"
 )
 
 // LinkSource returns the external_identities source of the accounts of the
