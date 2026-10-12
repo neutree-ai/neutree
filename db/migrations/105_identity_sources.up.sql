@@ -8,7 +8,8 @@
 -- metadata.name is the immutable id of the source. It becomes part of the
 -- users' link source (ldap:<name> / oidc:<name> in api.external_identities)
 -- and of their placeholder email domain (<name>.<type>.neutree.local), so it
--- is a DNS label of at most 32 characters and cannot be renamed.
+-- is a DNS label of at most 32 characters and cannot be renamed. spec.type is
+-- in both as well and cannot be changed either.
 --
 -- Secrets (spec.ldap.bind_password, spec.oidc.client_secret) are write-only.
 -- A write carries them in spec; the trigger below encrypts them into
@@ -163,6 +164,14 @@ BEGIN
     IF v_spec IS NULL OR v_spec.type IS NULL OR v_spec.type NOT IN ('ldap', 'oidc') THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10253","message": "spec.type must be ldap or oidc","hint": "Set spec.type and the matching spec.ldap or spec.oidc"}',
+            detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
+    END IF;
+
+    -- The type is part of the users' link source (ldap:<name> / oidc:<name>):
+    -- changing it would orphan every user of the source.
+    IF TG_OP = 'UPDATE' AND (OLD.spec).type IS DISTINCT FROM v_spec.type THEN
+        RAISE sqlstate 'PGRST'
+            USING message = '{"code": "10251","message": "spec.type of an identity source cannot be changed","hint": "Users are linked to the source by its type and name; create a new identity source instead"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
@@ -330,8 +339,9 @@ BEGIN
         END IF;
     END IF;
 
-    -- A secret is replaced when a new one is given, kept when it is left
-    -- empty, and dropped when the source changes to the other type.
+    -- A secret is replaced when a new one is given and kept when it is left
+    -- empty. The secret of the other type is always empty: the type of a
+    -- source cannot change.
     INSERT INTO api.identity_source_secrets (identity_source_id)
     VALUES (NEW.id)
     ON CONFLICT (identity_source_id) DO NOTHING;

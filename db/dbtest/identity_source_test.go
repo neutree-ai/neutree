@@ -500,32 +500,31 @@ func TestIdentitySource_PartialUpdateKeepsSecret(t *testing.T) {
 		}
 	})
 
-	// The resource proxy's backfill turns a type switch into a PATCH that still
-	// carries an ldap object with only a null bind_password.
-	t.Run("switching to oidc drops the ldap secret", func(t *testing.T) {
-		patch(t, mustJSON(map[string]any{"spec": map[string]any{
+	// The type is part of every user's link source, so it cannot change. The
+	// resource proxy's backfill would send the switch with an ldap object that
+	// holds only a null bind_password.
+	t.Run("switching to oidc is refused and keeps the secret", func(t *testing.T) {
+		code, raw := postgrestAs(t, token, http.MethodPatch, path, mustJSON(map[string]any{"spec": map[string]any{
 			"type": "oidc", "enabled": true,
 			"ldap": map[string]any{"bind_password": nil},
 			"oidc": oidcSpecJSON("client-secret-" + name),
 		}}))
+		if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10251"`) || !strings.Contains(raw, "spec.type") {
+			t.Errorf("PATCH = HTTP %d, want 400 with code 10251 for spec.type: %s", code, raw)
+		}
 
 		secrets := storedSecrets(t, name)
-		if secrets.LDAPBindPassword != "" || secrets.OIDCClientSecret != "client-secret-"+name {
-			t.Errorf("secrets after the switch = %+v", secrets)
+		if secrets.LDAPBindPassword != "rotated" || secrets.OIDCClientSecret != "" {
+			t.Errorf("secrets after the refused switch = %+v", secrets)
 		}
-
-		code, raw := postgrestAs(t, token, http.MethodGet, path, "")
-		if code != http.StatusOK || !strings.Contains(raw, `"ldap":null`) || !strings.Contains(raw, `"scopes":["openid","profile","email"]`) {
-			t.Errorf("GET after the switch = HTTP %d: %s", code, raw)
-		}
-
-		assertNoSecretInBody(t, raw, "client-secret-"+name)
 	})
 
-	t.Run("switching back to ldap needs a bind_password", func(t *testing.T) {
-		code, raw := postgrestAs(t, token, http.MethodPatch, path, ldapSourceJSON(name, "", "", true))
-		if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10255"`) || !strings.Contains(raw, "bind_password") {
-			t.Errorf("PATCH = HTTP %d, want 400 with code 10255 for bind_password: %s", code, raw)
+	t.Run("a whole-spec PATCH with the same type passes", func(t *testing.T) {
+		patch(t, ldapSourceJSON(name, "", "", false))
+
+		code, raw := postgrestAs(t, token, http.MethodGet, path, "")
+		if code != http.StatusOK || !strings.Contains(raw, `"type":"ldap"`) || !strings.Contains(raw, `"enabled":false`) {
+			t.Errorf("GET after the PATCH = HTTP %d: %s", code, raw)
 		}
 	})
 }
