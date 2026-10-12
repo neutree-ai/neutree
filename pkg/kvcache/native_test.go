@@ -10,7 +10,7 @@ import (
 )
 
 func TestNativeConfiguration(t *testing.T) {
-	memory := "4Gi"
+	memory := "4"
 	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
 		Resources: &v1.ResourceSpec{Memory: &memory},
 		Engine:    &v1.EndpointEngineSpec{Engine: "vllm"},
