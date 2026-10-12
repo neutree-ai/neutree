@@ -1,0 +1,2 @@
+-- No-op. PostgreSQL cannot remove enum values; org_unit:* and team:* stay in
+-- api.permission_action. 109's down migration takes them out of every role.

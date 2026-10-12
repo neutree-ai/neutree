@@ -237,12 +237,14 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		logName = identity.Subject
 	}
 
-	userID, err := ensureExternalUser(ctx, deps, externalAccount{
+	userID, err := ensureExternalUser(ctx, deps, auth.ExternalAccount{
 		Source:         auth.LinkSource(auth.OIDCSource, o.name),
 		ExternalID:     oidcExternalID(identity.Issuer, identity.Subject),
 		IdentitySource: auth.OIDCSource,
 		Email:          oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
-		Metadata:       externalUserMetadata(identity.Username, identity.DisplayName, identity.Email),
+		Username:       identity.Username,
+		DisplayName:    identity.DisplayName,
+		SourceEmail:    identity.Email,
 		LogName:        logName,
 	})
 	if err != nil {

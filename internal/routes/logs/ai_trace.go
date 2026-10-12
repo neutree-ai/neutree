@@ -143,7 +143,7 @@ const (
 // external_endpoint:trace-read for the workspace. A caller holding only one of
 // the two is restricted to that endpoint type (recorded in the context for the
 // handlers to scope their LogsQL query). Both checks pass the workspace to
-// has_permission, which the enterprise edition overrides to be workspace-aware.
+// has_permission, whose hooks the enterprise edition overrides to be workspace-aware.
 func requireTracePermission(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")

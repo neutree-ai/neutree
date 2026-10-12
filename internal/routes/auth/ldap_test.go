@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -152,6 +153,7 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String(),
+		Username: "alice", Email: "alice@example.org",
 	}).Return(nil).Once()
 	d.expectSession(userID.String())
 
@@ -159,6 +161,44 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, testSession, w.Body.String())
+}
+
+// A user the organization sync deactivated (banned in GoTrue) is refused,
+// whether it was created by the sync or by an earlier login.
+func TestLDAPToken_BannedUserIsRefused(t *testing.T) {
+	d := newLDAPTestDeps(t)
+	userID := uuid.New()
+	until := time.Now().Add(time.Hour)
+
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
+		Return(&storage.ExternalIdentity{Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String()}, nil).Once()
+	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
+		Return(&types.AdminGetUserResponse{User: types.User{ID: userID, Email: testPlaceholderEmail, BannedUntil: &until}}, nil).Once()
+
+	w := d.login(t)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, msgUserDisabled, errorBody(t, w))
+	d.sessions.AssertNotCalled(t, "GenerateMagicLink", mock.Anything, mock.Anything)
+}
+
+// A ban that has run out does not block the login.
+func TestLDAPToken_ExpiredBanAllowsLogin(t *testing.T) {
+	d := newLDAPTestDeps(t)
+	userID := uuid.New()
+	until := time.Now().Add(-time.Hour)
+
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, testIdentity().ExternalID).
+		Return(&storage.ExternalIdentity{Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String()}, nil).Once()
+	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
+		Return(&types.AdminGetUserResponse{User: types.User{ID: userID, Email: testPlaceholderEmail, BannedUntil: &until}}, nil).Once()
+	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
+		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
+	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
+
+	w := d.login(t)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestLDAPToken_LaterLoginUsesLink(t *testing.T) {

@@ -99,7 +99,7 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 		}
 
 		// LDAP and OIDC logins read their identity sources from the database.
-		authDeps.Sources, err = auth.NewLoginSources(deps.Config.Storage, deps.Config.AuthConfig.JwtSecret, auth.DefaultLoginSourceTTL)
+		authDeps.Sources, err = auth.NewLoginSources(deps.Config.Storage, deps.Config.AuthConfig.JwtSecret)
 		if err != nil {
 			return fmt.Errorf("init identity source logins: %w", err)
 		}

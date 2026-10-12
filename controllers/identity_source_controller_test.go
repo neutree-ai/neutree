@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/identitysource"
+	"github.com/neutree-ai/neutree/internal/identitysync"
 	"github.com/neutree-ai/neutree/pkg/storage"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
@@ -261,4 +263,213 @@ func TestIdentitySourceController_WrongObject(t *testing.T) {
 	c := newTestIdentitySourceController(t, storagemocks.NewMockStorage(t), &fakeTester{}, time.Now())
 
 	assert.Error(t, c.Reconcile(&v1.Role{}))
+}
+
+type fakeSyncer struct {
+	result identitysync.Result
+	err    error
+	calls  int
+}
+
+func (f *fakeSyncer) sync(_ context.Context, _ *v1.IdentitySource, _ *storage.IdentitySourceSecrets) (identitysync.Result, error) {
+	f.calls++
+	return f.result, f.err
+}
+
+func newSyncingController(t *testing.T, store *storagemocks.MockStorage, syncer *fakeSyncer, now *time.Time) *IdentitySourceController {
+	t.Helper()
+
+	c, err := NewIdentitySourceController(&IdentitySourceControllerOption{
+		Storage: store,
+		Tester:  (&fakeTester{}).test,
+		Syncer:  syncer.sync,
+	})
+	require.NoError(t, err)
+
+	c.now = func() time.Time { return *now }
+
+	return c
+}
+
+// syncedSource is a tested LDAP source with sync enabled whose last sync
+// handled the request at handled and finished at finished.
+func syncedSource(now time.Time, finished time.Time, handled, requested string, ok bool) *v1.IdentitySource {
+	src := testIdentitySource()
+	src.Spec.Sync = &v1.IdentitySourceSyncSpec{Enabled: true, Interval: 3600, RequestedAt: requested}
+	src.Status = &v1.IdentitySourceStatus{
+		Phase:              v1.IdentitySourcePhaseCONNECTED,
+		LastConnectionTest: &v1.IdentitySourceConnectionTest{Time: now.Format(time.RFC3339Nano), OK: true},
+	}
+
+	if !finished.IsZero() {
+		src.Status.LastSync = &v1.IdentitySourceSyncStatus{
+			RequestedAt: handled,
+			StartedAt:   finished.Add(-time.Second).Format(time.RFC3339Nano),
+			FinishedAt:  finished.Format(time.RFC3339Nano),
+			OK:          ok,
+		}
+	}
+
+	return src
+}
+
+// primeTested makes the controller consider src tested with its current
+// spec, so only the sync decision is exercised.
+func primeTested(c *IdentitySourceController, src *v1.IdentitySource) {
+	secrets := &storage.IdentitySourceSecrets{LDAPBindPassword: testBindPassword}
+	c.tested[src.ID] = identitysource.Fingerprint(src.Spec, secrets)
+}
+
+func TestIdentitySourceController_FirstSyncAndStatus(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	store := storagemocks.NewMockStorage(t)
+	syncer := &fakeSyncer{result: identitysync.Result{Planned: 12, Created: 7, Memberships: 5}}
+	c := newSyncingController(t, store, syncer, &now)
+
+	src := syncedSource(now, time.Time{}, "", "", true)
+	primeTested(c, src)
+	expectSecrets(store, testBindPassword)
+	written := captureStatus(store)
+
+	require.NoError(t, c.Reconcile(src))
+
+	assert.Equal(t, 1, syncer.calls)
+	require.NotNil(t, written.LastSync)
+	assert.True(t, written.LastSync.OK)
+	assert.Equal(t, 7, written.LastSync.Created)
+	assert.Equal(t, 5, written.LastSync.Memberships)
+	assert.Zero(t, written.LastSync.Pending)
+	assert.Equal(t, now.Format(time.RFC3339Nano), written.LastSync.LastSuccessTime)
+	assert.Equal(t, "applied 12 changes", written.LastSync.Message)
+	// The connection test part of the status is kept.
+	assert.Equal(t, v1.IdentitySourcePhaseCONNECTED, written.Phase)
+	assert.NotNil(t, written.LastConnectionTest)
+}
+
+func TestIdentitySourceController_SyncCadence(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	handled := now.Add(-2 * time.Hour).Format(time.RFC3339Nano)
+
+	cases := []struct {
+		name     string
+		src      *v1.IdentitySource
+		mutate   func(*v1.IdentitySource)
+		wantSync bool
+	}{
+		{"recent sync waits", syncedSource(now, now.Add(-10*time.Minute), handled, handled, true), nil, false},
+		{"interval passed", syncedSource(now, now.Add(-61*time.Minute), handled, handled, true), nil, true},
+		{"new manual request", syncedSource(now, now.Add(-time.Minute), handled, now.Add(-30*time.Second).Format(time.RFC3339Nano), true), nil, true},
+		{"request handled already", syncedSource(now, now.Add(-time.Minute), handled, handled, true), nil, false},
+		{"failed sync retries sooner", syncedSource(now, now.Add(-6*time.Minute), handled, handled, false), nil, true},
+		{"failed sync waits the retest interval", syncedSource(now, now.Add(-time.Minute), handled, handled, false), nil, false},
+		{"sync disabled", syncedSource(now, time.Time{}, "", "", true), func(s *v1.IdentitySource) { s.Spec.Sync.Enabled = false }, false},
+		{"no sync spec", syncedSource(now, time.Time{}, "", "", true), func(s *v1.IdentitySource) { s.Spec.Sync = nil }, false},
+		{"oidc source is not synced", syncedSource(now, time.Time{}, "", "", true), func(s *v1.IdentitySource) {
+			s.Spec.Type = v1.IdentitySourceTypeOIDC
+			s.Spec.LDAP = nil
+			s.Spec.OIDC = &v1.IdentitySourceOIDCSpec{Issuer: "https://idp.example.org"}
+		}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := storagemocks.NewMockStorage(t)
+			syncer := &fakeSyncer{}
+			c := newSyncingController(t, store, syncer, &now)
+
+			if tc.mutate != nil {
+				tc.mutate(tc.src)
+			}
+
+			primeTested(c, tc.src)
+			expectSecrets(store, testBindPassword)
+
+			if tc.wantSync {
+				captureStatus(store)
+			}
+
+			require.NoError(t, c.Reconcile(tc.src))
+			assert.Equal(t, tc.wantSync, syncer.calls == 1)
+		})
+	}
+}
+
+// A spec change seen by the process syncs at once; a fresh process does not
+// sync merely because it has not seen the spec before.
+func TestIdentitySourceController_SyncsOnSpecChange(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	handled := now.Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	store := storagemocks.NewMockStorage(t)
+	syncer := &fakeSyncer{}
+	c := newSyncingController(t, store, syncer, &now)
+	expectSecrets(store, testBindPassword)
+
+	src := syncedSource(now, now.Add(-time.Minute), handled, handled, true)
+	primeTested(c, src)
+
+	require.NoError(t, c.Reconcile(src))
+	assert.Zero(t, syncer.calls)
+
+	src.Spec.LDAP.Sync = &v1.IdentitySourceLDAPSyncSpec{OrgUnitBaseDN: "ou=org,dc=example,dc=org"}
+	primeTested(c, src)
+	captureStatus(store)
+
+	require.NoError(t, c.Reconcile(src))
+	assert.Equal(t, 1, syncer.calls)
+}
+
+func TestIdentitySourceController_FailedSyncStatus(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	earlier := now.Add(-2 * time.Hour)
+	store := storagemocks.NewMockStorage(t)
+	syncer := &fakeSyncer{
+		result: identitysync.Result{Planned: 10, Created: 3},
+		err:    errors.New("create team g1: bind " + testBindPassword + " refused"),
+	}
+	c := newSyncingController(t, store, syncer, &now)
+
+	requested := now.Add(-time.Second).Format(time.RFC3339Nano)
+	src := syncedSource(now, earlier, "", requested, true)
+	src.Status.LastSync.LastSuccessTime = earlier.Format(time.RFC3339Nano)
+	primeTested(c, src)
+	expectSecrets(store, testBindPassword)
+	written := captureStatus(store)
+
+	require.NoError(t, c.Reconcile(src))
+
+	require.NotNil(t, written.LastSync)
+	assert.False(t, written.LastSync.OK)
+	assert.Equal(t, 3, written.LastSync.Created)
+	assert.Equal(t, 7, written.LastSync.Pending)
+	assert.Equal(t, requested, written.LastSync.RequestedAt)
+	assert.Equal(t, earlier.Format(time.RFC3339Nano), written.LastSync.LastSuccessTime)
+	assert.NotContains(t, written.LastSync.Message, testBindPassword)
+	assert.Contains(t, written.LastSync.Message, "create team g1")
+}
+
+// The connection test writes the whole status; it keeps the sync result.
+func TestIdentitySourceController_TestKeepsSyncStatus(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	handled := now.Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	store := storagemocks.NewMockStorage(t)
+	syncer := &fakeSyncer{}
+	c := newSyncingController(t, store, syncer, &now)
+
+	src := syncedSource(now, now.Add(-time.Minute), handled, handled, true)
+	expectSecrets(store, testBindPassword)
+	written := captureStatus(store)
+
+	require.NoError(t, c.Reconcile(src))
+
+	assert.Zero(t, syncer.calls)
+	require.NotNil(t, written.LastSync)
+	assert.Equal(t, src.Status.LastSync.FinishedAt, written.LastSync.FinishedAt)
+}
+
+func TestRequestedAfter(t *testing.T) {
+	assert.False(t, requestedAfter("", ""))
+	assert.True(t, requestedAfter("2026-10-09T12:00:00+00:00", ""))
+	assert.True(t, requestedAfter("2026-10-09T12:00:01+00:00", "2026-10-09T12:00:00Z"))
+	assert.False(t, requestedAfter("2026-10-09T12:00:00+00:00", "2026-10-09T12:00:00Z"))
+	assert.False(t, requestedAfter("2026-10-09T11:00:00+00:00", "2026-10-09T12:00:00Z"))
 }

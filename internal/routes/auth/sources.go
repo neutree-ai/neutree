@@ -16,11 +16,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// DefaultLoginSourceTTL is how long a login reuses what it read about an
-// identity source before reading it again. A change to a source therefore
-// reaches logins within this time, with no restart.
-const DefaultLoginSourceTTL = 30 * time.Second
-
 var (
 	// errSourceNotFound covers a source that does not exist, is disabled, is
 	// being deleted, or has another type than the login asks for. They are
@@ -37,13 +32,12 @@ var (
 // database and keeps the LDAP authenticators and OIDC relying parties built
 // from them.
 //
-// An entry is reused for ttl after it was read. After that, the next login
-// reads the source and its secrets again and keeps the built client when
-// neither changed, so an OIDC provider is not discovered again just because
-// time passed. A source that is gone, or a failed read, drops the entry.
+// Every login reads the source and its secrets, so a change, a disable or a
+// delete applies to the next login. The built client is kept while neither
+// changed, so an OIDC provider keeps its discovery document and keys. A
+// source that is gone, or a failed read, drops its client.
 type LoginSources struct {
 	store storage.Storage
-	ttl   time.Duration
 	// codec seals the OIDC login state cookie of every source; the source
 	// name is bound into each sealed state.
 	codec *stateCodec
@@ -59,19 +53,14 @@ type LoginSources struct {
 // NewLoginSources reads identity sources from store. stateSecret keys the
 // OIDC login state cookie; it is the JWT secret neutree-api shares with
 // GoTrue and PostgREST, so every replica can finish a login another started.
-func NewLoginSources(store storage.Storage, stateSecret string, ttl time.Duration) (*LoginSources, error) {
+func NewLoginSources(store storage.Storage, stateSecret string) (*LoginSources, error) {
 	codec, err := newStateCodec(stateSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	if ttl <= 0 {
-		ttl = DefaultLoginSourceTTL
-	}
-
 	return &LoginSources{
 		store: store,
-		ttl:   ttl,
 		codec: codec,
 		now:   time.Now,
 		newLDAP: func(cfg ldap.Config) (LDAPAuthenticator, error) {
@@ -85,12 +74,11 @@ func NewLoginSources(store storage.Storage, stateSecret string, ttl time.Duratio
 }
 
 // loginSource is an enabled identity source ready for logins. It is not
-// changed once cached; a refresh replaces it.
+// changed once built; a changed source gets a new one.
 type loginSource struct {
 	name        string
 	sourceType  v1.IdentitySourceType
 	fingerprint [sha256.Size]byte
-	fetchedAt   time.Time
 
 	ldap LDAPAuthenticator
 	oidc *oidcSource
@@ -149,23 +137,14 @@ func (s *LoginSources) defaultSource(sourceType v1.IdentitySourceType) (string, 
 	}
 }
 
-// get returns the enabled source with the given name and type.
+// get reads the enabled source with the given name and type. The clients
+// built for it are reused while its spec and secrets are unchanged.
 func (s *LoginSources) get(name string, sourceType v1.IdentitySourceType) (*loginSource, error) {
 	if v1.ValidateIdentitySourceName(name) != nil {
 		return nil, errSourceNotFound
 	}
 
-	now := s.now()
-
-	s.mu.Lock()
-	cached := s.entries[name]
-	s.mu.Unlock()
-
-	if cached != nil && now.Sub(cached.fetchedAt) < s.ttl {
-		return ofType(cached, sourceType)
-	}
-
-	entry, err := s.load(name, cached, now)
+	entry, err := s.load(name)
 
 	s.mu.Lock()
 	if err != nil {
@@ -179,10 +158,6 @@ func (s *LoginSources) get(name string, sourceType v1.IdentitySourceType) (*logi
 		return nil, err
 	}
 
-	return ofType(entry, sourceType)
-}
-
-func ofType(entry *loginSource, sourceType v1.IdentitySourceType) (*loginSource, error) {
 	if entry.sourceType != sourceType {
 		return nil, errSourceNotFound
 	}
@@ -190,9 +165,9 @@ func ofType(entry *loginSource, sourceType v1.IdentitySourceType) (*loginSource,
 	return entry, nil
 }
 
-// load reads the source and its secrets, reusing the clients of previous when
-// both are unchanged.
-func (s *LoginSources) load(name string, previous *loginSource, now time.Time) (*loginSource, error) {
+// load reads the source and its secrets and returns the entry kept for them,
+// building a new one when either changed.
+func (s *LoginSources) load(name string) (*loginSource, error) {
 	sources, err := s.store.ListIdentitySource(storage.ListOption{
 		Filters: []storage.Filter{{Column: "metadata->name", Operator: "eq", Value: strconv.Quote(name)}},
 	})
@@ -220,19 +195,15 @@ func (s *LoginSources) load(name string, previous *loginSource, now time.Time) (
 
 	fingerprint := identitysource.Fingerprint(source.Spec, secrets)
 
+	s.mu.Lock()
+	previous := s.entries[name]
+	s.mu.Unlock()
+
 	if previous != nil && previous.fingerprint == fingerprint {
-		refreshed := *previous
-		refreshed.fetchedAt = now
-
-		return &refreshed, nil
+		return previous, nil
 	}
 
-	entry := &loginSource{
-		name:        name,
-		sourceType:  source.Spec.Type,
-		fingerprint: fingerprint,
-		fetchedAt:   now,
-	}
+	entry := &loginSource{name: name, sourceType: source.Spec.Type, fingerprint: fingerprint}
 
 	if err := s.build(entry, source.Spec, secrets); err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", errSourceUnusable, name, err)

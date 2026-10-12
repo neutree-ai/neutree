@@ -159,3 +159,31 @@ func TestIdentitySourceSecretJSONNames(t *testing.T) {
 	assert.Contains(t, string(raw), `"client_secret":"s"`)
 	assert.NotContains(t, string(raw), `"ldap"`)
 }
+
+func TestIdentitySourceSpecValidate_Sync(t *testing.T) {
+	spec := validLDAPSpec()
+	spec.Sync = &IdentitySourceSyncSpec{Enabled: true, Interval: 600}
+	spec.LDAP.Sync = &IdentitySourceLDAPSyncSpec{OrgUnitBaseDN: "ou=org,dc=example,dc=org", PageSize: 100}
+	assert.NoError(t, spec.Validate())
+	assert.True(t, spec.SyncEnabled())
+	assert.Equal(t, 600*time.Second, spec.Sync.SyncInterval())
+
+	spec.Sync.Interval = 30
+	assert.ErrorContains(t, spec.Validate(), "spec.sync.interval")
+
+	spec.Sync.Interval = 0
+	assert.NoError(t, spec.Validate())
+	assert.Equal(t, DefaultIdentitySourceSyncIntervalSeconds*time.Second, spec.Sync.SyncInterval())
+
+	spec.LDAP.Sync.UserListFilter = "(uid={username})"
+	assert.ErrorContains(t, spec.Validate(), "user_list_filter")
+
+	spec.LDAP.Sync.UserListFilter = ""
+	spec.LDAP.Sync.PageSize = -1
+	assert.ErrorContains(t, spec.Validate(), "page_size")
+
+	oidc := validOIDCSpec()
+	oidc.Sync = &IdentitySourceSyncSpec{Enabled: true}
+	assert.NoError(t, oidc.Validate())
+	assert.False(t, oidc.SyncEnabled(), "only LDAP sources sync")
+}

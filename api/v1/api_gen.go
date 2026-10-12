@@ -445,6 +445,7 @@ type ApiRoleAssignmentSpec struct {
 	Workspace string      `json:"workspace"`
 	Global    interface{} `json:"global"`
 	Role      string      `json:"role"`
+	OrgUnit   string      `json:"org_unit"`
 }
 
 type ApiRoleAssignmentStatus struct {

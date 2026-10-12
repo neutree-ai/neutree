@@ -62,6 +62,28 @@ func TestLDAPConfig(t *testing.T) {
 	assert.NoError(t, cfg.Validate())
 }
 
+func TestLDAPConfig_Sync(t *testing.T) {
+	spec := ldapSpec("ldap://ldap.example.org").LDAP
+
+	assert.Equal(t, ldap.SyncConfig{}, LDAPConfig(spec, "pw").Sync)
+
+	spec.Sync = &v1.IdentitySourceLDAPSyncSpec{
+		OrgUnitBaseDN:        " ou=org,dc=example,dc=org ",
+		GroupBaseDN:          "ou=groups,dc=example,dc=org",
+		GroupMemberAttribute: "uniqueMember",
+		DisabledUserFilter:   "(employeeType=disabled)",
+		PageSize:             200,
+	}
+
+	assert.Equal(t, ldap.SyncConfig{
+		OrgUnitBaseDN:        "ou=org,dc=example,dc=org",
+		GroupBaseDN:          "ou=groups,dc=example,dc=org",
+		GroupMemberAttribute: "uniqueMember",
+		DisabledUserFilter:   "(employeeType=disabled)",
+		PageSize:             200,
+	}, LDAPConfig(spec, "pw").Sync)
+}
+
 func TestOIDCConfig_Defaults(t *testing.T) {
 	cfg := OIDCConfig(&v1.IdentitySourceOIDCSpec{
 		Issuer:      "https://idp.example.org",

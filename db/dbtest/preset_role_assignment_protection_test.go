@@ -25,7 +25,7 @@ func TestPresetRoleAssignmentProtection_CannotUpdateAdminGlobalAssignment(t *tes
 	err = executeAsUser(t, adminDB, userID, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			UPDATE api.role_assignments
-			SET spec = ROW((spec).user_id, (spec).workspace, (spec).global, 'workspace-user')::api.role_assignment_spec
+			SET spec = ROW((spec).user_id, (spec).workspace, (spec).global, 'workspace-user', NULL)::api.role_assignment_spec
 			WHERE (metadata).name = 'admin-global-role-assignment'
 		`)
 		return err
@@ -92,7 +92,7 @@ func TestPresetRoleAssignmentProtection_CanUpdateOtherGlobalAssignment(t *testin
 			'v1',
 			'RoleAssignment',
 			ROW('test-global-assignment', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($1::uuid, NULL, TRUE, 'workspace-user')::api.role_assignment_spec
+			ROW($1::uuid, NULL, TRUE, 'workspace-user', NULL)::api.role_assignment_spec
 		)
 	`, testUser.ID)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestPresetRoleAssignmentProtection_CanDeleteOtherGlobalAssignment(t *testin
 			'v1',
 			'RoleAssignment',
 			ROW('test-deletable-assignment', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($1::uuid, NULL, TRUE, 'workspace-user')::api.role_assignment_spec
+			ROW($1::uuid, NULL, TRUE, 'workspace-user', NULL)::api.role_assignment_spec
 		)
 	`, testUser.ID)
 	if err != nil {

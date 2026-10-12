@@ -169,7 +169,7 @@ func TestRoleAssignmentSoftDelete_WithoutDeletePermission(t *testing.T) {
 			'v1',
 			'RoleAssignment',
 			ROW('ra-soft-delete-test-1', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($1::uuid, NULL, TRUE, 'workspace-user')::api.role_assignment_spec
+			ROW($1::uuid, NULL, TRUE, 'workspace-user', NULL)::api.role_assignment_spec
 		)
 	`, testUser.ID)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestRoleAssignmentSoftDelete_WithDeletePermission(t *testing.T) {
 			'v1',
 			'RoleAssignment',
 			ROW('ra-soft-delete-test-2', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($1::uuid, NULL, TRUE, 'workspace-user')::api.role_assignment_spec
+			ROW($1::uuid, NULL, TRUE, 'workspace-user', NULL)::api.role_assignment_spec
 		)
 	`, testUser.ID)
 	if err != nil {
