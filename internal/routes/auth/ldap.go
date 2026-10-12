@@ -86,6 +86,13 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		user, err := loginUser(deps, userID)
+		if errors.Is(err, errUserDisabled) {
+			klog.Infof("LDAP login of %q via %s rejected: user %s is disabled", identity.Username, source.name, userID)
+			c.JSON(http.StatusForbidden, gin.H{"error": msgUserDisabled})
+
+			return
+		}
+
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s: %v", identity.Username, source.name, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})

@@ -43,6 +43,13 @@ type externalAccount struct {
 	LogName string
 }
 
+// errUserDisabled means the linked user is banned in GoTrue.
+var errUserDisabled = errors.New("user is disabled")
+
+// msgUserDisabled answers a login of a disabled user. The credentials were
+// right, so saying so tells nothing an attacker could use.
+const msgUserDisabled = "account is disabled"
+
 // ensureExternalUser returns the GoTrue user linked to the account, creating
 // and linking one on the account's first login; created tells which.
 // Accounts are matched by their link only, never by email or name.
@@ -128,7 +135,9 @@ func waitForLink(ctx context.Context, store storage.Storage, source, externalID 
 	return nil, err
 }
 
-// loginUser returns the GoTrue user userID for a login.
+// loginUser returns the GoTrue user userID for a login. A banned user is
+// refused with errUserDisabled: GoTrue would refuse its session too, and
+// checking here gives the login a clear answer instead of a failed verify.
 func loginUser(deps *Dependencies, userID string) (*types.User, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
@@ -142,6 +151,10 @@ func loginUser(deps *Dependencies, userID string) (*types.User, error) {
 
 	if resp == nil || resp.Email == "" {
 		return nil, fmt.Errorf("user %s has no email", userID)
+	}
+
+	if auth.IsBanned(&resp.User, time.Now()) {
+		return nil, fmt.Errorf("user %s: %w", userID, errUserDisabled)
 	}
 
 	return &resp.User, nil

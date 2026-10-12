@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/supabase-community/gotrue-go/types"
@@ -177,4 +178,9 @@ func sameMetadataValue(stored, want any) bool {
 	s, ok := stored.(string)
 
 	return ok && s == want
+}
+
+// IsBanned reports whether a GoTrue user is banned at now.
+func IsBanned(user *types.User, now time.Time) bool {
+	return user != nil && user.BannedUntil != nil && user.BannedUntil.After(now)
 }

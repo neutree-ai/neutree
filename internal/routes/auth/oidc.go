@@ -39,6 +39,9 @@ const (
 	// oidcErrSourceUnavailable means the identity source the login started
 	// with was disabled or deleted before it finished.
 	oidcErrSourceUnavailable = "source_unavailable"
+	// oidcErrUserDisabled means the account is linked to a user that is
+	// banned in GoTrue; an LDAP login answers 403 for the same case.
+	oidcErrUserDisabled = "user_disabled"
 )
 
 // OIDCRelyingParty runs the code flow with the provider; *oidc.RelyingParty
@@ -253,6 +256,11 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 	}
 
 	user, err := loginUser(deps, userID)
+	if errors.Is(err, errUserDisabled) {
+		klog.Infof("OIDC login of %q via %s rejected: user %s is disabled", logName, o.name, userID)
+		return "", oidcErrUserDisabled
+	}
+
 	if err != nil {
 		klog.Errorf("OIDC login of %q via %s: %v", logName, o.name, err)
 		return "", oidcErrServerError
