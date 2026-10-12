@@ -41,7 +41,7 @@ services:
         max-file: "3"
 
   auth:
-    image: supabase/gotrue:v2.170.0
+    image: supabase/gotrue:v2.197.0
     container_name: auth
     environment:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: "/verify"
