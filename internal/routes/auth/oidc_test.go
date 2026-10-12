@@ -147,9 +147,19 @@ func (e *oidcTestEnv) placeholderEmail() string {
 }
 
 // expectEmail makes GoTrue report email as the current email of userID.
+// The user and its profile hold what the provider says, so a later login has
+// nothing to refresh.
 func (e *oidcTestEnv) expectEmail(userID, email string) {
 	e.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: uuid.MustParse(userID)}).
-		Return(&types.AdminGetUserResponse{User: types.User{ID: uuid.MustParse(userID), Email: email}}, nil).Once()
+		Return(&types.AdminGetUserResponse{User: types.User{
+			ID:           uuid.MustParse(userID),
+			Email:        email,
+			UserMetadata: internalauth.ExternalUserMetadata("kc.alice", "KC Alice", "alice@example.org"),
+		}}, nil).Once()
+	e.storage.EXPECT().GetUserProfile(userID).Return(&v1.UserProfile{
+		Metadata: &v1.Metadata{Name: "kc.alice", DisplayName: "KC Alice"},
+		Spec:     &v1.UserProfileSpec{Email: "alice@example.org"},
+	}, nil).Maybe()
 }
 
 func stateCookie(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {

@@ -237,20 +237,32 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		logName = identity.Subject
 	}
 
-	userID, err := ensureExternalUser(ctx, deps, externalAccount{
+	account := externalAccount{
 		Source:         auth.LinkSource(auth.OIDCSource, o.name),
 		ExternalID:     oidcExternalID(identity.Issuer, identity.Subject),
 		IdentitySource: auth.OIDCSource,
 		Email:          oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
-		Metadata:       externalUserMetadata(identity.Username, identity.DisplayName, identity.Email),
+		Profile:        auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
 		LogName:        logName,
-	})
+	}
+
+	userID, created, err := ensureExternalUser(ctx, deps, account)
 	if err != nil {
 		klog.Errorf("OIDC login of %q via %s: link user: %v", logName, o.name, err)
 		return "", oidcErrServerError
 	}
 
-	link, err := magicLinkFor(ctx, deps, userID)
+	user, err := loginUser(deps, userID)
+	if err != nil {
+		klog.Errorf("OIDC login of %q via %s: %v", logName, o.name, err)
+		return "", oidcErrServerError
+	}
+
+	if !created {
+		refreshExternalUser(deps, account, user, account.Profile)
+	}
+
+	link, err := magicLinkFor(ctx, deps, user)
 	if err != nil {
 		klog.Errorf("OIDC login of %q via %s (user %s): %v", logName, o.name, userID, err)
 		return "", oidcErrServerError

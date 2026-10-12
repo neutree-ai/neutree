@@ -75,7 +75,9 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		userID, err := ensureLDAPUser(ctx, deps, source.name, identity)
+		account := ldapAccount(source.name, identity)
+
+		userID, created, err := ensureExternalUser(ctx, deps, account)
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s (id %s): link user: %v", identity.Username, source.name, identity.ExternalID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
@@ -83,7 +85,19 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		session, err := issueSession(ctx, deps, userID)
+		user, err := loginUser(deps, userID)
+		if err != nil {
+			klog.Errorf("LDAP login of %q via %s: %v", identity.Username, source.name, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
+
+			return
+		}
+
+		if !created {
+			refreshExternalUser(deps, account, user, account.Profile)
+		}
+
+		session, err := issueSession(ctx, deps, user)
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s (user %s): issue session: %v", identity.Username, source.name, userID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
@@ -137,15 +151,15 @@ func ldapPlaceholderEmail(sourceName, externalID string) string {
 	return strings.ToLower(externalID) + "@" + sourceName + "." + ldapEmailDomain
 }
 
-// ensureLDAPUser returns the GoTrue user linked to the directory account,
-// creating and linking one on the account's first login.
-func ensureLDAPUser(ctx context.Context, deps *Dependencies, sourceName string, identity *ldap.Identity) (string, error) {
-	return ensureExternalUser(ctx, deps, externalAccount{
+// ldapAccount describes the directory account of identity in the LDAP
+// identity source sourceName.
+func ldapAccount(sourceName string, identity *ldap.Identity) externalAccount {
+	return externalAccount{
 		Source:         auth.LinkSource(auth.LDAPSource, sourceName),
 		ExternalID:     identity.ExternalID,
 		IdentitySource: auth.LDAPSource,
 		Email:          ldapPlaceholderEmail(sourceName, identity.ExternalID),
-		Metadata:       externalUserMetadata(identity.Username, identity.DisplayName, identity.Email),
+		Profile:        auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
 		LogName:        identity.Username,
-	})
+	}
 }

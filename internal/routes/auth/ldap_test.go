@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/supabase-community/gotrue-go/types"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	authmocks "github.com/neutree-ai/neutree/internal/auth/mocks"
 	"github.com/neutree-ai/neutree/pkg/identity/ldap"
@@ -109,10 +110,22 @@ func (d *ldapTestDeps) login(t *testing.T) *httptest.ResponseRecorder {
 	return d.serve(t, true, http.MethodPost, "/api/v1/auth/ldap/token", `{"source":"corp-ldap","username":"alice","password":"pw"}`)
 }
 
-// expectEmail makes GoTrue report email as the current email of userID.
+// expectEmail makes GoTrue report email as the current email of userID. The
+// user and its profile hold what the directory says, so a later login has
+// nothing to refresh.
 func (d *ldapTestDeps) expectEmail(userID, email string) {
+	id := testIdentity()
+
 	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: uuid.MustParse(userID)}).
-		Return(&types.AdminGetUserResponse{User: types.User{ID: uuid.MustParse(userID), Email: email}}, nil).Once()
+		Return(&types.AdminGetUserResponse{User: types.User{
+			ID:           uuid.MustParse(userID),
+			Email:        email,
+			UserMetadata: internalauth.ExternalUserMetadata(id.Username, id.DisplayName, id.Email),
+		}}, nil).Once()
+	d.storage.EXPECT().GetUserProfile(userID).Return(&v1.UserProfile{
+		Metadata: &v1.Metadata{Name: id.Username, DisplayName: id.DisplayName},
+		Spec:     &v1.UserProfileSpec{Email: id.Email},
+	}, nil).Maybe()
 }
 
 func (d *ldapTestDeps) expectSession(userID string) {
