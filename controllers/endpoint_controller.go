@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -17,17 +17,17 @@ import (
 )
 
 type EndpointController struct {
-	endpointCacheProvider clustercache.EndpointProvider
-	storage               storage.Storage
-	syncHandler           func(endpoint *v1.Endpoint) error // Added syncHandler field
+	kvCacheProviders kvcache.Providers
+	storage          storage.Storage
+	syncHandler      func(endpoint *v1.Endpoint) error // Added syncHandler field
 
 	gw             gateway.Gateway
 	acceleratorMgr accelerator.Manager
 }
 
 type EndpointControllerOption struct {
-	EndpointCacheProvider clustercache.EndpointProvider
-	Storage               storage.Storage
+	KVCacheProviders kvcache.Providers
+	Storage          storage.Storage
 
 	Gw             gateway.Gateway
 	AcceleratorMgr accelerator.Manager
@@ -35,10 +35,10 @@ type EndpointControllerOption struct {
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
-		storage:               option.Storage,
-		endpointCacheProvider: option.EndpointCacheProvider,
-		gw:                    option.Gw,
-		acceleratorMgr:        option.AcceleratorMgr,
+		storage:          option.Storage,
+		kvCacheProviders: option.KVCacheProviders,
+		gw:               option.Gw,
+		acceleratorMgr:   option.AcceleratorMgr,
 	}
 
 	c.syncHandler = c.sync
@@ -373,10 +373,10 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:               &cluster[0],
-		EndpointCacheProvider: c.endpointCacheProvider,
-		Storage:               c.storage,
-		AcceleratorMgr:        c.acceleratorMgr,
+		Cluster:          &cluster[0],
+		KVCacheProviders: c.kvCacheProviders,
+		Storage:          c.storage,
+		AcceleratorMgr:   c.acceleratorMgr,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.WorkspaceName())
