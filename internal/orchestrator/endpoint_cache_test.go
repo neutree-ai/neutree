@@ -21,7 +21,7 @@ func TestCacheDependencyWaitsForOldPods(t *testing.T) {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ns"}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", Namespace: "ns", Labels: map[string]string{"app": "inference", "endpoint": "test", kvcache.ZCacheDependencyLabel: "true"}}}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(dep, pod).Build()
-	e := &v1.Endpoint{Metadata: &v1.Metadata{Name: "test"}, Spec: &v1.EndpointSpec{KVCache: nil}, Status: &v1.EndpointStatus{ZCache: &v1.EndpointZCacheStatus{Generation: 4, InUse: true}}}
+	e := &v1.Endpoint{Metadata: &v1.Metadata{Name: "test"}, Spec: &v1.EndpointSpec{KVCache: &v1.EndpointKVCacheSpec{Provider: "vllm-native"}}, Status: &v1.EndpointStatus{ZCache: &v1.EndpointZCacheStatus{Generation: 4, InUse: true}}}
 	observed, err := observeEndpointCache(c, "ns", e)
 	require.NoError(t, err)
 	require.True(t, observed.InUse)

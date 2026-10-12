@@ -8,7 +8,6 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type Native struct{}
@@ -31,13 +30,10 @@ func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
 	if endpoint.Spec.Resources == nil || endpoint.Spec.Resources.Memory == nil {
 		return fmt.Errorf("set inference memory before enabling CPU KV cache")
 	}
-	memory, err := resource.ParseQuantity(*endpoint.Spec.Resources.Memory)
-	if err != nil {
-		return err
-	}
-	if options.CPUMemoryGiB*(1<<30) >= float64(memory.Value()) {
+	if options.CPUMemoryGiB >= endpoint.Spec.Resources.GetMemoryInGB() {
 		return fmt.Errorf("CPU KV cache must leave room within inference memory for the engine")
 	}
+
 	if args, ok := endpoint.Spec.Variables["engine_args"].(map[string]interface{}); ok {
 		for name := range args {
 			if nativeManagedArg(name) {
