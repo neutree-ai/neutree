@@ -1,4 +1,3 @@
--- Restore the 019 definition: the profile is named after user_metadata.username.
 CREATE OR REPLACE FUNCTION api.handle_new_user()
 RETURNS TRIGGER
 SECURITY DEFINER

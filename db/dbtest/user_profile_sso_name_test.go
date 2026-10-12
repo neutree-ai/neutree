@@ -13,15 +13,8 @@ import (
 	"time"
 )
 
-// These tests cover how api.handle_new_user names the profile of a user that
-// GoTrue creates from an SSO login: the IdP claims land in user_metadata and
-// there is no username, so the name is derived (migration 102).
-
 var userProfileNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
-// createSSOShapedUser creates a user through the GoTrue admin API with the
-// given body (user_metadata shaped like IdP claims) and deletes it when the
-// test ends.
 func createSSOShapedUser(t *testing.T, body map[string]any) string {
 	t.Helper()
 
@@ -120,8 +113,7 @@ func TestUserProfileSSOName(t *testing.T) {
 	})
 
 	t.Run("no usable claim falls back to the user id", func(t *testing.T) {
-		// GoTrue rejects a non-ASCII email, so the user has a phone and only a
-		// non-ASCII name: nothing to derive a name from.
+		// GoTrue rejects a non-ASCII email, so use a phone.
 		id := createSSOShapedUser(t, map[string]any{
 			"phone":         "1555" + run[len(run)-7:],
 			"phone_confirm": true,
@@ -176,8 +168,7 @@ func TestUserProfileSSOName(t *testing.T) {
 			t.Errorf("name = %q, want %q", name, want)
 		}
 
-		// The seeded admin is still the only profile named admin, so the
-		// delete protection keyed on that name still points at it alone.
+		// Delete protection is keyed on the name admin.
 		var admins int
 		if err := GetTestDB(t).QueryRowContext(context.Background(),
 			`SELECT count(*) FROM api.user_profiles WHERE (metadata).name = 'admin'`).Scan(&admins); err != nil {
@@ -227,8 +218,7 @@ func TestUserProfileSSOName(t *testing.T) {
 			"user_metadata": map[string]any{"preferred_username": "First.Login." + run, "name": "First"},
 		})
 
-		// GoTrue refreshes user_metadata from the IdP claims on every login;
-		// the admin update stands in for that.
+		// Stands in for a later login, which refreshes user_metadata.
 		code, raw := gotrueRequest(t, http.MethodPut, "/admin/users/"+id, gotrueServiceToken(t), map[string]any{
 			"user_metadata": map[string]any{"preferred_username": "Renamed." + run, "name": "Renamed"},
 		})
@@ -247,12 +237,10 @@ func TestUserProfileSSOName(t *testing.T) {
 	})
 }
 
-// TestDeriveUserProfileName checks the normalization rules directly.
 func TestDeriveUserProfileName(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
 
-	// Not a real user: nothing in user_profiles collides with these names.
 	const id = "0a1b2c3d-0000-4000-8000-000000000000"
 
 	fallback := "u-0a1b2c3d"

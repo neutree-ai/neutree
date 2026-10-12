@@ -368,8 +368,6 @@ func createExternalGoTrueUser(t *testing.T, name string) gotrueUser {
 	code, body := gotrueRequest(t, http.MethodPost, "/admin/users", gotrueServiceToken(t), map[string]any{
 		"email":         email,
 		"email_confirm": true,
-		// The profile an external login stores; api.handle_new_user derives
-		// the profile name from it.
 		"user_metadata": map[string]any{"preferred_username": name, "name": "Test " + name, "email": email},
 		"app_metadata":  map[string]any{"identity_source": "contract-test"},
 	})
@@ -608,8 +606,6 @@ func TestGoTrue_GenerateLinkSignsUpUnknownEmail(t *testing.T) {
 		t.Errorf("created user email = %q, want %q", gotEmail, email)
 	}
 
-	// The user has no user_metadata; api.handle_new_user still gives it a
-	// profile, named from the email.
 	var name string
 	if err := db.QueryRow(`SELECT (metadata).name FROM api.user_profiles WHERE id = $1`, link.ID).Scan(&name); err != nil {
 		t.Errorf("no profile for the signed-up user %s: %v", link.ID, err)
