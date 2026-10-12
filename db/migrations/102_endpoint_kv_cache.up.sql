@@ -1,13 +1,9 @@
-DROP TRIGGER guard_endpoint_zcache ON api.endpoints;
-ALTER TYPE api.endpoint_spec RENAME ATTRIBUTE zcache TO kv_cache;
-UPDATE api.endpoints SET spec.kv_cache = CASE
-    WHEN COALESCE(((spec).kv_cache::jsonb->>'enabled')::boolean, false)
-    THEN jsonb_build_object('provider', 'zcache', 'options', (spec).kv_cache::jsonb - 'enabled')::json
-    ELSE NULL END;
+ALTER TYPE api.endpoint_spec ADD ATTRIBUTE kv_cache json;
+ALTER TYPE api.endpoint_status ADD ATTRIBUTE zcache json;
 
 -- Lock the cluster row for cache admission. Cluster changes already lock that
 -- same row, so two API replicas cannot admit a dependency while disabling it.
-CREATE OR REPLACE FUNCTION api.guard_endpoint_zcache() RETURNS trigger AS $$
+CREATE FUNCTION api.guard_endpoint_zcache() RETURNS trigger AS $$
 DECLARE
     config jsonb := (NEW.spec).kv_cache::jsonb;
     old_status jsonb;
@@ -67,7 +63,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = api, public;
 CREATE TRIGGER guard_endpoint_zcache BEFORE INSERT OR UPDATE ON api.endpoints
 FOR EACH ROW EXECUTE FUNCTION api.guard_endpoint_zcache();
 
-CREATE OR REPLACE FUNCTION api.guard_cluster_zcache_dependencies() RETURNS trigger AS $$
+CREATE FUNCTION api.guard_cluster_zcache_dependencies() RETURNS trigger AS $$
 DECLARE
     old_config jsonb := (OLD.spec).zcache::jsonb;
     new_config jsonb := (NEW.spec).zcache::jsonb;
@@ -88,5 +84,5 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = api, public;
 
-
-
+CREATE TRIGGER guard_cluster_zcache_dependencies BEFORE UPDATE OF spec ON api.clusters
+FOR EACH ROW EXECUTE FUNCTION api.guard_cluster_zcache_dependencies();
