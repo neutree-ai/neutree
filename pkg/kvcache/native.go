@@ -6,8 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
 type Native struct{}
@@ -17,19 +18,25 @@ type NativeOptions struct {
 }
 
 func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
+
 	if cluster.Spec.Type != v1.KubernetesClusterType || endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
 		return fmt.Errorf("native KV cache requires vLLM on Kubernetes")
 	}
+
 	var options NativeOptions
+
 	if err := DecodeOptions(endpoint.Spec.KVCache.Options, &options); err != nil {
 		return fmt.Errorf("native KV cache options: %w", err)
 	}
+
 	if math.IsNaN(options.CPUMemoryGiB) || math.IsInf(options.CPUMemoryGiB, 0) || options.CPUMemoryGiB <= 0 {
 		return fmt.Errorf("cpu_memory_gib must be positive")
 	}
+
 	if endpoint.Spec.Resources == nil || endpoint.Spec.Resources.Memory == nil {
 		return fmt.Errorf("set inference memory before enabling CPU KV cache")
 	}
+
 	if options.CPUMemoryGiB >= endpoint.Spec.Resources.GetMemoryInGB() {
 		return fmt.Errorf("CPU KV cache must leave room within inference memory for the engine")
 	}
@@ -41,34 +48,44 @@ func (Native) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
 			}
 		}
 	}
+
 	return nil
 }
 
 func nativeManagedArg(arg string) bool {
 	name := strings.SplitN(strings.ReplaceAll(strings.TrimLeft(arg, "-"), "_", "-"), "=", 2)[0]
+
 	return name == "kv-transfer-config" || name == "kv-offloading-size" || name == "kv-offloading-backend"
 }
 
 func (n Native) Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment) error {
+
 	if err := n.Validate(endpoint, cluster); err != nil {
 		return err
 	}
+
 	var options NativeOptions
+
 	if err := DecodeOptions(endpoint.Spec.KVCache.Options, &options); err != nil {
 		return err
 	}
+
 	for i := range dep.Spec.Template.Spec.Containers {
 		container := &dep.Spec.Template.Spec.Containers[i]
 		if container.Name != "vllm" {
 			continue
 		}
+
 		for _, arg := range append(append([]string{}, container.Command...), container.Args...) {
 			if nativeManagedArg(arg) {
 				return fmt.Errorf("engine template already supplies KV cache configuration")
 			}
 		}
+
 		container.Args = append(container.Args, "--kv-offloading-backend", "native", "--kv-offloading-size", strconv.FormatFloat(options.CPUMemoryGiB, 'f', -1, 64))
+
 		return nil
 	}
+
 	return fmt.Errorf("vLLM container not found in engine deployment")
 }
