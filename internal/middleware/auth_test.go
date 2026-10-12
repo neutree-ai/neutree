@@ -373,7 +373,7 @@ func TestParseBearerToken(t *testing.T) {
 				authHeader = tt.setupToken()
 			}
 
-			parsedInfo, err := parseBearerToken(config, authHeader)
+			parsedInfo, err := parseBearerToken(config, authHeader, nil, newSessionCache(sessionCacheTTL, time.Now))
 
 			if tt.expectError {
 				assert.Error(t, err)

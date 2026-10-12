@@ -2623,6 +2623,63 @@ func (_c *MockStorage_GetWorkspace_Call) RunAndReturn(run func(string) (*v1.Work
 	return _c
 }
 
+// IsSessionActive provides a mock function with given fields: sessionID, userID
+func (_m *MockStorage) IsSessionActive(sessionID string, userID string) (bool, error) {
+	ret := _m.Called(sessionID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSessionActive")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (bool, error)); ok {
+		return rf(sessionID, userID)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
+		r0 = rf(sessionID, userID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(sessionID, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_IsSessionActive_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSessionActive'
+type MockStorage_IsSessionActive_Call struct {
+	*mock.Call
+}
+
+// IsSessionActive is a helper method to define mock.On call
+//   - sessionID string
+//   - userID string
+func (_e *MockStorage_Expecter) IsSessionActive(sessionID interface{}, userID interface{}) *MockStorage_IsSessionActive_Call {
+	return &MockStorage_IsSessionActive_Call{Call: _e.mock.On("IsSessionActive", sessionID, userID)}
+}
+
+func (_c *MockStorage_IsSessionActive_Call) Run(run func(sessionID string, userID string)) *MockStorage_IsSessionActive_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_IsSessionActive_Call) Return(_a0 bool, _a1 error) *MockStorage_IsSessionActive_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_IsSessionActive_Call) RunAndReturn(run func(string, string) (bool, error)) *MockStorage_IsSessionActive_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListApiKey provides a mock function with given fields: option
 func (_m *MockStorage) ListApiKey(option storage.ListOption) ([]v1.ApiKey, error) {
 	ret := _m.Called(option)
