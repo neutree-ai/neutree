@@ -10,6 +10,7 @@ import (
 	"github.com/supabase-community/gotrue-go/types"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // ExternalProfile is what an identity source says about an account: its
@@ -52,40 +53,53 @@ func ExternalUserMetadata(username, displayName, email string) map[string]any {
 	return metadata
 }
 
-// UserProfileStore reads and writes user profiles; storage.Storage
+// ExternalUserStore is the storage UpdateExternalUser writes; storage.Storage
 // implements it.
-type UserProfileStore interface {
+type ExternalUserStore interface {
 	GetUserProfile(id string) (*v1.UserProfile, error)
 	UpdateUserProfile(id string, data *v1.UserProfile) error
+	UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error
 }
 
-// UpdateExternalUser brings the GoTrue user_metadata and the profile of the
-// external user userID in line with what its identity source says now
-// (decision D56: the source owns the display name and email).
-//
-// current is the user as GoTrue has it. When it is given, only the
-// user_metadata keys that differ are written, and nothing when none does;
-// when it is nil, all keys are written.
-//
-// An empty value in p means the source said nothing about it. With
-// clearMissing the stored value is removed (the organization sync reads the
-// whole directory entry, so empty means gone); otherwise it is kept (a login
-// sees only what the source chose to send).
+// ExternalUserUpdate is what UpdateExternalUser brings in line.
+type ExternalUserUpdate struct {
+	// Link is the user's link as stored: its source, external ID, user ID,
+	// and the username and email last recorded on it.
+	Link *storage.ExternalIdentity
+	// User is the GoTrue user as it is now. When it is given, only the
+	// user_metadata keys that differ are written, and nothing when none
+	// does; when it is nil, all keys are written.
+	User *types.User
+	// Profile is what the identity source says now.
+	Profile ExternalProfile
+	// ClearMissing removes a value the source leaves empty (the
+	// organization sync reads the whole directory entry, so empty means
+	// gone). Without it the stored value is kept (a login sees only what the
+	// source chose to send).
+	ClearMissing bool
+}
+
+// UpdateExternalUser brings an external user in line with what its identity
+// source says now (the source owns the display name and email): the
+// GoTrue user_metadata, the profile's display name and email, and the
+// username and email recorded on the link. Each is written only when it
+// differs. The organization sync and every LDAP or OIDC login use it.
 //
 // The profile email can only be changed to what the database derives for the
 // user (migration 108): user_metadata.email, or the GoTrue email when there is
-// none. So user_metadata is written first, and the profile follows it. The
-// profile is written only when its display name or email differs.
-func UpdateExternalUser(client Client, profiles UserProfileStore, userID string, current *types.User, p ExternalProfile, clearMissing bool) error {
+// none. So user_metadata is written first, and the profile follows it.
+func UpdateExternalUser(client Client, store ExternalUserStore, u ExternalUserUpdate) error {
+	userID := u.Link.UserID
+	p := u.Profile
 	want := ExternalUserMetadata(p.Username, p.DisplayName, p.Email)
 
 	var metadata map[string]any
 
 	gotrueEmail := ""
 
-	if current != nil {
-		metadata = current.UserMetadata
-		gotrueEmail = current.Email
+	if u.User != nil {
+		metadata = u.User.UserMetadata
+		gotrueEmail = u.User.Email
 	}
 
 	update := map[string]any{}
@@ -93,7 +107,7 @@ func UpdateExternalUser(client Client, profiles UserProfileStore, userID string,
 	for _, key := range externalUserMetadataKeys {
 		value, ok := want[key]
 		if !ok {
-			if !clearMissing {
+			if !u.ClearMissing {
 				continue
 			}
 
@@ -101,7 +115,7 @@ func UpdateExternalUser(client Client, profiles UserProfileStore, userID string,
 			value = nil
 		}
 
-		if current != nil && sameMetadataValue(metadata[key], value) {
+		if u.User != nil && sameMetadataValue(metadata[key], value) {
 			continue
 		}
 
@@ -130,12 +144,48 @@ func UpdateExternalUser(client Client, profiles UserProfileStore, userID string,
 		email = gotrueEmail
 	}
 
-	return updateExternalProfile(profiles, userID, p.DisplayName, email)
+	if err := updateExternalProfile(store, userID, p.DisplayName, email); err != nil {
+		return err
+	}
+
+	return updateLinkAccount(store, u.Link, p, u.ClearMissing)
+}
+
+// updateLinkAccount records the source's username and email on the link.
+func updateLinkAccount(store ExternalUserStore, link *storage.ExternalIdentity, p ExternalProfile, clearMissing bool) error {
+	username, email := p.Username, p.Email
+
+	if !clearMissing {
+		if username == "" {
+			username = link.Username
+		}
+
+		if email == "" {
+			email = link.Email
+		}
+	}
+
+	if username == link.Username && email == link.Email {
+		return nil
+	}
+
+	if err := store.UpdateExternalIdentityAccount(&storage.ExternalIdentity{
+		Source:     link.Source,
+		ExternalID: link.ExternalID,
+		Username:   username,
+		Email:      email,
+	}); err != nil {
+		return fmt.Errorf("update link: %w", err)
+	}
+
+	link.Username, link.Email = username, email
+
+	return nil
 }
 
 // updateExternalProfile sets the profile's display name and email; an empty
 // value keeps the stored one.
-func updateExternalProfile(profiles UserProfileStore, userID, displayName, email string) error {
+func updateExternalProfile(profiles ExternalUserStore, userID, displayName, email string) error {
 	profile, err := profiles.GetUserProfile(userID)
 	if err != nil {
 		return fmt.Errorf("get profile: %w", err)

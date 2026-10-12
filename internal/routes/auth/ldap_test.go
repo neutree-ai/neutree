@@ -125,6 +125,8 @@ func (d *ldapTestDeps) expectEmail(userID, email string) {
 		Metadata: &v1.Metadata{Name: id.Username, DisplayName: id.DisplayName},
 		Spec:     &v1.UserProfileSpec{Email: id.Email},
 	}, nil).Maybe()
+	// The links in these tests record no username or email.
+	d.storage.EXPECT().UpdateExternalIdentityAccount(mock.Anything).Return(nil).Maybe()
 }
 
 func (d *ldapTestDeps) expectSession(userID string) {

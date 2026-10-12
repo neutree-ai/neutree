@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/auth"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // linkRetryAttempts and linkRetryDelay bound how long a first login waits for a
@@ -29,11 +30,11 @@ var errUserDisabled = errors.New("user is disabled")
 // right, so saying so tells nothing an attacker could use.
 const msgUserDisabled = "account is disabled"
 
-// ensureExternalUser returns the GoTrue user linked to the account, creating
-// and linking one on the account's first login (unless the organization sync
-// created it already); created tells which. Accounts are matched by their
-// link only, never by email or name.
-func ensureExternalUser(ctx context.Context, deps *Dependencies, account auth.ExternalAccount) (userID string, created bool, err error) {
+// ensureExternalUser returns the link of the account to its GoTrue user,
+// creating and linking a user on the account's first login (unless the
+// organization sync created it already); created tells which. Accounts are
+// matched by their link only, never by email or name.
+func ensureExternalUser(ctx context.Context, deps *Dependencies, account auth.ExternalAccount) (link *storage.ExternalIdentity, created bool, err error) {
 	users := &auth.ExternalUsers{
 		Client:        deps.AuthClient,
 		Links:         deps.Storage,
@@ -73,12 +74,14 @@ func loginUser(deps *Dependencies, userID string) (*types.User, error) {
 // email in line with what the identity source said at this login (D56). The
 // login goes on when this fails: the stale values are only shown, never used
 // to authorize.
-func refreshExternalUser(deps *Dependencies, account auth.ExternalAccount, user *types.User) {
+func refreshExternalUser(deps *Dependencies, account auth.ExternalAccount, link *storage.ExternalIdentity, user *types.User) {
 	if err := auth.RecordIdentitySourceName(deps.AuthClient, user, account.IdentitySourceName); err != nil {
 		klog.Warningf("%s login of %q (user %s): record identity source name: %v", account.Source, account.LogName, user.ID, err)
 	}
 
-	if err := auth.UpdateExternalUser(deps.AuthClient, deps.Storage, user.ID.String(), user, account.Profile(), false); err != nil {
+	if err := auth.UpdateExternalUser(deps.AuthClient, deps.Storage, auth.ExternalUserUpdate{
+		Link: link, User: user, Profile: account.Profile(),
+	}); err != nil {
 		klog.Warningf("%s login of %q (user %s): refresh profile: %v", account.Source, account.LogName, user.ID, err)
 	}
 }

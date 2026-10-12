@@ -250,11 +250,13 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		LogName:            logName,
 	}
 
-	userID, created, err := ensureExternalUser(ctx, deps, account)
+	stored, created, err := ensureExternalUser(ctx, deps, account)
 	if err != nil {
 		klog.Errorf("OIDC login of %q via %s: link user: %v", logName, o.name, err)
 		return "", oidcErrServerError
 	}
+
+	userID := stored.UserID
 
 	user, err := loginUser(deps, userID)
 	if errors.Is(err, errUserDisabled) {
@@ -268,7 +270,7 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 	}
 
 	if !created {
-		refreshExternalUser(deps, account, user)
+		refreshExternalUser(deps, account, stored, user)
 	}
 
 	link, err := magicLinkFor(ctx, deps, user)

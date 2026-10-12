@@ -165,6 +165,8 @@ func (e *oidcTestEnv) expectEmail(userID, email string) {
 		Metadata: &v1.Metadata{Name: "kc.alice", DisplayName: "KC Alice"},
 		Spec:     &v1.UserProfileSpec{Email: "alice@example.org"},
 	}, nil).Maybe()
+	// The links in these tests record no username or email.
+	e.storage.EXPECT().UpdateExternalIdentityAccount(mock.Anything).Return(nil).Maybe()
 }
 
 func stateCookie(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {

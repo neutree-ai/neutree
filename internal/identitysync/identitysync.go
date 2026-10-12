@@ -73,6 +73,7 @@ type Store interface {
 	GetExternalIdentity(source, externalID string) (*storage.ExternalIdentity, error)
 	CreateExternalIdentity(data *storage.ExternalIdentity) error
 	UpdateExternalIdentitySync(data *storage.ExternalIdentity) error
+	UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error
 	ListIdentitySourceSyncUsers(identitySource string) ([]storage.IdentitySourceSyncUser, error)
 	RevokeUserSessions(userID string) error
 }
@@ -536,7 +537,7 @@ func (r *run) applyUser(change orgsync.UserChange) error {
 		return r.createUser(change)
 	case orgsync.ActionUpdate:
 		stored := r.users[change.ExternalID]
-		if err := r.updateUser(stored.UserID, change, stored.SyncDeactivated); err != nil {
+		if err := r.updateUser(stored, change, stored.SyncDeactivated); err != nil {
 			return err
 		}
 	case orgsync.ActionDeactivate:
@@ -559,7 +560,7 @@ func (r *run) applyUser(change orgsync.UserChange) error {
 func (r *run) createUser(change orgsync.UserChange) error {
 	users := &auth.ExternalUsers{Client: r.Auth, Links: r.Store}
 
-	userID, created, err := users.Ensure(r.ctx,
+	link, created, err := users.Ensure(r.ctx,
 		auth.LDAPAccount(r.source, change.ExternalID, change.Username, change.DisplayName, change.Email))
 	if err != nil {
 		return err
@@ -567,7 +568,7 @@ func (r *run) createUser(change orgsync.UserChange) error {
 
 	r.users[change.ExternalID] = storage.IdentitySourceSyncUser{
 		ExternalID:  change.ExternalID,
-		UserID:      userID,
+		UserID:      link.UserID,
 		Username:    change.Username,
 		Email:       change.Email,
 		DisplayName: change.DisplayName,
@@ -580,7 +581,14 @@ func (r *run) createUser(change orgsync.UserChange) error {
 
 	// A login created the user since the state was read: bring it in line
 	// like any stored user.
-	if err := r.updateUser(userID, change, ""); err != nil {
+	stored := storage.IdentitySourceSyncUser{
+		ExternalID: change.ExternalID,
+		UserID:     link.UserID,
+		Username:   link.Username,
+		Email:      link.Email,
+	}
+
+	if err := r.updateUser(stored, change, ""); err != nil {
 		return err
 	}
 
@@ -590,79 +598,38 @@ func (r *run) createUser(change orgsync.UserChange) error {
 }
 
 // updateUser writes the directory's username, display name and email to the
-// GoTrue user, its profile and its link. marker is the link's
-// sync_deactivated value to keep.
-func (r *run) updateUser(userID string, change orgsync.UserChange, marker string) error {
-	id, err := uuid.Parse(userID)
-	if err != nil {
-		return fmt.Errorf("invalid user ID %q: %w", userID, err)
+// GoTrue user, its profile and its link, the same way a login does
+// (auth.UpdateExternalUser), and sets the link's sync_deactivated to marker
+// when the stored value differs.
+func (r *run) updateUser(stored storage.IdentitySourceSyncUser, change orgsync.UserChange, marker string) error {
+	link := &storage.ExternalIdentity{
+		Source:     r.linkSource,
+		ExternalID: change.ExternalID,
+		UserID:     stored.UserID,
+		Username:   stored.Username,
+		Email:      stored.Email,
 	}
 
-	metadata := auth.ExternalUserMetadata(change.Username, change.DisplayName, change.Email)
-	// A key set to null is removed from user_metadata.
-	for _, key := range []string{"preferred_username", "name", "email"} {
-		if _, ok := metadata[key]; !ok {
-			metadata[key] = nil
-		}
-	}
-
-	updated, err := r.Auth.AdminUpdateUser(types.AdminUpdateUserRequest{UserID: id, UserMetadata: metadata})
-	if err != nil {
-		return fmt.Errorf("update GoTrue user: %w", err)
-	}
-
-	gotrueEmail := ""
-	if updated != nil {
-		gotrueEmail = updated.Email
-	}
-
-	if err := r.updateProfile(userID, change, gotrueEmail); err != nil {
+	if err := auth.UpdateExternalUser(r.Auth, r.Store, auth.ExternalUserUpdate{
+		Link:         link,
+		Profile:      auth.ExternalProfile{Username: change.Username, DisplayName: change.DisplayName, Email: change.Email},
+		ClearMissing: true,
+	}); err != nil {
 		return err
+	}
+
+	if marker == stored.SyncDeactivated {
+		return nil
 	}
 
 	if err := r.Store.UpdateExternalIdentitySync(&storage.ExternalIdentity{
 		Source:          r.linkSource,
 		ExternalID:      change.ExternalID,
-		Username:        change.Username,
-		Email:           change.Email,
+		Username:        link.Username,
+		Email:           link.Email,
 		SyncDeactivated: marker,
 	}); err != nil {
 		return fmt.Errorf("update link: %w", err)
-	}
-
-	return nil
-}
-
-// updateProfile sets the profile's display name, and its email to what the
-// database derives for an external user: the directory email, or the GoTrue
-// (placeholder) email when the directory has none.
-func (r *run) updateProfile(userID string, change orgsync.UserChange, gotrueEmail string) error {
-	profile, err := r.Store.GetUserProfile(userID)
-	if err != nil {
-		return fmt.Errorf("get profile: %w", err)
-	}
-
-	if profile.Metadata == nil {
-		return errors.New("profile has no metadata")
-	}
-
-	email := change.Email
-	if email == "" {
-		email = gotrueEmail
-	}
-
-	if profile.Metadata.DisplayName == change.DisplayName && profile.Spec != nil && profile.Spec.Email == email {
-		return nil
-	}
-
-	metadata := *profile.Metadata
-	metadata.DisplayName = change.DisplayName
-
-	if err := r.Store.UpdateUserProfile(userID, &v1.UserProfile{
-		Metadata: &metadata,
-		Spec:     &v1.UserProfileSpec{Email: email},
-	}); err != nil {
-		return fmt.Errorf("update profile: %w", err)
 	}
 
 	return nil
@@ -746,7 +713,7 @@ func (r *run) reactivateUser(change orgsync.UserChange) error {
 		}
 	}
 
-	return r.updateUser(stored.UserID, change, "")
+	return r.updateUser(stored, change, "")
 }
 
 func (r *run) userID(externalID string) (string, error) {

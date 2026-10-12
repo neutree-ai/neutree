@@ -108,23 +108,23 @@ type ExternalUsers struct {
 	RetryDelay    time.Duration
 }
 
-// Ensure returns the GoTrue user linked to the account, creating and linking
-// one when there is none; created tells which. Accounts are matched by their
-// link only, never by email or name.
-func (u *ExternalUsers) Ensure(ctx context.Context, account ExternalAccount) (userID string, created bool, err error) {
-	link, err := u.Links.GetExternalIdentity(account.Source, account.ExternalID)
+// Ensure returns the link of the account to its GoTrue user, creating and
+// linking a user when there is none; created tells which. Accounts are
+// matched by their link only, never by email or name.
+func (u *ExternalUsers) Ensure(ctx context.Context, account ExternalAccount) (link *storage.ExternalIdentity, created bool, err error) {
+	link, err = u.Links.GetExternalIdentity(account.Source, account.ExternalID)
 	if err == nil {
-		return link.UserID, false, nil
+		return link, false, nil
 	}
 
 	if !errors.Is(err, storage.ErrResourceNotFound) {
-		return "", false, fmt.Errorf("look up link: %w", err)
+		return nil, false, fmt.Errorf("look up link: %w", err)
 	}
 
 	return u.create(ctx, account)
 }
 
-func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (string, bool, error) {
+func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (*storage.ExternalIdentity, bool, error) {
 	created, err := u.Client.AdminCreateUser(types.AdminCreateUserRequest{
 		Email:        account.Email,
 		EmailConfirm: true,
@@ -135,24 +135,26 @@ func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (st
 		// A concurrent creation of the same account came first, so the
 		// placeholder email is taken; its link follows shortly.
 		if link, lerr := u.waitForLink(ctx, account.Source, account.ExternalID); lerr == nil {
-			return link.UserID, false, nil
+			return link, false, nil
 		}
 
-		return "", false, fmt.Errorf("create GoTrue user: %w", err)
+		return nil, false, fmt.Errorf("create GoTrue user: %w", err)
 	}
 
 	userID := created.ID.String()
 
-	err = u.Links.CreateExternalIdentity(&storage.ExternalIdentity{
+	link := &storage.ExternalIdentity{
 		Source:     account.Source,
 		ExternalID: account.ExternalID,
 		UserID:     userID,
 		Username:   account.Username,
 		Email:      account.SourceEmail,
-	})
+	}
+
+	err = u.Links.CreateExternalIdentity(link)
 	if err == nil {
 		klog.Infof("%s account %q (id %s): created user %s", account.Source, account.LogName, account.ExternalID, userID)
-		return userID, true, nil
+		return link, true, nil
 	}
 
 	// The user is unusable without its link, and would block the next attempt
@@ -162,16 +164,16 @@ func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (st
 	}
 
 	if !errors.Is(err, storage.ErrResourceConflict) {
-		return "", false, fmt.Errorf("link user %s: %w", userID, err)
+		return nil, false, fmt.Errorf("link user %s: %w", userID, err)
 	}
 
 	// Another creation linked the account first; use its user.
-	link, err := u.Links.GetExternalIdentity(account.Source, account.ExternalID)
+	link, err = u.Links.GetExternalIdentity(account.Source, account.ExternalID)
 	if err != nil {
-		return "", false, fmt.Errorf("look up link after losing the race: %w", err)
+		return nil, false, fmt.Errorf("look up link after losing the race: %w", err)
 	}
 
-	return link.UserID, false, nil
+	return link, false, nil
 }
 
 func (u *ExternalUsers) waitForLink(ctx context.Context, source, externalID string) (*storage.ExternalIdentity, error) {

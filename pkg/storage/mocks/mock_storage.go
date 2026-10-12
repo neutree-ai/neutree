@@ -4721,6 +4721,52 @@ func (_c *MockStorage_UpdateExternalEndpoint_Call) RunAndReturn(run func(string,
 	return _c
 }
 
+// UpdateExternalIdentityAccount provides a mock function with given fields: data
+func (_m *MockStorage) UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateExternalIdentityAccount")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.ExternalIdentity) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateExternalIdentityAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateExternalIdentityAccount'
+type MockStorage_UpdateExternalIdentityAccount_Call struct {
+	*mock.Call
+}
+
+// UpdateExternalIdentityAccount is a helper method to define mock.On call
+//   - data *storage.ExternalIdentity
+func (_e *MockStorage_Expecter) UpdateExternalIdentityAccount(data interface{}) *MockStorage_UpdateExternalIdentityAccount_Call {
+	return &MockStorage_UpdateExternalIdentityAccount_Call{Call: _e.mock.On("UpdateExternalIdentityAccount", data)}
+}
+
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_UpdateExternalIdentityAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.ExternalIdentity))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) Return(_a0 error) *MockStorage_UpdateExternalIdentityAccount_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateExternalIdentityAccount_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_UpdateExternalIdentityAccount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateExternalIdentitySync provides a mock function with given fields: data
 func (_m *MockStorage) UpdateExternalIdentitySync(data *storage.ExternalIdentity) error {
 	ret := _m.Called(data)

@@ -267,6 +267,17 @@ func (s *fakeStore) UpdateExternalIdentitySync(data *storage.ExternalIdentity) e
 	return nil
 }
 
+func (s *fakeStore) UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error {
+	if err := s.write(); err != nil {
+		return err
+	}
+
+	link := s.links[data.ExternalID]
+	link.Username, link.Email = data.Username, data.Email
+
+	return nil
+}
+
 func (s *fakeStore) RevokeUserSessions(userID string) error {
 	if s.failRevoke {
 		return errInjected
@@ -812,9 +823,11 @@ func TestRun_ClaimsUserCreatedByLogin(t *testing.T) {
 	h := newHarness()
 
 	users := &auth.ExternalUsers{Client: h.gotrue, Links: h.store}
-	userID, created, err := users.Ensure(context.Background(), auth.LDAPAccount(testSource, "u-lin", "lin", "Lin", "lin@example.org"))
+	link, created, err := users.Ensure(context.Background(), auth.LDAPAccount(testSource, "u-lin", "lin", "Lin", "lin@example.org"))
 	require.NoError(t, err)
 	require.True(t, created)
+
+	userID := link.UserID
 
 	h.store.links["u-lin"].Username, h.store.links["u-lin"].Email = "", ""
 

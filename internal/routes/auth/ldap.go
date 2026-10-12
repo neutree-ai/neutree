@@ -70,13 +70,15 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 
 		account := ldapAccount(source.name, identity)
 
-		userID, created, err := ensureExternalUser(ctx, deps, account)
+		link, created, err := ensureExternalUser(ctx, deps, account)
 		if err != nil {
 			klog.Errorf("LDAP login of %q via %s (id %s): link user: %v", identity.Username, source.name, identity.ExternalID, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": msgInternalError})
 
 			return
 		}
+
+		userID := link.UserID
 
 		user, err := loginUser(deps, userID)
 		if errors.Is(err, errUserDisabled) {
@@ -94,7 +96,7 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		if !created {
-			refreshExternalUser(deps, account, user)
+			refreshExternalUser(deps, account, link, user)
 		}
 
 		session, err := issueSession(ctx, deps, user)

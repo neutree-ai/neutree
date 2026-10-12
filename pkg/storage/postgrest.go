@@ -1178,7 +1178,7 @@ const uniqueViolationCode = "(23505)"
 func (s *postgrestStorage) GetExternalIdentity(source, externalID string) (*ExternalIdentity, error) {
 	var response []ExternalIdentity
 
-	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id", "", false).
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id,username,email", "", false).
 		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
 	if err != nil {
 		return nil, err
@@ -1209,6 +1209,18 @@ func (s *postgrestStorage) UpdateExternalIdentitySync(data *ExternalIdentity) er
 		"username":         nullIfEmpty(data.Username),
 		"email":            nullIfEmpty(data.Email),
 		"sync_deactivated": nullIfEmpty(data.SyncDeactivated),
+	}
+
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
+		Filter("source", "eq", data.Source).Filter("external_id", "eq", data.ExternalID).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateExternalIdentityAccount(data *ExternalIdentity) error {
+	update := map[string]interface{}{
+		"username": nullIfEmpty(data.Username),
+		"email":    nullIfEmpty(data.Email),
 	}
 
 	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").

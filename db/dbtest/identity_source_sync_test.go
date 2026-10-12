@@ -364,9 +364,9 @@ func TestIdentitySourceSync_SyncerEndToEnd(t *testing.T) {
 	t.Run("a login finds the pre-created user", func(t *testing.T) {
 		users := &auth.ExternalUsers{Client: goTrueAdmin(t), Links: f.st}
 
-		userID, created, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), "lin", "Lin", "lin@example.org"))
-		if err != nil || created || userID != lin.UserID {
-			t.Errorf("Ensure = %s, %v, %v; want the synced user %s", userID, created, err, lin.UserID)
+		link, created, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), "lin", "Lin", "lin@example.org"))
+		if err != nil || created || link.UserID != lin.UserID || link.Username != "lin" || link.Email != "lin@example.org" {
+			t.Errorf("Ensure = %+v, %v, %v; want the synced user %s", link, created, err, lin.UserID)
 		}
 	})
 
@@ -475,6 +475,47 @@ func TestIdentitySourceSync_SyncerEndToEnd(t *testing.T) {
 		profile, err := f.st.GetUserProfile(lin.UserID)
 		if err != nil || profile.Metadata.DisplayName != "Lin Wei" || profile.Metadata.Name == "" {
 			t.Errorf("lin's profile after rename = %+v, %v", profile, err)
+		}
+	})
+
+	// A login refreshes the user with what the source says, through the
+	// same update the sync uses; the profile email trigger
+	// (user_profile_identity_source) accepts it.
+	t.Run("a login refresh writes the new name and email", func(t *testing.T) {
+		admin := goTrueAdmin(t)
+		users := &auth.ExternalUsers{Client: admin, Links: f.st}
+
+		link, _, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), "lin", "Lin", "lin@example.org"))
+		if err != nil {
+			t.Fatalf("Ensure failed: %v", err)
+		}
+
+		user, err := admin.AdminGetUser(types.AdminGetUserRequest{UserID: uuid.MustParse(link.UserID)})
+		if err != nil {
+			t.Fatalf("get lin: %v", err)
+		}
+
+		if err := auth.UpdateExternalUser(admin, f.st, auth.ExternalUserUpdate{
+			Link: link, User: &user.User,
+			Profile: auth.ExternalProfile{Username: "lin", DisplayName: "Lin W.", Email: "lin.w@example.org"},
+		}); err != nil {
+			t.Fatalf("UpdateExternalUser failed: %v", err)
+		}
+
+		profile, err := f.st.GetUserProfile(link.UserID)
+		if err != nil || profile.Metadata.DisplayName != "Lin W." || profile.Spec.Email != "lin.w@example.org" {
+			t.Errorf("lin's profile after the refresh = %+v, %v", profile, err)
+		}
+
+		stored, err := f.st.GetExternalIdentity(linkSource, id("lin"))
+		if err != nil || stored.Username != "lin" || stored.Email != "lin.w@example.org" {
+			t.Errorf("lin's link after the refresh = %+v, %v", stored, err)
+		}
+
+		// Only the changed keys were sent; GoTrue merges them.
+		user, err = admin.AdminGetUser(types.AdminGetUserRequest{UserID: uuid.MustParse(link.UserID)})
+		if err != nil || user.UserMetadata["preferred_username"] != "lin" || user.UserMetadata["name"] != "Lin W." {
+			t.Errorf("lin's user_metadata after the refresh = %+v, %v", user, err)
 		}
 	})
 }
