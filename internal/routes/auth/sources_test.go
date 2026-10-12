@@ -23,7 +23,7 @@ import (
 func newTestLoginSources(t *testing.T, store storage.Storage) *LoginSources {
 	t.Helper()
 
-	sources, err := NewLoginSources(store, testJWTSecret, DefaultLoginSourceTTL)
+	sources, err := NewLoginSources(store, testJWTSecret)
 	require.NoError(t, err)
 
 	return sources
@@ -74,20 +74,14 @@ func (c *countingLDAP) build(cfg ldap.Config) (LDAPAuthenticator, error) {
 	return &fakeLDAP{identity: testIdentity()}, nil
 }
 
-type clock struct{ now time.Time }
-
-func (c *clock) Now() time.Time { return c.now }
-
-func newCachingSources(t *testing.T, store storage.Storage) (*LoginSources, *countingLDAP, *clock) {
+func newCountingSources(t *testing.T, store storage.Storage) (*LoginSources, *countingLDAP) {
 	t.Helper()
 
 	sources := newTestLoginSources(t, store)
 	builder := &countingLDAP{}
-	clk := &clock{now: time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)}
 	sources.newLDAP = builder.build
-	sources.now = clk.Now
 
-	return sources, builder, clk
+	return sources, builder
 }
 
 func TestLoginSources_BuildsFromSpecAndSecrets(t *testing.T) {
@@ -98,7 +92,7 @@ func TestLoginSources_BuildsFromSpecAndSecrets(t *testing.T) {
 	source.Spec.LDAP.Attributes = &v1.IdentitySourceLDAPAttributes{MemberOf: "memberOf"}
 	expectSource(store, source, &storage.IdentitySourceSecrets{LDAPBindPassword: "svc-secret"})
 
-	sources, builder, _ := newCachingSources(t, store)
+	sources, builder := newCountingSources(t, store)
 
 	entry, err := sources.resolve("corp-ldap", v1.IdentitySourceTypeLDAP)
 	require.NoError(t, err)
@@ -112,43 +106,23 @@ func TestLoginSources_BuildsFromSpecAndSecrets(t *testing.T) {
 	assert.Equal(t, ldap.AttributeMapping{ID: "entryUUID", Username: "uid", Email: "mail", DisplayName: "cn", MemberOf: "memberOf"}, cfg.Attributes)
 }
 
-func TestLoginSources_CachesWithinTTL(t *testing.T) {
-	store := storagemocks.NewMockStorage(t)
-	store.EXPECT().ListIdentitySource(matchSourceName("corp-ldap")).
-		Return([]v1.IdentitySource{ldapSource("corp-ldap", true)}, nil).Once()
-	store.EXPECT().GetIdentitySourceSecrets("corp-ldap").
-		Return(&storage.IdentitySourceSecrets{LDAPBindPassword: "svc"}, nil).Once()
-
-	sources, builder, clk := newCachingSources(t, store)
-
-	first, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
-	require.NoError(t, err)
-
-	clk.now = clk.now.Add(DefaultLoginSourceTTL - time.Second)
-
-	second, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
-	require.NoError(t, err)
-	assert.Same(t, first, second)
-	assert.Equal(t, 1, builder.built)
-}
-
-func TestLoginSources_RereadsAfterTTLAndKeepsUnchangedClient(t *testing.T) {
+// Every login reads the source again; an unchanged source keeps its client.
+func TestLoginSources_RereadsEveryLoginAndKeepsUnchangedClient(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	expectSource(store, ldapSource("corp-ldap", true), &storage.IdentitySourceSecrets{LDAPBindPassword: "svc"})
 
-	sources, builder, clk := newCachingSources(t, store)
+	sources, builder := newCountingSources(t, store)
 
 	first, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
 	require.NoError(t, err)
-
-	clk.now = clk.now.Add(DefaultLoginSourceTTL)
 
 	second, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
 	require.NoError(t, err)
 
 	store.AssertNumberOfCalls(t, "ListIdentitySource", 2)
+	store.AssertNumberOfCalls(t, "GetIdentitySourceSecrets", 2)
 	assert.Equal(t, 1, builder.built, "an unchanged source keeps its client")
-	assert.Same(t, first.ldap, second.ldap)
+	assert.Same(t, first, second)
 }
 
 func TestLoginSources_RebuildsOnChange(t *testing.T) {
@@ -174,16 +148,15 @@ func TestLoginSources_RebuildsOnChange(t *testing.T) {
 			store.EXPECT().ListIdentitySource(mock.Anything).Return([]v1.IdentitySource{after}, nil).Once()
 			store.EXPECT().GetIdentitySourceSecrets("corp-ldap").Return(secretsAfter, nil).Once()
 
-			sources, builder, clk := newCachingSources(t, store)
+			sources, builder := newCountingSources(t, store)
 
-			_, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
+			first, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
 			require.NoError(t, err)
 
-			clk.now = clk.now.Add(DefaultLoginSourceTTL)
-
-			_, err = sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
+			second, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
 			require.NoError(t, err)
 			assert.Equal(t, 2, builder.built)
+			assert.NotSame(t, first.ldap, second.ldap)
 			assert.Equal(t, secretsAfter.LDAPBindPassword, builder.configs[1].BindPassword)
 		})
 	}
@@ -210,7 +183,7 @@ func TestLoginSources_Unavailable(t *testing.T) {
 			store := storagemocks.NewMockStorage(t)
 			store.EXPECT().ListIdentitySource(mock.Anything).Return(tc.sources, tc.listErr).Once()
 
-			sources, builder, _ := newCachingSources(t, store)
+			sources, builder := newCountingSources(t, store)
 
 			_, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
 
@@ -227,42 +200,49 @@ func TestLoginSources_Unavailable(t *testing.T) {
 	}
 }
 
-// A source that was cached and is then disabled stops working on the first
-// read after the TTL, and its entry is dropped.
-func TestLoginSources_DisabledAfterCachingIsDropped(t *testing.T) {
-	store := storagemocks.NewMockStorage(t)
-	store.EXPECT().ListIdentitySource(mock.Anything).Return([]v1.IdentitySource{ldapSource("corp-ldap", true)}, nil).Once()
-	store.EXPECT().GetIdentitySourceSecrets("corp-ldap").Return(&storage.IdentitySourceSecrets{LDAPBindPassword: "svc"}, nil).Once()
-	store.EXPECT().ListIdentitySource(mock.Anything).Return([]v1.IdentitySource{ldapSource("corp-ldap", false)}, nil).Once()
+// A source that is disabled or deleted stops working on the next login, and
+// its client is dropped.
+func TestLoginSources_GoneSourceIsDroppedAtOnce(t *testing.T) {
+	cases := map[string][]v1.IdentitySource{
+		"disabled": {ldapSource("corp-ldap", false)},
+		"deleted":  nil,
+	}
 
-	sources, _, clk := newCachingSources(t, store)
+	for name, after := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := storagemocks.NewMockStorage(t)
+			store.EXPECT().ListIdentitySource(mock.Anything).Return([]v1.IdentitySource{ldapSource("corp-ldap", true)}, nil).Once()
+			store.EXPECT().GetIdentitySourceSecrets("corp-ldap").Return(&storage.IdentitySourceSecrets{LDAPBindPassword: "svc"}, nil).Once()
+			store.EXPECT().ListIdentitySource(mock.Anything).Return(after, nil).Once()
 
-	_, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
-	require.NoError(t, err)
+			sources, _ := newCountingSources(t, store)
 
-	clk.now = clk.now.Add(DefaultLoginSourceTTL)
+			_, err := sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
+			require.NoError(t, err)
 
-	_, err = sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
-	require.ErrorIs(t, err, errSourceNotFound)
+			_, err = sources.get("corp-ldap", v1.IdentitySourceTypeLDAP)
+			require.ErrorIs(t, err, errSourceNotFound)
 
-	sources.mu.Lock()
-	defer sources.mu.Unlock()
+			sources.mu.Lock()
+			defer sources.mu.Unlock()
 
-	assert.NotContains(t, sources.entries, "corp-ldap")
+			assert.NotContains(t, sources.entries, "corp-ldap")
+		})
+	}
 }
 
 func TestLoginSources_WrongTypeIsNotFound(t *testing.T) {
 	store := storagemocks.NewMockStorage(t)
 	expectSource(store, ldapSource("corp-ldap", true), &storage.IdentitySourceSecrets{LDAPBindPassword: "svc"})
 
-	sources, _, _ := newCachingSources(t, store)
+	sources, _ := newCountingSources(t, store)
 
 	_, err := sources.get("corp-ldap", v1.IdentitySourceTypeOIDC)
 	assert.ErrorIs(t, err, errSourceNotFound)
 }
 
 func TestLoginSources_InvalidNameIsNotFoundWithoutReading(t *testing.T) {
-	sources, _, _ := newCachingSources(t, storagemocks.NewMockStorage(t))
+	sources, _ := newCountingSources(t, storagemocks.NewMockStorage(t))
 
 	for _, name := range []string{"Corp", "a.b", "../x", "corp_ldap"} {
 		_, err := sources.get(name, v1.IdentitySourceTypeLDAP)
@@ -291,7 +271,7 @@ func TestLoginSources_DefaultSource(t *testing.T) {
 			store := storagemocks.NewMockStorage(t)
 			store.EXPECT().ListLoginIdentitySources().Return(tc.enabled, nil).Once()
 
-			sources, _, _ := newCachingSources(t, store)
+			sources, _ := newCountingSources(t, store)
 
 			got, err := sources.defaultSource(v1.IdentitySourceTypeLDAP)
 
