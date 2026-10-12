@@ -27,7 +27,7 @@ func (p Providers) Get(name string) (Provider, error) {
 	}
 
 	if name == "vllm-native" {
-		return Native{}, nil
+		return VLLMNative{}, nil
 	}
 
 	return nil, fmt.Errorf("KV cache provider %q is not supported", name)
