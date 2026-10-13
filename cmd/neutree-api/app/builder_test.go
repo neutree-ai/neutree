@@ -103,3 +103,13 @@ func TestBuilderWithMiddleware(t *testing.T) {
 		t.Error("Expected 'test-route-1' to have only one middleware registered")
 	}
 }
+
+func TestNewBuilderDoesNotExposeReleaseInfoOrClusterProfileCRUD(t *testing.T) {
+	builder := NewBuilder()
+
+	for _, route := range []string{"rest/release-infos", "rest/cluster-profiles"} {
+		if _, exists := builder.routeInits[route]; exists {
+			t.Fatalf("unexpected API route %q", route)
+		}
+	}
+}
