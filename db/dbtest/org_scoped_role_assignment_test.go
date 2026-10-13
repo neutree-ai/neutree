@@ -231,7 +231,7 @@ func TestOrgScopedRoleAssignment_DepartmentAdminPreset(t *testing.T) {
 	want := []string{
 		"user_profile:read", "user_profile:update",
 		"role_assignment:read", "role_assignment:create", "role_assignment:update", "role_assignment:delete",
-		"role:read", "org_unit:read",
+		"role:read", "org_unit:read", "org_unit:assign-member",
 	}
 	got := strings.Split(strings.Trim(perms, "{}"), ",")
 	if len(got) != len(want) {
