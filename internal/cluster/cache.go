@@ -42,31 +42,42 @@ func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext)
 		if err := c.deleteCache(rc); err != nil {
 			recordCacheError(cluster, err)
 		}
+
 		return
 	}
+
 	if cluster.Status == nil {
 		cluster.Status = &v1.ClusterStatus{}
 	}
+
 	if cluster.Status.Cache == nil {
 		cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: cluster.Spec.Cache.Provider}
 	}
+
 	if cluster.Status.Cache.Provider != cluster.Spec.Cache.Provider {
 		recordCacheError(cluster, fmt.Errorf("waiting for previous cache provider cleanup"))
 		return
 	}
+
 	provider, err := c.cacheProviders.Get(cluster.Spec.Cache.Provider)
+
 	if err == nil {
 		var cacheCtx *clustercache.Context
+
 		cacheCtx, err = c.cacheContext(rc)
+
 		if err == nil {
 			err = provider.Reconcile(rc.Ctx, cacheCtx)
 		}
+
 	}
+
 	cluster.Status.Cache.Error = ""
 	if err != nil {
 		recordCacheError(cluster, err)
 		klog.Warningf("cache reconciliation failed for %s: %v", cluster.Key(), err)
 	}
+
 }
 
 func recordCacheError(cluster *v1.Cluster, err error) {
@@ -77,17 +88,23 @@ func (c *NativeKubernetesClusterReconciler) deleteCache(rc *ReconcileContext) er
 	if rc.Cluster.Status == nil || rc.Cluster.Status.Cache == nil {
 		return nil
 	}
+
 	provider, err := c.cacheProviders.Get(rc.Cluster.Status.Cache.Provider)
+
 	if err != nil {
 		return err
 	}
+
 	cacheCtx, err := c.cacheContext(rc)
 	if err != nil {
 		return err
 	}
+
 	if err = provider.Delete(rc.Ctx, cacheCtx); err != nil {
 		return err
 	}
+
 	rc.Cluster.Status.Cache = nil
+
 	return nil
 }
