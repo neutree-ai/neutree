@@ -3,7 +3,6 @@ package proxies
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -17,6 +16,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
