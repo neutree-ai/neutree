@@ -3,7 +3,9 @@ package e2e
 import (
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,8 +13,11 @@ import (
 
 const (
 	defaultModelVersion           = "latest"
+	defaultPackageArch            = "amd64"
 	maintainedVLLMVersionPrevious = "v0.17.1"
 	maintainedVLLMVersionCurrent  = "v0.24.0"
+	profileAcceleratorTypeCPU     = "cpu"
+	profileAcceleratorTypeNVIDIA  = "nvidia_gpu"
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
@@ -24,11 +29,22 @@ var maintainedVLLMVersions = map[string]struct{}{
 	maintainedVLLMVersionCurrent:  {},
 }
 
+// ModelProfile carries model settings loaded from the test profile.
+type ModelProfile struct {
+	Name       string `yaml:"name"`
+	Version    string `yaml:"version"`
+	File       string `yaml:"file"`
+	Task       string `yaml:"task"`
+	EngineArgs string `yaml:"engine_args"`
+}
+
 // EngineProfile carries per-engine configuration loaded from the test profile
 // under engines.<name>.
 type EngineProfile struct {
-	Version    string `yaml:"version"`
-	OldVersion string `yaml:"old_version"`
+	Version         string        `yaml:"version"`
+	OldVersion      string        `yaml:"old_version"`
+	AcceleratorType string        `yaml:"accelerator_type"`
+	Model           *ModelProfile `yaml:"model"`
 	// EngineArgs is a comma-separated `k=v` list that engineArgsYAML expands
 	// into a YAML snippet under spec.variables.engine_args. Empty (or missing)
 	// means rely on the engine's built-in defaults.
@@ -74,7 +90,9 @@ type Profile struct {
 		LocalNFSPath string `yaml:"local_nfs_path"`
 	} `yaml:"model_registry"`
 
-	Workspace string `yaml:"workspace"`
+	Workspace   string `yaml:"workspace"`
+	PackageURL  string `yaml:"package_url"`
+	PackageArch string `yaml:"package_arch"`
 
 	Cluster struct {
 		Version    string `yaml:"version"`
@@ -89,13 +107,7 @@ type Profile struct {
 	// block — no Go struct change required.
 	Engines map[string]EngineProfile `yaml:"engines"`
 
-	Model struct {
-		Name       string `yaml:"name"`
-		Version    string `yaml:"version"`
-		File       string `yaml:"file"`
-		Task       string `yaml:"task"`
-		EngineArgs string `yaml:"engine_args"`
-	} `yaml:"model"`
+	Model ModelProfile `yaml:"model"`
 
 	EmbeddingModel struct {
 		Name       string `yaml:"name"`
@@ -168,6 +180,10 @@ func LoadProfile() error {
 	var loadedProfile Profile
 	if err := yaml.Unmarshal(data, &loadedProfile); err != nil {
 		return fmt.Errorf("failed to parse profile %s: %w", path, err)
+	}
+
+	if loadedProfile.PackageArch == "" {
+		loadedProfile.PackageArch = defaultPackageArch
 	}
 
 	if err := validateMaintainedVLLMVersions(loadedProfile.Engines[defaultEngineName]); err != nil {
@@ -243,7 +259,7 @@ func validateMaintainedVLLMVersions(engineProfile EngineProfile) error {
 			continue
 		}
 
-		if _, ok := maintainedVLLMVersions[version]; !ok {
+		if !isMaintainedVLLMVersion(version) {
 			return fmt.Errorf(
 				"engines.vllm.%s %q is not maintained; supported versions are %s and %s",
 				field,
@@ -255,6 +271,18 @@ func validateMaintainedVLLMVersions(engineProfile EngineProfile) error {
 	}
 
 	return nil
+}
+
+// isMaintainedVLLMVersion accepts build/prerelease suffixes used by engine
+// packages (for example v0.24.0-p1) while retaining the maintained base window.
+func isMaintainedVLLMVersion(version string) bool {
+	for maintained := range maintainedVLLMVersions {
+		if version == maintained || strings.HasPrefix(version, maintained+"-") || strings.HasPrefix(version, maintained+"+") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // --- Profile accessor helpers ---
@@ -316,6 +344,67 @@ func profileWorkspace() string {
 	return "default"
 }
 
+func profilePackageURL() string {
+	return strings.TrimRight(strings.TrimSpace(profile.PackageURL), "/")
+}
+
+func profilePackageArch() string {
+	if arch := strings.TrimSpace(profile.PackageArch); arch != "" {
+		return arch
+	}
+
+	return defaultPackageArch
+}
+
+// enginePackageDownloadURL builds the archive URL from the profile's package
+// directory and validated filename components.
+func enginePackageDownloadURL(baseURL, engineName, version, arch string) (string, error) {
+	baseURL = strings.TrimSpace(baseURL)
+	parsed, err := url.Parse(baseURL)
+
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("package_url must be an absolute HTTP(S) URL")
+	}
+
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("package_url must not contain a query or fragment")
+	}
+
+	parts := []struct {
+		field string
+		value string
+	}{
+		{field: "engine name", value: engineName},
+		{field: "version", value: version},
+		{field: "architecture", value: arch},
+	}
+	for _, part := range parts {
+		if !validPackagePathPart(part.value) {
+			return "", fmt.Errorf("invalid package %s %q", part.field, part.value)
+		}
+	}
+
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + engineName + "-" + version + "-" + arch + ".tar.gz"
+	parsed.RawPath = ""
+
+	return parsed.String(), nil
+}
+
+func validPackagePathPart(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value || value == "." || value == ".." || strings.ContainsAny(value, `/\\`) {
+		return false
+	}
+
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || strings.ContainsRune("._+-", r)) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func profileClusterVersion() string {
 	if profile.Cluster.Version != "" {
 		return profile.Cluster.Version
@@ -368,6 +457,73 @@ func profileEngineVersionFor(name string) string {
 	return ""
 }
 
+func profileEngineAcceleratorType(name string) string {
+	if accelerator := strings.TrimSpace(profile.Engines[name].AcceleratorType); accelerator != "" {
+		return accelerator
+	}
+
+	if name == "llama-cpp" {
+		return profileAcceleratorTypeCPU
+	}
+
+	if name == "vllm" || name == "sglang" {
+		return profileAcceleratorTypeNVIDIA
+	}
+
+	return ""
+}
+
+func profileEngineNames() []string {
+	names := make([]string, 0, len(profile.Engines))
+
+	for name, engine := range profile.Engines {
+		if engine.Version != "" {
+			names = append(names, name)
+		}
+	}
+
+	sort.Strings(names)
+
+	return names
+}
+
+func profileModelForEngine(name string) ModelProfile {
+	model := profile.Model
+
+	configured := profile.Engines[name].Model
+	if configured != nil {
+		if configured.Name != "" {
+			model.Name = configured.Name
+		}
+
+		if configured.Version != "" {
+			model.Version = configured.Version
+		}
+
+		if configured.File != "" {
+			model.File = configured.File
+		}
+
+		if configured.Task != "" {
+			model.Task = configured.Task
+		}
+
+		if configured.EngineArgs != "" {
+			model.EngineArgs = configured.EngineArgs
+		}
+	}
+
+	if model.Version == "" {
+		model.Version = defaultModelVersion
+	}
+
+	if model.Task == "" {
+		model.Task = "text-generation"
+	}
+
+	return model
+}
+
 func profileModelName() string { return profile.Model.Name }
 
 func profileModelVersion() string {
@@ -412,6 +568,14 @@ func profileModelEngineArgsFor(task string) string {
 	default:
 		return profile.Model.EngineArgs
 	}
+}
+
+func profileModelEngineArgsForEngine(name, task string) string {
+	if configured := profile.Engines[name].Model; configured != nil && configured.EngineArgs != "" {
+		return configured.EngineArgs
+	}
+
+	return profileModelEngineArgsFor(task)
 }
 
 func profileEndpointTimeout() string {

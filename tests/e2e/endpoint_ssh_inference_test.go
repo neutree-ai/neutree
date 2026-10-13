@@ -2,9 +2,11 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -755,3 +757,134 @@ var _ = Describe("SSH Endpoint", Ordered, Label("endpoint", "ssh"), func() {
 		})
 	})
 })
+
+var _ = Describe("SSH Engine Package Import", Ordered,
+	Label("endpoint", "ssh", "inference", "engine-import"), func() {
+		var (
+			clusterName        string
+			clusterReady       bool
+			imageRegistryOwned bool
+			modelRegistryReady bool
+		)
+
+		BeforeAll(func() {
+			requireEngineImportProfile()
+			imageRegistryOwned = imageRegistryYAML == ""
+			clusterName = setupSSHCluster("e2e-ep-ssh-import-")
+			clusterReady = true
+			SetupModelRegistry()
+			modelRegistryReady = true
+		})
+
+		AfterAll(func() {
+			if modelRegistryReady {
+				TeardownModelRegistry()
+			}
+			if clusterReady {
+				NewClusterHelper().EnsureDeleted(clusterName)
+			}
+			if imageRegistryOwned {
+				TeardownImageRegistry()
+			}
+		})
+
+		It("should import each configured engine and serve chat", Label("happy-path"), func() {
+			engineH := NewProfileEngineHelper()
+			clusterAccType, clusterAccProduct := getClusterAccelerator(clusterName)
+
+			for _, engineName := range profileEngineNames() {
+				func(engineName string) {
+					engineVersion := profileEngineVersionFor(engineName)
+					model := profileModelForEngine(engineName)
+					accType := strings.ToLower(profileEngineAcceleratorType(engineName))
+
+					By(fmt.Sprintf("Importing %s %s from the profile package directory", engineName, engineVersion))
+					packageURL, err := enginePackageDownloadURL(
+						profilePackageURL(), engineName, engineVersion, profilePackageArch(),
+					)
+					Expect(err).NotTo(HaveOccurred())
+
+					// Import is intentionally run without --force. A pre-existing version
+					// must not be overwritten by this test.
+					before := engineH.Get(engineName)
+					if before.ExitCode == 0 {
+						for _, version := range parseEngineJSON(before.Stdout).Spec.Versions {
+							if version.Version == engineVersion {
+								Fail(fmt.Sprintf("engine %s version %s already exists; refusing to overwrite", engineName, engineVersion))
+							}
+						}
+					}
+
+					imported := false
+					epName := fmt.Sprintf("e2e-ep-ssh-import-%s-%s", strings.ReplaceAll(engineName, "_", "-"), Cfg.RunID)
+					endpointCreated := false
+					// Register cleanup in reverse dependency order: endpoint first, then
+					// the engine version that supplied its image.
+					defer func() {
+						if imported {
+							r := engineH.RemoveVersion(engineName, engineVersion, "--force")
+							ExpectSuccess(r)
+						}
+					}()
+					defer func() {
+						if endpointCreated {
+							deleteEndpoint(epName)
+						}
+					}()
+
+					r := engineH.ImportPackageURL(engineName, engineVersion, packageURL)
+					ExpectSuccess(r)
+					imported = true
+
+					r = engineH.Get(engineName)
+					ExpectSuccess(r)
+					engine := parseEngineJSON(r.Stdout)
+					var versionImages map[string]struct {
+						ImageName string `json:"image_name"`
+						Tag       string `json:"tag"`
+					}
+					for _, version := range engine.Spec.Versions {
+						if version.Version == engineVersion {
+							versionImages = version.Images
+							break
+						}
+					}
+					Expect(versionImages).NotTo(BeNil(), "imported engine version %s was not returned", engineVersion)
+					Expect(versionImages).To(HaveKey(accType), "engine image for accelerator %s is missing", accType)
+
+					options := []EndpointOption{
+						withEngine(engineName, engineVersion),
+						withModelProfile(model),
+					}
+					switch accType {
+					case "cpu":
+						options = append(options, withCPUOnly())
+					default:
+						Expect(clusterAccType).To(Equal(accType),
+							"profile accelerator %s does not match SSH cluster accelerator %s", accType, clusterAccType)
+						Expect(clusterAccProduct).NotTo(BeEmpty(), "SSH cluster did not report an accelerator product")
+						options = append(options, withGPU("1"), withAccelerator(accType, clusterAccProduct))
+					}
+
+					By(fmt.Sprintf("Deploying %s endpoint with the shared model registry", engineName))
+					yamlPath := applyEndpoint(epName, clusterName, options...)
+					endpointCreated = true
+					defer os.Remove(yamlPath)
+
+					waitEndpointRunning(epName)
+					ep := getEndpoint(epName)
+					Expect(ep.Spec.Engine).NotTo(BeNil())
+					Expect(ep.Spec.Model).NotTo(BeNil())
+					Expect(ep.Spec.Engine.Engine).To(Equal(engineName))
+					Expect(ep.Spec.Engine.Version).To(Equal(engineVersion))
+					Expect(ep.Spec.Model.Name).To(Equal(model.Name))
+					Expect(ep.Status.ServiceURL).NotTo(BeEmpty())
+
+					code, body, err := inferChatWithModel(ep.Status.ServiceURL, model.Name, "Hello")
+					Expect(err).NotTo(HaveOccurred())
+					Expect(code).To(Equal(http.StatusOK), "chat completion failed for %s: %s", engineName, body)
+					Expect(body).To(ContainSubstring("choices"))
+				}(engineName)
+			}
+		})
+	})

@@ -793,8 +793,9 @@ func profileVarMap() map[string]string {
 		"E2E_IMAGE_REGISTRY_PASSWORD": profile.ImageRegistry.Password,
 
 		// Model registry
-		"E2E_MODEL_REGISTRY_TYPE": profile.ModelRegistry.Type,
-		"E2E_MODEL_REGISTRY_URL":  profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY_TYPE":        profile.ModelRegistry.Type,
+		"E2E_MODEL_REGISTRY_URL":         profile.ModelRegistry.URL,
+		"E2E_MODEL_REGISTRY_CREDENTIALS": profile.ModelRegistry.Credentials,
 
 		// Engine
 		"E2E_ENGINE_NAME":    profileEngineName(),
@@ -904,6 +905,45 @@ func requireImageRegistryProfile() {
 
 	if profile.ImageRegistry.Repository == "" {
 		Skip("ImageRegistry.Repository not configured in profile")
+	}
+}
+
+// requireEngineImportProfile validates the additional inputs needed by the
+// package-import inference case. Missing environment capability skips the case;
+// malformed URL components fail during the preflight instead of being silently
+// rewritten.
+func requireEngineImportProfile() {
+	if profilePackageURL() == "" {
+		Skip("package_url not configured in profile")
+	}
+
+	if profile.ModelRegistry.Type == "" || profile.ModelRegistry.URL == "" {
+		Skip("model_registry type/url not configured in profile")
+	}
+
+	if profile.ImageRegistry.Username == "" || profile.ImageRegistry.Password == "" {
+		Skip("ImageRegistry username/password required for engine package import")
+	}
+
+	requireImageRegistryProfile()
+
+	names := profileEngineNames()
+	if len(names) == 0 {
+		Skip("engines.version not configured in profile")
+	}
+
+	for _, name := range names {
+		model := profileModelForEngine(name)
+		if model.Name == "" {
+			Skip("model.name not configured for engine " + name)
+		}
+
+		if profileEngineAcceleratorType(name) == "" {
+			Skip("accelerator_type not configured for engine " + name)
+		}
+
+		_, err := enginePackageDownloadURL(profilePackageURL(), name, profileEngineVersionFor(name), profilePackageArch())
+		Expect(err).NotTo(HaveOccurred(), "invalid package profile for engine %s", name)
 	}
 }
 
@@ -1331,7 +1371,7 @@ func mergeEngineArgs(base, overlay []EngineArg) []EngineArg {
 func defaultEndpointEngineArgs(engineName, task string) []EngineArg {
 	return mergeEngineArgs(
 		engineArgs(engineName),
-		parseEngineArgs(profileModelEngineArgsFor(task)),
+		parseEngineArgs(profileModelEngineArgsForEngine(engineName, task)),
 	)
 }
 
@@ -1341,6 +1381,7 @@ type endpointOpts struct {
 	engineVersion     string
 	model             string
 	modelVersion      string
+	modelFile         string
 	task              string
 	engineArgs        []EngineArg
 	gpu               string
@@ -1348,6 +1389,7 @@ type endpointOpts struct {
 	memory            string
 	accType           string
 	accProduct        string
+	cpuOnly           bool
 	vgpuMemoryMiB     string
 	vgpuMemoryPercent string
 	vgpuCorePercent   string
@@ -1384,6 +1426,15 @@ func withModel(name, version string) EndpointOption {
 	}
 }
 
+func withModelProfile(model ModelProfile) EndpointOption {
+	return func(o *endpointOpts) {
+		o.model = model.Name
+		o.modelVersion = model.Version
+		o.modelFile = model.File
+		o.task = model.Task
+	}
+}
+
 func withTask(task string) EndpointOption {
 	return func(o *endpointOpts) { o.task = task }
 }
@@ -1406,6 +1457,17 @@ func withAcceleratorVirtualization(memoryMiB, memoryPercent, corePercent string)
 
 func withCPU(cpu string) EndpointOption {
 	return func(o *endpointOpts) { o.cpu = cpu }
+}
+
+// withCPUOnly requests CPU scheduling without an accelerator map. An empty
+// accelerator type is the runtime's CPU-only path for SSH/Ray clusters.
+func withCPUOnly() EndpointOption {
+	return func(o *endpointOpts) {
+		o.cpuOnly = true
+		o.gpu = "0"
+		o.accType = ""
+		o.accProduct = ""
+	}
 }
 
 func withMemory(memory string) EndpointOption {
@@ -1433,7 +1495,10 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		engineVersion: profileEngineVersion(),
 		model:         profileModelName(),
 		modelVersion:  profileModelVersion(),
-		task:          profileModelTask(),
+		// Existing cases historically omit model.file; new per-engine cases set
+		// it explicitly through withModelProfile.
+		modelFile: "",
+		task:      profileModelTask(),
 		// engineArgs intentionally left nil here. Resolved AFTER opts run
 		// so withEngine can change engineName first and the per-engine
 		// profile lookup picks the right engine's args.
@@ -1449,7 +1514,11 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		o.engineArgs = defaultEndpointEngineArgs(o.engineName, o.task)
 	}
 
-	if o.accType == "" || o.accProduct == "" {
+	if o.cpuOnly {
+		o.gpu = "0"
+		o.accType = ""
+		o.accProduct = ""
+	} else if o.accType == "" || o.accProduct == "" {
 		o.accType, o.accProduct = getClusterAccelerator(cluster)
 	}
 
@@ -1462,7 +1531,9 @@ func renderEndpoint(name, cluster string, opts ...EndpointOption) (string, *endp
 		"E2E_MODEL_REGISTRY":                            testRegistry(),
 		"E2E_MODEL_NAME":                                o.model,
 		"E2E_MODEL_VERSION":                             o.modelVersion,
+		"E2E_MODEL_FILE":                                o.modelFile,
 		"E2E_MODEL_TASK":                                o.task,
+		"E2E_CPU_ONLY":                                  o.cpuOnly,
 		"E2E_ACCELERATOR_TYPE":                          o.accType,
 		"E2E_ACCELERATOR_PRODUCT":                       o.accProduct,
 		"E2E_ACCELERATOR_VIRTUALIZATION_MEMORY_MIB":     o.vgpuMemoryMiB,
