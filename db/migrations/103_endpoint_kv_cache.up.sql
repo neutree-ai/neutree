@@ -20,4 +20,3 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER validate_endpoint_kv_cache BEFORE INSERT OR UPDATE OF spec ON api.endpoints
 FOR EACH ROW EXECUTE FUNCTION api.validate_endpoint_kv_cache();
-
