@@ -237,7 +237,9 @@
         {
           "expr": "min by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"})",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "{{node}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {

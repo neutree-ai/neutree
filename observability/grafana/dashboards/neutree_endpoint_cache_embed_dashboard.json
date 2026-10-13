@@ -45,7 +45,9 @@
       "targets": [
         {
           "expr": "sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "title": "KV token capacity",
@@ -82,7 +84,9 @@
       "targets": [
         {
           "expr": "avg(vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}) or avg(vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}) or avg(sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "title": "KV usage",
@@ -118,7 +122,9 @@
       "targets": [
         {
           "expr": "((sum(rate(vllm:prefix_cache_hits_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) / sum(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_cache\"}[$__rate_interval])) / sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval]))) and (sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])) > 0))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "title": "Local cache hit",
@@ -235,7 +241,9 @@
         {
           "expr": "(sum(rate(vllm:external_prefix_cache_hits_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) / sum(rate(vllm:external_prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:external_prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)",
           "refId": "A",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -330,7 +338,9 @@
         {
           "expr": "min(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"})",
           "refId": "A",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
