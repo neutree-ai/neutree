@@ -16,7 +16,7 @@ func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
 	r.reconcileCache(&ReconcileContext{Cluster: cluster})
 	require.Nil(t, cluster.Status.Cache)
 	require.NoError(t, r.deleteCache(&ReconcileContext{Cluster: cluster}))
-	cluster.Spec.Cache = &v1.CacheSpec{Enabled: true}
+	cluster.Spec.Cache = &v1.ClusterCacheSpec{Provider: "example"}
 	r.reconcileCache(&ReconcileContext{Cluster: cluster})
 	require.Equal(t, v1.ClusterPhaseRunning, cluster.Status.Phase)
 	require.Equal(t, "example", cluster.Status.Cache.Provider)
@@ -25,10 +25,10 @@ func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
 	require.ErrorContains(t, r.deleteCache(&ReconcileContext{Cluster: cluster}), "not supported")
 }
 
-type failingCacheProviders struct{ calls int }
+type failingCacheProvider struct{ calls int }
 
 func (p *failingCacheProvider) Reconcile(_ context.Context, rc *clustercache.Context) error {
-	rc.Cluster.Status.Cache = &v1.CacheStatus{Phase: "Failed", Message: "cache unavailable"}
+	rc.Cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: "example", Error: "cache unavailable"}
 	p.calls++
 	return errors.New("cache unavailable")
 }
