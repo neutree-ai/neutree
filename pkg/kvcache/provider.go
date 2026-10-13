@@ -69,9 +69,11 @@ type DependencyObserver interface {
 func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, namespace string, endpoint *v1.Endpoint) (*v1.EndpointKVCacheStatus, error) {
 	state := endpoint.Status.KVCache
 	provider, err := p.Get(state.Provider)
+
 	if err != nil {
 		return nil, err
 	}
+
 	observer, ok := provider.(DependencyObserver)
 	if !ok {
 		return state, nil
