@@ -78,5 +78,6 @@ func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, nam
 	if !ok {
 		return state, nil
 	}
+
 	return observer.ObserveDependencies(ctx, c, namespace, endpoint)
 }
