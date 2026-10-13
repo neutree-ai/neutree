@@ -10,12 +10,14 @@ import (
 	"strings"
 )
 
+const runIDUpperBound int64 = 1_000_000_000_000_000_000
+
 // E2EConfig holds infrastructure-level configuration that is not part of
 // the test profile. Test-specific config lives in profile.go.
 type E2EConfig struct {
 	ServerURL string // NEUTREE_SERVER_URL (required)
 	APIKey    string // NEUTREE_API_KEY (required)
-	RunID     string // auto-generated 6-digit random suffix for resource name uniqueness
+	RunID     string // auto-generated 18-digit random suffix for resource ownership
 }
 
 // Cfg is the global e2e configuration, loaded once at package init.
@@ -33,12 +35,12 @@ func loadConfig() *E2EConfig {
 }
 
 func generateRunID() string {
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	n, err := rand.Int(rand.Reader, big.NewInt(runIDUpperBound))
 	if err != nil {
-		return "000000"
+		panic(fmt.Sprintf("generate RunID: %v", err))
 	}
 
-	return fmt.Sprintf("%06d", n.Int64())
+	return fmt.Sprintf("%018d", n.Int64())
 }
 
 // loadDotEnv loads a .env file if present. It does NOT override existing env vars.
