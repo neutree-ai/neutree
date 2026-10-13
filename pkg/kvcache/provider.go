@@ -3,17 +3,14 @@ package kvcache
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	appsv1 "k8s.io/api/apps/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-)
-
-const (
-	ZCacheDependencyLabel      = "neutree.ai/uses-cluster-cache"
-	ZCacheDependencyLabelValue = "true"
 )
 
 type Provider interface {
@@ -62,4 +59,22 @@ func DecodeOptions(raw json.RawMessage, target interface{}) error {
 	decoder.DisallowUnknownFields()
 
 	return decoder.Decode(target)
+}
+
+// DependencyObserver tracks provider-owned resources still used by deployed Pods.
+type DependencyObserver interface {
+	ObserveDependencies(context.Context, client.Client, string, *v1.Endpoint) (*v1.EndpointKVCacheStatus, error)
+}
+
+func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, namespace string, endpoint *v1.Endpoint) (*v1.EndpointKVCacheStatus, error) {
+	state := endpoint.Status.KVCache
+	provider, err := p.Get(state.Provider)
+	if err != nil {
+		return nil, err
+	}
+	observer, ok := provider.(DependencyObserver)
+	if !ok {
+		return state, nil
+	}
+	return observer.ObserveDependencies(ctx, c, namespace, endpoint)
 }

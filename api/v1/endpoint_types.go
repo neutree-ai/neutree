@@ -44,11 +44,10 @@ type EndpointKVCacheSpec struct {
 	Options  json.RawMessage `json:"options,omitempty"`
 }
 
-// EndpointZCacheStatus tracks the deployment dependency, not cache connectivity.
-// Generation is assigned by storage and prevents stale observations releasing a dependency.
-type EndpointZCacheStatus struct {
-	Generation int64 `json:"generation"`
-	InUse      bool  `json:"in_use"`
+// EndpointKVCacheStatus carries state owned by the selected provider.
+type EndpointKVCacheStatus struct {
+	Provider string          `json:"provider"`
+	Details  json.RawMessage `json:"details,omitempty"`
 }
 
 type EndpointSpec struct {
@@ -77,11 +76,11 @@ const (
 )
 
 type EndpointStatus struct {
-	ZCache             *EndpointZCacheStatus `json:"zcache,omitempty"`
-	Phase              EndpointPhase         `json:"phase,omitempty"`
-	ServiceURL         string                `json:"service_url,omitempty"`
-	LastTransitionTime string                `json:"last_transition_time,omitempty"`
-	ErrorMessage       string                `json:"error_message,omitempty"`
+	KVCache            *EndpointKVCacheStatus `json:"kv_cache,omitempty"`
+	Phase              EndpointPhase          `json:"phase,omitempty"`
+	ServiceURL         string                 `json:"service_url,omitempty"`
+	LastTransitionTime string                 `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                 `json:"error_message,omitempty"`
 	// ModelDownloadCompletedHash is reserved for future model download tracking extensions,
 	// such as node- or replica-level completion metadata. It must not be used alone as
 	// proof that the current node or replica has completed downloading.
