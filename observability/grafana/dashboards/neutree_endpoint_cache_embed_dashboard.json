@@ -32,7 +32,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -44,7 +44,7 @@
       },
       "targets": [
         {
-          "expr": "sum(label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
+          "expr": "sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
           "refId": "A"
         }
       ],
@@ -57,7 +57,8 @@
           "color": {
             "mode": "fixed",
             "fixedColor": "#0080FF"
-          }
+          },
+          "noValue": "No samples"
         },
         "overrides": []
       }
@@ -68,7 +69,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -80,7 +81,7 @@
       },
       "targets": [
         {
-          "expr": "avg(vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}) or avg(vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}) or avg(sglang:token_usage{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
+          "expr": "avg(vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}) or avg(vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}) or avg(sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
           "refId": "A"
         }
       ],
@@ -92,7 +93,8 @@
           "color": {
             "mode": "fixed",
             "fixedColor": "#0080FF"
-          }
+          },
+          "noValue": "No samples"
         },
         "overrides": []
       }
@@ -103,7 +105,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 0
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -115,11 +117,11 @@
       },
       "targets": [
         {
-          "expr": "(sum(rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])), 1e-9)) or (sum(rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=\"prefill_cache\"}[$__rate_interval])) / clamp_min(sum(rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])), 1e-9))",
+          "expr": "((sum(rate(vllm:prefix_cache_hits_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) / sum(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_cache\"}[$__rate_interval])) / sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval]))) and (sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])) > 0))",
           "refId": "A"
         }
       ],
-      "title": "Cache hit",
+      "title": "Local cache hit",
       "type": "stat",
       "fieldConfig": {
         "defaults": {
@@ -127,7 +129,8 @@
           "color": {
             "mode": "fixed",
             "fixedColor": "#0080FF"
-          }
+          },
+          "noValue": "No samples"
         },
         "overrides": []
       }
@@ -138,12 +141,12 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "id": 4,
       "targets": [
         {
-          "expr": "vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"} or vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"} or sglang:token_usage{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}",
+          "expr": "vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"} or vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"} or sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}",
           "refId": "A",
           "legendFormat": "{{replica}} usage"
         }
@@ -152,7 +155,8 @@
       "type": "timeseries",
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "noValue": "No samples"
         },
         "overrides": [
           {
@@ -179,21 +183,22 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 4
+        "y": 5
       },
       "id": 5,
       "targets": [
         {
-          "expr": "(sum by (replica) (rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])), 1e-9)) or (sum by (replica) (rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=\"prefill_cache\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])), 1e-9))",
+          "expr": "((sum by (replica)(rate(vllm:prefix_cache_hits_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) / sum by (replica)(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum by (replica)(rate(vllm:prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)) or ((sum by (replica)(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_cache\"}[$__rate_interval])) / sum by (replica)(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval]))) and (sum by (replica)(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])) > 0))",
           "refId": "A",
           "legendFormat": "{{replica}} hit"
         }
       ],
-      "title": "Cache hit trend",
+      "title": "Local cache hit trend",
       "type": "timeseries",
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "noValue": "No samples"
         },
         "overrides": [
           {
@@ -212,6 +217,139 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "id": 20,
+      "title": "External cache match rate",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 8,
+        "h": 4
+      },
+      "description": "Matched tokens / queried tokens after local cache reuse. Matching does not prove successful transfer. No requests or unsupported metrics show no samples.",
+      "targets": [
+        {
+          "expr": "(sum(rate(vllm:external_prefix_cache_hits_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) / sum(rate(vllm:external_prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:external_prefix_cache_queries_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 21,
+      "title": "Prompt token sources",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 8,
+        "y": 13,
+        "w": 16,
+        "h": 8
+      },
+      "description": "Engine-reported prompt accounting. External cache is the additional matched prefix beyond local cache, not a measured speedup or proof of successful transfer.",
+      "targets": [
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)",
+          "refId": "A",
+          "legendFormat": "Local cache"
+        },
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__rate_interval])) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)",
+          "refId": "B",
+          "legendFormat": "External cache"
+        },
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"}[$__rate_interval])) > 0)",
+          "refId": "C",
+          "legendFormat": "Computed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "fillOpacity": 65,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "Inference scrape health",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 8,
+        "h": 4
+      },
+      "description": "1 = collecting; 0 = scrape failed; no samples = no discovered target. Historical charts can retain samples from before a failure.",
+      "targets": [
+        {
+          "expr": "min(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"})",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
       }
     }
   ],
@@ -232,7 +370,8 @@
         },
         "name": "datasource",
         "query": "prometheus",
-        "type": "datasource"
+        "type": "datasource",
+        "hide": 2
       },
       {
         "datasource": "${datasource}",
@@ -241,7 +380,8 @@
         "name": "Cluster",
         "query": "label_values(neutree_node_ready, neutree_cluster)",
         "refresh": 1,
-        "type": "query"
+        "type": "query",
+        "hide": 2
       },
       {
         "datasource": "${datasource}",
@@ -251,7 +391,34 @@
         "query": "label_values(neutree_endpoint_replica_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query",
-        "multi": false
+        "multi": false,
+        "hide": 2
+      },
+      {
+        "name": "Workspace",
+        "type": "constant",
+        "query": "default",
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 2
+      },
+      {
+        "name": "Replica",
+        "label": "Replica",
+        "type": "query",
+        "datasource": "${datasource}",
+        "query": "label_values(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\"}, replica)",
+        "definition": "label_values(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\"}, replica)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
