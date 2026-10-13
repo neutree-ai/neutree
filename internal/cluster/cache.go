@@ -40,7 +40,7 @@ func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext)
 	cluster := rc.Cluster
 	if cluster.Spec == nil || cluster.Spec.Cache == nil {
 		if err := c.deleteCache(rc); err != nil {
-			recordCacheError(cluster, err)
+			klog.Warningf("cache cleanup pending for %s: %v", cluster.Key(), err)
 		}
 
 		return
@@ -60,27 +60,28 @@ func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext)
 	}
 
 	provider, err := c.cacheProviders.Get(cluster.Spec.Cache.Provider)
-
-	if err == nil {
-		var cacheCtx *clustercache.Context
-
-		cacheCtx, err = c.cacheContext(rc)
-
-		if err == nil {
-			err = provider.Reconcile(rc.Ctx, cacheCtx)
-		}
-
-	}
-
-	cluster.Status.Cache.Error = ""
 	if err != nil {
 		recordCacheError(cluster, err)
+		return
+	}
+	cacheCtx, err := c.cacheContext(rc)
+	if err != nil {
+		recordCacheError(cluster, err)
+		return
+	}
+	if err := provider.Reconcile(rc.Ctx, cacheCtx); err != nil {
 		klog.Warningf("cache reconciliation failed for %s: %v", cluster.Key(), err)
 	}
 }
 
 func recordCacheError(cluster *v1.Cluster, err error) {
-	cluster.Status.Cache.Error = err.Error()
+	status := cluster.Status.Cache
+	status.ErrorMessage = err.Error()
+	status.Phase = v1.CachePhaseUnavailable
+	status.Conditions = []v1.CacheCondition{
+		{Type: v1.CacheConfigurationApplied, Status: "Unknown", Reason: "ReconcileError", Message: err.Error()},
+		{Type: v1.CacheReady, Status: "Unknown", Reason: "ReconcileError", Message: err.Error()},
+	}
 }
 
 func (c *NativeKubernetesClusterReconciler) deleteCache(rc *ReconcileContext) error {
@@ -91,11 +92,13 @@ func (c *NativeKubernetesClusterReconciler) deleteCache(rc *ReconcileContext) er
 	provider, err := c.cacheProviders.Get(rc.Cluster.Status.Cache.Provider)
 
 	if err != nil {
+		recordCacheError(rc.Cluster, err)
 		return err
 	}
 
 	cacheCtx, err := c.cacheContext(rc)
 	if err != nil {
+		recordCacheError(rc.Cluster, err)
 		return err
 	}
 

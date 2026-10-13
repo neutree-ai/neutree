@@ -21,7 +21,7 @@ func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
 	r.reconcileCache(&ReconcileContext{Cluster: cluster})
 	require.Equal(t, v1.ClusterPhaseRunning, cluster.Status.Phase)
 	require.Equal(t, "example", cluster.Status.Cache.Provider)
-	require.Contains(t, cluster.Status.Cache.Error, "not supported")
+	require.Contains(t, cluster.Status.Cache.ErrorMessage, "not supported")
 	// An unsupported distribution must not silently orphan an existing cache.
 	require.ErrorContains(t, r.deleteCache(&ReconcileContext{Cluster: cluster}), "not supported")
 }
@@ -32,15 +32,16 @@ type failingCacheProvider struct {
 }
 
 func (p *failingCacheProvider) Reconcile(_ context.Context, rc *clustercache.Context) error {
-	rc.Cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: "example", Error: "cache unavailable"}
+	rc.Cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: "example", Phase: v1.CachePhaseFailed, ErrorMessage: "cache unavailable"}
 	p.calls++
 	return errors.New("cache unavailable")
 }
-func (p *failingCacheProvider) Delete(context.Context, *clustercache.Context) error {
+func (p *failingCacheProvider) Delete(_ context.Context, rc *clustercache.Context) error {
 	p.calls++
 	if p.cleanupReady {
 		return nil
 	}
+	rc.Cluster.Status.Cache.ErrorMessage = "cleanup pending"
 	return errors.New("cleanup pending")
 }
 
@@ -53,7 +54,8 @@ func TestProviderFailurePreservesClusterHealthAndBlocksCleanup(t *testing.T) {
 	r.reconcileCache(rc)
 	require.Equal(t, 1, provider.calls)
 	require.Equal(t, v1.ClusterPhaseRunning, cl.Status.Phase)
-	require.Equal(t, "cache unavailable", cl.Status.Cache.Error)
+	require.Equal(t, "cache unavailable", cl.Status.Cache.ErrorMessage)
+	require.Equal(t, v1.CachePhaseFailed, cl.Status.Cache.Phase, "provider classification must not be overwritten")
 	require.ErrorContains(t, r.deleteCache(rc), "cleanup pending")
 	require.Equal(t, 2, provider.calls)
 	// Removing desired configuration still dispatches cleanup to its saved owner.
@@ -61,7 +63,7 @@ func TestProviderFailurePreservesClusterHealthAndBlocksCleanup(t *testing.T) {
 	r.reconcileCache(rc)
 	require.Equal(t, 3, provider.calls)
 	require.Equal(t, "example", cl.Status.Cache.Provider)
-	require.Equal(t, "cleanup pending", cl.Status.Cache.Error)
+	require.Equal(t, "cleanup pending", cl.Status.Cache.ErrorMessage)
 	provider.cleanupReady = true
 	r.reconcileCache(rc)
 	require.Equal(t, 4, provider.calls)

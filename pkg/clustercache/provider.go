@@ -23,6 +23,7 @@ type Context struct {
 	SaveStatus      func(*v1.ClusterStatus) error
 }
 
+// Providers publish their observed status even when reconciliation returns an error.
 type Provider interface {
 	Validate(old, next *v1.Cluster) error
 	Reconcile(context.Context, *Context) error
