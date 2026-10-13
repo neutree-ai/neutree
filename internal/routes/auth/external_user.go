@@ -31,6 +31,9 @@ type externalAccount struct {
 	// IdentitySource is recorded in the user's app_metadata; it selects the
 	// fields neutree must not change for the user.
 	IdentitySource string
+	// IdentitySourceName is the name of the IdentitySource, recorded in the
+	// user's app_metadata for display.
+	IdentitySourceName string
 	// Email is the placeholder GoTrue email of a user created for the account,
 	// derived from ExternalID. Later logins use whatever email the user has
 	// then. The source's own email is never used: it may be missing, change,
@@ -71,7 +74,7 @@ func createExternalUser(ctx context.Context, deps *Dependencies, account externa
 		Email:        account.Email,
 		EmailConfirm: true,
 		UserMetadata: auth.ExternalUserMetadata(account.Profile.Username, account.Profile.DisplayName, account.Profile.Email),
-		AppMetadata:  map[string]any{auth.IdentitySourceKey: account.IdentitySource},
+		AppMetadata:  auth.ExternalAppMetadata(account.IdentitySource, account.IdentitySourceName),
 	})
 	if err != nil {
 		// A concurrent first login of the same account created the user first, so
@@ -160,10 +163,15 @@ func loginUser(deps *Dependencies, userID string) (*types.User, error) {
 	return &resp.User, nil
 }
 
-// refreshExternalUser brings the user's display name and email in line with
-// what the identity source said at this login (D56). The login goes on when
-// this fails: the stale values are only shown, never used to authorize.
+// refreshExternalUser brings the user's identity source name, display name and
+// email in line with what the identity source said at this login (D56). The
+// login goes on when this fails: the stale values are only shown, never used
+// to authorize.
 func refreshExternalUser(deps *Dependencies, account externalAccount, user *types.User, profile auth.ExternalProfile) {
+	if err := auth.RecordIdentitySourceName(deps.AuthClient, user, account.IdentitySourceName); err != nil {
+		klog.Warningf("%s login of %q (user %s): record identity source name: %v", account.Source, account.LogName, user.ID, err)
+	}
+
 	if err := auth.UpdateExternalUser(deps.AuthClient, deps.Storage, user.ID.String(), user, profile, false); err != nil {
 		klog.Warningf("%s login of %q (user %s): refresh profile: %v", account.Source, account.LogName, user.ID, err)
 	}

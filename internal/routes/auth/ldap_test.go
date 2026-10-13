@@ -121,6 +121,7 @@ func (d *ldapTestDeps) expectEmail(userID, email string) {
 			ID:           uuid.MustParse(userID),
 			Email:        email,
 			UserMetadata: internalauth.ExternalUserMetadata(id.Username, id.DisplayName, id.Email),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.LDAPSource, testLDAPSource),
 		}}, nil).Once()
 	d.storage.EXPECT().GetUserProfile(userID).Return(&v1.UserProfile{
 		Metadata: &v1.Metadata{Name: id.Username, DisplayName: id.DisplayName},
@@ -161,7 +162,8 @@ func TestLDAPToken_FirstLoginCreatesUserAndLink(t *testing.T) {
 			req.UserMetadata["preferred_username"] == "alice" &&
 			req.UserMetadata["name"] == "Alice Liddell" &&
 			req.UserMetadata["email"] == "alice@example.org" &&
-			req.AppMetadata["identity_source"] == "ldap"
+			req.AppMetadata["identity_source"] == "ldap" &&
+			req.AppMetadata["identity_source_name"] == testLDAPSource
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testLDAPLinkSource, ExternalID: testIdentity().ExternalID, UserID: userID.String(),

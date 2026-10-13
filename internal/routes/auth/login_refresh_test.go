@@ -37,6 +37,7 @@ func TestLDAPToken_LaterLoginRefreshesProfile(t *testing.T) {
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: testPlaceholderEmail,
 			UserMetadata: internalauth.ExternalUserMetadata(id.Username, "Old Name", "old@example.org"),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.LDAPSource, testLDAPSource),
 		}}, nil).Once()
 	d.client.EXPECT().AdminUpdateUser(types.AdminUpdateUserRequest{
 		UserID:       userID,
@@ -68,7 +69,7 @@ func TestLDAPToken_RefreshFailureDoesNotBlockLogin(t *testing.T) {
 		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
 	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
 		Return(&types.AdminGetUserResponse{User: types.User{ID: userID, Email: testPlaceholderEmail}}, nil).Once()
-	d.client.EXPECT().AdminUpdateUser(mock.Anything).Return(nil, errors.New("gotrue down")).Once()
+	d.client.EXPECT().AdminUpdateUser(mock.Anything).Return(nil, errors.New("gotrue down")).Twice()
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
 		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
 	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
@@ -92,6 +93,7 @@ func TestOIDCCallback_LaterLoginRefreshesProfile(t *testing.T) {
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: e.placeholderEmail(),
 			UserMetadata: internalauth.ExternalUserMetadata("kc.alice", "KC Alice", "alice@example.org"),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.OIDCSource, testOIDCID),
 		}}, nil).Once()
 	e.client.EXPECT().AdminUpdateUser(types.AdminUpdateUserRequest{
 		UserID:       userID,
@@ -111,4 +113,33 @@ func TestOIDCCallback_LaterLoginRefreshesProfile(t *testing.T) {
 	_, fragment := redirectFragment(t, e.loginFlow(t))
 
 	assert.Equal(t, url.Values{"token_hash": {"hashed-token"}, "type": {"magiclink"}}, fragment)
+}
+
+// A later login of a user created before identity_source_name was recorded
+// adds it, and nothing else to app_metadata.
+func TestLDAPToken_LaterLoginRecordsIdentitySourceName(t *testing.T) {
+	d := newLDAPTestDeps(t)
+	userID := uuid.New()
+	id := testIdentity()
+
+	d.storage.EXPECT().GetExternalIdentity(testLDAPLinkSource, id.ExternalID).
+		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+	d.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
+		Return(&types.AdminGetUserResponse{User: types.User{
+			ID: userID, Email: testPlaceholderEmail,
+			UserMetadata: internalauth.ExternalUserMetadata(id.Username, id.DisplayName, id.Email),
+			AppMetadata:  map[string]any{internalauth.IdentitySourceKey: internalauth.LDAPSource},
+		}}, nil).Once()
+	d.client.EXPECT().AdminUpdateUser(types.AdminUpdateUserRequest{
+		UserID:      userID,
+		AppMetadata: map[string]any{internalauth.IdentitySourceNameKey: testLDAPSource},
+	}).Return(&types.AdminUpdateUserResponse{}, nil).Once()
+	expectProfile(d.storage, userID.String(), id.DisplayName, id.Email)
+	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).
+		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
+	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
+
+	w := d.login(t)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }

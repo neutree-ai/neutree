@@ -47,6 +47,7 @@ func TestLDAPToken_ExpiredBanAllowsLogin(t *testing.T) {
 		Return(&types.AdminGetUserResponse{User: types.User{
 			ID: userID, Email: testPlaceholderEmail, BannedUntil: &until,
 			UserMetadata: internalauth.ExternalUserMetadata(id.Username, id.DisplayName, id.Email),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.LDAPSource, testLDAPSource),
 		}}, nil).Once()
 	expectProfile(d.storage, userID.String(), id.DisplayName, id.Email)
 	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, testPlaceholderEmail).

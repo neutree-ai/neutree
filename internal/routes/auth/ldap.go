@@ -162,11 +162,12 @@ func ldapPlaceholderEmail(sourceName, externalID string) string {
 // identity source sourceName.
 func ldapAccount(sourceName string, identity *ldap.Identity) externalAccount {
 	return externalAccount{
-		Source:         auth.LinkSource(auth.LDAPSource, sourceName),
-		ExternalID:     identity.ExternalID,
-		IdentitySource: auth.LDAPSource,
-		Email:          ldapPlaceholderEmail(sourceName, identity.ExternalID),
-		Profile:        auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
-		LogName:        identity.Username,
+		Source:             auth.LinkSource(auth.LDAPSource, sourceName),
+		ExternalID:         identity.ExternalID,
+		IdentitySource:     auth.LDAPSource,
+		IdentitySourceName: sourceName,
+		Email:              ldapPlaceholderEmail(sourceName, identity.ExternalID),
+		Profile:            auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
+		LogName:            identity.Username,
 	}
 }

@@ -241,12 +241,13 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 	}
 
 	account := externalAccount{
-		Source:         auth.LinkSource(auth.OIDCSource, o.name),
-		ExternalID:     oidcExternalID(identity.Issuer, identity.Subject),
-		IdentitySource: auth.OIDCSource,
-		Email:          oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
-		Profile:        auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
-		LogName:        logName,
+		Source:             auth.LinkSource(auth.OIDCSource, o.name),
+		ExternalID:         oidcExternalID(identity.Issuer, identity.Subject),
+		IdentitySource:     auth.OIDCSource,
+		IdentitySourceName: o.name,
+		Email:              oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
+		Profile:            auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
+		LogName:            logName,
 	}
 
 	userID, created, err := ensureExternalUser(ctx, deps, account)

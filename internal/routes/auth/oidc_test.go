@@ -155,6 +155,7 @@ func (e *oidcTestEnv) expectEmail(userID, email string) {
 			ID:           uuid.MustParse(userID),
 			Email:        email,
 			UserMetadata: internalauth.ExternalUserMetadata("kc.alice", "KC Alice", "alice@example.org"),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.OIDCSource, testOIDCID),
 		}}, nil).Once()
 	e.storage.EXPECT().GetUserProfile(userID).Return(&v1.UserProfile{
 		Metadata: &v1.Metadata{Name: "kc.alice", DisplayName: "KC Alice"},
@@ -288,7 +289,8 @@ func TestOIDCCallback_FirstLoginCreatesUserAndLink(t *testing.T) {
 			req.UserMetadata["preferred_username"] == "kc.alice" &&
 			req.UserMetadata["name"] == "KC Alice" &&
 			req.UserMetadata["email"] == "alice@example.org" &&
-			req.AppMetadata["identity_source"] == "oidc"
+			req.AppMetadata["identity_source"] == "oidc" &&
+			req.AppMetadata["identity_source_name"] == testOIDCID
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	e.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: testOIDCLinkSource, ExternalID: e.externalID(), UserID: userID.String(),

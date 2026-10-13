@@ -180,6 +180,24 @@ func sameMetadataValue(stored, want any) bool {
 	return ok && s == want
 }
 
+// RecordIdentitySourceName sets app_metadata.identity_source_name of user to
+// name when it differs. Users created before the key existed lack it.
+func RecordIdentitySourceName(client Client, user *types.User, name string) error {
+	if current, _ := user.AppMetadata[IdentitySourceNameKey].(string); current == name {
+		return nil
+	}
+
+	// GoTrue merges the given keys into app_metadata.
+	if _, err := client.AdminUpdateUser(types.AdminUpdateUserRequest{
+		UserID:      user.ID,
+		AppMetadata: map[string]any{IdentitySourceNameKey: name},
+	}); err != nil {
+		return fmt.Errorf("update GoTrue app_metadata: %w", err)
+	}
+
+	return nil
+}
+
 // IsBanned reports whether a GoTrue user is banned at now.
 func IsBanned(user *types.User, now time.Time) bool {
 	return user != nil && user.BannedUntil != nil && user.BannedUntil.After(now)

@@ -274,3 +274,167 @@ func TestUserProfileExternalEmail_BackfillStillApplies(t *testing.T) {
 		t.Errorf("spec.email = %q, want the directory mail %q", got, user.directory)
 	}
 }
+
+const identitySourceNameLabel = "neutree.ai/identity-source-name"
+
+// The 106 backfill of app_metadata.identity_source_name, verbatim.
+const identitySourceNameBackfill = `
+UPDATE auth.users u
+SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+                        || jsonb_build_object('identity_source_name', l.name)
+FROM (
+  SELECT DISTINCT ON (user_id) user_id, substr(source, strpos(source, ':') + 1) AS name
+    FROM api.external_identities
+   WHERE strpos(source, ':') > 0
+   ORDER BY user_id, created_at
+) l
+WHERE u.id = l.user_id
+  AND NULLIF(u.raw_app_meta_data->>'identity_source', '') IS NOT NULL
+  AND NULLIF(u.raw_app_meta_data->>'identity_source_name', '') IS NULL`
+
+func createNamedExternalUser(t *testing.T, sourceType, sourceName, prefix string) string {
+	t.Helper()
+
+	run := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+
+	return createSSOShapedUser(t, map[string]any{
+		"email":         run + "@" + sourceName + "." + sourceType + ".neutree.local",
+		"email_confirm": true,
+		"app_metadata":  map[string]any{"identity_source": sourceType, "identity_source_name": sourceName},
+		"user_metadata": map[string]any{"preferred_username": run, "email": run + "@corp.test.local"},
+	})
+}
+
+func TestUserProfileExternalEmail_SourceNameLabel(t *testing.T) {
+	admin := adminToken(t)
+
+	t.Run("external user gets both labels", func(t *testing.T) {
+		id := createNamedExternalUser(t, "ldap", "org-ldap", "name")
+
+		labels := userProfileLabels(t, id)
+		if labels[identitySourceLabel] != "ldap" || labels[identitySourceNameLabel] != "org-ldap" {
+			t.Errorf("labels = %v, want %s=ldap and %s=org-ldap", labels, identitySourceLabel, identitySourceNameLabel)
+		}
+	})
+
+	t.Run("admin cannot change or drop the label", func(t *testing.T) {
+		id := createNamedExternalUser(t, "oidc", "keycloak", "name-admin")
+
+		metadata := profileMetadata(t, admin, id)
+		metadata["labels"] = map[string]any{identitySourceNameLabel: "forged", "team": "a"}
+
+		code, raw := patchProfile(t, admin, id, map[string]any{"metadata": metadata})
+		if code != http.StatusOK {
+			t.Fatalf("metadata PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+
+		labels := userProfileLabels(t, id)
+		if labels[identitySourceNameLabel] != "keycloak" || labels["team"] != "a" {
+			t.Errorf("labels = %v, want %s=keycloak and team=a", labels, identitySourceNameLabel)
+		}
+
+		metadata["labels"] = map[string]any{}
+
+		if code, raw := patchProfile(t, admin, id, map[string]any{"metadata": metadata}); code != http.StatusOK {
+			t.Fatalf("metadata PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+
+		if got := userProfileLabels(t, id)[identitySourceNameLabel]; got != "keycloak" {
+			t.Errorf("label after dropping it = %q, want keycloak", got)
+		}
+	})
+
+	t.Run("user cannot change their own label", func(t *testing.T) {
+		id := createNamedExternalUser(t, "ldap", "org-ldap", "name-self")
+
+		var got string
+
+		err := executeAsUser(t, GetTestDB(t), id, func(tx *sql.Tx) error {
+			ctx := context.Background()
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE api.user_profiles
+				SET metadata.labels = jsonb_build_object($2::text, 'forged')::json
+				WHERE id = $1`, id, identitySourceNameLabel); err != nil {
+				return err
+			}
+
+			return tx.QueryRowContext(ctx,
+				`SELECT COALESCE((metadata).labels::jsonb->>$2, '') FROM api.user_profiles WHERE id = $1`,
+				id, identitySourceNameLabel).Scan(&got)
+		})
+		if err != nil {
+			t.Fatalf("self update: %v", err)
+		}
+
+		if got != "org-ldap" {
+			t.Errorf("label after self update = %q, want org-ldap", got)
+		}
+	})
+
+	t.Run("user cannot set their own app_metadata", func(t *testing.T) {
+		user := createLocalEmailUser(t, "name-gotrue")
+		password := "Passw0rd-" + strings.TrimSuffix(user.email, "@corp.test.local")
+		session := gotruePasswordLogin(t, user.email, password)
+
+		code, raw := gotrueRequest(t, http.MethodPut, "/user", session.AccessToken,
+			map[string]any{"app_metadata": map[string]any{"identity_source": "ldap", "identity_source_name": "forged"}})
+		if code < 400 {
+			t.Errorf("PUT /user with app_metadata = HTTP %d, want it refused: %s", code, raw)
+		}
+
+		if labels := userProfileLabels(t, user.id); labels[identitySourceLabel] != "" || labels[identitySourceNameLabel] != "" {
+			t.Errorf("local user got labels %v", labels)
+		}
+	})
+
+	t.Run("local user has no label and cannot forge it", func(t *testing.T) {
+		user := createLocalEmailUser(t, "name-local")
+
+		metadata := profileMetadata(t, admin, user.id)
+		metadata["labels"] = map[string]any{identitySourceNameLabel: "org-ldap"}
+
+		if code, raw := patchProfile(t, admin, user.id, map[string]any{"metadata": metadata}); code != http.StatusOK {
+			t.Fatalf("metadata PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+
+		if got := userProfileLabels(t, user.id)[identitySourceNameLabel]; got != "" {
+			t.Errorf("local user has label %s=%q", identitySourceNameLabel, got)
+		}
+	})
+
+	t.Run("backfill takes the name from the link", func(t *testing.T) {
+		db := GetTestDB(t)
+		ctx := context.Background()
+		user := createExternalEmailUser(t, "ldap", "name-backfill")
+		local := createLocalEmailUser(t, "name-backfill-local")
+
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO api.external_identities (source, external_id, user_id) VALUES ('ldap:org-ldap', $1, $2)`,
+			"ext-"+user.id, user.id); err != nil {
+			t.Fatalf("insert link: %v", err)
+		}
+
+		if got := userProfileLabels(t, user.id)[identitySourceNameLabel]; got != "" {
+			t.Fatalf("label before backfill = %q, want none", got)
+		}
+
+		if _, err := db.ExecContext(ctx, identitySourceNameBackfill); err != nil {
+			t.Fatalf("backfill: %v", err)
+		}
+
+		var name string
+		if err := db.QueryRowContext(ctx,
+			`SELECT raw_app_meta_data->>'identity_source_name' FROM auth.users WHERE id = $1`, user.id).Scan(&name); err != nil || name != "org-ldap" {
+			t.Errorf("app_metadata.identity_source_name = %q (%v), want org-ldap", name, err)
+		}
+
+		labels := userProfileLabels(t, user.id)
+		if labels[identitySourceLabel] != "ldap" || labels[identitySourceNameLabel] != "org-ldap" {
+			t.Errorf("labels after backfill = %v, want %s=ldap and %s=org-ldap", labels, identitySourceLabel, identitySourceNameLabel)
+		}
+
+		if got := userProfileLabels(t, local.id)[identitySourceNameLabel]; got != "" {
+			t.Errorf("local user has label %s=%q after backfill", identitySourceNameLabel, got)
+		}
+	})
+}

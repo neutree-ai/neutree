@@ -20,6 +20,11 @@
 -- readable to user admins, auth.users is not. The label is recomputed from
 -- auth.users on every insert and update, so a write cannot add, change or
 -- drop it; local users never have it.
+--
+-- A second read-only label, neutree.ai/identity-source-name = <name>, names
+-- the identity source itself (app_metadata.identity_source_name), so a client
+-- can show which source of a type the user comes from. It is kept the same
+-- way, and only on users that also have the type label.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION api.apply_user_profile_identity_source()
@@ -27,14 +32,16 @@ RETURNS TRIGGER
 SECURITY DEFINER
 AS $$
 DECLARE
-  v_source TEXT;
-  v_email  TEXT;
+  v_source      TEXT;
+  v_source_name TEXT;
+  v_email       TEXT;
   v_meta   api.metadata := NEW.metadata;
   v_labels JSONB;
 BEGIN
   SELECT NULLIF(u.raw_app_meta_data->>'identity_source', ''),
+         NULLIF(u.raw_app_meta_data->>'identity_source_name', ''),
          public.user_profile_email(u.raw_app_meta_data, u.raw_user_meta_data, u.email)
-    INTO v_source, v_email
+    INTO v_source, v_source_name, v_email
     FROM auth.users u
    WHERE u.id = NEW.id;
 
@@ -47,9 +54,13 @@ BEGIN
       detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
   END IF;
 
-  v_labels := COALESCE(v_meta.labels::jsonb, '{}'::jsonb) - 'neutree.ai/identity-source';
+  v_labels := COALESCE(v_meta.labels::jsonb, '{}'::jsonb)
+              - 'neutree.ai/identity-source' - 'neutree.ai/identity-source-name';
   IF v_source IS NOT NULL THEN
     v_labels := v_labels || jsonb_build_object('neutree.ai/identity-source', v_source);
+    IF v_source_name IS NOT NULL THEN
+      v_labels := v_labels || jsonb_build_object('neutree.ai/identity-source-name', v_source_name);
+    END IF;
   END IF;
 
   IF v_labels IS DISTINCT FROM COALESCE(v_meta.labels::jsonb, '{}'::jsonb) THEN
@@ -65,6 +76,39 @@ CREATE TRIGGER user_profile_identity_source
   BEFORE INSERT OR UPDATE ON api.user_profiles
   FOR EACH ROW
   EXECUTE FUNCTION api.apply_user_profile_identity_source();
+
+-- The 103 trigger touches the profile only when identity_source is first set;
+-- a later change of the name must relabel it too.
+CREATE OR REPLACE FUNCTION api.handle_user_identity_source_name_set()
+RETURNS TRIGGER
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE api.user_profiles SET metadata = metadata WHERE id = NEW.id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_auth_user_identity_source_name_set
+  AFTER UPDATE OF raw_app_meta_data ON auth.users
+  FOR EACH ROW
+  WHEN (OLD.raw_app_meta_data->>'identity_source_name' IS DISTINCT FROM NEW.raw_app_meta_data->>'identity_source_name')
+  EXECUTE PROCEDURE api.handle_user_identity_source_name_set();
+
+-- Users created before identity_source_name was recorded: take the name from
+-- their link, external_identities.source = <type>:<name>.
+UPDATE auth.users u
+SET raw_app_meta_data = COALESCE(u.raw_app_meta_data, '{}'::jsonb)
+                        || jsonb_build_object('identity_source_name', l.name)
+FROM (
+  SELECT DISTINCT ON (user_id) user_id, substr(source, strpos(source, ':') + 1) AS name
+    FROM api.external_identities
+   WHERE strpos(source, ':') > 0
+   ORDER BY user_id, created_at
+) l
+WHERE u.id = l.user_id
+  AND NULLIF(u.raw_app_meta_data->>'identity_source', '') IS NOT NULL
+  AND NULLIF(u.raw_app_meta_data->>'identity_source_name', '') IS NULL;
 
 -- Label the profiles of existing external users; the trigger computes it.
 UPDATE api.user_profiles p
