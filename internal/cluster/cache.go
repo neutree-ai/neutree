@@ -77,7 +77,6 @@ func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext)
 		recordCacheError(cluster, err)
 		klog.Warningf("cache reconciliation failed for %s: %v", cluster.Key(), err)
 	}
-
 }
 
 func recordCacheError(cluster *v1.Cluster, err error) {
