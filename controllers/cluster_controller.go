@@ -34,7 +34,7 @@ type ClusterController struct {
 }
 
 type ClusterControllerOption struct {
-	CacheProvider         clustercache.Provider
+	CacheProviders        clustercache.Providers
 	Storage               storage.Storage
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string
@@ -55,7 +55,7 @@ func NewClusterController(opt *ClusterControllerOption) (*ClusterController, err
 		gw:                 opt.Gw,
 		acceleratorManager: opt.AcceleratorManager,
 		newClusterReconcile: func(c *v1.Cluster, a accelerator.Manager, s storage.Storage, url string) (cluster.ClusterReconcile, error) {
-			return cluster.NewReconcile(c, a, s, url, cluster.WithCacheProvider(opt.CacheProvider))
+			return cluster.NewReconcile(c, a, s, url, cluster.WithCacheProviders(opt.CacheProviders))
 		},
 	}
 
@@ -244,7 +244,7 @@ func (controller *ClusterController) updateStatus(obj *v1.Cluster, phase v1.Clus
 	}
 
 	if obj.Status != nil {
-		newStatus.ZCache = obj.Status.ZCache
+		newStatus.Cache = obj.Status.Cache
 		newStatus.Initialized = obj.Status.Initialized
 		newStatus.DashboardURL = obj.Status.DashboardURL
 		newStatus.NodeProvisionStatus = obj.Status.NodeProvisionStatus

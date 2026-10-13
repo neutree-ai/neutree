@@ -2,6 +2,7 @@ package system
 
 import (
 	"encoding/json"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
@@ -196,13 +197,17 @@ func TestValidateAndCleanURL(t *testing.T) {
 }
 
 func TestCacheCapabilityDefaultsOff(t *testing.T) {
-	for _, supported := range []bool{false, true} {
+	for _, names := range [][]string{{}, {"example"}} {
+		providers := clustercache.Providers{}
+		for _, name := range names {
+			providers[name] = nil
+		}
 		router := gin.New()
-		router.GET("/info", handleSystemInfo(&Dependencies{ClusterCacheSupported: supported}))
+		router.GET("/info", handleSystemInfo(&Dependencies{ClusterCacheProviders: providers}))
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/info", nil))
 		var info SystemInfo
 		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &info))
-		require.Equal(t, supported, info.Capabilities.ZCache)
+		require.Equal(t, names, info.Capabilities.ClusterCacheProviders)
 	}
 }

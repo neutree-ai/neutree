@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -11,14 +12,14 @@ import (
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
-func TestClusterStatusRetainsZCacheAfterUnrelatedComponentError(t *testing.T) {
+func TestClusterStatusRetainsCacheAfterUnrelatedComponentError(t *testing.T) {
 	s := &storagemocks.MockStorage{}
-	status := &v1.ZCacheStatus{Phase: "Reconciling", Nodes: []v1.ZCacheNode{{Name: "worker", Runtime: "Ready"}}, Change: &v1.ZCacheChange{OperationID: "op-1"}}
+	status := &v1.ClusterCacheStatus{Provider: "example", Details: json.RawMessage(`{"operation_id":"op-1"}`)}
 	s.On("UpdateCluster", "1", mock.MatchedBy(func(c *v1.Cluster) bool {
-		return c.Status.ZCache == status && c.Status.ErrorMessage == "router unavailable"
+		return c.Status.Cache == status && c.Status.ErrorMessage == "router unavailable"
 	})).Return(nil).Once()
 	controller := &ClusterController{storage: s}
-	c := &v1.Cluster{ID: 1, Status: &v1.ClusterStatus{ZCache: status}}
+	c := &v1.Cluster{ID: 1, Status: &v1.ClusterStatus{Cache: status}}
 	require.NoError(t, controller.updateStatus(c, v1.ClusterPhaseFailed, errors.New("router unavailable")))
 	s.AssertExpectations(t)
 }

@@ -3,6 +3,7 @@ package proxies
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -20,7 +21,7 @@ import (
 )
 
 type Dependencies struct {
-	ClusterCacheSupported bool
+	ClusterCacheProviders clustercache.Providers
 	Storage               storage.Storage
 	StorageAccessURL      string
 	AuthEndpoint          string

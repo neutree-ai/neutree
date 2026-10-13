@@ -2,6 +2,7 @@ package system
 
 import (
 	"fmt"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 // Dependencies defines the dependencies for system handlers
 type Dependencies struct {
-	ClusterCacheSupported bool
+	ClusterCacheProviders clustercache.Providers
 	// GrafanaURL is the URL to the Grafana instance for monitoring
 	GrafanaURL string
 	// Version is the application version
@@ -34,7 +35,7 @@ type SystemInfo struct {
 
 // Capabilities describes optional integrations present in this distribution.
 type Capabilities struct {
-	ZCache bool `json:"zcache"`
+	ClusterCacheProviders []string `json:"cluster_cache_providers"`
 }
 
 func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -47,7 +48,7 @@ func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 // handleSystemInfo returns system information including URLs to monitoring services
 func handleSystemInfo(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		info := &SystemInfo{Capabilities: Capabilities{ZCache: deps.ClusterCacheSupported}}
+		info := &SystemInfo{Capabilities: Capabilities{ClusterCacheProviders: deps.ClusterCacheProviders.Names()}}
 
 		// Add version if configured
 		if deps.Version != "" {

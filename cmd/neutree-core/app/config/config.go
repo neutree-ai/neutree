@@ -36,7 +36,7 @@ type ServerConfig struct {
 }
 
 type CoreConfig struct {
-	ClusterCacheProvider    clustercache.Provider
+	ClusterCacheProviders   clustercache.Providers
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage
 	ImageService            registry.ImageService

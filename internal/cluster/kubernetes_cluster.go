@@ -26,7 +26,7 @@ import (
 var _ ClusterReconcile = &NativeKubernetesClusterReconciler{}
 
 type NativeKubernetesClusterReconciler struct {
-	cacheProvider         clustercache.Provider
+	cacheProviders        clustercache.Providers
 	storage               storage.Storage
 	acceleratorMgr        accelerator.Manager
 	metricsRemoteWriteURL string

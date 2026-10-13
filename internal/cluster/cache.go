@@ -37,53 +37,57 @@ func (c *NativeKubernetesClusterReconciler) cacheContext(rc *ReconcileContext) (
 }
 
 func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext) {
-	if c.cacheProvider == nil {
-		if rc.Cluster.Spec != nil && rc.Cluster.Spec.ZCache != nil && rc.Cluster.Spec.ZCache.Enabled {
-			recordCacheError(rc.Cluster, fmt.Errorf("ZCache is not supported by this control plane"))
+	cluster := rc.Cluster
+	if cluster.Spec == nil || cluster.Spec.Cache == nil {
+		if err := c.deleteCache(rc); err != nil {
+			recordCacheError(cluster, err)
 		}
-
 		return
 	}
-
-	cacheCtx, err := c.cacheContext(rc)
-	if err != nil {
-		recordCacheError(rc.Cluster, err)
-	} else {
-		err = c.cacheProvider.Reconcile(rc.Ctx, cacheCtx)
+	if cluster.Status == nil {
+		cluster.Status = &v1.ClusterStatus{}
 	}
-
+	if cluster.Status.Cache == nil {
+		cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: cluster.Spec.Cache.Provider}
+	}
+	if cluster.Status.Cache.Provider != cluster.Spec.Cache.Provider {
+		recordCacheError(cluster, fmt.Errorf("waiting for previous cache provider cleanup"))
+		return
+	}
+	provider, err := c.cacheProviders.Get(cluster.Spec.Cache.Provider)
+	if err == nil {
+		var cacheCtx *clustercache.Context
+		cacheCtx, err = c.cacheContext(rc)
+		if err == nil {
+			err = provider.Reconcile(rc.Ctx, cacheCtx)
+		}
+	}
+	cluster.Status.Cache.Error = ""
 	if err != nil {
-		klog.Warningf("cache reconciliation failed for %s: %v", rc.Cluster.Key(), err)
+		recordCacheError(cluster, err)
+		klog.Warningf("cache reconciliation failed for %s: %v", cluster.Key(), err)
 	}
 }
 
 func recordCacheError(cluster *v1.Cluster, err error) {
-	if cluster.Status == nil {
-		cluster.Status = &v1.ClusterStatus{}
-	}
-
-	if cluster.Status.ZCache == nil {
-		cluster.Status.ZCache = &v1.ZCacheStatus{}
-	}
-
-	cluster.Status.ZCache.Phase = "Failed"
-	cluster.Status.ZCache.ObservationError = err.Error()
-	cluster.Status.ZCache.Message = err.Error()
+	cluster.Status.Cache.Error = err.Error()
 }
 
 func (c *NativeKubernetesClusterReconciler) deleteCache(rc *ReconcileContext) error {
-	if rc.Cluster.Status == nil || rc.Cluster.Status.ZCache == nil {
+	if rc.Cluster.Status == nil || rc.Cluster.Status.Cache == nil {
 		return nil
 	}
-
-	if c.cacheProvider == nil {
-		return fmt.Errorf("cache cleanup requires a control plane with a cache provider")
+	provider, err := c.cacheProviders.Get(rc.Cluster.Status.Cache.Provider)
+	if err != nil {
+		return err
 	}
-
 	cacheCtx, err := c.cacheContext(rc)
 	if err != nil {
 		return err
 	}
-
-	return c.cacheProvider.Delete(rc.Ctx, cacheCtx)
+	if err = provider.Delete(rc.Ctx, cacheCtx); err != nil {
+		return err
+	}
+	rc.Cluster.Status.Cache = nil
+	return nil
 }

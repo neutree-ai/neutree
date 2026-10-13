@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"io"
 	"net/http"
 	"net/url"
@@ -63,7 +64,7 @@ type ValidationInput[T any] struct {
 	Operation   clusterValidationOperation
 }
 
-func validateClusterRequest(s storage.Storage, cacheSupported bool) gin.HandlerFunc {
+func validateClusterRequest(s storage.Storage, cacheProviders clustercache.Providers) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -98,13 +99,8 @@ func validateClusterRequest(s storage.Storage, cacheSupported bool) gin.HandlerF
 			return
 		}
 
-		if input.New != nil && input.New.Spec != nil && input.New.Spec.ZCache != nil && input.New.Spec.ZCache.Enabled && !cacheSupported {
-			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{
-				Code:    "10208",
-				Message: "ZCache is not supported by this control plane",
-				Hint:    "Use a distribution with a cluster cache provider to enable ZCache",
-			})
-
+		if err := cacheProviders.Validate(input.Current, input.New); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{Code: "10208", Message: err.Error()})
 			return
 		}
 
@@ -1058,7 +1054,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheSupported)
+	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheProviders)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validation, handler)
