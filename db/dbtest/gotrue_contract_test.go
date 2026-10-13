@@ -368,9 +368,7 @@ func createExternalGoTrueUser(t *testing.T, name string) gotrueUser {
 	code, body := gotrueRequest(t, http.MethodPost, "/admin/users", gotrueServiceToken(t), map[string]any{
 		"email":         email,
 		"email_confirm": true,
-		// username feeds neutree's profile trigger (api.handle_new_user); the
-		// rest is the profile an external login stores.
-		"user_metadata": map[string]any{"username": name, "preferred_username": name, "name": "Test " + name, "email": email},
+		"user_metadata": map[string]any{"preferred_username": name, "name": "Test " + name, "email": email},
 		"app_metadata":  map[string]any{"identity_source": "contract-test"},
 	})
 	if code != http.StatusOK {
@@ -588,19 +586,6 @@ func TestGoTrue_GenerateLinkSignsUpUnknownEmail(t *testing.T) {
 	db := GetTestDB(t)
 	email := gotrueTestEmail("gotrue-unknown")
 
-	// GoTrue signs the user up with no user_metadata, which neutree's profile
-	// trigger rejects (it needs a username). Turn the trigger off so the test
-	// sees GoTrue's own behaviour. dbtest runs its tests one at a time.
-	if _, err := db.Exec(`ALTER TABLE auth.users DISABLE TRIGGER on_auth_user_created`); err != nil {
-		t.Fatalf("failed to disable the profile trigger: %v", err)
-	}
-
-	t.Cleanup(func() {
-		if _, err := db.Exec(`ALTER TABLE auth.users ENABLE TRIGGER on_auth_user_created`); err != nil {
-			t.Errorf("failed to re-enable the profile trigger: %v", err)
-		}
-	})
-
 	code, link, body := generateMagicLink(t, email)
 	if code != http.StatusOK {
 		t.Fatalf("generate_link for an unknown email = HTTP %d, want 200: %s", code, body)
@@ -619,6 +604,11 @@ func TestGoTrue_GenerateLinkSignsUpUnknownEmail(t *testing.T) {
 
 	if gotEmail != email {
 		t.Errorf("created user email = %q, want %q", gotEmail, email)
+	}
+
+	var name string
+	if err := db.QueryRow(`SELECT (metadata).name FROM api.user_profiles WHERE id = $1`, link.ID).Scan(&name); err != nil {
+		t.Errorf("no profile for the signed-up user %s: %v", link.ID, err)
 	}
 }
 
