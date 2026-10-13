@@ -143,7 +143,10 @@ scrape_configs:
       names:
       - {{ .Namespace }}
   relabel_configs:
-  - source_labels: [__meta_kubernetes_service_label_zcache_smartx_com_scrape, __meta_kubernetes_service_label_app_kubernetes_io_component, __meta_kubernetes_endpoint_port_name]
+  - source_labels:
+    - __meta_kubernetes_service_label_zcache_smartx_com_scrape
+    - __meta_kubernetes_service_label_app_kubernetes_io_component
+    - __meta_kubernetes_endpoint_port_name
     action: keep
     regex: 'true;lmcache;metrics'
   - source_labels: [__meta_kubernetes_namespace]
