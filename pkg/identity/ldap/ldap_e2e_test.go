@@ -1,6 +1,8 @@
 //go:build e2e
 
-// E2E against a real OpenLDAP seeded with the neutree SSO fixture. Run with:
+// E2E against a real OpenLDAP that the LDAP_E2E_* variables point to. The base DN must hold
+// inetOrgPerson users alice, bob, carol, zhang.san and two entries with uid=dup, all with
+// LDAP_E2E_USER_PASSWORD; alice is in ou=groups cn=admins and cn=ai-taskforce. Run with:
 // LDAP_E2E_URL=ldap://host:389 LDAP_E2E_LDAPS_URL=ldaps://host:636 LDAP_E2E_CA_FILE=ca.crt LDAP_E2E_BIND_DN=... LDAP_E2E_BIND_PASSWORD=... LDAP_E2E_BASE_DN=ou=people,dc=... LDAP_E2E_USER_PASSWORD=... [LDAP_E2E_UNREACHABLE_URL=ldap://host:1] go test -tags e2e -count=1 -v ./pkg/identity/ldap/ -run E2E
 
 package ldap
