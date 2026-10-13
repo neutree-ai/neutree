@@ -260,7 +260,7 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
-	if !reflect.DeepEqual(obj.Status.ZCache, normalizedStatus.ZCache) {
+	if !reflect.DeepEqual(obj.Status.KVCache, normalizedStatus.KVCache) {
 		return true
 	}
 

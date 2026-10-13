@@ -1,18 +1,11 @@
 package orchestrator
 
 import (
-	"context"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/kvcache"
 )
 
 func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext, objects *unstructured.UnstructuredList) error {
@@ -55,35 +48,4 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 	}
 
 	return nil
-}
-
-// Inspect terminating Pods too. A disabled spec or a ready replacement does not
-// prove that the old process has stopped using the node-local cache.
-func observeEndpointCache(c client.Client, namespace string, endpoint *v1.Endpoint) (*v1.EndpointZCacheStatus, error) {
-	status := &v1.EndpointZCacheStatus{Generation: endpoint.Status.ZCache.Generation}
-	dep := &appsv1.Deployment{}
-
-	err := c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: endpoint.Metadata.Name}, dep)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return nil, err
-	}
-
-	if err == nil && (dep.Spec.Replicas == nil || *dep.Spec.Replicas > 0) &&
-		dep.Spec.Template.Labels[kvcache.ZCacheDependencyLabel] == kvcache.ZCacheDependencyLabelValue {
-		status.InUse = true
-	}
-
-	var pods corev1.PodList
-	if err := c.List(context.Background(), &pods, client.InNamespace(namespace),
-		client.MatchingLabels{"app": "inference", "endpoint": endpoint.Metadata.Name}); err != nil {
-		return nil, err
-	}
-
-	for _, pod := range pods.Items {
-		if pod.Labels[kvcache.ZCacheDependencyLabel] == kvcache.ZCacheDependencyLabelValue {
-			status.InUse = true
-		}
-	}
-
-	return status, nil
 }

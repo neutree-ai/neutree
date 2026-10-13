@@ -537,8 +537,8 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 		return nil, err
 	}
 
-	if endpoint.Status != nil && endpoint.Status.ZCache != nil {
-		status.ZCache, err = observeEndpointCache(ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
+	if endpoint.Status != nil && endpoint.Status.KVCache != nil {
+		status.KVCache, err = k.kvCacheProviders.ObserveDependencies(context.Background(), ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
 		if err != nil {
 			return nil, err
 		}
