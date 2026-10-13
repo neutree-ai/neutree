@@ -64,11 +64,13 @@ func (c *NativeKubernetesClusterReconciler) reconcileCache(rc *ReconcileContext)
 		recordCacheError(cluster, err)
 		return
 	}
+
 	cacheCtx, err := c.cacheContext(rc)
 	if err != nil {
 		recordCacheError(cluster, err)
 		return
 	}
+
 	if err := provider.Reconcile(rc.Ctx, cacheCtx); err != nil {
 		klog.Warningf("cache reconciliation failed for %s: %v", cluster.Key(), err)
 	}
