@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/staticcomponent"
+	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -16,6 +17,8 @@ const (
 	rayRuntimeWarmImageName = "ray-runtime"
 	rayDockerConfigHostDir  = "/etc/neutree/docker"
 	rayDockerConfigMountDir = "/root/.docker"
+	// Versions at or below this gate keep the legacy Ray startup arguments.
+	rayNodeIPAddressVersionGate = "v1.2.0"
 )
 
 func buildNodeComponents(
@@ -155,7 +158,8 @@ func rayStartCommand(
 
 	// Ray otherwise auto-detects the node IP from the default route, which on a
 	// multi-homed node can differ from the spec IP that cluster verification expects.
-	if node != nil && node.Spec != nil && node.Spec.IP != "" {
+	// Older runtimes must keep their existing command during a control-plane upgrade.
+	if supportsRayNodeIPAddress(cluster) && node != nil && node.Spec != nil && node.Spec.IP != "" {
 		commonArgs += " --node-ip-address=" + node.Spec.IP
 	}
 
@@ -178,6 +182,16 @@ func rayStartCommand(
 	}
 
 	return strings.Join(parts, " && ")
+}
+
+func supportsRayNodeIPAddress(cluster *v1.StaticNodeCluster) bool {
+	if cluster == nil || cluster.Spec == nil {
+		return false
+	}
+
+	supported, err := semver.LessThan(rayNodeIPAddressVersionGate, cluster.Spec.Version)
+
+	return err == nil && supported
 }
 
 func rayNodeLabelArg(cluster *v1.StaticNodeCluster, role v1.StaticNodeRole) string {
