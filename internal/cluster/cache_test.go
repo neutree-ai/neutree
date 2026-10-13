@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"testing"
+
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
@@ -25,7 +26,10 @@ func TestCommunityCacheIsAbsentByDefault(t *testing.T) {
 	require.ErrorContains(t, r.deleteCache(&ReconcileContext{Cluster: cluster}), "not supported")
 }
 
-type failingCacheProvider struct{ calls int }
+type failingCacheProvider struct {
+	calls        int
+	cleanupReady bool
+}
 
 func (p *failingCacheProvider) Reconcile(_ context.Context, rc *clustercache.Context) error {
 	rc.Cluster.Status.Cache = &v1.ClusterCacheStatus{Provider: "example", Error: "cache unavailable"}
@@ -34,6 +38,9 @@ func (p *failingCacheProvider) Reconcile(_ context.Context, rc *clustercache.Con
 }
 func (p *failingCacheProvider) Delete(context.Context, *clustercache.Context) error {
 	p.calls++
+	if p.cleanupReady {
+		return nil
+	}
 	return errors.New("cleanup pending")
 }
 
@@ -49,6 +56,18 @@ func TestProviderFailurePreservesClusterHealthAndBlocksCleanup(t *testing.T) {
 	require.Equal(t, "cache unavailable", cl.Status.Cache.Error)
 	require.ErrorContains(t, r.deleteCache(rc), "cleanup pending")
 	require.Equal(t, 2, provider.calls)
+	// Removing desired configuration still dispatches cleanup to its saved owner.
+	cl.Spec.Cache = nil
+	r.reconcileCache(rc)
+	require.Equal(t, 3, provider.calls)
+	require.Equal(t, "example", cl.Status.Cache.Provider)
+	require.Equal(t, "cleanup pending", cl.Status.Cache.Error)
+	provider.cleanupReady = true
+	r.reconcileCache(rc)
+	require.Equal(t, 4, provider.calls)
+	require.Nil(t, cl.Status.Cache)
+	r.reconcileCache(rc)
+	require.Equal(t, 4, provider.calls)
 }
 
 func (p *failingCacheProvider) Validate(old, next *v1.Cluster) error { return nil }
