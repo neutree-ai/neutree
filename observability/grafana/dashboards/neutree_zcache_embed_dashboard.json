@@ -597,7 +597,7 @@
         "x": 0,
         "y": 21,
         "w": 24,
-        "h": 9
+        "h": 6
       },
       "targets": [
         {
@@ -863,6 +863,10 @@
             },
             "properties": [
               {
+                "id": "custom.width",
+                "value": 340
+              },
+              {
                 "id": "links",
                 "value": [
                   {
@@ -996,7 +1000,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 27,
         "w": 24,
         "h": 1
       },
@@ -1008,7 +1012,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 0,
-            "y": 31,
+            "y": 28,
             "w": 12,
             "h": 7
           },
@@ -1061,7 +1065,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 12,
-            "y": 31,
+            "y": 28,
             "w": 12,
             "h": 7
           },
@@ -1114,7 +1118,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 0,
-            "y": 38,
+            "y": 35,
             "w": 8,
             "h": 7
           },
@@ -1167,7 +1171,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 8,
-            "y": 38,
+            "y": 35,
             "w": 8,
             "h": 7
           },
@@ -1220,7 +1224,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 16,
-            "y": 38,
+            "y": 35,
             "w": 8,
             "h": 7
           },
