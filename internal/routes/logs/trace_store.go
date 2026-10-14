@@ -453,6 +453,110 @@ func (s *traceStore) KeyStats(scope string, since time.Time) ([]AITraceKeyStat, 
 	return s.queryKeyStats(query, params)
 }
 
+// FilterOptions returns the distinct endpoints and models of the traces in
+// scope, each list sorted and capped at limit. Models are the union of
+// request_model and response_model, the two fields the list's model filter
+// matches.
+func (s *traceStore) FilterOptions(scope string, f traceFilters, w timeWindow, limit int) (*AITraceFilterOptions, error) {
+	base := strings.Join(append([]string{s.baseQuery(scope)}, f.clauses()...), " ")
+	// One row over the limit tells a list that was cut from one that fits.
+	uniq := func(field, by string) string {
+		return fmt.Sprintf("%s %s:* | uniq by (%s) limit %d", base, field, by, limit+1)
+	}
+
+	endpointRows, err := s.queryRows(uniq("endpoint_name", "endpoint_type, endpoint_name"), w.params())
+	if err != nil {
+		return nil, err
+	}
+
+	opts := &AITraceFilterOptions{
+		Endpoints: make([]AITraceEndpointOption, 0, len(endpointRows)),
+		Models:    []string{},
+	}
+
+	for _, r := range endpointRows {
+		opts.Endpoints = append(opts.Endpoints, AITraceEndpointOption{Name: r["endpoint_name"], Type: r["endpoint_type"]})
+	}
+
+	sort.Slice(opts.Endpoints, func(i, j int) bool {
+		a, b := opts.Endpoints[i], opts.Endpoints[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+
+		return a.Type < b.Type
+	})
+
+	if len(opts.Endpoints) > limit {
+		opts.Endpoints = opts.Endpoints[:limit]
+		opts.EndpointsTruncated = true
+	}
+
+	models := map[string]struct{}{}
+
+	for _, field := range []string{"request_model", "response_model"} {
+		rows, err := s.queryRows(uniq(field, field), w.params())
+		if err != nil {
+			return nil, err
+		}
+
+		if len(rows) > limit {
+			opts.ModelsTruncated = true
+		}
+
+		for _, r := range rows {
+			models[r[field]] = struct{}{}
+		}
+	}
+
+	for m := range models {
+		opts.Models = append(opts.Models, m)
+	}
+
+	sort.Strings(opts.Models)
+
+	if len(opts.Models) > limit {
+		opts.Models = opts.Models[:limit]
+		opts.ModelsTruncated = true
+	}
+
+	return opts, nil
+}
+
+// queryRows runs a LogsQL query and decodes each NDJSON row into its string
+// fields.
+func (s *traceStore) queryRows(query string, params url.Values) ([]map[string]string, error) {
+	resp, err := s.selectQuery(query, params)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var rows []map[string]string
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var row map[string]string
+		if err := json.Unmarshal(line, &row); err != nil {
+			continue
+		}
+
+		rows = append(rows, row)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan victorialogs response: %w", err)
+	}
+
+	return rows, nil
+}
+
 // select runs a LogsQL query against VictoriaLogs and returns the raw NDJSON
 // response body; the caller must Close it.
 func (s *traceStore) selectQuery(query string, params url.Values) (*http.Response, error) {

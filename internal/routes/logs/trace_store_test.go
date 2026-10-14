@@ -61,7 +61,7 @@ func chunkLine(requestID, kind string, seq int, rawData string) string {
 func TestBaseQuery_ExcludesChunkRecords(t *testing.T) {
 	// Every query the store issues must filter out chunk records; forgetting
 	// this on any path would leak storage internals into lists and stats.
-	fake := &fakeVL{responses: []string{"", "", "", ""}}
+	fake := &fakeVL{responses: []string{"", "", "", "", "", "", ""}}
 	server := fake.server(t)
 
 	defer server.Close()
@@ -80,10 +80,111 @@ func TestBaseQuery_ExcludesChunkRecords(t *testing.T) {
 	_, err = store.KeyStats(`workspace:="ws1"`, timeMustParse(t, "2026-07-01T00:00:00Z"))
 	require.NoError(t, err)
 
-	require.Len(t, fake.queries, 4)
+	_, err = store.FilterOptions(`workspace:="ws1"`, traceFilters{}, timeWindow{}, 10)
+	require.NoError(t, err)
+
+	require.Len(t, fake.queries, 7)
 
 	for i, q := range fake.queries {
 		assert.Containsf(t, q, `NOT record_type:="chunk"`, "query %d: %s", i, q)
+	}
+}
+
+func TestFilterOptions_MergesAndSorts(t *testing.T) {
+	// Endpoints keep their type (names can collide across types); models are the
+	// union of request_model and response_model, deduplicated and sorted.
+	fake := &fakeVL{responses: []string{
+		`{"endpoint_type":"external-endpoint","endpoint_name":"chat"}` + "\n" +
+			`{"endpoint_type":"endpoint","endpoint_name":"chat"}` + "\n" +
+			`{"endpoint_type":"endpoint","endpoint_name":"alpha"}` + "\n",
+		`{"request_model":"qwen"}` + "\n" + `{"request_model":"gpt-x"}` + "\n",
+		`{"response_model":"qwen"}` + "\n" + `{"response_model":"qwen-2"}` + "\n",
+	}}
+	server := fake.server(t)
+
+	defer server.Close()
+
+	store := newTestStore(server.URL)
+
+	opts, err := store.FilterOptions(`workspace:="ws1"`, traceFilters{EndpointType: "endpoint"}, timeWindow{}, 10)
+	require.NoError(t, err)
+
+	assert.Equal(t, []AITraceEndpointOption{
+		{Name: "alpha", Type: "endpoint"},
+		{Name: "chat", Type: "endpoint"},
+		{Name: "chat", Type: "external-endpoint"},
+	}, opts.Endpoints)
+	assert.Equal(t, []string{"gpt-x", "qwen", "qwen-2"}, opts.Models)
+	assert.False(t, opts.EndpointsTruncated)
+	assert.False(t, opts.ModelsTruncated)
+
+	require.Len(t, fake.queries, 3)
+
+	for _, q := range fake.queries {
+		assert.Contains(t, q, `endpoint_type:="endpoint"`)
+	}
+
+	assert.Contains(t, fake.queries[0], `endpoint_name:* | uniq by (endpoint_type, endpoint_name) limit 11`)
+	assert.Contains(t, fake.queries[1], `request_model:* | uniq by (request_model) limit 11`)
+	assert.Contains(t, fake.queries[2], `response_model:* | uniq by (response_model) limit 11`)
+}
+
+func TestFilterOptions_Truncates(t *testing.T) {
+	rows := func(field string, values ...string) string {
+		var b strings.Builder
+		for _, v := range values {
+			line, _ := json.Marshal(map[string]string{field: v})
+			b.Write(line)
+			b.WriteString("\n")
+		}
+
+		return b.String()
+	}
+
+	cases := []struct {
+		name           string
+		requestModels  []string
+		responseModels []string
+		wantModels     []string
+		wantTruncated  bool
+	}{
+		{
+			name:          "union within limit",
+			requestModels: []string{"a"}, responseModels: []string{"b"},
+			wantModels: []string{"a", "b"},
+		},
+		{
+			name:          "one field over limit",
+			requestModels: []string{"c", "a", "b"},
+			wantModels:    []string{"a", "b"}, wantTruncated: true,
+		},
+		{
+			name:          "union over limit",
+			requestModels: []string{"a", "b"}, responseModels: []string{"c", "d"},
+			wantModels: []string{"a", "b"}, wantTruncated: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeVL{responses: []string{
+				rows("endpoint_name", "e3", "e1", "e2"),
+				rows("request_model", tc.requestModels...),
+				rows("response_model", tc.responseModels...),
+			}}
+			server := fake.server(t)
+
+			defer server.Close()
+
+			opts, err := newTestStore(server.URL).FilterOptions(`workspace:="ws1"`, traceFilters{}, timeWindow{}, 2)
+			require.NoError(t, err)
+
+			require.Len(t, opts.Endpoints, 2)
+			assert.Equal(t, "e1", opts.Endpoints[0].Name)
+			assert.True(t, opts.EndpointsTruncated)
+			assert.Equal(t, tc.wantModels, opts.Models)
+			assert.Equal(t, tc.wantTruncated, opts.ModelsTruncated)
+		})
 	}
 }
 
