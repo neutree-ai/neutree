@@ -600,55 +600,7 @@
       "gridPos": {
         "x": 0,
         "y": 15,
-        "w": 8,
-        "h": 9
-      },
-      "id": 4,
-      "targets": [
-        {
-          "expr": "vllm:kv_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"} or vllm:gpu_cache_usage_perc{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"} or sglang:token_usage{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"}",
-          "refId": "A",
-          "legendFormat": "{{replica}} usage"
-        }
-      ],
-      "title": "Replica L0 KV usage",
-      "type": "timeseries",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "noValue": "No samples",
-          "min": 0,
-          "max": 1,
-          "decimals": 1,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "datasource": "${datasource}",
-      "gridPos": {
-        "x": 8,
-        "y": 15,
-        "w": 8,
+        "w": 12,
         "h": 9
       },
       "id": 36,
@@ -726,9 +678,9 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 15,
-        "w": 8,
+        "w": 12,
         "h": 9
       },
       "id": 37,
