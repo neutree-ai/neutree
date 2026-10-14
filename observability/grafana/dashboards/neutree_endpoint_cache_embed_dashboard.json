@@ -367,8 +367,8 @@
       "gridPos": {
         "x": 0,
         "y": 6,
-        "w": 5,
-        "h": 10
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
@@ -482,10 +482,10 @@
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 5,
+        "x": 12,
         "y": 6,
-        "w": 5,
-        "h": 10
+        "w": 12,
+        "h": 9
       },
       "targets": [
         {
@@ -598,10 +598,10 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 10,
-        "y": 6,
-        "w": 4,
-        "h": 10
+        "x": 0,
+        "y": 15,
+        "w": 8,
+        "h": 9
       },
       "id": 4,
       "targets": [
@@ -646,10 +646,10 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 14,
-        "y": 6,
-        "w": 5,
-        "h": 10
+        "x": 8,
+        "y": 15,
+        "w": 8,
+        "h": 9
       },
       "id": 36,
       "targets": [
@@ -726,10 +726,10 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 19,
-        "y": 6,
-        "w": 5,
-        "h": 10
+        "x": 16,
+        "y": 15,
+        "w": 8,
+        "h": 9
       },
       "id": 37,
       "targets": [
