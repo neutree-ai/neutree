@@ -755,7 +755,7 @@
           "unit": "suffix:chunks/s",
           "noValue": "No samples",
           "min": 0,
-          "decimals": 1,
+          "decimals": 3,
           "color": {
             "mode": "palette-classic"
           },
