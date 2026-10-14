@@ -549,6 +549,10 @@ func (f *FakeK8sClient) WithWaitingInitContainer(containerName, reason string) *
 }
 
 func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
+	return f.WithUnschedulablePodSince(message, time.Now().Add(-2*podUnschedulableGracePeriod))
+}
+
+func (f *FakeK8sClient) WithUnschedulablePodSince(message string, since time.Time) *FakeK8sClient {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pod-unschedulable",
@@ -562,10 +566,11 @@ func (f *FakeK8sClient) WithUnschedulablePod(message string) *FakeK8sClient {
 			Phase: corev1.PodPending,
 			Conditions: []corev1.PodCondition{
 				{
-					Type:    corev1.PodScheduled,
-					Status:  corev1.ConditionFalse,
-					Reason:  "Unschedulable",
-					Message: message,
+					Type:               corev1.PodScheduled,
+					Status:             corev1.ConditionFalse,
+					Reason:             "Unschedulable",
+					Message:            message,
+					LastTransitionTime: metav1.NewTime(since),
 				},
 			},
 		},
@@ -1746,6 +1751,68 @@ func Test_checkPodFailures(t *testing.T) {
 			if tt.wantFailed && tt.wantMsgPart != "" {
 				assert.Contains(t, msg, tt.wantMsgPart)
 			}
+		})
+	}
+}
+
+func Test_checkPodFailures_unschedulableGracePeriod(t *testing.T) {
+	unschedulablePod := func(transition, created time.Time, terminating bool) corev1.Pod {
+		p := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-pending", CreationTimestamp: metav1.NewTime(created)},
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{
+						Type:               corev1.PodScheduled,
+						Status:             corev1.ConditionFalse,
+						Reason:             corev1.PodReasonUnschedulable,
+						Message:            "0/3 nodes are available",
+						LastTransitionTime: metav1.NewTime(transition),
+					},
+				},
+			},
+		}
+		if terminating {
+			p.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		}
+		return p
+	}
+
+	now := time.Now()
+	within := now.Add(-podUnschedulableGracePeriod / 2)
+	past := now.Add(-podUnschedulableGracePeriod - time.Minute)
+
+	tests := []struct {
+		name        string
+		pod         corev1.Pod
+		wantFailed  bool
+		wantPending bool
+	}{
+		{name: "within grace period -> pending", pod: unschedulablePod(within, within, false), wantPending: true},
+		{name: "past grace period -> failed", pod: unschedulablePod(past, past, false), wantFailed: true},
+		{
+			name:        "old pod that turned unschedulable recently -> pending",
+			pod:         unschedulablePod(within, past, false),
+			wantPending: true,
+		},
+		{
+			name:       "no transition time falls back to creation time",
+			pod:        unschedulablePod(time.Time{}, past, false),
+			wantFailed: true,
+		},
+		{name: "terminating pod -> ignored", pod: unschedulablePod(past, past, true)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := &kubernetesOrchestrator{}
+			hasFailed, msg := k.checkPodFailures([]corev1.Pod{tt.pod})
+			assert.Equal(t, tt.wantFailed, hasFailed)
+			if tt.wantFailed {
+				assert.Contains(t, msg, "Pod 'pod-pending' is unschedulable: 0/3 nodes are available")
+			}
+
+			pending := pendingUnschedulableMessages([]corev1.Pod{tt.pod})
+			assert.Equal(t, tt.wantPending, len(pending) > 0)
 		})
 	}
 }
@@ -3666,7 +3733,21 @@ func TestKubernetesOrchestrator_getEndpointStats(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "return Failed for unschedulable pod",
+			name: "return Deploying for pod unschedulable within grace period",
+			inputEndpoint: func() *v1.Endpoint {
+				return newEndpoint()
+			},
+			setupMock: func(t *testing.T) *FakeK8sClient {
+				return NewFakeK8sClient(t).
+					WithDeployment(newEndpoint().Metadata.Name, 1, 0, 0).
+					WithUnschedulablePodSince("pod has unbound immediate PersistentVolumeClaims", time.Now())
+			},
+			expectedPhase:  v1.EndpointPhaseDEPLOYING,
+			expectErrorMsg: "waiting for pod scheduling: Pod 'pod-unschedulable' is unschedulable: pod has unbound immediate PersistentVolumeClaims",
+			expectError:    false,
+		},
+		{
+			name: "return Failed for pod unschedulable past grace period",
 			inputEndpoint: func() *v1.Endpoint {
 				return newEndpoint()
 			},
