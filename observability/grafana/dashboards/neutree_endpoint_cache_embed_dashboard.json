@@ -185,7 +185,7 @@
     },
     {
       "id": 32,
-      "title": "External cache hit tokens",
+      "title": "Cache hit tokens",
       "type": "stat",
       "datasource": "${datasource}",
       "gridPos": {
@@ -196,9 +196,16 @@
       },
       "targets": [
         {
-          "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
           "refId": "A",
-          "legendFormat": "",
+          "legendFormat": "L0 local cache",
+          "instant": true,
+          "range": false
+        },
+        {
+          "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "B",
+          "legendFormat": "L1 external cache",
           "instant": true,
           "range": false
         }
@@ -213,7 +220,38 @@
           },
           "decimals": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "reduceOptions": {
@@ -225,8 +263,9 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "value",
-        "justifyMode": "center"
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "horizontal"
       }
     },
     {
@@ -322,14 +361,14 @@
     },
     {
       "id": 33,
-      "title": "Input token throughput",
+      "title": "Cache hit and miss throughput",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
         "y": 6,
-        "w": 12,
-        "h": 9
+        "w": 6,
+        "h": 10
       },
       "targets": [
         {
@@ -443,10 +482,10 @@
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 12,
+        "x": 6,
         "y": 6,
-        "w": 12,
-        "h": 9
+        "w": 6,
+        "h": 10
       },
       "targets": [
         {
@@ -559,10 +598,10 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 0,
-        "y": 15,
-        "w": 24,
-        "h": 8
+        "x": 12,
+        "y": 6,
+        "w": 6,
+        "h": 10
       },
       "id": 4,
       "targets": [
@@ -590,6 +629,56 @@
             "lineWidth": 1,
             "showPoints": "never",
             "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 18,
+        "y": 6,
+        "w": 6,
+        "h": 10
+      },
+      "id": 36,
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
+          "refId": "A",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node shared L1 usage",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "Bytes"
           }
         },
         "overrides": []
