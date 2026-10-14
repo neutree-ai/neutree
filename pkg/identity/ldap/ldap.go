@@ -1,5 +1,5 @@
 // Package ldap authenticates users against an LDAP directory (OpenLDAP, Active Directory)
-// with the search-then-bind flow. Returned errors never contain the password.
+// with the search-then-bind flow.
 package ldap
 
 import (
