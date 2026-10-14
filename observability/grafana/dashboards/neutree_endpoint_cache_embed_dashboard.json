@@ -656,12 +656,19 @@
         {
           "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
           "refId": "A",
-          "legendFormat": "{{node}}",
+          "legendFormat": "{{node}} utilization",
+          "range": true,
+          "instant": false
+        },
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
+          "refId": "B",
+          "legendFormat": "{{node}} used",
           "range": true,
           "instant": false
         }
       ],
-      "title": "Hosting-node shared L1 usage rate",
+      "title": "Hosting-node shared L1 usage and utilization",
       "type": "timeseries",
       "fieldConfig": {
         "defaults": {
@@ -678,11 +685,33 @@
             "lineWidth": 1,
             "showPoints": "never",
             "spanNulls": false,
-            "axisLabel": ""
+            "axisLabel": "",
+            "axisPlacement": "left"
           },
           "max": 1
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "max",
+                "value": null
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
