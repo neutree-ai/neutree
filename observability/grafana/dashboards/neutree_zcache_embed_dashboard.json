@@ -223,7 +223,7 @@
       },
       "targets": [
         {
-          "expr": "(sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) / sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))) and (sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) > 0)",
+          "expr": "(sum(increase(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))/sum(increase(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))) and (sum(increase(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))>0)",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -641,7 +641,7 @@
           "format": "table"
         },
         {
-          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * (0/0))",
+          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
           "refId": "F",
           "legendFormat": "Read",
           "instant": true,
@@ -649,7 +649,7 @@
           "format": "table"
         },
         {
-          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * (0/0))",
+          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
           "refId": "G",
           "legendFormat": "Write",
           "instant": true,
@@ -909,6 +909,50 @@
                     "title": "View node",
                     "url": "/d/neutree-zcache-embed?${__url_time_range}&var-datasource=${datasource:percentencode}&var-Workspace=${Workspace:percentencode}&var-Cluster=${Cluster:percentencode}&var-Node=${__value.raw}&var-CacheCapacity=${CacheCapacity:percentencode}&var-CacheReady=${CacheReady:percentencode}&theme=light&kiosk",
                     "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Read"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Write"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
                   }
                 ]
               }
