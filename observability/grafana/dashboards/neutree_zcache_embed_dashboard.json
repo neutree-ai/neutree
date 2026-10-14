@@ -641,7 +641,7 @@
           "format": "table"
         },
         {
-          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * (0/0))",
           "refId": "F",
           "legendFormat": "Read",
           "instant": true,
@@ -649,7 +649,7 @@
           "format": "table"
         },
         {
-          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * (0/0))",
           "refId": "G",
           "legendFormat": "Write",
           "instant": true,
