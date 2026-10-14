@@ -3,7 +3,7 @@
 //
 // The package is deliberately self-contained: it imports only the standard library and
 // github.com/go-ldap/ldap/v3, so it can be reused outside neutree. It does no logging;
-// callers log the returned errors, which never contain the password.
+// callers log the returned errors.
 package ldap
 
 import (
