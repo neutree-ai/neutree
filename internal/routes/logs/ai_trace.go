@@ -108,6 +108,23 @@ type AITraceKeyStatsResponse struct {
 	Keys        []AITraceKeyStat `json:"keys"`
 }
 
+// AITraceFilterOptions lists the values the list filters can pick from: the
+// endpoints and models that appear in the caller's traces within the window.
+// A *Truncated flag means the list was cut at maxTraceFilterOptions.
+type AITraceFilterOptions struct {
+	Endpoints          []AITraceEndpointOption `json:"endpoints"`
+	EndpointsTruncated bool                    `json:"endpoints_truncated"`
+	Models             []string                `json:"models"`
+	ModelsTruncated    bool                    `json:"models_truncated"`
+}
+
+// AITraceEndpointOption is one endpoint seen in traces. The type is part of the
+// option because an endpoint and an external endpoint may share a name.
+type AITraceEndpointOption struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 // RegisterAITraceRoutes mounts the AI inference trace endpoints.
 func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	traces := group.Group("/ai-traces/:workspace")
@@ -117,6 +134,7 @@ func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	traces.GET("", handleListAITraces(deps))
 	traces.GET("/stats", handleAITraceStats(deps))
 	traces.GET("/key-stats", handleAITraceKeyStats(deps))
+	traces.GET("/filter-options", handleAITraceFilterOptions(deps))
 	traces.GET("/:request_id", handleGetAITrace(deps))
 }
 
@@ -652,5 +670,39 @@ func handleAITraceKeyStats(deps *Dependencies) gin.HandlerFunc {
 			WindowHours: windowHours,
 			Keys:        keys,
 		})
+	}
+}
+
+// maxTraceFilterOptions caps each option list. Clients send arbitrary model
+// names, so the distinct request_model set has no natural bound.
+const maxTraceFilterOptions = 1000
+
+// handleAITraceFilterOptions returns the distinct endpoints and models in the
+// caller's traces, for the list page's filter dropdowns. It takes the same
+// start/end window and endpoint_type filter as the list.
+func handleAITraceFilterOptions(deps *Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		store := requireTraceStore(c, deps)
+		if store == nil {
+			return
+		}
+
+		filters := traceFilters{EndpointType: strings.TrimSpace(c.Query("endpoint_type"))}
+		window := timeWindow{
+			Start: strings.TrimSpace(c.Query("start")),
+			End:   strings.TrimSpace(c.Query("end")),
+		}
+
+		opts, err := store.FilterOptions(traceScopeClause(c), filters, window, maxTraceFilterOptions)
+		if err != nil {
+			klog.Errorf("ai-trace: filter-options: %v", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": "failed to query trace store",
+			})
+
+			return
+		}
+
+		c.JSON(http.StatusOK, opts)
 	}
 }

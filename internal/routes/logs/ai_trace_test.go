@@ -495,10 +495,11 @@ func TestAITraceHandlers_StoreNotConfigured(t *testing.T) {
 	deps := &Dependencies{}
 
 	handlers := map[string]gin.HandlerFunc{
-		"list":      handleListAITraces(deps),
-		"stats":     handleAITraceStats(deps),
-		"get":       handleGetAITrace(deps),
-		"key-stats": handleAITraceKeyStats(deps),
+		"list":           handleListAITraces(deps),
+		"stats":          handleAITraceStats(deps),
+		"get":            handleGetAITrace(deps),
+		"key-stats":      handleAITraceKeyStats(deps),
+		"filter-options": handleAITraceFilterOptions(deps),
 	}
 
 	for name, h := range handlers {
@@ -611,5 +612,44 @@ func TestHandleListAITraces_IncludeBodyClampsLimit(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code)
 			assert.Contains(t, gotQuery, tc.wantLimit, "query: %s", gotQuery)
 		})
+	}
+}
+
+func TestHandleAITraceFilterOptions_ScopeWindowAndType(t *testing.T) {
+	// The options follow the list's scope, start/end window and endpoint_type
+	// filter, so a dropdown never offers a value the list cannot show.
+	var queries []string
+
+	var windows []url.Values
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		windows = append(windows, url.Values{"start": {r.URL.Query().Get("start")}, "end": {r.URL.Query().Get("end")}})
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"endpoint_name":"e1","endpoint_type":"endpoint","request_model":"m1","response_model":"m1"}` + "\n"))
+	}))
+	defer server.Close()
+
+	deps := &Dependencies{AITraceStoreURL: server.URL, HTTPClient: &util.DefaultHTTPClient{}}
+	c, w := traceCtx("user-1", "ws1")
+	c.Request = httptest.NewRequest("GET",
+		"/?endpoint_type=endpoint&start=2026-10-01T00:00:00Z&end=2026-10-08T00:00:00Z", nil)
+
+	handleAITraceFilterOptions(deps)(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp AITraceFilterOptions
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, []AITraceEndpointOption{{Name: "e1", Type: "endpoint"}}, resp.Endpoints)
+	assert.Equal(t, []string{"m1"}, resp.Models)
+
+	require.Len(t, queries, 3)
+
+	for i, q := range queries {
+		assert.Contains(t, q, `workspace:="ws1"`)
+		assert.Contains(t, q, `endpoint_type:="endpoint"`)
+		assert.Equal(t, "2026-10-01T00:00:00Z", windows[i].Get("start"))
+		assert.Equal(t, "2026-10-08T00:00:00Z", windows[i].Get("end"))
 	}
 }
