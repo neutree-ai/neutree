@@ -27,30 +27,322 @@
       "transparent": true
     },
     {
-      "id": 1,
-      "title": "Shared L1 bytes",
-      "type": "timeseries",
+      "id": 10,
+      "title": "Ready cache nodes",
+      "type": "stat",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
         "y": 1,
-        "w": 12,
-        "h": 7
+        "w": 4,
+        "h": 4
       },
-      "description": "Shared by inference replicas on this node. This is cache allocator usage, not process RSS or exclusive endpoint memory.",
       "targets": [
         {
-          "expr": "max by (node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "sum(label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\"))",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Observed cache nodes",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "count(label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\"))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Configured L1 capacity",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(label_match((${CacheCapacity:raw}), \"node\", \"${Node:regex}\"))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
           "noValue": "No samples",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "title": "Used L1 capacity",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Cache lookup hit rate",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "(sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) / sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))) and (sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) > 0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "title": "Scraped cache nodes",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(max by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 1,
+      "title": "Node L1 used capacity",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "A",
+          "legendFormat": "{{node}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -67,29 +359,45 @@
     },
     {
       "id": 2,
-      "title": "Shared L1 usage",
+      "title": "Node L1 utilization",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 5,
         "w": 12,
-        "h": 7
+        "h": 8
       },
-      "description": "Shared by inference replicas on this node. This is cache allocator usage, not process RSS or exclusive endpoint memory.",
       "targets": [
         {
-          "expr": "max by (node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "{{node}}",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "noValue": "No samples",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -106,29 +414,50 @@
     },
     {
       "id": 3,
-      "title": "L1 reads (chunks/s)",
+      "title": "Cache lookup token throughput",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 13,
         "w": 8,
-        "h": 7
+        "h": 8
       },
-      "description": "Cache blocks per second, not bytes/s. Missing metrics are not zero activity.",
       "targets": [
         {
-          "expr": "sum by (node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "Hit",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "clamp_min(sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) - sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))), 0)",
+          "refId": "B",
+          "legendFormat": "Miss",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "suffix:Tokens/s",
           "noValue": "No samples",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -145,29 +474,45 @@
     },
     {
       "id": 4,
-      "title": "L1 writes (chunks/s)",
+      "title": "Cache lookup hit rate trend",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 8,
-        "y": 8,
+        "y": 13,
         "w": 8,
-        "h": 7
+        "h": 8
       },
-      "description": "Cache blocks per second, not bytes/s. Missing metrics are not zero activity.",
       "targets": [
         {
-          "expr": "sum by (node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "(sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) / sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))) and (sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) > 0)",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "Hit rate",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "percentunit",
           "noValue": "No samples",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -184,29 +529,51 @@
     },
     {
       "id": 5,
-      "title": "L1 evictions (chunks/s)",
+      "title": "L1 read and write chunk rate",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 16,
-        "y": 8,
+        "y": 13,
         "w": 8,
-        "h": 7
+        "h": 8
       },
-      "description": "Cache blocks per second, not bytes/s. Missing metrics are not zero activity.",
       "targets": [
         {
-          "expr": "sum by (node) (rate(lmcache_mp_l1_evicted_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "expr": "sum(sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
           "refId": "A",
-          "legendFormat": "{{node}}"
+          "legendFormat": "Read",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "sum(sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "B",
+          "legendFormat": "Write",
+          "instant": false,
+          "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "suffix:chunks/s",
           "noValue": "No samples",
+          "min": 0,
           "color": {
             "mode": "palette-classic"
+          },
+          "decimals": 3,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
           }
         },
         "overrides": []
@@ -222,44 +589,653 @@
       }
     },
     {
-      "id": 6,
-      "title": "Cache scrape health",
-      "type": "stat",
+      "id": 20,
+      "title": "Cache nodes",
+      "type": "table",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 21,
         "w": 24,
-        "h": 4
+        "h": 9
       },
-      "description": "1 = collecting; 0 = scrape failed; no samples = no discovered target. Runtime readiness alone does not prove metrics are being collected.",
       "targets": [
         {
-          "expr": "min by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"})",
+          "expr": "label_match((${CacheCapacity:raw}), \"node\", \"${Node:regex}\")",
           "refId": "A",
-          "legendFormat": "{{node}}",
+          "legendFormat": "Capacity",
           "instant": true,
-          "range": false
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\")",
+          "refId": "B",
+          "legendFormat": "Runtime",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"})",
+          "refId": "C",
+          "legendFormat": "Scrape",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "D",
+          "legendFormat": "Used",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "E",
+          "legendFormat": "Utilization",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "F",
+          "legendFormat": "Read",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "G",
+          "legendFormat": "Write",
+          "instant": true,
+          "range": false,
+          "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
           "noValue": "No samples",
-          "color": {
-            "mode": "palette-classic"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Utilization"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Read"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix:chunks/s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Write"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix:chunks/s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runtime"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Not ready",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Ready",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Scrape"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Down",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Up",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Node"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Capacity"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runtime"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Runtime"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Scrape"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Scrape"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Used"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Utilization"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Utilization"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Read"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Read"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Write"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Write"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View node",
+                    "url": "/d/neutree-zcache-embed?${__url_time_range}&var-datasource=${datasource:percentencode}&var-Workspace=${Workspace:percentencode}&var-Cluster=${Cluster:percentencode}&var-Node=${__value.raw}&var-CacheCapacity=${CacheCapacity:percentencode}&var-CacheReady=${CacheReady:percentencode}&theme=light&kiosk",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "node",
+            "mode": "outerTabular"
+          }
         },
-        "colorMode": "value"
-      }
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true
+            },
+            "renameByName": {
+              "node": "Node",
+              "Value #A": "Capacity",
+              "Value #B": "Runtime",
+              "Value #C": "Scrape",
+              "Value #D": "Used",
+              "Value #E": "Utilization",
+              "Value #F": "Read",
+              "Value #G": "Write"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "Advanced diagnostics",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 30,
+          "title": "Cache process CPU",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 0,
+            "y": 31,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "sum by(node) (rate(process_cpu_seconds_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cores",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 31,
+          "title": "Cache process resident memory",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 12,
+            "y": 31,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "max by(node) (process_resident_memory_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 32,
+          "title": "Metrics event queue depth",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 0,
+            "y": 38,
+            "w": 8,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "max by(node) (lmcache_mp_event_bus_queue_depth{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 33,
+          "title": "Metrics event drain delay",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 8,
+            "y": 38,
+            "w": 8,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "max by(node) (lmcache_mp_event_bus_drain_lag_seconds{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 34,
+          "title": "Metrics events dropped",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 16,
+            "y": 38,
+            "w": 8,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "sum by(node) (rate(lmcache_mp_event_bus_dropped_events_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -315,6 +1291,26 @@
         "current": {
           "text": "All",
           "value": "$__all"
+        }
+      },
+      {
+        "name": "CacheCapacity",
+        "type": "textbox",
+        "hide": 2,
+        "query": "(vector(0) > 0)",
+        "current": {
+          "text": "(vector(0) > 0)",
+          "value": "(vector(0) > 0)"
+        }
+      },
+      {
+        "name": "CacheReady",
+        "type": "textbox",
+        "hide": 2,
+        "query": "(vector(0) > 0)",
+        "current": {
+          "text": "(vector(0) > 0)",
+          "value": "(vector(0) > 0)"
         }
       }
     ]
