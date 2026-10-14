@@ -367,7 +367,7 @@
       "gridPos": {
         "x": 0,
         "y": 6,
-        "w": 6,
+        "w": 5,
         "h": 10
       },
       "targets": [
@@ -482,9 +482,9 @@
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 6,
+        "x": 5,
         "y": 6,
-        "w": 6,
+        "w": 5,
         "h": 10
       },
       "targets": [
@@ -598,9 +598,9 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 12,
+        "x": 10,
         "y": 6,
-        "w": 6,
+        "w": 4,
         "h": 10
       },
       "id": 4,
@@ -646,9 +646,9 @@
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 18,
+        "x": 14,
         "y": 6,
-        "w": 6,
+        "w": 5,
         "h": 10
       },
       "id": 36,
@@ -708,6 +708,99 @@
               {
                 "id": "custom.axisPlacement",
                 "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 19,
+        "y": 6,
+        "w": 5,
+        "h": 10
+      },
+      "id": 37,
+      "targets": [
+        {
+          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
+          "refId": "A",
+          "legendFormat": "Read",
+          "range": true,
+          "instant": false
+        },
+        {
+          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
+          "refId": "B",
+          "legendFormat": "Write",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node L1 read and write chunk rate",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "Chunks/s",
+            "axisPlacement": "left",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
               }
             ]
           }
