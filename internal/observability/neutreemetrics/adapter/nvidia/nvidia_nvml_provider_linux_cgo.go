@@ -2,7 +2,11 @@
 
 package nvidia
 
-import "github.com/NVIDIA/go-nvml/pkg/nvml"
+import (
+	"fmt"
+
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+)
 
 type realNvidiaNVMLHardwareClient struct {
 	api nvml.Interface
@@ -132,4 +136,20 @@ func nvidiaCStringFromInt8(value []int8) string {
 	}
 
 	return string(bytes)
+}
+
+func nvidiaFormatCUDADriverVersion(value float64) string {
+	version := int64(value)
+	if version <= 0 {
+		return ""
+	}
+
+	major := version / 1000
+	minor := (version % 1000) / 10
+
+	if major <= 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%d.%d", major, minor)
 }
