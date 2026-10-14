@@ -606,13 +606,6 @@
       "id": 36,
       "targets": [
         {
-          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
-          "refId": "A",
-          "legendFormat": "{{node}} utilization",
-          "range": true,
-          "instant": false
-        },
-        {
           "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
           "refId": "B",
           "legendFormat": "{{node}} used",
@@ -620,7 +613,58 @@
           "instant": false
         }
       ],
-      "title": "Hosting-node shared L1 usage and utilization",
+      "title": "Hosting-node shared L1 usage",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "",
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 9
+      },
+      "id": 38,
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
+          "refId": "A",
+          "legendFormat": "{{node}} utilization",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node shared L1 usage rate",
       "type": "timeseries",
       "fieldConfig": {
         "defaults": {
@@ -642,28 +686,59 @@
           },
           "max": 1
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              },
-              {
-                "id": "max",
-                "value": null
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              }
-            ]
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 9
+      },
+      "id": 37,
+      "targets": [
+        {
+          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
+          "refId": "A",
+          "legendFormat": "Read",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node L1 read chunk rate",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#00BA5D"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "Chunks/s",
+            "axisPlacement": "left"
           }
-        ]
+        },
+        "overrides": []
       },
       "options": {
         "legend": {
@@ -679,19 +754,12 @@
       "datasource": "${datasource}",
       "gridPos": {
         "x": 12,
-        "y": 15,
+        "y": 24,
         "w": 12,
         "h": 9
       },
-      "id": 37,
+      "id": 39,
       "targets": [
-        {
-          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
-          "refId": "A",
-          "legendFormat": "Read",
-          "range": true,
-          "instant": false
-        },
         {
           "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
           "refId": "B",
@@ -700,7 +768,7 @@
           "instant": false
         }
       ],
-      "title": "Hosting-node L1 read and write chunk rate",
+      "title": "Hosting-node L1 write chunk rate",
       "type": "timeseries",
       "fieldConfig": {
         "defaults": {
@@ -709,7 +777,8 @@
           "min": 0,
           "decimals": 3,
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
           },
           "custom": {
             "drawStyle": "line",
@@ -718,45 +787,10 @@
             "showPoints": "never",
             "spanNulls": false,
             "axisLabel": "Chunks/s",
-            "axisPlacement": "left",
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            }
+            "axisPlacement": "left"
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "A"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#00BA5D"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "B"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#0080FF"
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "legend": {
