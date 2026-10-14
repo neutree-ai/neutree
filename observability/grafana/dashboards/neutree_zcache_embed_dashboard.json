@@ -284,7 +284,7 @@
       },
       {
         "name": "Workspace",
-        "type": "constant",
+        "type": "textbox",
         "query": "default",
         "current": {
           "text": "default",
@@ -294,7 +294,7 @@
       },
       {
         "name": "Cluster",
-        "type": "constant",
+        "type": "textbox",
         "query": "",
         "current": {
           "text": "",
