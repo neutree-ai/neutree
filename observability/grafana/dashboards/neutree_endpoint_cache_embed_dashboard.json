@@ -34,10 +34,9 @@
       "gridPos": {
         "x": 0,
         "y": 1,
-        "w": 8,
+        "w": 4,
         "h": 5
       },
-      "description": "Uses the full selected time range and selected replica Pods. Counter increases are estimates between scrapes; restarts are handled per counter before aggregation. Engine-reported input token sources. External cache records an additional matched prefix after L0 reuse, not verified transfer success or measured GPU savings. Empty when there is no input activity or source metrics are unsupported.",
       "targets": [
         {
           "expr": "(((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) + (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
@@ -77,16 +76,15 @@
     },
     {
       "id": 31,
-      "title": "Input token source shares",
+      "title": "Cache hit shares",
       "type": "bargauge",
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 8,
+        "x": 4,
         "y": 1,
         "w": 8,
         "h": 5
       },
-      "description": "Uses the full selected time range and selected replica Pods. Counter increases are estimates between scrapes; restarts are handled per counter before aggregation. Engine-reported input token sources. External cache records an additional matched prefix after L0 reuse, not verified transfer success or measured GPU savings. Empty when there is no input activity or source metrics are unsupported.",
       "targets": [
         {
           "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
@@ -98,14 +96,14 @@
         {
           "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
           "refId": "B",
-          "legendFormat": "External cache",
+          "legendFormat": "L1 external cache",
           "instant": true,
           "range": false
         },
         {
           "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
           "refId": "C",
-          "legendFormat": "Computed",
+          "legendFormat": "Miss",
           "instant": true,
           "range": false
         }
@@ -187,16 +185,15 @@
     },
     {
       "id": 32,
-      "title": "External cache matched tokens",
+      "title": "External cache hit tokens",
       "type": "stat",
       "datasource": "${datasource}",
       "gridPos": {
-        "x": 16,
+        "x": 12,
         "y": 1,
-        "w": 8,
+        "w": 4,
         "h": 5
       },
-      "description": "Uses the full selected time range and selected replica Pods. Counter increases are estimates between scrapes; restarts are handled per counter before aggregation. Engine-reported input token sources. External cache records an additional matched prefix after L0 reuse, not verified transfer success or measured GPU savings. Empty when there is no input activity or source metrics are unsupported.",
       "targets": [
         {
           "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
@@ -233,8 +230,99 @@
       }
     },
     {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "expr": "sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "L0 token capacity",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "id": 35,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "expr": "(sum(count by (node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0) > bool 0) * ${L1CapacityBytes:raw}) and on() (vector(${L1CapacityBytes:raw}) > 0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "Hosting-node shared L1 capacity",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 33,
-      "title": "Input token throughput by source",
+      "title": "Input token throughput",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
@@ -243,7 +331,6 @@
         "w": 12,
         "h": 9
       },
-      "description": "Engine-reported input token sources. External cache records an additional matched prefix after L0 reuse, not verified transfer success or measured GPU savings. Empty when there is no input activity or source metrics are unsupported. Tokens per second over the rate window; includes cached input tokens and computed input tokens, excluding output tokens.",
       "targets": [
         {
           "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
@@ -255,14 +342,14 @@
         {
           "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
           "refId": "B",
-          "legendFormat": "External cache",
+          "legendFormat": "L1 external cache",
           "instant": false,
           "range": true
         },
         {
           "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
           "refId": "C",
-          "legendFormat": "Computed",
+          "legendFormat": "Miss",
           "instant": false,
           "range": true
         }
@@ -352,7 +439,7 @@
     },
     {
       "id": 34,
-      "title": "Input token source share trend",
+      "title": "Cache hit rate trend",
       "type": "timeseries",
       "datasource": "${datasource}",
       "gridPos": {
@@ -361,7 +448,6 @@
         "w": 12,
         "h": 9
       },
-      "description": "Engine-reported input token sources. External cache records an additional matched prefix after L0 reuse, not verified transfer success or measured GPU savings. Empty when there is no input activity or source metrics are unsupported. All three shares use the same total input denominator and sum to 100%.",
       "targets": [
         {
           "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
@@ -373,14 +459,14 @@
         {
           "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
           "refId": "B",
-          "legendFormat": "External cache",
+          "legendFormat": "L1 external cache",
           "instant": false,
           "range": true
         },
         {
           "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
           "refId": "C",
-          "legendFormat": "Computed",
+          "legendFormat": "Miss",
           "instant": false,
           "range": true
         }
@@ -475,7 +561,7 @@
       "gridPos": {
         "x": 0,
         "y": 15,
-        "w": 16,
+        "w": 24,
         "h": 8
       },
       "id": 4,
@@ -508,7 +594,6 @@
         },
         "overrides": []
       },
-      "description": "Engine-reported L0 KV pool usage per replica Pod, not total GPU memory usage or shared L1 capacity. Values are fractions from 0 to 1.",
       "options": {
         "legend": {
           "displayMode": "list",
@@ -517,125 +602,6 @@
         "tooltip": {
           "mode": "multi"
         }
-      }
-    },
-    {
-      "datasource": "${datasource}",
-      "gridPos": {
-        "x": 16,
-        "y": 15,
-        "w": 8,
-        "h": 4
-      },
-      "id": 1,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "textMode": "value",
-        "justifyMode": "center"
-      },
-      "targets": [
-        {
-          "expr": "sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
-          "refId": "A",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "title": "L0 token capacity",
-      "type": "stat",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "locale",
-          "decimals": 0,
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#0080FF"
-          },
-          "noValue": "No samples"
-        },
-        "overrides": []
-      },
-      "description": "Current engine-reported L0 KV token capacity summed across selected replica Pods. This is configured pool capacity, not current token occupancy or shared L1 memory."
-    },
-    {
-      "id": 22,
-      "title": "Inference scrape health",
-      "type": "stat",
-      "datasource": "${datasource}",
-      "gridPos": {
-        "x": 16,
-        "y": 19,
-        "w": 8,
-        "h": 4
-      },
-      "description": "1 = collecting; 0 = scrape failed; no samples = no discovered target. Historical charts can retain samples from before a failure.",
-      "targets": [
-        {
-          "expr": "min(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\"})",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "noValue": "No samples",
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "Scrape failed",
-                  "color": "#F0483E"
-                },
-                "1": {
-                  "text": "Collecting",
-                  "color": "#00BA5D"
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#F0483E",
-                "value": null
-              },
-              {
-                "color": "#00BA5D",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "textMode": "value",
-        "justifyMode": "center"
       }
     }
   ],
@@ -705,6 +671,26 @@
           "text": "All",
           "value": "$__all"
         }
+      },
+      {
+        "name": "L1CapacityBytes",
+        "type": "textbox",
+        "query": "0",
+        "current": {
+          "text": "0",
+          "value": "0"
+        },
+        "hide": 2
+      },
+      {
+        "name": "L1Nodes",
+        "type": "textbox",
+        "query": "a^",
+        "current": {
+          "text": "a^",
+          "value": "a^"
+        },
+        "hide": 2
       }
     ]
   },
@@ -715,5 +701,5 @@
   "timezone": "browser",
   "title": "Neutree Endpoint Cache Embed",
   "uid": "neutree-endpoint-cache-embed",
-  "version": 2
+  "version": 3
 }
