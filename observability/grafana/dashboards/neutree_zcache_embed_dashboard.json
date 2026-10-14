@@ -681,6 +681,10 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Capacity"
               }
             ]
           },
@@ -697,6 +701,10 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Used"
               }
             ]
           },
@@ -713,6 +721,10 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Utilization"
               }
             ]
           },
@@ -729,6 +741,24 @@
               {
                 "id": "decimals",
                 "value": 3
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Read"
               }
             ]
           },
@@ -745,6 +775,24 @@
               {
                 "id": "decimals",
                 "value": 3
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Write"
               }
             ]
           },
@@ -771,6 +819,10 @@
                     }
                   }
                 ]
+              },
+              {
+                "id": "displayName",
+                "value": "Runtime"
               }
             ]
           },
@@ -797,102 +849,10 @@
                     }
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Node"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Node"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Capacity"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Capacity"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Runtime"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Runtime"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Scrape"
-            },
-            "properties": [
+              },
               {
                 "id": "displayName",
                 "value": "Scrape"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Used"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Used"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Utilization"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Utilization"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Read"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Read"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Write"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Write"
               }
             ]
           },
@@ -911,50 +871,10 @@
                     "targetBlank": false
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Read"
-            },
-            "properties": [
+              },
               {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "-1": {
-                        "text": "No samples",
-                        "color": "gray"
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Write"
-            },
-            "properties": [
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "-1": {
-                        "text": "No samples",
-                        "color": "gray"
-                      }
-                    }
-                  }
-                ]
+                "id": "displayName",
+                "value": "Node"
               }
             ]
           }
@@ -997,6 +917,73 @@
               "Value #E": "Utilization",
               "Value #F": "Read",
               "Value #G": "Write"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Node": {
+                "operation": "groupby",
+                "aggregations": []
+              },
+              "Capacity": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Runtime": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Scrape": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Used": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Utilization": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Read": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Write": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Capacity (lastNotNull)": "Capacity",
+              "Runtime (lastNotNull)": "Runtime",
+              "Scrape (lastNotNull)": "Scrape",
+              "Used (lastNotNull)": "Used",
+              "Utilization (lastNotNull)": "Utilization",
+              "Read (lastNotNull)": "Read",
+              "Write (lastNotNull)": "Write"
             }
           }
         }
