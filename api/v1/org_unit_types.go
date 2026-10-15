@@ -14,8 +14,8 @@ const (
 	OrgPhaseInactive OrgPhase = "Inactive"
 )
 
-// OrgStatus is the status of an OrgUnit or a Team, written by sync. A status
-// without Phase keeps the stored phase; a new object starts Active.
+// OrgStatus is the status of an OrgUnit or a Team. A status without Phase
+// keeps the stored phase; a new object starts Active.
 type OrgStatus struct {
 	Phase              OrgPhase `json:"phase,omitempty"`
 	LastTransitionTime string   `json:"last_transition_time,omitempty"`
