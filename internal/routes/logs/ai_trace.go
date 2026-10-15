@@ -67,6 +67,9 @@ const stringTrue = "true"
 // (?include_body=true); metadata-only pages may go up to 500.
 const includeBodyMaxLimit = 50
 
+// maxTracePageSize caps the page size of a metadata-only list query.
+const maxTracePageSize = 500
+
 // AITraceListResponse is the wire format for GET /api/v1/ai-traces/:workspace.
 //
 // NextBefore is the cursor for the next page: passing it as ?before=<ts> on
@@ -135,6 +138,7 @@ func RegisterAITraceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	traces.GET("/stats", handleAITraceStats(deps))
 	traces.GET("/key-stats", handleAITraceKeyStats(deps))
 	traces.GET("/filter-options", handleAITraceFilterOptions(deps))
+	traces.GET("/export", handleExportAITraces(deps))
 	traces.GET("/:request_id", handleGetAITrace(deps))
 }
 
@@ -396,6 +400,35 @@ func requireTraceStore(c *gin.Context, deps *Dependencies) *traceStore {
 	return store
 }
 
+// traceListQuery parses the filter and time-window query params shared by the
+// list and export routes.
+func traceListQuery(c *gin.Context) (traceFilters, timeWindow) {
+	filters := traceFilters{
+		RequestID:     strings.TrimSpace(c.Query("request_id")),
+		RequestModel:  strings.TrimSpace(c.Query("request_model")),
+		Upstream:      strings.TrimSpace(c.Query("upstream")),
+		UpstreamModel: strings.TrimSpace(c.Query("upstream_model")),
+
+		EndpointName: strings.TrimSpace(c.Query("endpoint_name")),
+		EndpointType: strings.TrimSpace(c.Query("endpoint_type")),
+		Status:       strings.TrimSpace(c.Query("status")),
+		APIKeyID:     strings.TrimSpace(c.Query("api_key_id")),
+		FinishReason: strings.TrimSpace(c.Query("finish_reason")),
+		Model:        strings.TrimSpace(c.Query("model")),
+	}
+
+	window := timeWindow{Start: strings.TrimSpace(c.Query("start"))}
+	// `before` is the inclusive upper bound from the previous page's last
+	// record's timestamp. To page strictly older we pass it as end.
+	if before := strings.TrimSpace(c.Query("before")); before != "" {
+		window.End = before
+	} else {
+		window.End = strings.TrimSpace(c.Query("end"))
+	}
+
+	return filters, window
+}
+
 func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		store := requireTraceStore(c, deps)
@@ -406,24 +439,12 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		limit := 50
 
 		if v := c.Query("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= maxTracePageSize {
 				limit = n
 			}
 		}
 
-		filters := traceFilters{
-			RequestID:     strings.TrimSpace(c.Query("request_id")),
-			RequestModel:  strings.TrimSpace(c.Query("request_model")),
-			Upstream:      strings.TrimSpace(c.Query("upstream")),
-			UpstreamModel: strings.TrimSpace(c.Query("upstream_model")),
-
-			EndpointName: strings.TrimSpace(c.Query("endpoint_name")),
-			EndpointType: strings.TrimSpace(c.Query("endpoint_type")),
-			Status:       strings.TrimSpace(c.Query("status")),
-			APIKeyID:     strings.TrimSpace(c.Query("api_key_id")),
-			FinishReason: strings.TrimSpace(c.Query("finish_reason")),
-			Model:        strings.TrimSpace(c.Query("model")),
-		}
+		filters, window := traceListQuery(c)
 
 		// The list view never renders request/response bodies, so they are
 		// omitted by default. Callers exporting the full record opt in via
@@ -438,15 +459,6 @@ func handleListAITraces(deps *Dependencies) gin.HandlerFunc {
 		// result set in smaller pages.
 		if includeBody && limit > includeBodyMaxLimit {
 			limit = includeBodyMaxLimit
-		}
-
-		window := timeWindow{Start: strings.TrimSpace(c.Query("start"))}
-		// `before` is the inclusive upper bound from the previous page's last
-		// record's timestamp. To page strictly older we pass it as end.
-		if before := strings.TrimSpace(c.Query("before")); before != "" {
-			window.End = before
-		} else {
-			window.End = strings.TrimSpace(c.Query("end"))
 		}
 
 		items, err := store.List(traceScopeClause(c), filters, limit, includeBody, window)
