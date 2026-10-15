@@ -6,8 +6,8 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
-// Team is a global, sync-written flat group; nested directory groups are
-// expanded into direct members.
+// Team is a global flat group: synced from an identity source (read-only in
+// Neutree), or manual (empty spec, managed in Neutree).
 type Team struct {
 	ID         int        `json:"id,omitempty"`
 	APIVersion string     `json:"api_version,omitempty"`
@@ -19,7 +19,7 @@ type Team struct {
 
 type TeamSpec struct {
 	// IdentitySource is the metadata.name of the IdentitySource the Team was
-	// synced from.
+	// synced from; empty for a manual Team.
 	IdentitySource string `json:"identity_source"`
 	// ExternalID is the directory's stable ID of the group, never a name.
 	ExternalID string `json:"external_id"`
