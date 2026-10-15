@@ -443,16 +443,56 @@ grafana:
   adminUser: admin
   adminPassword: admin
 
+  # Dashboard files use native Grafana chart volume hooks. Releases retaining
+  # the old dashboard mount must use --reset-values or replacement values.
   extraConfigmapMounts:
   - name: datasources
     mountPath: /etc/grafana/provisioning/datasources
     configMap: grafana-datasources
     readOnly: true
     optional: false
-  - name: dashboards
+
+  extraVolumeMounts:
+  - name: grafana-dashboards
     mountPath: /var/lib/grafana/dashboards
-    configMap: grafana-dashboards
     readOnly: true
+
+  extraContainerVolumes:
+  - name: grafana-dashboards
+    projected:
+      sources:
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "dcgm_exporter_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "default_grafana_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_cluster_overview_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_endpoint_cache_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_endpoint_latency_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_endpoint_overview_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_endpoint_queue_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_endpoint_token_latency_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_model_routing_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_model_routing_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "neutree_overview_embed_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "node_exporter_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "serve_deployment_grafana_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "serve_grafana_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "sglang_grafana_dashboard.json" }}'
+      - configMap:
+          name: '{{ include "neutree.grafana.dashboardConfigMapName" "vllm_grafana_dashboard.json" }}'
   service:
     enabled: true
     type: LoadBalancer
