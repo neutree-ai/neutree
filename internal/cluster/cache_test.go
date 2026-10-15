@@ -50,7 +50,9 @@ func TestProviderFailurePreservesClusterHealthAndBlocksCleanup(t *testing.T) {
 	cl := &v1.Cluster{Metadata: &v1.Metadata{Name: "compute", Workspace: "default"}, Spec: &v1.ClusterSpec{Cache: &v1.ClusterCacheSpec{Provider: "example"}, Config: &v1.ClusterConfig{KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: base64.StdEncoding.EncodeToString([]byte(kubeconfig))}}}, Status: &v1.ClusterStatus{Phase: v1.ClusterPhaseRunning}}
 	rc := &ReconcileContext{Ctx: context.Background(), Cluster: cl, ImageRegistry: &v1.ImageRegistry{Spec: &v1.ImageRegistrySpec{URL: "https://registry.example"}}}
 	provider := &failingCacheProvider{}
-	r := &NativeKubernetesClusterReconciler{cacheProviders: clustercache.Providers{"example": provider}}
+	providers := &clustercache.Providers{}
+	require.NoError(t, providers.Register("example", provider))
+	r := &NativeKubernetesClusterReconciler{cacheProviders: providers}
 	r.reconcileCache(rc)
 	require.Equal(t, 1, provider.calls)
 	require.Equal(t, v1.ClusterPhaseRunning, cl.Status.Phase)

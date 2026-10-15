@@ -34,7 +34,7 @@ type ClusterController struct {
 }
 
 type ClusterControllerOption struct {
-	CacheProviders        clustercache.Providers
+	CacheProviders        *clustercache.Providers
 	Storage               storage.Storage
 	DefaultClusterVersion string
 	MetricsRemoteWriteURL string

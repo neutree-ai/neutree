@@ -15,7 +15,7 @@ import (
 
 // Dependencies defines the dependencies for system handlers
 type Dependencies struct {
-	ClusterCacheProviders clustercache.Providers
+	ClusterCacheProviders *clustercache.Providers
 	// GrafanaURL is the URL to the Grafana instance for monitoring
 	GrafanaURL string
 	// Version is the application version

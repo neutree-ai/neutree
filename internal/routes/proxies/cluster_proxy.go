@@ -64,7 +64,7 @@ type ValidationInput[T any] struct {
 	Operation   clusterValidationOperation
 }
 
-func validateClusterRequest(s storage.Storage, cacheProviders clustercache.Providers) gin.HandlerFunc {
+func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Providers) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()

@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -3361,9 +3362,9 @@ func TestClusterCacheAdmission(t *testing.T) {
 				if method == http.MethodPatch {
 					s.On("ListCluster", mock.Anything).Return([]v1.Cluster{*current}, nil).Once()
 				}
-				providers := clustercache.Providers{}
+				providers := &clustercache.Providers{}
 				if supported {
-					providers["example"] = &acceptingCacheProvider{}
+					require.NoError(t, providers.Register("example", &acceptingCacheProvider{}))
 				}
 				router := gin.New()
 				called := false

@@ -21,7 +21,7 @@ import (
 )
 
 type Dependencies struct {
-	ClusterCacheProviders clustercache.Providers
+	ClusterCacheProviders *clustercache.Providers
 	Storage               storage.Storage
 	StorageAccessURL      string
 	AuthEndpoint          string

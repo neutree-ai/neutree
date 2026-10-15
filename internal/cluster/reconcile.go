@@ -56,7 +56,7 @@ type ReconcileContext struct {
 }
 
 // WithCacheProviders installs the optional distribution cache implementation.
-func WithCacheProviders(providers clustercache.Providers) func(*NativeKubernetesClusterReconciler) {
+func WithCacheProviders(providers *clustercache.Providers) func(*NativeKubernetesClusterReconciler) {
 	return func(r *NativeKubernetesClusterReconciler) { r.cacheProviders = providers }
 }
 

@@ -1,7 +1,9 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/stretchr/testify/require"
 	"net/http"
@@ -198,9 +200,9 @@ func TestValidateAndCleanURL(t *testing.T) {
 
 func TestCacheCapabilityDefaultsOff(t *testing.T) {
 	for _, names := range [][]string{{}, {"example"}} {
-		providers := clustercache.Providers{}
+		providers := &clustercache.Providers{}
 		for _, name := range names {
-			providers[name] = nil
+			require.NoError(t, providers.Register(name, &systemTestCacheProvider{}))
 		}
 		router := gin.New()
 		router.GET("/info", handleSystemInfo(&Dependencies{ClusterCacheProviders: providers}))
@@ -211,3 +213,9 @@ func TestCacheCapabilityDefaultsOff(t *testing.T) {
 		require.Equal(t, names, info.Capabilities.ClusterCacheProviders)
 	}
 }
+
+type systemTestCacheProvider struct{}
+
+func (*systemTestCacheProvider) Validate(*v1.Cluster, *v1.Cluster) error                { return nil }
+func (*systemTestCacheProvider) Reconcile(context.Context, *clustercache.Context) error { return nil }
+func (*systemTestCacheProvider) Delete(context.Context, *clustercache.Context) error    { return nil }
