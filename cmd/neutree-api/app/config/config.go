@@ -1,12 +1,12 @@
 package config
 
 import (
-	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 

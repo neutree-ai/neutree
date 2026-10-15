@@ -2,7 +2,6 @@ package system
 
 import (
 	"fmt"
-	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 )
 
 // Dependencies defines the dependencies for system handlers
