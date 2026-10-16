@@ -3,7 +3,7 @@
     "list": []
   },
   "editable": true,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "panels": [
     {
       "id": 9999,
@@ -27,138 +27,219 @@
       "transparent": true
     },
     {
+      "id": 30,
+      "title": "Combined token hit rate",
+      "type": "stat",
       "datasource": "${datasource}",
       "gridPos": {
-        "h": 4,
-        "w": 8,
         "x": 0,
-        "y": 0
-      },
-      "id": 1,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
+        "y": 1,
+        "w": 4,
+        "h": 5
       },
       "targets": [
         {
-          "expr": "sum(label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
-          "refId": "A"
-        }
-      ],
-      "title": "KV token capacity",
-      "type": "stat",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "locale",
-          "decimals": 0,
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#0080FF"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "datasource": "${datasource}",
-      "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 8,
-        "y": 0
-      },
-      "id": 2,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      },
-      "targets": [
-        {
-          "expr": "avg(vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}) or avg(vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}) or avg(sglang:token_usage{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
-          "refId": "A"
-        }
-      ],
-      "title": "KV usage",
-      "type": "stat",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#0080FF"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "datasource": "${datasource}",
-      "gridPos": {
-        "h": 4,
-        "w": 8,
-        "x": 16,
-        "y": 0
-      },
-      "id": 3,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      },
-      "targets": [
-        {
-          "expr": "(sum(rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])), 1e-9)) or (sum(rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=\"prefill_cache\"}[$__rate_interval])) / clamp_min(sum(rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])), 1e-9))",
-          "refId": "A"
-        }
-      ],
-      "title": "Cache hit",
-      "type": "stat",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "#0080FF"
-          }
-        },
-        "overrides": []
-      }
-    },
-    {
-      "datasource": "${datasource}",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 4
-      },
-      "id": 4,
-      "targets": [
-        {
-          "expr": "vllm:kv_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"} or vllm:gpu_cache_usage_perc{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"} or sglang:token_usage{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}",
+          "expr": "(((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) + (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
           "refId": "A",
-          "legendFormat": "{{replica}} usage"
+          "legendFormat": "",
+          "instant": true,
+          "range": false
         }
       ],
-      "title": "KV usage trend",
-      "type": "timeseries",
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#00BA5D"
+          },
+          "min": 0,
+          "max": 1,
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 31,
+      "title": "Cache hit shares",
+      "type": "bargauge",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 8,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "A",
+          "legendFormat": "L0 local cache",
+          "instant": true,
+          "range": false
+        },
+        {
+          "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "B",
+          "legendFormat": "L1 external cache",
+          "instant": true,
+          "range": false
+        },
+        {
+          "expr": "((sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) / sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range]))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "C",
+          "legendFormat": "Miss",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "min": 0,
+          "max": 1,
+          "decimals": 1
         },
         "overrides": [
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".* usage$"
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0483E"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "minVizWidth": 0,
+        "minVizHeight": 10
+      }
+    },
+    {
+      "id": 32,
+      "title": "Cache hit tokens",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "A",
+          "legendFormat": "L0 local cache",
+          "instant": true,
+          "range": false
+        },
+        {
+          "expr": "(sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__range])) or (0 * sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])))) and (sum(increase(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__range])) > 0)",
+          "refId": "B",
+          "legendFormat": "L1 external cache",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale",
+          "noValue": "No samples",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
             },
             "properties": [
               {
@@ -171,35 +252,175 @@
             ]
           }
         ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "horizontal"
       }
     },
     {
       "datasource": "${datasource}",
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 4
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 5
       },
-      "id": 5,
+      "id": 1,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
       "targets": [
         {
-          "expr": "(sum by (replica) (rate(vllm:prefix_cache_hits_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(vllm:prefix_cache_queries_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])), 1e-9)) or (sum by (replica) (rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=\"prefill_cache\"}[$__rate_interval])) / clamp_min(sum by (replica) (rate(sglang:realtime_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])), 1e-9))",
+          "expr": "sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",kv_cache_size_tokens=~\"[0-9]+\"}, \"kv_cache_size_tokens\")) or sum(label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"num_gpu_blocks\") * label_value(vllm:cache_config_info{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\",num_gpu_blocks=~\"[0-9]+\",block_size=~\"[0-9]+\"}, \"block_size\")) or sum(sglang:max_total_num_tokens{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",replica=~\"${Replica:regex}\",application=\"$Endpoint\"})",
           "refId": "A",
-          "legendFormat": "{{replica}} hit"
+          "instant": true,
+          "range": false
         }
       ],
-      "title": "Cache hit trend",
-      "type": "timeseries",
+      "title": "L0 token capacity",
+      "type": "stat",
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit"
+          "unit": "locale",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 5
+      },
+      "id": 35,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      },
+      "targets": [
+        {
+          "expr": "(sum(count by (node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0) > bool 0) * ${L1CapacityBytes:raw}) and on() (vector(${L1CapacityBytes:raw}) > 0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "title": "Hosting-node shared L1 capacity",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "noValue": "No samples"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "title": "Cache hit and miss throughput",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "A",
+          "legendFormat": "L0 local cache",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "B",
+          "legendFormat": "L1 external cache",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "(sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "C",
+          "legendFormat": "Miss",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:Tokens/s",
+          "noValue": "No samples",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 65,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisLabel": "Tokens/s",
+            "axisCenteredZero": false
+          }
         },
         "overrides": [
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".* hit$"
+              "id": "byFrameRefID",
+              "options": "A"
             },
             "properties": [
               {
@@ -210,8 +431,375 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0483E"
+                }
+              }
+            ]
           }
         ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 34,
+      "title": "Cache hit rate trend",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "A",
+          "legendFormat": "L0 local cache",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"external_kv_transfer\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "B",
+          "legendFormat": "L1 external cache",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) / sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)",
+          "refId": "C",
+          "legendFormat": "Miss",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 65,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisLabel": "Share",
+            "axisCenteredZero": false
+          },
+          "max": 1,
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#F0483E"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 9
+      },
+      "id": 36,
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
+          "refId": "B",
+          "legendFormat": "{{node}} used",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node shared L1 usage",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "",
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 9
+      },
+      "id": 38,
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0))",
+          "refId": "A",
+          "legendFormat": "{{node}} utilization",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node shared L1 usage rate",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "",
+            "axisPlacement": "left"
+          },
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 9
+      },
+      "id": 37,
+      "targets": [
+        {
+          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
+          "refId": "A",
+          "legendFormat": "Read",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node L1 read chunk rate",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#00BA5D"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "Chunks/s",
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 9
+      },
+      "id": 39,
+      "targets": [
+        {
+          "expr": "sum(max by(node, cache_salt) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${L1Nodes:raw}\"} == 1)) and on(node) (count by(node) (neutree_endpoint_replica_accelerator_allocation{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",endpoint=\"$Endpoint\",replica=~\"${Replica:regex}\",node=~\"${L1Nodes:raw}\"} > 0)))",
+          "refId": "B",
+          "legendFormat": "Write",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "title": "Hosting-node L1 write chunk rate",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "decimals": 3,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisLabel": "Chunks/s",
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
       }
     }
   ],
@@ -232,7 +820,8 @@
         },
         "name": "datasource",
         "query": "prometheus",
-        "type": "datasource"
+        "type": "datasource",
+        "hide": 2
       },
       {
         "datasource": "${datasource}",
@@ -241,7 +830,8 @@
         "name": "Cluster",
         "query": "label_values(neutree_node_ready, neutree_cluster)",
         "refresh": 1,
-        "type": "query"
+        "type": "query",
+        "hide": 2
       },
       {
         "datasource": "${datasource}",
@@ -251,7 +841,54 @@
         "query": "label_values(neutree_endpoint_replica_accelerator_allocation{neutree_cluster=~\"$Cluster\"}, endpoint)",
         "refresh": 1,
         "type": "query",
-        "multi": false
+        "multi": false,
+        "hide": 2
+      },
+      {
+        "name": "Workspace",
+        "type": "textbox",
+        "query": "default",
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 2
+      },
+      {
+        "name": "Replica",
+        "label": "Replica",
+        "type": "query",
+        "datasource": "${datasource}",
+        "query": "label_values(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\"}, replica)",
+        "definition": "label_values(up{job=\"neutree-inference\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\"}, replica)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "L1CapacityBytes",
+        "type": "textbox",
+        "query": "0",
+        "current": {
+          "text": "0",
+          "value": "0"
+        },
+        "hide": 2
+      },
+      {
+        "name": "L1Nodes",
+        "type": "textbox",
+        "query": "a^",
+        "current": {
+          "text": "a^",
+          "value": "a^"
+        },
+        "hide": 2
       }
     ]
   },
@@ -262,5 +899,5 @@
   "timezone": "browser",
   "title": "Neutree Endpoint Cache Embed",
   "uid": "neutree-endpoint-cache-embed",
-  "version": 1
+  "version": 3
 }
