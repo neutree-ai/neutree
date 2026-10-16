@@ -880,7 +880,7 @@ func TestBuildVllmDeployment(t *testing.T) {
 		},
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0-p2"), data)
 	if err != nil {
 		t.Fatalf("Failed to build deployment: %v", err)
 	}
@@ -913,7 +913,7 @@ func TestBuildVllmDeploymentRendersStartupTimeout(t *testing.T) {
 		StartupProbeFailureThreshold: 30,
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0-p2"), data)
 	require.NoError(t, err)
 	require.Len(t, objs.Items, 1)
 
@@ -966,7 +966,7 @@ func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
 		Replicas:     1,
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.17.1"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.17.1-p2"), data)
 	require.NoError(t, err)
 	require.Len(t, objs.Items, 1)
 
@@ -1030,7 +1030,7 @@ func TestBuildLlamacppDeployment(t *testing.T) {
 		},
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "llama-cpp-v0.3.7"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "llama-cpp-v0.3.7-p2"), data)
 	if err != nil {
 		t.Fatalf("Failed to build deployment: %v", err)
 	}
@@ -1308,9 +1308,9 @@ func Test_getDeployTemplate(t *testing.T) {
 	// inline base64 fixture. This proves the decode path against production
 	// data and removes any "test fixture is out of sync with the real
 	// template" failure mode.
-	vllmTemplateB64, err := engine.GetDeployTemplate("vllm-v0.24.0")
+	vllmTemplateB64, err := engine.GetDeployTemplate("vllm-v0.24.0-p2")
 	require.NoError(t, err)
-	vllmTemplateRaw := realEmbeddedTemplate(t, "vllm-v0.24.0")
+	vllmTemplateRaw := realEmbeddedTemplate(t, "vllm-v0.24.0-p2")
 
 	tests := []struct {
 		name             string
@@ -3963,16 +3963,16 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 			templateKey: "vllm-v0.31.0",
 		},
 		{
-			name:        "vllm-v0.24.0",
-			templateKey: "vllm-v0.24.0",
+			name:        "vllm-v0.24.0-p2",
+			templateKey: "vllm-v0.24.0-p2",
 		},
 		{
-			name:        "vllm-v0.17.1",
-			templateKey: "vllm-v0.17.1",
+			name:        "vllm-v0.17.1-p2",
+			templateKey: "vllm-v0.17.1-p2",
 		},
 		{
-			name:        "sglang-v0.5.10",
-			templateKey: "sglang-v0.5.10",
+			name:        "sglang-v0.5.10-p2",
+			templateKey: "sglang-v0.5.10-p2",
 		},
 	}
 
@@ -4070,12 +4070,12 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 			templateKey: "vllm-v0.31.0",
 		},
 		{
-			name:        "vllm-v0.24.0",
-			templateKey: "vllm-v0.24.0",
+			name:        "vllm-v0.24.0-p2",
+			templateKey: "vllm-v0.24.0-p2",
 		},
 		{
-			name:        "vllm-v0.17.1",
-			templateKey: "vllm-v0.17.1",
+			name:        "vllm-v0.17.1-p2",
+			templateKey: "vllm-v0.17.1-p2",
 		},
 	}
 
@@ -4129,7 +4129,7 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 }
 
 func TestBuildDeployment_SGLangJSONListEngineArgs(t *testing.T) {
-	tmpl := realEmbeddedTemplate(t, "sglang-v0.5.10")
+	tmpl := realEmbeddedTemplate(t, "sglang-v0.5.10-p2")
 
 	data := DeploymentManifestVariables{
 		NeutreeVersion:  "v0.1.0",
@@ -4294,8 +4294,8 @@ func TestKubernetesOrchestrator_pauseEndpoint(t *testing.T) {
 }
 
 // realEmbeddedTemplate decodes the production embedded K8s deploy template for
-// the given engine key (e.g. "vllm-v0.24.0", "llama-cpp-v0.3.7",
-// "sglang-v0.5.10"). Tests that need a representative template should use this
+// the given engine key (e.g. "vllm-v0.24.0-p2", "llama-cpp-v0.3.7-p2",
+// "sglang-v0.5.10-p2"). Tests that need a representative template should use this
 // instead of pasting an inline fixture, so future edits to the real template
 // (probe paths, label additions, etc.) propagate automatically and there is no
 // "test fixture is out of sync" failure mode.
