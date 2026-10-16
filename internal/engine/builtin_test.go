@@ -21,6 +21,17 @@ func TestGetBuiltinEngines(t *testing.T) {
 	engineNames := make(map[string]bool)
 	for _, e := range engines {
 		engineNames[e.Metadata.Name] = true
+		for _, v := range e.Spec.Versions {
+			key := e.Metadata.Name + "-" + v.Version
+			schema, err := GetEngineSchema(key)
+			if err != nil || !reflect.DeepEqual(schema, v.ValuesSchema) {
+				t.Errorf("%s schema mismatch: %v", key, err)
+			}
+			template, err := GetDeployTemplate(key)
+			if err != nil || template != v.DeployTemplate["kubernetes"]["default"] {
+				t.Errorf("%s template mismatch: %v", key, err)
+			}
+		}
 	}
 
 	if !engineNames["vllm"] {
@@ -45,53 +56,16 @@ func TestGetBuiltinEngines(t *testing.T) {
 		gotVersions := make([]string, 0, len(e.Spec.Versions))
 		for _, v := range e.Spec.Versions {
 			gotVersions = append(gotVersions, v.Version)
-			switch v.Version {
-			case "v0.17.1", "v0.24.0", "v0.31.0":
-				img, ok := v.Images["nvidia_gpu"]
-				if !ok {
-					t.Errorf("vllm %s missing nvidia_gpu image", v.Version)
-					continue
-				}
-				if img == nil {
-					t.Errorf("vllm %s nvidia_gpu image config is nil", v.Version)
-					continue
-				}
-				if v.Version == "v0.24.0" {
-					if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
-						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
-					}
-					if got, want := img.Tag, "v0.24.0-neutree1-ray2.53.0"; got != want {
-						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
-					}
-				}
-				if v.Version == "v0.31.0" {
-					if got, want := img.ImageName, "neutree/engine-vllm"; got != want {
-						t.Errorf("vllm %s nvidia_gpu image name mismatch: got %q, want %q", v.Version, got, want)
-					}
-					if got, want := img.Tag, "v0.31.0-ray2.53.0"; got != want {
-						t.Errorf("vllm %s nvidia_gpu tag mismatch: got %q, want %q", v.Version, got, want)
-					}
-				}
-				if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
-					t.Errorf("vllm %s missing kubernetes deploy template", v.Version)
-				} else if _, ok := k8sTemplates["default"]; !ok {
-					t.Errorf("vllm %s missing default kubernetes deploy template", v.Version)
-				}
+			img := v.Images["nvidia_gpu"]
+			if img == nil || img.ImageName != "neutree/engine-vllm" || img.Tag != v.Version+"-ray2.53.0" {
+				t.Errorf("vllm %s unexpected nvidia_gpu image: %+v", v.Version, img)
 			}
 		}
 
 		sort.Strings(gotVersions)
-		if want := []string{"v0.17.1", "v0.24.0", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
+		if want := []string{"v0.17.1-p2", "v0.24.0-p2", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
 			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
 		}
-	}
-
-	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
-		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
-	}
-
-	if _, err := GetDeployTemplate("vllm-v0.31.0"); err != nil {
-		t.Fatalf("DeployTemplates lookup for vLLM v0.31.0 failed: %v", err)
 	}
 
 	for _, retiredVersion := range []string{"v0.8.5", "v0.11.2"} {
@@ -103,7 +77,27 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 	}
 
-	// Verify sglang v0.5.10 has nvidia_gpu image, k8s default template, and supported tasks (rerank excluded).
+	for _, e := range engines {
+		if e.Metadata.Name != "llama-cpp" {
+			continue
+		}
+		if len(e.Spec.Versions) != 1 {
+			t.Errorf("llama-cpp: expected one version, got %d", len(e.Spec.Versions))
+		}
+		for _, v := range e.Spec.Versions {
+			if v.Version != "v0.3.7-p2" {
+				t.Errorf("llama-cpp version: got %q, want v0.3.7-p2", v.Version)
+			}
+			for _, accelerator := range []string{"cpu", v1.SSHImageKeyPrefix + "cpu"} {
+				img := v.Images[accelerator]
+				if img == nil || img.ImageName != "neutree/engine-llama-cpp" || img.Tag != v.Version+"-ray2.53.0" {
+					t.Errorf("llama-cpp %s unexpected %s image: %+v", v.Version, accelerator, img)
+				}
+			}
+		}
+	}
+
+	// Verify SGLang images and supported tasks (rerank excluded).
 	for _, e := range engines {
 		if e.Metadata.Name != "sglang" {
 			continue
@@ -114,8 +108,8 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 
 		v := e.Spec.Versions[0]
-		if v.Version != "v0.5.10" {
-			t.Errorf("sglang version: got %q, want %q", v.Version, "v0.5.10")
+		if v.Version != "v0.5.10-p2" {
+			t.Errorf("sglang version: got %q, want %q", v.Version, "v0.5.10-p2")
 		}
 		nvidiaImg, ok := v.Images["nvidia_gpu"]
 		if !ok {
@@ -133,11 +127,6 @@ func TestGetBuiltinEngines(t *testing.T) {
 		if _, ok := v.Images["amd_gpu"]; ok {
 			t.Errorf("sglang %s should not register amd_gpu (no AMD test cluster available)", v.Version)
 		}
-		if k8sTemplates, ok := v.DeployTemplate["kubernetes"]; !ok {
-			t.Errorf("sglang %s missing kubernetes deploy template", v.Version)
-		} else if _, ok := k8sTemplates["default"]; !ok {
-			t.Errorf("sglang %s missing default kubernetes deploy template", v.Version)
-		}
 
 		wantTasks := map[string]bool{"text-generation": true, "text-embedding": true}
 		for _, task := range e.Spec.SupportedTasks {
@@ -152,5 +141,18 @@ func TestGetBuiltinEngines(t *testing.T) {
 				t.Errorf("sglang must not advertise text-rerank")
 			}
 		}
+	}
+}
+
+func TestUnpatchedEngineMappingsRemoved(t *testing.T) {
+	for _, key := range []string{"llama-cpp-v0.3.7", "sglang-v0.5.10", "vllm-v0.17.1", "vllm-v0.24.0"} {
+		t.Run(key, func(t *testing.T) {
+			if _, err := GetEngineSchema(key); err == nil {
+				t.Error("unpatched schema must not be registered")
+			}
+			if _, err := GetDeployTemplate(key); err == nil {
+				t.Error("unpatched template must not be registered")
+			}
+		})
 	}
 }
