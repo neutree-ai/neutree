@@ -43,19 +43,19 @@ cluster:
 
 # Per-engine configuration. Default engine for tests that don't pass an
 # explicit withEngine() option is "vllm". Tests that target a specific engine
-# (e.g. SGLang K8s suite uses withEngine("sglang", "v0.5.10")) pull from the
+# (e.g. SGLang K8s suite uses withEngine("sglang", "v0.5.10-p2")) pull from the
 # corresponding entry below. Empty / missing entries fall back to baked-in
 # defaults inside profile.go.
 engines:
   vllm:
-    version: v0.24.0
-    old_version: v0.17.1           # multi-version isolation and upgrade tests (vLLM only)
+    version: v0.24.0-p2
+    old_version: v0.17.1-p2           # multi-version isolation and upgrade tests (vLLM only)
     engine_args: "dtype=half,gpu_memory_utilization=0.85"
   sglang:
-    version: v0.5.10
+    version: v0.5.10-p2
     engine_args: ""                # empty → SGLang uses its built-in defaults
   llama-cpp:
-    version: v0.3.7
+    version: v0.3.7-p2
     engine_args: ""
 
 model:
