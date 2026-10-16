@@ -73,14 +73,10 @@ func GetSGLangV0_5_10EngineSchema() (map[string]interface{}, error) {
 
 // EngineSchemas contains all available engine schemas
 var EngineSchemas = map[string]func() (map[string]interface{}, error){
-	"llama-cpp-v0.3.7":    GetLlamaCppDefaultEngineSchema,
 	"llama-cpp-v0.3.7-p2": GetLlamaCppDefaultEngineSchema,
-	"vllm-v0.17.1":        GetVLLMV0_17_1EngineSchema,
 	"vllm-v0.17.1-p2":     GetVLLMV0_17_1EngineSchema,
-	"vllm-v0.24.0":        GetVLLMV0_24_0EngineSchema,
 	"vllm-v0.24.0-p2":     GetVLLMV0_24_0EngineSchema,
 	"vllm-v0.31.0":        GetVLLMV0_31_0EngineSchema,
-	"sglang-v0.5.10":      GetSGLangV0_5_10EngineSchema,
 	"sglang-v0.5.10-p2":   GetSGLangV0_5_10EngineSchema,
 }
 

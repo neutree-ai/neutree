@@ -86,7 +86,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 	}
 
-	if _, err := GetDeployTemplate("vllm-v0.24.0"); err != nil {
+	if _, err := GetDeployTemplate("vllm-v0.24.0-p2"); err != nil {
 		t.Fatalf("DeployTemplates lookup for vLLM v0.24.0 failed: %v", err)
 	}
 
@@ -195,6 +195,19 @@ func TestPatchedBuiltinEngines(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("missing builtin %s %s", tc.name, tc.version)
+			}
+		})
+	}
+}
+
+func TestUnpatchedEngineMappingsRemoved(t *testing.T) {
+	for _, key := range []string{"llama-cpp-v0.3.7", "sglang-v0.5.10", "vllm-v0.17.1", "vllm-v0.24.0"} {
+		t.Run(key, func(t *testing.T) {
+			if _, err := GetEngineSchema(key); err == nil {
+				t.Error("unpatched schema must not be registered")
+			}
+			if _, err := GetDeployTemplate(key); err == nil {
+				t.Error("unpatched template must not be registered")
 			}
 		})
 	}
