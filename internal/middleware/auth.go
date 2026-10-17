@@ -29,6 +29,16 @@ type Dependencies struct {
 // closed either way; the distinction only decides the status code the caller sees.
 var errAPIKeyStateUnknown = errors.New("failed to verify API key")
 
+// errSessionStateUnknown marks a failure to determine whether the session of a
+// user token still stands. Like errAPIKeyStateUnknown it fails closed with 500,
+// not 401: a client that sees 401 drops its session, which an outage of the
+// session check should not cause.
+var errSessionStateUnknown = errors.New("failed to verify session")
+
+// errSessionEnded refuses a user token whose session was ended (logout, or the
+// user deactivated) or whose user is banned or deleted.
+var errSessionEnded = errors.New("session has ended")
+
 // AuthConfig holds the configuration for JWT authentication
 type AuthConfig struct {
 	JwtSecret string
@@ -38,6 +48,12 @@ type AuthConfig struct {
 type Claims struct {
 	UserID string `json:"sub"`
 	Email  string `json:"email,omitempty"`
+	// SessionID is the GoTrue session the token belongs to. GoTrue puts it in
+	// every access token it issues; tokens minted with the JWT secret (the
+	// service_role token) have none.
+	SessionID string `json:"session_id,omitempty"`
+	// AppMetadata is the user's GoTrue app_metadata, which only admins can write.
+	AppMetadata map[string]any `json:"app_metadata,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -54,6 +70,8 @@ type SelfContainedPayload struct {
 }
 
 func Auth(deps Dependencies) gin.HandlerFunc {
+	sessions := newSessionCache(sessionCacheTTL, time.Now)
+
 	return func(c *gin.Context) {
 		// Extract token from Authorization header
 		authHeader := c.GetHeader("Authorization")
@@ -72,7 +90,7 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 
 		switch {
 		case strings.HasPrefix(authHeader, "Bearer "):
-			parsedInfo, err = parseBearerToken(deps.Config, authHeader)
+			parsedInfo, err = parseBearerToken(deps.Config, authHeader, deps.Storage, sessions)
 			is_api_key = false
 		case strings.HasPrefix(authHeader, "sk_"):
 			parsedInfo, err = parseApiKey(authHeader, deps.Config, deps.Storage)
@@ -88,6 +106,16 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 				klog.Errorf("Failed to verify API key: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": errAPIKeyStateUnknown.Error(),
+				})
+				c.Abort()
+
+				return
+			}
+
+			if errors.Is(err, errSessionStateUnknown) {
+				klog.Errorf("Failed to verify session: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": errSessionStateUnknown.Error(),
 				})
 				c.Abort()
 
@@ -124,7 +152,23 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
-func parseBearerToken(config AuthConfig, authHeader string) (*ParsedInfo, error) {
+func parseBearerToken(config AuthConfig, authHeader string, store storage.Storage, sessions *sessionCache) (*ParsedInfo, error) {
+	claims, err := ParseBearerClaims(config, authHeader)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := verifySessionActive(store, sessions, claims); err != nil {
+		return nil, err
+	}
+
+	return &ParsedInfo{
+		UserID: claims.UserID,
+	}, nil
+}
+
+// ParseBearerClaims validates a "Bearer <GoTrue JWT>" header and returns its claims.
+func ParseBearerClaims(config AuthConfig, authHeader string) (*Claims, error) {
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	if tokenString == "" {
@@ -151,9 +195,7 @@ func parseBearerToken(config AuthConfig, authHeader string) (*ParsedInfo, error)
 		return nil, errors.New("invalid token claims")
 	}
 
-	return &ParsedInfo{
-		UserID: claims.UserID,
-	}, nil
+	return claims, nil
 }
 
 func parseApiKey(authHeader string, config AuthConfig, store storage.Storage) (*ParsedInfo, error) {

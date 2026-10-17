@@ -205,6 +205,19 @@ func (c *UserProfileController) syncSpecToGoTrue(obj *v1.UserProfile) error {
 		return errors.Wrapf(err, "failed to parse user ID %s as UUID", obj.ID)
 	}
 
+	// An external identity source owns the GoTrue email of its users: the
+	// profile keeps their directory email, while GoTrue keeps the placeholder
+	// their sessions are issued for.
+	user, err := c.authClient.AdminGetUser(types.AdminGetUserRequest{UserID: userUUID})
+	if err != nil {
+		return errors.Wrapf(err, "failed to get user %s from auth backend", obj.ID)
+	}
+
+	if source := auth.IdentitySource(user.AppMetadata); auth.ManagesField(source, "email") {
+		klog.V(4).Infof("Skipping email sync for user %s, managed by identity source %s", obj.ID, source)
+		return nil
+	}
+
 	_, err = c.authClient.AdminUpdateUser(types.AdminUpdateUserRequest{
 		UserID:       userUUID,
 		Email:        obj.Spec.Email,
