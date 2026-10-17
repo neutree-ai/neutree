@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/client"
+	"github.com/neutree-ai/neutree/pkg/tracecsv"
 )
 
 // recordWriter streams records of type T to an output in a specific format.
@@ -116,41 +117,9 @@ func (cw *csvWriter[T]) Close() error {
 // traceWriter is the access-log record writer.
 type traceWriter = recordWriter[client.AITrace]
 
-// csvHeader lists the trace columns in the order traceCSVRow emits them.
-var csvHeader = []string{
-	"request_id", "time", "workspace", "endpoint_type", "endpoint_name",
-	"api_key_id", "request_uri", "request_model", "response_model",
-	"response_status", "prompt_tokens", "completion_tokens", "total_tokens",
-	"finish_reason", "stream", "user_agent", "duration_ms",
-	"request_body", "response_body", "body_truncated", "body_incomplete", "upstream", "upstream_model",
-}
-
-// traceCSVRow renders a trace as a CSV row. Body columns are empty unless the
-// export was run with --with-body.
-func traceCSVRow(t client.AITrace) []string {
-	return []string{
-		t.RequestID, t.Time, t.Workspace, t.EndpointType, t.EndpointName,
-		t.APIKeyID, t.RequestURI, t.RequestModel, t.ResponseModel,
-		strconv.Itoa(t.ResponseStatus),
-		intPtrStr(t.PromptTokens), intPtrStr(t.CompletionTokens), intPtrStr(t.TotalTokens),
-		t.FinishReason, strconv.FormatBool(t.Stream), t.UserAgent, intPtrStr(t.DurationMs),
-		t.RequestBody, t.ResponseBody,
-		strconv.FormatBool(t.BodyTruncated), strconv.FormatBool(t.BodyIncomplete), t.Upstream, t.UpstreamModel,
-	}
-}
-
 // newTraceWriter builds an access-log writer for the given format.
 func newTraceWriter(format string, w io.Writer) (traceWriter, error) {
-	return newRecordWriter(format, w, csvHeader, traceCSVRow)
-}
-
-// intPtrStr renders a *int as its decimal string, or "" when nil.
-func intPtrStr(p *int) string {
-	if p == nil {
-		return ""
-	}
-
-	return strconv.Itoa(*p)
+	return newRecordWriter(format, w, tracecsv.Header, tracecsv.Row)
 }
 
 // --- model-usage writer ---

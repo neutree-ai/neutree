@@ -254,6 +254,61 @@ the subchart's release context, not this parent chart's fullname.
 {{- end -}}
 
 {{/*
+Build a readable, DNS-safe ConfigMap name for one Grafana dashboard.
+The chart test enforces the Kubernetes 63-character limit and uniqueness.
+*/}}
+{{- define "neutree.grafana.dashboardConfigMapName" -}}
+{{- $filename := . -}}
+{{- $slug := $filename | trimSuffix ".json" | lower | replace "_" "-" -}}
+{{- if not (hasSuffix "-grafana-dashboard" $slug) -}}
+{{- $slug = printf "%s-grafana-dashboard" ($slug | trimSuffix "-dashboard") -}}
+{{- end -}}
+{{- $slug -}}
+{{- end -}}
+
+{{/*
+Reject the pre-NEU-818 dashboard mount instead of rendering a broken upgrade.
+When Helm reuses old values, all native replacement volumes must be supplied.
+*/}}
+{{- define "neutree.grafana.validateDashboardMounts" -}}
+{{- $legacyMountFound := false -}}
+{{- range .Values.grafana.extraConfigmapMounts }}
+{{- $configMap := default "" .configMap | toString -}}
+{{- $mountPath := default "" .mountPath | toString -}}
+{{- if or (eq (tpl $configMap $) "grafana-dashboards") (eq (tpl $mountPath $) "/var/lib/grafana/dashboards") -}}
+{{- $legacyMountFound = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $legacyMountFound -}}
+{{- fail "grafana.extraConfigmapMounts contains the removed Grafana dashboard mount; run helm upgrade with --reset-values or explicitly provide native dashboard volume values" -}}
+{{- end -}}
+
+{{- $dashboardVolumeFound := false -}}
+{{- range .Values.grafana.extraContainerVolumes }}
+{{- $name := default "" .name | toString -}}
+{{- $sources := dig "projected" "sources" (list) . -}}
+{{- if and (eq $name "grafana-dashboards") (gt (len $sources) 0) -}}
+{{- $dashboardVolumeFound = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $dashboardVolumeFound -}}
+{{- fail "grafana native dashboard volume is missing; run helm upgrade with --reset-values or provide grafana.extraContainerVolumes and grafana.extraVolumeMounts" -}}
+{{- end -}}
+
+{{- $dashboardMountFound := false -}}
+{{- range .Values.grafana.extraVolumeMounts }}
+{{- $name := default "" .name | toString -}}
+{{- $mountPath := default "" .mountPath | toString -}}
+{{- if and (eq $name "grafana-dashboards") (eq $mountPath "/var/lib/grafana/dashboards") -}}
+{{- $dashboardMountFound = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $dashboardMountFound -}}
+{{- fail "grafana native dashboard mount is missing; run helm upgrade with --reset-values or provide grafana.extraVolumeMounts" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Choose the Grafana URL exposed by the API system-info endpoint.
 Priority:
 1. system.grafana.url explicit override

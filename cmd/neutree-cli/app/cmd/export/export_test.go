@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/neutree-ai/neutree/pkg/client"
+	"github.com/neutree-ai/neutree/pkg/tracecsv"
 )
 
 // fakeLister is an in-memory traceLister. It reproduces the real endpoint's
@@ -239,7 +240,7 @@ func TestRunExportCSVToBufferNormalizesUntil(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSpace(data.String()), "\n")
 	require.Len(t, lines, 4) // header + 3 rows
-	require.Equal(t, strings.Join(csvHeader, ","), lines[0])
+	require.Equal(t, strings.Join(tracecsv.Header, ","), lines[0])
 }
 
 func TestRunExportUnsupportedFormat(t *testing.T) {
