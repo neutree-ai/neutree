@@ -58,7 +58,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVarP(&opts.file, "file", "f", "", "Path to a YAML file containing resources to delete")
-	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (only for kind+name mode; ignored for Workspace kind)")
+	cmd.Flags().StringVarP(&opts.workspace, "workspace", "w", "default", "Workspace name (only for kind+name mode; ignored for global kinds such as Workspace)")
 	cmd.Flags().BoolVar(&opts.ignoreNotFound, "ignore-not-found", false, "Treat not-found resources as successful deletes")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Force delete, skipping graceful shutdown")
 	cmd.Flags().BoolVar(&opts.wait, "wait", true, "Wait for resources to be fully deleted")
@@ -107,8 +107,8 @@ func runDeleteByName(c *client.Client, opts *deleteOptions, args []string) error
 	name := args[1]
 	workspace := opts.workspace
 
-	// Workspace kind does not belong to a workspace; blank it for display and API calls.
-	if kind == "Workspace" {
+	// Global kinds do not belong to a workspace; blank it for display and API calls.
+	if client.IsGlobalKind(kind) {
 		workspace = ""
 	}
 

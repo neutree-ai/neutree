@@ -7,8 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
+	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 type closeNotifyRecorder struct {
@@ -63,6 +65,60 @@ func TestRegisterCredentialsRoutesOmitsExternalEndpoints(t *testing.T) {
 	assert.Contains(t, paths, "/api/v1/credentials/clusters")
 	assert.Contains(t, paths, "/api/v1/credentials/image_registries")
 	assert.Contains(t, paths, "/api/v1/credentials/model_registries")
+	assert.Contains(t, paths, "/api/v1/credentials/log_sinks")
 	assert.NotContains(t, paths, "/api/v1/credentials/external_endpoints",
 		"external endpoint credentials must never be exported via the credentials API")
+}
+
+func TestLogSinkCredentialsRequirePermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		hasPermission  bool
+		wantStatus     int
+		wantForwarding bool
+	}{
+		{name: "with read-credentials", hasPermission: true, wantStatus: http.StatusOK, wantForwarding: true},
+		{name: "without read-credentials", hasPermission: false, wantStatus: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var forwarded bool
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				forwarded = true
+				assert.Equal(t, "/log_sinks", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[{"spec":{"victorialogs":{"auth":{"type":"bearer","token":"secret"}}}}]`))
+			}))
+			defer upstream.Close()
+
+			s := storageMocks.NewMockStorage(t)
+			s.EXPECT().
+				CallDatabaseFunction("has_permission", mock.MatchedBy(func(params map[string]interface{}) bool {
+					return params["required_permission"] == "log_sink:read-credentials" && params["workspace"] == nil
+				}), mock.Anything).
+				Run(func(_ string, _ map[string]interface{}, result interface{}) {
+					*result.(*bool) = tt.hasPermission
+				}).
+				Return(nil)
+
+			router := gin.New()
+			setUser := func(c *gin.Context) { c.Set("user_id", "u1") }
+			RegisterCredentialsRoutes(router.Group("/api/v1"), []gin.HandlerFunc{setUser}, &Dependencies{
+				Storage:          s,
+				StorageAccessURL: upstream.URL,
+			})
+
+			w := &closeNotifyRecorder{ResponseRecorder: httptest.NewRecorder()}
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/credentials/log_sinks?metadata-%3E%3Ename=eq.vl", nil))
+
+			assert.Equal(t, tt.wantStatus, w.Code)
+			assert.Equal(t, tt.wantForwarding, forwarded)
+			if tt.wantForwarding {
+				assert.Contains(t, w.Body.String(), `"token":"secret"`)
+			}
+		})
+	}
 }

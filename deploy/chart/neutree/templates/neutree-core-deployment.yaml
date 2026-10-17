@@ -41,6 +41,12 @@ spec:
             {{- end }}
             - --kubernetes-metrics-collect-configmap=vmagent-scrape-config
             - --kubernetes-collect-config-namespace={{ .Release.Namespace}}
+            - --vector-logsinks-configmap={{ include "neutree.fullname" . }}-vector-logsinks
+            - --vector-logsink-secret={{ include "neutree.fullname" . }}-vector-logsink-secrets
+            - --vector-metrics-url=http://{{ include "neutree.fullname" . }}-vector:9598/metrics
+            {{- if not (include "neutree.aiTraceStoreUrl" .) }}
+            - --vector-trace-pipeline-enabled=false
+            {{- end }}
             - --gateway-type=kong
             - --gateway-proxy-url={{ include "neutree.kong.proxyUrl" . }}
             - --gateway-admin-url=http://{{ include "neutree.fullname" . }}-kong-admin:8001
