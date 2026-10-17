@@ -16,15 +16,17 @@ import (
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type Dependencies struct {
-	Storage          storage.Storage
-	StorageAccessURL string
-	AuthEndpoint     string
-	AuthConfig       middleware.AuthConfig
-	ImageService     registry.ImageService
+	ClusterCacheProviders *clustercache.Providers
+	Storage               storage.Storage
+	StorageAccessURL      string
+	AuthEndpoint          string
+	AuthConfig            middleware.AuthConfig
+	ImageService          registry.ImageService
 }
 
 func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
