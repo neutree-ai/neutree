@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/neutree-ai/neutree/pkg/client"
+	"github.com/neutree-ai/neutree/pkg/tracecsv"
 )
 
 func intPtr(n int) *int { return &n }
@@ -72,7 +73,7 @@ func TestCSVWriterHeaderAndPointerColumns(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	require.Len(t, lines, 2)
-	require.Equal(t, strings.Join(csvHeader, ","), lines[0])
+	require.Equal(t, strings.Join(tracecsv.Header, ","), lines[0])
 	require.Contains(t, lines[1], "a,")
 	require.Contains(t, lines[1], ",42,") // total_tokens rendered
 }

@@ -60,16 +60,16 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 			Spec: &v1.EngineSpec{
 				Versions: []*v1.EngineVersion{
 					{
-						Version:      "v0.3.7",
+						Version:      "v0.3.7-p2",
 						ValuesSchema: llamaCppDefaultEngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"cpu": {
-								ImageName: "neutree/llama-cpp-python",
-								Tag:       "v0.3.7",
+								ImageName: "neutree/engine-llama-cpp",
+								Tag:       "v0.3.7-p2-ray2.53.0",
 							},
 							v1.SSHImageKeyPrefix + "cpu": {
 								ImageName: "neutree/engine-llama-cpp",
-								Tag:       "v0.3.7-ray2.53.0",
+								Tag:       "v0.3.7-p2-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
@@ -92,12 +92,12 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 			Spec: &v1.EngineSpec{
 				Versions: []*v1.EngineVersion{
 					{
-						Version:      "v0.17.1",
+						Version:      "v0.17.1-p2",
 						ValuesSchema: vllmV0_17_1EngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
 								ImageName: "neutree/engine-vllm",
-								Tag:       "v0.17.1-ray2.53.0",
+								Tag:       "v0.17.1-p2-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
@@ -108,12 +108,12 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 						Capabilities: builtinCapabilities(v1.PlaygroundModeChat, v1.PlaygroundModeEmbedding, v1.PlaygroundModeRerank),
 					},
 					{
-						Version:      "v0.24.0",
+						Version:      "v0.24.0-p2",
 						ValuesSchema: vllmV0_24_0EngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
 								ImageName: "neutree/engine-vllm",
-								Tag:       "v0.24.0-neutree1-ray2.53.0",
+								Tag:       "v0.24.0-p2-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{
@@ -152,12 +152,12 @@ func GetBuiltinEngines() ([]*v1.Engine, error) {
 			Spec: &v1.EngineSpec{
 				Versions: []*v1.EngineVersion{
 					{
-						Version:      "v0.5.10",
+						Version:      "v0.5.10-p2",
 						ValuesSchema: sglangV0_5_10EngineSchema,
 						Images: map[string]*v1.EngineImage{
 							"nvidia_gpu": {
 								ImageName: "neutree/engine-sglang",
-								Tag:       "v0.5.10-ray2.53.0",
+								Tag:       "v0.5.10-p2-ray2.53.0",
 							},
 						},
 						DeployTemplate: map[string]map[string]string{

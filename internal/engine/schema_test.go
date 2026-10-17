@@ -48,7 +48,7 @@ func TestGetVLLMV0_24_0EngineSchema(t *testing.T) {
 		}
 	}
 
-	if _, err := GetEngineSchema("vllm-v0.24.0"); err != nil {
+	if _, err := GetEngineSchema("vllm-v0.24.0-p2"); err != nil {
 		t.Fatalf("EngineSchemas lookup for vLLM v0.24.0 failed: %v", err)
 	}
 }

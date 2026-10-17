@@ -1,10 +1,15 @@
 {{- if .Values.grafana.enabled }}
+{{- include "neutree.grafana.validateDashboardMounts" . }}
+{{- range $path, $_ := .Files.Glob "grafana-dashboards/*" }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: grafana-dashboards
+  name: {{ include "neutree.grafana.dashboardConfigMapName" (base $path) }}
   labels:
-    {{- include "neutree.labels" . | nindent 4 }}
+    {{- include "neutree.labels" $ | nindent 4 }}
 data:
-{{ (.Files.Glob "grafana-dashboards/*").AsConfig | indent 2 }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
 {{- end }}

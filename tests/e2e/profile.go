@@ -11,8 +11,8 @@ import (
 
 const (
 	defaultModelVersion           = "latest"
-	maintainedVLLMVersionPrevious = "v0.17.1"
-	maintainedVLLMVersionCurrent  = "v0.24.0"
+	maintainedVLLMVersionPrevious = "v0.17.1-p2"
+	maintainedVLLMVersionCurrent  = "v0.24.0-p2"
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).
@@ -360,9 +360,9 @@ func profileEngineVersionFor(name string) string {
 	case "vllm":
 		return maintainedVLLMVersionCurrent
 	case "sglang":
-		return "v0.5.10"
+		return "v0.5.10-p2"
 	case "llama-cpp":
-		return "v0.3.7"
+		return "v0.3.7-p2"
 	}
 
 	return ""
