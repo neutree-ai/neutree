@@ -8,6 +8,8 @@ metadata:
     {{ include "neutree.labels" . | nindent 4 }}
 data:
   vector.yml: |-
+    # Log sink disk buffers live on the data emptyDir, not the container filesystem.
+    data_dir: /vector-data-dir
     secret:
       jwt_secret:
         type: directory
@@ -17,6 +19,8 @@ data:
         type: http_server
         address: 0.0.0.0:30122
         encode: json
+      vector_metrics:
+        type: internal_metrics
     transforms:
       parse_kong_logs:
         type: remap
@@ -223,6 +227,11 @@ data:
           }
       {{- end }}
     sinks:
+      vector_metrics_exporter:
+        type: prometheus_exporter
+        inputs:
+          - vector_metrics
+        address: 0.0.0.0:9598
       postgrest_rpc:
         type: http
         inputs:
@@ -274,6 +283,10 @@ spec:
       port: 30122
       protocol: TCP
       targetPort: 30122
+    - name: metrics
+      port: 9598
+      protocol: TCP
+      targetPort: 9598
   selector:
     app.kubernetes.io/component: neutree-vector
   type: ClusterIP
@@ -332,6 +345,9 @@ spec:
             - name: aggregator-log
               containerPort: 30122
               protocol: TCP
+            - name: metrics
+              containerPort: 9598
+              protocol: TCP
           {{- with .Values.vector.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -344,14 +360,27 @@ spec:
             - name: config
               mountPath: "/etc/vector/"
               readOnly: true
+            - name: logsink-secrets
+              mountPath: "/etc/vector/logsink-secrets/"
+              readOnly: true
       terminationGracePeriodSeconds: 60
       volumes:
         - name: jwt-secret
           emptyDir: {}
         - name: data
           emptyDir: {}
+        - name: logsink-secrets
+          secret:
+            secretName: {{ include "neutree.fullname" . }}-vector-logsink-secrets
+            optional: true
         - name: config
           projected:
             sources:
               - configMap:
                   name: {{ include "neutree.fullname" . }}-vector
+              - configMap:
+                  name: {{ include "neutree.fullname" . }}-vector-logsinks
+                  optional: true
+                  items:
+                    - key: logsinks.yaml
+                      path: logsinks.yaml

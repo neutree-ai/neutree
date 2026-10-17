@@ -386,3 +386,26 @@ func builtinModelRegistryConfig(opts *ControllerOptions) model_registry.BuiltinC
 
 	return opts.config.ModelRegistryConfig.Builtin
 }
+
+// NewLogSinkControllerFactory builds the log sink controller, which runs its
+// own aggregate loop rather than the per-object base controller.
+func NewLogSinkControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		cfg := opts.config.LogSinkConfig
+		if cfg == nil {
+			return nil, errors.New("log sink config is required")
+		}
+
+		ctrl, err := controllers.NewLogSinkController(&controllers.LogSinkControllerOption{
+			Storage:              opts.config.Storage,
+			Syncer:               cfg.Syncer,
+			MetricsURL:           cfg.MetricsURL,
+			TracePipelineEnabled: cfg.TracePipelineEnabled,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create log sink controller")
+		}
+
+		return ctrl, nil
+	}
+}
