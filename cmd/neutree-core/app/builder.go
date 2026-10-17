@@ -48,6 +48,7 @@ func NewBuilder() *Builder {
 		"static-node":         NewStaticNodeControllerFactory(),
 		"user-profile":        NewUserProfileControllerFactory(),
 		"external-endpoint":   NewExternalEndpointControllerFactory(),
+		"log-sink":            NewLogSinkControllerFactory(),
 	}
 
 	for name, factory := range defaultControllers {

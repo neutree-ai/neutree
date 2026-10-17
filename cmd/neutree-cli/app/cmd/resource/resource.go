@@ -18,6 +18,7 @@ var KindPriority = map[string]int{
 	"Workspace":        0,
 	"Engine":           1,
 	"ImageRegistry":    1,
+	"LogSink":          1,
 	"ModelRegistry":    1,
 	"Role":             1,
 	"OEMConfig":        1,

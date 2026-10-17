@@ -131,6 +131,56 @@ func (s *postgrestStorage) GetImageRegistry(id string) (*v1.ImageRegistry, error
 	return &response[0], nil
 }
 
+func (s *postgrestStorage) ListLogSink(option ListOption) ([]v1.LogSink, error) {
+	var response []v1.LogSink
+	err := s.genericList(LOG_SINK_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) CreateLogSink(data *v1.LogSink) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Insert(data, true, "", "", "").Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) DeleteLogSink(id string) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Delete("", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) UpdateLogSink(id string, data *v1.LogSink) error {
+	if _, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *postgrestStorage) GetLogSink(id string) (*v1.LogSink, error) {
+	var response []v1.LogSink
+
+	responseContent, _, err := s.postgrestClient.From(LOG_SINK_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
 func (s *postgrestStorage) ListModelRegistry(option ListOption) ([]v1.ModelRegistry, error) {
 	var response []v1.ModelRegistry
 	err := s.genericList(MODEL_REGISTRY_TABLE, &response, option)
