@@ -355,3 +355,88 @@ func TestLogSinkValidation(t *testing.T) {
 		}
 	})
 }
+
+func TestLogSinkNormalization(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	run := func(t *testing.T, vl string, update string) (auth sql.NullString, enabled sql.NullBool, workspace sql.NullString, err error) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if err := insertLogSink(ctx, tx, "log-sink-normalize", "victorialogs", vl, ""); err != nil {
+			t.Fatalf("insert failed: %v", err)
+		}
+
+		if update != "" {
+			if _, err = tx.ExecContext(ctx, `UPDATE api.log_sinks SET `+update+` WHERE (metadata).name = 'log-sink-normalize'`); err != nil {
+				return auth, enabled, workspace, err
+			}
+		}
+
+		err = tx.QueryRowContext(ctx, `
+			SELECT (spec).victorialogs->'auth', (spec).enabled, (metadata).workspace
+			FROM api.log_sinks WHERE (metadata).name = 'log-sink-normalize'
+		`).Scan(&auth, &enabled, &workspace)
+
+		return auth, enabled, workspace, err
+	}
+
+	t.Run("enabled defaults to true and workspace is cleared", func(t *testing.T) {
+		_, enabled, workspace, err := run(t, `{"url": "http://vl"}`, `metadata.workspace = 'default'`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !enabled.Valid || !enabled.Bool {
+			t.Fatalf("expected enabled=true, got %+v", enabled)
+		}
+		if workspace.Valid {
+			t.Fatalf("expected no workspace, got %q", workspace.String)
+		}
+	})
+
+	t.Run("explicit enabled=false is kept", func(t *testing.T) {
+		_, enabled, _, err := run(t, `{"url": "http://vl"}`, `spec.enabled = false`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !enabled.Valid || enabled.Bool {
+			t.Fatalf("expected enabled=false, got %+v", enabled)
+		}
+	})
+
+	t.Run("unused secrets are dropped", func(t *testing.T) {
+		auth, _, _, err := run(t, `{"url": "http://vl", "auth": {"type": "basic", "username": "u", "password": "p"}}`,
+			`spec.victorialogs = '{"url": "http://vl", "auth": {"type": "bearer", "token": "t", "username": "u", "password": "p"}}'::jsonb`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if auth.String != `{"type": "bearer", "token": "t"}` {
+			t.Fatalf("expected only the bearer token, got %s", auth.String)
+		}
+	})
+
+	t.Run("backfilled secrets without type remove auth", func(t *testing.T) {
+		auth, _, _, err := run(t, validLogSinkVictoriaLogs,
+			`spec.victorialogs = '{"url": "http://vl", "auth": {"token": "secret"}}'::jsonb`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if auth.Valid {
+			t.Fatalf("expected auth removed, got %s", auth.String)
+		}
+	})
+
+	t.Run("new secret without type is still rejected", func(t *testing.T) {
+		_, _, _, err := run(t, validLogSinkVictoriaLogs,
+			`spec.victorialogs = '{"url": "http://vl", "auth": {"token": "other"}}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10246"`) {
+			t.Fatalf("expected error code 10246, got: %v", err)
+		}
+	})
+}
