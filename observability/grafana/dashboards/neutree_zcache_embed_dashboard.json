@@ -1,0 +1,1202 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 9999,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "html",
+        "content": "<style>\n/* ============================================================\n   Grafana Custom Theme\n   ============================================================ */\n\n/* ---------- Typography ---------- */\nbody,\nbutton,\ninput,\nselect,\ntextarea,\ntable,\n[class*=\"panel-title\"],\n[class*=\"panel-content\"] {\n  font-family: Inter, \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif !important;\n}\n\n/* ---------- Dark Mode ---------- */\nbody[class*=\"theme-dark\"],\nbody:not([class*=\"theme-light\"]) {\n  --ui-bg: #08111f;\n  --ui-card: #0f1d2a;\n  --ui-border: rgba(198, 219, 234, 0.14);\n  --ui-input: #20324b;\n  --ui-primary: #268dff;\n  --ui-fg: #e6edf7;\n  --ui-muted-fg: rgba(182, 199, 224, 0.58);\n  --ui-destructive: #f0685f;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(198, 219, 234, 0.04);\n  --ui-card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 20px 0 rgba(2, 7, 12, 0.42);\n  --ui-select-fill: #0f1d2a;\n  --ui-select-border: rgba(198, 219, 234, 0.2);\n  --ui-select-hover-border: rgba(173, 192, 224, 0.42);\n  --ui-select-outstanding: #268dff;\n  --ui-select-hover-fill: rgba(158, 179, 214, 0.18);\n  --ui-select-selected-fill: rgba(38, 141, 255, 0.06);\n  --ui-select-focus-ring: 0 0 0 4px rgba(38, 141, 255, 0.18);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.32);\n  --ui-menu-fill: #0f1d2a;\n  --ui-menu-border: rgba(198, 219, 234, 0.14);\n  --ui-menu-shadow: 0px 18px 42px 0px rgba(0, 0, 0, 0.48), 0px 0px 0px 1px rgba(173, 192, 224, 0.12);\n  --ui-select-text: #e6edf7;\n  --ui-select-text-strong: #f6f9fe;\n}\n\n/* ---------- Light Mode ---------- */\nbody[class*=\"theme-light\"] {\n  --ui-bg: #edf0f7;\n  --ui-card: #ffffff;\n  --ui-border: rgba(12, 40, 73, 0.12);\n  --ui-input: #edf1f4;\n  --ui-primary: #0080ff;\n  --ui-fg: #00122e;\n  --ui-muted-fg: rgba(44, 56, 82, 0.6);\n  --ui-destructive: #f0483e;\n  --ui-radius: 2px;\n  --ui-radius-button: 6px;\n  --ui-radius-input: 2px;\n  --ui-radius-menu: 2px;\n  --ui-radius-menu-item: 4px;\n  --ui-radius-panel: 10px;\n  --ui-radius-select: 6px;\n  --ui-table-hover: rgba(36, 41, 46, 0.04);\n  --ui-card-shadow: 0 4px 14px 0 rgba(12, 40, 73, 0.06);\n  --ui-select-fill: #ffffff;\n  --ui-select-border: rgba(12, 40, 73, 0.24);\n  --ui-select-hover-border: rgba(107, 128, 167, 0.6);\n  --ui-select-outstanding: #0080ff;\n  --ui-select-hover-fill: rgba(211, 218, 235, 0.6);\n  --ui-select-selected-fill: rgba(0, 136, 255, 0.04);\n  --ui-select-focus-ring: 0 0 0 4px rgba(0, 136, 255, 0.16);\n  --ui-select-shadow: 0px 1px 2px -1px rgba(44, 56, 82, 0.18);\n  --ui-menu-fill: #ffffff;\n  --ui-menu-border: rgba(211, 218, 235, 0.6);\n  --ui-menu-shadow: 0px 12px 40px 0px rgba(45, 58, 86, 0.3), 0px 0px 10px 0px rgba(107, 125, 153, 0.18);\n  --ui-select-text: #00122e;\n  --ui-select-text-strong: #1d326c;\n}\n\n/* ---------- Global Background ---------- */\nbody,\n.main-view,\n[class*=\"page-wrapper\"]>div>div:first-child {\n  background-color: var(--ui-bg) !important;\n}\n\n/* ---------- Panel Container ---------- */\nsection[class*=\"panel-container\"]:not([class*=\"transparent\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-panel) !important;\n  background-clip: padding-box !important;\n  overflow: hidden !important;\n  box-shadow: var(--ui-card-shadow) !important;\n}\n\n/* ---------- Panel Title ---------- */\n[class*=\"panel-title\"] {\n  color: var(--ui-muted-fg) !important;\n  font-size: 13px !important;\n  font-weight: 500 !important;\n}\n\n/* ---------- Padding ---------- */\n[data-testid=\"data-testid dashboard controls\"] {\n  padding: 4px 0 8px 0 !important;\n}\n\n[class*=\"-canvas-wrapper-old\"] [class*=\"-body\"] {\n  padding: 0 !important;\n  margin-top: -32px !important;\n}\n\n/* ---------- Dashboard Variable Controls ---------- */\n[class*=\"submenu-controls\"],\n[class*=\"SubMenu\"] {\n  background-color: var(--ui-bg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n  z-index: 10 !important;\n  position: relative !important;\n  padding: 8px 8px 8px 16px !important;\n}\n\n/* Variable Container */\n[data-testid=\"data-testid template variable\"] {\n  display: flex !important;\n  align-items: center !important;\n  gap: 0 !important;\n}\n\n/* Variable Label */\n[data-testid=\"data-testid template variable\"]>label {\n  background-color: transparent !important;\n  color: var(--ui-muted-fg) !important;\n  border: 0 !important;\n  border-radius: 0 !important;\n  font-size: 13px !important;\n  padding: 0 8px 0 0 !important;\n  line-height: 1 !important;\n  white-space: nowrap !important;\n}\n\n/* Variable Dropdown - Outer Wrapper */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]:focus-within {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n/* Variable Dropdown - Inner Container */\n[data-testid=\"data-testid template variable\"] [class*=\"-input-wrapper\"]>div:not([class*=\"input-suffix\"]):not([class*=\"a11yText\"]) {\n  background-color: transparent !important;\n  border: none !important;\n  border-radius: inherit !important;\n}\n\n/* Variable Value Container */\n[data-testid=\"data-testid template variable\"] [class*=\"select-value-container\"] {\n  background-color: transparent !important;\n  padding: 0 8px !important;\n}\n\n/* Variable Selected Value */\ndiv[class*=\"singleValue\"],\ndiv[class*=\"grafana-select-value-container\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n}\n\n/* Variable Dropdown Arrow */\ndiv[class*=\"input-suffix\"] {\n  color: var(--ui-muted-fg) !important;\n  padding-right: 8px !important;\n}\n\ndiv[class*=\"input-suffix\"] svg {\n  fill: var(--ui-muted-fg) !important;\n}\n\n/* Variable Dropdown Menu (expanded) */\ndiv[class*=\"menu\"],\n[class*=\"options-group\"] {\n  z-index: 1050 !important;\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n/* Dropdown Options */\n[data-testid=\"data-testid Select option\"] {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  height: 32px !important;\n  min-height: 32px !important;\n  max-height: 32px !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n  box-sizing: border-box !important;\n  border-left: 2px solid transparent !important;\n  outline: none !important;\n  overflow: hidden !important;\n}\n\n[data-testid=\"data-testid Select option\"]:hover {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[data-testid=\"data-testid Select option\"][class*=\"focused\"] {\n  color: var(--ui-select-text-strong) !important;\n  background-color: transparent !important;\n  border-left-color: transparent !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"][aria-selected=\"true\"][class*=\"focused\"] {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] [class*=\"option-body\"] {\n  padding: 0 !important;\n  height: 20px !important;\n  min-height: 20px !important;\n  line-height: 20px !important;\n  overflow: hidden !important;\n  text-overflow: ellipsis !important;\n  white-space: nowrap !important;\n}\n\n[data-testid=\"data-testid Select option\"]::before,\n[data-testid=\"data-testid Select option\"]::after {\n  background-image: none !important;\n  background-color: transparent !important;\n}\n\n/* ---------- Legacy Select ---------- */\n.gf-form-select-box__control,\ndiv[class*=\"gf-form-select-box__control\"] {\n  background-color: var(--ui-select-fill) !important;\n  border: 1px solid var(--ui-select-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-select-shadow) !important;\n  min-height: 32px !important;\n  transition: border-color 140ms ease, box-shadow 140ms ease !important;\n}\n\n.gf-form-select-box__control:hover,\ndiv[class*=\"gf-form-select-box__control\"]:hover {\n  border-color: var(--ui-select-hover-border) !important;\n}\n\n.gf-form-select-box__control--is-focused,\ndiv[class*=\"gf-form-select-box__control--is-focused\"] {\n  border-color: var(--ui-select-outstanding) !important;\n  box-shadow: var(--ui-select-focus-ring) !important;\n  outline: none !important;\n}\n\n.gf-form-select-box__menu {\n  background-color: var(--ui-menu-fill) !important;\n  border: 1px solid var(--ui-menu-border) !important;\n  border-radius: var(--ui-radius-select) !important;\n  box-shadow: var(--ui-menu-shadow) !important;\n  padding: 4px !important;\n}\n\n.gf-form-select-box__option {\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-left: 2px solid transparent !important;\n  border-image: none !important;\n  border-radius: 0 !important;\n  padding: 6px 8px !important;\n}\n\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-focused,\ndiv.gf-form-select-box__option.gf-form-select-box__option--is-selected {\n  color: var(--ui-primary) !important;\n  background-color: var(--ui-select-selected-fill) !important;\n  border-left: 2px solid var(--ui-primary) !important;\n  border-image: none !important;\n}\n\n.gf-form-select-box__option--is-selected .fa {\n  color: var(--ui-primary) !important;\n}\n\n[data-testid=\"data-testid Select option\"] *,\n.gf-form-select-box__option * {\n  border-radius: 0 !important;\n}\n\n/* ---------- Native Grafana Menus ---------- */\n[role=\"menu\"] [role=\"menuitem\"],\n[role=\"menu\"] [role=\"menuitemradio\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"],\nbutton[data-role=\"menuitem\"] {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border: 0 !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  box-shadow: none !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  line-height: 20px !important;\n  min-height: 32px !important;\n  height: 32px !important;\n  padding: 6px 8px !important;\n  outline: none !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitemradio\"]:hover,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:hover,\nbutton[data-role=\"menuitem\"]:hover,\n[role=\"menu\"] [role=\"menuitem\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemradio\"]:focus-visible,\n[role=\"menu\"] [role=\"menuitemcheckbox\"]:focus-visible,\nbutton[data-role=\"menuitem\"]:focus-visible {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n  outline: none !important;\n}\n\n[role=\"menu\"] [role=\"menuitem\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemradio\"][aria-checked=\"true\"],\n[role=\"menu\"] [role=\"menuitemcheckbox\"][aria-checked=\"true\"],\nbutton[data-role=\"menuitem\"][aria-checked=\"true\"] {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker Menu ---------- */\n[aria-roledescription=\"Time range selection\"] li {\n  height: 32px !important;\n  line-height: 20px !important;\n}\n\n[aria-roledescription=\"Time range selection\"] label {\n  box-sizing: border-box !important;\n  background-color: transparent !important;\n  border-radius: var(--ui-radius-menu-item) !important;\n  color: var(--ui-select-text) !important;\n  font-size: 14px !important;\n  height: 32px !important;\n  line-height: 20px !important;\n  padding: 6px 8px !important;\n  transition: background-color 120ms ease, color 120ms ease !important;\n}\n\n[aria-roledescription=\"Time range selection\"] li:hover label,\n[aria-roledescription=\"Time range selection\"] li:focus-within label {\n  background-color: var(--ui-select-hover-fill) !important;\n  color: var(--ui-select-text-strong) !important;\n}\n\n[aria-roledescription=\"Time range selection\"] input:checked + label {\n  background-color: var(--ui-select-selected-fill) !important;\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Time Picker / Toolbar Buttons ---------- */\nbutton[class*=\"toolbar-button\"],\nbutton[data-testid=\"data-testid TimePicker Open Button\"],\n.button-group > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius-button) !important;\n}\n\n/* Button Group Connectors */\n.button-group {\n  gap: 0 !important;\n}\n\n.button-group > button:first-child {\n  border-radius: var(--ui-radius-button) 0 0 var(--ui-radius-button) !important;\n  border-right: none !important;\n}\n\n.button-group > button:last-child {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Refresh Picker ---------- */\n[class*=\"refresh-picker\"] > button,\n[class*=\"RefreshPicker\"] > button {\n  background-color: var(--ui-card) !important;\n  color: var(--ui-fg) !important;\n  border: 1px solid var(--ui-border) !important;\n}\n\n[class*=\"refresh-picker\"] > div:last-child > button,\n[class*=\"RefreshPicker\"] > div:last-child > button {\n  border-radius: 0 var(--ui-radius-button) var(--ui-radius-button) 0 !important;\n}\n\n/* ---------- Top Navigation ---------- */\n[class*=\"navbar\"],\nheader[class*=\"page-toolbar\"] {\n  background-color: var(--ui-card) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Inputs / Selects ---------- */\ninput:not([type=\"checkbox\"]):not([type=\"radio\"]),\nselect,\n[class*=\"gf-form-input\"] {\n  border-color: var(--ui-border) !important;\n  border-radius: var(--ui-radius-input) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Tables ---------- */\ntable tbody tr:nth-child(odd) {\n  background-color: color-mix(in srgb, var(--ui-input) 15%, transparent) !important;\n}\n\ntable tbody tr:hover {\n  background-color: var(--ui-table-hover) !important;\n}\n\n[class*=\"tableContentWrapper\"] div[class*=\"row\"]:hover,\n[class*=\"tablePanel\"] div[class*=\"row\"]:hover {\n  background-color: var(--ui-table-hover) !important;\n  transition: background-color 120ms ease !important;\n}\n\ntable th {\n  color: var(--ui-muted-fg) !important;\n  border-bottom: 1px solid var(--ui-border) !important;\n}\n\n/* ---------- Links ---------- */\na:not([class*=\"btn\"]):not([class*=\"variable\"]) {\n  color: var(--ui-primary) !important;\n}\n\n/* ---------- Row Title ---------- */\n.dashboard-row .dashboard-row__title {\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Tooltip ---------- */\n[class*=\"tooltip\"]:not([class*=\"panel\"]) {\n  background-color: var(--ui-card) !important;\n  border: 1px solid var(--ui-border) !important;\n  border-radius: var(--ui-radius) !important;\n  color: var(--ui-fg) !important;\n}\n\n/* ---------- Alert ---------- */\n[class*=\"alert-error\"],\n[class*=\"alerting\"] {\n  border-color: var(--ui-destructive) !important;\n}\n\n/* ---------- Scrollbar ---------- */\nhtml,\nbody,\n#root {\n  scrollbar-width: none !important;\n}\n\nhtml::-webkit-scrollbar,\nbody::-webkit-scrollbar,\n#root::-webkit-scrollbar {\n  width: 0 !important;\n  height: 0 !important;\n}\n\n::-webkit-scrollbar-track {\n  background: transparent;\n}\n\n::-webkit-scrollbar-thumb {\n  background: var(--ui-input);\n  border-radius: 3px;\n}\n\n::-webkit-scrollbar-thumb:hover {\n  background: var(--ui-muted-fg);\n}\n\n/* Hide the injected theme panel itself */\ndiv[data-griditem-key=\"grid-item-9999\"] {\n  visibility: hidden !important;\n}\n</style>",
+        "code": {
+          "language": "html",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        }
+      },
+      "transparent": true
+    },
+    {
+      "id": 10,
+      "title": "Ready cache nodes",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\"))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Observed cache nodes",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "count(label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\"))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Configured L1 capacity",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(label_match((${CacheCapacity:raw}), \"node\", \"${Node:regex}\"))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "title": "Used L1 capacity",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Cache lookup hit rate",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "(sum(increase(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))/sum(increase(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))) and (sum(increase(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__range]))>0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "title": "Scraped cache nodes",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "sum(max by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 1,
+      "title": "Node L1 used capacity",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "A",
+          "legendFormat": "{{node}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Node L1 utilization",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "A",
+          "legendFormat": "{{node}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Cache lookup token throughput",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "A",
+          "legendFormat": "Hit",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "clamp_min(sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) - sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))), 0)",
+          "refId": "B",
+          "legendFormat": "Miss",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:Tokens/s",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Cache lookup hit rate trend",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 8,
+        "y": 13,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "(sum(sum by(node) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) / sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))) and (sum(sum by(node) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) > 0)",
+          "refId": "A",
+          "legendFormat": "Hit rate",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "L1 read and write chunk rate",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 16,
+        "y": 13,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "A",
+          "legendFormat": "Read",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "sum(sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "B",
+          "legendFormat": "Write",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 3,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "Cache nodes",
+      "type": "table",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "label_match((${CacheCapacity:raw}), \"node\", \"${Node:regex}\")",
+          "refId": "A",
+          "legendFormat": "Capacity",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\")",
+          "refId": "B",
+          "legendFormat": "Runtime",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"})",
+          "refId": "C",
+          "legendFormat": "Scrape",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (lmcache_mp_l1_memory_usage_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "D",
+          "legendFormat": "Used",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "max by(node) (lmcache_mp_l1_usage_ratio{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "E",
+          "legendFormat": "Utilization",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_read_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
+          "refId": "F",
+          "legendFormat": "Read",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
+          "refId": "G",
+          "legendFormat": "Write",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No samples",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Capacity"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Capacity"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Used"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Utilization"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "displayName",
+                "value": "Utilization"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Read"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix:chunks/s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Read"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Write"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix:chunks/s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Write"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runtime"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Not ready",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Ready",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Runtime"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Scrape"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Down",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Up",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Scrape"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 340
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View node",
+                    "url": "/d/neutree-zcache-embed?${__url_time_range}&var-datasource=${datasource:percentencode}&var-Workspace=${Workspace:percentencode}&var-Cluster=${Cluster:percentencode}&var-Node=${__value.raw}&var-CacheCapacity=${CacheCapacity:percentencode}&var-CacheReady=${CacheReady:percentencode}&theme=light&kiosk",
+                    "targetBlank": false
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Node"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "node",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true
+            },
+            "renameByName": {
+              "node": "Node",
+              "Value #A": "Capacity",
+              "Value #B": "Runtime",
+              "Value #C": "Scrape",
+              "Value #D": "Used",
+              "Value #E": "Utilization",
+              "Value #F": "Read",
+              "Value #G": "Write"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Node": {
+                "operation": "groupby",
+                "aggregations": []
+              },
+              "Capacity": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Runtime": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Scrape": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Used": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Utilization": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Read": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              },
+              "Write": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Capacity (lastNotNull)": "Capacity",
+              "Runtime (lastNotNull)": "Runtime",
+              "Scrape (lastNotNull)": "Scrape",
+              "Used (lastNotNull)": "Used",
+              "Utilization (lastNotNull)": "Utilization",
+              "Read (lastNotNull)": "Read",
+              "Write (lastNotNull)": "Write"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "Advanced diagnostics",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 30,
+          "title": "Cache process CPU",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 0,
+            "y": 28,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "sum by(node) (rate(process_cpu_seconds_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cores",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 31,
+          "title": "Cache process resident memory",
+          "type": "timeseries",
+          "datasource": "${datasource}",
+          "gridPos": {
+            "x": 12,
+            "y": 28,
+            "w": 12,
+            "h": 7
+          },
+          "targets": [
+            {
+              "expr": "max by(node) (process_resident_memory_bytes{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+              "refId": "A",
+              "legendFormat": "{{node}}",
+              "instant": false,
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "noValue": "No samples",
+              "min": 0,
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "fillOpacity": 5,
+                "spanNulls": false,
+                "showPoints": "auto",
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": [
+    "neutree",
+    "endpoint",
+    "cache",
+    "embed"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "neutree-cluster",
+          "value": "neutree-cluster"
+        },
+        "hide": 2
+      },
+      {
+        "name": "Workspace",
+        "type": "textbox",
+        "query": "default",
+        "current": {
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 2
+      },
+      {
+        "name": "Cluster",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 2
+      },
+      {
+        "name": "Node",
+        "label": "Node",
+        "type": "query",
+        "datasource": "${datasource}",
+        "query": "label_values(up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\"}, node)",
+        "definition": "label_values(up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\"}, node)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "CacheCapacity",
+        "type": "textbox",
+        "hide": 2,
+        "query": "(vector(0) > 0)",
+        "current": {
+          "text": "(vector(0) > 0)",
+          "value": "(vector(0) > 0)"
+        }
+      },
+      {
+        "name": "CacheReady",
+        "type": "textbox",
+        "hide": 2,
+        "query": "(vector(0) > 0)",
+        "current": {
+          "text": "(vector(0) > 0)",
+          "value": "(vector(0) > 0)"
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Shared L1 cache",
+  "uid": "neutree-zcache-embed",
+  "version": 1
+}
