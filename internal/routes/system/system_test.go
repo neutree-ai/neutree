@@ -1,7 +1,11 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -193,3 +197,25 @@ func TestValidateAndCleanURL(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheCapabilityDefaultsOff(t *testing.T) {
+	for _, names := range [][]string{{}, {"example"}} {
+		providers := &clustercache.Providers{}
+		for _, name := range names {
+			require.NoError(t, providers.Register(name, &systemTestCacheProvider{}))
+		}
+		router := gin.New()
+		router.GET("/info", handleSystemInfo(&Dependencies{ClusterCacheProviders: providers}))
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/info", nil))
+		var info SystemInfo
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &info))
+		require.Equal(t, names, info.Capabilities.ClusterCacheProviders)
+	}
+}
+
+type systemTestCacheProvider struct{}
+
+func (*systemTestCacheProvider) Validate(*v1.Cluster, *v1.Cluster) error                { return nil }
+func (*systemTestCacheProvider) Reconcile(context.Context, *clustercache.Context) error { return nil }
+func (*systemTestCacheProvider) Delete(context.Context, *clustercache.Context) error    { return nil }

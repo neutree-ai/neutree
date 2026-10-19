@@ -10,10 +10,12 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 )
 
 // Dependencies defines the dependencies for system handlers
 type Dependencies struct {
+	ClusterCacheProviders *clustercache.Providers
 	// GrafanaURL is the URL to the Grafana instance for monitoring
 	GrafanaURL string
 	// Version is the application version
@@ -24,10 +26,16 @@ type Dependencies struct {
 
 // SystemInfo represents the system information response
 type SystemInfo struct {
+	Capabilities Capabilities `json:"capabilities"`
 	// GrafanaURL is the URL to access Grafana dashboard
 	GrafanaURL string `json:"grafana_url,omitempty"`
 	// Version is the application version
 	Version string `json:"version,omitempty"`
+}
+
+// Capabilities describes optional integrations present in this distribution.
+type Capabilities struct {
+	ClusterCacheProviders []string `json:"cluster_cache_providers"`
 }
 
 func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -40,7 +48,7 @@ func RegisterSystemRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 // handleSystemInfo returns system information including URLs to monitoring services
 func handleSystemInfo(deps *Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		info := &SystemInfo{}
+		info := &SystemInfo{Capabilities: Capabilities{ClusterCacheProviders: deps.ClusterCacheProviders.Names()}}
 
 		// Add version if configured
 		if deps.Version != "" {
