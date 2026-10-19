@@ -18,7 +18,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// These tests cover api.identity_sources (migrations 103/104): RLS by the
+// These tests cover api.identity_sources (migrations 104/105): RLS by the
 // identity_source:* permissions, validation and defaults in the write trigger,
 // write-only secrets encrypted into api.identity_source_secrets, and the two
 // SECURITY DEFINER functions (the public login list and the service-role

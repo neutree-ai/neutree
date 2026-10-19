@@ -3,7 +3,7 @@
 -- ----------------------
 -- An LDAP directory or OpenID Connect provider users can log in with. Global:
 -- metadata.workspace is always NULL, and access is by the identity_source:*
--- permissions (migration 103) with a NULL workspace.
+-- permissions (migration 104) with a NULL workspace.
 --
 -- metadata.name is the immutable id of the source. It becomes part of the
 -- users' link source (ldap:<name> / oidc:<name> in api.external_identities)

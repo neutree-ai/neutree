@@ -1,5 +1,5 @@
 -- Take identity_source:* out of every role; the enum values themselves stay
--- (see 103's down migration).
+-- (see 104's down migration).
 UPDATE api.roles
 SET spec = ROW(
     (spec).preset_key,
