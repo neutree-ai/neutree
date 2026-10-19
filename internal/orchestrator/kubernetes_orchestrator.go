@@ -247,6 +247,15 @@ func computeEndpointSpecHash(endpoint *v1.Endpoint) (string, error) {
 }
 
 func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error {
+	ready, err := k.kvCacheProviders.DeploymentReady(ctx.Endpoint, ctx.Cluster)
+	if err != nil {
+		return err
+	}
+
+	if !ready {
+		return nil
+	}
+
 	namespace := util.ClusterNamespace(ctx.Cluster)
 
 	renderVars, err := k.buildManifestVariables(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.Engine, ctx.ImageRegistry)
