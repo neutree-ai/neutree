@@ -78,3 +78,33 @@ func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, nam
 
 	return observer.ObserveDependencies(ctx, c, namespace, endpoint)
 }
+
+// DeploymentGate delays applying a new template while a shared cache dependency
+// is being upgraded. Existing Pods keep running; deletion and pause remain usable.
+type DeploymentGate interface {
+	DeploymentReady(*v1.Endpoint, *v1.Cluster) (bool, error)
+}
+
+func (p Providers) DeploymentReady(endpoint *v1.Endpoint, cluster *v1.Cluster) (bool, error) {
+	name := ""
+	if endpoint.Spec.KVCache != nil {
+		name = endpoint.Spec.KVCache.Provider
+	} else if endpoint.Status != nil && endpoint.Status.KVCache != nil {
+		name = endpoint.Status.KVCache.Provider
+	}
+
+	if name == "" {
+		return true, nil
+	}
+
+	provider, err := p.Get(name)
+	if err != nil {
+		return false, err
+	}
+
+	if gate, ok := provider.(DeploymentGate); ok {
+		return gate.DeploymentReady(endpoint, cluster)
+	}
+
+	return true, nil
+}
