@@ -18,7 +18,6 @@ type VLLMNativeOptions struct {
 }
 
 func (VLLMNative) Validate(endpoint *v1.Endpoint, cluster *v1.Cluster) error {
-
 	if cluster.Spec.Type != v1.KubernetesClusterType || endpoint.Spec.Engine == nil || endpoint.Spec.Engine.Engine != "vllm" {
 		return fmt.Errorf("native KV cache requires vLLM on Kubernetes")
 	}
@@ -59,7 +58,6 @@ func vllmNativeManagedArg(arg string) bool {
 }
 
 func (n VLLMNative) Configure(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment) error {
-
 	if err := n.Validate(endpoint, cluster); err != nil {
 		return err
 	}
