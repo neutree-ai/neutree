@@ -224,7 +224,7 @@ func TestIdentitySourceController_Deletion(t *testing.T) {
 		source.Status = &v1.IdentitySourceStatus{Phase: v1.IdentitySourcePhaseDELETED}
 
 		c := newTestIdentitySourceController(t, store, tester, time.Now())
-		c.tested[source.ID] = [32]byte{1}
+		c.tested[source.ID] = identitySourceTest{fingerprint: [32]byte{1}}
 
 		require.NoError(t, c.Reconcile(source))
 		assert.NotContains(t, c.tested, source.ID)

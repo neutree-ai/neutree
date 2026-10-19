@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -30,39 +29,6 @@ const seededAdminEmail = "admin@neutree.local"
 
 // seededAdminPassword is set by PGOPTIONS in db/docker-compose.test.yml.
 const seededAdminPassword = "neutree-test"
-
-// postgrestAs sends a request to the test PostgREST with the given bearer token
-// (none when empty, i.e. the anonymous role).
-func postgrestAs(t *testing.T, token, method, path, body string) (int, string) {
-	t.Helper()
-
-	req, err := http.NewRequest(method, GetPostgRESTURL()+path, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("failed to build the request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept-Profile", "api")
-	req.Header.Set("Content-Profile", "api")
-	req.Header.Set("Prefer", "return=representation")
-
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read the response: %v", err)
-	}
-
-	return resp.StatusCode, string(raw)
-}
 
 func adminToken(t *testing.T) string {
 	t.Helper()
@@ -118,12 +84,12 @@ func ldapSourceJSON(name, displayName, bindPassword string, enabled bool) string
 		ldap["bind_password"] = bindPassword
 	}
 
-	return mustJSON(map[string]any{
-		"api_version": "v1",
-		"kind":        "IdentitySource",
-		"metadata":    map[string]any{"name": name, "display_name": displayName},
-		"spec":        map[string]any{"type": "ldap", "enabled": enabled, "ldap": ldap},
-	})
+	return identitySourceJSON(map[string]any{"name": name, "display_name": displayName},
+		map[string]any{"type": "ldap", "enabled": enabled, "ldap": ldap})
+}
+
+func identitySourceJSON(metadata map[string]any, spec any) string {
+	return mustJSON(map[string]any{"api_version": "v1", "kind": "IdentitySource", "metadata": metadata, "spec": spec})
 }
 
 func oidcSpecJSON(clientSecret string) map[string]any {
@@ -164,15 +130,21 @@ func createIdentitySource(t *testing.T, token, body string) v1.IdentitySource {
 		t.Fatalf("failed to decode the created identity source %q: %v", raw, err)
 	}
 
-	id := rows[0].ID
+	deleteIdentitySourceOnCleanup(t, rows[0].ID)
+
+	return rows[0]
+}
+
+// deleteIdentitySourceOnCleanup removes the source (and so its secrets) when
+// the test ends.
+func deleteIdentitySourceOnCleanup(t *testing.T, id int) {
+	t.Helper()
 
 	t.Cleanup(func() {
 		if _, err := GetTestDB(t).Exec(`DELETE FROM api.identity_sources WHERE id = $1`, id); err != nil {
 			t.Errorf("failed to delete identity source %d: %v", id, err)
 		}
 	})
-
-	return rows[0]
 }
 
 func storedSecrets(t *testing.T, name string) *storage.IdentitySourceSecrets {
@@ -184,6 +156,14 @@ func storedSecrets(t *testing.T, name string) *storage.IdentitySourceSecrets {
 	}
 
 	return secrets
+}
+
+func assertBindPassword(t *testing.T, name, want string) {
+	t.Helper()
+
+	if got := storedSecrets(t, name).LDAPBindPassword; got != want {
+		t.Errorf("bind password of %s = %q, want %q", name, got, want)
+	}
 }
 
 func assertNoSecretInBody(t *testing.T, body string, secrets ...string) {
@@ -210,7 +190,7 @@ func TestIdentitySource_AdminCRUD(t *testing.T) {
 			t.Fatalf("created spec.ldap = %+v, want it without bind_password", ldap)
 		}
 
-		if ldap.Timeout != v1.DefaultIdentitySourceLDAPTimeoutSeconds || ldap.Attributes == nil ||
+		if ldap.Timeout != 10 || ldap.Attributes == nil ||
 			ldap.Attributes.ID != "entryUUID" || ldap.Attributes.Username != "uid" ||
 			ldap.Attributes.Email != "mail" || ldap.Attributes.DisplayName != "cn" || ldap.Attributes.MemberOf != "" {
 			t.Errorf("defaults not applied: %+v / %+v", ldap, ldap.Attributes)
@@ -220,9 +200,7 @@ func TestIdentitySource_AdminCRUD(t *testing.T) {
 			t.Errorf("metadata = %+v", created.Metadata)
 		}
 
-		if got := storedSecrets(t, name).LDAPBindPassword; got != secret {
-			t.Errorf("stored bind password = %q, want %q", got, secret)
-		}
+		assertBindPassword(t, name, secret)
 	})
 
 	t.Run("read never returns the secret", func(t *testing.T) {
@@ -407,14 +385,15 @@ func TestIdentitySource_SecretsEncryptedAtRest(t *testing.T) {
 
 	db := GetTestDB(t)
 
-	var cipherA, cipherB []byte
-	if err := db.QueryRow(`SELECT bind_password FROM api.identity_source_secrets WHERE identity_source_id = $1`, a.ID).Scan(&cipherA); err != nil {
-		t.Fatalf("read ciphertext a: %v", err)
-	}
+	ciphertext := func(id int) []byte {
+		var cipher []byte
+		if err := db.QueryRow(`SELECT bind_password FROM api.identity_source_secrets WHERE identity_source_id = $1`, id).Scan(&cipher); err != nil {
+			t.Fatalf("read ciphertext of %d: %v", id, err)
+		}
 
-	if err := db.QueryRow(`SELECT bind_password FROM api.identity_source_secrets WHERE identity_source_id = $1`, b.ID).Scan(&cipherB); err != nil {
-		t.Fatalf("read ciphertext b: %v", err)
+		return cipher
 	}
+	cipherA, cipherB := ciphertext(a.ID), ciphertext(b.ID)
 
 	if len(cipherA) == 0 || bytes.Contains(cipherA, []byte(secret)) {
 		t.Errorf("stored bind_password is empty or holds the plaintext: %x", cipherA)
@@ -436,9 +415,7 @@ func TestIdentitySource_SecretsEncryptedAtRest(t *testing.T) {
 	}
 
 	for _, source := range []v1.IdentitySource{a, b} {
-		if got := storedSecrets(t, source.Metadata.Name).LDAPBindPassword; got != secret {
-			t.Errorf("decrypted bind password of %s = %q, want %q", source.Metadata.Name, got, secret)
-		}
+		assertBindPassword(t, source.Metadata.Name, secret)
 	}
 
 	t.Run("a write without the encryption key is refused", func(t *testing.T) {
@@ -470,34 +447,26 @@ func TestIdentitySource_PartialUpdateKeepsSecret(t *testing.T) {
 	t.Run("spec without bind_password keeps it", func(t *testing.T) {
 		patch(t, ldapSourceJSON(name, "", "", true))
 
-		if got := storedSecrets(t, name).LDAPBindPassword; got != secret {
-			t.Errorf("bind password = %q, want %q", got, secret)
-		}
+		assertBindPassword(t, name, secret)
 	})
 
 	t.Run("empty bind_password keeps it", func(t *testing.T) {
 		body := strings.Replace(ldapSourceJSON(name, "", "", true), `"bind_dn"`, `"bind_password":"","bind_dn"`, 1)
 		patch(t, body)
 
-		if got := storedSecrets(t, name).LDAPBindPassword; got != secret {
-			t.Errorf("bind password = %q, want %q", got, secret)
-		}
+		assertBindPassword(t, name, secret)
 	})
 
 	t.Run("status-only write keeps it", func(t *testing.T) {
 		patch(t, `{"status":{"phase":"Connected","error_message":""}}`)
 
-		if got := storedSecrets(t, name).LDAPBindPassword; got != secret {
-			t.Errorf("bind password = %q, want %q", got, secret)
-		}
+		assertBindPassword(t, name, secret)
 	})
 
 	t.Run("a new bind_password replaces it", func(t *testing.T) {
 		patch(t, ldapSourceJSON(name, "", "rotated", true))
 
-		if got := storedSecrets(t, name).LDAPBindPassword; got != "rotated" {
-			t.Errorf("bind password = %q, want rotated", got)
-		}
+		assertBindPassword(t, name, "rotated")
 	})
 
 	// The type is part of every user's link source, so it cannot change. The
@@ -591,13 +560,11 @@ func TestIdentitySource_Validation(t *testing.T) {
 				metadata[k] = v
 			}
 
-			body := mustJSON(map[string]any{"api_version": "v1", "kind": "IdentitySource", "metadata": metadata, "spec": tt.spec})
-
-			code, raw := postgrestAs(t, token, http.MethodPost, "/identity_sources", body)
+			code, raw := postgrestAs(t, token, http.MethodPost, "/identity_sources", identitySourceJSON(metadata, tt.spec))
 			if code == http.StatusCreated {
 				var rows []v1.IdentitySource
 				if json.Unmarshal([]byte(raw), &rows) == nil && len(rows) == 1 {
-					_, _ = GetTestDB(t).Exec(`DELETE FROM api.identity_sources WHERE id = $1`, rows[0].ID)
+					deleteIdentitySourceOnCleanup(t, rows[0].ID)
 				}
 			}
 
@@ -632,11 +599,8 @@ func TestIdentitySource_PublicLoginList(t *testing.T) {
 	disabled := createIdentitySource(t, token, ldapSourceJSON(newIdentitySourceName("pub-off"), "", "pw-off", false))
 
 	oidcName := newIdentitySourceName("pub-oidc")
-	createIdentitySource(t, token, mustJSON(map[string]any{
-		"api_version": "v1", "kind": "IdentitySource",
-		"metadata": map[string]any{"name": oidcName},
-		"spec":     map[string]any{"type": "oidc", "enabled": true, "oidc": oidcSpecJSON("pw-oidc")},
-	}))
+	createIdentitySource(t, token, identitySourceJSON(map[string]any{"name": oidcName},
+		map[string]any{"type": "oidc", "enabled": true, "oidc": oidcSpecJSON("pw-oidc")}))
 
 	// Anonymous: no Authorization header, the way the login page calls it.
 	code, raw := postgrestAs(t, "", http.MethodPost, "/rpc/list_login_identity_sources", "{}")

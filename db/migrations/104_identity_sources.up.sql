@@ -340,24 +340,14 @@ BEGIN
     END IF;
 
     -- A secret is replaced when a new one is given and kept when it is left
-    -- empty. The secret of the other type is always empty: the type of a
-    -- source cannot change.
-    INSERT INTO api.identity_source_secrets (identity_source_id)
-    VALUES (NEW.id)
-    ON CONFLICT (identity_source_id) DO NOTHING;
-
-    UPDATE api.identity_source_secrets s
-    SET bind_password = CASE
-            WHEN v_spec.type <> 'ldap' THEN NULL
-            WHEN v_bind_password IS NOT NULL THEN pgp_sym_encrypt(v_bind_password, v_key, 'cipher-algo=aes256')
-            ELSE s.bind_password
-        END,
-        client_secret = CASE
-            WHEN v_spec.type <> 'oidc' THEN NULL
-            WHEN v_client_secret IS NOT NULL THEN pgp_sym_encrypt(v_client_secret, v_key, 'cipher-algo=aes256')
-            ELSE s.client_secret
-        END
-    WHERE s.identity_source_id = NEW.id
+    -- empty (pgp_sym_encrypt is strict, so an empty one encrypts to NULL).
+    INSERT INTO api.identity_source_secrets AS s (identity_source_id, bind_password, client_secret)
+    VALUES (NEW.id,
+            pgp_sym_encrypt(v_bind_password, v_key, 'cipher-algo=aes256'),
+            pgp_sym_encrypt(v_client_secret, v_key, 'cipher-algo=aes256'))
+    ON CONFLICT (identity_source_id) DO UPDATE
+    SET bind_password = COALESCE(EXCLUDED.bind_password, s.bind_password),
+        client_secret = COALESCE(EXCLUDED.client_secret, s.client_secret)
     RETURNING s.bind_password IS NOT NULL INTO v_has_bind_password;
 
     IF v_spec.type = 'ldap' AND NOT v_has_bind_password THEN

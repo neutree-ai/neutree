@@ -28,6 +28,7 @@ func ldapSpec(url string) *v1.IdentitySourceSpec {
 			BindDN:     "cn=svc,dc=example,dc=org",
 			UserBaseDN: "ou=people,dc=example,dc=org",
 			UserFilter: "(uid={username})",
+			Attributes: &v1.IdentitySourceLDAPAttributes{ID: "entryUUID", Username: "uid", Email: "mail", DisplayName: "cn"},
 		},
 	}
 }
@@ -39,8 +40,10 @@ func oidcSpec(idp *oidctest.Provider) *v1.IdentitySourceSpec {
 		OIDC: &v1.IdentitySourceOIDCSpec{
 			Issuer:           idp.Issuer(),
 			ClientID:         "neutree",
+			Scopes:           []string{"openid", "profile", "email"},
 			CACert:           string(idp.CAPEM()),
 			RedirectURL:      "https://neutree.example.org/api/v1/auth/oidc/callback",
+			Claims:           &v1.IdentitySourceOIDCClaims{Username: "preferred_username", DisplayName: "name", Email: "email"},
 			AllowedRedirects: []string{"https://neutree.example.org/"},
 		},
 	}
@@ -49,30 +52,32 @@ func oidcSpec(idp *oidctest.Provider) *v1.IdentitySourceSpec {
 func TestLDAPConfig(t *testing.T) {
 	spec := ldapSpec("ldaps://ldap.example.org:636").LDAP
 	spec.CACert = "-----BEGIN CERTIFICATE-----"
-	spec.Attributes = &v1.IdentitySourceLDAPAttributes{ID: "objectGUID", Username: " ", MemberOf: "memberOf"}
+	spec.Attributes = &v1.IdentitySourceLDAPAttributes{ID: "objectGUID", Username: "sAMAccountName", Email: "mail", DisplayName: "cn", MemberOf: "memberOf"}
 
 	cfg := LDAPConfig(spec, "pw")
 
 	assert.Equal(t, "pw", cfg.BindPassword)
 	assert.Equal(t, 2*time.Second, cfg.Timeout)
 	assert.Equal(t, []byte(spec.CACert), cfg.RootCAs)
-	assert.Equal(t, ldap.AttributeMapping{ID: "objectGUID", Username: "uid", Email: "mail", DisplayName: "cn", MemberOf: "memberOf"}, cfg.Attributes)
+	assert.Equal(t, ldap.AttributeMapping{ID: "objectGUID", Username: "sAMAccountName", Email: "mail", DisplayName: "cn", MemberOf: "memberOf"}, cfg.Attributes)
 
 	cfg.RootCAs = nil
 	assert.NoError(t, cfg.Validate())
 }
 
-func TestOIDCConfig_Defaults(t *testing.T) {
+func TestOIDCConfig(t *testing.T) {
 	cfg := OIDCConfig(&v1.IdentitySourceOIDCSpec{
 		Issuer:      "https://idp.example.org",
 		ClientID:    "neutree",
 		RedirectURL: "https://neutree.example.org/cb",
+		Scopes:      []string{"openid", "groups"},
+		Claims:      &v1.IdentitySourceOIDCClaims{Username: "upn", DisplayName: "name", Email: "email"},
 	}, "secret")
 
 	assert.Equal(t, "secret", cfg.ClientSecret)
-	assert.Equal(t, []string{"openid", "profile", "email"}, cfg.Scopes)
+	assert.Equal(t, []string{"openid", "groups"}, cfg.Scopes)
 	assert.Nil(t, cfg.RootCAs)
-	assert.Equal(t, oidc.ClaimMapping{Username: "preferred_username", DisplayName: "name", Email: "email"}, cfg.Claims)
+	assert.Equal(t, oidc.ClaimMapping{Username: "upn", DisplayName: "name", Email: "email"}, cfg.Claims)
 	assert.NoError(t, cfg.Validate())
 }
 

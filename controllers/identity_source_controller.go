@@ -39,11 +39,16 @@ type IdentitySourceController struct {
 	retestInterval time.Duration
 	now            func() time.Time
 
-	// tested holds, per source ID, the fingerprint of the spec and secrets the
-	// last recorded test ran with. It is memory only (it hashes the secrets),
-	// so a restart tests every source once more.
+	// tested holds, per source ID, the last recorded test. It is memory only
+	// (it hashes the secrets), so a restart tests every source once more.
 	mu     sync.Mutex
-	tested map[int][sha256.Size]byte
+	tested map[int]identitySourceTest
+}
+
+type identitySourceTest struct {
+	// fingerprint is of the spec and secrets the test ran with.
+	fingerprint [sha256.Size]byte
+	at          time.Time
 }
 
 type IdentitySourceControllerOption struct {
@@ -60,7 +65,7 @@ func NewIdentitySourceController(option *IdentitySourceControllerOption) (*Ident
 		test:           option.Tester,
 		retestInterval: option.RetestInterval,
 		now:            time.Now,
-		tested:         map[int][sha256.Size]byte{},
+		tested:         map[int]identitySourceTest{},
 	}
 
 	if c.test == nil {
@@ -111,7 +116,7 @@ func (c *IdentitySourceController) sync(obj *v1.IdentitySource) error {
 	}
 
 	fingerprint := identitysource.Fingerprint(obj.Spec, secrets)
-	if !c.testDue(obj, fingerprint) {
+	if !c.testDue(obj.ID, fingerprint) {
 		return nil
 	}
 
@@ -120,7 +125,9 @@ func (c *IdentitySourceController) sync(obj *v1.IdentitySource) error {
 
 	cancel()
 
-	if err := c.storage.UpdateIdentitySource(id, &v1.IdentitySource{Status: c.testedStatus(obj, testErr, secrets)}); err != nil {
+	testedAt := c.now()
+
+	if err := c.storage.UpdateIdentitySource(id, &v1.IdentitySource{Status: c.testedStatus(obj, testedAt, testErr, secrets)}); err != nil {
 		return errors.Wrapf(err, "failed to update status of identity source %s", obj.Metadata.Name)
 	}
 
@@ -131,38 +138,27 @@ func (c *IdentitySourceController) sync(obj *v1.IdentitySource) error {
 	}
 
 	c.mu.Lock()
-	c.tested[obj.ID] = fingerprint
+	c.tested[obj.ID] = identitySourceTest{fingerprint: fingerprint, at: testedAt}
 	c.mu.Unlock()
 
 	return nil
 }
 
-// testDue reports whether the source needs a connection test: it has never
-// been tested by this process with its current spec and secrets, or its last
-// recorded test is older than the retest interval.
-func (c *IdentitySourceController) testDue(obj *v1.IdentitySource, fingerprint [sha256.Size]byte) bool {
+// testDue reports whether the source needs a connection test: this process
+// has not recorded one with its current spec and secrets, or the last one is
+// older than the retest interval.
+func (c *IdentitySourceController) testDue(id int, fingerprint [sha256.Size]byte) bool {
 	c.mu.Lock()
-	last, seen := c.tested[obj.ID]
+	last, seen := c.tested[id]
 	c.mu.Unlock()
 
-	if !seen || last != fingerprint {
-		return true
-	}
-
-	if obj.Status == nil || obj.Status.LastConnectionTest == nil {
-		return true
-	}
-
-	testedAt, err := time.Parse(time.RFC3339Nano, obj.Status.LastConnectionTest.Time)
-	if err != nil {
-		return true
-	}
-
-	return c.now().Sub(testedAt) >= c.retestInterval
+	return !seen || last.fingerprint != fingerprint || c.now().Sub(last.at) >= c.retestInterval
 }
 
-func (c *IdentitySourceController) testedStatus(obj *v1.IdentitySource, testErr error, secrets *storage.IdentitySourceSecrets) *v1.IdentitySourceStatus {
-	now := c.now().UTC().Format(time.RFC3339Nano)
+func (c *IdentitySourceController) testedStatus(
+	obj *v1.IdentitySource, testedAt time.Time, testErr error, secrets *storage.IdentitySourceSecrets,
+) *v1.IdentitySourceStatus {
+	now := testedAt.UTC().Format(time.RFC3339Nano)
 	status := &v1.IdentitySourceStatus{
 		Phase:              v1.IdentitySourcePhaseCONNECTED,
 		LastTransitionTime: now,

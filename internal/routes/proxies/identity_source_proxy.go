@@ -39,53 +39,10 @@ func RegisterIdentitySourceRoutes(group *gin.RouterGroup, middlewares []gin.Hand
 // delete) passes through.
 func validateIdentitySource() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := readAndRestoreBody(c.Request)
-		if err != nil {
-			rejectIdentitySource(c, "failed to read request body")
-			return
-		}
+		if err := checkIdentitySourcePayload(c.Request); err != nil {
+			c.JSON(validationErrStatus(err), err)
+			c.Abort()
 
-		var payload struct {
-			Metadata *v1.Metadata    `json:"metadata"`
-			Spec     json.RawMessage `json:"spec"`
-		}
-
-		if err := json.Unmarshal(body, &payload); err != nil {
-			rejectIdentitySource(c, "request body must be a single identity source object")
-			return
-		}
-
-		if c.Request.Method == http.MethodPost {
-			if payload.Metadata == nil {
-				rejectIdentitySource(c, "metadata is required")
-				return
-			}
-
-			if err := v1.ValidateIdentitySourceName(payload.Metadata.Name); err != nil {
-				rejectIdentitySource(c, err.Error())
-				return
-			}
-		}
-
-		if len(payload.Spec) == 0 || string(payload.Spec) == "null" {
-			if c.Request.Method == http.MethodPost {
-				rejectIdentitySource(c, "spec is required")
-				return
-			}
-
-			c.Next()
-
-			return
-		}
-
-		var spec v1.IdentitySourceSpec
-		if err := json.Unmarshal(payload.Spec, &spec); err != nil {
-			rejectIdentitySource(c, "spec is malformed: "+err.Error())
-			return
-		}
-
-		if err := spec.Validate(); err != nil {
-			rejectIdentitySource(c, err.Error())
 			return
 		}
 
@@ -93,11 +50,57 @@ func validateIdentitySource() gin.HandlerFunc {
 	}
 }
 
-func rejectIdentitySource(c *gin.Context, hint string) {
-	c.JSON(http.StatusBadRequest, &validationError{
+func checkIdentitySourcePayload(req *http.Request) *validationError {
+	body, err := readAndRestoreBody(req)
+	if err != nil {
+		return invalidIdentitySourceError("failed to read request body")
+	}
+
+	var payload struct {
+		Metadata *v1.Metadata    `json:"metadata"`
+		Spec     json.RawMessage `json:"spec"`
+	}
+
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return invalidIdentitySourceError("request body must be a single identity source object")
+	}
+
+	hasSpec := len(payload.Spec) > 0 && string(payload.Spec) != "null"
+
+	if req.Method == http.MethodPost {
+		if payload.Metadata == nil {
+			return invalidIdentitySourceError("metadata is required")
+		}
+
+		if err := v1.ValidateIdentitySourceName(payload.Metadata.Name); err != nil {
+			return invalidIdentitySourceError(err.Error())
+		}
+
+		if !hasSpec {
+			return invalidIdentitySourceError("spec is required")
+		}
+	}
+
+	if !hasSpec {
+		return nil
+	}
+
+	var spec v1.IdentitySourceSpec
+	if err := json.Unmarshal(payload.Spec, &spec); err != nil {
+		return invalidIdentitySourceError("spec is malformed: " + err.Error())
+	}
+
+	if err := spec.Validate(); err != nil {
+		return invalidIdentitySourceError(err.Error())
+	}
+
+	return nil
+}
+
+func invalidIdentitySourceError(hint string) *validationError {
+	return &validationError{
 		Code:    identitySourceInvalidCode,
 		Message: "invalid identity source",
 		Hint:    hint,
-	})
-	c.Abort()
+	}
 }

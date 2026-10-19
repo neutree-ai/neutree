@@ -31,26 +31,12 @@ const (
 	IdentitySourcePhaseDELETED   IdentitySourcePhase = "Deleted"
 )
 
-// Defaults the database applies to an identity source spec when a field is
-// left empty.
 const (
-	DefaultIdentitySourceLDAPTimeoutSeconds = 10
-	DefaultIdentitySourceLDAPIDAttribute    = "entryUUID"
-	DefaultIdentitySourceLDAPUsernameAttr   = "uid"
-	DefaultIdentitySourceLDAPEmailAttr      = "mail"
-	DefaultIdentitySourceLDAPDisplayAttr    = "cn"
-	DefaultIdentitySourceOIDCUsernameClaim  = "preferred_username"
-	DefaultIdentitySourceOIDCDisplayClaim   = "name"
-	DefaultIdentitySourceOIDCEmailClaim     = "email"
-
 	// IdentitySourceLDAPUsernamePlaceholder must appear in an LDAP user filter.
 	IdentitySourceLDAPUsernamePlaceholder = "{username}"
 	// IdentitySourceOIDCScopeOpenID must be among the requested OIDC scopes.
 	IdentitySourceOIDCScopeOpenID = "openid"
 )
-
-// DefaultIdentitySourceOIDCScopes are requested when spec.oidc.scopes is empty.
-var DefaultIdentitySourceOIDCScopes = []string{"openid", "profile", "email"}
 
 // IdentitySource is an external directory or provider users can log in with.
 // It is a global resource: metadata.workspace is always empty.

@@ -23,7 +23,7 @@ import (
 const maxMessageLength = 512
 
 // LDAPConfig builds the directory configuration of an LDAP identity source.
-// Attribute names the spec leaves empty get the defaults the database applies.
+// The spec is a stored one: the database has filled in the defaults.
 func LDAPConfig(spec *v1.IdentitySourceLDAPSpec, bindPassword string) ldap.Config {
 	cfg := ldap.Config{
 		URL:                spec.URL,
@@ -34,31 +34,27 @@ func LDAPConfig(spec *v1.IdentitySourceLDAPSpec, bindPassword string) ldap.Confi
 		BindPassword:       bindPassword,
 		UserBaseDN:         spec.UserBaseDN,
 		UserFilter:         spec.UserFilter,
-		Attributes: ldap.AttributeMapping{
-			ID:          v1.DefaultIdentitySourceLDAPIDAttribute,
-			Username:    v1.DefaultIdentitySourceLDAPUsernameAttr,
-			Email:       v1.DefaultIdentitySourceLDAPEmailAttr,
-			DisplayName: v1.DefaultIdentitySourceLDAPDisplayAttr,
-		},
 	}
 
-	if strings.TrimSpace(spec.CACert) != "" {
+	if spec.CACert != "" {
 		cfg.RootCAs = []byte(spec.CACert)
 	}
 
 	if attrs := spec.Attributes; attrs != nil {
-		cfg.Attributes.ID = orDefault(attrs.ID, cfg.Attributes.ID)
-		cfg.Attributes.Username = orDefault(attrs.Username, cfg.Attributes.Username)
-		cfg.Attributes.Email = orDefault(attrs.Email, cfg.Attributes.Email)
-		cfg.Attributes.DisplayName = orDefault(attrs.DisplayName, cfg.Attributes.DisplayName)
-		cfg.Attributes.MemberOf = strings.TrimSpace(attrs.MemberOf)
+		cfg.Attributes = ldap.AttributeMapping{
+			ID:          attrs.ID,
+			Username:    attrs.Username,
+			Email:       attrs.Email,
+			DisplayName: attrs.DisplayName,
+			MemberOf:    attrs.MemberOf,
+		}
 	}
 
 	return cfg
 }
 
 // OIDCConfig builds the relying party configuration of an OIDC identity
-// source. Scopes and claims the spec leaves empty get the database defaults.
+// source. The spec is a stored one: the database has filled in the defaults.
 func OIDCConfig(spec *v1.IdentitySourceOIDCSpec, clientSecret string) oidc.Config {
 	cfg := oidc.Config{
 		Issuer:       spec.Issuer,
@@ -66,36 +62,21 @@ func OIDCConfig(spec *v1.IdentitySourceOIDCSpec, clientSecret string) oidc.Confi
 		ClientSecret: clientSecret,
 		RedirectURL:  spec.RedirectURL,
 		Scopes:       spec.Scopes,
-		Claims: oidc.ClaimMapping{
-			Username:    v1.DefaultIdentitySourceOIDCUsernameClaim,
-			DisplayName: v1.DefaultIdentitySourceOIDCDisplayClaim,
-			Email:       v1.DefaultIdentitySourceOIDCEmailClaim,
-		},
 	}
 
-	if len(cfg.Scopes) == 0 {
-		cfg.Scopes = append([]string(nil), v1.DefaultIdentitySourceOIDCScopes...)
-	}
-
-	if strings.TrimSpace(spec.CACert) != "" {
+	if spec.CACert != "" {
 		cfg.RootCAs = []byte(spec.CACert)
 	}
 
 	if claims := spec.Claims; claims != nil {
-		cfg.Claims.Username = orDefault(claims.Username, cfg.Claims.Username)
-		cfg.Claims.DisplayName = orDefault(claims.DisplayName, cfg.Claims.DisplayName)
-		cfg.Claims.Email = orDefault(claims.Email, cfg.Claims.Email)
+		cfg.Claims = oidc.ClaimMapping{
+			Username:    claims.Username,
+			DisplayName: claims.DisplayName,
+			Email:       claims.Email,
+		}
 	}
 
 	return cfg
-}
-
-func orDefault(value, fallback string) string {
-	if v := strings.TrimSpace(value); v != "" {
-		return v
-	}
-
-	return fallback
 }
 
 // Fingerprint identifies what a source's clients are built from: its spec and
@@ -105,16 +86,7 @@ func Fingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSec
 	specJSON, _ := json.Marshal(spec)       //nolint:errcheck // plain structs always marshal
 	secretsJSON, _ := json.Marshal(secrets) //nolint:errcheck // plain structs always marshal
 
-	h := sha256.New()
-	h.Write(specJSON)
-	h.Write([]byte{0})
-	h.Write(secretsJSON)
-
-	var sum [sha256.Size]byte
-
-	copy(sum[:], h.Sum(nil))
-
-	return sum
+	return sha256.Sum256(append(append(specJSON, 0), secretsJSON...))
 }
 
 // ConnectionTest checks that the source answers with its configuration: an
