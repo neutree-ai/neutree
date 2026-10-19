@@ -53,6 +53,7 @@ func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
 			ClusterCacheProviders: deps.Config.ClusterCacheProviders,
+			KVCacheProviders:      deps.Config.KVCacheProviders,
 			Storage:               deps.Config.Storage,
 			StorageAccessURL:      deps.Config.StorageAccessURL,
 			AuthEndpoint:          deps.Config.AuthEndpoint,
