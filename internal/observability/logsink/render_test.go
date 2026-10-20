@@ -123,14 +123,15 @@ func TestRender_Sinks(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{
 		"headers": map[string]interface{}{"Content-Type": "application/stream+json"}, "timeout_secs": 15,
 	}, b["request"])
-	assert.Equal(t, map[string]interface{}{"type": "disk", "max_size": 1073741824, "when_full": "drop_newest"}, b["buffer"])
+	assert.Equal(t, map[string]interface{}{"type": "disk", "max_size": 1073741824 + 134217728, "when_full": "drop_newest"}, b["buffer"])
 	assert.Equal(t, map[string]interface{}{"max_events": 100, "timeout_secs": 1}, b["batch"])
 
 	a := generic["sinks"]["logsink_audit_vl"]
 	assert.Equal(t, map[string]interface{}{"strategy": "bearer", "token": "SECRET[logsink.token.audit.vl]"}, a["auth"])
 	assert.Equal(t, map[string]interface{}{"verify_certificate": false, "verify_hostname": false}, a["tls"])
 	assert.Equal(t, map[string]interface{}{"headers": map[string]interface{}{"Content-Type": "application/stream+json"}}, a["request"])
-	assert.Equal(t, 536870912, a["buffer"].(map[string]interface{})["max_size"])
+	// Vector stops accepting at max_size minus one 128MiB data file, so that file is added on top.
+	assert.Equal(t, 536870912+134217728, a["buffer"].(map[string]interface{})["max_size"])
 
 	// Secrets are YAML double-quoted scalars, since Vector pastes them into the text.
 	assert.Equal(t, map[string][]byte{

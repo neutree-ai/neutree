@@ -36,6 +36,13 @@ const (
 	componentPrefix = "logsink_"
 	secretBackend   = "logsink"
 
+	// Vector's disk buffer stops accepting events at max_size minus one data
+	// file (128MiB, fixed), so this is added to make spec.buffer.max_size the
+	// usable capacity. See DEFAULT_MAX_DATA_FILE_SIZE and the
+	// "max_buffer_size - max_data_file_size" note in
+	// lib/vector-buffers/src/variants/disk_v2/common.rs.
+	diskBufferDataFileSize int64 = 128 << 20
+
 	// Same as the built-in ai_trace_victorialogs sink, so records are identical.
 	victoriaLogsInsertQuery = "_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp"
 )
@@ -335,7 +342,7 @@ func renderSink(s *v1.LogSink, secrets map[string][]byte) map[string]interface{}
 		"batch":       map[string]interface{}{"max_events": 100, "timeout_secs": 1},
 		"buffer": map[string]interface{}{
 			"type":      "disk",
-			"max_size":  s.Spec.Buffer.GetMaxSize(),
+			"max_size":  s.Spec.Buffer.GetMaxSize() + diskBufferDataFileSize,
 			"when_full": "drop_newest",
 		},
 	}

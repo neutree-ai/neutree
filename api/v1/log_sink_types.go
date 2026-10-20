@@ -74,7 +74,8 @@ type LogSinkAuth struct {
 }
 
 type LogSinkBuffer struct {
-	// MaxSize is the disk buffer size in bytes.
+	// MaxSize is the usable disk buffer size in bytes. Vector reserves one more
+	// 128MiB data file on top of it, so disk usage can reach MaxSize+128MiB.
 	MaxSize int64 `json:"max_size,omitempty"`
 }
 
