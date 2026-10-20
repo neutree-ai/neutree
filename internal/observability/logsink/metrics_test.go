@@ -15,6 +15,7 @@ vector_component_sent_events_total{component_id="ai_trace_victorialogs",componen
 # TYPE vector_component_errors_total counter
 vector_component_errors_total{component_id="logsink_deny",component_kind="sink",component_type="http",error_type="request_failed",stage="sending"} 1 1792233729442
 vector_component_errors_total{error_code="config_load",error_type="configuration_failed",stage="processing"} 2 1792233729442
+vector_component_errors_total{error_code="reload",error_type="configuration_failed",stage="processing"} 3 1792233729442
 # TYPE vector_component_discarded_events_total counter
 vector_component_discarded_events_total{component_id="logsink_deny",component_kind="sink",component_type="http",intentional="false"} 5 1792233729442
 # TYPE vector_buffer_discarded_events_total counter
@@ -34,15 +35,26 @@ func TestParseMetrics(t *testing.T) {
 	m, err := ParseMetrics(strings.NewReader(sampleMetrics))
 	require.NoError(t, err)
 
-	assert.Equal(t, float64(4), m.Reloads)
-	assert.Equal(t, float64(2), m.ConfigLoadErrors)
+	// Both a config that fails to load and a topology that fails to build are rejected reloads.
+	assert.Equal(t, float64(5), m.RejectedReloads)
 	assert.Equal(t, map[string]ComponentCounters{
 		"logsink_ok":   {Sent: 5},
 		"logsink_deny": {Failed: 2, Dropped: 5},
 		"logsink_down": {Failed: 7, Dropped: 3},
-		// An idle sink still has series, so it counts as present.
-		"logsink_idle": {},
+		// Only utilization shows a sink is running; an idle one still reports it.
+		"logsink_idle": {Running: true},
 	}, m.Components)
+}
+
+func TestRejectedSince(t *testing.T) {
+	m := &VectorMetrics{RejectedReloads: 3}
+	assert.True(t, m.RejectedSince(2))
+	assert.False(t, m.RejectedSince(3))
+	// Expired and counted again from zero.
+	assert.True(t, m.RejectedSince(5))
+
+	m.RejectedReloads = 0
+	assert.False(t, m.RejectedSince(5), "an expired series is not a rejection")
 }
 
 func TestComponentCountersSub(t *testing.T) {

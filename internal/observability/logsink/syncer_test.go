@@ -155,3 +155,40 @@ func TestKubernetesSyncer_SecretFailureSkipsConfigMap(t *testing.T) {
 		assert.NotEqual(t, "configmaps", a.GetResource().Resource)
 	}
 }
+
+func TestSyncers_RetryMarker(t *testing.T) {
+	ctx := context.Background()
+	base := &Rendered{Content: []byte("# Managed\n# content-hash: 1\nsinks: {}\n")}
+
+	file := NewFileSyncer(t.TempDir())
+	client := fake.NewSimpleClientset()
+	syncers := map[string]Syncer{"file": file, "kubernetes": NewKubernetesSyncer(client, "ns", "cm", "sec")}
+
+	for name, s := range syncers {
+		t.Run(name, func(t *testing.T) {
+			written, err := s.Sync(ctx, base)
+			require.NoError(t, err)
+			assert.True(t, written)
+
+			// A retry rewrites the same config, every attempt.
+			for _, marker := range []string{"a", "b"} {
+				written, err = s.Sync(ctx, base.WithRetry(marker))
+				require.NoError(t, err)
+				assert.True(t, written, marker)
+			}
+
+			written, err = s.Sync(ctx, base.WithRetry("b"))
+			require.NoError(t, err)
+			assert.False(t, written, "the same attempt is not written twice")
+
+			// The unmarked config (e.g. after a restart) does not rewrite a marked copy.
+			written, err = s.Sync(ctx, base)
+			require.NoError(t, err)
+			assert.False(t, written)
+		})
+	}
+
+	got, err := os.ReadFile(filepath.Join(file.dir, ConfigFileName))
+	require.NoError(t, err)
+	assert.Equal(t, string(base.WithRetry("b").Content), string(got))
+}

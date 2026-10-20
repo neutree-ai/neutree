@@ -20,7 +20,8 @@ CREATE TYPE api.log_sink_status AS (
     sent_events BIGINT,
     dropped_events BIGINT,
     last_sent_time TIMESTAMPTZ,
-    last_connection_test JSONB
+    last_connection_test JSONB,
+    component_id TEXT
 );
 
 CREATE TABLE api.log_sinks (

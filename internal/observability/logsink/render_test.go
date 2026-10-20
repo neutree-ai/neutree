@@ -18,6 +18,7 @@ func testSink(name string, mutate func(*v1.VictoriaLogsSinkSpec)) *v1.LogSink {
 			Type:         v1.LogSinkTypeVictoriaLogs,
 			VictoriaLogs: &v1.VictoriaLogsSinkSpec{URL: "https://vl.example.com:9428/"},
 		},
+		Status: &v1.LogSinkStatus{ComponentID: "logsink_" + strings.ReplaceAll(name, ".", "_")},
 	}
 	if mutate != nil {
 		mutate(s.Spec.VictoriaLogs)
@@ -27,11 +28,55 @@ func testSink(name string, mutate func(*v1.VictoriaLogsSinkSpec)) *v1.LogSink {
 }
 
 func TestComponentIDAndSecretKey(t *testing.T) {
-	assert.Equal(t, "logsink_a-b_c", ComponentID("a-b.c"))
+	id := NewComponentID("a-b.c")
+	assert.Regexp(t, `^logsink_a-b_c_[0-9a-f]{8}$`, id)
+	assert.True(t, ValidComponentID(id))
+	// Every activation gets its own ID, so its disk buffer dir is never one an old sink still holds.
+	assert.NotEqual(t, id, NewComponentID("a-b.c"))
+
+	for _, bad := range []string{"", "logsink_", "logsink_a.b", "other_a", "logsink_A"} {
+		assert.False(t, ValidComponentID(bad), bad)
+	}
+
 	assert.Equal(t, "token.a_b.c", secretKey("token", "a-b.c"))
 	// '.' and '-' map to different characters, so distinct names stay distinct.
-	assert.NotEqual(t, ComponentID("a.b"), ComponentID("a-b"))
 	assert.NotEqual(t, secretKey("token", "a.b"), secretKey("token", "a-b"))
+}
+
+func TestRender_RequiresComponentID(t *testing.T) {
+	s := testSink("a", nil)
+	s.Status = nil
+	_, err := Render([]*v1.LogSink{s})
+	require.Error(t, err)
+
+	s.Status = &v1.LogSinkStatus{ComponentID: "logsink_a.b"}
+	_, err = Render([]*v1.LogSink{s})
+	require.Error(t, err)
+}
+
+func TestRendered_WithRetry(t *testing.T) {
+	r, err := Render([]*v1.LogSink{testSink("a", nil)})
+	require.NoError(t, err)
+
+	retry := r.WithRetry("1")
+	assert.NotEqual(t, string(r.Content), string(retry.Content))
+	assert.Equal(t, string(r.Content), string(stripRetry(retry.Content)))
+
+	var doc map[string]interface{}
+	require.NoError(t, yaml.Unmarshal(retry.Content, &doc))
+	assert.Contains(t, doc["sinks"], "logsink_a")
+
+	// A marked config is up to date only if it is exactly what is there.
+	assert.True(t, UpToDate(retry.Content, retry.Content))
+	assert.False(t, UpToDate(r.WithRetry("0").Content, retry.Content))
+	assert.False(t, UpToDate(r.Content, retry.Content))
+	// Without a marker, a marked copy of the same config needs no rewrite.
+	assert.True(t, UpToDate(retry.Content, r.Content))
+	assert.True(t, UpToDate(r.Content, r.Content))
+
+	other, err := Render([]*v1.LogSink{testSink("b", nil)})
+	require.NoError(t, err)
+	assert.False(t, UpToDate(retry.Content, other.Content))
 }
 
 func TestRender_Sinks(t *testing.T) {

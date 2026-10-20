@@ -4,6 +4,7 @@ package logsink
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,13 +40,26 @@ const (
 	victoriaLogsInsertQuery = "_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp"
 )
 
-var nameRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+var (
+	nameRegexp        = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
+	componentIDRegexp = regexp.MustCompile(`^` + componentPrefix + `[-a-z0-9_]+$`)
+)
 
-// ComponentID is the Vector sink ID for a LogSink. Names allow '.', which
-// Vector rejects in component IDs; '_' is not allowed in names, so the mapping
-// stays one-to-one.
-func ComponentID(name string) string {
-	return componentPrefix + strings.ReplaceAll(name, ".", "_")
+// NewComponentID returns a fresh Vector sink ID for one activation of a LogSink.
+// Vector keeps a removed sink running until it drains, holding the lock on its
+// disk buffer dir; re-adding the same ID meanwhile fails the whole reload
+// (vectordotdev/vector#18831), so a re-added sink must not reuse an old ID.
+func NewComponentID(name string) string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b) //nolint:errcheck
+
+	// Vector rejects '.' in component IDs.
+	return componentPrefix + strings.ReplaceAll(name, ".", "_") + "_" + hex.EncodeToString(b)
+}
+
+// ValidComponentID reports whether id can be used as a log sink's Vector sink ID.
+func ValidComponentID(id string) bool {
+	return componentIDRegexp.MatchString(id)
 }
 
 // secretKey names a secret file. SECRET[backend.key] only matches word
@@ -147,7 +161,73 @@ type Rendered struct {
 	Secrets map[string][]byte
 }
 
-// Render builds logsinks.yaml for sinks that already passed Validate.
+const retryMarker = "# retry: "
+
+// WithRetry marks the content so that delivering it again is a change Vector
+// (and a ConfigMap) notices, which makes Vector retry a rejected reload.
+// Syncers ignore the marker otherwise, so a restarted controller rendering
+// without it does not rewrite the file.
+func (r *Rendered) WithRetry(marker string) *Rendered {
+	header, rest := splitHeader(r.Content)
+
+	content := make([]byte, 0, len(r.Content)+len(retryMarker)+len(marker)+1)
+	content = append(content, header...)
+	content = append(content, retryMarker+marker+"\n"...)
+	content = append(content, rest...)
+
+	return &Rendered{Content: content, Secrets: r.Secrets}
+}
+
+// UpToDate reports whether current needs no rewrite to become want.
+func UpToDate(current, want []byte) bool {
+	if bytes.Equal(current, want) {
+		return true
+	}
+
+	if hasRetry(want) {
+		return false
+	}
+
+	return bytes.Equal(stripRetry(current), want)
+}
+
+// splitHeader splits after the "# content-hash:" line, the end of the header Render writes.
+func splitHeader(content []byte) ([]byte, []byte) {
+	i := bytes.Index(content, []byte("# content-hash: "))
+	if i < 0 {
+		return nil, content
+	}
+
+	end := bytes.IndexByte(content[i:], '\n')
+	if end < 0 {
+		return content, nil
+	}
+
+	return content[:i+end+1], content[i+end+1:]
+}
+
+func hasRetry(content []byte) bool {
+	_, rest := splitHeader(content)
+
+	return bytes.HasPrefix(rest, []byte(retryMarker))
+}
+
+func stripRetry(content []byte) []byte {
+	header, rest := splitHeader(content)
+	if !bytes.HasPrefix(rest, []byte(retryMarker)) {
+		return content
+	}
+
+	end := bytes.IndexByte(rest, '\n')
+	if end < 0 {
+		return header
+	}
+
+	return append(append([]byte(nil), header...), rest[end+1:]...)
+}
+
+// Render builds logsinks.yaml for sinks that already passed Validate and carry
+// a component ID in status.component_id.
 func Render(sinks []*v1.LogSink) (*Rendered, error) {
 	sorted := append([]*v1.LogSink(nil), sinks...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Metadata.Name < sorted[j].Metadata.Name })
@@ -156,7 +236,11 @@ func Render(sinks []*v1.LogSink) (*Rendered, error) {
 	vectorSinks := map[string]interface{}{}
 
 	for _, s := range sorted {
-		vectorSinks[ComponentID(s.Metadata.Name)] = renderSink(s, secrets)
+		if s.Status == nil || !ValidComponentID(s.Status.ComponentID) {
+			return nil, errors.Errorf("log sink %s has no valid component ID", s.Metadata.Name)
+		}
+
+		vectorSinks[s.Status.ComponentID] = renderSink(s, secrets)
 	}
 
 	doc := map[string]interface{}{}

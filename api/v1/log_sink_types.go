@@ -97,6 +97,10 @@ type LogSinkStatus struct {
 	DroppedEvents      int64                  `json:"dropped_events,omitempty"`
 	LastSentTime       string                 `json:"last_sent_time,omitempty"`
 	LastConnectionTest *LogSinkConnectionTest `json:"last_connection_test,omitempty"`
+	// ComponentID is the Vector sink ID of the current activation. The controller
+	// assigns a new one each time the sink starts being delivered and clears it
+	// when the sink stops being delivered (e.g. disabled).
+	ComponentID string `json:"component_id,omitempty"`
 }
 
 type LogSinkConnectionTest struct {

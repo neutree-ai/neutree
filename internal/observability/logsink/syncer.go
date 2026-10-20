@@ -38,7 +38,7 @@ func (s *FileSyncer) Sync(_ context.Context, r *Rendered) (bool, error) {
 	}
 
 	// The content embeds a hash of the secrets, so equal content means nothing to do.
-	if err == nil && bytes.Equal(current, r.Content) {
+	if err == nil && UpToDate(current, r.Content) {
 		return false, nil
 	}
 
@@ -121,7 +121,7 @@ func (s *KubernetesSyncer) Sync(ctx context.Context, r *Rendered) (bool, error) 
 		return false, err
 	}
 
-	cmChanged, err := s.syncConfigMap(ctx, map[string]string{ConfigFileName: string(r.Content)})
+	cmChanged, err := s.syncConfigMap(ctx, r.Content)
 	if err != nil {
 		return secretChanged, err
 	}
@@ -166,7 +166,8 @@ func (s *KubernetesSyncer) syncSecret(ctx context.Context, data map[string][]byt
 	return true, nil
 }
 
-func (s *KubernetesSyncer) syncConfigMap(ctx context.Context, data map[string]string) (bool, error) {
+func (s *KubernetesSyncer) syncConfigMap(ctx context.Context, content []byte) (bool, error) {
+	data := map[string]string{ConfigFileName: string(content)}
 	configMaps := s.client.CoreV1().ConfigMaps(s.namespace)
 
 	existing, err := configMaps.Get(ctx, s.configMap, metav1.GetOptions{})
@@ -186,7 +187,7 @@ func (s *KubernetesSyncer) syncConfigMap(ctx context.Context, data map[string]st
 		return false, errors.Wrapf(err, "failed to get configmap %s", s.configMap)
 	}
 
-	if reflect.DeepEqual(existing.Data, data) {
+	if len(existing.Data) == 1 && UpToDate([]byte(existing.Data[ConfigFileName]), content) {
 		return false, nil
 	}
 

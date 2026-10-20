@@ -30,7 +30,7 @@ func (f *fakeLogSinkSyncer) Sync(_ context.Context, r *logsink.Rendered) (bool, 
 		return false, f.err
 	}
 
-	if f.last != nil && string(f.last.Content) == string(r.Content) {
+	if f.last != nil && logsink.UpToDate(f.last.Content, r.Content) {
 		return false, nil
 	}
 
@@ -60,7 +60,7 @@ func newLogSinkHarness(t *testing.T, sinks ...*v1.LogSink) *logSinkHarness {
 		t:       t,
 		db:      map[int]*v1.LogSink{},
 		syncer:  &fakeLogSinkSyncer{},
-		metrics: &logsink.VectorMetrics{Reloads: 1, Components: map[string]logsink.ComponentCounters{}},
+		metrics: &logsink.VectorMetrics{Components: map[string]logsink.ComponentCounters{}},
 		now:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 
@@ -138,10 +138,11 @@ func newTestLogSink(id int, name string) *v1.LogSink {
 
 func TestLogSinkController_Lifecycle(t *testing.T) {
 	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
-	id := logsink.ComponentID("a")
 
 	// Delivered, Vector has not reloaded yet.
 	h.pass(0)
+	id := h.status(1).ComponentID
+	assert.True(t, logsink.ValidComponentID(id))
 	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
 	assert.Contains(t, string(h.syncer.last.Content), id+":")
 	assert.True(t, h.status(1).LastConnectionTest.OK)
@@ -153,22 +154,26 @@ func TestLogSinkController_Lifecycle(t *testing.T) {
 	h.pass(10 * time.Second)
 	assert.Equal(t, updates, h.updates)
 
-	// Reload observed and the component exists: Running.
-	h.metrics.Reloads = 2
+	// Series of a component built during a reload Vector rejected: not running.
 	h.metrics.Components[id] = logsink.ComponentCounters{}
 	h.pass(20 * time.Second)
+	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
+
+	// The component runs in Vector: Running.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true}
+	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 	assert.Empty(t, h.status(1).ErrorMessage)
 
 	// Events delivered: counters and last_sent_time follow.
-	h.metrics.Components[id] = logsink.ComponentCounters{Sent: 40}
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 40}
 	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 	assert.Equal(t, int64(40), h.status(1).SentEvents)
 	assert.NotEmpty(t, h.status(1).LastSentTime)
 
 	// Failures and drops in the last window: Degraded.
-	h.metrics.Components[id] = logsink.ComponentCounters{Sent: 50, Failed: 2, Dropped: 3}
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 50, Failed: 2, Dropped: 3}
 	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase)
 	assert.Contains(t, h.status(1).ErrorMessage, "2 failed sends, 3 dropped events")
@@ -179,7 +184,7 @@ func TestLogSinkController_Lifecycle(t *testing.T) {
 	failed := 2.0
 	for i := 0; i < 11; i++ {
 		failed++
-		h.metrics.Components[id] = logsink.ComponentCounters{Sent: 50, Failed: failed, Dropped: 3}
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 50, Failed: failed, Dropped: 3}
 		h.pass(30 * time.Second)
 	}
 
@@ -187,7 +192,7 @@ func TestLogSinkController_Lifecycle(t *testing.T) {
 	assert.Contains(t, h.status(1).ErrorMessage, "no events delivered")
 
 	// One successful send recovers it.
-	h.metrics.Components[id] = logsink.ComponentCounters{Sent: 51, Failed: failed, Dropped: 3}
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 51, Failed: failed, Dropped: 3}
 	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 
@@ -199,38 +204,158 @@ func TestLogSinkController_NotAppliedFails(t *testing.T) {
 	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
 	h.pass(0)
 
-	// Vector rejects the reload: the counter never moves.
-	h.metrics.ConfigLoadErrors = 1
+	// Vector rejects the reload: the reload counter never moves.
+	h.metrics.RejectedReloads = 1
 	for i := 0; i < 5; i++ {
 		h.pass(30 * time.Second)
 	}
 
 	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "rejected a config reload, retrying")
 
 	h.pass(time.Minute)
 	assert.Equal(t, v1.LogSinkPhaseFAILED, h.status(1).Phase)
 	assert.Contains(t, h.status(1).ErrorMessage, "rejected a config reload")
+
+	// A retry that Vector accepts recovers it.
+	for i := 0; i < 10 && h.status(1).Phase != v1.LogSinkPhaseRUNNING; i++ {
+		if strings.Contains(string(h.syncer.last.Content), "# retry: ") {
+			h.metrics.Components[h.status(1).ComponentID] = logsink.ComponentCounters{Running: true}
+		}
+
+		h.pass(30 * time.Second)
+	}
+
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 }
 
-func TestLogSinkController_StaleSeriesNeedReload(t *testing.T) {
-	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
-	// Series left behind by an earlier sink of the same name.
-	h.metrics.Components[logsink.ComponentID("a")] = logsink.ComponentCounters{Sent: 7}
+// retriedAt reports the times (since start) at which the config was written
+// again. With reject, Vector rejects every write.
+func retriedAt(h *logSinkHarness, start time.Time, passes int, reject bool) []time.Duration {
+	var at []time.Duration
 
+	for i := 0; i < passes; i++ {
+		before := h.syncer.written
+		h.pass(10 * time.Second)
+
+		if h.syncer.written > before {
+			require.Contains(h.t, string(h.syncer.last.Content), "# retry: ")
+			at = append(at, h.now.Sub(start))
+
+			if reject {
+				h.metrics.RejectedReloads++
+			}
+		}
+	}
+
+	return at
+}
+
+func TestLogSinkController_RetryRejectedReload(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+	start := h.now
 	h.pass(0)
+	require.Equal(t, 1, h.syncer.written)
+
+	// Rejected: the first retry follows the first scrape that shows it, then backs off.
+	h.metrics.RejectedReloads = 1
+	at := retriedAt(h, start, 60, true)
+	assert.Equal(t, []time.Duration{30 * time.Second, 90 * time.Second, 210 * time.Second, 450 * time.Second}, at)
+
+	// Once loaded, no more retries.
+	h.metrics.Components[h.status(1).ComponentID] = logsink.ComponentCounters{Running: true}
+	h.pass(10 * time.Second)
+	h.pass(30 * time.Second)
+	require.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	written := h.syncer.written
+	h.pass(10 * time.Minute)
+	h.pass(10 * time.Minute)
+	assert.Equal(t, written, h.syncer.written)
+}
+
+func TestLogSinkController_RetryUnconfirmedWaitsForPropagation(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+	start := h.now
+	h.pass(0)
+
+	// No rejection seen (e.g. a ConfigMap still propagating): wait longer before retrying.
+	at := retriedAt(h, start, 30, false)
+	assert.Equal(t, []time.Duration{90 * time.Second, 270 * time.Second}, at)
+}
+
+func TestLogSinkController_ComponentIDRotation(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+	h.pass(0)
+
+	id := h.status(1).ComponentID
+	require.True(t, logsink.ValidComponentID(id))
+	assert.Contains(t, string(h.syncer.last.Content), id+":")
+
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 5}
+	h.pass(30 * time.Second)
+	require.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	// A spec edit keeps the ID.
+	h.db[1].Spec.VictoriaLogs.TimeoutSeconds = 9
+	h.pass(10 * time.Second)
+	assert.Equal(t, id, h.status(1).ComponentID)
+
+	// A restarted controller keeps the ID and writes nothing.
+	written := h.syncer.written
+	restarted := newLogSinkHarness(t)
+	restarted.db, restarted.syncer, restarted.metrics, restarted.now = h.db, h.syncer, h.metrics, h.now
+	restarted.c.syncer = h.syncer
+	restarted.pass(0)
+	assert.Equal(t, id, h.status(1).ComponentID)
+	assert.Equal(t, written, h.syncer.written)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	// Disabling clears the ID; enabling again takes a new one.
+	h.db[1].Spec.Enabled = new(bool)
+	h.pass(10 * time.Second)
+	assert.Empty(t, h.status(1).ComponentID)
+	assert.NotContains(t, string(h.syncer.last.Content), id)
+
+	h.db[1].Spec.Enabled = nil
+	h.pass(10 * time.Second)
+
+	reenabled := h.status(1).ComponentID
+	assert.True(t, logsink.ValidComponentID(reenabled))
+	assert.NotEqual(t, id, reenabled)
+	assert.Contains(t, string(h.syncer.last.Content), reenabled+":")
+
+	// The old activation still runs (draining) but says nothing about the new one.
+	require.True(t, h.metrics.Components[id].Running)
 	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
 
-	h.metrics.Reloads++
-	h.pass(30 * time.Second)
-	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+	// Deleted and created again under the same name: a new ID as well.
+	h.db[1].Metadata.DeletionTimestamp = h.now.Format(time.RFC3339)
+	h.pass(10 * time.Second)
+	h.pass(10 * time.Second)
+	require.NotContains(t, h.db, 1)
+
+	h.db[2] = newTestLogSink(2, "a")
+	h.pass(10 * time.Second)
+	assert.True(t, logsink.ValidComponentID(h.status(2).ComponentID))
+	assert.NotEqual(t, reenabled, h.status(2).ComponentID)
+	assert.NotEqual(t, id, h.status(2).ComponentID)
+}
+
+func TestLogSinkController_ComponentIDNotSavedIsNotDelivered(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+	h.c.storage = failingUpdateStorage(t, h)
+	h.pass(0)
+
+	assert.Empty(t, h.db[1].Status)
+	assert.NotContains(t, string(h.syncer.last.Content), "logsink_a")
 }
 
 func TestLogSinkController_SpecChangeRedeliversAndRetests(t *testing.T) {
 	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
 	h.pass(0)
-	h.metrics.Reloads++
-	h.metrics.Components[logsink.ComponentID("a")] = logsink.ComponentCounters{}
+	h.metrics.Components[h.status(1).ComponentID] = logsink.ComponentCounters{Running: true}
 	h.pass(30 * time.Second)
 	require.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 
@@ -314,4 +439,20 @@ func TestLogSinkController_SyncError(t *testing.T) {
 	h.db[2].Metadata.Annotations = v1.WithForceDeleteAnnotation(nil)
 	h.pass(10 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseDELETED, h.status(2).Phase)
+}
+
+// failingUpdateStorage serves h's sinks but fails every status write.
+func failingUpdateStorage(t *testing.T, h *logSinkHarness) storage.Storage {
+	st := storagemocks.NewMockStorage(t)
+	st.On("ListLogSink", mock.Anything).Return(func(_ storage.ListOption) ([]v1.LogSink, error) {
+		var out []v1.LogSink
+		for _, s := range h.db {
+			out = append(out, *s)
+		}
+
+		return out, nil
+	}).Maybe()
+	st.On("UpdateLogSink", mock.Anything, mock.Anything).Return(assert.AnError).Maybe()
+
+	return st
 }

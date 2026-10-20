@@ -24,6 +24,13 @@ const (
 	logSinkApplyTimeout = 3 * time.Minute
 	// How long a sink may fail every send without a single success before it is Failed.
 	logSinkFailingTimeout = 5 * time.Minute
+	// Vector does not retry a rejected reload, so an unconfirmed delivery is
+	// written again: soon after a rejection shows up, otherwise only after a
+	// ConfigMap has had time to propagate (up to about a minute). Doubles per
+	// attempt up to logSinkRetryMaxWait.
+	logSinkRetryRejectedWait    = 30 * time.Second
+	logSinkRetryUnconfirmedWait = 90 * time.Second
+	logSinkRetryMaxWait         = 5 * time.Minute
 
 	logSinkDisabledMessage = "log sink is disabled; it is not delivered to Vector"
 	logSinkNoTraceMessage  = "the AI trace pipeline is not deployed (no built-in trace store), so log sinks have no traces to receive"
@@ -44,18 +51,24 @@ type LogSinkController struct {
 	metrics      *logsink.VectorMetrics
 	scrapeErr    error
 	states       map[string]*logSinkState
+
+	// The last write of the config and the rejected reload count before it.
+	lastWriteAt  time.Time
+	rejectedBase float64
+	retries      int
 }
 
 // logSinkState is what the controller remembers about a delivered sink.
 type logSinkState struct {
 	hash        string
+	componentID string
 	deliveredAt time.Time
-	// reloadBase/loadErrBase are Vector's counters before delivery; without a
-	// baseline, the component showing up in metrics counts as applied.
-	reloadBase        *float64
-	loadErrBase       float64
-	presentAtDelivery bool
-	applied           bool
+	// written is set when this process wrote the config that delivered the
+	// sink; rejectedBase is Vector's rejected reload count before that write.
+	written      bool
+	rejectedBase float64
+	// applied is set once the delivered component ID runs in Vector.
+	applied bool
 
 	prev         *logsink.ComponentCounters
 	window       *logsink.ComponentCounters
@@ -154,6 +167,8 @@ func (c *LogSinkController) reconcile(ctx context.Context) error {
 		}
 	}
 
+	active = c.assignComponentIDs(active, excluded, now)
+
 	syncErr := c.deliver(ctx, active, now)
 	if syncErr != nil {
 		klog.Errorf("failed to deliver log sinks to Vector: %v", syncErr)
@@ -174,6 +189,38 @@ func (c *LogSinkController) reconcile(ctx context.Context) error {
 	return nil
 }
 
+// assignComponentIDs gives every active sink without one a fresh component ID,
+// saved before delivery so it survives a restart. A sink whose ID cannot be
+// saved is not delivered.
+func (c *LogSinkController) assignComponentIDs(active []*v1.LogSink, excluded map[string]error,
+	now time.Time) []*v1.LogSink {
+	kept := active[:0]
+
+	for _, s := range active {
+		old := s.Status
+		if old == nil {
+			old = &v1.LogSinkStatus{}
+		}
+
+		if logsink.ValidComponentID(old.ComponentID) {
+			kept = append(kept, s)
+			continue
+		}
+
+		status := *old
+		status.ComponentID = logsink.NewComponentID(s.GetName())
+
+		if err := c.writeStatus(s, old, &status, now); err != nil {
+			excluded[s.GetName()] = errors.Wrap(err, "failed to assign a Vector component ID")
+			continue
+		}
+
+		kept = append(kept, s)
+	}
+
+	return kept
+}
+
 // deliver renders the active sinks and records which of them a write delivered.
 func (c *LogSinkController) deliver(ctx context.Context, active []*v1.LogSink, now time.Time) error {
 	activeNames := map[string]bool{}
@@ -192,31 +239,54 @@ func (c *LogSinkController) deliver(ctx context.Context, active []*v1.LogSink, n
 		return err
 	}
 
+	// After a restart, the config on disk counts as just written.
+	if c.lastWriteAt.IsZero() {
+		c.lastWriteAt = now
+	}
+
+	retry := c.retryDue(now)
+	if retry {
+		rendered = rendered.WithRetry(now.UTC().Format(time.RFC3339Nano))
+	}
+
 	written, err := c.syncer.Sync(ctx, rendered)
 	if err != nil {
 		return err
 	}
 
+	if written {
+		c.lastWriteAt = now
+		if c.metrics != nil {
+			c.rejectedBase = c.metrics.RejectedReloads
+		}
+
+		if retry {
+			c.retries++
+			klog.Infof("Vector has not confirmed the log sink config; delivered it again (attempt %d)", c.retries+1)
+		} else {
+			c.retries = 0
+		}
+	}
+
 	for _, s := range active {
 		hash := logsink.SpecHash(s)
+		id := s.Status.ComponentID
 
 		st := c.states[s.GetName()]
-		if st != nil && st.hash == hash {
+		if st != nil && st.hash == hash && st.componentID == id {
 			continue
 		}
 
-		next := &logSinkState{hash: hash, deliveredAt: now}
-		if st != nil {
+		next := &logSinkState{hash: hash, componentID: id, deliveredAt: now}
+		if st != nil && st.componentID == id {
 			next.prev, next.window, next.windowAt = st.prev, st.window, st.windowAt
 		}
 
 		// Nothing written means the config on disk already had this sink (e.g.
-		// after a core restart); there is no reload to wait for.
+		// after a core restart); rejections counted before say nothing about it.
 		if written && c.metrics != nil {
-			base := c.metrics.Reloads
-			next.reloadBase = &base
-			next.loadErrBase = c.metrics.ConfigLoadErrors
-			_, next.presentAtDelivery = c.metrics.Components[logsink.ComponentID(s.GetName())]
+			next.written = true
+			next.rejectedBase = c.metrics.RejectedReloads
 		}
 
 		c.states[s.GetName()] = next
@@ -225,21 +295,53 @@ func (c *LogSinkController) deliver(ctx context.Context, active []*v1.LogSink, n
 	return nil
 }
 
-// observe folds a fresh scrape into every delivered sink's state.
-func (c *LogSinkController) observe(now time.Time) {
-	for name, st := range c.states {
-		cur, present := c.metrics.Components[logsink.ComponentID(name)]
+// retryDue reports whether the config should be written again because Vector
+// has not confirmed a delivered sink, waiting at least one scrape after the
+// last write and backing off per attempt.
+func (c *LogSinkController) retryDue(now time.Time) bool {
+	if c.metrics == nil || c.scrapeErr != nil || !c.lastScrapeAt.After(c.lastWriteAt) {
+		return false
+	}
 
+	unconfirmed := false
+
+	for _, st := range c.states {
 		if !st.applied {
-			switch {
-			case st.reloadBase == nil:
-				st.applied = present
-			case c.metrics.Reloads != *st.reloadBase:
-				// Changed either way: reloaded, or restarted and loaded from disk.
-				st.applied = true
-			default:
-				st.applied = present && !st.presentAtDelivery
-			}
+			unconfirmed = true
+			break
+		}
+	}
+
+	if !unconfirmed {
+		return false
+	}
+
+	wait := logSinkRetryUnconfirmedWait
+	if c.metrics.RejectedSince(c.rejectedBase) {
+		wait = logSinkRetryRejectedWait
+	}
+
+	for i := 0; i < c.retries && wait < logSinkRetryMaxWait; i++ {
+		wait *= 2
+	}
+
+	if wait > logSinkRetryMaxWait {
+		wait = logSinkRetryMaxWait
+	}
+
+	return now.Sub(c.lastWriteAt) >= wait
+}
+
+// observe folds a fresh scrape into every delivered sink's state. Only the
+// series of the component ID that was delivered count: series of an earlier
+// activation stay in the exporter.
+func (c *LogSinkController) observe(now time.Time) {
+	for _, st := range c.states {
+		cur, present := c.metrics.Components[st.componentID]
+
+		// The ID is new for each activation, so only this delivery can make it run.
+		if present && cur.Running {
+			st.applied = true
 		}
 
 		if !present {
@@ -299,10 +401,13 @@ func (c *LogSinkController) reconcileOne(ctx context.Context, s *v1.LogSink, exc
 	case !s.Spec.IsEnabled():
 		status.Phase = v1.LogSinkPhaseDISABLED
 		status.ErrorMessage = ""
+		// Not delivered any more; delivering it again takes a new ID.
+		status.ComponentID = ""
 	case excludedErr != nil:
 		status.Phase = v1.LogSinkPhaseFAILED
 		status.ErrorMessage = excludedErr.Error()
-	case syncErr != nil && (st == nil || st.hash != hash || !st.applied):
+		status.ComponentID = ""
+	case syncErr != nil && (st == nil || st.hash != hash || st.componentID != status.ComponentID || !st.applied):
 		status.Phase = v1.LogSinkPhaseFAILED
 		status.ErrorMessage = "failed to deliver to Vector: " + syncErr.Error()
 	case st == nil:
@@ -339,7 +444,13 @@ func (c *LogSinkController) reconcileOne(ctx context.Context, s *v1.LogSink, exc
 
 func (c *LogSinkController) derivePhase(st *logSinkState, now time.Time) (v1.LogSinkPhase, string) {
 	if !st.applied {
+		rejected := st.written && c.metrics != nil && c.metrics.RejectedSince(st.rejectedBase)
+
 		if now.Sub(st.deliveredAt) < logSinkApplyTimeout {
+			if rejected {
+				return v1.LogSinkPhasePENDING, "Vector rejected a config reload, retrying; see the Vector logs"
+			}
+
 			return v1.LogSinkPhasePENDING, ""
 		}
 
@@ -348,8 +459,8 @@ func (c *LogSinkController) derivePhase(st *logSinkState, now time.Time) (v1.Log
 		switch {
 		case c.scrapeErr != nil:
 			msg += "; cannot read Vector metrics: " + c.scrapeErr.Error()
-		case c.metrics != nil && c.metrics.ConfigLoadErrors > st.loadErrBase:
-			msg += "; Vector rejected a config reload, see the Vector logs"
+		case rejected:
+			msg += "; Vector rejected a config reload, see the Vector logs; still retrying"
 		}
 
 		return v1.LogSinkPhaseFAILED, msg
@@ -375,6 +486,7 @@ func (c *LogSinkController) writeStatus(s *v1.LogSink, old, status *v1.LogSinkSt
 		old.SentEvents == status.SentEvents &&
 		old.DroppedEvents == status.DroppedEvents &&
 		old.LastSentTime == status.LastSentTime &&
+		old.ComponentID == status.ComponentID &&
 		sameConnectionTest(old.LastConnectionTest, status.LastConnectionTest) {
 		return nil
 	}

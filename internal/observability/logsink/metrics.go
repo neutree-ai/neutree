@@ -13,6 +13,11 @@ import (
 
 // ComponentCounters are cumulative Vector counters for one sink component.
 type ComponentCounters struct {
+	// Running is set when the component reports utilization, which only a
+	// running component does. Other series also appear for a component built
+	// during a reload that Vector then rejected, so they prove nothing.
+	Running bool
+
 	Sent float64
 	// Failed counts failed send attempts: component errors, HTTP client errors
 	// (e.g. connection refused, retried forever) and non-2xx responses.
@@ -33,6 +38,7 @@ func (c ComponentCounters) Sub(prev ComponentCounters) ComponentCounters {
 	}
 
 	return ComponentCounters{
+		Running: c.Running,
 		Sent:    d(c.Sent, prev.Sent),
 		Failed:  d(c.Failed, prev.Failed),
 		Dropped: d(c.Dropped, prev.Dropped),
@@ -44,10 +50,19 @@ type VectorMetrics struct {
 	// Components holds every log sink component that has series. Series of a
 	// removed component stay in the exporter, so presence alone proves little.
 	Components map[string]ComponentCounters
-	// Reloads counts successful config reloads since Vector started.
-	Reloads float64
-	// ConfigLoadErrors counts reloads Vector rejected since it started.
-	ConfigLoadErrors float64
+	// RejectedReloads counts reloads Vector rejected since it started: config
+	// that failed to load (error_code "config_load", e.g. a missing secret) and
+	// topology that failed to build (error_code "reload", e.g. a locked buffer).
+	// Either way Vector keeps the old config and does not retry on its own.
+	// Vector drops series idle for a while, so this can fall back to zero and
+	// count up again; compare with RejectedSince.
+	RejectedReloads float64
+}
+
+// RejectedSince reports whether Vector rejected a reload after base was read.
+// A count below base that is not zero means the series expired and came back.
+func (m *VectorMetrics) RejectedSince(base float64) bool {
+	return m.RejectedReloads > base || (m.RejectedReloads > 0 && m.RejectedReloads < base)
 }
 
 // ScrapeMetrics fetches and parses Vector metrics.
@@ -90,17 +105,11 @@ func ParseMetrics(r io.Reader) (*VectorMetrics, error) {
 
 			value := metricValue(metric)
 
-			switch name {
-			case "vector_reloaded_total":
-				m.Reloads += value
+			if code := labels["error_code"]; name == "vector_component_errors_total" &&
+				(code == "config_load" || code == "reload") {
+				m.RejectedReloads += value
 
 				continue
-			case "vector_component_errors_total":
-				if labels["error_code"] == "config_load" {
-					m.ConfigLoadErrors += value
-
-					continue
-				}
 			}
 
 			id := labels["component_id"]
@@ -111,6 +120,8 @@ func ParseMetrics(r io.Reader) (*VectorMetrics, error) {
 			c := m.Components[id]
 
 			switch name {
+			case "vector_utilization":
+				c.Running = true
 			case "vector_component_sent_events_total":
 				c.Sent += value
 			case "vector_component_errors_total", "vector_http_client_errors_total":
