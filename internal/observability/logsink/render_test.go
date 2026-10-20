@@ -211,6 +211,9 @@ func TestValidate(t *testing.T) {
 		{name: "extra field value with comma", sink: testSink("x", func(vl *v1.VictoriaLogsSinkSpec) {
 			vl.ExtraFields = map[string]string{"a": "b,c"}
 		}), wantErr: "extra_fields value"},
+		{name: "ca cert not PEM", sink: testSink("x", func(vl *v1.VictoriaLogsSinkSpec) {
+			vl.CACert = "not a certificate"
+		}), wantErr: "ca_cert"},
 		{name: "bad name", sink: testSink("Bad_Name", nil), wantErr: "metadata.name"},
 		{name: "wrong type", sink: func() *v1.LogSink { s := testSink("x", nil); s.Spec.Type = "loki"; return s }(), wantErr: "spec.type"},
 		{name: "small buffer", sink: func() *v1.LogSink {

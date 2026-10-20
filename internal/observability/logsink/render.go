@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -115,6 +116,12 @@ func ValidateSpec(spec *v1.LogSinkSpec) error {
 
 	if vl.TimeoutSeconds < 0 {
 		return errors.New("spec.victorialogs.timeout_seconds must not be negative")
+	}
+
+	// Vector rejects the whole reload on an unparsable CA, taking every other
+	// sink's change down with it, so keep such a sink out of the config.
+	if vl.CACert != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(vl.CACert)) {
+		return errors.New("spec.victorialogs.ca_cert contains no valid PEM certificate")
 	}
 
 	if vl.Auth != nil {
