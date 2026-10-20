@@ -9,6 +9,7 @@ import (
 const (
 	ComponentName             = "hami"
 	ChartReleaseName          = "hami"
+	LegacyVersion             = "v2.9.0"
 	Version                   = "v2.10.0"
 	SchedulerName             = "hami-scheduler"
 	DevicePluginDaemonSetName = "hami-device-plugin"
@@ -28,6 +29,16 @@ const (
 	KubeSchedulerImageRepository = "kube-scheduler"
 )
 
+var legacyKubeSchedulerVersionsByMinor = map[string]string{
+	"1.26": "v1.26.15",
+	"1.27": "v1.27.16",
+	"1.28": "v1.28.15",
+	"1.29": "v1.29.14",
+	"1.30": "v1.30.14",
+	"1.31": "v1.31.14",
+	"1.32": "v1.32.13",
+}
+
 var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.26": "v1.26.15",
 	"1.27": "v1.27.16",
@@ -42,6 +53,7 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 }
 
 type HAMiStatus struct {
+	Version                string
 	Ready                  bool
 	Reason                 string
 	Message                string
@@ -72,7 +84,7 @@ func (s HAMiStatus) ComponentStatus() *v1.ComponentStatus {
 	return &v1.ComponentStatus{
 		Phase:   phase,
 		Managed: true,
-		Version: Version,
+		Version: s.Version,
 		Reason:  s.Reason,
 		Message: s.Message,
 	}

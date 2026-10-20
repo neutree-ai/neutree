@@ -1,17 +1,54 @@
 # HAMi Chart Modifications
 
-This is the official `hami-2.10.0.tgz` release chart, repackaged with the
-Neutree scheduler rollout patch described below.
+Neutree embeds both the existing patched `hami-2.9.0.tgz` and the official
+`hami-2.10.0.tgz` release chart repackaged with the scheduler rollout patch.
+The Neutree cluster version selects a compatibility profile; the underlying
+Kubernetes server version independently selects that profile's scheduler image.
 
-## Upstream Source
+## Cluster Version Matrix
+
+`hami.VersionForCluster(clusterVersion)` resolves the HAMi version:
+
+| Neutree cluster version | HAMi version | Embedded chart | Scheduler profile |
+| --- | --- | --- | --- |
+| Supported `1.1.x` and `1.2.x` versions | `v2.9.0` (`hami.LegacyVersion`) | `hami-2.9.0.tgz` | Existing 1.26–1.32 pins; detected-version fallback for unmapped minors |
+| Base version `>= 1.3.0`, including RCs and build metadata | `v2.10.0` (`hami.Version`) | `hami-2.10.0.tgz` | 1.26–1.35 pins; detected-version fallback for unmapped minors |
+| Below `1.1.0`, empty, or invalid | Error | None | None |
+
+The threshold uses the numeric base version: `1.3.0-rc.1` and
+`1.3.0+build.1` select HAMi 2.10.0. Kubernetes server-version discovery does
+not select the HAMi profile; upgrading Kubernetes alone does not change it.
+
+Upgrading the control plane does not implicitly upgrade HAMi on an existing
+Neutree 1.1/1.2 cluster. Reconciliation retains its 2.9.0 profile. A new cluster
+explicitly selecting Neutree 1.3+ uses 2.10.0; an existing cluster moves to that
+profile only when its Neutree cluster version is explicitly upgraded to 1.3+.
+This does not upgrade Kubernetes. `hami.Version` still means the latest HAMi
+version, not the expected version for every cluster.
+
+Both archives are loaded in-process with `loader.LoadArchive` in
+`internal/cluster/component/hami/chart.go`.
+
+## Legacy 2.9.0 Chart
+
+The patched 2.9.0 archive is restored unchanged from the repository baseline,
+not reconstructed from the 2.10.0 chart. Its existing Neutree patches remain:
+
+- `device-config.content` overrides `files/device-config.yaml` and chart defaults.
+- `scheduler.updateStrategy` defaults to a zero-unavailable rolling update
+  (`maxUnavailable: 0`, `maxSurge: 1`).
+- Scheduler pod anti-affinity is soft
+  (`preferredDuringSchedulingIgnoredDuringExecution`) so a replacement can
+  schedule on a single-node cluster while leader election protects the overlap.
+
+## Upstream 2.10.0 Source
 
 - Release: https://github.com/Project-HAMi/HAMi/releases/tag/v2.10.0
 - Archive: https://github.com/Project-HAMi/HAMi/releases/download/v2.10.0/hami-2.10.0.tgz
 - Original archive SHA-256: `e1d8429b2270da1a5c26343d6d6fd2a0099ba7b944cf0f52eb20d6b9f14e5099`
 
-The checksum identifies the unmodified upstream download, not the repackaged
-archive committed here. The embedded chart is loaded with `loader.LoadArchive`
-in `internal/cluster/component/hami/chart.go`.
+The checksum identifies the unmodified upstream 2.10.0 download, not either
+repackaged archive committed here.
 
 ## Deviation From Upstream 2.10.0
 
@@ -43,14 +80,18 @@ files changed from the upstream release archive.
   cluster to schedule the replacement pod while retaining the multi-node spread
   preference. Leader election protects the brief overlap.
 
-Neither behavior needs a local patch in 2.10.0. Keep the upstream device-config
-defaults, including the new MIG profile allowlist and NUMA topology setting.
+Neither behavior needs a local patch in 2.10.0. Keep that profile's upstream
+device-config defaults, including the new MIG profile allowlist and NUMA
+topology setting; do not apply them to the legacy chart.
 
 ## DRA and Webhook Configuration
 
-HAMi 2.10.0 removes DRA from its main chart. This archive has no DRA dependency;
-Neutree does not install HAMi-DRA or ascend-dra-driver and no longer sets the
-obsolete `dra.enabled` value. User `config_patch` still cannot enable DRA.
+The legacy 2.9.0 profile keeps `dra.enabled: false`; user `config_patch` cannot
+enable it. Its optional DRA dependency need not be vendored for in-process
+chart loading. HAMi 2.10.0 removes DRA from its main chart, so that
+archive has no DRA dependency and the new profile does not set the obsolete
+`dra.enabled` value. Neither profile installs HAMi-DRA or ascend-dra-driver;
+user `config_patch` cannot enable DRA.
 
 Neutree enforces `scheduler.admissionWebhook.enabled: true` and
 `scheduler.admissionWebhook.manageNamespaceSelector: true`, supplies its own
@@ -61,25 +102,41 @@ restricted to the owning Neutree cluster namespace.
 
 ## Kubernetes Scheduler Images
 
-`KubeSchedulerVersionsByMinor` in `types.go` pins a scheduler image for each
-bundled Kubernetes minor, from 1.26 through 1.35. The offline Kubernetes image
-list must include every pin. Existing 1.26–1.32 pins and the 1.32 discovery-error
-fallback are unchanged.
+Both profiles retain the existing Kubernetes 1.26–1.32 scheduler image pins
+and the `v1.32.13` fallback when server-version discovery or parsing fails.
+Only the Neutree 1.3+ profile adds pins for Kubernetes 1.33–1.35:
 
-This update adds the following scheduler image pins:
+| Kubernetes minor | Legacy 1.1/1.2 profile | Neutree 1.3+ profile |
+| --- | --- | --- |
+| 1.26 | `v1.26.15` | `v1.26.15` |
+| 1.27 | `v1.27.16` | `v1.27.16` |
+| 1.28 | `v1.28.15` | `v1.28.15` |
+| 1.29 | `v1.29.14` | `v1.29.14` |
+| 1.30 | `v1.30.14` | `v1.30.14` |
+| 1.31 | `v1.31.14` | `v1.31.14` |
+| 1.32 | `v1.32.13` | `v1.32.13` |
+| 1.33 | Detected server version | `v1.33.13` |
+| 1.34 | Detected server version | `v1.34.12` |
+| 1.35 | Detected server version | `v1.35.9` |
 
-| Kubernetes minor | Scheduler image tag |
-| --- | --- |
-| 1.33 | `v1.33.13` |
-| 1.34 | `v1.34.12` |
-| 1.35 | `v1.35.9` |
+Unmapped minors use the detected server version, including its patch with
+vendor suffixes removed. This applies to Kubernetes 1.33+ on the legacy
+profile and 1.36+ on the new profile, as well as older unmapped minors. Such
+clusters require a separately supplied offline scheduler image unless the
+exact detected tag is already bundled; new-profile pins must not leak into
+legacy scheduler selection.
 
-Unmapped minors, including 1.36 and later, continue using the detected server
-version, including its patch with vendor suffixes removed, and require a
-separately supplied offline scheduler image. Older unmapped minors are not added.
+The offline Kubernetes image list contains both HAMi versions and the union of
+the 1.26–1.35 scheduler pins, not just images for the latest profile.
 
 Bundling or rendering an image is not real-cluster compatibility certification
 and does not extend the Kubernetes project's security-support lifecycle.
+
+## Node-Agent Artifacts
+
+Node-agent publishing, builds, and image/version tiers remain independent work.
+This change leaves the node-agent image-list entry unchanged; choosing a HAMi
+profile does not publish or rebuild a matching node-agent artifact.
 
 ## Verification
 
@@ -87,10 +144,17 @@ and does not extend the Kubernetes project's security-support lifecycle.
   renders every bundled Kubernetes minor, checking pinned images, scheduler
   configuration, absence of DRA, TLS/webhook protection, node scope, device
   configuration overrides/checksums, and zero-unavailable scheduler rollouts.
-- `TestHAMiOfflineImages` checks the scheduler/HAMi pins against the offline
-  Kubernetes image list.
-- `TestHAMiReconcileInstallsAndUpgradesEmbeddedChart` uses a fake client with
-  Kubernetes `v1.33.13` for fresh installation and HAMi 2.9.0 → 2.10.0 upgrades.
+- `TestHAMiOfflineImages` checks both HAMi versions and the union of scheduler
+  pins against the offline Kubernetes image list.
+- Reconciliation checks must distinguish unchanged legacy clusters from an
+  explicit Neutree cluster-version upgrade to the 2.10.0 profile. Unit tests
+  use fake clients and in-process rendering, not actual cluster certification.
 - E2E virtualization coverage lives in
   `tests/e2e/accelerator_virtualization_test.go` and requires a configured
-  Neutree deployment and GPU Kubernetes cluster.
+  Neutree deployment and GPU Kubernetes cluster. Its expected HAMi version is
+  resolved with `hami.VersionForCluster(cluster.GetVersion())`, so legacy
+  profiles are not incorrectly required to run the latest HAMi.
+
+This document does not assert that either profile has passed real-cluster E2E
+validation. Local checks and compilation must be reported separately from any
+deployment or compatibility certification.

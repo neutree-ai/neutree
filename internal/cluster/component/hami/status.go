@@ -15,7 +15,12 @@ import (
 )
 
 func (h *HAMiComponent) CheckResourcesStatus(ctx context.Context) (*HAMiStatus, error) {
-	status := &HAMiStatus{}
+	hamiVersion, err := VersionForCluster(h.cluster.GetVersion())
+	if err != nil {
+		return nil, err
+	}
+
+	status := &HAMiStatus{Version: hamiVersion}
 
 	nodeList := &corev1.NodeList{}
 	if err := h.ctrlClient.List(ctx, nodeList); err != nil {

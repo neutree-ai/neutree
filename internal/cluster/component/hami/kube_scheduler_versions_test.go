@@ -66,7 +66,7 @@ func TestHAMiOfflineImages(t *testing.T) {
 
 	t.Run("hami", func(t *testing.T) {
 		assert.Equal(t, "v2.10.0", Version)
-		assert.Equal(t, []string{hamiImagePrefix + Version}, hamiImages)
+		assert.ElementsMatch(t, []string{hamiImagePrefix + "v2.9.0", hamiImagePrefix + Version}, hamiImages)
 	})
 
 	expectedSchedulerImages := make([]string, 0, len(KubeSchedulerVersionsByMinor))

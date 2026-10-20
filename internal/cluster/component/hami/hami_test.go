@@ -78,7 +78,7 @@ func TestHAMiComponentPluginPatchControlsDevicePluginValues(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, Version)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -370,7 +370,7 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), Version)
 	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["enabled"])
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
@@ -400,7 +400,7 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), Version)
 	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
 	require.NoError(t, err)
 	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
@@ -538,7 +538,7 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, Version)
 
 	assert.Equal(t, KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
@@ -559,7 +559,7 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, Version)
 
 	assert.Equal(t, "v1.40.0",
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
@@ -624,7 +624,7 @@ func TestHAMiComponentLegacyDevicePluginConfigPatchCannotOverrideOwner(t *testin
 		},
 	}
 
-	values := component.buildChartValues(plan)
+	values := component.buildChartValues(plan, Version)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -642,7 +642,7 @@ func TestHAMiComponentDefaultValuesDoNotOwnNVIDIADevicePluginPolicy(t *testing.T
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, Version)
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 
 	assert.NotContains(t, devicePlugin, "migStrategy")
@@ -653,7 +653,7 @@ func TestHAMiComponentUsesGPUTopologyAwareSchedulerPolicy(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, Version)
 
 	defaultSchedulerPolicy := nestedMap(t, values, "scheduler", "defaultSchedulerPolicy")
 	assert.Equal(t, plugin.NvidiaGPUTopologyAwarePolicy, defaultSchedulerPolicy["gpuSchedulerPolicy"])
@@ -799,7 +799,7 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"plugin-candidate"}, plan.PatchedNodes)
 	assert.Equal(t, plugin.NvidiaGPUOperatorDriverRoot,
-		nestedMap(t, component.buildChartValues(plan), "devicePlugin")["nvidiaDriverRoot"])
+		nestedMap(t, component.buildChartValues(plan, Version), "devicePlugin")["nvidiaDriverRoot"])
 
 	patched := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "plugin-candidate"}, patched))
@@ -1361,7 +1361,7 @@ func newTestCluster() *v1.Cluster {
 		Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
 		Spec: &v1.ClusterSpec{
 			Type:    v1.KubernetesClusterType,
-			Version: "v1.1.0",
+			Version: "v1.3.0",
 			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
 				Enabled: true,
 			},

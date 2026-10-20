@@ -12,29 +12,34 @@ import (
 
 func TestHAMiKubernetesVersionDiscoveryCompatibility(test *testing.T) {
 	cases := []struct {
-		name             string
-		server           *kubeversion.Info
-		discoveryError   error
-		serverVersion    string
-		minor            string
-		schedulerVersion string
-		chartVersion     string
+		name                   string
+		server                 *kubeversion.Info
+		discoveryError         error
+		serverVersion          string
+		minor                  string
+		schedulerVersion       string
+		legacySchedulerVersion string
+		chartVersion           string
 	}{
 		{
 			name: "GKE prerelease suffix", server: &kubeversion.Info{GitVersion: "v1.33.4-gke.123"},
 			serverVersion: "v1.33.4", minor: "1.33", schedulerVersion: "v1.33.13", chartVersion: "v1.33.4",
+			legacySchedulerVersion: "v1.33.4",
 		},
 		{
 			name: "K3s build metadata", server: &kubeversion.Info{GitVersion: "v1.34.2+k3s1"},
 			serverVersion: "v1.34.2", minor: "1.34", schedulerVersion: "v1.34.12", chartVersion: "v1.34.2",
+			legacySchedulerVersion: "v1.34.2",
 		},
 		{
 			name: "numeric minor with plus", server: &kubeversion.Info{Major: "1", Minor: "35+"},
 			serverVersion: "v1.35.0", minor: "1.35", schedulerVersion: "v1.35.9", chartVersion: "v1.35.0",
+			legacySchedulerVersion: "v1.35.0",
 		},
 		{
 			name: "mapped minor preserves chart patch", server: &kubeversion.Info{GitVersion: "v1.35.4-vendor.1"},
 			serverVersion: "v1.35.4", minor: "1.35", schedulerVersion: "v1.35.9", chartVersion: "v1.35.4",
+			legacySchedulerVersion: "v1.35.4",
 		},
 		{
 			name: "EKS fallback fields", server: &kubeversion.Info{GitVersion: "invalid", Major: "v1", Minor: "36-eks-123"},
@@ -81,7 +86,12 @@ func TestHAMiKubernetesVersionDiscoveryCompatibility(test *testing.T) {
 
 			assert.Equal(test, testCase.serverVersion, kubeServerSemver(testCase.server))
 			assert.Equal(test, testCase.minor, kubeServerMajorMinor(testCase.server))
-			assert.Equal(test, testCase.schedulerVersion, component.resolveKubeSchedulerVersion())
+			assert.Equal(test, testCase.schedulerVersion, component.resolveKubeSchedulerVersion(Version))
+			legacySchedulerVersion := testCase.legacySchedulerVersion
+			if legacySchedulerVersion == "" {
+				legacySchedulerVersion = testCase.schedulerVersion
+			}
+			assert.Equal(test, legacySchedulerVersion, component.resolveKubeSchedulerVersion(LegacyVersion))
 			assert.Equal(test, testCase.chartVersion, component.resolveChartKubeVersion().Version)
 		})
 	}

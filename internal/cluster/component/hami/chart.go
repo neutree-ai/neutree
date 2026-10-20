@@ -17,17 +17,16 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const embeddedHAMiChartPackage = "chart/hami-2.10.0.tgz"
-
-//go:embed chart/hami-2.10.0.tgz
+//go:embed chart/hami-2.9.0.tgz chart/hami-2.10.0.tgz
 var embeddedHAMiChartFS embed.FS
 
 func renderEmbeddedHAMiChart(
+	hamiVersion string,
 	values map[string]interface{},
 	namespace string,
 	kubeVersion chartutil.KubeVersion,
 ) (*unstructured.UnstructuredList, error) {
-	hamiChart, err := loadEmbeddedHAMiChart()
+	hamiChart, err := loadEmbeddedHAMiChart(hamiVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -66,8 +65,10 @@ func renderEmbeddedHAMiChart(
 	return objList, nil
 }
 
-func loadEmbeddedHAMiChart() (*chart.Chart, error) {
-	data, err := embeddedHAMiChartFS.ReadFile(embeddedHAMiChartPackage)
+func loadEmbeddedHAMiChart(hamiVersion string) (*chart.Chart, error) {
+	chartPackage := "chart/hami-" + strings.TrimPrefix(hamiVersion, "v") + ".tgz"
+
+	data, err := embeddedHAMiChartFS.ReadFile(chartPackage)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read embedded HAMi chart")
 	}
