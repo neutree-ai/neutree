@@ -9,8 +9,10 @@
 --                        the IE/EE endpoint it hit must match some entry. Empty
 --                        type/endpoint_name = any endpoint of that model. An unset
 --                        list means unrestricted; an empty [] means deny-all.
---                        The model list names no model, so the list does not
---                        apply to it (see is_model_list_request).
+--                        Model-list requests reach the endpoint, then their
+--                        collection response is filtered with these same rules.
+--                        Disabled keys receive key_disabled from access() or,
+--                        when an EE list was already synthesized, response filters.
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
 --   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
 -- The plugin is attached only when the key actually has access limits, so an
@@ -38,7 +40,7 @@ end
 
 local function request_model()
     -- Prefer the client-facing model stashed by neutree-ai-gateway (priority
-    -- 1100) before it rewrites the request body for model mapping. This plugin
+    -- 900) before it rewrites the request body for model mapping. This plugin
     -- (895) runs after that rewrite, so re-reading the raw body here is
     -- unreliable (it can come back nil) — which would make any key with an
     -- allowed_models list reject every request. Fall back to the body for routes
@@ -58,12 +60,11 @@ local function request_model()
 end
 
 -- is_model_list_request reports whether this request asks for the endpoint's
--- model list rather than for a model to be served. Such a request carries no
--- model, so the allowlist -- a statement about which models may be *called* --
--- has nothing to judge: enforcing it there answers model_not_permitted to a
--- client that asked for no model, and makes the model list unusable for every
--- key that has an allowlist. Inference paths always name a model and stay
--- enforced.
+-- model list rather than for a model to be served. An enabled key reaches the
+-- endpoint because the request names no one model; body_filter then applies the
+-- allowlist semantics to each model in the collection response. A disabled key
+-- is normally rejected in access(), while response filters cover an EE list that
+-- neutree-ai-gateway already synthesized before this plugin's access() ran.
 --
 -- Matched on the end of the request path, because the client-facing route prefix
 -- (/workspace/<ws>/endpoint/<ep>, .../external-endpoint/<ee>) precedes the API
@@ -129,16 +130,66 @@ local function allow_match(list, model, ep_type, ep_name)
     return false
 end
 
+local function json_array()
+    return setmetatable({}, cjson.array_mt)
+end
+
+local function filter_model_list_response(body, allowed_models, ep_type, ep_name)
+    local response = cjson.decode(body)
+    if type(response) ~= "table" or type(response.data) ~= "table" then
+        return body
+    end
+
+    -- OpenAI lists carry object=list; Anthropic lists carry pagination fields.
+    -- Do not reinterpret another successful JSON response that happens to have a
+    -- data field as a model collection.
+    if response.object ~= "list" and response.has_more == nil then
+        return body
+    end
+
+    local visible = json_array()
+    for _, model in ipairs(response.data) do
+        if type(model) == "table" and type(model.id) == "string"
+            and allow_match(allowed_models, model.id, ep_type, ep_name) then
+            visible[#visible + 1] = model
+        end
+    end
+    response.data = visible
+
+    -- Anthropic's cursor fields describe the returned data, not the upstream's
+    -- unfiltered page. Preserve their presence while keeping them coherent.
+    if response.first_id ~= nil then
+        response.first_id = visible[1] and visible[1].id or nil
+    end
+    if response.last_id ~= nil then
+        response.last_id = visible[#visible] and visible[#visible].id or nil
+    end
+
+    return cjson.encode(response) or body
+end
+
+local function is_successful_model_list_response()
+    return is_model_list_request() and kong.response.get_status() == 200
+end
+
+local function should_filter_model_list_response(conf)
+    return type(conf.allowed_models) == "table" and is_successful_model_list_response()
+end
+
 local function counter_dict()
     -- Only the dedicated rate-limiting counters dict; return nil (callers fail
     -- open) rather than writing into kong_locks, which Kong uses for locking.
     return ngx.shared.kong_rate_limiting_counters
 end
 
-local function deny403(code, message)
-    return kong.response.exit(403, {
+local function access_error(code, message)
+    return {
         error = { message = message, type = "not_permitted", code = code },
-    })
+    }
+end
+
+local function deny403(code, message)
+    return kong.response.exit(403, access_error(code, message))
 end
 
 function AccessHandler:access(conf)
@@ -151,9 +202,9 @@ function AccessHandler:access(conf)
     --    "unrestricted"; a list (any JSON array, INCLUDING an empty []) means the
     --    request model must be present and in it. An explicit empty [] therefore
     --    denies every model (deny-all). Guard on the value being a table so null
-    --    stays unrestricted while [] enforces. The model list is not a model
-    --    call at all, so the list never applies to it -- not even a deny-all []
-    --    -- and it reaches the endpoint's own model list instead.
+    --    stays unrestricted while [] enforces. A model list is not one model
+    --    call, so it reaches the endpoint here; body_filter narrows its response
+    --    to the models visible through this key, including an empty [] deny-all.
     if type(conf.allowed_models) == "table" and not is_model_list_request() then
         local model = request_model()
         local ep_type = kong.ctx.shared and kong.ctx.shared.neutree_endpoint_type
@@ -242,6 +293,63 @@ function AccessHandler:access(conf)
             end
         end
     end
+end
+
+function AccessHandler:header_filter(conf)
+    if not is_successful_model_list_response() then
+        return
+    end
+
+    if conf.disabled then
+        -- EE lists are generated by neutree-ai-gateway (priority 900), whose
+        -- access-phase exit prevents this consumer plugin (895) from rejecting
+        -- there. Header/body filters still run after that exit, so preserve the
+        -- normal disabled-key response without moving the plugin priority.
+        kong.ctx.plugin.disabled_model_list_response = true
+        kong.response.set_status(403)
+        kong.response.set_header("Content-Type", "application/json")
+        kong.response.clear_header("Content-Length")
+        return
+    end
+
+    if should_filter_model_list_response(conf) then
+        -- body_filter can shorten the collection, so the upstream or synthetic
+        -- response's original length would be stale by the time it reaches the
+        -- client. Kong cannot revise it after this phase.
+        kong.response.clear_header("Content-Length")
+    end
+end
+
+function AccessHandler:body_filter(conf)
+    if kong.ctx.plugin.disabled_model_list_response then
+        local body = kong.response.get_raw_body()
+        if not body then
+            return
+        end
+
+        kong.response.set_raw_body(cjson.encode(access_error(
+            "key_disabled",
+            "This API key is disabled"
+        )))
+        return
+    end
+
+    if not should_filter_model_list_response(conf) then
+        return
+    end
+
+    local body = kong.response.get_raw_body()
+    if not body then
+        return
+    end
+
+    local shared = kong.ctx.shared or {}
+    kong.response.set_raw_body(filter_model_list_response(
+        body,
+        conf.allowed_models,
+        shared.neutree_endpoint_type,
+        shared.neutree_endpoint_name
+    ))
 end
 
 function AccessHandler:log(_)
