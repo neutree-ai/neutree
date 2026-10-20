@@ -38,6 +38,8 @@ type AuthConfig struct {
 type Claims struct {
 	UserID string `json:"sub"`
 	Email  string `json:"email,omitempty"`
+	// AppMetadata is the user's GoTrue app_metadata, which only admins can write.
+	AppMetadata map[string]any `json:"app_metadata,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -125,6 +127,18 @@ func Auth(deps Dependencies) gin.HandlerFunc {
 }
 
 func parseBearerToken(config AuthConfig, authHeader string) (*ParsedInfo, error) {
+	claims, err := ParseBearerClaims(config, authHeader)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ParsedInfo{
+		UserID: claims.UserID,
+	}, nil
+}
+
+// ParseBearerClaims validates a "Bearer <GoTrue JWT>" header and returns its claims.
+func ParseBearerClaims(config AuthConfig, authHeader string) (*Claims, error) {
 	// Extract the token
 	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 	if tokenString == "" {
@@ -151,9 +165,7 @@ func parseBearerToken(config AuthConfig, authHeader string) (*ParsedInfo, error)
 		return nil, errors.New("invalid token claims")
 	}
 
-	return &ParsedInfo{
-		UserID: claims.UserID,
-	}, nil
+	return claims, nil
 }
 
 func parseApiKey(authHeader string, config AuthConfig, store storage.Storage) (*ParsedInfo, error) {
