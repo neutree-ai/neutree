@@ -9,7 +9,7 @@ import (
 const (
 	ComponentName             = "hami"
 	ChartReleaseName          = "hami"
-	Version                   = "v2.9.0"
+	Version                   = "v2.10.0"
 	SchedulerName             = "hami-scheduler"
 	DevicePluginDaemonSetName = "hami-device-plugin"
 	MonitorServiceName        = "hami-device-plugin-monitor"
@@ -36,6 +36,9 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.30": "v1.30.14",
 	"1.31": "v1.31.14",
 	"1.32": "v1.32.13",
+	"1.33": "v1.33.13",
+	"1.34": "v1.34.12",
+	"1.35": "v1.35.9",
 }
 
 type HAMiStatus struct {

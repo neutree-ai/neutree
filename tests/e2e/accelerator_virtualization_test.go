@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/cluster/component/hami"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
 )
 
@@ -79,7 +80,7 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			component := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 			Expect(component.Phase).To(Equal(v1.ComponentPhaseReady))
 			Expect(component.Managed).To(BeTrue())
-			Expect(component.Version).NotTo(BeEmpty())
+			Expect(component.Version).To(Equal(hami.Version))
 
 			productName = expectNVIDIAVirtualizedClusterResources(cluster)
 		})

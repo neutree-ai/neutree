@@ -383,6 +383,7 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"admissionWebhook": map[string]interface{}{
+				"manageNamespaceSelector": false,
 				"namespaceSelector": map[string]interface{}{
 					"matchExpressions": []interface{}{
 						map[string]interface{}{
@@ -403,6 +404,7 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
 	require.NoError(t, err)
 	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
+	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["manageNamespaceSelector"])
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
 	require.NoError(t, err)

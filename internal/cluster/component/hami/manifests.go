@@ -18,10 +18,8 @@ const defaultChartValuesYAML = `
 fullnameOverride: hami
 global:
   imageRegistry: ""
-  imageTag: v2.9.0
+  imageTag: v2.10.0
 schedulerName: hami-scheduler
-dra:
-  enabled: false
 mockDevicePlugin:
   enabled: false
 prometheus:
@@ -47,28 +45,27 @@ scheduler:
     image:
       repository: projecthami/hami
       pullPolicy: IfNotPresent
-      tag: v2.9.0
+      tag: v2.10.0
 devicePlugin:
   enabled: false
   image:
     repository: projecthami/hami
     pullPolicy: IfNotPresent
-    tag: v2.9.0
+    tag: v2.10.0
   monitor:
     image:
       repository: projecthami/hami
       pullPolicy: IfNotPresent
-      tag: v2.9.0
+      tag: v2.10.0
   service:
     type: ClusterIP
 `
 
 const protectedChartValuesYAML = `
-dra:
-  enabled: false
 scheduler:
   admissionWebhook:
     enabled: true
+    manageNamespaceSelector: true
   patch:
     enabled: false
   certManager:

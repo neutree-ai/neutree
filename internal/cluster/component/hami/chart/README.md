@@ -1,83 +1,96 @@
 # HAMi Chart Modifications
 
-This chart is a repackaged `hami-2.9.0` with a cherry-picked upstream extension
-that lets the scheduler device-config be supplied through chart values.
+This is the official `hami-2.10.0.tgz` release chart, repackaged with the
+Neutree scheduler rollout patch described below.
 
-## Deviation from upstream hami-2.9.0
+## Upstream Source
 
-### `device-config.content` values override
+- Release: https://github.com/Project-HAMi/HAMi/releases/tag/v2.10.0
+- Archive: https://github.com/Project-HAMi/HAMi/releases/download/v2.10.0/hami-2.10.0.tgz
+- Original archive SHA-256: `e1d8429b2270da1a5c26343d6d6fd2a0099ba7b944cf0f52eb20d6b9f14e5099`
 
-Upstream `Project-HAMi/HAMi` master added the ability to provide the full
-`device-config.yaml` payload through `values.device-config.content` instead of
-shipping a `files/device-config.yaml` inside the chart or editing the hardcoded
-defaults. This repackaged chart carries that change on top of 2.9.0.
+The checksum identifies the unmodified upstream download, not the repackaged
+archive committed here. The embedded chart is loaded with `loader.LoadArchive`
+in `internal/cluster/component/hami/chart.go`.
 
-**`values.yaml`** adds:
+## Deviation From Upstream 2.10.0
 
-```yaml
-# Device config overrides
-# If content is set under device-config.content, it will be used as the device-config.yaml
-# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
-device-config:
-  content: ""
-```
+### `scheduler.updateStrategy`
 
-**`templates/scheduler/device-configmap.yaml`** renders the ConfigMap payload
-with this precedence:
+`templates/scheduler/deployment.yaml` renders `spec.strategy` from
+`values.scheduler.updateStrategy`. The packaged `values.yaml` sets:
 
 ```yaml
-data:
-  device-config.yaml: |-
-  {{- if and (index .Values "device-config") (index .Values "device-config" "content") }}
-  {{- (index .Values "device-config" "content") | nindent 4 }}
-  {{- else if .Files.Glob "files/device-config.yaml" }}
-  {{- .Files.Get "files/device-config.yaml" | nindent 4}}
-  {{- else }}
-  ...default hardcoded config...
+scheduler:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
 ```
 
-So the precedence is: `device-config.content` > `files/device-config.yaml` >
-the hardcoded default. This lets a cluster supply its own device-config
-templates (for example chip hard-slice templates) through chart values without
-rebuilding the chart.
+This preserves the Neutree 2.9.0 chart's rollout behavior: a replacement must
+become ready before the only scheduler can be removed. These are the only two
+files changed from the upstream release archive.
 
-### `scheduler.updateStrategy` value
+## Former Patches Now Provided Upstream
 
-The scheduler Deployment previously used the Kubernetes default RollingUpdate
-strategy (25% surge / 25% unavailable). On a single-replica scheduler with no
-hostPort binding, an update could take down the only scheduler before its
-replacement became ready. The chart now renders `spec.strategy` from
-`values.scheduler.updateStrategy`; the packaged default is
-`maxUnavailable: 0, maxSurge: 1` so the new scheduler is created before the
-old one is removed and a single-node cluster never loses its only scheduler.
+- `device-config.content` is supported directly by 2.10.0. The precedence remains
+  `device-config.content` > `files/device-config.yaml` > chart defaults, so
+  cluster-specific device configurations do not require repackaging the chart.
+- Scheduler pod anti-affinity is already
+  `preferredDuringSchedulingIgnoredDuringExecution`. It allows a single-node
+  cluster to schedule the replacement pod while retaining the multi-node spread
+  preference. Leader election protects the brief overlap.
 
-### Soft scheduler pod anti-affinity
+Neither behavior needs a local patch in 2.10.0. Keep the upstream device-config
+defaults, including the new MIG profile allowlist and NUMA topology setting.
 
-The scheduler pod anti-affinity (active when `scheduler.leaderElect` is true)
-is now `preferredDuringSchedulingIgnoredDuringExecution` instead of the
-upstream hard `requiredDuringSchedulingIgnoredDuringExecution`. On a
-single-node cluster the hard form made a scheduler rollout unschedulable
-(the new pod could never satisfy the different-host constraint); the soft form
-keeps the spread intent on multi-node clusters while allowing co-location when
-no other node is available. Leader election still guards against two active
-schedulers during the brief rollout overlap.
+## DRA and Webhook Configuration
 
-## Webhook configuration
+HAMi 2.10.0 removes DRA from its main chart. This archive has no DRA dependency;
+Neutree does not install HAMi-DRA or ascend-dra-driver and no longer sets the
+obsolete `dra.enabled` value. User `config_patch` still cannot enable DRA.
 
-Neutree does not override the HAMi chart's `failurePolicy`, so the packaged
-chart default (`Ignore`) applies. It intentionally does not override the
-chart's `namespaceSelector`, so matching admission requests are not limited to
-the owning cluster namespace. The HAMi chart still emits its default selector,
-which excludes namespaces marked `hami.io/webhook: ignore`.
+Neutree enforces `scheduler.admissionWebhook.enabled: true` and
+`scheduler.admissionWebhook.manageNamespaceSelector: true`, supplies its own
+TLS secret and CA bundle, and disables chart-managed certificate jobs. The
+upstream webhook `failurePolicy: Ignore` and namespace selector remain intact;
+namespaces labeled `hami.io/webhook: ignore` are excluded, but admission is not
+restricted to the owning Neutree cluster namespace.
 
-Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
-disabled through `accelerator_virtualization.config_patch`.
+## Kubernetes Scheduler Images
+
+`KubeSchedulerVersionsByMinor` in `types.go` pins a scheduler image for each
+bundled Kubernetes minor, from 1.26 through 1.35. The offline Kubernetes image
+list must include every pin. Existing 1.26–1.32 pins and the 1.32 discovery-error
+fallback are unchanged.
+
+This update adds the following scheduler image pins:
+
+| Kubernetes minor | Scheduler image tag |
+| --- | --- |
+| 1.33 | `v1.33.13` |
+| 1.34 | `v1.34.12` |
+| 1.35 | `v1.35.9` |
+
+Unmapped minors, including 1.36 and later, continue using the detected server
+version, including its patch with vendor suffixes removed, and require a
+separately supplied offline scheduler image. Older unmapped minors are not added.
+
+Bundling or rendering an image is not real-cluster compatibility certification
+and does not extend the Kubernetes project's security-support lifecycle.
 
 ## Verification
 
-- `helm template` renders `device-config.content` into the
-  `hami-scheduler-device` ConfigMap when set, and falls back to the default
-  config when empty.
-- The chart is loaded in-process via `loader.LoadArchive` (see
-  `internal/cluster/component/hami/chart.go`), which does not require the
-  optional `hami-dra` dependency to be vendored.
+- `go test ./internal/cluster/component/hami` loads the embedded chart and
+  renders every bundled Kubernetes minor, checking pinned images, scheduler
+  configuration, absence of DRA, TLS/webhook protection, node scope, device
+  configuration overrides/checksums, and zero-unavailable scheduler rollouts.
+- `TestHAMiOfflineImages` checks the scheduler/HAMi pins against the offline
+  Kubernetes image list.
+- `TestHAMiReconcileInstallsAndUpgradesEmbeddedChart` uses a fake client with
+  Kubernetes `v1.33.13` for fresh installation and HAMi 2.9.0 → 2.10.0 upgrades.
+- E2E virtualization coverage lives in
+  `tests/e2e/accelerator_virtualization_test.go` and requires a configured
+  Neutree deployment and GPU Kubernetes cluster.

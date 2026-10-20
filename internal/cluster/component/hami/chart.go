@@ -17,9 +17,9 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const embeddedHAMiChartPackage = "chart/hami-2.9.0.tgz"
+const embeddedHAMiChartPackage = "chart/hami-2.10.0.tgz"
 
-//go:embed chart/hami-2.9.0.tgz
+//go:embed chart/hami-2.10.0.tgz
 var embeddedHAMiChartFS embed.FS
 
 func renderEmbeddedHAMiChart(
