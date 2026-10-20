@@ -4700,3 +4700,18 @@ func TestKubernetesOrchestratorValidateDependenciesClassifiesNotReady(t *testing
 		})
 	}
 }
+
+func TestEndpointStatusDoesNotReportOldSpecAsRunning(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	ep := &v1.Endpoint{Metadata: &v1.Metadata{Name: "ep"}, Spec: &v1.EndpointSpec{}}
+	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "ep", Namespace: "ns", Annotations: map[string]string{annEndpointSpecHash: "previous"}}}
+	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"endpoint": "ep"}}
+	require.NoError(t, corev1.AddToScheme(scheme))
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(dep).Build()
+	o := &kubernetesOrchestrator{}
+	status, err := o.getEndpointStats(c, "ns", &v1.Cluster{Spec: &v1.ClusterSpec{}}, ep)
+	require.NoError(t, err)
+	require.Equal(t, v1.EndpointPhaseDEPLOYING, status.Phase)
+	require.Contains(t, status.ErrorMessage, "current endpoint configuration")
+}
