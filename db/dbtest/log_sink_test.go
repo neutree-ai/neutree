@@ -7,18 +7,25 @@ import (
 	"testing"
 )
 
-const validLogSinkVictoriaLogs = `{"url": "https://vl.example.com:9428", "auth": {"type": "bearer", "token": "secret"}}`
+const (
+	validLogSinkVictoriaLogs = `{"url": "https://vl.example.com:9428", "auth": {"type": "bearer", "token": "secret"}}`
+	validLogSinkS3           = `{"region": "us-east-1", "bucket": "traces", "auth": {"access_key_id": "ak", "secret_access_key": "sk"}}`
+)
 
 func insertLogSink(ctx context.Context, tx *sql.Tx, name, sinkType, victorialogs, buffer string) error {
+	return insertLogSinkSpec(ctx, tx, name, sinkType, victorialogs, "", buffer)
+}
+
+func insertLogSinkSpec(ctx context.Context, tx *sql.Tx, name, sinkType, victorialogs, s3, buffer string) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO api.log_sinks (api_version, kind, metadata, spec)
 		VALUES (
 			'v1',
 			'LogSink',
 			ROW($1, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW($2::text, NULL, $3::jsonb, $4::jsonb)::api.log_sink_spec
+			ROW($2::text, NULL, $3::jsonb, $4::jsonb, $5::jsonb)::api.log_sink_spec
 		)
-	`, name, sinkType, nullIfEmpty(victorialogs), nullIfEmpty(buffer))
+	`, name, sinkType, nullIfEmpty(victorialogs), nullIfEmpty(buffer), nullIfEmpty(s3))
 
 	return err
 }
@@ -46,7 +53,7 @@ func TestLogSinkRBAC_UserWithoutPermissionIsBlocked(t *testing.T) {
 		INSERT INTO api.log_sinks (api_version, kind, metadata, spec)
 		VALUES ('v1', 'LogSink',
 			ROW('log-sink-hidden', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('victorialogs', NULL, $1::jsonb, NULL)::api.log_sink_spec)
+			ROW('victorialogs', NULL, $1::jsonb, NULL, NULL)::api.log_sink_spec)
 	`, validLogSinkVictoriaLogs); err != nil {
 		t.Fatalf("failed to seed log sink: %v", err)
 	}
@@ -207,7 +214,7 @@ func TestLogSinkSoftDelete(t *testing.T) {
 		INSERT INTO api.log_sinks (api_version, kind, metadata, spec)
 		VALUES ('v1', 'LogSink',
 			ROW('log-sink-soft-delete', NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata,
-			ROW('victorialogs', NULL, $1::jsonb, NULL)::api.log_sink_spec)
+			ROW('victorialogs', NULL, $1::jsonb, NULL, NULL)::api.log_sink_spec)
 	`, validLogSinkVictoriaLogs); err != nil {
 		t.Fatalf("failed to seed log sink: %v", err)
 	}
@@ -287,7 +294,7 @@ func TestLogSinkValidation(t *testing.T) {
 		buffer       string
 		wantCode     string
 	}{
-		{name: "unsupported type", sinkType: "s3", victorialogs: validLogSinkVictoriaLogs, wantCode: "10243"},
+		{name: "unsupported type", sinkType: "kafka", victorialogs: validLogSinkVictoriaLogs, wantCode: "10243"},
 		{name: "missing type", sinkType: "", victorialogs: validLogSinkVictoriaLogs, wantCode: "10243"},
 		{name: "missing victorialogs", sinkType: "victorialogs", wantCode: "10244"},
 		{name: "empty url", sinkType: "victorialogs", victorialogs: `{"url": " "}`, wantCode: "10244"},
@@ -437,6 +444,148 @@ func TestLogSinkNormalization(t *testing.T) {
 			`spec.victorialogs = '{"url": "http://vl", "auth": {"token": "other"}}'::jsonb`)
 		if err == nil || !strings.Contains(err.Error(), `"code": "10246"`) {
 			t.Fatalf("expected error code 10246, got: %v", err)
+		}
+	})
+}
+
+func TestLogSinkS3Validation(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	const auth = `"auth": {"access_key_id": "ak", "secret_access_key": "sk"}`
+
+	tests := []struct {
+		name     string
+		s3       string
+		wantCode string
+	}{
+		{name: "missing s3", wantCode: "10305"},
+		{name: "s3 not an object", s3: `"bucket"`, wantCode: "10305"},
+		{name: "bucket not a string", s3: `{"region": "r", "bucket": 1, ` + auth + `}`, wantCode: "10305"},
+		{name: "path style not a boolean", s3: `{"region": "r", "bucket": "b", "force_path_style": "true", ` + auth + `}`, wantCode: "10305"},
+		{name: "auth not an object", s3: `{"region": "r", "bucket": "b", "auth": "ak:sk"}`, wantCode: "10305"},
+		{name: "missing bucket", s3: `{"region": "r", ` + auth + `}`, wantCode: "10306"},
+		{name: "blank bucket", s3: `{"region": "r", "bucket": " ", ` + auth + `}`, wantCode: "10306"},
+		{name: "missing region", s3: `{"bucket": "b", ` + auth + `}`, wantCode: "10307"},
+		{name: "endpoint without scheme", s3: `{"endpoint": "minio:9000", "region": "r", "bucket": "b", ` + auth + `}`, wantCode: "10308"},
+		{name: "unknown compression", s3: `{"region": "r", "bucket": "b", "compression": "lz4", ` + auth + `}`, wantCode: "10309"},
+		{name: "zero flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 0, ` + auth + `}`, wantCode: "10310"},
+		{name: "fractional flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 1.5, ` + auth + `}`, wantCode: "10310"},
+		{name: "huge flush interval", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": 1e30, ` + auth + `}`, wantCode: "10310"},
+		{name: "flush interval as string", s3: `{"region": "r", "bucket": "b", "flush_interval_seconds": "60", ` + auth + `}`, wantCode: "10310"},
+		{name: "missing auth", s3: `{"region": "r", "bucket": "b"}`, wantCode: "10311"},
+		{name: "missing secret key", s3: `{"region": "r", "bucket": "b", "auth": {"access_key_id": "ak"}}`, wantCode: "10311"},
+		{name: "minimal valid", s3: validLogSinkS3},
+		{name: "all fields", s3: `{"endpoint": "HTTP://minio:9000", "region": "r", "bucket": "b", "key_prefix": "x/%Y/",
+			"force_path_style": false, "compression": "none", "flush_interval_seconds": 10, ` + auth + `}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("failed to begin transaction: %v", err)
+			}
+			defer func() {
+				_ = tx.Rollback()
+			}()
+
+			err = insertLogSinkSpec(ctx, tx, "log-sink-s3-validation", "s3", "", tt.s3, "")
+
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("expected insert to succeed, got: %v", err)
+				}
+
+				return
+			}
+
+			if err == nil || !strings.Contains(err.Error(), `"code": "`+tt.wantCode+`"`) {
+				t.Fatalf("expected error code %s, got: %v", tt.wantCode, err)
+			}
+		})
+	}
+}
+
+func TestLogSinkS3Normalization(t *testing.T) {
+	db := GetTestDB(t)
+	ctx := context.Background()
+
+	run := func(t *testing.T, sinkType, vl, s3, update string) (gotVL, gotS3 sql.NullString, err error) {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("failed to begin transaction: %v", err)
+		}
+		defer func() {
+			_ = tx.Rollback()
+		}()
+
+		if err := insertLogSinkSpec(ctx, tx, "log-sink-s3-normalize", sinkType, vl, s3, ""); err != nil {
+			return gotVL, gotS3, err
+		}
+
+		if update != "" {
+			if _, err = tx.ExecContext(ctx, `UPDATE api.log_sinks SET `+update+` WHERE (metadata).name = 'log-sink-s3-normalize'`); err != nil {
+				return gotVL, gotS3, err
+			}
+		}
+
+		err = tx.QueryRowContext(ctx, `
+			SELECT (spec).victorialogs, (spec).s3
+			FROM api.log_sinks WHERE (metadata).name = 'log-sink-s3-normalize'
+		`).Scan(&gotVL, &gotS3)
+
+		return gotVL, gotS3, err
+	}
+
+	t.Run("only the two keys are kept in auth", func(t *testing.T) {
+		_, s3, err := run(t, "s3", "",
+			`{"region": "r", "bucket": "b", "auth": {"access_key_id": "ak", "secret_access_key": "sk", "type": "x"}}`, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(s3.String, `"auth": {"access_key_id": "ak", "secret_access_key": "sk"}`) {
+			t.Fatalf("unexpected s3: %s", s3.String)
+		}
+	})
+
+	t.Run("an s3 sink keeps no victorialogs settings", func(t *testing.T) {
+		vl, s3, err := run(t, "s3", validLogSinkVictoriaLogs, validLogSinkS3, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vl.Valid || !s3.Valid {
+			t.Fatalf("expected only s3, got victorialogs=%s s3=%s", vl.String, s3.String)
+		}
+	})
+
+	t.Run("a victorialogs sink keeps no s3 settings", func(t *testing.T) {
+		vl, s3, err := run(t, "victorialogs", validLogSinkVictoriaLogs, validLogSinkS3, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !vl.Valid || s3.Valid {
+			t.Fatalf("expected only victorialogs, got victorialogs=%s s3=%s", vl.String, s3.String)
+		}
+	})
+
+	// What the API sends for a PATCH that leaves the keys blank: the backfill
+	// restores both stored keys.
+	t.Run("backfilled keys are kept on update", func(t *testing.T) {
+		_, s3, err := run(t, "s3", "", validLogSinkS3,
+			`spec.s3 = '{"region": "r", "bucket": "other", "auth": {"access_key_id": "ak", "secret_access_key": "sk"}}'::jsonb`)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(s3.String, `"bucket": "other"`) || !strings.Contains(s3.String, `"secret_access_key": "sk"`) {
+			t.Fatalf("unexpected s3: %s", s3.String)
+		}
+	})
+
+	t.Run("update dropping auth is rejected", func(t *testing.T) {
+		_, _, err := run(t, "s3", "", validLogSinkS3, `spec.s3 = '{"region": "r", "bucket": "b"}'::jsonb`)
+		if err == nil || !strings.Contains(err.Error(), `"code": "10311"`) {
+			t.Fatalf("expected error code 10311, got: %v", err)
 		}
 	})
 }

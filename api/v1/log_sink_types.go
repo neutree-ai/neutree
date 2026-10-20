@@ -19,6 +19,7 @@ const (
 
 const (
 	LogSinkTypeVictoriaLogs = "victorialogs"
+	LogSinkTypeS3           = "s3"
 
 	LogSinkAuthTypeNone   = "none"
 	LogSinkAuthTypeBasic  = "basic"
@@ -28,6 +29,15 @@ const (
 	LogSinkBufferDefaultMaxSize int64 = 1 << 30
 	// LogSinkBufferMinMaxSize is the smallest disk buffer Vector accepts.
 	LogSinkBufferMinMaxSize int64 = 268435488
+
+	LogSinkS3CompressionGzip = "gzip"
+	LogSinkS3CompressionZstd = "zstd"
+	LogSinkS3CompressionNone = "none"
+
+	// LogSinkS3DefaultKeyPrefix is used when spec.s3.key_prefix is unset.
+	LogSinkS3DefaultKeyPrefix = "neutree/%Y/%m/%d/"
+	// LogSinkS3DefaultFlushIntervalSeconds is used when spec.s3.flush_interval_seconds is unset.
+	LogSinkS3DefaultFlushIntervalSeconds = 300
 )
 
 // LogSink is an external log store that AI traces are replicated to. It is a
@@ -45,6 +55,7 @@ type LogSinkSpec struct {
 	Type         string                `json:"type"`
 	Enabled      *bool                 `json:"enabled,omitempty"`
 	VictoriaLogs *VictoriaLogsSinkSpec `json:"victorialogs,omitempty"`
+	S3           *S3SinkSpec           `json:"s3,omitempty"`
 	Buffer       *LogSinkBuffer        `json:"buffer,omitempty"`
 }
 
@@ -71,6 +82,63 @@ type LogSinkAuth struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty" api:"-"`
 	Token    string `json:"token,omitempty" api:"-"`
+}
+
+// S3SinkSpec writes traces as compressed NDJSON objects to an S3 bucket or an
+// S3-compatible store.
+type S3SinkSpec struct {
+	// Endpoint is the store's URL; empty means the AWS endpoint for Region.
+	Endpoint string `json:"endpoint,omitempty"`
+	Region   string `json:"region"`
+	Bucket   string `json:"bucket"`
+	// KeyPrefix may hold strftime placeholders, evaluated in UTC when a batch
+	// is created. Empty means LogSinkS3DefaultKeyPrefix.
+	KeyPrefix string `json:"key_prefix,omitempty"`
+	// ForcePathStyle addresses the bucket as <endpoint>/<bucket>; unset means true.
+	ForcePathStyle *bool `json:"force_path_style,omitempty"`
+	// Compression is gzip, zstd or none; empty means gzip.
+	Compression string `json:"compression,omitempty"`
+	// FlushIntervalSeconds is the longest an event waits in a batch; 0 means
+	// LogSinkS3DefaultFlushIntervalSeconds.
+	FlushIntervalSeconds int         `json:"flush_interval_seconds,omitempty"`
+	Auth                 *S3SinkAuth `json:"auth,omitempty"`
+}
+
+type S3SinkAuth struct {
+	AccessKeyID     string `json:"access_key_id,omitempty" api:"-"`
+	SecretAccessKey string `json:"secret_access_key,omitempty" api:"-"`
+}
+
+// GetKeyPrefix returns the key prefix, or the default when unset.
+func (in *S3SinkSpec) GetKeyPrefix() string {
+	if in.KeyPrefix == "" {
+		return LogSinkS3DefaultKeyPrefix
+	}
+
+	return in.KeyPrefix
+}
+
+// UsePathStyle reports whether the bucket is addressed by path; unset means true.
+func (in *S3SinkSpec) UsePathStyle() bool {
+	return in.ForcePathStyle == nil || *in.ForcePathStyle
+}
+
+// GetCompression returns the compression, or gzip when unset.
+func (in *S3SinkSpec) GetCompression() string {
+	if in.Compression == "" {
+		return LogSinkS3CompressionGzip
+	}
+
+	return in.Compression
+}
+
+// GetFlushIntervalSeconds returns the flush interval, or the default when unset.
+func (in *S3SinkSpec) GetFlushIntervalSeconds() int {
+	if in.FlushIntervalSeconds <= 0 {
+		return LogSinkS3DefaultFlushIntervalSeconds
+	}
+
+	return in.FlushIntervalSeconds
 }
 
 type LogSinkBuffer struct {
