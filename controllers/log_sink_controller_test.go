@@ -456,3 +456,99 @@ func failingUpdateStorage(t *testing.T, h *logSinkHarness) storage.Storage {
 
 	return st
 }
+
+func TestLogSinkStallGrace(t *testing.T) {
+	vl := newTestLogSink(1, "a").Spec
+	assert.Equal(t, 2*time.Minute, logSinkStallGrace(vl))
+
+	vl.VictoriaLogs.TimeoutSeconds = 300
+	assert.Equal(t, 6*time.Minute, logSinkStallGrace(vl))
+
+	s3 := &v1.LogSinkSpec{Type: v1.LogSinkTypeS3, S3: &v1.S3SinkSpec{}}
+	assert.Equal(t, 7*time.Minute, logSinkStallGrace(s3), "the default flush interval is 300s")
+
+	s3.S3.FlushIntervalSeconds = 10
+	assert.Equal(t, 2*time.Minute+10*time.Second, logSinkStallGrace(s3))
+}
+
+// An unreachable or timing-out store makes Vector retry forever without an
+// error metric: only the buffer grows while nothing is sent.
+func TestLogSinkController_Stalled(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+
+	h.pass(0)
+	id := h.status(1).ComponentID
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	// Events pile up, nothing is sent: Running for the 2m grace.
+	buffered := 0.0
+	step := func() {
+		buffered += 5
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10, Buffered: buffered}
+		h.pass(30 * time.Second)
+	}
+
+	for i := 0; i < 4; i++ {
+		step()
+		assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase, "pass %d", i)
+	}
+
+	step()
+	assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase)
+	assert.Equal(t, "25 events buffered, none delivered for 2m; the store may be unreachable or too slow", h.status(1).ErrorMessage)
+
+	// Five more minutes: Failed.
+	for i := 0; i < 9; i++ {
+		step()
+		assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase, "pass %d", i)
+	}
+
+	step()
+	assert.Equal(t, v1.LogSinkPhaseFAILED, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "none delivered for 7m")
+
+	// The store is back: the backlog drains and the sink recovers at once.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10 + buffered, Buffered: 3}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+	assert.Empty(t, h.status(1).ErrorMessage)
+}
+
+// S3 batches hold events for up to the flush interval, and they count as
+// buffered; that alone must not look stalled.
+func TestLogSinkController_S3BatchingIsNotStalled(t *testing.T) {
+	sink := newTestLogSink(1, "a")
+	sink.Spec = &v1.LogSinkSpec{Type: v1.LogSinkTypeS3, S3: &v1.S3SinkSpec{
+		Region: "us-east-1", Bucket: "b", Auth: &v1.S3SinkAuth{AccessKeyID: "a", SecretAccessKey: "s"},
+	}}
+	h := newLogSinkHarness(t, sink)
+
+	h.pass(0)
+	id := h.status(1).ComponentID
+
+	// A trickle of events, flushed every 300s.
+	sent, buffered := 0.0, 0.0
+	for i := 1; i <= 40; i++ {
+		buffered++
+		if i%10 == 0 {
+			sent += buffered
+			buffered = 0
+		}
+
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: sent, Buffered: buffered}
+		h.pass(30 * time.Second)
+		assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase, "pass %d", i)
+	}
+
+	// No flush for longer than the grace of 300s + 2m: Degraded.
+	for i := 0; i < 15; i++ {
+		buffered++
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: sent, Buffered: buffered}
+		h.pass(30 * time.Second)
+	}
+
+	assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "events buffered, none delivered for 7m")
+}

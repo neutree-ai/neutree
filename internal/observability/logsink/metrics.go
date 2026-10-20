@@ -24,6 +24,9 @@ type ComponentCounters struct {
 	Failed float64
 	// Dropped counts events that will never be delivered.
 	Dropped float64
+	// Buffered is the number of events in the sink's buffer (a gauge). Events
+	// stay counted until delivered, including those waiting in a batch.
+	Buffered float64
 }
 
 // Sub returns the change since prev. A counter that went down means Vector
@@ -38,10 +41,11 @@ func (c ComponentCounters) Sub(prev ComponentCounters) ComponentCounters {
 	}
 
 	return ComponentCounters{
-		Running: c.Running,
-		Sent:    d(c.Sent, prev.Sent),
-		Failed:  d(c.Failed, prev.Failed),
-		Dropped: d(c.Dropped, prev.Dropped),
+		Running:  c.Running,
+		Sent:     d(c.Sent, prev.Sent),
+		Failed:   d(c.Failed, prev.Failed),
+		Dropped:  d(c.Dropped, prev.Dropped),
+		Buffered: c.Buffered,
 	}
 }
 
@@ -132,6 +136,8 @@ func ParseMetrics(r io.Reader) (*VectorMetrics, error) {
 				}
 			case "vector_component_discarded_events_total", "vector_buffer_discarded_events_total":
 				c.Dropped += value
+			case "vector_buffer_events":
+				c.Buffered += value
 			}
 
 			m.Components[id] = c
