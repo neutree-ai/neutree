@@ -42,6 +42,9 @@ spec:
             {{- if $grafanaURL }}
             - --grafana-url={{ $grafanaURL }}
             {{- end }}
+            {{- if .Values.metrics.queryUrl }}
+            - --metrics-url={{ .Values.metrics.queryUrl }}
+            {{- end }}
             {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . }}
             {{- if $aiTraceStoreUrl }}
             - --ai-trace-store-url={{ $aiTraceStoreUrl }}

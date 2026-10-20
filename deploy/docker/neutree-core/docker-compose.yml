@@ -232,6 +232,7 @@ services:
       - --auth-endpoint=http://auth:9999
       - --grafana-url={{ .GrafanaURL }}
       - --ai-trace-store-url=http://victorialogs:9428
+      - --metrics-url=http://vmselect:8481/select/0/prometheus
     ports:
       - 3000:3000
     networks:
