@@ -7,12 +7,14 @@ Kubernetes server version independently selects that profile's scheduler image.
 
 ## Cluster Version Matrix
 
-`hami.VersionForCluster(clusterVersion)` resolves the HAMi version:
+`internal/component/version.go` owns the component versions, compatibility
+thresholds, scheduler pins, and Kubernetes version normalization.
+`component.HAMiVersionForCluster(clusterVersion)` resolves the HAMi version:
 
 | Neutree cluster version | HAMi version | Embedded chart | Scheduler profile |
 | --- | --- | --- | --- |
-| Supported `1.1.x` and `1.2.x` versions | `v2.9.0` (`hami.LegacyVersion`) | `hami-2.9.0.tgz` | Existing 1.26–1.32 pins; detected-version fallback for unmapped minors |
-| Base version `>= 1.3.0`, including RCs and build metadata | `v2.10.0` (`hami.Version`) | `hami-2.10.0.tgz` | 1.26–1.35 pins; detected-version fallback for unmapped minors |
+| Supported `1.1.x` and `1.2.x` versions | `v2.9.0` (`component.LegacyHAMi`) | `hami-2.9.0.tgz` | Existing 1.26–1.32 pins; detected-version fallback for unmapped minors |
+| Base version `>= 1.3.0`, including RCs and build metadata | `v2.10.0` (`component.HAMi`) | `hami-2.10.0.tgz` | 1.26–1.35 pins; detected-version fallback for unmapped minors |
 | Below `1.1.0`, empty, or invalid | Error | None | None |
 
 The threshold uses the numeric base version: `1.3.0-rc.1` and
@@ -23,7 +25,7 @@ Upgrading the control plane does not implicitly upgrade HAMi on an existing
 Neutree 1.1/1.2 cluster. Reconciliation retains its 2.9.0 profile. A new cluster
 explicitly selecting Neutree 1.3+ uses 2.10.0; an existing cluster moves to that
 profile only when its Neutree cluster version is explicitly upgraded to 1.3+.
-This does not upgrade Kubernetes. `hami.Version` still means the latest HAMi
+This does not upgrade Kubernetes. `component.HAMi` still means the latest HAMi
 version, not the expected version for every cluster.
 
 Both archives are loaded in-process with `loader.LoadArchive` in
@@ -126,8 +128,11 @@ clusters require a separately supplied offline scheduler image unless the
 exact detected tag is already bundled; new-profile pins must not leak into
 legacy scheduler selection.
 
-The offline Kubernetes image list contains both HAMi versions and the union of
-the 1.26–1.35 scheduler pins, not just images for the latest profile.
+The offline Kubernetes image list packages only the latest Neutree cluster
+profile: HAMi `v2.10.0` and the 1.26–1.35 scheduler pins. The legacy 2.9.0 chart
+remains embedded for existing Neutree 1.1/1.2 clusters, but its container image
+is not included. Offline deployments of legacy clusters must supply their own
+matching images.
 
 Bundling or rendering an image is not real-cluster compatibility certification
 and does not extend the Kubernetes project's security-support lifecycle.
@@ -144,15 +149,15 @@ profile does not publish or rebuild a matching node-agent artifact.
   renders every bundled Kubernetes minor, checking pinned images, scheduler
   configuration, absence of DRA, TLS/webhook protection, node scope, device
   configuration overrides/checksums, and zero-unavailable scheduler rollouts.
-- `TestHAMiOfflineImages` checks both HAMi versions and the union of scheduler
-  pins against the offline Kubernetes image list.
+- `TestHAMiOfflineImages` checks that only the latest HAMi version and the
+  latest profile's scheduler pins are in the offline Kubernetes image list.
 - Reconciliation checks must distinguish unchanged legacy clusters from an
   explicit Neutree cluster-version upgrade to the 2.10.0 profile. Unit tests
   use fake clients and in-process rendering, not actual cluster certification.
 - E2E virtualization coverage lives in
   `tests/e2e/accelerator_virtualization_test.go` and requires a configured
   Neutree deployment and GPU Kubernetes cluster. Its expected HAMi version is
-  resolved with `hami.VersionForCluster(cluster.GetVersion())`, so legacy
+  resolved with `component.HAMiVersionForCluster(cluster.GetVersion())`, so legacy
   profiles are not incorrectly required to run the latest HAMi.
 
 This document does not assert that either profile has passed real-cluster E2E

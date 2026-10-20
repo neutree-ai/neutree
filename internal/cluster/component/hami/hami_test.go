@@ -27,6 +27,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	componentversion "github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
@@ -78,7 +79,7 @@ func TestHAMiComponentPluginPatchControlsDevicePluginValues(t *testing.T) {
 				},
 			},
 		},
-	}, Version)
+	}, componentversion.HAMi)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -261,7 +262,7 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	assert.Contains(t, stringSlice(scheduler["command"]), "--device-config-file=/device-config.yaml")
 
 	kubeScheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "kube-scheduler")
-	assert.Equal(t, "registry.example.com/neutree/kube-scheduler:"+DefaultKubeSchedulerVersion(), kubeScheduler["image"])
+	assert.Equal(t, "registry.example.com/neutree/kube-scheduler:"+componentversion.DefaultKubeSchedulerVersion, kubeScheduler["image"])
 	assert.Contains(t, stringSlice(kubeScheduler["command"]), "--config=/config/config.yaml")
 
 	devicePlugin := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
@@ -282,20 +283,20 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 		{
 			name:               "docker hub preserves explicit upstream registries",
 			imagePrefix:        "docker.io/neutree-ai",
-			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + DefaultKubeSchedulerVersion(),
-			hamiImage:          "docker.io/projecthami/hami:" + Version,
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			hamiImage:          "docker.io/projecthami/hami:" + componentversion.HAMi,
 		},
 		{
 			name:               "private registry rewrites all images",
 			imagePrefix:        "registry.example.com/neutree-ai",
-			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + DefaultKubeSchedulerVersion(),
-			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + Version,
+			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + componentversion.HAMi,
 		},
 		{
 			name:               "docker hub without project preserves source registries",
 			imagePrefix:        "docker.io",
-			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + DefaultKubeSchedulerVersion(),
-			hamiImage:          "docker.io/projecthami/hami:" + Version,
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			hamiImage:          "docker.io/projecthami/hami:" + componentversion.HAMi,
 		},
 	}
 
@@ -370,7 +371,7 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), Version)
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.HAMi)
 	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["enabled"])
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
@@ -400,7 +401,7 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), Version)
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.HAMi)
 	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
 	require.NoError(t, err)
 	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
@@ -538,9 +539,9 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{}, Version)
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
-	assert.Equal(t, KubeSchedulerVersionsByMinor["1.30"],
+	assert.Equal(t, componentversion.KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
 }
 
@@ -559,7 +560,7 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{}, Version)
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
 	assert.Equal(t, "v1.40.0",
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
@@ -624,7 +625,7 @@ func TestHAMiComponentLegacyDevicePluginConfigPatchCannotOverrideOwner(t *testin
 		},
 	}
 
-	values := component.buildChartValues(plan, Version)
+	values := component.buildChartValues(plan, componentversion.HAMi)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -642,7 +643,7 @@ func TestHAMiComponentDefaultValuesDoNotOwnNVIDIADevicePluginPolicy(t *testing.T
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{}, Version)
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 
 	assert.NotContains(t, devicePlugin, "migStrategy")
@@ -653,7 +654,7 @@ func TestHAMiComponentUsesGPUTopologyAwareSchedulerPolicy(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{}, Version)
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
 	defaultSchedulerPolicy := nestedMap(t, values, "scheduler", "defaultSchedulerPolicy")
 	assert.Equal(t, plugin.NvidiaGPUTopologyAwarePolicy, defaultSchedulerPolicy["gpuSchedulerPolicy"])
@@ -799,7 +800,7 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"plugin-candidate"}, plan.PatchedNodes)
 	assert.Equal(t, plugin.NvidiaGPUOperatorDriverRoot,
-		nestedMap(t, component.buildChartValues(plan, Version), "devicePlugin")["nvidiaDriverRoot"])
+		nestedMap(t, component.buildChartValues(plan, componentversion.HAMi), "devicePlugin")["nvidiaDriverRoot"])
 
 	patched := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "plugin-candidate"}, patched))

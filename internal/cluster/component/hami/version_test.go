@@ -14,39 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	componentversion "github.com/neutree-ai/neutree/internal/component"
 )
-
-func TestVersionForCluster(test *testing.T) {
-	cases := []struct {
-		clusterVersion string
-		hamiVersion    string
-	}{
-		{clusterVersion: "v1.1.0-rc.1", hamiVersion: "v2.9.0"},
-		{clusterVersion: "v1.1.1", hamiVersion: "v2.9.0"},
-		{clusterVersion: "1.2.0", hamiVersion: "v2.9.0"},
-		{clusterVersion: " v1.2.99-rc.1+build.1 ", hamiVersion: "v2.9.0"},
-		{clusterVersion: "v1.3.0-rc.1", hamiVersion: "v2.10.0"},
-		{clusterVersion: "1.3.0+build.1", hamiVersion: "v2.10.0"},
-		{clusterVersion: "v1.3.1", hamiVersion: "v2.10.0"},
-		{clusterVersion: "v1.4.0", hamiVersion: "v2.10.0"},
-		{clusterVersion: ""},
-		{clusterVersion: " "},
-		{clusterVersion: "invalid"},
-		{clusterVersion: "v1.0.9"},
-	}
-	for _, testCase := range cases {
-		test.Run(testCase.clusterVersion, func(test *testing.T) {
-			hamiVersion, err := VersionForCluster(testCase.clusterVersion)
-			if testCase.hamiVersion == "" {
-				require.Error(test, err)
-				assert.Empty(test, hamiVersion)
-				return
-			}
-			require.NoError(test, err)
-			assert.Equal(test, testCase.hamiVersion, hamiVersion)
-		})
-	}
-}
 
 func TestHAMiClusterVersionCompatibility(test *testing.T) {
 	originalGetKubernetesServerVersion := getKubernetesServerVersion
@@ -113,7 +82,7 @@ func TestHAMiLegacyChartProtectedDRA(test *testing.T) {
 	scopePlan := NodeScopePlan{ConfigPatch: map[string]interface{}{
 		"dra": map[string]interface{}{"enabled": true},
 	}}
-	values := component.buildChartValues(scopePlan, LegacyVersion)
+	values := component.buildChartValues(scopePlan, componentversion.LegacyHAMi)
 	assert.Equal(test, false, nestedMap(test, values, "dra")["enabled"])
 	resources, err := component.renderResources(scopePlan)
 	require.NoError(test, err)

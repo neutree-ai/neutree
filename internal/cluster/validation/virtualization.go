@@ -2,15 +2,14 @@ package validation
 
 import (
 	"fmt"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/semver"
+	"github.com/neutree-ai/neutree/internal/component"
 )
 
-const MinVirtualizationClusterVersion = "v1.1.0"
+const MinVirtualizationClusterVersion = component.MinVirtualizationClusterVersion
 
 type AcceleratorVirtualizationErrorReason string
 
@@ -42,22 +41,7 @@ func (e *AcceleratorVirtualizationError) Unwrap() error {
 // SupportsVirtualizationClusterVersion gates accelerator virtualization by the
 // Neutree cluster package version, not by the Kubernetes server version.
 func SupportsVirtualizationClusterVersion(version string) (bool, error) {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return false, nil
-	}
-
-	baseVersion, err := semver.BaseVersion(version)
-	if err != nil {
-		return false, err
-	}
-
-	lessThanMinVersion, err := semver.LessThan(baseVersion, MinVirtualizationClusterVersion)
-	if err != nil {
-		return false, err
-	}
-
-	return !lessThanMinVersion, nil
+	return component.SupportsVirtualizationClusterVersion(version)
 }
 
 func ValidateAcceleratorVirtualizationClusterSupport(clusterType, version string) error {

@@ -10,16 +10,17 @@ import (
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	componentversion "github.com/neutree-ai/neutree/internal/component"
 )
 
 func TestEmbeddedHAMiChartVersion(t *testing.T) {
-	hamiChart, err := loadEmbeddedHAMiChart(Version)
+	hamiChart, err := loadEmbeddedHAMiChart(componentversion.HAMi)
 	require.NoError(t, err)
 	assert.Equal(t, "2.10.0", hamiChart.Metadata.Version)
 	assert.Equal(t, "2.10.0", hamiChart.Metadata.AppVersion)
 	assert.Empty(t, hamiChart.Metadata.Dependencies)
 	assert.NotContains(t, hamiChart.Values, "dra")
-	assert.NotContains(t, defaultChartValues("", Version), "dra")
+	assert.NotContains(t, defaultChartValues("", componentversion.HAMi), "dra")
 	assert.NotContains(t, chartValuesFromYAML(protectedChartValuesYAML), "dra")
 }
 
@@ -38,12 +39,12 @@ func TestHAMiChartProtectedImageVersions(t *testing.T) {
 				"image": map[string]interface{}{"tag": "unexpected"},
 			},
 		},
-	}}, Version)
+	}}, componentversion.HAMi)
 
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "scheduler", "extender", "image")["tag"])
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "image")["tag"])
 	assert.Equal(t, "v2.10.0", nestedMap(t, values, "devicePlugin", "monitor", "image")["tag"])
-	assert.Equal(t, "v2.10.0", (HAMiStatus{Ready: true, Version: Version}).ComponentStatus().Version)
+	assert.Equal(t, "v2.10.0", (HAMiStatus{Ready: true, Version: componentversion.HAMi}).ComponentStatus().Version)
 }
 
 func TestHAMiChartKubernetesVersionCompatibility(t *testing.T) {
@@ -53,7 +54,7 @@ func TestHAMiChartKubernetesVersionCompatibility(t *testing.T) {
 	})
 
 	for _, clusterVersion := range []string{"v1.2.0", "v1.3.0-rc.1"} {
-		for minor, schedulerVersion := range KubeSchedulerVersionsByMinor {
+		for minor, schedulerVersion := range componentversion.KubeSchedulerVersionsByMinor {
 			t.Run(clusterVersion+"/"+minor, func(t *testing.T) {
 				getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
 					return &kubeversion.Info{GitVersion: schedulerVersion}, nil
@@ -97,14 +98,14 @@ func TestHAMiChartDeviceConfigContent(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			values := defaultChartValues("", Version)
+			values := defaultChartValues("", componentversion.HAMi)
 			if testCase.content != "" {
 				values = mergeChartValues(values, map[string]interface{}{
 					"device-config": map[string]interface{}{"content": testCase.content},
 				})
 			}
 
-			resources, err := renderEmbeddedHAMiChart(Version, values, "neutree-system", kubeVersionFromBaseVersion("v1.32.13"))
+			resources, err := renderEmbeddedHAMiChart(componentversion.HAMi, values, "neutree-system", componentversion.KubeVersionFromBaseVersion("v1.32.13"))
 			require.NoError(t, err)
 			configMap := findObject(t, resources.Items, "ConfigMap", "hami-scheduler-device")
 			content, found, err := unstructured.NestedString(configMap.Object, "data", "device-config.yaml")
