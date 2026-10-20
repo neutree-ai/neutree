@@ -246,3 +246,138 @@ func TestSpecHash_CoversSecrets(t *testing.T) {
 	assert.NotEqual(t, SpecHash(a), SpecHash(b))
 	assert.Equal(t, SpecHash(a), SpecHash(a))
 }
+
+func testS3Sink(name string, mutate func(*v1.S3SinkSpec)) *v1.LogSink {
+	s := &v1.LogSink{
+		Metadata: &v1.Metadata{Name: name},
+		Spec: &v1.LogSinkSpec{
+			Type: v1.LogSinkTypeS3,
+			S3: &v1.S3SinkSpec{
+				Endpoint: "http://demo-s3:9000/",
+				Region:   "us-east-1",
+				Bucket:   "neutree-traces",
+				Auth:     &v1.S3SinkAuth{AccessKeyID: "AKID", SecretAccessKey: `s3cr$t"`},
+			},
+		},
+		Status: &v1.LogSinkStatus{ComponentID: "logsink_" + strings.ReplaceAll(name, ".", "_")},
+	}
+	if mutate != nil {
+		mutate(s.Spec.S3)
+	}
+
+	return s
+}
+
+// The defaults render to the config verified against an S3-compatible store.
+func TestRender_S3Golden(t *testing.T) {
+	r, err := Render([]*v1.LogSink{testS3Sink("archive", nil)})
+	require.NoError(t, err)
+
+	_, body := splitHeader(r.Content)
+	assert.Equal(t, `secret:
+  logsink:
+    path: /etc/vector/logsink-secrets
+    type: directory
+sinks:
+  logsink_archive:
+    auth:
+      access_key_id: SECRET[logsink.access_key_id.archive]
+      secret_access_key: SECRET[logsink.secret_access_key.archive]
+    batch:
+      timeout_secs: 300
+    bucket: neutree-traces
+    buffer:
+      max_size: 1207959552
+      type: disk
+      when_full: drop_newest
+    compression: gzip
+    encoding:
+      codec: json
+    endpoint: http://demo-s3:9000
+    force_path_style: true
+    framing:
+      method: newline_delimited
+    inputs:
+      - prepare_trace_payload
+    key_prefix: neutree/%Y/%m/%d/
+    region: us-east-1
+    type: aws_s3
+`, string(body))
+
+	assert.Equal(t, map[string][]byte{
+		"access_key_id.archive":     []byte(`"AKID"`),
+		"secret_access_key.archive": []byte(`"s3cr$t\""`),
+	}, r.Secrets)
+}
+
+func TestRender_S3Options(t *testing.T) {
+	f := false
+	s := testS3Sink("archive", func(s3 *v1.S3SinkSpec) {
+		s3.Endpoint = ""
+		s3.KeyPrefix = "traces/$HOME/%F/"
+		s3.ForcePathStyle = &f
+		s3.Compression = v1.LogSinkS3CompressionZstd
+		s3.FlushIntervalSeconds = 10
+	})
+	s.Spec.Buffer = &v1.LogSinkBuffer{MaxSize: v1.LogSinkBufferMinMaxSize}
+
+	r, err := Render([]*v1.LogSink{s})
+	require.NoError(t, err)
+
+	var generic map[string]map[string]map[string]interface{}
+	require.NoError(t, yaml.Unmarshal(r.Content, &generic))
+
+	got := generic["sinks"]["logsink_archive"]
+	assert.NotContains(t, got, "endpoint", "no endpoint means the AWS endpoint of the region")
+	assert.Equal(t, "traces/$$HOME/%F/", got["key_prefix"])
+	assert.Equal(t, false, got["force_path_style"])
+	assert.Equal(t, "zstd", got["compression"])
+	assert.Equal(t, map[string]interface{}{"timeout_secs": 10}, got["batch"])
+	assert.Equal(t, int(v1.LogSinkBufferMinMaxSize)+134217728, got["buffer"].(map[string]interface{})["max_size"])
+}
+
+func TestValidate_S3(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*v1.S3SinkSpec)
+		wantErr string
+	}{
+		{name: "valid"},
+		{name: "aws endpoint", mutate: func(s *v1.S3SinkSpec) { s.Endpoint = "" }},
+		{name: "endpoint scheme", mutate: func(s *v1.S3SinkSpec) { s.Endpoint = "ftp://h" }, wantErr: "http(s)"},
+		{name: "endpoint without host", mutate: func(s *v1.S3SinkSpec) { s.Endpoint = "http://" }, wantErr: "http(s)"},
+		{name: "endpoint with credentials", mutate: func(s *v1.S3SinkSpec) { s.Endpoint = "http://a:b@h" }, wantErr: "credentials"},
+		{name: "no region", mutate: func(s *v1.S3SinkSpec) { s.Region = " " }, wantErr: "region"},
+		{name: "no bucket", mutate: func(s *v1.S3SinkSpec) { s.Bucket = "" }, wantErr: "bucket"},
+		{name: "prefix with leading slash", mutate: func(s *v1.S3SinkSpec) { s.KeyPrefix = "/a/" }, wantErr: "key_prefix"},
+		{name: "prefix with template", mutate: func(s *v1.S3SinkSpec) { s.KeyPrefix = "{{ workspace }}/" }, wantErr: "key_prefix"},
+		{name: "prefix with newline", mutate: func(s *v1.S3SinkSpec) { s.KeyPrefix = "a\nb/" }, wantErr: "key_prefix"},
+		{name: "prefix too long", mutate: func(s *v1.S3SinkSpec) { s.KeyPrefix = strings.Repeat("a", 513) }, wantErr: "key_prefix"},
+		{name: "compression", mutate: func(s *v1.S3SinkSpec) { s.Compression = "lz4" }, wantErr: "compression"},
+		{name: "negative flush", mutate: func(s *v1.S3SinkSpec) { s.FlushIntervalSeconds = -1 }, wantErr: "flush_interval_seconds"},
+		{name: "no auth", mutate: func(s *v1.S3SinkSpec) { s.Auth = nil }, wantErr: "auth"},
+		{name: "no secret key", mutate: func(s *v1.S3SinkSpec) { s.Auth.SecretAccessKey = "" }, wantErr: "auth"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(testS3Sink("x", tt.mutate))
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+
+	missing := testS3Sink("x", nil)
+	missing.Spec.S3 = nil
+	assert.ErrorContains(t, Validate(missing), "spec.s3 is required")
+}
+
+func TestKeyPrefixStatic(t *testing.T) {
+	assert.Equal(t, "neutree/", KeyPrefixStatic("neutree/%Y/%m/%d/"))
+	assert.Equal(t, "", KeyPrefixStatic("%Y/"))
+	assert.Equal(t, "a/b/", KeyPrefixStatic("a/b/"))
+}
