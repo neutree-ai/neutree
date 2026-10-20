@@ -61,15 +61,20 @@ func Validate(sink *v1.LogSink) error {
 		return errors.New("metadata.name is invalid")
 	}
 
-	if sink.Spec == nil {
+	return ValidateSpec(sink.Spec)
+}
+
+// ValidateSpec is Validate without the name check, for a spec not yet saved.
+func ValidateSpec(spec *v1.LogSinkSpec) error {
+	if spec == nil {
 		return errors.New("spec is required")
 	}
 
-	if sink.Spec.Type != v1.LogSinkTypeVictoriaLogs {
-		return errors.Errorf("unsupported spec.type %q", sink.Spec.Type)
+	if spec.Type != v1.LogSinkTypeVictoriaLogs {
+		return errors.Errorf("unsupported spec.type %q", spec.Type)
 	}
 
-	vl := sink.Spec.VictoriaLogs
+	vl := spec.VictoriaLogs
 	if vl == nil {
 		return errors.New("spec.victorialogs is required")
 	}
@@ -118,7 +123,7 @@ func Validate(sink *v1.LogSink) error {
 		}
 	}
 
-	if sink.Spec.Buffer.GetMaxSize() < v1.LogSinkBufferMinMaxSize {
+	if spec.Buffer.GetMaxSize() < v1.LogSinkBufferMinMaxSize {
 		return errors.Errorf("spec.buffer.max_size must be at least %d", v1.LogSinkBufferMinMaxSize)
 	}
 
