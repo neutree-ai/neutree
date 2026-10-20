@@ -57,6 +57,10 @@ This is independent from the **CP install mode** (how `neutree-api` / `neutree-c
 - The other vendor implementation.
 - `internal/accelerator/plugin/plugin.go` — the shared interface layer that frequently needs updates when vendor-specific logic changes.
 
+NodeAgent adapters may implement `pkg/nodeagent/adapter.HardwareHealthProvider` to evaluate hardware health from the current exporter evidence. The host applies this optional capability before building metrics or returning `/v1/node/device-snapshot`; adapters without it retain their discovered health state. Evaluation must return a new snapshot without mutating the discovered inventory.
+
+NVIDIA discovery alone does not establish health. A GPU is healthy only when a successful exporter scrape contains at least one `DCGM_EXP_GPU_HEALTH_STATUS` sample matching its UUID and every matching value is zero. Missing, malformed, non-finite, or nonzero health data leaves the device unhealthy. Externally managed DCGM exporters, including GPU Operator deployments, must expose this metric too. Resource views retain unhealthy inventory but exclude its capacity from allocatable and available resources, including static-node Ray quantity backfills. The `neutree_node_accelerator_free` metric also excludes unhealthy devices; total inventory and existing allocation metrics remain unchanged.
+
 ## Adding a New Controller
 
 Follow [`playbooks.md#adding-a-new-resource-type`](playbooks.md#adding-a-new-resource-type) — the controller is wired through `cmd/neutree-core/app/builder.go` and its tests live alongside the controller file. Don't also wire the controller into `neutree-api` (that's the proxies' job, not the reconciler's).

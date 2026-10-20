@@ -14,6 +14,10 @@ type Accelerator interface {
 	DiscoverHardware(context.Context) (HardwareSnapshot, error)
 }
 
+type HardwareHealthProvider interface {
+	EvaluateHardwareHealth(HardwareSnapshot, CommonEvidence) HardwareSnapshot
+}
+
 // KubernetesAccelerator builds metrics from Kubernetes-specific raw evidence.
 type KubernetesAccelerator interface {
 	Accelerator

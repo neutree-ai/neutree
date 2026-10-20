@@ -20,6 +20,7 @@ type accelerator struct {
 
 var (
 	_ adapter.Accelerator              = (*accelerator)(nil)
+	_ adapter.HardwareHealthProvider   = (*accelerator)(nil)
 	_ adapter.KubernetesAccelerator    = (*accelerator)(nil)
 	_ adapter.StaticAccelerator        = (*accelerator)(nil)
 	_ adapter.MetricDescriptorProvider = (*accelerator)(nil)
@@ -84,7 +85,6 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 			UUID:         info.UUID,
 			ProductName:  info.Product,
 			ProductModel: info.Product,
-			Healthy:      true,
 		}
 
 		if info.MemoryTotalMiB != "" {
