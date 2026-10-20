@@ -24,6 +24,14 @@ const (
 	logSinkApplyTimeout = 3 * time.Minute
 	// How long a sink may fail every send without a single success before it is Failed.
 	logSinkFailingTimeout = 5 * time.Minute
+	// A sink holding buffered events without delivering any is stalled: Vector
+	// retries an unreachable or timing-out store forever without counting an
+	// error. Normal operation explains a pause of one request timeout (Vector's
+	// default, 60s), plus for S3 the flush interval (buffered events include
+	// those waiting in a batch), plus this margin. Past that the sink is
+	// Degraded, and Failed logSinkFailingTimeout later.
+	logSinkStallMargin          = time.Minute
+	logSinkVectorRequestTimeout = 60 * time.Second
 	// Vector does not retry a rejected reload, so an unconfirmed delivery is
 	// written again: soon after a rejection shows up, otherwise only after a
 	// ConfigMap has had time to propagate (up to about a minute). Doubles per
@@ -74,6 +82,11 @@ type logSinkState struct {
 	window       *logsink.ComponentCounters
 	windowAt     time.Time
 	failingSince time.Time
+
+	// stallGrace is how long the sink may hold events without delivering any
+	// before it counts as stalled; stalledSince is when that started.
+	stallGrace   time.Duration
+	stalledSince time.Time
 }
 
 type LogSinkControllerOption struct {
@@ -278,7 +291,7 @@ func (c *LogSinkController) deliver(ctx context.Context, active []*v1.LogSink, n
 			continue
 		}
 
-		next := &logSinkState{hash: hash, componentID: id, deliveredAt: now}
+		next := &logSinkState{hash: hash, componentID: id, deliveredAt: now, stallGrace: logSinkStallGrace(s.Spec)}
 		if st != nil && st.componentID == id {
 			next.prev, next.window, next.windowAt = st.prev, st.window, st.windowAt
 		}
@@ -359,6 +372,13 @@ func (c *LogSinkController) observe(now time.Time) {
 				st.failingSince = time.Time{}
 			case delta.Failed > 0 && st.failingSince.IsZero():
 				st.failingSince = now
+			}
+
+			switch {
+			case delta.Sent > 0 || cur.Buffered <= 0:
+				st.stalledSince = time.Time{}
+			case st.stalledSince.IsZero():
+				st.stalledSince = now
 			}
 		}
 
@@ -471,12 +491,54 @@ func (c *LogSinkController) derivePhase(st *logSinkState, now time.Time) (v1.Log
 		return v1.LogSinkPhaseFAILED, fmt.Sprintf("no events delivered for %s; every send failed", logSinkFailingTimeout)
 	}
 
+	stalled := time.Duration(0)
+	if !st.stalledSince.IsZero() {
+		stalled = now.Sub(st.stalledSince)
+	}
+
+	if stalled >= st.stallGrace+logSinkFailingTimeout {
+		return v1.LogSinkPhaseFAILED, stalledMessage(st, stalled)
+	}
+
 	if w := st.window; w != nil && (w.Failed > 0 || w.Dropped > 0) {
 		return v1.LogSinkPhaseDEGRADED, fmt.Sprintf("in the last %s: %d failed sends, %d dropped events",
 			logSinkScrapeInterval, int64(w.Failed), int64(w.Dropped))
 	}
 
+	if stalled >= st.stallGrace {
+		return v1.LogSinkPhaseDEGRADED, stalledMessage(st, stalled)
+	}
+
 	return v1.LogSinkPhaseRUNNING, ""
+}
+
+func stalledMessage(st *logSinkState, stalled time.Duration) string {
+	buffered := int64(0)
+	if st.prev != nil {
+		buffered = int64(st.prev.Buffered)
+	}
+
+	return fmt.Sprintf("%d events buffered, none delivered for %s; the store may be unreachable or too slow",
+		buffered, formatMinutes(stalled))
+}
+
+// formatMinutes rounds down to whole minutes, so a status message changes at most once a minute.
+func formatMinutes(d time.Duration) string {
+	return fmt.Sprintf("%dm", int(d/time.Minute))
+}
+
+// logSinkStallGrace is how long normal operation may hold events back.
+func logSinkStallGrace(spec *v1.LogSinkSpec) time.Duration {
+	grace := logSinkStallMargin + logSinkVectorRequestTimeout
+
+	switch {
+	case spec.Type == v1.LogSinkTypeS3 && spec.S3 != nil:
+		grace += time.Duration(spec.S3.GetFlushIntervalSeconds()) * time.Second
+	case spec.VictoriaLogs != nil && spec.VictoriaLogs.TimeoutSeconds > 0:
+		grace += time.Duration(spec.VictoriaLogs.TimeoutSeconds)*time.Second - logSinkVectorRequestTimeout
+	}
+
+	return grace
 }
 
 // writeStatus skips the write when nothing visible changed, to avoid churn.
