@@ -60,6 +60,7 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 	for _, resource := range []string{"clusters", "endpoints"} {
 		route := group.Group("/" + resource + "/:workspace/:name")
 		route.Use(middlewares...)
+
 		permission := "cluster:read"
 
 		if resource == "endpoints" {
