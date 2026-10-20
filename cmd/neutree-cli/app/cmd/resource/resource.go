@@ -17,6 +17,7 @@ import (
 var KindPriority = map[string]int{
 	"Workspace":        0,
 	"Engine":           1,
+	"IdentitySource":   1,
 	"ImageRegistry":    1,
 	"ModelRegistry":    1,
 	"Role":             1,
