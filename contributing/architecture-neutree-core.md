@@ -50,6 +50,28 @@ Resources whose reconcile path depends on cluster mode (chiefly `Endpoint` and `
 
 This is independent from the **CP install mode** (how `neutree-api` / `neutree-core` themselves are deployed) — see [`architecture-neutree-cli.md#deploy-mode`](architecture-neutree-cli.md#deploy-mode). The two axes happen to share "K8s vs SSH" terminology but mean different things.
 
+## Cluster Version Policy
+
+`internal/cluster/version` owns compatibility decisions based on the Neutree
+cluster package version: runtime engine isolation, SSH lifecycle selection, Ray
+node-IP support, NodeAgent contract/image selection, virtualization and HAMi
+selection, metrics capabilities, selectable versions, and upgrade validation.
+Its functions accept version strings and have no cluster, storage, or HTTP
+dependencies. Callers retain object resolution, missing/invalid-version fallback,
+error presentation, and rollout state transitions.
+
+The gates deliberately retain their individual comparison rules. Runtime and
+lifecycle gates compare full semantic versions; NodeAgent, HAMi, and metrics
+policies compare base versions so prereleases use the intended release contract.
+The selectable-version floor filters discovery, not cluster admission. Upgrade
+admission compares the desired version with the current spec, not observed status.
+
+`internal/component/version.go` remains the component release catalogue, consumed
+by the cluster-version policies. Kubernetes server compatibility, scheduler pins,
+and Helm capabilities stay in `internal/component/hami.go`; they use a different
+version axis. Generic parsing stays in `internal/semver`, and control-plane build
+metadata stays in `internal/version`.
+
 ## Vendor Plugin Pairs
 
 `internal/accelerator/plugin/gpu.go` (NVIDIA) and `internal/accelerator/plugin/amd_gpu.go` implement the same accelerator interface with vendor-specific details. The orchestrators consume this interface to discover and request GPU resources during reconcile. A change to one vendor implementation must be evaluated against:

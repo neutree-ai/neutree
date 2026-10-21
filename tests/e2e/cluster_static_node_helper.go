@@ -11,11 +11,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/semver"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 func usesStaticNodeClusterFlow(version string) bool {
-	enabled, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, version)
+	enabled, err := clusterversion.IsStaticNodeClusterFlowVersion(version)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "cluster version must be semver")
 
 	return enabled

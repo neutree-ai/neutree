@@ -6,10 +6,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
-
-const MinVirtualizationClusterVersion = component.MinVirtualizationClusterVersion
 
 type AcceleratorVirtualizationErrorReason string
 
@@ -38,12 +36,6 @@ func (e *AcceleratorVirtualizationError) Unwrap() error {
 	return e.Err
 }
 
-// SupportsVirtualizationClusterVersion gates accelerator virtualization by the
-// Neutree cluster package version, not by the Kubernetes server version.
-func SupportsVirtualizationClusterVersion(version string) (bool, error) {
-	return component.SupportsVirtualizationClusterVersion(version)
-}
-
 func ValidateAcceleratorVirtualizationClusterSupport(clusterType, version string) error {
 	if clusterType != v1.KubernetesClusterType {
 		return &AcceleratorVirtualizationError{
@@ -53,7 +45,7 @@ func ValidateAcceleratorVirtualizationClusterSupport(clusterType, version string
 		}
 	}
 
-	supported, err := SupportsVirtualizationClusterVersion(version)
+	supported, err := clusterversion.SupportsVirtualizationClusterVersion(version)
 	if err != nil {
 		return &AcceleratorVirtualizationError{
 			Reason:  AcceleratorVirtualizationInvalidVersionReason,
@@ -67,9 +59,9 @@ func ValidateAcceleratorVirtualizationClusterSupport(clusterType, version string
 		return &AcceleratorVirtualizationError{
 			Reason: AcceleratorVirtualizationUnsupportedVersionReason,
 			Message: fmt.Sprintf("spec.accelerator_virtualization requires cluster version >= %s",
-				MinVirtualizationClusterVersion),
+				clusterversion.MinVirtualizationClusterVersion),
 			Hint: fmt.Sprintf("Upgrade cluster version to %s or later before enabling accelerator virtualization",
-				MinVirtualizationClusterVersion),
+				clusterversion.MinVirtualizationClusterVersion),
 		}
 	}
 

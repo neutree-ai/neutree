@@ -13,13 +13,12 @@ import (
 	"strconv"
 	"strings"
 
-	mastermindssemver "github.com/Masterminds/semver/v3"
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/middleware"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -545,7 +544,7 @@ func validateClusterVersionInput(input *ValidationInput[v1.Cluster]) *validation
 		}
 	}
 
-	if err := validateDesiredClusterVersion(input.New.GetVersion()); err != nil {
+	if err := clusterversion.ValidateDesiredClusterVersion(input.New.GetVersion()); err != nil {
 		return clusterVersionValidationError(err)
 	}
 
@@ -649,58 +648,11 @@ func clusterPatchValidationResolutionError(err error) *validationError {
 }
 
 func validateClusterVersionNotDowngrade(current *v1.Cluster, desiredVersion string) error {
-	baseline, err := currentClusterSpecVersionBaseline(current)
-	if err != nil {
-		return err
-	}
-
-	if baseline == "" {
-		if err := validateDesiredClusterVersion(desiredVersion); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	desiredIsOlder, err := semver.LessThan(desiredVersion, baseline)
-	if err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	if desiredIsOlder {
-		return fmt.Errorf(
-			"cluster version downgrade is not supported: current version is %s, desired version is %s",
-			baseline,
-			desiredVersion,
-		)
-	}
-
-	return nil
-}
-
-func validateDesiredClusterVersion(desiredVersion string) error {
-	if _, err := mastermindssemver.NewVersion(desiredVersion); err != nil {
-		return fmt.Errorf("invalid desired cluster version %q: %w", desiredVersion, err)
-	}
-
-	return nil
-}
-
-func currentClusterSpecVersionBaseline(current *v1.Cluster) (string, error) {
 	if current == nil || current.Spec == nil {
-		return "", fmt.Errorf("current cluster spec is required")
+		return fmt.Errorf("current cluster spec is required")
 	}
 
-	baseline := current.GetVersion()
-	if baseline == "" {
-		return "", nil
-	}
-
-	if _, err := mastermindssemver.NewVersion(baseline); err != nil {
-		return "", nil
-	}
-
-	return baseline, nil
+	return clusterversion.ValidateClusterVersionUpgrade(current.GetVersion(), desiredVersion)
 }
 
 func clusterEndpointReferenceFilters(workspace, name string) []storage.Filter {

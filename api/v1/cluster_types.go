@@ -21,15 +21,6 @@ const (
 	KubernetesClusterType = "kubernetes"
 )
 
-// StaticNodeClusterFlowVersionGate is the highest SSH cluster version that
-// still uses the legacy Ray SSH lifecycle. Greater versions use the static-node
-// backed lifecycle.
-const StaticNodeClusterFlowVersionGate = "v1.0.1"
-
-// MinimumSelectableClusterVersionGate is the highest cluster version hidden
-// from version selection and available-version responses.
-const MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
-
 type Cluster struct {
 	ID         int            `json:"id,omitempty"`
 	APIVersion string         `json:"api_version,omitempty"`

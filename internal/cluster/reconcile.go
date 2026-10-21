@@ -11,8 +11,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/pkg/command"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -64,7 +64,7 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 			storage:            s,
 		}
 
-		useStaticFlow, err := isStaticNodeClusterFlowVersion(cluster.GetVersion())
+		useStaticFlow, err := clusterversion.IsStaticNodeClusterFlowVersion(cluster.GetVersion())
 		if err != nil {
 			return nil, err
 		}
@@ -83,19 +83,4 @@ func NewReconcile(cluster *v1.Cluster, acceleratorManager accelerator.Manager,
 	default:
 		return nil, fmt.Errorf("unsupported cluster type: %s", cluster.Spec.Type)
 	}
-}
-
-func isStaticNodeClusterFlowVersion(version string) (bool, error) {
-	useStaticNodeFlow, err := semver.LessThan(v1.StaticNodeClusterFlowVersionGate, version)
-	if err != nil {
-		return false, fmt.Errorf("invalid cluster version %q: %w", version, err)
-	}
-
-	return useStaticNodeFlow, nil
-}
-
-// IsStaticNodeClusterFlowVersion reports whether a cluster version uses the
-// static-node-backed SSH reconciliation flow.
-func IsStaticNodeClusterFlowVersion(version string) (bool, error) {
-	return isStaticNodeClusterFlowVersion(version)
 }

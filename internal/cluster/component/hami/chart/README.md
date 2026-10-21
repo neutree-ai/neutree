@@ -8,9 +8,10 @@ Kubernetes server version independently selects that profile's scheduler image.
 ## Cluster Version Matrix
 
 `internal/component/version.go` defines the component image versions.
-`internal/component/hami.go` owns the HAMi compatibility thresholds, scheduler
-pins, and Kubernetes version normalization.
-`component.HAMiVersionForCluster(clusterVersion)` resolves the HAMi version:
+`internal/cluster/version/hami.go` owns the Neutree cluster compatibility
+thresholds and HAMi selection. `internal/component/hami.go` owns the Kubernetes
+scheduler pins and Kubernetes version normalization.
+`clusterversion.HAMiVersionForCluster(clusterVersion)` resolves the HAMi version:
 
 | Neutree cluster version | HAMi version | Embedded chart | Scheduler profile |
 | --- | --- | --- | --- |
@@ -146,6 +147,8 @@ profile does not publish or rebuild a matching node-agent artifact.
 
 ## Verification
 
+- `go test ./internal/cluster/version` covers Neutree cluster compatibility
+  gates, including HAMi selection and prerelease/base-version handling.
 - `go test ./internal/cluster/component/hami` loads the embedded chart and
   renders every bundled Kubernetes minor, checking pinned images, scheduler
   configuration, absence of DRA, TLS/webhook protection, node scope, device
@@ -158,7 +161,7 @@ profile does not publish or rebuild a matching node-agent artifact.
 - E2E virtualization coverage lives in
   `tests/e2e/accelerator_virtualization_test.go` and requires a configured
   Neutree deployment and GPU Kubernetes cluster. Its expected HAMi version is
-  resolved with `component.HAMiVersionForCluster(cluster.GetVersion())`, so legacy
+  resolved with `clusterversion.HAMiVersionForCluster(cluster.GetVersion())`, so legacy
   profiles are not incorrectly required to run the latest HAMi.
 
 This document does not assert that either profile has passed real-cluster E2E

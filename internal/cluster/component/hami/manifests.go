@@ -10,6 +10,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	componentversion "github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -255,7 +256,7 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 }
 
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
-	hamiVersion, err := componentversion.HAMiVersionForCluster(h.cluster.GetVersion())
+	hamiVersion, err := clusterversion.HAMiVersionForCluster(h.cluster.GetVersion())
 	if err != nil {
 		return nil, err
 	}

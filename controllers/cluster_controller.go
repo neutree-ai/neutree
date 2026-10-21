@@ -10,6 +10,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/cluster"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/observability/monitoring"
@@ -133,7 +134,7 @@ func (controller *ClusterController) syncInternalMetricsMonitor(c *v1.Cluster) e
 		return nil
 	}
 
-	useStaticNodeFlow, err := cluster.IsStaticNodeClusterFlowVersion(c.GetVersion())
+	useStaticNodeFlow, err := clusterversion.IsStaticNodeClusterFlowVersion(c.GetVersion())
 	if err != nil {
 		return err
 	}
