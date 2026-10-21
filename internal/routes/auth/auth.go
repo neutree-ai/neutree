@@ -24,6 +24,11 @@ type Dependencies struct {
 	AuthConfig   middleware.AuthConfig
 	Storage      storage.Storage
 	AuthClient   auth.Client
+	// Sources resolves the LDAP identity sources users log in with. When nil,
+	// the LDAP login route is not registered.
+	Sources *LoginSources
+	// Sessions is required when Sources is set.
+	Sessions auth.SessionIssuer
 }
 
 // RegisterAuthRoutes registers authentication-related routes
@@ -47,15 +52,25 @@ func RegisterAuthRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	}
 
 	// Public GoTrue proxy routes - no authentication required
-	// Only expose endpoints actually used by the client
+	// Only expose endpoints actually used by the client. There is no /signup:
+	// users are created by an admin or by an SSO login, never by themselves.
 	authGroup.POST("/token", handleTokenProxy(deps))   // signInWithPassword, token refresh
-	authGroup.POST("/signup", handleAuthProxy(deps))   // signUp
 	authGroup.POST("/recover", handleAuthProxy(deps))  // resetPasswordForEmail
 	authGroup.GET("/user", handleAuthProxy(deps))      // getUser
 	authGroup.PUT("/user", handleUpdateUser(deps))     // updateUser (password)
 	authGroup.POST("/logout", handleAuthProxy(deps))   // signOut
 	authGroup.GET("/authorize", handleAuthProxy(deps)) // OAuth authorize
 	authGroup.GET("/callback", handleAuthProxy(deps))  // OAuth callback
+
+	// The login page lists the identity sources it offers before anyone is
+	// logged in.
+	authGroup.GET("/identity-sources", handleListLoginIdentitySources(deps))
+
+	// Identity sources are read from the database at login, so the route exists
+	// whether or not any source is configured yet.
+	if deps.Sources != nil {
+		authGroup.POST("/ldap/token", handleLDAPToken(deps))
+	}
 }
 
 func handleCreateUser(deps *Dependencies) gin.HandlerFunc {

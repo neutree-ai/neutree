@@ -11,9 +11,15 @@ const (
 	// key of its own.
 	IdentitySourceKey = "identity_source"
 
+	// IdentitySourceNameKey is the app_metadata key naming the IdentitySource
+	// of an external user; the database copies it into IdentitySourceNameLabel.
+	IdentitySourceNameKey = "identity_source_name"
+
 	// LDAPSource and OIDCSource are the identity_source app_metadata values of
 	// users from an LDAP or an OpenID Connect IdentitySource: the source's type,
-	// which selects the fields neutree must not change for the user.
+	// which selects the fields neutree must not change for the user. The
+	// account's link in external_identities is keyed by LinkSource instead, so
+	// each IdentitySource keeps its own links.
 	LDAPSource = "ldap"
 	OIDCSource = "oidc"
 
@@ -22,7 +28,23 @@ const (
 	// app_metadata on every profile write (migration 108), so no write can
 	// add, change or remove it; local users never have it.
 	IdentitySourceLabel = "neutree.ai/identity-source"
+
+	// IdentitySourceNameLabel is the read-only user profile label naming the
+	// IdentitySource of an external user, kept like IdentitySourceLabel.
+	IdentitySourceNameLabel = "neutree.ai/identity-source-name"
 )
+
+// ExternalAppMetadata is the app_metadata of a user from the IdentitySource of
+// the given type and name.
+func ExternalAppMetadata(sourceType, sourceName string) map[string]any {
+	return map[string]any{IdentitySourceKey: sourceType, IdentitySourceNameKey: sourceName}
+}
+
+// LinkSource returns the external_identities source of the accounts of the
+// IdentitySource of the given type and name, e.g. ldap:corp-ldap.
+func LinkSource(sourceType, name string) string {
+	return sourceType + ":" + name
+}
 
 // externallyManagedFields lists, per identity source, the GoTrue account fields
 // that source owns. A local password would let the user log in without the
