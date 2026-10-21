@@ -299,7 +299,7 @@ sinks:
       method: newline_delimited
     inputs:
       - prepare_trace_payload
-    key_prefix: neutree/%Y/%m/%d/
+    key_prefix: traces/%Y/%m/%d/
     region: us-east-1
     type: aws_s3
 `, string(body))
@@ -377,7 +377,7 @@ func TestValidate_S3(t *testing.T) {
 }
 
 func TestKeyPrefixStatic(t *testing.T) {
-	assert.Equal(t, "neutree/", KeyPrefixStatic("neutree/%Y/%m/%d/"))
+	assert.Equal(t, "traces/", KeyPrefixStatic("traces/%Y/%m/%d/"))
 	assert.Equal(t, "", KeyPrefixStatic("%Y/"))
 	assert.Equal(t, "a/b/", KeyPrefixStatic("a/b/"))
 }

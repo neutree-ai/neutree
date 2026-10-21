@@ -125,7 +125,7 @@ func TestTestConnection_S3(t *testing.T) {
 
 	// Path style, under the static part of the default prefix.
 	require.NotEmpty(t, fake.puts)
-	assert.Regexp(t, `^neutree/\.neutree-probe-\d+$`, fake.puts[0])
+	assert.Regexp(t, `^traces/\.connection-test-\d+$`, fake.puts[0])
 	// Only the write-only keys leave their test object behind.
 	assert.Len(t, fake.objects, 1)
 }

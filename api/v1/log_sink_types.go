@@ -35,7 +35,7 @@ const (
 	LogSinkS3CompressionNone = "none"
 
 	// LogSinkS3DefaultKeyPrefix is used when spec.s3.key_prefix is unset.
-	LogSinkS3DefaultKeyPrefix = "neutree/%Y/%m/%d/"
+	LogSinkS3DefaultKeyPrefix = "traces/%Y/%m/%d/"
 	// LogSinkS3DefaultFlushIntervalSeconds is used when spec.s3.flush_interval_seconds is unset.
 	LogSinkS3DefaultFlushIntervalSeconds = 300
 )
