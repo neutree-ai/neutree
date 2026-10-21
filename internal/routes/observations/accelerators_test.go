@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,4 +109,49 @@ func TestClusterReadDoesNotImplyEndpointRead(t *testing.T) {
 	w := httptest.NewRecorder()
 	router(&Dependencies{Storage: s, MetricsURL: upstream.URL}, true).ServeHTTP(w, httptest.NewRequest("GET", "/clusters/tenant/cluster/accelerator-observations", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
+}
+
+func TestEndpointOnlyReaderGetsAssignedHardware(t *testing.T) {
+	s := mocks.NewMockStorage(t)
+	s.On("CallDatabaseFunction", "has_permission", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		*args.Get(2).(*bool) = args.Get(1).(map[string]interface{})["required_permission"] == "endpoint:read"
+	}).Return(nil)
+	s.On("ListEndpoint", resourceFilter("tenant", "model")).Return([]v1.Endpoint{{Spec: &v1.EndpointSpec{Cluster: "cluster"}, Status: &v1.EndpointStatus{Resources: &v1.EndpointResourceStatus{Replicas: []v1.ReplicaDeviceAllocation{
+		{NodeID: "node-a", Devices: []v1.DeviceAllocation{{UUID: "gpu.1"}, {UUID: "gpu.1"}}},
+		{NodeID: "node-b", Devices: []v1.DeviceAllocation{{UUID: "gpu-2"}}},
+	}}}}}, nil)
+	queries := []string{}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		queries = append(queries, q)
+		require.Contains(t, q, `workspace="tenant"`)
+		require.Contains(t, q, `neutree_cluster="cluster"`)
+		require.Contains(t, q, "[90s]")
+		require.NotContains(t, q, "[90s:]")
+		if len(queries) == 1 {
+			require.Contains(t, q, `endpoint="model"`)
+		} else {
+			require.NotContains(t, q, `endpoint=`)
+			require.NotContains(t, q, "neutree_accelerator_memory_used_bytes")
+			require.NotContains(t, q, "neutree_accelerator_utilization_ratio")
+			require.Contains(t, q, "neutree_node_accelerator_npu_info")
+			require.Contains(t, q, "neutree_node_accelerator_hcu_info")
+			if strings.Contains(q, `node="node-a"`) {
+				require.Contains(t, q, `accelerator_uuid=~"gpu\\.1"`)
+				require.NotContains(t, q, "gpu-2")
+			} else {
+				require.Contains(t, q, `node="node-b"`)
+				require.Contains(t, q, `accelerator_uuid=~"gpu-2"`)
+				require.NotContains(t, q, "gpu.1")
+			}
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"neutree_node_accelerator_npu_info","node":"node-a","accelerator_uuid":"gpu.1","driver_version":"24.1","hccs_capable":"1","private":"hidden"},"values":[[%d,"1"]]}]}}`, time.Now().Unix()-20)
+	}))
+	defer upstream.Close()
+	w := httptest.NewRecorder()
+	router(&Dependencies{Storage: s, MetricsURL: upstream.URL}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/model/accelerator-observations", nil))
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Len(t, queries, 3)
+	require.Contains(t, w.Body.String(), `"hccs_capable":"1"`)
+	require.NotContains(t, w.Body.String(), "hidden")
 }

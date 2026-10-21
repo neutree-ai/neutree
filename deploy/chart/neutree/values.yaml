@@ -53,7 +53,7 @@ publicModelRegistries:
     url: "https://www.modelscope.cn"
 
 metrics:
-  # Prometheus-compatible query base URL for GPU observations. Empty disables the feature.
+  # Prometheus-compatible query base URL for GPU observations. Empty uses the enabled built-in VictoriaMetrics service.
   queryUrl: ""
   # Specify the URL for remote write if using an external metrics storage system.
   # This explicit value takes precedence over the embedded VictoriaMetrics

@@ -3,12 +3,14 @@
 package observations
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,8 +27,8 @@ var physicalMetrics = []string{
 	"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes",
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
 	"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info",
-	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_ascend_info",
-	"neutree_node_accelerator_hygon_info",
+	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info",
+	"neutree_node_accelerator_hcu_info",
 }
 
 var replicaMetrics = []string{
@@ -85,6 +87,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		cluster, endpoint := name, ""
 
 		metrics := append([]string{}, physicalMetrics...)
+		var devices [][2]string
 
 		if resource == "endpoints" {
 			items, err := deps.Storage.ListEndpoint(resourceFilter(workspace, name))
@@ -101,6 +104,22 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 			cluster, endpoint = items[0].Spec.Cluster, name
 			metrics = replicaMetrics
+			if status := items[0].Status; status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
+				seen := map[[2]string]bool{}
+				for _, replica := range status.Resources.Replicas {
+					for _, device := range replica.Devices {
+						node := device.NodeID
+						if node == "" {
+							node = replica.NodeID
+						}
+						key := [2]string{node, device.UUID}
+						if node != "" && device.UUID != "" && !seen[key] {
+							devices = append(devices, key)
+							seen[key] = true
+						}
+					}
+				}
+			}
 		} else {
 			items, err := deps.Storage.ListCluster(resourceFilter(workspace, name))
 
@@ -142,46 +161,27 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 		// A range vector preserves original scrape timestamps. An instant vector
 		// reports evaluation time and can make old measurements look fresh.
-		query := selector + "}[90s]"
-		u, err := url.Parse(strings.TrimRight(deps.MetricsURL, "/") + "/api/v1/query")
-
-		if err != nil {
-			c.JSON(503, gin.H{"error": "monitoring unavailable"})
-			return
+		queries := []string{selector + "}[90s]"}
+		if len(devices) > 0 {
+			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info"}
+			byNode := map[string][]string{}
+			for _, device := range devices {
+				byNode[device[0]] = append(byNode[device[0]], regexp.QuoteMeta(device[1]))
+			}
+			for node, uuids := range byNode {
+				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
+			}
 		}
-
-		params := u.Query()
-		params.Set("query", query)
-		u.RawQuery = params.Encode()
-
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u.String(), nil)
-
-		if err != nil {
-			c.JSON(503, gin.H{"error": "monitoring unavailable"})
-			return
-		}
-
-		resp, err := deps.Client.Do(req)
-
-		if err != nil {
-			c.JSON(503, gin.H{"error": "monitoring unavailable"})
-			return
-		}
-
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-
-		if err != nil || resp.StatusCode != 200 || len(body) > maxResponseBytes {
-			c.JSON(503, gin.H{"error": "monitoring unavailable"})
-			return
-		}
-
-		samples, err := decodeSamples(body, time.Now())
-
-		if err != nil {
-			c.JSON(503, gin.H{"error": "monitoring unavailable"})
-			return
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+		samples := []Sample{}
+		for _, query := range queries {
+			batch, err := querySamples(ctx, deps, query)
+			if err != nil {
+				c.JSON(503, gin.H{"error": "monitoring unavailable"})
+				return
+			}
+			samples = append(samples, batch...)
 		}
 
 		status := "ok"
@@ -192,6 +192,33 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 		c.JSON(200, Snapshot{Status: status, Samples: samples})
 	}
+}
+
+func querySamples(ctx context.Context, deps *Dependencies, query string) ([]Sample, error) {
+	u, err := url.Parse(strings.TrimRight(deps.MetricsURL, "/") + "/api/v1/query")
+	if err != nil {
+		return nil, err
+	}
+	params := u.Query()
+	params.Set("query", query)
+	u.RawQuery = params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := deps.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 || len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("invalid monitoring response")
+	}
+	return decodeSamples(body, time.Now())
 }
 
 func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
@@ -240,7 +267,7 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 		labels := map[string]string{}
 
 		for _, key := range strings.Fields("node accelerator_uuid accelerator_index accelerator_type product endpoint replica instance_id vdevice_index " +
-			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch") {
+			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch hccs_capable") {
 			if value, ok := series.Metric[key]; ok {
 				labels[key] = value
 			}
