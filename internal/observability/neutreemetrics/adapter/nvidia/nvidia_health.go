@@ -8,21 +8,21 @@ import (
 const nvidiaDCGMDeviceHealthMetric = "DCGM_EXP_GPU_HEALTH_STATUS"
 
 func (*accelerator) EvaluateHardwareHealth(hardware adapter.HardwareSnapshot, evidence adapter.CommonEvidence) adapter.HardwareSnapshot {
-	var healthByUUID map[string]bool
+	var HealthStatusByUUID map[string]bool
 	if evidence.ExporterUp {
-		healthByUUID = nvidiaHealthByUUID(evidence.ExporterText)
+		HealthStatusByUUID = nvidiaHealthByUUID(evidence.ExporterText)
 	}
 
 	result := hardware.Clone()
 	for deviceIndex, device := range result.Accelerator.Devices {
-		result.Accelerator.Devices[deviceIndex].Healthy = healthByUUID[device.UUID]
+		result.Accelerator.Devices[deviceIndex].Healthy = HealthStatusByUUID[device.UUID]
 	}
 
 	return result
 }
 
 func nvidiaHealthByUUID(raw string) map[string]bool {
-	healthByUUID := make(map[string]bool)
+	HealthStatusByUUID := make(map[string]bool)
 
 	for _, sample := range promtext.ParseVector(raw) {
 		if promtext.MetricName(sample) != nvidiaDCGMDeviceHealthMetric {
@@ -30,13 +30,18 @@ func nvidiaHealthByUUID(raw string) map[string]bool {
 		}
 
 		uuid := promtext.LabelValue(sample, "UUID", "uuid")
-		if uuid == "" {
+		if uuid == "" || promtext.LabelValue(sample, "health_watch") == "" {
 			continue
 		}
 
-		healthy, found := healthByUUID[uuid]
-		healthByUUID[uuid] = (!found || healthy) && promtext.Value(sample) == 0
+		if _, found := HealthStatusByUUID[uuid]; !found {
+			HealthStatusByUUID[uuid] = true
+		}
+
+		if promtext.Value(sample) != 0 {
+			HealthStatusByUUID[uuid] = false
+		}
 	}
 
-	return healthByUUID
+	return HealthStatusByUUID
 }

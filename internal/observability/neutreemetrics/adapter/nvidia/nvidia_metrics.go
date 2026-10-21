@@ -273,7 +273,7 @@ func nvidiaNormalizeGPUHardwareInfoSamples(
 func nvidiaDevicesFromDCGM(raw string) []v1.StaticNodeAcceleratorDeviceStatus {
 	devicesByUUID := map[string]v1.StaticNodeAcceleratorDeviceStatus{}
 	discoveredUUIDs := map[string]struct{}{}
-	healthByUUID := nvidiaHealthByUUID(raw)
+	HealthStatusByUUID := nvidiaHealthByUUID(raw)
 
 	for _, metric := range promtext.ParseVector(raw) {
 		uuid := promtext.LabelValue(metric, "UUID", "uuid")
@@ -287,7 +287,7 @@ func nvidiaDevicesFromDCGM(raw string) []v1.StaticNodeAcceleratorDeviceStatus {
 
 		device := devicesByUUID[uuid]
 		device.UUID = uuid
-		device.Healthy = healthByUUID[uuid]
+		device.Healthy = HealthStatusByUUID[uuid]
 
 		if id := promtext.LabelValue(metric, "gpu", "GPU_I_ID"); id != "" {
 			device.ID = id

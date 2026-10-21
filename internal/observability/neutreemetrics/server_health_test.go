@@ -56,10 +56,46 @@ func TestServerEvaluatesHardwareHealthBeforeSnapshotsAndMetrics(t *testing.T) {
 	}{
 		{
 			name: "healthy and unhealthy devices",
-			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc"} 0
-DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def"} 1`,
+			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 1`,
 			status: http.StatusOK,
 			health: []bool{true, false, false},
+		},
+		{
+			name: "power failure followed by OK remains unhealthy",
+			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 1
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
+			status: http.StatusOK,
+			health: []bool{false, true, false},
+		},
+		{
+			name: "power OK followed by failure remains unhealthy",
+			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 1
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
+			status: http.StatusOK,
+			health: []bool{false, true, false},
+		},
+		{
+			name: "missing health watch fails closed",
+			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc"} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
+			status: http.StatusOK,
+			health: []bool{false, true, false},
+		},
+		{
+			name: "empty health watch fails closed",
+			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch=""} 0
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
+			status: http.StatusOK,
+			health: []bool{false, true, false},
 		},
 		{
 			name:   "missing health metrics",
@@ -69,7 +105,7 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def"} 1`,
 		},
 		{
 			name:   "exporter unavailable",
-			body:   `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc"} 0`,
+			body:   `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`,
 			status: http.StatusServiceUnavailable,
 			health: []bool{false, false, false},
 		},
