@@ -4,7 +4,7 @@ This version adds a read-only monitoring path for the cluster and endpoint basic
 
 ## Configuration
 
-Pass `--metrics-url=<Prometheus-compatible query base URL>` to neutree-api. For VictoriaMetrics cluster tenant 0 this is `http://vmselect:8481/select/0/prometheus`. For Docker, set `NEUTREE_METRICS_QUERY_URL` to an address reachable from the API container (the observability stack may use a separate Docker network); Helm installations can set `metrics.queryUrl`. An empty value disables observations without disabling allocation views.
+Pass `--metrics-url=<Prometheus-compatible query base URL>` to neutree-api. For VictoriaMetrics cluster tenant 0 this is `http://vmselect:8481/select/0/prometheus`. For Docker, set `NEUTREE_METRICS_QUERY_URL` to an address reachable from the API container (the observability stack may use a separate Docker network); Helm installations can set `metrics.queryUrl`. With the built-in VictoriaMetrics service enabled, an empty value uses that service automatically. Set an explicit value to query an external Prometheus-compatible service; disabling the built-in service and leaving this value empty leaves observations unconfigured without disabling allocation views.
 
 The browser never supplies PromQL or a backend address. Cluster and endpoint routes require their respective workspace read permission. Cluster readers receive workload measurements only if they also hold endpoint read permission. Endpoint queries resolve the cluster from the stored endpoint.
 
