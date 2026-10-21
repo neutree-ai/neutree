@@ -1,4 +1,4 @@
-package component
+package version
 
 import (
 	"testing"
@@ -7,24 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"helm.sh/helm/v3/pkg/chartutil"
 	kubeversion "k8s.io/apimachinery/pkg/version"
+
+	"github.com/neutree-ai/neutree/internal/component"
 )
 
-func TestHAMiVersionConstants(test *testing.T) {
-	cases := []struct {
-		name     string
-		actual   string
-		expected string
-	}{
-		{name: "HAMi", actual: HAMi, expected: "v2.10.0"},
-		{name: "legacy HAMi", actual: LegacyHAMi, expected: "v2.9.0"},
-		{name: "default Kubernetes scheduler", actual: DefaultKubeSchedulerVersion, expected: "v1.32.13"},
-	}
-
-	for _, testCase := range cases {
-		test.Run(testCase.name, func(test *testing.T) {
-			assert.Equal(test, testCase.expected, testCase.actual)
-		})
-	}
+func TestDefaultKubeSchedulerVersion(test *testing.T) {
+	assert.Equal(test, "v1.32.13", DefaultKubeSchedulerVersion)
 }
 
 func TestKubeSchedulerVersionsByMinor(test *testing.T) {
@@ -52,8 +40,8 @@ func TestKubeSchedulerVersionsByMinor(test *testing.T) {
 			require.Contains(test, KubeSchedulerVersionsByMinor, testCase.minor)
 			assert.Equal(test, testCase.schedulerVersion, KubeSchedulerVersionsByMinor[testCase.minor])
 			serverVersion := &kubeversion.Info{GitVersion: testCase.serverVersion}
-			assert.Equal(test, testCase.schedulerVersion, KubeSchedulerVersionForHAMi(HAMi, serverVersion))
-			assert.Equal(test, testCase.legacySchedulerVersion, KubeSchedulerVersionForHAMi(LegacyHAMi, serverVersion))
+			assert.Equal(test, testCase.schedulerVersion, KubeSchedulerVersionForHAMi(component.HAMi, serverVersion))
+			assert.Equal(test, testCase.legacySchedulerVersion, KubeSchedulerVersionForHAMi(component.LegacyHAMi, serverVersion))
 		})
 	}
 }
@@ -150,8 +138,8 @@ func TestKubernetesVersionDiscoveryCompatibility(test *testing.T) {
 		test.Run(testCase.name, func(test *testing.T) {
 			assert.Equal(test, testCase.serverVersion, KubernetesServerVersion(testCase.server))
 			assert.Equal(test, testCase.majorMinor, KubernetesServerMajorMinor(testCase.server))
-			assert.Equal(test, testCase.schedulerVersion, KubeSchedulerVersionForHAMi(HAMi, testCase.server))
-			assert.Equal(test, testCase.legacySchedulerVersion, KubeSchedulerVersionForHAMi(LegacyHAMi, testCase.server))
+			assert.Equal(test, testCase.schedulerVersion, KubeSchedulerVersionForHAMi(component.HAMi, testCase.server))
+			assert.Equal(test, testCase.legacySchedulerVersion, KubeSchedulerVersionForHAMi(component.LegacyHAMi, testCase.server))
 			assert.Equal(test, testCase.chartVersion, KubeVersionFromServerVersion(testCase.server))
 		})
 	}

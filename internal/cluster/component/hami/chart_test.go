@@ -10,6 +10,7 @@ import (
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	componentversion "github.com/neutree-ai/neutree/internal/component"
 )
 
@@ -54,7 +55,7 @@ func TestHAMiChartKubernetesVersionCompatibility(t *testing.T) {
 	})
 
 	for _, clusterVersion := range []string{"v1.2.0", "v1.3.0-rc.1"} {
-		for minor, schedulerVersion := range componentversion.KubeSchedulerVersionsByMinor {
+		for minor, schedulerVersion := range clusterversion.KubeSchedulerVersionsByMinor {
 			t.Run(clusterVersion+"/"+minor, func(t *testing.T) {
 				getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
 					return &kubeversion.Info{GitVersion: schedulerVersion}, nil
@@ -105,7 +106,7 @@ func TestHAMiChartDeviceConfigContent(t *testing.T) {
 				})
 			}
 
-			resources, err := renderEmbeddedHAMiChart(componentversion.HAMi, values, "neutree-system", componentversion.KubeVersionFromBaseVersion("v1.32.13"))
+			resources, err := renderEmbeddedHAMiChart(componentversion.HAMi, values, "neutree-system", clusterversion.KubeVersionFromBaseVersion("v1.32.13"))
 			require.NoError(t, err)
 			configMap := findObject(t, resources.Items, "ConfigMap", "hami-scheduler-device")
 			content, found, err := unstructured.NestedString(configMap.Object, "data", "device-config.yaml")

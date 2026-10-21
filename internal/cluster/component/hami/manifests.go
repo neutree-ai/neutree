@@ -222,14 +222,14 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion(hamiVersion string) string {
 	if err != nil {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi scheduler image, using default",
 			"error", err,
-			"defaultVersion", componentversion.DefaultKubeSchedulerVersion)
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 
-		return componentversion.DefaultKubeSchedulerVersion
+		return clusterversion.DefaultKubeSchedulerVersion
 	}
 
-	detectedVersion := componentversion.KubernetesServerVersion(serverVersion)
+	detectedVersion := clusterversion.KubernetesServerVersion(serverVersion)
 
-	schedulerVersion := componentversion.KubeSchedulerVersionForHAMi(hamiVersion, serverVersion)
+	schedulerVersion := clusterversion.KubeSchedulerVersionForHAMi(hamiVersion, serverVersion)
 	if detectedVersion == "" {
 		h.logger.Info("Kubernetes server version is invalid for HAMi scheduler image, using default",
 			"defaultVersion", schedulerVersion)
@@ -247,12 +247,12 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 	if err != nil {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi chart render, using default",
 			"error", err,
-			"defaultVersion", componentversion.DefaultKubeSchedulerVersion)
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 
-		return componentversion.KubeVersionFromBaseVersion(componentversion.DefaultKubeSchedulerVersion)
+		return clusterversion.KubeVersionFromBaseVersion(clusterversion.DefaultKubeSchedulerVersion)
 	}
 
-	return componentversion.KubeVersionFromServerVersion(serverVersion)
+	return clusterversion.KubeVersionFromServerVersion(serverVersion)
 }
 
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {

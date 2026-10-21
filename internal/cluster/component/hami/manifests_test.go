@@ -8,6 +8,7 @@ import (
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	componentversion "github.com/neutree-ai/neutree/internal/component"
 )
 
@@ -60,15 +61,15 @@ func TestHAMiKubernetesVersionDiscoveryCompatibility(test *testing.T) {
 		},
 		{
 			name: "invalid major", server: &kubeversion.Info{Major: "invalid", Minor: "37+"},
-			schedulerVersion: componentversion.DefaultKubeSchedulerVersion, chartVersion: componentversion.DefaultKubeSchedulerVersion,
+			schedulerVersion: clusterversion.DefaultKubeSchedulerVersion, chartVersion: clusterversion.DefaultKubeSchedulerVersion,
 		},
 		{
 			name: "invalid minor", server: &kubeversion.Info{Major: "1", Minor: "invalid"},
-			schedulerVersion: componentversion.DefaultKubeSchedulerVersion, chartVersion: componentversion.DefaultKubeSchedulerVersion,
+			schedulerVersion: clusterversion.DefaultKubeSchedulerVersion, chartVersion: clusterversion.DefaultKubeSchedulerVersion,
 		},
 		{
 			name: "discovery unavailable", discoveryError: errors.New("discovery unavailable"),
-			schedulerVersion: componentversion.DefaultKubeSchedulerVersion, chartVersion: componentversion.DefaultKubeSchedulerVersion,
+			schedulerVersion: clusterversion.DefaultKubeSchedulerVersion, chartVersion: clusterversion.DefaultKubeSchedulerVersion,
 		},
 	}
 
@@ -85,8 +86,8 @@ func TestHAMiKubernetesVersionDiscoveryCompatibility(test *testing.T) {
 			component := NewHAMiComponent(newTestCluster(), "neutree-system", "docker.io",
 				"", v1.KubernetesClusterConfig{}, newHAMiFakeClient(test))
 
-			assert.Equal(test, testCase.serverVersion, componentversion.KubernetesServerVersion(testCase.server))
-			assert.Equal(test, testCase.minor, componentversion.KubernetesServerMajorMinor(testCase.server))
+			assert.Equal(test, testCase.serverVersion, clusterversion.KubernetesServerVersion(testCase.server))
+			assert.Equal(test, testCase.minor, clusterversion.KubernetesServerMajorMinor(testCase.server))
 			assert.Equal(test, testCase.schedulerVersion, component.resolveKubeSchedulerVersion(componentversion.HAMi))
 			legacySchedulerVersion := testCase.legacySchedulerVersion
 			if legacySchedulerVersion == "" {

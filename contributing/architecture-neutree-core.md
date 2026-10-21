@@ -67,10 +67,13 @@ The selectable-version floor filters discovery, not cluster admission. Upgrade
 admission compares the desired version with the current spec, not observed status.
 
 `internal/component/version.go` remains the component release catalogue, consumed
-by the cluster-version policies. Kubernetes server compatibility, scheduler pins,
-and Helm capabilities stay in `internal/component/hami.go`; they use a different
-version axis. Generic parsing stays in `internal/semver`, and control-plane build
-metadata stays in `internal/version`.
+by the cluster-version policies. Neutree HAMi selection stays in
+`internal/cluster/version/hami.go`. Kubernetes scheduler maps, defaults and
+selection, server-version normalization, and Helm capability conversion live in
+`internal/cluster/version/kubernetes.go`, keeping Kubernetes server-version
+policy distinct from the Neutree cluster package-version gates. Tests for both
+axes live in `internal/cluster/version`. Generic parsing stays in
+`internal/semver`, and control-plane build metadata stays in `internal/version`.
 
 ## Vendor Plugin Pairs
 

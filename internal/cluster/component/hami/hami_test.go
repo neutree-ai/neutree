@@ -27,6 +27,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	componentversion "github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
@@ -262,7 +263,7 @@ func TestHAMiComponentResourcesUseHAMiEntrypoints(t *testing.T) {
 	assert.Contains(t, stringSlice(scheduler["command"]), "--device-config-file=/device-config.yaml")
 
 	kubeScheduler := findContainer(t, objs.Items, "Deployment", SchedulerName, "kube-scheduler")
-	assert.Equal(t, "registry.example.com/neutree/kube-scheduler:"+componentversion.DefaultKubeSchedulerVersion, kubeScheduler["image"])
+	assert.Equal(t, "registry.example.com/neutree/kube-scheduler:"+clusterversion.DefaultKubeSchedulerVersion, kubeScheduler["image"])
 	assert.Contains(t, stringSlice(kubeScheduler["command"]), "--config=/config/config.yaml")
 
 	devicePlugin := findContainer(t, objs.Items, "DaemonSet", DevicePluginDaemonSetName, "device-plugin")
@@ -283,19 +284,19 @@ func TestHAMiComponentRewritesImagesByRegistry(t *testing.T) {
 		{
 			name:               "docker hub preserves explicit upstream registries",
 			imagePrefix:        "docker.io/neutree-ai",
-			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
 			hamiImage:          "docker.io/projecthami/hami:" + componentversion.HAMi,
 		},
 		{
 			name:               "private registry rewrites all images",
 			imagePrefix:        "registry.example.com/neutree-ai",
-			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			kubeSchedulerImage: "registry.example.com/neutree-ai/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
 			hamiImage:          "registry.example.com/neutree-ai/projecthami/hami:" + componentversion.HAMi,
 		},
 		{
 			name:               "docker hub without project preserves source registries",
 			imagePrefix:        "docker.io",
-			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + componentversion.DefaultKubeSchedulerVersion,
+			kubeSchedulerImage: "registry.k8s.io/kube-scheduler:" + clusterversion.DefaultKubeSchedulerVersion,
 			hamiImage:          "docker.io/projecthami/hami:" + componentversion.HAMi,
 		},
 	}
@@ -541,7 +542,7 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 
 	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
-	assert.Equal(t, componentversion.KubeSchedulerVersionsByMinor["1.30"],
+	assert.Equal(t, clusterversion.KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
 }
 

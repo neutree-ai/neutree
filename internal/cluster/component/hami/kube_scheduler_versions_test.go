@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	componentversion "github.com/neutree-ai/neutree/internal/component"
 )
 
@@ -43,8 +44,8 @@ func TestHAMiOfflineImages(t *testing.T) {
 		assert.ElementsMatch(t, []string{hamiImagePrefix + componentversion.HAMi}, hamiImages)
 	})
 
-	expectedSchedulerImages := make([]string, 0, len(componentversion.KubeSchedulerVersionsByMinor))
-	for minor, version := range componentversion.KubeSchedulerVersionsByMinor {
+	expectedSchedulerImages := make([]string, 0, len(clusterversion.KubeSchedulerVersionsByMinor))
+	for minor, version := range clusterversion.KubeSchedulerVersionsByMinor {
 		expectedSchedulerImages = append(expectedSchedulerImages, schedulerImagePrefix+version)
 		t.Run(minor, func(t *testing.T) {
 			assert.Regexp(t, "^v"+regexp.QuoteMeta(minor)+`\.[0-9]+$`, version)

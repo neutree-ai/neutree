@@ -1,4 +1,4 @@
-// Package component defines versions and compatibility rules for bundled
+// Package component defines release versions for bundled
 // infrastructure components shared by deployment and cluster renderers.
 package component
 

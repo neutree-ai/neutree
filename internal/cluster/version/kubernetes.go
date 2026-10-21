@@ -1,4 +1,4 @@
-package component
+package version
 
 import (
 	"strings"
@@ -6,6 +6,7 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
@@ -36,7 +37,7 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 
 func KubeSchedulerVersionForHAMi(hamiVersion string, serverVersion *kubeversion.Info) string {
 	schedulerVersions := KubeSchedulerVersionsByMinor
-	if hamiVersion == LegacyHAMi {
+	if hamiVersion == component.LegacyHAMi {
 		schedulerVersions = legacyKubeSchedulerVersionsByMinor
 	}
 
