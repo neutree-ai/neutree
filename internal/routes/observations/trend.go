@@ -25,10 +25,12 @@ func trendHandler(deps *Dependencies) gin.HandlerFunc {
   c.Header("Cache-Control", "no-store")
   if deps.MetricsURL=="" { c.JSON(200, Snapshot{Status:"not_configured", Samples:[]Sample{}}); return }
   ctx,cancel:=context.WithTimeout(c.Request.Context(),5*time.Second); defer cancel()
-  samples,err:=queryTrend(ctx,deps,c.Param("workspace"),c.Param("name"),time.Now())
+  now:=time.Now()
+  samples,err:=queryTrend(ctx,deps,c.Param("workspace"),c.Param("name"),now)
   if err!=nil { c.JSON(503,gin.H{"error":"monitoring unavailable"});return }
   status:="ok"; if len(samples)==0 {status="no_data"}
-  c.JSON(200,Snapshot{Status:status,Samples:samples})
+  end:=now.Unix()/21600*21600
+  c.JSON(200,gin.H{"status":status,"samples":samples,"start":end-30*24*3600,"end":end})
  }
 }
 func queryTrend(ctx context.Context,deps *Dependencies,workspace,cluster string,now time.Time)([]Sample,error){
