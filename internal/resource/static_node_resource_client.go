@@ -251,8 +251,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		}
 
 		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
-			availableQuantity := deviceAvailableEquivalentQuantity(allocatablePool, availablePool)
-			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, availableQuantity, availablePool)
+			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
 		}
 	}
 
@@ -329,20 +328,11 @@ func completeStaticNodeAcceleratorQuantities(
 		return
 	}
 
-	limitToHealthyDevices := false
-
-	for _, device := range status.Devices {
-		if !device.Health {
-			limitToHealthyDevices = true
-			break
-		}
-	}
-
 	// Static clusters support fractional GPU quantities. Keep the group-level
 	// quantity aligned with the native Ray dashboard resources, while device
 	// pools and virtualization details still come from the node-agent snapshot.
-	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product, limitToHealthyDevices)
-	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product, limitToHealthyDevices)
+	completeStaticNodeAcceleratorQuantity(status.Allocatable, base.Status.Allocatable, acceleratorType, product)
+	completeStaticNodeAcceleratorQuantity(status.Available, base.Status.Available, acceleratorType, product)
 }
 
 func completeStaticNodeAcceleratorQuantity(
@@ -350,7 +340,6 @@ func completeStaticNodeAcceleratorQuantity(
 	baseInfo *v1.ResourceInfo,
 	acceleratorType v1.AcceleratorType,
 	product string,
-	limitToHealthyDevices bool,
 ) {
 	if targetInfo == nil || baseInfo == nil || acceleratorType == "" || product == "" {
 		return
@@ -374,15 +363,8 @@ func completeStaticNodeAcceleratorQuantity(
 	}
 
 	productName := v1.AcceleratorProduct(product)
-	quantity := baseGroup.Quantity
 	productQuantity := baseStaticNodeProductQuantity(baseGroup, productName)
-
-	if limitToHealthyDevices {
-		quantity = min(quantity, targetGroup.Quantity)
-		productQuantity = min(productQuantity, baseStaticNodeProductQuantity(targetGroup, productName))
-	}
-
-	targetGroup.Quantity = quantity
+	targetGroup.Quantity = baseGroup.Quantity
 
 	if targetGroup.ProductGroups == nil {
 		targetGroup.ProductGroups = make(map[v1.AcceleratorProduct]float64)

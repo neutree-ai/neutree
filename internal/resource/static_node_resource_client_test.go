@@ -190,7 +190,7 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 	require.NotNil(t, allocatableProduct.Virtualization)
 	assert.Equal(t, float64(15360), allocatableProduct.Virtualization.MemoryMiB)
 	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
-	assert.Equal(t, float64(0.5), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
+	assert.Equal(t, float64(1), nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].Quantity)
 	availableProduct := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU].
 		Products["NVIDIA_Tesla_T4"]
 	require.NotNil(t, availableProduct.Virtualization)
@@ -255,50 +255,53 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 		allocations       []v1.DeviceAllocation
 		rayQuantity       float64
 		rayAvailable      float64
-		wantQuantity      float64
-		wantAvailable     float64
 		wantAvailablePool v1.DeviceResourcePool
 	}{
 		{
 			"healthy fractional Ray quantities", [2]bool{true, true},
 			[]v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 100}, {UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50}},
-			1.5, 0.5, 1.5, 0.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
+			1.5, 0.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
 		},
 		{
 			"unhealthy idle card", [2]bool{true, false}, nil,
-			2, 2, 1, 1, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			2, 2, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
 		},
 		{
 			"all cards unhealthy", [2]bool{false, false}, nil,
-			2, 2, 0, 0, v1.DeviceResourcePool{},
+			2, 2, v1.DeviceResourcePool{},
 		},
 		{
 			"healthy whole card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc"}},
-			2, 1, 1, 0, v1.DeviceResourcePool{},
+			2, 1, v1.DeviceResourcePool{},
 		},
 		{
 			"unhealthy whole card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-def"}},
-			2, 1, 1, 1, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			2, 1, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
 		},
 		{
 			"healthy shared card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, 1, 0.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
+			2, 1.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
 		},
 		{
 			"unhealthy shared card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, 1, 1, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			2, 1.5, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
 		},
 		{
 			"all unhealthy with shared allocation", [2]bool{false, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, 0, 0, v1.DeviceResourcePool{},
+			2, 1.5, v1.DeviceResourcePool{},
 		},
 		{
-			"fractional Ray capacity remains an upper bound", [2]bool{true, false}, nil,
-			0.5, 0.25, 0.5, 0.25, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			"fractional Ray capacity remains native", [2]bool{true, false}, nil,
+			0.5, 0.25, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
 		},
 		{
 			"healthy shared card memory exhausted", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 50}},
-			2, 0.5, 1, 0, v1.DeviceResourcePool{},
+			2, 0.5, v1.DeviceResourcePool{},
+		},
+		{
+			"fractional Ray quantity is independent of rounded device pools", [2]bool{true, false},
+			[]v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 1920, CoreUnits: 13}},
+			2, 1.875, v1.DeviceResourcePool{MemoryMiB: 13440, CoreUnits: 87},
 		},
 	}
 	resourceInfo := func(quantity float64) *v1.ResourceInfo {
@@ -353,10 +356,10 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 			for _, status := range []*v1.ResourceStatus{&nodes[0].Status.ResourceStatus, &resources.ResourceStatus} {
 				allocatable := status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 				require.NotNil(t, allocatable)
-				assert.Equal(t, tc.wantQuantity, allocatable.Quantity)
-				assert.Equal(t, tc.wantQuantity, allocatable.ProductGroups["NVIDIA_Tesla_T4"])
+				assert.Equal(t, tc.rayQuantity, allocatable.Quantity)
+				assert.Equal(t, tc.rayQuantity, allocatable.ProductGroups["NVIDIA_Tesla_T4"])
 				require.NotNil(t, allocatable.Products["NVIDIA_Tesla_T4"])
-				assert.Equal(t, tc.wantQuantity, allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
+				assert.Equal(t, tc.rayQuantity, allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
 				if healthyCount == 0 {
 					assert.Nil(t, allocatable.Products["NVIDIA_Tesla_T4"].Virtualization)
 				} else {
@@ -365,10 +368,10 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 				}
 				available := status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 				require.NotNil(t, available)
-				assert.Equal(t, tc.wantAvailable, available.Quantity)
-				assert.Equal(t, tc.wantAvailable, available.ProductGroups["NVIDIA_Tesla_T4"])
+				assert.Equal(t, tc.rayAvailable, available.Quantity)
+				assert.Equal(t, tc.rayAvailable, available.ProductGroups["NVIDIA_Tesla_T4"])
 				require.NotNil(t, available.Products["NVIDIA_Tesla_T4"])
-				assert.Equal(t, tc.wantAvailable, available.Products["NVIDIA_Tesla_T4"].Quantity)
+				assert.Equal(t, tc.rayAvailable, available.Products["NVIDIA_Tesla_T4"].Quantity)
 				if tc.wantAvailablePool == (v1.DeviceResourcePool{}) {
 					assert.Nil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
 				} else {
@@ -376,7 +379,6 @@ func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) 
 						MemoryMiB: float64(tc.wantAvailablePool.MemoryMiB), CoreUnits: float64(tc.wantAvailablePool.CoreUnits),
 					}, available.Products["NVIDIA_Tesla_T4"].Virtualization)
 				}
-				assert.Equal(t, tc.wantQuantity-tc.wantAvailable, allocatable.Quantity-available.Quantity)
 				assert.GreaterOrEqual(t, allocatable.Quantity-available.Quantity, float64(0))
 			}
 		})
