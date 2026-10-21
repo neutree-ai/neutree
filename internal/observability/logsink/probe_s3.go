@@ -18,7 +18,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-const s3ProbeKeyPrefix = ".neutree-probe-"
+const s3ProbeKeyPrefix = ".connection-test-"
 
 // testS3Connection checks that the bucket exists and accepts an object written
 // with the sink's keys, the only call Vector makes. It writes a small object
@@ -44,7 +44,7 @@ func testS3Connection(ctx context.Context, spec *v1.S3SinkSpec) error {
 	_, err := client.PutObject(putCtx, &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-		Body:   strings.NewReader("neutree log sink connection test\n"),
+		Body:   strings.NewReader("log sink connection test\n"),
 	})
 
 	cancel()
