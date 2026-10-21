@@ -9,7 +9,7 @@ import (
 	kubeversion "k8s.io/apimachinery/pkg/version"
 )
 
-func TestVersionConstants(test *testing.T) {
+func TestHAMiVersionConstants(test *testing.T) {
 	cases := []struct {
 		name     string
 		actual   string

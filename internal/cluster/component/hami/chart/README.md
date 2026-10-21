@@ -7,8 +7,9 @@ Kubernetes server version independently selects that profile's scheduler image.
 
 ## Cluster Version Matrix
 
-`internal/component/version.go` owns the component versions, compatibility
-thresholds, scheduler pins, and Kubernetes version normalization.
+`internal/component/version.go` defines the component image versions.
+`internal/component/hami.go` owns the HAMi compatibility thresholds, scheduler
+pins, and Kubernetes version normalization.
 `component.HAMiVersionForCluster(clusterVersion)` resolves the HAMi version:
 
 | Neutree cluster version | HAMi version | Embedded chart | Scheduler profile |
