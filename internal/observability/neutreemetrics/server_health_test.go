@@ -45,7 +45,7 @@ func (accelerator *healthSnapshotAccelerator) BuildKubernetesMetrics(
 	return adapter.MetricResult{}, nil
 }
 
-func TestServerEvaluatesHardwareHealthBeforeSnapshotsAndMetrics(t *testing.T) {
+func TestServerOverridesHardwareHealthOnlyWithEvaluatedExporterEvidence(t *testing.T) {
 	provider, ok := nvidia.New().(adapter.HardwareHealthProvider)
 	require.True(t, ok)
 	cases := []struct {
@@ -55,22 +55,22 @@ func TestServerEvaluatesHardwareHealthBeforeSnapshotsAndMetrics(t *testing.T) {
 		health []bool
 	}{
 		{
-			name: "healthy and unhealthy devices",
+			name: "evaluated healthy and unhealthy devices override discovery",
 			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
-DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 1`,
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 20`,
 			status: http.StatusOK,
-			health: []bool{true, false, false},
+			health: []bool{true, false, true},
 		},
 		{
 			name: "power failure followed by OK remains unhealthy",
 			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 0
-DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 1
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 10
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
 			status: http.StatusOK,
-			health: []bool{false, true, false},
+			health: []bool{false, true, true},
 		},
 		{
 			name: "power OK followed by failure remains unhealthy",
@@ -78,40 +78,40 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
-DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 1
+DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_POWER_UNREADABLE"} 20
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
 			status: http.StatusOK,
-			health: []bool{false, true, false},
+			health: []bool{false, true, true},
 		},
 		{
-			name: "missing health watch fails closed",
+			name: "missing health watch preserves discovered health",
 			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
 			status: http.StatusOK,
-			health: []bool{false, true, false},
+			health: []bool{true, true, true},
 		},
 		{
-			name: "empty health watch fails closed",
+			name: "empty health watch preserves discovered health",
 			body: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch=""} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
 			status: http.StatusOK,
-			health: []bool{false, true, false},
+			health: []bool{true, true, true},
 		},
 		{
-			name:   "missing health metrics",
+			name:   "missing health metrics preserves discovered health",
 			body:   `DCGM_FI_DEV_GPU_UTIL{UUID="GPU-abc"} 0`,
 			status: http.StatusOK,
-			health: []bool{false, false, false},
+			health: []bool{true, true, true},
 		},
 		{
-			name:   "exporter unavailable",
+			name:   "unavailable exporter preserves discovered health",
 			body:   `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`,
 			status: http.StatusServiceUnavailable,
-			health: []bool{false, false, false},
+			health: []bool{true, true, true},
 		},
 		{
-			name:   "no exporter configured",
-			health: []bool{false, false, false},
+			name:   "no exporter configured preserves discovered health",
+			health: []bool{true, true, true},
 		},
 	}
 

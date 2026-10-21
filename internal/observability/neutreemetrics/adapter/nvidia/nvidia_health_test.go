@@ -17,23 +17,26 @@ func TestNvidiaAdapterEvaluatesHardwareHealth(t *testing.T) {
 	require.True(t, ok)
 
 	cases := []struct {
-		name    string
-		text    string
-		up      bool
-		healthy bool
+		name      string
+		text      string
+		up        bool
+		evaluated bool
+		healthy   bool
 	}{
 		{
-			name:    "one zero sample",
-			text:    `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="PCIE"} 0`,
-			up:      true,
-			healthy: true,
+			name:      "one zero sample",
+			text:      `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="PCIE"} 0`,
+			up:        true,
+			evaluated: true,
+			healthy:   true,
 		},
 		{
 			name: "exporter counter type",
 			text: `# TYPE DCGM_EXP_GPU_HEALTH_STATUS counter
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`,
-			up:      true,
-			healthy: true,
+			up:        true,
+			evaluated: true,
+			healthy:   true,
 		},
 		{
 			name: "all zero samples",
@@ -48,46 +51,53 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="PMU"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="SM"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="THERMAL"} 0`,
-			up:      true,
-			healthy: true,
+			up:        true,
+			evaluated: true,
+			healthy:   true,
 		},
 		{
 			name: "nonzero followed by zero",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 1
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 0`,
-			up: true,
+			up:        true,
+			evaluated: true,
 		},
 		{
 			name: "zero followed by nonzero",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="DRIVER"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU"} 2`,
-			up: true,
+			up:        true,
+			evaluated: true,
 		},
 		{
 			name: "ALL and later OK do not mask subsystem failure",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_CLOCK_THROTTLE_POWER"} 1
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL",health_error_code="DCGM_FR_OK"} 0`,
-			up: true,
+			up:        true,
+			evaluated: true,
 		},
 		{
 			name: "same subsystem with OK before failure",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU",health_error_code="DCGM_FR_OK"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="MCU",health_error_code="DCGM_FR_UNKNOWN"} 2`,
-			up: true,
+			up:        true,
+			evaluated: true,
 		},
 		{
 			name: "new subsystem is not excluded",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="FUTURE_SUBSYSTEM"} 1`,
-			up: true,
+			up:        true,
+			evaluated: true,
 		},
 		{
 			name: "other device failure does not affect current device",
 			text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="POWER"} 1
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0`,
-			up:      true,
-			healthy: true,
+			up:        true,
+			evaluated: true,
+			healthy:   true,
 		},
 		{
 			name: "other device zero does not match",
@@ -100,12 +110,14 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0`,
 		{name: "empty health_watch", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch=""} 0`, up: true},
 		{name: "empty metrics", up: true},
 		{name: "invalid value", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} invalid`, up: true},
-		{name: "NaN value", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} NaN`, up: true},
-		{name: "positive infinity", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} +Inf`, up: true},
-		{name: "negative infinity", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} -Inf`, up: true},
-		{name: "negative status", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} -1`, up: true},
+		{name: "DCGM warning", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 10`, up: true, evaluated: true},
+		{name: "DCGM failure", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 20`, up: true, evaluated: true},
+		{name: "NaN value", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} NaN`, up: true, evaluated: true},
+		{name: "positive infinity", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} +Inf`, up: true, evaluated: true},
+		{name: "negative infinity", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} -Inf`, up: true, evaluated: true},
+		{name: "negative status", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} -1`, up: true, evaluated: true},
 		{name: "exporter down", text: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`},
-		{name: "lowercase UUID label", text: `DCGM_EXP_GPU_HEALTH_STATUS{uuid="GPU-abc",health_watch="ALL"} 0`, up: true, healthy: true},
+		{name: "lowercase UUID label", text: `DCGM_EXP_GPU_HEALTH_STATUS{uuid="GPU-abc",health_watch="ALL"} 0`, up: true, evaluated: true, healthy: true},
 	}
 
 	for _, testCase := range cases {
@@ -126,10 +138,15 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0`,
 					ExporterUp:   testCase.up,
 				})
 
+				wantHealthy := initialHealth
+				if testCase.evaluated {
+					wantHealthy = testCase.healthy
+				}
+
 				require.Len(t, result.Accelerator.Devices, 3)
-				assert.Equal(t, testCase.healthy, result.Accelerator.Devices[0].Healthy)
-				assert.False(t, result.Accelerator.Devices[1].Healthy)
-				assert.False(t, result.Accelerator.Devices[2].Healthy)
+				assert.Equal(t, wantHealthy, result.Accelerator.Devices[0].Healthy)
+				assert.Equal(t, initialHealth, result.Accelerator.Devices[1].Healthy)
+				assert.Equal(t, initialHealth, result.Accelerator.Devices[2].Healthy)
 				assert.Equal(t, original, hardware)
 				assert.Equal(t, original.Accelerator.Type, result.Accelerator.Type)
 				assert.Equal(t, original.Accelerator.Devices[0].MemoryMiB, result.Accelerator.Devices[0].MemoryMiB)
@@ -138,23 +155,20 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER"} 0`,
 	}
 }
 
-func TestNvidiaAdapterReportsOnlyHealthyDevicesAsFree(t *testing.T) {
+func TestNvidiaAdapterReportsAllUnallocatedDevicesAsFree(t *testing.T) {
 	cases := []struct {
 		name       string
 		healthText string
-		free       float64
 	}{
 		{
 			name: "all healthy",
 			healthText: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
-			free: 2,
 		},
 		{
 			name: "one unhealthy",
 			healthText: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 1
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 0`,
-			free: 1,
 		},
 		{
 			name: "all unhealthy",
@@ -168,11 +182,10 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="POWER",health_error_code="DCGM_FR_OK"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL",health_error_code="DCGM_FR_OK"} 0
 DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="MCU",health_error_code="DCGM_FR_OK"} 0`,
-			free: 1,
 		},
 		{name: "missing health metrics"},
 		{name: "other device health", healthText: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-other",health_watch="ALL"} 0`},
-		{name: "one missing health", healthText: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`, free: 1},
+		{name: "one missing health", healthText: `DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0`},
 	}
 
 	for _, clusterType := range []string{v1.SSHClusterType, v1.KubernetesClusterType} {
@@ -203,7 +216,7 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="MCU",health_error_code="
 					result, err = accelerator.BuildKubernetesMetrics(context.Background(), hardware, adapter.KubernetesEvidence{Common: evidence})
 				}
 				require.NoError(t, err)
-				assert.Equal(t, testCase.free, requireNvidiaSample(t, result.Samples, "neutree_node_accelerator_free", nil).Value)
+				assert.Equal(t, 2.0, requireNvidiaSample(t, result.Samples, "neutree_node_accelerator_free", nil).Value)
 				assert.Equal(t, 2.0, requireNvidiaSample(t, result.Samples, "neutree_node_accelerator_total", nil).Value)
 				assert.Zero(t, requireNvidiaSample(t, result.Samples, "neutree_node_accelerator_allocated", nil).Value)
 			})
@@ -211,7 +224,7 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="MCU",health_error_code="
 	}
 }
 
-func TestNvidiaNodeGPUFreeMetricsExcludeAllocationsAndUnhealthyDevices(t *testing.T) {
+func TestNvidiaNodeGPUFreeMetricsExcludeOnlyAllocatedDevices(t *testing.T) {
 	raw := nvidiaDCGMFixture("GPU-abc", "A100", "0", 0, 0, 81920) +
 		nvidiaDCGMFixture("GPU-def", "A100", "1", 0, 0, 81920) +
 		`DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-abc",health_watch="ALL"} 0
@@ -222,11 +235,7 @@ DCGM_EXP_GPU_HEALTH_STATUS{UUID="GPU-def",health_watch="ALL"} 1`
 			samples := nvidiaNormalizeNodeGPUSamples(adapter.CanonicalLabels{}, raw, []model.EndpointAllocation{
 				nvidiaTestAllocation("chat", "replica-a", allocatedUUID, "A100", 81920),
 			})
-			free := 0.0
-			if allocatedUUID == "GPU-def" {
-				free = 1
-			}
-			assert.Equal(t, free, requireNvidiaSample(t, samples, "neutree_node_accelerator_free", nil).Value)
+			assert.Equal(t, 1.0, requireNvidiaSample(t, samples, "neutree_node_accelerator_free", nil).Value)
 			assert.Equal(t, 2.0, requireNvidiaSample(t, samples, "neutree_node_accelerator_total", nil).Value)
 			assert.Equal(t, 1.0, requireNvidiaSample(t, samples, "neutree_node_accelerator_allocated", nil).Value)
 		})

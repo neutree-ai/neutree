@@ -85,6 +85,7 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 			UUID:         info.UUID,
 			ProductName:  info.Product,
 			ProductModel: info.Product,
+			Healthy:      true, // Preserve the discovery default unless DCGM health metrics can be evaluated.
 		}
 
 		if info.MemoryTotalMiB != "" {

@@ -140,7 +140,6 @@ func nvidiaNormalizeNodeGPUSamples(
 	allocatedByUUID := nvidiaAllocatedDeviceUUIDs(allocations)
 	totalByProduct := map[string]float64{}
 	allocatedByProduct := map[string]float64{}
-	freeByProduct := map[string]float64{}
 	result := make([]adapter.Sample, 0, len(devices)*2)
 
 	for _, device := range devices {
@@ -153,8 +152,6 @@ func nvidiaNormalizeNodeGPUSamples(
 
 		if _, ok := allocatedByUUID[device.UUID]; ok {
 			allocatedByProduct[product]++
-		} else if device.Healthy {
-			freeByProduct[product]++
 		}
 
 		result = append(result, adapter.Sample{
@@ -180,7 +177,7 @@ func nvidiaNormalizeNodeGPUSamples(
 	for _, product := range products {
 		total := totalByProduct[product]
 		allocated := allocatedByProduct[product]
-		free := freeByProduct[product]
+		free := total - allocated
 		metricLabels := nvidiaNodeAcceleratorProductLabels(labels, v1.AcceleratorTypeNVIDIAGPU.String(), product)
 
 		result = append(result,
@@ -273,7 +270,6 @@ func nvidiaNormalizeGPUHardwareInfoSamples(
 func nvidiaDevicesFromDCGM(raw string) []v1.StaticNodeAcceleratorDeviceStatus {
 	devicesByUUID := map[string]v1.StaticNodeAcceleratorDeviceStatus{}
 	discoveredUUIDs := map[string]struct{}{}
-	HealthStatusByUUID := nvidiaHealthByUUID(raw)
 
 	for _, metric := range promtext.ParseVector(raw) {
 		uuid := promtext.LabelValue(metric, "UUID", "uuid")
@@ -287,7 +283,7 @@ func nvidiaDevicesFromDCGM(raw string) []v1.StaticNodeAcceleratorDeviceStatus {
 
 		device := devicesByUUID[uuid]
 		device.UUID = uuid
-		device.Healthy = HealthStatusByUUID[uuid]
+		device.Healthy = true
 
 		if id := promtext.LabelValue(metric, "gpu", "GPU_I_ID"); id != "" {
 			device.ID = id
