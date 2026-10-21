@@ -70,7 +70,7 @@ func testIdentity() *ldap.Identity {
 const (
 	testLDAPSource       = "corp-ldap"
 	testLDAPLinkSource   = "ldap:corp-ldap"
-	testPlaceholderEmail = "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@corp-ldap.ldap.neutree.local"
+	testPlaceholderEmail = "0fb0688a1d0a6b96c6c075e5d00f1610@corp-ldap.ldap.neutree.local"
 )
 
 func (d *ldapTestDeps) serve(t *testing.T, ldapEnabled bool, method, path, body string) *httptest.ResponseRecorder {
@@ -355,5 +355,21 @@ func TestAuthRoutes_Registration(t *testing.T) {
 				assert.Equal(t, http.StatusNotFound, w.Code)
 			}
 		})
+	}
+}
+
+// IDs differing only in case are distinct accounts, and any ID gives a valid
+// email.
+func TestLDAPPlaceholderEmail(t *testing.T) {
+	upper := ldapPlaceholderEmail(testLDAPSource, "ABC")
+	lower := ldapPlaceholderEmail(testLDAPSource, "abc")
+	assert.NotEqual(t, upper, lower)
+
+	for _, id := range []string{"ABC", "John Smith", "a@b", "cn=x,dc=y"} {
+		email := ldapPlaceholderEmail(testLDAPSource, id)
+		local, domain, ok := strings.Cut(email, "@")
+		assert.True(t, ok, id)
+		assert.Regexp(t, "^[0-9a-f]{32}$", local, id)
+		assert.Equal(t, testLDAPSource+".ldap.neutree.local", domain, id)
 	}
 }

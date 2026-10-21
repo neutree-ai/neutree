@@ -2,9 +2,10 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
@@ -154,8 +155,11 @@ func ldapErrorResponse(source, username string, err error) (int, string) {
 	}
 }
 
+// ldapPlaceholderEmail is the GoTrue email of a directory account. The ID is
+// case-sensitive and may hold any character, so the local part is its hash.
 func ldapPlaceholderEmail(sourceName, externalID string) string {
-	return strings.ToLower(externalID) + "@" + sourceName + "." + ldapEmailDomain
+	sum := sha256.Sum256([]byte(externalID))
+	return hex.EncodeToString(sum[:])[:32] + "@" + sourceName + "." + ldapEmailDomain
 }
 
 // ldapAccount describes the directory account of identity in the LDAP

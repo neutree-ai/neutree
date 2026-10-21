@@ -399,15 +399,15 @@ func TestLDAPToken_LinksArePerSource(t *testing.T) {
 	expectSource(d.storage, ldapSource("lab-ldap", true), &storage.IdentitySourceSecrets{LDAPBindPassword: "svc"})
 	d.storage.EXPECT().GetExternalIdentity("ldap:lab-ldap", testIdentity().ExternalID).Return(nil, storage.ErrResourceNotFound).Once()
 	d.client.EXPECT().AdminCreateUser(mock.MatchedBy(func(req types.AdminCreateUserRequest) bool {
-		return req.Email == "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@lab-ldap.ldap.neutree.local" &&
+		return req.Email == "0fb0688a1d0a6b96c6c075e5d00f1610@lab-ldap.ldap.neutree.local" &&
 			req.AppMetadata["identity_source"] == "ldap" &&
 			req.AppMetadata["identity_source_name"] == "lab-ldap"
 	})).Return(&types.AdminCreateUserResponse{User: types.User{ID: userID}}, nil).Once()
 	d.storage.EXPECT().CreateExternalIdentity(&storage.ExternalIdentity{
 		Source: "ldap:lab-ldap", ExternalID: testIdentity().ExternalID, UserID: userID.String(),
 	}).Return(nil).Once()
-	d.expectEmail(userID.String(), "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@lab-ldap.ldap.neutree.local")
-	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, "8f6c0e5e-1b0b-4a4b-9c1d-2f3e4d5c6b7a@lab-ldap.ldap.neutree.local").
+	d.expectEmail(userID.String(), "0fb0688a1d0a6b96c6c075e5d00f1610@lab-ldap.ldap.neutree.local")
+	d.sessions.EXPECT().GenerateMagicLink(mock.Anything, "0fb0688a1d0a6b96c6c075e5d00f1610@lab-ldap.ldap.neutree.local").
 		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hash"}, nil).Once()
 	d.sessions.EXPECT().VerifyMagicLink(mock.Anything, "hash").Return([]byte(testSession), nil).Once()
 
