@@ -21,11 +21,11 @@ const LegacyNeutreeNodeAgent = "v1.1.0-rc.1"
 // NeutreeNodeAgentV120 is the NodeAgent image pinned for clusters from v1.1.2
 // through v1.2.0. Those clusters predate version-aware image selection, so they
 // keep the image they were released with.
-const NeutreeNodeAgentV120 = "v1.2.0-rc.1"
+const NeutreeNodeAgentV120 = "observability-unified-v1"
 
 // NeutreeNodeAgent is the NodeAgent image running on clusters newer than
 // v1.2.0.
-const NeutreeNodeAgent = "v1.2.1-rc.1"
+const NeutreeNodeAgent = "observability-unified-v1"
 
 // Grafana image version.
 const Grafana = "11.5.3"
