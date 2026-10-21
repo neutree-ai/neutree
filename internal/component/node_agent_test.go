@@ -10,8 +10,8 @@ import (
 func TestSelectNodeAgent(t *testing.T) {
 	const (
 		legacyImage  = "neutree/neutree-node-agent:v1.1.0-rc.1"
-		pinnedImage  = "neutree/neutree-node-agent:observability-unified-v1"
-		currentImage = "neutree/neutree-node-agent:observability-unified-v1"
+		pinnedImage  = "neutree/neutree-node-agent:v1.2.0-rc.1"
+		currentImage = "neutree/neutree-node-agent:v1.2.1-rc.1"
 	)
 
 	tests := []struct {

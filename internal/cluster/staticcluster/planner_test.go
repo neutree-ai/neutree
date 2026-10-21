@@ -25,7 +25,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 				Options: []string{"--gpus all", "--volume /cluster-only:/cluster-only:ro"},
 			},
 			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-				Image:      "neutree/neutree-node-agent:observability-unified-v1",
+				Image:      "neutree/neutree-node-agent:v1.2.0-rc.1",
 				Privileged: true,
 				Env: map[string]string{
 					"NVIDIA_VISIBLE_DEVICES": "all",
@@ -139,7 +139,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1",
+		nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 		acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 		vmagentComponentName:             "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
@@ -170,7 +170,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assert.Equal(t, "/metrics", exporter.HealthCheck.HTTPPath)
 	nodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, nodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1", nodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1", nodeAgent.Image)
 	assert.Contains(t, nodeAgent.Args, "--listen-address=:19101")
 	assert.Contains(t, nodeAgent.Args, "--cluster-type="+v1.SSHClusterType)
 	assert.NotContains(t, nodeAgent.Args, "--metrics-mode=managed")
@@ -279,7 +279,7 @@ func TestPlannerPlanBuildsDesiredNodes(t *testing.T) {
 	assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 	})
 
 	cluster.Spec.Version = "mutated"
@@ -366,7 +366,7 @@ func TestPlannerDoesNotBackfillStaticNodeAgentAcceleratorType(t *testing.T) {
 	profiles := map[string]*v1.AcceleratorProfile{
 		v1.AcceleratorTypeNVIDIAGPU.String(): {
 			NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-				Image:   "neutree/neutree-node-agent:observability-unified-v1",
+				Image:   "neutree/neutree-node-agent:v1.2.0-rc.1",
 				Runtime: "nvidia",
 			},
 		},
@@ -487,7 +487,7 @@ func TestPlannerUsesProfileNodeAgentContractForCPUHeadWithoutProfile(t *testing.
 	require.NotNil(t, head)
 	headNodeAgent := findComponent(head.Spec.Components, nodeAgentComponentName)
 	require.NotNil(t, headNodeAgent)
-	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1", headNodeAgent.Image)
+	assert.Equal(t, "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1", headNodeAgent.Image)
 	assert.Contains(t, headNodeAgent.Args, "--cluster-type="+v1.SSHClusterType)
 	assert.NotContains(t, headNodeAgent.Args, "--cluster-type=ray")
 	assert.NotContains(t, headNodeAgent.Args, "--metrics-mode=managed")
@@ -542,7 +542,7 @@ func TestPlannerDoesNotValidateNodeAgentRuntimeProfile(t *testing.T) {
 			v1.AcceleratorTypeNVIDIAGPU.String(): {
 				AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 				NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-					Image: "neutree/neutree-node-agent:observability-unified-v1",
+					Image: "neutree/neutree-node-agent:v1.2.0-rc.1",
 					Volumes: []v1.ComponentVolume{{
 						Name:     "vendor-driver",
 						HostPath: &v1.ComponentHostPathVolumeSource{Path: "/opt/vendor/driver", Type: v1.ComponentHostPathTypeDirectory},
@@ -669,7 +669,7 @@ func TestPlannerProjectsMalformedAcceleratorExporterProfile(t *testing.T) {
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 					NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-						Image: "neutree/neutree-node-agent:observability-unified-v1",
+						Image: "neutree/neutree-node-agent:v1.2.0-rc.1",
 					},
 					MetricsExporter: &v1.AcceleratorExporterProfile{
 						MetricsPath: "trusted/metrics",
@@ -810,7 +810,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 				"ray-runtime":                    "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 				nodeExporterComponentName:        "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1",
+				nodeAgentComponentName:           "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 				acceleratorExporterComponentName: "registry.example.com/neutree/nvidia/k8s/dcgm-exporter:test",
 			})
 
@@ -825,7 +825,7 @@ func TestPlannerSkipsMetricsComponentsWithoutValidRemoteWriteURL(t *testing.T) {
 			assertWarmImages(t, worker.Spec.Warm.Images, map[string]string{
 				"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0",
 				nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1",
+				nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 			})
 		})
 	}
@@ -934,7 +934,7 @@ func TestDefaultNodeAgentImageUsesSameRepositoryPathAsKubernetes(t *testing.T) {
 	cluster := testStaticNodeCluster()
 	cluster.Spec.Version = "v9.9.9"
 
-	assert.Equal(t, "neutree/neutree-node-agent:observability-unified-v1", defaultNodeAgentImage(cluster))
+	assert.Equal(t, "neutree/neutree-node-agent:v1.2.1-rc.1", defaultNodeAgentImage(cluster))
 }
 
 func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
@@ -981,7 +981,7 @@ func TestPlannerUsesClusterRuntimeImageSuffix(t *testing.T) {
 	assertWarmImages(t, head.Spec.Warm.Images, map[string]string{
 		"ray-runtime":             "registry.example.com/neutree/neutree/neutree-serve:v1.2.0-cuda",
 		nodeExporterComponentName: "registry.example.com/neutree/prometheus/node-exporter:v1.8.2",
-		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:observability-unified-v1",
+		nodeAgentComponentName:    "registry.example.com/neutree/neutree/neutree-node-agent:v1.2.0-rc.1",
 		vmagentComponentName:      "registry.example.com/neutree/victoriametrics/vmagent:v1.115.0",
 	})
 }

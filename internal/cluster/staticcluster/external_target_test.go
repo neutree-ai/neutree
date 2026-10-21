@@ -32,7 +32,7 @@ func TestPlannerUsesExternalProfileExporterTarget(t *testing.T) {
 				v1.AcceleratorTypeNVIDIAGPU.String(): {
 					AcceleratorType: v1.AcceleratorTypeNVIDIAGPU.String(),
 					NodeAgentRuntime: &v1.NodeAgentRuntimeProfile{
-						Image: "neutree/neutree-node-agent:observability-unified-v1",
+						Image: "neutree/neutree-node-agent:v1.2.0-rc.1",
 					},
 					MetricsExporter: &v1.AcceleratorExporterProfile{
 						Name:        "accelerator-exporter",
