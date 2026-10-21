@@ -17,14 +17,15 @@ import (
 )
 
 // logSinkTestConnectionTimeout bounds the whole test; the probe makes two
-// requests, each capped by the sink's own timeout.
+// (VictoriaLogs) or three (S3) requests, each capped on its own.
 const logSinkTestConnectionTimeout = 30 * time.Second
 
 // logSinkTestConnectionRequest selects what to test:
 //   - spec only: an unsaved spec (create form), needs log_sink:create;
 //   - id only: the stored sink with its stored secrets, needs log_sink:read;
 //   - id and spec: an edited spec whose blank secrets come from the stored
-//     sink when the auth type is unchanged, needs log_sink:update.
+//     sink when the type (and VictoriaLogs auth type) is unchanged, needs
+//     log_sink:update.
 type logSinkTestConnectionRequest struct {
 	ID   *int            `json:"id,omitempty"`
 	Spec *v1.LogSinkSpec `json:"spec,omitempty"`
@@ -131,10 +132,20 @@ func requireGlobalPermission(c *gin.Context, deps *Dependencies, permission stri
 }
 
 // backfillLogSinkSecrets fills secrets the edit form left blank (reads mask
-// them) from the stored spec, only while the auth type is unchanged.
+// them) from the stored spec, only while the type (and for VictoriaLogs the
+// auth type) is unchanged.
 func backfillLogSinkSecrets(spec, stored *v1.LogSinkSpec) {
+	if stored == nil || spec.Type != stored.Type {
+		return
+	}
+
+	if spec.Type == v1.LogSinkTypeS3 {
+		backfillS3Keys(spec.S3, stored.S3)
+		return
+	}
+
 	if spec.VictoriaLogs == nil || spec.VictoriaLogs.Auth == nil ||
-		stored == nil || stored.VictoriaLogs == nil || stored.VictoriaLogs.Auth == nil {
+		stored.VictoriaLogs == nil || stored.VictoriaLogs.Auth == nil {
 		return
 	}
 
@@ -152,5 +163,24 @@ func backfillLogSinkSecrets(spec, stored *v1.LogSinkSpec) {
 		if auth.Token == "" {
 			auth.Token = old.Token
 		}
+	}
+}
+
+// backfillS3Keys fills each blank key separately, like a PATCH does.
+func backfillS3Keys(spec, stored *v1.S3SinkSpec) {
+	if spec == nil || stored == nil || stored.Auth == nil {
+		return
+	}
+
+	if spec.Auth == nil {
+		spec.Auth = &v1.S3SinkAuth{}
+	}
+
+	if spec.Auth.AccessKeyID == "" {
+		spec.Auth.AccessKeyID = stored.Auth.AccessKeyID
+	}
+
+	if spec.Auth.SecretAccessKey == "" {
+		spec.Auth.SecretAccessKey = stored.Auth.SecretAccessKey
 	}
 }

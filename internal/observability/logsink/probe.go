@@ -19,11 +19,19 @@ const (
 	maxProbeTimeout     = 30 * time.Second
 )
 
-// TestConnection checks that the sink's VictoriaLogs answers and accepts its
-// credentials, using the same TLS settings Vector will use.
+// TestConnection checks that the sink's store answers and accepts its
+// credentials, with the same settings Vector will use.
 func TestConnection(ctx context.Context, sink *v1.LogSink) error {
-	vl := sink.Spec.VictoriaLogs
+	if sink.Spec.Type == v1.LogSinkTypeS3 {
+		return testS3Connection(ctx, sink.Spec.S3)
+	}
 
+	return testVictoriaLogsConnection(ctx, sink.Spec.VictoriaLogs)
+}
+
+// testVictoriaLogsConnection checks that VictoriaLogs answers and accepts the
+// credentials, using the same TLS settings Vector will use.
+func testVictoriaLogsConnection(ctx context.Context, vl *v1.VictoriaLogsSinkSpec) error {
 	client, err := probeClient(vl)
 	if err != nil {
 		return err
