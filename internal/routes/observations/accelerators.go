@@ -70,9 +70,9 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 		}
 
 		if resource == "clusters" {
-            route.GET("/accelerator-utilization-trend", middleware.RequireWorkspacePermission(permission,
-                middleware.PermissionDependencies{Storage: deps.Storage}), trendHandler(deps))
-        }
+			route.GET("/accelerator-utilization-trend", middleware.RequireWorkspacePermission(permission,
+				middleware.PermissionDependencies{Storage: deps.Storage}), trendHandler(deps))
+		}
 		route.GET("/accelerator-observations", middleware.RequireWorkspacePermission(permission,
 			middleware.PermissionDependencies{Storage: deps.Storage}), handler(deps, resource))
 	}
