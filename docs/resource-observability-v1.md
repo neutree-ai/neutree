@@ -1,6 +1,6 @@
 # Resource observations, first version
 
-This version adds a read-only monitoring path for the cluster and endpoint basic-information pages. Allocation and scheduling remain on their existing resource-status path. No NodeAgent rollout, resource-status writes, database migration, or new external service is required.
+This version adds a read-only monitoring path for the cluster and endpoint basic-information pages. Allocation and scheduling remain on their existing resource-status path. No resource-status writes, database schema changes, or new external service are required. The branch pins its matching NodeAgent build for normalized power telemetry.
 
 ## Configuration
 
@@ -23,8 +23,19 @@ The browser never supplies PromQL or a backend address. Cluster and endpoint rou
 
 The cluster's existing node GPU grid and endpoint runtime allocation grid show actual VRAM, allocated VRAM, physical capacity, and GPU utilization. The cluster grid also shows allocation segments with stable per-instance colors and links. GPU buttons open hardware/details drawers. Unknown hardware fields and unsupported telemetry display a dash. Temperature and power are explicitly labeled as whole-device measurements even on an endpoint page.
 
-The first version keeps allocation segments separate from the physical-usage bar: summing workload usage is not guaranteed to equal physical-card usage. It does not infer measured usage from `allocatable - available` or estimate actual TFLOPS from utilization.
+The first version keeps allocation segments separate from the physical-usage bar: summing workload usage is not guaranteed to equal physical-card usage. It does not infer measured usage from `allocatable - available`. FP16 throughput is explicitly an estimate (nominal or calibrated peak multiplied by utilization), not a hardware FLOPS counter.
 
-## Deliberately deferred
+## FLOPS and topology
 
-No TFLOPS dictionary or calibration editor, historical charts, topology graph, CPU/RAM actual-usage changes, inference throughput/KV-cache summary, or new vendor telemetry collectors. Power appears only when the normalized metric already exists. Hardware availability depends on the installed collector and driver. Tests with synthetic data cover sharing/identity rules but do not certify hardware environments that were not exercised.
+The cluster resource summary includes healthy-device FP16 capacity and utilization-based estimates, with per-model overrides in `metadata.annotations["neutree.ai/accelerator-tflops"]`. Metadata-only updates preserve spec and other metadata. Unknown models or missing utilization keep totals/usage unknown. The dictionary uses longest substring matches and explicit per-product calibration wins.
+
+`GET /api/v1/clusters/:workspace/:name/accelerator-utilization-trend` requires cluster read access and queries a server-owned 30-day window with a six-hour step. Each point uses six-hour mean utilization; duplicate scrape targets are reduced with max by node/UUID/product. The browser applies current calibration to historical reported devices. Gaps are not zeros and historical values do not reconstruct past calibration or health.
+
+The topology tab groups current physical GPUs by node and reported NUMA domain, with PCIe details, temperature/power, assignment links, and a shared hardware drawer. Interconnect banners reflect node-reported capability flags, not measured pairwise edges.
+
+## Deferred collector work
+
+- 3.b: pairwise GPU matrix probing within a node.
+- 3.g: collecting host RDMA NIC binding.
+
+Other vendor hardware paths still require hardware-specific runtime validation.

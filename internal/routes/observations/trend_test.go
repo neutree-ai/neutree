@@ -1,5 +1,5 @@
 package observations
-import("context";"fmt";"net/http";"net/http/httptest";"testing";"time";"github.com/stretchr/testify/require")
+import("github.com/neutree-ai/neutree/pkg/storage/mocks";"context";"fmt";"net/http";"net/http/httptest";"testing";"time";"github.com/stretchr/testify/require")
 func TestTrendBoundsAndFiltering(t *testing.T){
  now:=time.Unix(1792570000,0);end:=now.Unix()/21600*21600
  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
@@ -11,4 +11,9 @@ func TestTrendBoundsAndFiltering(t *testing.T){
  }));defer server.Close()
  samples,err:=queryTrend(context.Background(),&Dependencies{MetricsURL:server.URL,Client:server.Client()},"team","cluster",now)
  require.NoError(t,err);require.Len(t,samples,2);require.Zero(t,samples[0].Value);require.NotContains(t,samples[0].Labels,"secret")
+}
+func TestTrendRequiresClusterRead(t *testing.T){
+ s:=mocks.NewMockStorage(t);permission(t,s,false)
+ w:=httptest.NewRecorder();router(&Dependencies{Storage:s},true).ServeHTTP(w,httptest.NewRequest("GET","/clusters/private/cluster/accelerator-utilization-trend",nil))
+ require.Equal(t,403,w.Code)
 }
