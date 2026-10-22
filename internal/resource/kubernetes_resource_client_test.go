@@ -2,7 +2,6 @@ package resource
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -1070,8 +1069,8 @@ func (r *blockedLogReader) Close() error { return nil }
 
 func TestVLLMStartupMemory(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		logs string
+		name        string
+		logs        string
 		weights, kv float64
 	}{
 		{"plain", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 6, 8},
