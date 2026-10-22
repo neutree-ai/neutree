@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/scheme"
@@ -37,15 +38,28 @@ type ReplicaSpec struct {
 	Num *int `json:"num,omitempty"`
 }
 
+// EndpointKVCacheSpec selects an optional KV cache integration.
+type EndpointKVCacheSpec struct {
+	Provider string          `json:"provider"`
+	Options  json.RawMessage `json:"options,omitempty"`
+}
+
+// EndpointKVCacheStatus carries state owned by the selected provider.
+type EndpointKVCacheStatus struct {
+	Provider string          `json:"provider"`
+	Details  json.RawMessage `json:"details,omitempty"`
+}
+
 type EndpointSpec struct {
-	Cluster           string              `json:"cluster,omitempty"`
-	Model             *ModelSpec          `json:"model,omitempty"`
-	Engine            *EndpointEngineSpec `json:"engine,omitempty"`
-	Resources         *ResourceSpec       `json:"resources,omitempty"`
-	Replicas          ReplicaSpec         `json:"replicas,omitempty"`
-	DeploymentOptions map[string]any      `json:"deployment_options,omitempty"`
-	Variables         map[string]any      `json:"variables,omitempty"`
-	Env               map[string]string   `json:"env,omitempty"`
+	KVCache           *EndpointKVCacheSpec `json:"kv_cache,omitempty"`
+	Cluster           string               `json:"cluster,omitempty"`
+	Model             *ModelSpec           `json:"model,omitempty"`
+	Engine            *EndpointEngineSpec  `json:"engine,omitempty"`
+	Resources         *ResourceSpec        `json:"resources,omitempty"`
+	Replicas          ReplicaSpec          `json:"replicas,omitempty"`
+	DeploymentOptions map[string]any       `json:"deployment_options,omitempty"`
+	Variables         map[string]any       `json:"variables,omitempty"`
+	Env               map[string]string    `json:"env,omitempty"`
 }
 
 type EndpointPhase string
@@ -62,10 +76,11 @@ const (
 )
 
 type EndpointStatus struct {
-	Phase              EndpointPhase `json:"phase,omitempty"`
-	ServiceURL         string        `json:"service_url,omitempty"`
-	LastTransitionTime string        `json:"last_transition_time,omitempty"`
-	ErrorMessage       string        `json:"error_message,omitempty"`
+	KVCache            *EndpointKVCacheStatus `json:"kv_cache,omitempty"`
+	Phase              EndpointPhase          `json:"phase,omitempty"`
+	ServiceURL         string                 `json:"service_url,omitempty"`
+	LastTransitionTime string                 `json:"last_transition_time,omitempty"`
+	ErrorMessage       string                 `json:"error_message,omitempty"`
 	// ModelDownloadCompletedHash is reserved for future model download tracking extensions,
 	// such as node- or replica-level completion metadata. It must not be used alone as
 	// proof that the current node or replica has completed downloading.
