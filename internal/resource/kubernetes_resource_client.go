@@ -254,12 +254,14 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 	}
 
 	prevByPod := make(map[string]v1.ReplicaDeviceAllocation)
+
 	if endpoint != nil && endpoint.Status != nil && endpoint.Status.Resources != nil {
 		for _, prev := range endpoint.Status.Resources.Replicas {
 			key := prev.ReplicaID
 			if key == "" {
 				key = prev.InstanceID
 			}
+
 			if key != "" {
 				prevByPod[key] = prev
 			}
@@ -274,6 +276,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 	if endpoint != nil && endpoint.Spec != nil {
 		engineArgs, _ = endpoint.Spec.Variables["engine_args"].(map[string]interface{})
 	}
+
 	_, overrideUnderscore := engineArgs["num_gpu_blocks_override"]
 	_, overrideDash := engineArgs["num-gpu-blocks-override"]
 
@@ -301,6 +304,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			if overrideUnderscore || overrideDash {
 				instances[i].KVCacheCapacityMiB = nil
 			}
+
 			continue
 		}
 
@@ -309,6 +313,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 
 		limit := startupLogLimitBytes + 1
+
 		stream, err := c.podLogClient.GetPodLogs(logCtx, cluster, namespace, pod.Name, &corev1.PodLogOptions{
 			Container:  containerName,
 			LimitBytes: &limit,
@@ -320,6 +325,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 
 		rawLogs, readErr := io.ReadAll(io.LimitReader(stream, limit))
 		_ = stream.Close()
+
 		if readErr != nil {
 			klog.V(4).Infof("Failed reading startup logs for pod %s/%s: %v", namespace, pod.Name, readErr)
 			continue
@@ -329,6 +335,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		if overrideUnderscore || overrideDash {
 			kvCacheMiB = nil
 		}
+
 		instances[i].ContainerID = containerID
 		instances[i].ModelWeightsMiB = weightsMiB
 		instances[i].KVCacheCapacityMiB = kvCacheMiB
@@ -380,12 +387,14 @@ func parseWorkerMemoryMiB(pattern *regexp.Regexp, logs string, workers int, take
 		if err != nil || gib <= 0 {
 			continue
 		}
+
 		worker := ""
 		if id := vllmWorkerRegex.FindStringSubmatch(line); len(id) > 1 {
 			worker = id[1]
 		} else if workers > 1 {
 			continue
 		}
+
 		values[worker] = gib
 	}
 

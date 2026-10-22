@@ -75,6 +75,7 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 			route.GET("/accelerator-utilization-trend", middleware.RequireWorkspacePermission(permission,
 				middleware.PermissionDependencies{Storage: deps.Storage}), trendHandler(deps))
 		}
+
 		route.GET("/accelerator-observations", middleware.RequireWorkspacePermission(permission,
 			middleware.PermissionDependencies{Storage: deps.Storage}), handler(deps, resource))
 	}
@@ -112,14 +113,17 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			cluster, endpoint = items[0].Spec.Cluster, name
 			zcacheEnabled = items[0].Spec.KVCache != nil && items[0].Spec.KVCache.Provider == "zcache"
 			metrics = replicaMetrics
+
 			if status := items[0].Status; status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
 				seen := map[[2]string]bool{}
+
 				for _, replica := range status.Resources.Replicas {
 					for _, device := range replica.Devices {
 						node := device.NodeID
 						if node == "" {
 							node = replica.NodeID
 						}
+
 						key := [2]string{node, device.UUID}
 						if node != "" && device.UUID != "" && !seen[key] {
 							devices = append(devices, key)
@@ -177,12 +181,15 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		if resource == "clusters" {
 			queries = append(queries, l1Selector+"}[90s]")
 		}
+
 		if len(devices) > 0 {
 			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info"}
+
 			byNode := map[string][]string{}
 			for _, device := range devices {
 				byNode[device[0]] = append(byNode[device[0]], regexp.QuoteMeta(device[1]))
 			}
+
 			for node, uuids := range byNode {
 				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
 				if zcacheEnabled {
@@ -190,18 +197,23 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 				}
 			}
 		}
+
 		if zcacheEnabled {
 			queries = append(queries, fmt.Sprintf("{__name__=~\"vllm:kv_cache_usage_perc|vllm:gpu_cache_usage_perc\",workspace=%s,neutree_cluster=%s,application=%s}[90s]", strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(endpoint)))
 		}
+
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
+
 		samples := []Sample{}
+
 		for _, query := range queries {
 			batch, err := querySamples(ctx, deps, query)
 			if err != nil {
 				c.JSON(503, gin.H{"error": "monitoring unavailable"})
 				return
 			}
+
 			samples = append(samples, batch...)
 		}
 
@@ -220,25 +232,32 @@ func querySamples(ctx context.Context, deps *Dependencies, query string) ([]Samp
 	if err != nil {
 		return nil, err
 	}
+
 	params := u.Query()
 	params.Set("query", query)
 	u.RawQuery = params.Encode()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
+
 	resp, err := deps.Client.Do(req)
 	if err != nil {
 		return nil, err
 	}
+
 	defer resp.Body.Close()
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
+
 	if resp.StatusCode != 200 || len(body) > maxResponseBytes {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
+
 	return decodeSamples(body, time.Now())
 }
 
@@ -270,8 +289,10 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 		if series.Metric["__name__"] != "up" || series.Metric["job"] != "neutree-zcache" || len(series.Values) == 0 {
 			continue
 		}
+
 		last := series.Values[len(series.Values)-1]
 		var timestamp float64
+
 		var raw string
 		if json.Unmarshal(last[0], &timestamp) == nil && json.Unmarshal(last[1], &raw) == nil &&
 			timestamp >= float64(now.Unix()-90) && timestamp <= float64(now.Unix()+5) {
@@ -292,6 +313,7 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 			if series.Metric["replica"] == "" || (series.Metric["endpoint"] == "" && series.Metric["application"] == "") {
 				continue
 			}
+
 			name = "vllm:kv_cache_usage_perc"
 		} else if isNodeL1Usage {
 			if series.Metric["node"] == "" || !up[[2]string{series.Metric["job"], series.Metric["instance"]}] {
@@ -323,9 +345,11 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 				labels[key] = value
 			}
 		}
+
 		if labels["endpoint"] == "" && series.Metric["application"] != "" {
 			labels["endpoint"] = series.Metric["application"]
 		}
+
 		if isNodeL1Usage && series.Metric["pod"] != "" {
 			labels["pod"] = series.Metric["pod"]
 		}
