@@ -17,7 +17,7 @@ type Dependencies struct {
 // RegisterCredentialsRoutes registers credentials retrieval routes
 // This is a separate API group to ensure explicit intent when accessing sensitive data
 // For every resource, we will check the permission before returning the sensitive data
-// Now only supports clusters, image registries, and model registries.
+// Now only supports clusters, image registries, model registries, and log sinks.
 // External endpoint credentials are intentionally NOT exposed here: users
 // attach their own third-party API keys to external endpoints, and those
 // keys are write-only (never readable back via the API, by anyone,
@@ -52,6 +52,13 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 			Storage: deps.Storage,
 		}),
 		handleResourceCredentials(proxyDeps, "model_registries"))
+
+	// Log sink credentials (auth password / token)
+	credGroup.GET("/log_sinks",
+		middleware.RequirePermission("log_sink:read-credentials", middleware.PermissionDependencies{
+			Storage: deps.Storage,
+		}),
+		handleResourceCredentials(proxyDeps, "log_sinks"))
 }
 
 func handleResourceCredentials(deps *proxies.Dependencies, tabelName string) gin.HandlerFunc {

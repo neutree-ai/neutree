@@ -32,6 +32,7 @@ const (
 	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
 	STATIC_NODE_TABLE         = "static_nodes"
 	IDENTITY_SOURCE_TABLE     = "identity_sources"
+	LOG_SINK_TABLE            = "log_sinks"
 )
 
 type ImageRegistryStorage interface {
@@ -45,6 +46,19 @@ type ImageRegistryStorage interface {
 	GetImageRegistry(id string) (*v1.ImageRegistry, error)
 	// ListImageRegistry retrieves a list of image registries with optional filters.
 	ListImageRegistry(option ListOption) ([]v1.ImageRegistry, error)
+}
+
+type LogSinkStorage interface {
+	// CreateLogSink creates a new log sink in the database.
+	CreateLogSink(data *v1.LogSink) error
+	// DeleteLogSink deletes a log sink by its ID.
+	DeleteLogSink(id string) error
+	// UpdateLogSink updates an existing log sink in the database.
+	UpdateLogSink(id string, data *v1.LogSink) error
+	// GetLogSink retrieves a log sink by its ID.
+	GetLogSink(id string) (*v1.LogSink, error)
+	// ListLogSink retrieves a list of log sinks with optional filters.
+	ListLogSink(option ListOption) ([]v1.LogSink, error)
 }
 
 type ModelRegistryStorage interface {
@@ -271,6 +285,7 @@ type Storage interface {
 	StaticNodeClusterStorage
 	StaticNodeStorage
 	IdentitySourceStorage
+	LogSinkStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
