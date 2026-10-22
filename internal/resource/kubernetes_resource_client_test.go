@@ -1027,6 +1027,24 @@ func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
 		}
 	}
 	endpoint.Spec.Variables = nil
+	// Empty results, including caches written by older code, must be retried.
+	endpoint.Status.Resources = status
+	status.Replicas[0].ModelWeightsMiB = nil
+	status.Replicas[0].KVCacheCapacityMiB = nil
+	logClient.logs = "starting up\n"
+	calls := logClient.calls
+	empty, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.Empty(t, empty.Replicas[0].ContainerID)
+	endpoint.Status.Resources = empty
+	logClient.logs = "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes))
+	filled, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, logClient.calls)
+	require.Equal(t, "containerd://cid-1", filled.Replicas[0].ContainerID)
+	require.InDelta(t, 6144.0, *filled.Replicas[0].ModelWeightsMiB, 0.01)
+	require.InDelta(t, 8192.0, *filled.Replicas[0].KVCacheCapacityMiB, 0.01)
 	endpoint.Status.Resources = nil
 	logClient.getLogs = func(ctx context.Context) (io.ReadCloser, error) {
 		deadline, ok := ctx.Deadline()
@@ -1050,29 +1068,22 @@ func (r *blockedLogReader) Read([]byte) (int, error) {
 }
 func (r *blockedLogReader) Close() error { return nil }
 
-func TestVLLMStartupMemoryWorkers(t *testing.T) {
-	worker := func(rank int, weights, kv string) string {
-		return fmt.Sprintf("(Worker_TP%d pid=%d) Model loading took %s GiB\n(Worker_TP%d pid=%d) Available KV cache memory: %s GiB\n", rank, rank+10, weights, rank, rank+10, kv)
-	}
+func TestVLLMStartupMemory(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		logs        string
-		workers     int
+		name string
+		logs string
 		weights, kv float64
 	}{
-		{"single", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 1, 6, 8},
-		{"symmetric TP", worker(0, "6", "8") + worker(1, "6", "8"), 2, 6, 8},
-		{"within display precision", worker(0, "6", "8") + worker(1, "6.05", "8.09"), 2, 6.05, 8},
-		{"asymmetric weights", worker(0, "6", "8") + worker(1, "7", "8"), 2, 0, 8},
-		{"asymmetric KV", worker(0, "6", "8") + worker(1, "6", "9"), 2, 6, 0},
-		{"missing worker", worker(0, "6", "8"), 2, 0, 0},
-		{"duplicate is not another worker", worker(0, "6", "8") + worker(0, "6", "8"), 2, 0, 0},
-		{"missing KV line", worker(0, "6", "8") + "(Worker_TP1 pid=11) Model loading took 6 GiB\n", 2, 6, 0},
-		{"no worker identity", "Model loading took 6 GiB\nModel loading took 6 GiB\n", 2, 0, 0},
-		{"truncated", worker(0, "6", "8") + strings.Repeat("x", int(startupLogLimitBytes)), 1, 0, 0},
+		{"plain", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 6, 8},
+		{"mixed prefixes and different budgets", "Model loading took 6 GiB\nAvailable KV cache memory: 12.10 GiB\n(Worker_TP1 pid=11) Model loading took 7 GiB\n(Worker_TP1 pid=11) Available KV cache memory: 12.35 GiB\n", 7, 12.10},
+		{"shared nested prefix", "(outer) (EngineCore pid=1) Model loading took 7 GiB\n(outer) (EngineCore pid=1) Model loading took 6 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 9 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 8 GiB\n", 7, 8},
+		{"weights only", "Model loading took 6 GiB\n", 6, 0},
+		{"no positive values", "Model loading took 0 GiB\nAvailable KV cache memory: 0 GiB\n", 0, 0},
+		{"empty", "", 0, 0},
+		{"long running log", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes)), 6, 8},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			weights, kv := parseVLLMStartupMemoryMiB(tc.logs, tc.workers)
+			weights, kv := parseVLLMStartupMemoryMiB(tc.logs)
 			for i, got := range []*float64{weights, kv} {
 				want := []float64{tc.weights, tc.kv}[i]
 				if want == 0 {
