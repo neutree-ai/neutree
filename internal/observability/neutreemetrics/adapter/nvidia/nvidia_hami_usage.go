@@ -168,7 +168,7 @@ func float64Pointer(value float64) *float64 {
 }
 
 func normalizedRatio(value float64) float64 {
-	if value > 1 {
+	if value >= 1 {
 		return value / 100
 	}
 

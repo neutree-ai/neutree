@@ -1,88 +1,172 @@
 # HAMi Chart Modifications
 
-This chart is a repackaged `hami-2.9.0` with a cherry-picked upstream extension
-that lets the scheduler device-config be supplied through chart values.
+Neutree embeds both the existing patched `hami-2.9.0.tgz` and the official
+`hami-2.10.0.tgz` release chart repackaged with the scheduler rollout patch.
+The Neutree cluster version selects a compatibility profile; the underlying
+Kubernetes server version independently selects that profile's scheduler image.
 
-The HAMi release pin is maintained in `internal/component/version.go`.
-Kubernetes scheduler image selection and Helm version normalization are maintained
-in `internal/cluster/version/kubernetes.go`; `manifests.go` handles discovery and
-chart values.
+## Cluster Version Matrix
 
-## Deviation from upstream hami-2.9.0
+`internal/component/version.go` defines the component image versions.
+`internal/cluster/version/hami.go` owns the Neutree cluster compatibility
+thresholds and HAMi selection. `internal/cluster/version/kubernetes.go` owns
+the Kubernetes scheduler maps, defaults and selection, server-version
+normalization, and Helm capability conversion.
+`clusterversion.HAMiVersionForCluster(clusterVersion)` resolves the HAMi version:
 
-### `device-config.content` values override
+| Neutree cluster version | HAMi version | Embedded chart | Scheduler profile |
+| --- | --- | --- | --- |
+| Supported `1.1.x` and `1.2.x` versions | `v2.9.0` (`component.LegacyHAMi`) | `hami-2.9.0.tgz` | Existing 1.26–1.32 pins; detected-version fallback for unmapped minors |
+| Base version `>= 1.3.0`, including RCs and build metadata | `v2.10.0` (`component.HAMi`) | `hami-2.10.0.tgz` | 1.26–1.35 pins; detected-version fallback for unmapped minors |
+| Below `1.1.0`, empty, or invalid | Error | None | None |
 
-Upstream `Project-HAMi/HAMi` master added the ability to provide the full
-`device-config.yaml` payload through `values.device-config.content` instead of
-shipping a `files/device-config.yaml` inside the chart or editing the hardcoded
-defaults. This repackaged chart carries that change on top of 2.9.0.
+The threshold uses the numeric base version: `1.3.0-rc.1` and
+`1.3.0+build.1` select HAMi 2.10.0. Kubernetes server-version discovery does
+not select the HAMi profile; upgrading Kubernetes alone does not change it.
 
-**`values.yaml`** adds:
+Upgrading the control plane does not implicitly upgrade HAMi on an existing
+Neutree 1.1/1.2 cluster. Reconciliation retains its 2.9.0 profile. A new cluster
+explicitly selecting Neutree 1.3+ uses 2.10.0; an existing cluster moves to that
+profile only when its Neutree cluster version is explicitly upgraded to 1.3+.
+This does not upgrade Kubernetes. `component.HAMi` still means the latest HAMi
+version, not the expected version for every cluster.
+
+Both archives are loaded in-process with `loader.LoadArchive` in
+`internal/cluster/component/hami/chart.go`.
+
+## Legacy 2.9.0 Chart
+
+The patched 2.9.0 archive is restored unchanged from the repository baseline,
+not reconstructed from the 2.10.0 chart. Its existing Neutree patches remain:
+
+- `device-config.content` overrides `files/device-config.yaml` and chart defaults.
+- `scheduler.updateStrategy` defaults to a zero-unavailable rolling update
+  (`maxUnavailable: 0`, `maxSurge: 1`).
+- Scheduler pod anti-affinity is soft
+  (`preferredDuringSchedulingIgnoredDuringExecution`) so a replacement can
+  schedule on a single-node cluster while leader election protects the overlap.
+
+## Upstream 2.10.0 Source
+
+- Release: https://github.com/Project-HAMi/HAMi/releases/tag/v2.10.0
+- Archive: https://github.com/Project-HAMi/HAMi/releases/download/v2.10.0/hami-2.10.0.tgz
+- Original archive SHA-256: `e1d8429b2270da1a5c26343d6d6fd2a0099ba7b944cf0f52eb20d6b9f14e5099`
+
+The checksum identifies the unmodified upstream 2.10.0 download, not either
+repackaged archive committed here.
+
+## Deviation From Upstream 2.10.0
+
+### `scheduler.updateStrategy`
+
+`templates/scheduler/deployment.yaml` renders `spec.strategy` from
+`values.scheduler.updateStrategy`. The packaged `values.yaml` sets:
 
 ```yaml
-# Device config overrides
-# If content is set under device-config.content, it will be used as the device-config.yaml
-# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
-device-config:
-  content: ""
+scheduler:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
 ```
 
-**`templates/scheduler/device-configmap.yaml`** renders the ConfigMap payload
-with this precedence:
+This preserves the Neutree 2.9.0 chart's rollout behavior: a replacement must
+become ready before the only scheduler can be removed. These are the only two
+files changed from the upstream release archive.
 
-```yaml
-data:
-  device-config.yaml: |-
-  {{- if and (index .Values "device-config") (index .Values "device-config" "content") }}
-  {{- (index .Values "device-config" "content") | nindent 4 }}
-  {{- else if .Files.Glob "files/device-config.yaml" }}
-  {{- .Files.Get "files/device-config.yaml" | nindent 4}}
-  {{- else }}
-  ...default hardcoded config...
-```
+## Former Patches Now Provided Upstream
 
-So the precedence is: `device-config.content` > `files/device-config.yaml` >
-the hardcoded default. This lets a cluster supply its own device-config
-templates (for example chip hard-slice templates) through chart values without
-rebuilding the chart.
+- `device-config.content` is supported directly by 2.10.0. The precedence remains
+  `device-config.content` > `files/device-config.yaml` > chart defaults, so
+  cluster-specific device configurations do not require repackaging the chart.
+- Scheduler pod anti-affinity is already
+  `preferredDuringSchedulingIgnoredDuringExecution`. It allows a single-node
+  cluster to schedule the replacement pod while retaining the multi-node spread
+  preference. Leader election protects the brief overlap.
 
-### `scheduler.updateStrategy` value
+Neither behavior needs a local patch in 2.10.0. Keep that profile's upstream
+device-config defaults, including the new MIG profile allowlist and NUMA
+topology setting; do not apply them to the legacy chart.
 
-The scheduler Deployment previously used the Kubernetes default RollingUpdate
-strategy (25% surge / 25% unavailable). On a single-replica scheduler with no
-hostPort binding, an update could take down the only scheduler before its
-replacement became ready. The chart now renders `spec.strategy` from
-`values.scheduler.updateStrategy`; the packaged default is
-`maxUnavailable: 0, maxSurge: 1` so the new scheduler is created before the
-old one is removed and a single-node cluster never loses its only scheduler.
+## DRA and Webhook Configuration
 
-### Soft scheduler pod anti-affinity
+The legacy 2.9.0 profile keeps `dra.enabled: false`; user `config_patch` cannot
+enable it. Its optional DRA dependency need not be vendored for in-process
+chart loading. HAMi 2.10.0 removes DRA from its main chart, so that
+archive has no DRA dependency and the new profile does not set the obsolete
+`dra.enabled` value. Neither profile installs HAMi-DRA or ascend-dra-driver;
+user `config_patch` cannot enable DRA.
 
-The scheduler pod anti-affinity (active when `scheduler.leaderElect` is true)
-is now `preferredDuringSchedulingIgnoredDuringExecution` instead of the
-upstream hard `requiredDuringSchedulingIgnoredDuringExecution`. On a
-single-node cluster the hard form made a scheduler rollout unschedulable
-(the new pod could never satisfy the different-host constraint); the soft form
-keeps the spread intent on multi-node clusters while allowing co-location when
-no other node is available. Leader election still guards against two active
-schedulers during the brief rollout overlap.
+Neutree enforces `scheduler.admissionWebhook.enabled: true` and
+`scheduler.admissionWebhook.manageNamespaceSelector: true`, supplies its own
+TLS secret and CA bundle, and disables chart-managed certificate jobs. The
+upstream webhook `failurePolicy: Ignore` and namespace selector remain intact;
+namespaces labeled `hami.io/webhook: ignore` are excluded, but admission is not
+restricted to the owning Neutree cluster namespace.
 
-## Webhook configuration
+## Kubernetes Scheduler Images
 
-Neutree does not override the HAMi chart's `failurePolicy`, so the packaged
-chart default (`Ignore`) applies. It intentionally does not override the
-chart's `namespaceSelector`, so matching admission requests are not limited to
-the owning cluster namespace. The HAMi chart still emits its default selector,
-which excludes namespaces marked `hami.io/webhook: ignore`.
+Both profiles retain the existing Kubernetes 1.26–1.32 scheduler image pins
+and the `v1.32.13` fallback when server-version discovery or parsing fails.
+Only the Neutree 1.3+ profile adds pins for Kubernetes 1.33–1.35:
 
-Neutree also enforces `scheduler.admissionWebhook.enabled: true`; it cannot be
-disabled through `accelerator_virtualization.config_patch`.
+| Kubernetes minor | Legacy 1.1/1.2 profile | Neutree 1.3+ profile |
+| --- | --- | --- |
+| 1.26 | `v1.26.15` | `v1.26.15` |
+| 1.27 | `v1.27.16` | `v1.27.16` |
+| 1.28 | `v1.28.15` | `v1.28.15` |
+| 1.29 | `v1.29.14` | `v1.29.14` |
+| 1.30 | `v1.30.14` | `v1.30.14` |
+| 1.31 | `v1.31.14` | `v1.31.14` |
+| 1.32 | `v1.32.13` | `v1.32.13` |
+| 1.33 | Detected server version | `v1.33.13` |
+| 1.34 | Detected server version | `v1.34.12` |
+| 1.35 | Detected server version | `v1.35.9` |
+
+Unmapped minors use the detected server version, including its patch with
+vendor suffixes removed. This applies to Kubernetes 1.33+ on the legacy
+profile and 1.36+ on the new profile, as well as older unmapped minors. Such
+clusters require a separately supplied offline scheduler image unless the
+exact detected tag is already bundled; new-profile pins must not leak into
+legacy scheduler selection.
+
+The offline Kubernetes image list packages only the latest Neutree cluster
+profile: HAMi `v2.10.0` and the 1.26–1.35 scheduler pins. The legacy 2.9.0 chart
+remains embedded for existing Neutree 1.1/1.2 clusters, but its container image
+is not included. Offline deployments of legacy clusters must supply their own
+matching images.
+
+Bundling or rendering an image is not real-cluster compatibility certification
+and does not extend the Kubernetes project's security-support lifecycle.
+
+## Node-Agent Artifacts
+
+Node-agent publishing, builds, and image/version tiers remain independent work.
+This change leaves the node-agent image-list entry unchanged; choosing a HAMi
+profile does not publish or rebuild a matching node-agent artifact.
 
 ## Verification
 
-- `helm template` renders `device-config.content` into the
-  `hami-scheduler-device` ConfigMap when set, and falls back to the default
-  config when empty.
-- The chart is loaded in-process via `loader.LoadArchive` (see
-  `internal/cluster/component/hami/chart.go`), which does not require the
-  optional `hami-dra` dependency to be vendored.
+- `go test ./internal/cluster/version` covers Neutree cluster compatibility
+  gates, including HAMi selection and prerelease/base-version handling, plus
+  Kubernetes scheduler selection, server-version normalization, and Helm
+  capability conversion.
+- `go test ./internal/cluster/component/hami` loads the embedded chart and
+  renders every bundled Kubernetes minor, checking pinned images, scheduler
+  configuration, absence of DRA, TLS/webhook protection, node scope, device
+  configuration overrides/checksums, and zero-unavailable scheduler rollouts.
+- `TestHAMiOfflineImages` checks that only the latest HAMi version and the
+  latest profile's scheduler pins are in the offline Kubernetes image list.
+- Reconciliation checks must distinguish unchanged legacy clusters from an
+  explicit Neutree cluster-version upgrade to the 2.10.0 profile. Unit tests
+  use fake clients and in-process rendering, not actual cluster certification.
+- E2E virtualization coverage lives in
+  `tests/e2e/accelerator_virtualization_test.go` and requires a configured
+  Neutree deployment and GPU Kubernetes cluster. Its expected HAMi version is
+  resolved with `clusterversion.HAMiVersionForCluster(cluster.GetVersion())`, so legacy
+  profiles are not incorrectly required to run the latest HAMi.
+
+This document does not assert that either profile has passed real-cluster E2E
+validation. Local checks and compilation must be reported separately from any
+deployment or compatibility certification.

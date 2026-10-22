@@ -3,7 +3,7 @@ victoriametrics/vmagent:v1.115.0
 quay.io/prometheus/node-exporter:v1.8.2
 neutree/neutree-runtime:latest
 neutree/neutree-node-agent:v1.2.1-rc.1
-docker.io/projecthami/hami:v2.9.0
+docker.io/projecthami/hami:v2.10.0
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/kube-scheduler:v1.26.15
 registry.k8s.io/kube-scheduler:v1.27.16
@@ -12,3 +12,6 @@ registry.k8s.io/kube-scheduler:v1.29.14
 registry.k8s.io/kube-scheduler:v1.30.14
 registry.k8s.io/kube-scheduler:v1.31.14
 registry.k8s.io/kube-scheduler:v1.32.13
+registry.k8s.io/kube-scheduler:v1.33.13
+registry.k8s.io/kube-scheduler:v1.34.12
+registry.k8s.io/kube-scheduler:v1.35.9

@@ -54,19 +54,20 @@ This is independent from the **CP install mode** (how `neutree-api` / `neutree-c
 
 `internal/cluster/version` owns compatibility decisions based on the Neutree
 cluster package version: runtime engine isolation, SSH lifecycle selection, Ray
-node-IP support, NodeAgent contract/image selection, virtualization, metrics capabilities, selectable versions, and upgrade validation.
+node-IP support, NodeAgent contract/image selection, virtualization and HAMi
+selection, metrics capabilities, selectable versions, and upgrade validation.
 Its Neutree package-version functions accept version strings and have no cluster, storage, or HTTP
 dependencies. Callers retain object resolution, missing/invalid-version fallback,
 error presentation, and rollout state transitions.
 
 The gates deliberately retain their individual comparison rules. Runtime and
-lifecycle gates compare full semantic versions; NodeAgent, virtualization, and metrics
+lifecycle gates compare full semantic versions; NodeAgent, HAMi, and metrics
 policies compare base versions so prereleases use the intended release contract.
 The selectable-version floor filters discovery, not cluster admission. Upgrade
 admission compares the desired version with the current spec, not observed status.
 
 `internal/component/version.go` remains the component release catalogue, consumed
-by the cluster-version policies. Virtualization support stays in
+by the cluster-version policies. Neutree HAMi selection stays in
 `internal/cluster/version/hami.go`. Kubernetes scheduler maps, defaults and
 selection, server-version normalization, and Helm capability conversion live in
 `internal/cluster/version/kubernetes.go`, keeping Kubernetes server-version

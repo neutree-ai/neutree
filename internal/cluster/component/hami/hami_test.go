@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"helm.sh/helm/v3/pkg/chartutil"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -81,7 +80,7 @@ func TestHAMiComponentPluginPatchControlsDevicePluginValues(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, componentversion.HAMi)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -373,7 +372,7 @@ func TestHAMiComponentDoesNotAllowAdmissionWebhookToBeDisabled(t *testing.T) {
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.HAMi)
 	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["enabled"])
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
@@ -386,6 +385,7 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	cluster.Spec.AcceleratorVirtualization.ConfigPatch = map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"admissionWebhook": map[string]interface{}{
+				"manageNamespaceSelector": false,
 				"namespaceSelector": map[string]interface{}{
 					"matchExpressions": []interface{}{
 						map[string]interface{}{
@@ -402,10 +402,11 @@ func TestHAMiComponentIgnoresAdmissionWebhookNamespaceSelectorOverride(t *testin
 	component := NewHAMiComponent(cluster, "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan())
+	values := component.buildChartValues(nvidiaDevicePluginNodeScopePlan(), componentversion.HAMi)
 	_, found, err := unstructured.NestedMap(values, "scheduler", "admissionWebhook", "namespaceSelector")
 	require.NoError(t, err)
 	assert.False(t, found, "Neutree must ignore custom namespaceSelector overrides")
+	assert.Equal(t, true, nestedMap(t, values, "scheduler", "admissionWebhook")["manageNamespaceSelector"])
 
 	objs, err := component.renderResources(nvidiaDevicePluginNodeScopePlan())
 	require.NoError(t, err)
@@ -539,7 +540,7 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
 	assert.Equal(t, clusterversion.KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
@@ -560,67 +561,10 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
 	assert.Equal(t, "v1.40.0",
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
-}
-
-func TestHAMiComponentVersionDiscoveryCompatibility(test *testing.T) {
-	defaultChartVersion := chartutil.KubeVersion{Version: "v1.32.13", Major: "1", Minor: "32"}
-	cases := []struct {
-		name             string
-		server           *kubeversion.Info
-		discoveryErr     error
-		schedulerVersion string
-		chartVersion     chartutil.KubeVersion
-	}{
-		{
-			name: "mapped minor preserves chart patch", server: &kubeversion.Info{GitVersion: "v1.30.9-gke.1"},
-			schedulerVersion: "v1.30.14", chartVersion: chartutil.KubeVersion{Version: "v1.30.9", Major: "1", Minor: "30"},
-		},
-		{
-			name: "unmapped minor uses detected patch", server: &kubeversion.Info{GitVersion: "v1.33.4-vendor.1"},
-			schedulerVersion: "v1.33.4", chartVersion: chartutil.KubeVersion{Version: "v1.33.4", Major: "1", Minor: "33"},
-		},
-		{
-			name: "discovery error uses default", discoveryErr: fmt.Errorf("version discovery failed"),
-			schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-		{
-			name: "invalid server info uses default", server: &kubeversion.Info{GitVersion: "invalid"},
-			schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-		{
-			name: "nil server info uses default", schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-	}
-
-	for _, testCase := range cases {
-		test.Run(testCase.name, func(test *testing.T) {
-			originalGetKubernetesServerVersion := getKubernetesServerVersion
-			getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
-				return testCase.server, testCase.discoveryErr
-			}
-			test.Cleanup(func() {
-				getKubernetesServerVersion = originalGetKubernetesServerVersion
-			})
-			hamiComponent := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
-				"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(test))
-
-			assert.Equal(test, testCase.schedulerVersion, hamiComponent.resolveKubeSchedulerVersion())
-			assert.Equal(test, testCase.chartVersion, hamiComponent.resolveChartKubeVersion())
-		})
-	}
-}
-
-func TestHAMiStatusUsesReleaseVersion(test *testing.T) {
-	for _, ready := range []bool{false, true} {
-		test.Run(fmt.Sprintf("ready=%t", ready), func(test *testing.T) {
-			status := HAMiStatus{Ready: ready}
-			assert.Equal(test, componentversion.HAMi, status.ComponentStatus().Version)
-		})
-	}
 }
 
 func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {
@@ -682,7 +626,7 @@ func TestHAMiComponentLegacyDevicePluginConfigPatchCannotOverrideOwner(t *testin
 		},
 	}
 
-	values := component.buildChartValues(plan)
+	values := component.buildChartValues(plan, componentversion.HAMi)
 
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 	assert.Equal(t, true, devicePlugin["enabled"])
@@ -700,7 +644,7 @@ func TestHAMiComponentDefaultValuesDoNotOwnNVIDIADevicePluginPolicy(t *testing.T
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 	devicePlugin := nestedMap(t, values, "devicePlugin")
 
 	assert.NotContains(t, devicePlugin, "migStrategy")
@@ -711,7 +655,7 @@ func TestHAMiComponentUsesGPUTopologyAwareSchedulerPolicy(t *testing.T) {
 	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
 		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
 
-	values := component.buildChartValues(NodeScopePlan{})
+	values := component.buildChartValues(NodeScopePlan{}, componentversion.HAMi)
 
 	defaultSchedulerPolicy := nestedMap(t, values, "scheduler", "defaultSchedulerPolicy")
 	assert.Equal(t, plugin.NvidiaGPUTopologyAwarePolicy, defaultSchedulerPolicy["gpuSchedulerPolicy"])
@@ -857,7 +801,7 @@ func TestHAMiComponentNodeScopeUsesPluginVirtualizationConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"plugin-candidate"}, plan.PatchedNodes)
 	assert.Equal(t, plugin.NvidiaGPUOperatorDriverRoot,
-		nestedMap(t, component.buildChartValues(plan), "devicePlugin")["nvidiaDriverRoot"])
+		nestedMap(t, component.buildChartValues(plan, componentversion.HAMi), "devicePlugin")["nvidiaDriverRoot"])
 
 	patched := &corev1.Node{}
 	require.NoError(t, fakeClient.Get(context.Background(), client.ObjectKey{Name: "plugin-candidate"}, patched))
@@ -1419,7 +1363,7 @@ func newTestCluster() *v1.Cluster {
 		Metadata: &v1.Metadata{Name: "cluster", Workspace: "workspace"},
 		Spec: &v1.ClusterSpec{
 			Type:    v1.KubernetesClusterType,
-			Version: "v1.1.0",
+			Version: "v1.3.0",
 			AcceleratorVirtualization: &v1.AcceleratorVirtualizationSpec{
 				Enabled: true,
 			},

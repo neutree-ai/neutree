@@ -6,12 +6,13 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	kubeversion "k8s.io/apimachinery/pkg/version"
 
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
 const DefaultKubeSchedulerVersion = "v1.32.13"
 
-var KubeSchedulerVersionsByMinor = map[string]string{
+var legacyKubeSchedulerVersionsByMinor = map[string]string{
 	"1.26": "v1.26.15",
 	"1.27": "v1.27.16",
 	"1.28": "v1.28.15",
@@ -21,8 +22,26 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.32": "v1.32.13",
 }
 
-func KubeSchedulerVersion(serverVersion *kubeversion.Info) string {
-	if schedulerVersion, ok := KubeSchedulerVersionsByMinor[KubernetesServerMajorMinor(serverVersion)]; ok {
+var KubeSchedulerVersionsByMinor = map[string]string{
+	"1.26": "v1.26.15",
+	"1.27": "v1.27.16",
+	"1.28": "v1.28.15",
+	"1.29": "v1.29.14",
+	"1.30": "v1.30.14",
+	"1.31": "v1.31.14",
+	"1.32": "v1.32.13",
+	"1.33": "v1.33.13",
+	"1.34": "v1.34.12",
+	"1.35": "v1.35.9",
+}
+
+func KubeSchedulerVersionForHAMi(hamiVersion string, serverVersion *kubeversion.Info) string {
+	schedulerVersions := KubeSchedulerVersionsByMinor
+	if hamiVersion == component.LegacyHAMi {
+		schedulerVersions = legacyKubeSchedulerVersionsByMinor
+	}
+
+	if schedulerVersion, ok := schedulerVersions[KubernetesServerMajorMinor(serverVersion)]; ok {
 		return schedulerVersion
 	}
 
