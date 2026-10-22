@@ -97,6 +97,8 @@ func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshCon
 // Run runs a command over SSH.
 func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
 	environmentVariables map[string]interface{}, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
+	// Override RequestTTY from SSH config: a remote PTY merges stdout and stderr
+	// before the local executor can capture them separately.
 	sshCommand := []string{"ssh", "-T"}
 
 	if portForward != nil {

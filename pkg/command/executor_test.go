@@ -45,7 +45,7 @@ func TestOSExecutorExecuteOutput(t *testing.T) {
 			stdout: " \x00\xff\r\nwelcome\n\n",
 		},
 		{
-			name:   "stdout is not capped by stderr limit",
+			name:   "large stdout remains unchanged",
 			script: "printf '%020000d' 0; printf warning >&2",
 			stdout: strings.Repeat("0", 20000),
 		},
@@ -75,6 +75,17 @@ func TestOSExecutorExecuteExitError(t *testing.T) {
 		{name: "empty stderr", script: "printf partial; exit 23", stdout: "partial"},
 		{name: "stderr diagnostic", script: "printf partial; printf failure >&2; exit 23", stdout: "partial", stderr: "failure"},
 		{name: "stderr only", script: "printf failure >&2; exit 23", stderr: "failure"},
+		{
+			name:   "stderr leading and trailing whitespace",
+			script: "printf ' \\tfailure\\r\\n ' >&2; exit 23",
+			stderr: " \tfailure\r\n ",
+		},
+		{name: "whitespace only stderr", script: "printf ' \\t\\r\\n ' >&2; exit 23", stderr: " \t\r\n "},
+		{
+			name:   "binary stderr remains unchanged",
+			script: "printf ' \\000\\377\\r\\nfailure\\n\\t ' >&2; exit 23",
+			stderr: " \x00\xff\r\nfailure\n\t ",
+		},
 	}
 
 	for _, testCase := range cases {
@@ -90,7 +101,7 @@ func TestOSExecutorExecuteExitError(t *testing.T) {
 			if testCase.stderr == "" {
 				assert.Equal(t, exitError.Error(), err.Error())
 			} else {
-				assert.Contains(t, err.Error(), testCase.stderr)
+				assert.Equal(t, exitError.Error()+": "+testCase.stderr, err.Error())
 			}
 		})
 	}
@@ -289,19 +300,26 @@ func TestOSExecutorExecuteWithTimeout(t *testing.T) {
 	}
 }
 
-func TestOSExecutorExecuteStderrLimit(t *testing.T) {
-	const limit = 16 * 1024
+func TestOSExecutorExecuteFullStderr(t *testing.T) {
 	cases := []struct {
 		name string
 		size int
 	}{
-		{name: "below limit", size: limit - 1},
-		{name: "exactly at limit", size: limit},
-		{name: "one byte over limit", size: limit + 1},
-		{name: "large stderr is drained", size: 1024 * 1024},
+		{name: "below 16KiB", size: 16*1024 - 1},
+		{name: "exactly 16KiB", size: 16 * 1024},
+		{name: "over 16KiB", size: 16*1024 + 1},
+		{name: "1MiB stderr", size: 1024 * 1024},
 	}
 
 	for _, testCase := range cases {
+		beginning := " \tBEGIN\x00\xff\n"
+		middle := "\nMIDDLE\x00\xff\n"
+		ending := "\nEND\x00\xff \r\n\t "
+		padding := testCase.size - len(beginning) - len(middle) - len(ending)
+		diagnostic := beginning + strings.Repeat("a", padding/2) + middle + strings.Repeat("b", padding-padding/2) + ending
+		stderrPath := filepath.Join(t.TempDir(), "stderr")
+		require.NoError(t, os.WriteFile(stderrPath, []byte(diagnostic), 0600))
+
 		for _, exitCode := range []int{0, 23} {
 			t.Run(testCase.name+"/exit_"+strconv.Itoa(exitCode), func(t *testing.T) {
 				t.Parallel()
@@ -309,8 +327,8 @@ func TestOSExecutorExecuteStderrLimit(t *testing.T) {
 				defer cancel()
 				executor := &OSExecutor{}
 				output, err := executor.Execute(ctx, "sh", []string{
-					"-c", "printf '%0*d' \"$1\" 0 >&2; printf stdout-after-stderr; exit \"$2\"",
-					"executor-test", strconv.Itoa(testCase.size), strconv.Itoa(exitCode),
+					"-c", "cat \"$1\" >&2; printf stdout-after-stderr; exit \"$2\"",
+					"executor-test", stderrPath, strconv.Itoa(exitCode),
 				})
 				assert.Equal(t, "stdout-after-stderr", string(output))
 				if exitCode == 0 {
@@ -321,72 +339,11 @@ func TestOSExecutorExecuteStderrLimit(t *testing.T) {
 				var exitError *exec.ExitError
 				require.ErrorAs(t, err, &exitError)
 				assert.Equal(t, exitCode, exitError.ExitCode())
-				expected := strings.Repeat("0", testCase.size)
-				if testCase.size > limit {
-					expected = "[stderr truncated]\n" + strings.Repeat("0", limit-len("[stderr truncated]\n"))
-				} else {
-					assert.NotContains(t, err.Error(), "[stderr truncated]\n")
-				}
-				assert.Contains(t, err.Error(), expected)
-				assert.LessOrEqual(t, len(err.Error()), limit+256)
+				expected := exitError.Error() + ": " + diagnostic
+				assert.Equal(t, len(expected), len(err.Error()))
+				assert.True(t, expected == err.Error(), "stderr diagnostic must retain every byte")
 			})
 		}
-	}
-}
-
-func TestStderrBufferTailRetention(t *testing.T) {
-	const (
-		limit  = 16 * 1024
-		marker = "[stderr truncated]\n"
-	)
-	require.Equal(t, limit, stderrLimit)
-	require.Equal(t, marker, stderrTruncated)
-	cases := []struct {
-		name   string
-		writes []string
-	}{
-		{name: "no writes"},
-		{name: "empty write", writes: []string{""}},
-		{name: "below limit", writes: []string{strings.Repeat("a", limit-1)}},
-		{name: "exact limit", writes: []string{strings.Repeat("a", limit)}},
-		{name: "one byte over limit", writes: []string{strings.Repeat("a", limit+1)}},
-		{name: "single oversized write", writes: []string{strings.Repeat("startup noise", limit) + "No such object"}},
-		{
-			name:   "oversized write replaces buffered bytes",
-			writes: []string{"old bytes", strings.Repeat("new bytes", limit), "final diagnostic"},
-		},
-		{
-			name:   "exact limit replaces buffered bytes",
-			writes: []string{"old bytes", strings.Repeat("b", limit)},
-		},
-		{
-			name:   "segmented sliding window",
-			writes: []string{strings.Repeat("a", limit/2), strings.Repeat("b", limit/2), "c", strings.Repeat("d", limit/2), "end"},
-		},
-		{name: "empty write after truncation", writes: []string{strings.Repeat("a", limit+1), ""}},
-		{name: "binary tail", writes: []string{strings.Repeat("a", limit), "\x00\xff\r\n"}},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			var buffer stderrBuffer
-			var complete string
-			require.Empty(t, buffer.String())
-			for _, fragment := range testCase.writes {
-				written, err := buffer.Write([]byte(fragment))
-				require.NoError(t, err)
-				require.Equal(t, len(fragment), written)
-				assert.LessOrEqual(t, len(buffer.buffer), limit)
-				complete += fragment
-				expected := complete
-				if len(complete) > limit {
-					expected = marker + complete[len(complete)-limit+len(marker):]
-				}
-				require.Equal(t, expected, buffer.String())
-				require.Equal(t, expected, buffer.String())
-				assert.LessOrEqual(t, len(buffer.String()), limit)
-			}
-		})
 	}
 }
 
@@ -402,20 +359,18 @@ func TestOSExecutorExecuteRetainsFinalFailureDiagnostic(t *testing.T) {
 	require.ErrorAs(t, err, &exitError)
 	assert.Equal(t, 1, exitError.ExitCode())
 	assert.Equal(t, "partial", string(output))
-	assert.Contains(t, err.Error(), "[stderr truncated]\n")
-	assert.Contains(t, err.Error(), "\nError: No such object: missing-container")
-	assert.LessOrEqual(t, len(err.Error()), 16*1024+256)
+	expected := exitError.Error() + ": " + strings.Repeat("0", 20000) + "\nError: No such object: missing-container"
+	assert.Equal(t, len(expected), len(err.Error()))
+	assert.True(t, expected == err.Error(), "startup noise and final diagnostic must both remain intact")
 }
 
 func TestOSExecutorExecuteInheritedPipes(t *testing.T) {
-	require.Equal(t, time.Second, processWaitDelay)
 	cases := []struct {
-		name   string
-		cancel bool
-		cause  error
+		name     string
+		exitCode int
 	}{
-		{name: "exited parent", cause: exec.ErrWaitDelay},
-		{name: "canceled parent", cancel: true, cause: context.Canceled},
+		{name: "successful parent"},
+		{name: "failed parent", exitCode: 23},
 	}
 
 	for _, testCase := range cases {
@@ -423,23 +378,22 @@ func TestOSExecutorExecuteInheritedPipes(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			script := "sleep 3 & printf started; printf diagnostic >&2"
-			if testCase.cancel {
-				timer := time.AfterFunc(500*time.Millisecond, cancel)
-				defer timer.Stop()
-				script += "; wait"
-			}
+			script := "(sleep 1.5; printf 'late stdout\\000\\377 \\n'; printf ' \\tlate stderr\\000\\377\\r\\n ' >&2) & " +
+				"printf 'early stdout\\n'; printf ' \\tearly stderr\\n' >&2; exit \"$1\""
 			executor := &OSExecutor{}
 			started := time.Now()
-			output, err := executor.Execute(ctx, "sh", []string{"-c", script})
-			require.ErrorIs(t, err, testCase.cause)
-			assert.Equal(t, "started", string(output))
-			assert.Contains(t, err.Error(), "diagnostic")
-			assert.Less(t, time.Since(started), 2500*time.Millisecond)
-			if testCase.cancel {
-				var exitError *exec.ExitError
-				assert.ErrorAs(t, err, &exitError)
+			output, err := executor.Execute(ctx, "sh", []string{"-c", script, "executor-test", strconv.Itoa(testCase.exitCode)})
+			assert.Equal(t, "early stdout\nlate stdout\x00\xff \n", string(output))
+			assert.GreaterOrEqual(t, time.Since(started), 1500*time.Millisecond)
+			if testCase.exitCode == 0 {
+				require.NoError(t, err)
+				return
 			}
+			require.Error(t, err)
+			var exitError *exec.ExitError
+			require.ErrorAs(t, err, &exitError)
+			assert.Equal(t, testCase.exitCode, exitError.ExitCode())
+			assert.Equal(t, exitError.Error()+":  \tearly stderr\n \tlate stderr\x00\xff\r\n ", err.Error())
 		})
 	}
 }
