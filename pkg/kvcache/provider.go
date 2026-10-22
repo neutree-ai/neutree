@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -21,7 +22,6 @@ type Provider interface {
 type Providers map[string]Provider
 
 func (p Providers) Get(name string) (Provider, error) {
-
 	if provider := p[name]; provider != nil {
 		return provider, nil
 	}
@@ -34,9 +34,7 @@ func (p Providers) Get(name string) (Provider, error) {
 }
 
 func Validate(endpoint *v1.Endpoint, cluster *v1.Cluster, providers Providers) error {
-
 	if endpoint.Spec.KVCache == nil {
-
 		return nil
 	}
 
@@ -50,7 +48,6 @@ func Validate(endpoint *v1.Endpoint, cluster *v1.Cluster, providers Providers) e
 }
 
 func DecodeOptions(raw json.RawMessage, target interface{}) error {
-
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
