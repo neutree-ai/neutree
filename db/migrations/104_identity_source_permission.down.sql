@@ -1,0 +1,3 @@
+-- No-op. PostgreSQL cannot remove enum values; the identity_source:* values
+-- stay in api.permission_action. 105's down migration takes them out of every
+-- role.

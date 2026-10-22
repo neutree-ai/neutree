@@ -56,7 +56,7 @@ This is independent from the **CP install mode** (how `neutree-api` / `neutree-c
 cluster package version: runtime engine isolation, SSH lifecycle selection, Ray
 node-IP support, NodeAgent contract/image selection, virtualization and HAMi
 selection, metrics capabilities, selectable versions, and upgrade validation.
-Its functions accept version strings and have no cluster, storage, or HTTP
+Its Neutree package-version functions accept version strings and have no cluster, storage, or HTTP
 dependencies. Callers retain object resolution, missing/invalid-version fallback,
 error presentation, and rollout state transitions.
 

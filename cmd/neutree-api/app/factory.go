@@ -5,6 +5,7 @@ import (
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -52,11 +53,13 @@ type ProxyRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFun
 func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
-			Storage:          deps.Config.Storage,
-			StorageAccessURL: deps.Config.StorageAccessURL,
-			AuthEndpoint:     deps.Config.AuthEndpoint,
-			AuthConfig:       deps.Config.AuthConfig,
-			ImageService:     registry.NewImageService(),
+			ClusterCacheProviders: deps.Config.ClusterCacheProviders,
+			KVCacheProviders:      deps.Config.KVCacheProviders,
+			Storage:               deps.Config.Storage,
+			StorageAccessURL:      deps.Config.StorageAccessURL,
+			AuthEndpoint:          deps.Config.AuthEndpoint,
+			AuthConfig:            deps.Config.AuthConfig,
+			ImageService:          registry.NewImageService(),
 		})
 
 		return nil
@@ -68,9 +71,10 @@ type SystemRegisterFunc func(group *gin.RouterGroup, middlewares []gin.HandlerFu
 func SystemRouteFactory(register SystemRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &system.Dependencies{
-			GrafanaURL: deps.Config.GrafanaURL,
-			Version:    deps.Config.Version,
-			AuthConfig: deps.Config.AuthConfig,
+			ClusterCacheProviders: deps.Config.ClusterCacheProviders,
+			GrafanaURL:            deps.Config.GrafanaURL,
+			Version:               deps.Config.Version,
+			AuthConfig:            deps.Config.AuthConfig,
 		})
 
 		return nil
@@ -93,6 +97,9 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 			AuthConfig:   deps.Config.AuthConfig,
 			Storage:      deps.Config.Storage,
 			AuthClient:   authClient,
+			// LDAP logins read their identity sources from the database.
+			Sources:  auth.NewLoginSources(deps.Config.Storage),
+			Sessions: internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken),
 		})
 
 		return nil

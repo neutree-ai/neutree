@@ -20,6 +20,7 @@ import (
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -62,7 +63,7 @@ type ValidationInput[T any] struct {
 	Operation   clusterValidationOperation
 }
 
-func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
+func validateClusterRequest(s storage.Storage, cacheProviders *clustercache.Providers) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost && c.Request.Method != http.MethodPatch {
 			c.Next()
@@ -94,6 +95,11 @@ func validateClusterRequest(s storage.Storage) gin.HandlerFunc {
 			c.JSON(validationErrStatus(validationErr), validationErr)
 			c.Abort()
 
+			return
+		}
+
+		if err := cacheProviders.Validate(input.Current, input.New); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, &validationError{Code: "10208", Message: err.Error()})
 			return
 		}
 
@@ -1000,7 +1006,7 @@ func RegisterClusterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.Use(middlewares...)
 
 	handler := CreateStructProxyHandler[v1.Cluster](deps, storage.CLUSTERS_TABLE)
-	validation := validateClusterRequest(deps.Storage)
+	validation := validateClusterRequest(deps.Storage, deps.ClusterCacheProviders)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validation, handler)

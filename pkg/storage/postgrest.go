@@ -1119,3 +1119,102 @@ func (s *postgrestStorage) ListExternalEndpoint(option ListOption) ([]v1.Externa
 
 	return response, err
 }
+
+// uniqueViolationCode is the Postgres SQLSTATE for a unique constraint failure.
+// postgrest-go turns the PostgREST error body into "(<code>) <message>".
+const uniqueViolationCode = "(23505)"
+
+func (s *postgrestStorage) GetExternalIdentity(source, externalID string) (*ExternalIdentity, error) {
+	var response []ExternalIdentity
+
+	responseContent, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Select("source,external_id,user_id", "", false).
+		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error {
+	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Insert(data, false, "", "minimal", "").Execute()
+	if err != nil && strings.Contains(err.Error(), uniqueViolationCode) {
+		return errors.Wrap(ErrResourceConflict, err.Error())
+	}
+
+	return err
+}
+
+func (s *postgrestStorage) CreateIdentitySource(data *v1.IdentitySource) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Insert(data, true, "", "", "").Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) DeleteIdentitySource(id string) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Delete("", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) UpdateIdentitySource(id string, data *v1.IdentitySource) error {
+	_, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Update(data, "", "").Filter("id", "eq", id).Execute()
+
+	return err
+}
+
+func (s *postgrestStorage) GetIdentitySource(id string) (*v1.IdentitySource, error) {
+	var response []v1.IdentitySource
+
+	responseContent, _, err := s.postgrestClient.From(IDENTITY_SOURCE_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = parseResponse(&response, responseContent); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}
+
+func (s *postgrestStorage) ListIdentitySource(option ListOption) ([]v1.IdentitySource, error) {
+	var response []v1.IdentitySource
+	err := s.genericList(IDENTITY_SOURCE_TABLE, &response, option)
+
+	return response, err
+}
+
+func (s *postgrestStorage) ListLoginIdentitySources() ([]v1.LoginIdentitySource, error) {
+	response := []v1.LoginIdentitySource{}
+	if err := s.CallDatabaseFunction("list_login_identity_sources", map[string]interface{}{}, &response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func (s *postgrestStorage) GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error) {
+	var response []IdentitySourceSecrets
+	if err := s.CallDatabaseFunction("get_identity_source_secrets", map[string]interface{}{"p_name": name}, &response); err != nil {
+		return nil, err
+	}
+
+	if len(response) == 0 {
+		return nil, ErrResourceNotFound
+	}
+
+	return &response[0], nil
+}

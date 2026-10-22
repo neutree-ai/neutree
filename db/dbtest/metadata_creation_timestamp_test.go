@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // metadata is a composite column, so PostgREST rewrites all of it from whatever
@@ -18,10 +16,13 @@ import (
 func postgrestRequest(t *testing.T, method, path, body string) (int, string) {
 	t.Helper()
 
-	token, err := storage.CreateServiceToken(TestJWTSecret)
-	if err != nil {
-		t.Fatalf("failed to mint a service token: %v", err)
-	}
+	return postgrestAs(t, gotrueServiceToken(t), method, path, body)
+}
+
+// postgrestAs sends a request to the test PostgREST with the given bearer token
+// (none when empty, i.e. the anonymous role).
+func postgrestAs(t *testing.T, token, method, path, body string) (int, string) {
+	t.Helper()
 
 	req, err := http.NewRequest(method, GetPostgRESTURL()+path, strings.NewReader(body))
 	if err != nil {
@@ -31,8 +32,11 @@ func postgrestRequest(t *testing.T, method, path, body string) (int, string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Profile", "api")
 	req.Header.Set("Content-Profile", "api")
-	req.Header.Set("Authorization", "Bearer "+*token)
 	req.Header.Set("Prefer", "return=representation")
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

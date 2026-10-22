@@ -1,19 +1,22 @@
 package launch
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/compose-spec/compose-go/cli"
-	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
-	"github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/neutree-ai/neutree/cmd/neutree-cli/app/constants"
+	"github.com/neutree-ai/neutree/pkg/command/mocks"
 )
 
 func TestNewNeutreeCoreInstallCmd(t *testing.T) {
@@ -482,7 +485,38 @@ func TestPrepareNeutreeCoreDeployConfig_DecodesEndpointName(t *testing.T) {
 		"endpoint_name = .extracted_data.url_split[4]")
 }
 
+func currentNeutreeCoreReleaseVersion() *semver.Version {
+	minVersion := semver.MustParse(neutreeCoreCompatibilityPolicyForCurrentRelease.targetMin)
+	return semver.New(minVersion.Major(), minVersion.Minor(), minVersion.Patch(), "", "")
+}
+
+func previousNeutreeCoreReleaseVersion(t *testing.T) string {
+	t.Helper()
+
+	currentVersion := currentNeutreeCoreReleaseVersion()
+	if currentVersion.Patch() > 0 {
+		return fmt.Sprintf("v%d.%d.%d", currentVersion.Major(), currentVersion.Minor(), currentVersion.Patch()-1)
+	}
+	if currentVersion.Minor() > 0 {
+		return fmt.Sprintf("v%d.%d.0", currentVersion.Major(), currentVersion.Minor()-1)
+	}
+
+	require.NotZero(t, currentVersion.Major())
+	return fmt.Sprintf("v%d.0.0", currentVersion.Major()-1)
+}
+
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
+	policy := neutreeCoreCompatibilityPolicyForCurrentRelease
+	coreVersion := currentNeutreeCoreReleaseVersion()
+	releaseVersion := "v" + coreVersion.String()
+	nightlyVersion := releaseVersion + "-nightly-20261019"
+	enterpriseVersion := releaseVersion + "-enterprise"
+	previousVersion := previousNeutreeCoreReleaseVersion(t)
+	firstPatchVersion := coreVersion.IncPatch()
+	secondPatchVersion := firstPatchVersion.IncPatch()
+	nextVersion := semver.MustParse(policy.targetMax)
+	nextNightlyVersion := fmt.Sprintf("v%d.%d.%d-nightly-20261020", nextVersion.Major(), nextVersion.Minor(), nextVersion.Patch())
+
 	tests := []struct {
 		name          string
 		cliVersion    string
@@ -490,64 +524,80 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 		wantErr       string
 	}{
 		{
-			name:          "allows target version in same v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.2.0-nightly-20260730",
+			name:          "allows target version in current release line",
+			cliVersion:    nightlyVersion,
+			targetVersion: releaseVersion + "-nightly-20261020",
 		},
 		{
-			name:          "allows enterprise version in same v1.2 release line",
-			cliVersion:    "v1.2.0-enterprise",
-			targetVersion: "v1.2.0-enterprise",
+			name:          "allows enterprise version in current release line",
+			cliVersion:    enterpriseVersion,
+			targetVersion: enterpriseVersion,
 		},
 		{
-			name:          "allows v1.2 release target",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.2.0",
+			name:          "allows current release target",
+			cliVersion:    nightlyVersion,
+			targetVersion: releaseVersion,
+		},
+		{
+			name:          "allows patch releases in current release line",
+			cliVersion:    "v" + firstPatchVersion.String(),
+			targetVersion: "v" + secondPatchVersion.String(),
+		},
+		{
+			name:          "allows inclusive release-line lower boundary",
+			cliVersion:    policy.cliMin,
+			targetVersion: policy.targetMin,
 		},
 		{
 			name:          "allows git describe prerelease version in same release line",
-			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
-			targetVersion: "v1.2.0-nightly-20260730",
+			cliVersion:    nightlyVersion + "-5-g1e6a9fc8",
+			targetVersion: releaseVersion + "-nightly-20261020",
 		},
 		{
 			name:          "git describe CLI keeps development build flexibility",
-			cliVersion:    "v1.2.0-nightly-20260729-5-g1e6a9fc8",
+			cliVersion:    nightlyVersion + "-5-g1e6a9fc8",
 			targetVersion: fallbackNeutreeCoreVersion,
 		},
 		{
-			name:          "rejects target version below v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.1.0-nightly-20260728",
+			name:          "rejects target version below current release line",
+			cliVersion:    nightlyVersion,
+			targetVersion: previousVersion,
+			wantErr:       fmt.Sprintf("allowed target range is [%s, %s)", policy.targetMin, policy.targetMax),
+		},
+		{
+			name:          "rejects target version at exclusive release-line upper boundary",
+			cliVersion:    nightlyVersion,
+			targetVersion: policy.targetMax,
 			wantErr:       "not compatible",
 		},
 		{
-			name:          "rejects target version at v1.3 release-line boundary",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.3.0-0",
-			wantErr:       "not compatible",
-		},
-		{
-			name:          "rejects target version above v1.2 release line",
-			cliVersion:    "v1.2.0-nightly-20260729",
-			targetVersion: "v1.3.0-nightly-20260730",
+			name:          "rejects target version above current release line",
+			cliVersion:    nightlyVersion,
+			targetVersion: nextNightlyVersion,
 			wantErr:       "not compatible",
 		},
 		{
 			name:          "rejects previous release line because only current release policy is configured",
-			cliVersion:    "v1.1.0-enterprise",
-			targetVersion: "v1.1.0-enterprise",
+			cliVersion:    previousVersion + "-enterprise",
+			targetVersion: previousVersion + "-enterprise",
+			wantErr:       "no configured",
+		},
+		{
+			name:          "rejects CLI version at exclusive release-line upper boundary",
+			cliVersion:    policy.cliMax,
+			targetVersion: releaseVersion,
 			wantErr:       "no configured",
 		},
 		{
 			name:          "rejects invalid target version",
-			cliVersion:    "v1.2.0-nightly-20260729",
+			cliVersion:    nightlyVersion,
 			targetVersion: "not-a-version",
 			wantErr:       "invalid target version",
 		},
 		{
 			name:          "development CLI still validates target version format",
 			cliVersion:    "dev",
-			targetVersion: "v1.1.0",
+			targetVersion: previousVersion,
 		},
 		{
 			name:          "development CLI rejects invalid target version",
@@ -572,6 +622,10 @@ func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 }
 
 func TestDefaultNeutreeCoreVersion(t *testing.T) {
+	releaseVersion := "v" + currentNeutreeCoreReleaseVersion().String()
+	nightlyVersion := releaseVersion + "-nightly-20261019"
+	enterpriseVersion := releaseVersion + "-enterprise"
+
 	tests := []struct {
 		name       string
 		cliVersion string
@@ -579,22 +633,22 @@ func TestDefaultNeutreeCoreVersion(t *testing.T) {
 	}{
 		{
 			name:       "exact nightly tag defaults to CLI app version",
-			cliVersion: "v1.2.0-nightly-20260729",
-			want:       "v1.2.0-nightly-20260729",
+			cliVersion: nightlyVersion,
+			want:       nightlyVersion,
 		},
 		{
 			name:       "exact enterprise tag defaults to CLI app version",
-			cliVersion: "v1.2.0-enterprise",
-			want:       "v1.2.0-enterprise",
+			cliVersion: enterpriseVersion,
+			want:       enterpriseVersion,
 		},
 		{
 			name:       "git describe commit suffix falls back",
-			cliVersion: "v1.1.0-nightly-20260608-5-g1e6a9fc8",
+			cliVersion: nightlyVersion + "-5-g1e6a9fc8",
 			want:       fallbackNeutreeCoreVersion,
 		},
 		{
 			name:       "dirty tag falls back",
-			cliVersion: "v1.1.0-nightly-20260608-dirty",
+			cliVersion: nightlyVersion + "-dirty",
 			want:       fallbackNeutreeCoreVersion,
 		},
 		{
@@ -712,9 +766,10 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 }
 
 func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *testing.T) {
+	releaseVersion := "v" + currentNeutreeCoreReleaseVersion().String()
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.2.0-nightly-20260729"
+		return releaseVersion + "-nightly-20261019"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -733,7 +788,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 			deployMode: constants.DeployModeSingle,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.2.0-nightly-20260730",
+		version:   releaseVersion + "-nightly-20261020",
 	})
 
 	require.NoError(t, err)
@@ -770,6 +825,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerUsesStopTimeout(t *testing.T) {
 }
 
 func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMutation(t *testing.T) {
+	releaseVersion := "v" + currentNeutreeCoreReleaseVersion().String()
 	tempDir := t.TempDir()
 	composeDir := filepath.Join(tempDir, "neutree-core")
 	require.NoError(t, os.MkdirAll(composeDir, 0755))
@@ -780,7 +836,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.2.0-nightly-20260729"
+		return releaseVersion + "-nightly-20261019"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -795,7 +851,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsIncompatibleVersionBeforeMut
 			deployMode: constants.DeployModeSingle,
 		},
 		jwtSecret: "test-secret",
-		version:   "v1.1.0-nightly-20260728",
+		version:   previousNeutreeCoreReleaseVersion(t) + "-nightly-20261018",
 	})
 
 	require.Error(t, err)
@@ -846,6 +902,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerRejectsEmptyVersionBeforeMutation(t
 }
 
 func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompose(t *testing.T) {
+	releaseVersion := "v" + currentNeutreeCoreReleaseVersion().String()
 	tempDir := t.TempDir()
 	composeDir := filepath.Join(tempDir, "neutree-core")
 	require.NoError(t, os.MkdirAll(composeDir, 0755))
@@ -856,7 +913,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompo
 
 	oldGetCLIAppVersion := getCLIAppVersion
 	getCLIAppVersion = func() string {
-		return "v1.2.0-nightly-20260729"
+		return releaseVersion + "-nightly-20261019"
 	}
 	t.Cleanup(func() {
 		getCLIAppVersion = oldGetCLIAppVersion
@@ -874,7 +931,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerDryRunDoesNotOverwriteExistingCompo
 				dryRun:     true,
 			},
 			jwtSecret: "test-secret",
-			version:   "v1.2.0-nightly-20260730",
+			version:   releaseVersion + "-nightly-20261020",
 		})
 	})
 

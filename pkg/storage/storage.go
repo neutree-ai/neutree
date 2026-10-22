@@ -12,6 +12,8 @@ import (
 
 var (
 	ErrResourceNotFound = errors.New("resource not found")
+	// ErrResourceConflict means a write collided with a unique constraint.
+	ErrResourceConflict = errors.New("resource conflict")
 )
 
 const (
@@ -31,6 +33,8 @@ const (
 	EXTERNAL_ENDPOINT_TABLE   = "external_endpoints"
 	STATIC_NODE_CLUSTER_TABLE = "static_node_clusters"
 	STATIC_NODE_TABLE         = "static_nodes"
+	EXTERNAL_IDENTITY_TABLE   = "external_identities"
+	IDENTITY_SOURCE_TABLE     = "identity_sources"
 )
 
 type ImageRegistryStorage interface {
@@ -224,6 +228,54 @@ type StaticNodeStorage interface {
 	UpdateStaticNode(id string, data *v1.StaticNode) error
 }
 
+// ExternalIdentity links an account in an external directory to a neutree
+// user. It is internal bookkeeping for login, not an API resource.
+type ExternalIdentity struct {
+	// Source names the directory, e.g. "ldap".
+	Source string `json:"source"`
+	// ExternalID is the directory's stable ID for the account, never a name.
+	ExternalID string `json:"external_id"`
+	UserID     string `json:"user_id"`
+}
+
+type ExternalIdentityStorage interface {
+	// GetExternalIdentity returns the link for an external account, or
+	// ErrResourceNotFound when the account is not linked.
+	GetExternalIdentity(source, externalID string) (*ExternalIdentity, error)
+	// CreateExternalIdentity links an external account to a user. It returns an
+	// error wrapping ErrResourceConflict when the account is already linked.
+	CreateExternalIdentity(data *ExternalIdentity) error
+}
+
+// IdentitySourceSecrets are the decrypted secrets of an identity source. A
+// secret that is not stored is empty.
+type IdentitySourceSecrets struct {
+	LDAPBindPassword string `json:"ldap_bind_password"`
+	OIDCClientSecret string `json:"oidc_client_secret"`
+}
+
+type IdentitySourceStorage interface {
+	// CreateIdentitySource creates a new identity source in the database.
+	CreateIdentitySource(data *v1.IdentitySource) error
+	// DeleteIdentitySource deletes an identity source by its ID.
+	DeleteIdentitySource(id string) error
+	// UpdateIdentitySource updates an existing identity source. Secrets left
+	// empty keep their stored value.
+	UpdateIdentitySource(id string, data *v1.IdentitySource) error
+	// GetIdentitySource retrieves an identity source by its ID. Its secrets
+	// are never returned.
+	GetIdentitySource(id string) (*v1.IdentitySource, error)
+	// ListIdentitySource retrieves a list of identity sources with optional filters.
+	ListIdentitySource(option ListOption) ([]v1.IdentitySource, error)
+	// ListLoginIdentitySources returns the enabled identity sources that are
+	// not being deleted, with only what the login page shows.
+	ListLoginIdentitySources() ([]v1.LoginIdentitySource, error)
+	// GetIdentitySourceSecrets decrypts the secrets of the identity source with
+	// the given name. It returns ErrResourceNotFound when there is no such
+	// source or it is being deleted.
+	GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error)
+}
+
 type Storage interface {
 	ClusterStorage
 	ImageRegistryStorage
@@ -240,6 +292,8 @@ type Storage interface {
 	ExternalEndpointStorage
 	StaticNodeClusterStorage
 	StaticNodeStorage
+	ExternalIdentityStorage
+	IdentitySourceStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error
