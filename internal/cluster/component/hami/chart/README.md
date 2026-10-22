@@ -3,6 +3,11 @@
 This chart is a repackaged `hami-2.9.0` with a cherry-picked upstream extension
 that lets the scheduler device-config be supplied through chart values.
 
+The HAMi release pin is maintained in `internal/component/version.go`.
+Kubernetes scheduler image selection and Helm version normalization are maintained
+in `internal/cluster/version/kubernetes.go`; `manifests.go` handles discovery and
+chart values.
+
 ## Deviation from upstream hami-2.9.0
 
 ### `device-config.content` values override

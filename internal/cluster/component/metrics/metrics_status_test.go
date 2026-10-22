@@ -371,7 +371,7 @@ func TestCheckResourcesStatusDoesNotCheckExternalExporterDaemonSet(t *testing.T)
 	assert.Empty(t, status.Errors)
 }
 
-func TestSupportsClusterVersionAtLeast(t *testing.T) {
+func TestSupportsMetricsClusterVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
@@ -387,14 +387,21 @@ func TestSupportsClusterVersionAtLeast(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := supportsClusterVersionAtLeast(tt.version, MinKubeStateMetricsClusterVersion)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
+			metricsComponent := &MetricsComponent{cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Version: tt.version}}}
+			policies := map[string]func() (bool, error){
+				"kube state metrics": metricsComponent.supportsKubeStateMetrics,
+				"managed exporters":  metricsComponent.supportsManagedMetricsExporters,
 			}
+			for name, policy := range policies {
+				got, err := policy()
+				if tt.wantErr {
+					assert.Error(t, err, name)
+					continue
+				}
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
+				assert.NoError(t, err, name)
+				assert.Equal(t, tt.want, got, name)
+			}
 		})
 	}
 }

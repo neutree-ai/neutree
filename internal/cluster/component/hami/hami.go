@@ -11,6 +11,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
+	"github.com/neutree-ai/neutree/internal/component"
 )
 
 type HAMiComponent struct {
@@ -153,7 +154,7 @@ func (h *HAMiComponent) setNotReadyStatus(reason, message string) {
 	h.writeStatus(&v1.ComponentStatus{
 		Phase:   v1.ComponentPhaseNotReady,
 		Managed: true,
-		Version: Version,
+		Version: component.HAMi,
 		Reason:  reason,
 		Message: message,
 	})

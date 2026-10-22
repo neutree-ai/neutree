@@ -50,6 +50,30 @@ Resources whose reconcile path depends on cluster mode (chiefly `Endpoint` and `
 
 This is independent from the **CP install mode** (how `neutree-api` / `neutree-core` themselves are deployed) — see [`architecture-neutree-cli.md#deploy-mode`](architecture-neutree-cli.md#deploy-mode). The two axes happen to share "K8s vs SSH" terminology but mean different things.
 
+## Cluster Version Policy
+
+`internal/cluster/version` owns compatibility decisions based on the Neutree
+cluster package version: runtime engine isolation, SSH lifecycle selection, Ray
+node-IP support, NodeAgent contract/image selection, virtualization, metrics capabilities, selectable versions, and upgrade validation.
+Its Neutree package-version functions accept version strings and have no cluster, storage, or HTTP
+dependencies. Callers retain object resolution, missing/invalid-version fallback,
+error presentation, and rollout state transitions.
+
+The gates deliberately retain their individual comparison rules. Runtime and
+lifecycle gates compare full semantic versions; NodeAgent, virtualization, and metrics
+policies compare base versions so prereleases use the intended release contract.
+The selectable-version floor filters discovery, not cluster admission. Upgrade
+admission compares the desired version with the current spec, not observed status.
+
+`internal/component/version.go` remains the component release catalogue, consumed
+by the cluster-version policies. Virtualization support stays in
+`internal/cluster/version/hami.go`. Kubernetes scheduler maps, defaults and
+selection, server-version normalization, and Helm capability conversion live in
+`internal/cluster/version/kubernetes.go`, keeping Kubernetes server-version
+policy distinct from the Neutree cluster package-version gates. Tests for both
+axes live in `internal/cluster/version`. Generic parsing stays in
+`internal/semver`, and control-plane build metadata stays in `internal/version`.
+
 ## Vendor Plugin Pairs
 
 `internal/accelerator/plugin/gpu.go` (NVIDIA) and `internal/accelerator/plugin/amd_gpu.go` implement the same accelerator interface with vendor-specific details. The orchestrators consume this interface to discover and request GPU resources during reconcile. A change to one vendor implementation must be evaluated against:

@@ -1,8 +1,9 @@
-package component
+package version
 
 import (
 	"strings"
 
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
@@ -44,21 +45,21 @@ type nodeAgentTier struct {
 // CLI contract and the image; an accelerator profile has no say.
 //
 // The last tier is open ended, so shipping a new image is a one line change to
-// NeutreeNodeAgent in version.go and nothing here moves.
+// NeutreeNodeAgent in internal/component/version.go and nothing here moves.
 var nodeAgentTiers = []nodeAgentTier{
 	{
 		maxVersion: "v1.1.1",
 		contract:   NodeAgentContractLegacy,
-		image:      nodeAgentImage(LegacyNeutreeNodeAgent),
+		image:      nodeAgentImage(component.LegacyNeutreeNodeAgent),
 	},
 	{
 		maxVersion: "v1.2.0",
 		contract:   NodeAgentContractProfile,
-		image:      nodeAgentImage(NeutreeNodeAgentV120),
+		image:      nodeAgentImage(component.NeutreeNodeAgentV120),
 	},
 	{
 		contract: NodeAgentContractProfile,
-		image:    nodeAgentImage(NeutreeNodeAgent),
+		image:    nodeAgentImage(component.NeutreeNodeAgent),
 	},
 }
 

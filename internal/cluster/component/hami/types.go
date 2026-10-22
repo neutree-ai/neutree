@@ -4,12 +4,12 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/component"
 )
 
 const (
 	ComponentName             = "hami"
 	ChartReleaseName          = "hami"
-	Version                   = "v2.9.0"
 	SchedulerName             = "hami-scheduler"
 	DevicePluginDaemonSetName = "hami-device-plugin"
 	MonitorServiceName        = "hami-device-plugin-monitor"
@@ -27,16 +27,6 @@ const (
 	KubeSchedulerImageRegistry   = "registry.k8s.io"
 	KubeSchedulerImageRepository = "kube-scheduler"
 )
-
-var KubeSchedulerVersionsByMinor = map[string]string{
-	"1.26": "v1.26.15",
-	"1.27": "v1.27.16",
-	"1.28": "v1.28.15",
-	"1.29": "v1.29.14",
-	"1.30": "v1.30.14",
-	"1.31": "v1.31.14",
-	"1.32": "v1.32.13",
-}
 
 type HAMiStatus struct {
 	Ready                  bool
@@ -69,7 +59,7 @@ func (s HAMiStatus) ComponentStatus() *v1.ComponentStatus {
 	return &v1.ComponentStatus{
 		Phase:   phase,
 		Managed: true,
-		Version: Version,
+		Version: component.HAMi,
 		Reason:  s.Reason,
 		Message: s.Message,
 	}
