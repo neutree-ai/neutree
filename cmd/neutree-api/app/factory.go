@@ -5,6 +5,7 @@ import (
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -96,6 +97,9 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 			AuthConfig:   deps.Config.AuthConfig,
 			Storage:      deps.Config.Storage,
 			AuthClient:   authClient,
+			// LDAP logins read their identity sources from the database.
+			Sources:  auth.NewLoginSources(deps.Config.Storage),
+			Sessions: internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken),
 		})
 
 		return nil

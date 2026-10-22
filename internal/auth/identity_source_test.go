@@ -17,3 +17,8 @@ func TestManagesField(t *testing.T) {
 
 	assert.False(t, ManagesField("", "password"), "local users manage their own password")
 }
+
+func TestLinkSource(t *testing.T) {
+	assert.Equal(t, "ldap:corp-ldap", LinkSource(LDAPSource, "corp-ldap"))
+	assert.Equal(t, "oidc:keycloak", LinkSource(OIDCSource, "keycloak"))
+}

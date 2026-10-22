@@ -12,10 +12,14 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/neutree-ai/neutree/internal/auth"
+	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 // These tests cover api.external_identities (migration 106), which links a
-// directory account to the GoTrue user an LDAP login created for it.
+// directory account to the GoTrue user an LDAP login created for it, and the
+// GoTrue calls the LDAP login turns that user into a session with.
 
 // createLDAPShapedUser creates a user the way the LDAP login does: placeholder
 // email, no password. It is not deleted automatically, so tests can delete it
@@ -130,6 +134,34 @@ func TestExternalIdentities_CascadeOnUserDelete(t *testing.T) {
 	}
 }
 
+// TestExternalIdentities_ServiceRoleStorage checks the storage methods
+// neutree-api uses, through PostgREST with the service-role token.
+func TestExternalIdentities_ServiceRoleStorage(t *testing.T) {
+	s := NewTestStorage(t)
+
+	extID := newExternalID()
+	userID := createLDAPShapedUser(t, extID)
+	t.Cleanup(func() { deleteGoTrueUser(t, userID) })
+
+	if _, err := s.GetExternalIdentity("ldap", extID); !errors.Is(err, storage.ErrResourceNotFound) {
+		t.Fatalf("get before link = %v, want ErrResourceNotFound", err)
+	}
+
+	link := &storage.ExternalIdentity{Source: "ldap", ExternalID: extID, UserID: userID}
+	if err := s.CreateExternalIdentity(link); err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	got, err := s.GetExternalIdentity("ldap", extID)
+	if err != nil || *got != *link {
+		t.Fatalf("get = %+v, %v; want %+v", got, err, link)
+	}
+
+	if err := s.CreateExternalIdentity(link); !errors.Is(err, storage.ErrResourceConflict) {
+		t.Errorf("second create = %v, want ErrResourceConflict", err)
+	}
+}
+
 // TestExternalIdentities_UserAccessDenied checks a user's own session cannot
 // read or write links, neither through PostgREST nor as api_user in SQL.
 func TestExternalIdentities_UserAccessDenied(t *testing.T) {
@@ -205,4 +237,74 @@ func TestExternalIdentities_UserAccessDenied(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGoTrue_LDAPSessionFlow pins the GoTrue behaviour the LDAP login builds on:
+// an admin magic link for a password-less user verifies into a full session,
+// and a magic link for an unknown email silently signs up a new user, which is
+// why the login compares the link's user with the linked one.
+func TestGoTrue_LDAPSessionFlow(t *testing.T) {
+	issuer := auth.NewSessionIssuer(GetGoTrueURL(), gotrueServiceToken(t))
+	ctx := context.Background()
+
+	t.Run("magic link verifies into a session for the same user", func(t *testing.T) {
+		extID := newExternalID()
+		userID := createLDAPShapedUser(t, extID)
+		t.Cleanup(func() { deleteGoTrueUser(t, userID) })
+
+		link, err := issuer.GenerateMagicLink(ctx, extID+"@ldap.neutree.local")
+		if err != nil {
+			t.Fatalf("generate_link failed: %v", err)
+		}
+
+		if link.UserID != userID {
+			t.Fatalf("generate_link user = %s, want %s", link.UserID, userID)
+		}
+
+		raw, err := issuer.VerifyMagicLink(ctx, link.HashedToken)
+		if err != nil {
+			t.Fatalf("verify failed: %v", err)
+		}
+
+		var session struct {
+			AccessToken  string `json:"access_token"`
+			TokenType    string `json:"token_type"`
+			ExpiresIn    int    `json:"expires_in"`
+			ExpiresAt    int64  `json:"expires_at"`
+			RefreshToken string `json:"refresh_token"`
+			User         struct {
+				ID          string         `json:"id"`
+				AppMetadata map[string]any `json:"app_metadata"`
+			} `json:"user"`
+		}
+		if err := json.Unmarshal(raw, &session); err != nil {
+			t.Fatalf("failed to decode the session %q: %v", raw, err)
+		}
+
+		if session.AccessToken == "" || session.RefreshToken == "" || session.TokenType != "bearer" ||
+			session.ExpiresIn == 0 || session.ExpiresAt == 0 || session.User.ID != userID {
+			t.Errorf("incomplete session for %s: %s", userID, raw)
+		}
+
+		if got := session.User.AppMetadata["identity_source"]; got != "ldap" {
+			t.Errorf("app_metadata.identity_source = %v, want ldap", got)
+		}
+
+		if _, err := issuer.VerifyMagicLink(ctx, link.HashedToken); err == nil {
+			t.Error("a magic link verified twice")
+		}
+	})
+
+	t.Run("magic link for an unknown email signs up a new user", func(t *testing.T) {
+		link, err := issuer.GenerateMagicLink(ctx, newExternalID()+"@ldap.neutree.local")
+		if err != nil {
+			t.Fatalf("generate_link failed: %v", err)
+		}
+
+		if link.UserID == "" {
+			t.Fatal("generate_link returned no user")
+		}
+
+		deleteGoTrueUser(t, link.UserID)
+	})
 }
