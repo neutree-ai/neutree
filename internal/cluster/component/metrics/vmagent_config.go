@@ -118,6 +118,9 @@ scrape_configs:
   - source_labels: [__meta_kubernetes_pod_label_endpoint]
     action: replace
     target_label: application
+  - source_labels: [__meta_kubernetes_pod_label_endpoint]
+    action: replace
+    target_label: endpoint
   # Add fixed labels to all scraped metrics
   - target_label: deployment
     replacement: Backend

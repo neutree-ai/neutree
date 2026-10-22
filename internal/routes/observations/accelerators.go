@@ -28,12 +28,14 @@ var physicalMetrics = []string{
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
 	"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info",
 	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info",
-	"neutree_node_accelerator_hcu_info",
+	"neutree_node_accelerator_hcu_info", "lmcache_mp_l1_memory_usage_bytes",
 }
 
 var replicaMetrics = []string{
 	"neutree_endpoint_replica_accelerator_memory_used_bytes",
 	"neutree_endpoint_replica_accelerator_utilization_ratio",
+	"vllm:kv_cache_usage_perc",
+	"vllm:gpu_cache_usage_perc",
 }
 
 type Dependencies struct {
@@ -92,6 +94,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 		metrics := append([]string{}, physicalMetrics...)
 		var devices [][2]string
+		zcacheEnabled := false
 
 		if resource == "endpoints" {
 			items, err := deps.Storage.ListEndpoint(resourceFilter(workspace, name))
@@ -107,6 +110,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			}
 
 			cluster, endpoint = items[0].Spec.Cluster, name
+			zcacheEnabled = items[0].Spec.KVCache != nil && items[0].Spec.KVCache.Provider == "zcache"
 			metrics = replicaMetrics
 			if status := items[0].Status; status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
 				seen := map[[2]string]bool{}
@@ -174,7 +178,13 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			}
 			for node, uuids := range byNode {
 				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
+				if zcacheEnabled {
+					queries = append(queries, fmt.Sprintf("{__name__=\"lmcache_mp_l1_memory_usage_bytes\",workspace=%s,neutree_cluster=%s,node=%s}[90s]", strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node)))
+				}
 			}
+		}
+		if zcacheEnabled {
+			queries = append(queries, fmt.Sprintf("{__name__=~\"vllm:kv_cache_usage_perc|vllm:gpu_cache_usage_perc\",workspace=%s,neutree_cluster=%s,application=%s}[90s]", strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(endpoint)))
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
@@ -249,7 +259,24 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 	result := []Sample{}
 
 	for _, series := range response.Data.Result {
-		if len(series.Values) == 0 || series.Metric["accelerator_uuid"] == "" {
+		if len(series.Values) == 0 {
+			continue
+		}
+
+		name := series.Metric["__name__"]
+		isKVCacheUsage := name == "vllm:kv_cache_usage_perc" || name == "vllm:gpu_cache_usage_perc"
+		isNodeL1Usage := name == "lmcache_mp_l1_memory_usage_bytes"
+
+		if isKVCacheUsage {
+			if series.Metric["replica"] == "" || (series.Metric["endpoint"] == "" && series.Metric["application"] == "") {
+				continue
+			}
+			name = "vllm:kv_cache_usage_perc"
+		} else if isNodeL1Usage {
+			if series.Metric["node"] == "" {
+				continue
+			}
+		} else if series.Metric["accelerator_uuid"] == "" {
 			continue
 		}
 
@@ -267,7 +294,6 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 			continue
 		}
 
-		name := series.Metric["__name__"]
 		labels := map[string]string{}
 
 		for _, key := range strings.Fields("node accelerator_uuid accelerator_index accelerator_type product endpoint replica instance_id vdevice_index " +
@@ -275,6 +301,9 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 			if value, ok := series.Metric[key]; ok {
 				labels[key] = value
 			}
+		}
+		if labels["endpoint"] == "" && series.Metric["application"] != "" {
+			labels["endpoint"] = series.Metric["application"]
 		}
 
 		result = append(result, Sample{Metric: name, Labels: labels, Value: value, ObservedAt: timestamp})

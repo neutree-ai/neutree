@@ -589,13 +589,129 @@
       }
     },
     {
+      "id": 6,
+      "title": "Node L1 read and write bandwidth",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\",phase=\"staging\",direction=\"h2d\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or sum by(node) (rate(lmcache_mp_read_bytes_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "A",
+          "legendFormat": "{{node}} read",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\",phase=\"staging\",direction=\"d2h\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or sum by(node) (rate(lmcache_mp_write_bytes_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "B",
+          "legendFormat": "{{node}} write",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Cache lookup hit rate by model",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "(sum by(model_name) (rate(lmcache_mp_lookup_hit_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) / sum by(model_name) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))) and (sum by(model_name) (rate(lmcache_mp_lookup_requested_tokens_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) > 0)",
+          "refId": "A",
+          "legendFormat": "{{model_name}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "max": 1,
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 20,
       "title": "Cache nodes",
       "type": "table",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 29,
         "w": 24,
         "h": 6
       },
@@ -1000,7 +1116,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 35,
         "w": 24,
         "h": 1
       },
@@ -1012,7 +1128,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 0,
-            "y": 28,
+            "y": 36,
             "w": 12,
             "h": 7
           },
@@ -1065,7 +1181,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 12,
-            "y": 28,
+            "y": 36,
             "w": 12,
             "h": 7
           },

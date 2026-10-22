@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,7 +22,15 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
-const kubernetesDefaultDeviceCoreUnits = int64(100)
+const (
+	kubernetesDefaultDeviceCoreUnits = int64(100)
+	startupLogLimitBytes             = int64(512 * 1024)
+)
+
+var (
+	vllmModelLoadingRegex     = regexp.MustCompile(`Model loading took ([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
+	vllmAvailableKVCacheRegex = regexp.MustCompile(`Available KV cache memory:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
+)
 
 type kubernetesNeutreeDeviceAnnotation struct {
 	ID          string `json:"id,omitempty"`
@@ -56,15 +67,22 @@ type kubernetesNeutreeAcceleratorResources struct {
 }
 
 type K8sResourceClient struct {
-	client  client.Client
-	parsers map[string]resourceparser.ResourceParser
+	client       client.Client
+	parsers      map[string]resourceparser.ResourceParser
+	podLogClient util.K8sClient
 }
 
 func NewK8sResourceClient(ctrClient client.Client, parsers map[string]resourceparser.ResourceParser) *K8sResourceClient {
 	return &K8sResourceClient{
-		client:  ctrClient,
-		parsers: parsers,
+		client:       ctrClient,
+		parsers:      parsers,
+		podLogClient: &util.DefaultK8sClient{},
 	}
+}
+
+func (c *K8sResourceClient) WithPodLogClient(podLogClient util.K8sClient) *K8sResourceClient {
+	c.podLogClient = podLogClient
+	return c
 }
 
 func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]ResourceNode, error) {
@@ -217,9 +235,132 @@ func (c *K8sResourceClient) ListEndpointInstances(
 		return nil, nil
 	}
 
+	c.populateEndpointStartupMemoryStats(ctx, cluster, endpoint, namespace, podList.Items, instances)
+
 	sortEndpointInstanceResources(instances)
 
 	return instances, nil
+}
+
+func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
+	ctx context.Context,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
+	namespace string,
+	pods []corev1.Pod,
+	instances []EndpointInstanceResource,
+) {
+	podsByName := make(map[string]corev1.Pod, len(pods))
+	for _, pod := range pods {
+		podsByName[pod.Name] = pod
+	}
+
+	prevByPod := make(map[string]v1.ReplicaDeviceAllocation)
+	if endpoint != nil && endpoint.Status != nil && endpoint.Status.Resources != nil {
+		for _, prev := range endpoint.Status.Resources.Replicas {
+			key := prev.ReplicaID
+			if key == "" {
+				key = prev.InstanceID
+			}
+			if key != "" {
+				prevByPod[key] = prev
+			}
+		}
+	}
+
+	for i := range instances {
+		podName := instances[i].ReplicaID
+		if podName == "" {
+			podName = instances[i].InstanceID
+		}
+
+		pod, ok := podsByName[podName]
+		if !ok {
+			continue
+		}
+
+		containerName, containerID, ready := mainContainerReadyStatus(pod)
+		if !ready || containerID == "" {
+			continue
+		}
+
+		if prev, exists := prevByPod[podName]; exists && prev.ContainerID == containerID {
+			instances[i].ContainerID = prev.ContainerID
+			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
+			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
+			continue
+		}
+
+		if c.podLogClient == nil {
+			continue
+		}
+
+		limit := startupLogLimitBytes
+		stream, err := c.podLogClient.GetPodLogs(ctx, cluster, namespace, pod.Name, &corev1.PodLogOptions{
+			Container:  containerName,
+			LimitBytes: &limit,
+		})
+		if err != nil {
+			klog.V(4).Infof("Skipping startup log parse for pod %s/%s: %v", namespace, pod.Name, err)
+			continue
+		}
+
+		rawLogs, readErr := io.ReadAll(io.LimitReader(stream, startupLogLimitBytes))
+		_ = stream.Close()
+		if readErr != nil {
+			klog.V(4).Infof("Failed reading startup logs for pod %s/%s: %v", namespace, pod.Name, readErr)
+			continue
+		}
+
+		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs))
+		instances[i].ContainerID = containerID
+		instances[i].ModelWeightsMiB = weightsMiB
+		instances[i].KVCacheCapacityMiB = kvCacheMiB
+	}
+}
+
+func mainContainerReadyStatus(pod corev1.Pod) (string, string, bool) {
+	var containerName string
+	if len(pod.Spec.Containers) > 0 {
+		containerName = pod.Spec.Containers[0].Name
+	}
+
+	for _, status := range pod.Status.ContainerStatuses {
+		if containerName == "" || status.Name == containerName {
+			return status.Name, strings.TrimSpace(status.ContainerID), status.Ready
+		}
+	}
+
+	if len(pod.Status.ContainerStatuses) > 0 {
+		status := pod.Status.ContainerStatuses[0]
+		return status.Name, strings.TrimSpace(status.ContainerID), status.Ready
+	}
+
+	return containerName, "", false
+}
+
+func parseVLLMStartupMemoryMiB(logs string) (*float64, *float64) {
+	return parseLastGiBMatchAsMiB(vllmModelLoadingRegex, logs),
+		parseLastGiBMatchAsMiB(vllmAvailableKVCacheRegex, logs)
+}
+
+func parseLastGiBMatchAsMiB(pattern *regexp.Regexp, logs string) *float64 {
+	matches := pattern.FindAllStringSubmatch(logs, -1)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if len(matches[i]) < 2 {
+			continue
+		}
+
+		gib, err := strconv.ParseFloat(matches[i][1], 64)
+		if err != nil || gib <= 0 {
+			continue
+		}
+
+		mib := roundFloat64ToTwoDecimals(gib * 1024)
+		return &mib
+	}
+
+	return nil
 }
 
 func kubernetesPodResourceContext(pod corev1.Pod) resourceparser.KubernetesPodResourceContext {

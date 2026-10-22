@@ -2,6 +2,8 @@ package resource
 
 import (
 	"context"
+	"io"
+	"strings"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -924,4 +926,83 @@ func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnno
 	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA_A100"])
 	require.Equal(t, float64(81920),
 		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_A100"].MemoryTotalMiB)
+}
+
+type fakePodLogClient struct {
+	calls int
+	logs  string
+}
+
+func (f *fakePodLogClient) GetPod(context.Context, *v1.Cluster, string, string) (*corev1.Pod, error) {
+	return nil, nil
+}
+
+func (f *fakePodLogClient) GetPodLogs(context.Context, *v1.Cluster, string, string, *corev1.PodLogOptions) (io.ReadCloser, error) {
+	f.calls++
+	return io.NopCloser(strings.NewReader(f.logs)), nil
+}
+
+func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: k8sClusterNamespaceForTest(),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46080,"core_units":100}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node-1",
+			Containers: []corev1.Container{
+				{Name: "vllm"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "vllm",
+					Ready:       true,
+					ContainerID: "containerd://cid-1",
+				},
+			},
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+	logClient := &fakePodLogClient{
+		logs: "INFO 10-22 10:00:00 [gpu_model_runner.py:123] Model loading took 14.5000 GiB and 3.21 seconds\n" +
+			"INFO 10-22 10:00:02 [gpu_worker.py:234] Available KV cache memory: 23.25 GiB\n",
+	}
+	resClient := NewK8sResourceClient(ctrClient, nil).WithPodLogClient(logClient)
+	builder := NewResourceViewBuilder(resClient)
+
+	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
+	status, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Len(t, status.Replicas, 1)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, "containerd://cid-1", status.Replicas[0].ContainerID)
+	require.NotNil(t, status.Replicas[0].ModelWeightsMiB)
+	require.InDelta(t, 14848.0, *status.Replicas[0].ModelWeightsMiB, 0.01)
+	require.NotNil(t, status.Replicas[0].KVCacheCapacityMiB)
+	require.InDelta(t, 23808.0, *status.Replicas[0].KVCacheCapacityMiB, 0.01)
+
+	// Subsequent reconcile with the same containerID reuses cached values without calling GetPodLogs.
+	endpoint.Status = &v1.EndpointStatus{Resources: status}
+	status2, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, status.Replicas[0].ModelWeightsMiB, status2.Replicas[0].ModelWeightsMiB)
+	require.Equal(t, status.Replicas[0].KVCacheCapacityMiB, status2.Replicas[0].KVCacheCapacityMiB)
 }

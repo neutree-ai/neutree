@@ -30,8 +30,43 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 6,
         "x": 0,
+        "y": 0
+      },
+      "id": 7,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Request rate (QPS)",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
         "y": 0
       },
       "id": 1,
@@ -64,8 +99,8 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "id": 2,
@@ -98,8 +133,8 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
       "id": 3,
@@ -116,7 +151,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total tokens/s",
+      "title": "Total tokens/s (TPS)",
       "type": "stat",
       "fieldConfig": {
         "defaults": {

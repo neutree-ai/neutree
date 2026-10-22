@@ -31,6 +31,24 @@ func TestSamplesPreserveZeroAndScrapeTime(t *testing.T) {
 	require.NotContains(t, samples[0].Labels, "instance")
 }
 
+func TestDecodeKVCacheAndNodeL1Samples(t *testing.T) {
+	now := time.Now()
+	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
+ {"metric":{"__name__":"vllm:gpu_cache_usage_perc","application":"chat","replica":"chat-pod-0"},"values":[[%d,"0.42"]]},
+ {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a"},"values":[[%d,"2147483648"]]}
+ ]}}`, now.Unix()-10, now.Unix()-12)
+	samples, err := decodeSamples([]byte(body), now)
+	require.NoError(t, err)
+	require.Len(t, samples, 2)
+	require.Equal(t, "vllm:kv_cache_usage_perc", samples[0].Metric)
+	require.Equal(t, "chat", samples[0].Labels["endpoint"])
+	require.Equal(t, "chat-pod-0", samples[0].Labels["replica"])
+	require.InDelta(t, 0.42, samples[0].Value, 1e-6)
+	require.Equal(t, "lmcache_mp_l1_memory_usage_bytes", samples[1].Metric)
+	require.Equal(t, "node-a", samples[1].Labels["node"])
+	require.InDelta(t, 2147483648.0, samples[1].Value, 1e-3)
+}
+
 func TestRejectPartialOrMalformedResponse(t *testing.T) {
 	for _, body := range []string{`{}`, `{"status":"success","isPartial":true,"data":{"resultType":"matrix"}}`, `{"status":"success","data":{"resultType":"vector"}}`} {
 		_, err := decodeSamples([]byte(body), time.Now())
