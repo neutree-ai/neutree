@@ -705,13 +705,135 @@
       }
     },
     {
+      "id": 8,
+      "title": "Node L1 chunk eviction rate",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_evicted_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1))",
+          "refId": "A",
+          "legendFormat": "{{node}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:chunks/s",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 3,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "L1 chunk lifetime",
+      "type": "timeseries",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by(le) (rate(lmcache_mp_l1_chunk_lifetime_seconds_bucket{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "A",
+          "legendFormat": "Lifetime P50",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by(le) (rate(lmcache_mp_l1_chunk_lifetime_seconds_bucket{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "B",
+          "legendFormat": "Lifetime P95",
+          "instant": false,
+          "range": true
+        },
+        {
+          "expr": "histogram_quantile(0.5, sum by(le) (rate(lmcache_mp_l1_chunk_idle_before_evict_seconds_bucket{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)))",
+          "refId": "C",
+          "legendFormat": "Idle before eviction P50",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No samples",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 20,
       "title": "Cache nodes",
       "type": "table",
       "datasource": "${datasource}",
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 37,
         "w": 24,
         "h": 6
       },
@@ -768,6 +890,14 @@
           "expr": "sum by(node) (rate(lmcache_mp_l1_write_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
           "refId": "G",
           "legendFormat": "Write",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "expr": "sum by(node) (rate(lmcache_mp_l1_evicted_chunks_total{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"}[$__rate_interval]) and on(job,instance) (up{job=\"neutree-zcache\",workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",node=~\"${Node:regex}\"} == 1)) or on(node) (label_match((${CacheReady:raw}), \"node\", \"${Node:regex}\") * 0 - 1)",
+          "refId": "H",
+          "legendFormat": "Evicted",
           "instant": true,
           "range": false,
           "format": "table"
@@ -915,6 +1045,40 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Evicted"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "suffix:chunks/s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "-1": {
+                        "text": "No samples",
+                        "color": "gray"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "displayName",
+                "value": "Evicted"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Runtime"
             },
             "properties": [
@@ -1026,7 +1190,8 @@
               "Time 4": true,
               "Time 5": true,
               "Time 6": true,
-              "Time 7": true
+              "Time 7": true,
+              "Time 8": true
             },
             "renameByName": {
               "node": "Node",
@@ -1036,7 +1201,8 @@
               "Value #D": "Used",
               "Value #E": "Utilization",
               "Value #F": "Read",
-              "Value #G": "Write"
+              "Value #G": "Write",
+              "Value #H": "Evicted"
             }
           }
         },
@@ -1089,6 +1255,12 @@
                 "aggregations": [
                   "lastNotNull"
                 ]
+              },
+              "Evicted": {
+                "operation": "aggregate",
+                "aggregations": [
+                  "lastNotNull"
+                ]
               }
             }
           }
@@ -1103,7 +1275,8 @@
               "Used (lastNotNull)": "Used",
               "Utilization (lastNotNull)": "Utilization",
               "Read (lastNotNull)": "Read",
-              "Write (lastNotNull)": "Write"
+              "Write (lastNotNull)": "Write",
+              "Evicted (lastNotNull)": "Evicted"
             }
           }
         }
@@ -1116,7 +1289,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 43,
         "w": 24,
         "h": 1
       },
@@ -1128,7 +1301,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 0,
-            "y": 36,
+            "y": 44,
             "w": 12,
             "h": 7
           },
@@ -1181,7 +1354,7 @@
           "datasource": "${datasource}",
           "gridPos": {
             "x": 12,
-            "y": 36,
+            "y": 44,
             "w": 12,
             "h": 7
           },
