@@ -269,6 +269,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 	// Bound the entire collection pass, including reading response bodies.
 	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
 	defer cancel()
+
 	var engineArgs map[string]interface{}
 	if endpoint != nil && endpoint.Spec != nil {
 		engineArgs, _ = endpoint.Spec.Variables["engine_args"].(map[string]interface{})
@@ -296,6 +297,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			instances[i].ContainerID = prev.ContainerID
 			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
 			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
+
 			if overrideUnderscore || overrideDash {
 				instances[i].KVCacheCapacityMiB = nil
 			}
@@ -357,6 +359,7 @@ func parseVLLMStartupMemoryMiB(logs string, workers int) (*float64, *float64) {
 	if int64(len(logs)) > startupLogLimitBytes || workers < 1 {
 		return nil, nil
 	}
+
 	return parseWorkerMemoryMiB(vllmModelLoadingRegex, logs, workers, false),
 		parseWorkerMemoryMiB(vllmAvailableKVCacheRegex, logs, workers, true)
 }
@@ -366,11 +369,13 @@ func parseVLLMStartupMemoryMiB(logs string, workers int) (*float64, *float64) {
 // within the UI's 0.1 GiB precision. KV memory remains a budget approximation.
 func parseWorkerMemoryMiB(pattern *regexp.Regexp, logs string, workers int, takeMin bool) *float64 {
 	values := make(map[string]float64)
+
 	for _, line := range strings.Split(logs, "\n") {
 		match := pattern.FindStringSubmatch(line)
 		if len(match) < 2 {
 			continue
 		}
+
 		gib, err := strconv.ParseFloat(match[1], 64)
 		if err != nil || gib <= 0 {
 			continue
@@ -383,26 +388,34 @@ func parseWorkerMemoryMiB(pattern *regexp.Regexp, logs string, workers int, take
 		}
 		values[worker] = gib
 	}
+
 	if len(values) != workers {
 		return nil
 	}
+
 	var low, high float64
+
 	for _, value := range values {
 		if low == 0 || value < low {
 			low = value
 		}
+
 		if value > high {
 			high = value
 		}
 	}
+
 	if high-low > 0.1+1e-9 {
 		return nil
 	}
+
 	value := high
 	if takeMin {
 		value = low
 	}
+
 	mib := roundFloat64ToTwoDecimals(value * 1024)
+
 	return &mib
 }
 

@@ -172,7 +172,8 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		queries := []string{selector + "}[90s]"}
 		// Read usage and scrape health together as range vectors, preserving the
 		// actual sample timestamps rather than replacing them with query time.
-		l1Selector := fmt.Sprintf(`{__name__=~"lmcache_mp_l1_memory_usage_bytes|up",job="neutree-zcache",workspace=%s,neutree_cluster=%s`, strconv.Quote(workspace), strconv.Quote(cluster))
+		l1Selector := fmt.Sprintf(`{__name__=~"lmcache_mp_l1_memory_usage_bytes|up",job="neutree-zcache",workspace=%s,neutree_cluster=%s`,
+			strconv.Quote(workspace), strconv.Quote(cluster))
 		if resource == "clusters" {
 			queries = append(queries, l1Selector+"}[90s]")
 		}
@@ -264,6 +265,7 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 
 	result := []Sample{}
 	up := map[[2]string]bool{}
+
 	for _, series := range response.Data.Result {
 		if series.Metric["__name__"] != "up" || series.Metric["job"] != "neutree-zcache" || len(series.Values) == 0 {
 			continue
