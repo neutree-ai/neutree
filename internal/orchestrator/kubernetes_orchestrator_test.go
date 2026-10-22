@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -2383,37 +2384,60 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 	}
 }
 
-func TestEscapeEngineArgsForTemplate(t *testing.T) {
+func TestPrepareEngineArgsForTemplate(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     map[string]interface{}
-		expected map[string]interface{}
+		name           string
+		args           map[string]interface{}
+		expected       map[string]interface{}
+		vllmExpected   map[string]interface{}
+		legacyExpected map[string]interface{}
 	}{
 		{
-			name: "native map is JSON-serialized and YAML-escaped",
+			name: "native map is JSON-serialized",
 			args: map[string]interface{}{
 				"speculative-config": map[string]interface{}{"method": "mtp"},
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 			},
 		},
 		{
-			name: "native slice is JSON-serialized and YAML-escaped",
+			name: "native slice follows engine list semantics",
 			args: map[string]interface{}{
 				"allowed-origins": []interface{}{"http://localhost", "https://example.com"},
 			},
 			expected: map[string]interface{}{
+				"allowed-origins": `["http://localhost","https://example.com"]`,
+			},
+			vllmExpected: map[string]interface{}{
+				"allowed-origins": []interface{}{"http://localhost", "https://example.com"},
+			},
+			legacyExpected: map[string]interface{}{
 				"allowed-origins": `[\"http://localhost\",\"https://example.com\"]`,
 			},
 		},
 		{
-			name: "unescaped JSON string is YAML-escaped",
+			name: "JSON object string is unchanged",
 			args: map[string]interface{}{
 				"speculative-config": `{"method":"mtp"}`,
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+		},
+		{
+			name: "single-quoted object string is unchanged",
+			args: map[string]interface{}{
+				"test": `{'111':'222'}`,
+			},
+			expected: map[string]interface{}{
+				"test": `{'111':'222'}`,
 			},
 		},
 		{
@@ -2452,6 +2476,12 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 				"dtype":              "float16",
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+				"max-model-len":      "4096",
+				"override-config":    `{"temperature":0.5}`,
+				"dtype":              "float16",
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 				"max-model-len":      "4096",
 				"override-config":    `{\"temperature\":0.5}`,
@@ -2460,10 +2490,22 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			escapeEngineArgsForTemplate(tt.args)
-			assert.Equal(t, tt.expected, tt.args)
+	for _, engineName := range []string{v1.EngineNameVLLM, v1.EngineNameSGLang, v1.EngineNameLlamaCpp, "custom-engine"} {
+		t.Run(engineName, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					args := maps.Clone(tt.args)
+					expected := tt.expected
+					if engineName == v1.EngineNameVLLM && tt.vllmExpected != nil {
+						expected = tt.vllmExpected
+					}
+					if engineName == "custom-engine" && tt.legacyExpected != nil {
+						expected = tt.legacyExpected
+					}
+					prepareEngineArgsForTemplate(args, engineName)
+					assert.Equal(t, expected, args)
+				})
+			}
 		})
 	}
 }
@@ -2496,14 +2538,6 @@ func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
 	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
 
 	assert.Equal(t, `[1,2]`, args["cuda_graph_bs"])
-}
-
-func TestPrepareEngineArgsForTemplate_CustomEngineKeepsLegacyEscaping(t *testing.T) {
-	args := map[string]interface{}{
-		"config": map[string]interface{}{"method": "mtp"},
-	}
-	prepareEngineArgsForTemplate(args, "custom-engine")
-	assert.Equal(t, `{\"method\":\"mtp\"}`, args["config"])
 }
 
 func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
@@ -4058,6 +4092,7 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 		{"backslash", `C:\models\weights`, `C:\models\weights`},
 		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
 		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"single-quoted object string", `{'111':'222'}`, `{'111':'222'}`},
 		{"literal escaped JSON", `{\"ratio\":\"1:1\"}`, `{\"ratio\":\"1:1\"}`},
 		{"native object", map[string]interface{}{"ratio": "1:1", "enabled": true}, `{"enabled":true,"ratio":"1:1"}`},
 		{"native object with special text", map[string]interface{}{"path": `C:\models\weights`, "text": "it's \"quoted\"\n$(printf expanded)"},
@@ -4065,7 +4100,7 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
 	}
 	keys := []string{"enable_prefix_caching", "no-enable-prefix-caching", "trust-remote-code", "enforce_eager",
-		"disable-log-stats", "aggregate_engine_logging", "skip_tokenizer_init", "hf_token"}
+		"disable-log-stats", "aggregate_engine_logging", "skip_tokenizer_init", "hf_token", "test"}
 	for _, tc := range cases {
 		t.Run(tc.templateKey, func(t *testing.T) {
 			for _, value := range values {
