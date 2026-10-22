@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
@@ -32,7 +33,7 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 		return false, nil
 	}
 
-	isNew, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	isNew, err := clusterversion.SupportsEngineIsolation(cluster.Spec.Version)
 	if err != nil {
 		return false, errors.Errorf("failed to parse cluster version %q: %v", cluster.Spec.Version, err)
 	}
@@ -1281,7 +1282,7 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
 	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
-			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
+			isNew, err := clusterversion.SupportsEngineIsolation(deployedCluster.Spec.Version)
 			if err == nil && !isNew {
 				applicationEnv["VLLM_SKIP_P2P_CHECK"] = "1"
 			}

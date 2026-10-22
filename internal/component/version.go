@@ -1,6 +1,7 @@
-// Package component defines versions and compatibility rules for bundled
-// infrastructure components shared by deployment and cluster renderers.
+// Package component defines release pins for bundled infrastructure components.
 package component
+
+const HAMi = "v2.9.0"
 
 // VictoriaMetrics image versions.
 const (

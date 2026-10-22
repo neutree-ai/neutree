@@ -1,18 +1,10 @@
 package metrics
 
 import (
-	"strings"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/component"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
-)
-
-const (
-	MinKubeStateMetricsClusterVersion = "v1.1.0"
-	// Clusters before v1.1.0 do not support Neutree-managed metrics exporters.
-	MinManagedMetricsExporterClusterVersion = "v1.1.0"
 )
 
 var metricsManifestTemplate = `
@@ -610,7 +602,7 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 	}
 	nodeAgentImage := "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 
-	selection, err := component.SelectNodeAgent(m.cluster.GetVersion())
+	selection, err := clusterversion.SelectNodeAgent(m.cluster.GetVersion())
 
 	if err == nil && selection.Image != "" {
 		nodeAgentImage = selection.Image
@@ -647,28 +639,9 @@ func (m *MetricsComponent) buildManifestVariables() MetricsManifestVariables {
 }
 
 func (m *MetricsComponent) supportsKubeStateMetrics() (bool, error) {
-	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinKubeStateMetricsClusterVersion)
+	return clusterversion.SupportsKubeStateMetrics(m.cluster.GetVersion())
 }
 
 func (m *MetricsComponent) supportsManagedMetricsExporters() (bool, error) {
-	return supportsClusterVersionAtLeast(m.cluster.GetVersion(), MinManagedMetricsExporterClusterVersion)
-}
-
-func supportsClusterVersionAtLeast(version string, minVersion string) (bool, error) {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return false, nil
-	}
-
-	baseVersion, err := semver.BaseVersion(version)
-	if err != nil {
-		return false, err
-	}
-
-	lessThanMinVersion, err := semver.LessThan(baseVersion, minVersion)
-	if err != nil {
-		return false, err
-	}
-
-	return !lessThanMinVersion, nil
+	return clusterversion.SupportsManagedMetricsExporters(m.cluster.GetVersion())
 }

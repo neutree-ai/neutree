@@ -10,7 +10,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	ntsemver "github.com/neutree-ai/neutree/internal/semver"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -127,7 +128,7 @@ func defaultChartValues(imageRegistry string) map[string]interface{} {
 	return mergeChartValues(chartValuesFromYAML(defaultChartValuesYAML), map[string]interface{}{
 		"global": map[string]interface{}{
 			"imageRegistry": imageRegistry,
-			"imageTag":      Version,
+			"imageTag":      component.HAMi,
 		},
 	})
 }
@@ -173,13 +174,13 @@ func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, component.HAMi),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, component.HAMi),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, component.HAMi),
 			},
 		},
 	})
@@ -217,51 +218,42 @@ func (h *HAMiComponent) normalizedImagePrefix() string {
 	return imagePrefix
 }
 
-// DefaultKubeSchedulerVersion is used when the target cluster version cannot be
-// detected or parsed.
-func DefaultKubeSchedulerVersion() string {
-	return KubeSchedulerVersionsByMinor["1.32"]
-}
-
 func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 	serverVersion, err := getKubernetesServerVersion(h.cluster)
 	if err != nil {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi scheduler image, using default",
 			"error", err,
-			"defaultVersion", DefaultKubeSchedulerVersion())
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 
-		return DefaultKubeSchedulerVersion()
+		return clusterversion.DefaultKubeSchedulerVersion
 	}
 
-	minorVersion := kubeServerMajorMinor(serverVersion)
+	minorVersion := clusterversion.KubernetesServerMajorMinor(serverVersion)
+	schedulerVersion := clusterversion.KubeSchedulerVersion(serverVersion)
 
-	schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]
-	if !ok {
-		// For an unmapped Kubernetes minor, use the exact detected scheduler
-		// version and rely on the customer's offline image package to provide it.
-		detectedVersion := kubeSchedulerVersionFromServerVersion(serverVersion)
+	if _, ok := clusterversion.KubeSchedulerVersionsByMinor[minorVersion]; !ok {
+		gitVersion := ""
+		if serverVersion != nil {
+			gitVersion = serverVersion.GitVersion
+		}
+
+		detectedVersion := clusterversion.KubernetesServerVersion(serverVersion)
 		if detectedVersion != "" {
 			h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
-				"kubernetesVersion", serverVersion.GitVersion,
+				"kubernetesVersion", gitVersion,
 				"minorVersion", minorVersion,
 				"detectedVersion", detectedVersion)
 
-			return detectedVersion
+			return schedulerVersion
 		}
 
 		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
-			"kubernetesVersion", serverVersion.GitVersion,
+			"kubernetesVersion", gitVersion,
 			"minorVersion", minorVersion,
-			"defaultVersion", DefaultKubeSchedulerVersion())
-
-		return DefaultKubeSchedulerVersion()
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 	}
 
 	return schedulerVersion
-}
-
-func kubeSchedulerVersionFromServerVersion(serverVersion *kubeversion.Info) string {
-	return kubeServerSemver(serverVersion)
 }
 
 func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
@@ -269,87 +261,12 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 	if err != nil {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi chart render, using default",
 			"error", err,
-			"defaultVersion", DefaultKubeSchedulerVersion())
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 
-		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
+		return clusterversion.KubeVersionFromBaseVersion(clusterversion.DefaultKubeSchedulerVersion)
 	}
 
-	return kubeVersionFromServerVersion(serverVersion)
-}
-
-func kubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
-	version := kubeServerSemver(serverVersion)
-	if version == "" {
-		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
-	}
-
-	return kubeVersionFromBaseVersion(version)
-}
-
-func kubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
-	majorMinor, err := ntsemver.MajorMinor(version)
-	if err != nil {
-		return chartutil.KubeVersion{
-			Version: version,
-			Major:   "1",
-			Minor:   "32",
-		}
-	}
-
-	parts := strings.SplitN(majorMinor, ".", 2)
-
-	return chartutil.KubeVersion{
-		Version: version,
-		Major:   parts[0],
-		Minor:   parts[1],
-	}
-}
-
-func kubeServerSemver(serverVersion *kubeversion.Info) string {
-	if serverVersion == nil {
-		return ""
-	}
-
-	if version, err := ntsemver.BaseVersion(serverVersion.GitVersion); err == nil && version != "" {
-		return version
-	}
-
-	return kubeServerSemverFromMajorMinor(serverVersion.Major, serverVersion.Minor)
-}
-
-func kubeServerMajorMinor(serverVersion *kubeversion.Info) string {
-	version := kubeServerSemver(serverVersion)
-	if version == "" {
-		return ""
-	}
-
-	majorMinor, err := ntsemver.MajorMinor(version)
-	if err != nil {
-		return ""
-	}
-
-	return majorMinor
-}
-
-func kubeServerSemverFromMajorMinor(major, minor string) string {
-	major = kubeVersionNumericPrefix(strings.TrimPrefix(major, "v"))
-	minor = kubeVersionNumericPrefix(minor)
-
-	if major == "" || minor == "" {
-		return ""
-	}
-
-	return "v" + major + "." + minor + ".0"
-}
-
-func kubeVersionNumericPrefix(value string) string {
-	for i, r := range value {
-		if r < '0' || r > '9' {
-			return value[:i]
-		}
-	}
-
-	return value
+	return clusterversion.KubeVersionFromServerVersion(serverVersion)
 }
 
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {

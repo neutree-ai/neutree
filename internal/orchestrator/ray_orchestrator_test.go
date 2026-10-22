@@ -108,6 +108,34 @@ func newTestRayOrchestratorCtx(s *storagemocks.MockStorage, dashboardService *da
 
 }
 
+func TestIsNewClusterVersionMissingVersionFallback(test *testing.T) {
+	cases := []struct {
+		name    string
+		cluster *v1.Cluster
+	}{
+		{name: "nil cluster"},
+		{
+			name:    "nil spec ignores status version",
+			cluster: &v1.Cluster{Status: &v1.ClusterStatus{Version: "v1.2.0"}},
+		},
+		{
+			name: "empty spec version ignores status version",
+			cluster: &v1.Cluster{
+				Spec:   &v1.ClusterSpec{},
+				Status: &v1.ClusterStatus{Version: "v1.2.0"},
+			},
+		},
+	}
+
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			isNew, err := isNewClusterVersion(testCase.cluster)
+			assert.NoError(test, err)
+			assert.False(test, isNew)
+		})
+	}
+}
+
 func TestRayOrchestrator_ApplicationNamingConsistency(t *testing.T) {
 	endpoint := &v1.Endpoint{
 		Metadata: &v1.Metadata{
