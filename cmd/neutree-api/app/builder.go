@@ -15,6 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/routes/images"
 	"github.com/neutree-ai/neutree/internal/routes/logs"
 	"github.com/neutree-ai/neutree/internal/routes/models"
+	"github.com/neutree-ai/neutree/internal/routes/observations"
 	"github.com/neutree-ai/neutree/internal/routes/proxies"
 	"github.com/neutree-ai/neutree/internal/routes/system"
 )
@@ -46,6 +47,10 @@ func NewBuilder() *Builder {
 		"endpoint-logs":   LogsRouteFactory(logs.RegisterEndpointLogsRoutes),
 		"ai-traces":       LogsRouteFactory(logs.RegisterAITraceRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
+		"accelerator-observations": func(deps *RouteOptions) error {
+			observations.RegisterRoutes(deps.Group, deps.Middlewares, &observations.Dependencies{Storage: deps.Config.Storage, MetricsURL: deps.Config.MetricsURL})
+			return nil
+		},
 		// Auth route (no auth required for authentication itself)
 		"auth": AuthRouteFactory(auth.RegisterAuthRoutes),
 		// Credentials route is used for get resource with sensitive data
@@ -89,12 +94,13 @@ func NewBuilder() *Builder {
 	}
 	// Register default middlewares to routes
 	defaultRoutesToMiddlewares := map[string][]string{
-		"models":        {"auth"},
-		"serve-proxy":   {"auth"},
-		"k8s-proxy":     {"auth"},
-		"system":        {"auth"},
-		"endpoint-logs": {"auth"},
-		"ai-traces":     {"auth"},
+		"models":                   {"auth"},
+		"serve-proxy":              {"auth"},
+		"k8s-proxy":                {"auth"},
+		"system":                   {"auth"},
+		"endpoint-logs":            {"auth"},
+		"accelerator-observations": {"auth"},
+		"ai-traces":                {"auth"},
 		// PostgREST proxy routes now require auth middleware to:
 		// 1. Validate JWT tokens (pass-through to PostgREST)
 		// 2. Convert API keys to PostgREST-compatible JWT tokens
