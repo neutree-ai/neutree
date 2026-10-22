@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
@@ -24,12 +25,14 @@ import (
 
 const (
 	kubernetesDefaultDeviceCoreUnits = int64(100)
-	startupLogLimitBytes             = int64(512 * 1024)
+	startupLogLimitBytes             = int64(2 * 1024 * 1024)
+	startupLogTimeout                = 3 * time.Second
 )
 
 var (
 	vllmModelLoadingRegex     = regexp.MustCompile(`Model loading took ([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
 	vllmAvailableKVCacheRegex = regexp.MustCompile(`Available KV cache memory:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
+	vllmWorkerRegex           = regexp.MustCompile(`\(([^)]*(?:Worker|EngineCore)[^)]*)\)`)
 )
 
 type kubernetesNeutreeDeviceAnnotation struct {
@@ -78,11 +81,6 @@ func NewK8sResourceClient(ctrClient client.Client, parsers map[string]resourcepa
 		parsers:      parsers,
 		podLogClient: &util.DefaultK8sClient{},
 	}
-}
-
-func (c *K8sResourceClient) WithPodLogClient(podLogClient util.K8sClient) *K8sResourceClient {
-	c.podLogClient = podLogClient
-	return c
 }
 
 func (c *K8sResourceClient) ListNodes(ctx context.Context, _ *v1.Cluster) ([]ResourceNode, error) {
@@ -268,6 +266,16 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 		}
 	}
 
+	// Bound the entire collection pass, including reading response bodies.
+	logCtx, cancel := context.WithTimeout(ctx, startupLogTimeout)
+	defer cancel()
+	var engineArgs map[string]interface{}
+	if endpoint != nil && endpoint.Spec != nil {
+		engineArgs, _ = endpoint.Spec.Variables["engine_args"].(map[string]interface{})
+	}
+	_, overrideUnderscore := engineArgs["num_gpu_blocks_override"]
+	_, overrideDash := engineArgs["num-gpu-blocks-override"]
+
 	for i := range instances {
 		podName := instances[i].ReplicaID
 		if podName == "" {
@@ -288,15 +296,18 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			instances[i].ContainerID = prev.ContainerID
 			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
 			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
+			if overrideUnderscore || overrideDash {
+				instances[i].KVCacheCapacityMiB = nil
+			}
 			continue
 		}
 
-		if c.podLogClient == nil {
+		if c.podLogClient == nil || logCtx.Err() != nil {
 			continue
 		}
 
-		limit := startupLogLimitBytes
-		stream, err := c.podLogClient.GetPodLogs(ctx, cluster, namespace, pod.Name, &corev1.PodLogOptions{
+		limit := startupLogLimitBytes + 1
+		stream, err := c.podLogClient.GetPodLogs(logCtx, cluster, namespace, pod.Name, &corev1.PodLogOptions{
 			Container:  containerName,
 			LimitBytes: &limit,
 		})
@@ -305,14 +316,17 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			continue
 		}
 
-		rawLogs, readErr := io.ReadAll(io.LimitReader(stream, startupLogLimitBytes))
+		rawLogs, readErr := io.ReadAll(io.LimitReader(stream, limit))
 		_ = stream.Close()
 		if readErr != nil {
 			klog.V(4).Infof("Failed reading startup logs for pod %s/%s: %v", namespace, pod.Name, readErr)
 			continue
 		}
 
-		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs))
+		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs), len(instances[i].Devices))
+		if overrideUnderscore || overrideDash {
+			kvCacheMiB = nil
+		}
 		instances[i].ContainerID = containerID
 		instances[i].ModelWeightsMiB = weightsMiB
 		instances[i].KVCacheCapacityMiB = kvCacheMiB
@@ -339,28 +353,57 @@ func mainContainerReadyStatus(pod corev1.Pod) (string, string, bool) {
 	return containerName, "", false
 }
 
-func parseVLLMStartupMemoryMiB(logs string) (*float64, *float64) {
-	return parseLastGiBMatchAsMiB(vllmModelLoadingRegex, logs),
-		parseLastGiBMatchAsMiB(vllmAvailableKVCacheRegex, logs)
+func parseVLLMStartupMemoryMiB(logs string, workers int) (*float64, *float64) {
+	if int64(len(logs)) > startupLogLimitBytes || workers < 1 {
+		return nil, nil
+	}
+	return parseWorkerMemoryMiB(vllmModelLoadingRegex, logs, workers, false),
+		parseWorkerMemoryMiB(vllmAvailableKVCacheRegex, logs, workers, true)
 }
 
-func parseLastGiBMatchAsMiB(pattern *regexp.Regexp, logs string) *float64 {
-	matches := pattern.FindAllStringSubmatch(logs, -1)
-	for i := len(matches) - 1; i >= 0; i-- {
-		if len(matches[i]) < 2 {
+// Logs provide rounded per-worker measurements, not device UUIDs. Reuse a
+// value across devices only when every worker is present and the spread is
+// within the UI's 0.1 GiB precision. KV memory remains a budget approximation.
+func parseWorkerMemoryMiB(pattern *regexp.Regexp, logs string, workers int, takeMin bool) *float64 {
+	values := make(map[string]float64)
+	for _, line := range strings.Split(logs, "\n") {
+		match := pattern.FindStringSubmatch(line)
+		if len(match) < 2 {
 			continue
 		}
-
-		gib, err := strconv.ParseFloat(matches[i][1], 64)
+		gib, err := strconv.ParseFloat(match[1], 64)
 		if err != nil || gib <= 0 {
 			continue
 		}
-
-		mib := roundFloat64ToTwoDecimals(gib * 1024)
-		return &mib
+		worker := ""
+		if id := vllmWorkerRegex.FindStringSubmatch(line); len(id) > 1 {
+			worker = id[1]
+		} else if workers > 1 {
+			continue
+		}
+		values[worker] = gib
 	}
-
-	return nil
+	if len(values) != workers {
+		return nil
+	}
+	var low, high float64
+	for _, value := range values {
+		if low == 0 || value < low {
+			low = value
+		}
+		if value > high {
+			high = value
+		}
+	}
+	if high-low > 0.1+1e-9 {
+		return nil
+	}
+	value := high
+	if takeMin {
+		value = low
+	}
+	mib := roundFloat64ToTwoDecimals(value * 1024)
+	return &mib
 }
 
 func kubernetesPodResourceContext(pod corev1.Pod) resourceparser.KubernetesPodResourceContext {

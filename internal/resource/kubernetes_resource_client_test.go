@@ -2,9 +2,11 @@ package resource
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
@@ -929,16 +931,20 @@ func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnno
 }
 
 type fakePodLogClient struct {
-	calls int
-	logs  string
+	calls   int
+	logs    string
+	getLogs func(context.Context) (io.ReadCloser, error)
 }
 
 func (f *fakePodLogClient) GetPod(context.Context, *v1.Cluster, string, string) (*corev1.Pod, error) {
 	return nil, nil
 }
 
-func (f *fakePodLogClient) GetPodLogs(context.Context, *v1.Cluster, string, string, *corev1.PodLogOptions) (io.ReadCloser, error) {
+func (f *fakePodLogClient) GetPodLogs(ctx context.Context, _ *v1.Cluster, _, _ string, opts *corev1.PodLogOptions) (io.ReadCloser, error) {
 	f.calls++
+	if f.getLogs != nil {
+		return f.getLogs(ctx)
+	}
 	return io.NopCloser(strings.NewReader(f.logs)), nil
 }
 
@@ -983,7 +989,8 @@ func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
 		logs: "INFO 10-22 10:00:00 [gpu_model_runner.py:123] Model loading took 14.5000 GiB and 3.21 seconds\n" +
 			"INFO 10-22 10:00:02 [gpu_worker.py:234] Available KV cache memory: 23.25 GiB\n",
 	}
-	resClient := NewK8sResourceClient(ctrClient, nil).WithPodLogClient(logClient)
+	resClient := NewK8sResourceClient(ctrClient, nil)
+	resClient.podLogClient = logClient
 	builder := NewResourceViewBuilder(resClient)
 
 	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
@@ -1005,4 +1012,76 @@ func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
 	require.Equal(t, 1, logClient.calls)
 	require.Equal(t, status.Replicas[0].ModelWeightsMiB, status2.Replicas[0].ModelWeightsMiB)
 	require.Equal(t, status.Replicas[0].KVCacheCapacityMiB, status2.Replicas[0].KVCacheCapacityMiB)
+
+	for _, key := range []string{"num_gpu_blocks_override", "num-gpu-blocks-override"} {
+		endpoint.Spec.Variables = map[string]interface{}{"engine_args": map[string]interface{}{key: 128}}
+		for _, cached := range []bool{true, false} {
+			endpoint.Status.Resources = status
+			if !cached {
+				endpoint.Status.Resources = nil
+			}
+			got, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+			require.NoError(t, err)
+			require.NotNil(t, got.Replicas[0].ModelWeightsMiB)
+			require.Nil(t, got.Replicas[0].KVCacheCapacityMiB, key)
+		}
+	}
+	endpoint.Spec.Variables = nil
+	endpoint.Status.Resources = nil
+	logClient.getLogs = func(ctx context.Context) (io.ReadCloser, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), startupLogTimeout)
+		return &blockedLogReader{ctx: ctx}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	got, err := builder.BuildEndpointResources(ctx, k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Nil(t, got.Replicas[0].ModelWeightsMiB)
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+}
+
+type blockedLogReader struct{ ctx context.Context }
+
+func (r *blockedLogReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+func (r *blockedLogReader) Close() error { return nil }
+
+func TestVLLMStartupMemoryWorkers(t *testing.T) {
+	worker := func(rank int, weights, kv string) string {
+		return fmt.Sprintf("(Worker_TP%d pid=%d) Model loading took %s GiB\n(Worker_TP%d pid=%d) Available KV cache memory: %s GiB\n", rank, rank+10, weights, rank, rank+10, kv)
+	}
+	for _, tc := range []struct {
+		name        string
+		logs        string
+		workers     int
+		weights, kv float64
+	}{
+		{"single", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 1, 6, 8},
+		{"symmetric TP", worker(0, "6", "8") + worker(1, "6", "8"), 2, 6, 8},
+		{"within display precision", worker(0, "6", "8") + worker(1, "6.05", "8.09"), 2, 6.05, 8},
+		{"asymmetric weights", worker(0, "6", "8") + worker(1, "7", "8"), 2, 0, 8},
+		{"asymmetric KV", worker(0, "6", "8") + worker(1, "6", "9"), 2, 6, 0},
+		{"missing worker", worker(0, "6", "8"), 2, 0, 0},
+		{"duplicate is not another worker", worker(0, "6", "8") + worker(0, "6", "8"), 2, 0, 0},
+		{"missing KV line", worker(0, "6", "8") + "(Worker_TP1 pid=11) Model loading took 6 GiB\n", 2, 6, 0},
+		{"no worker identity", "Model loading took 6 GiB\nModel loading took 6 GiB\n", 2, 0, 0},
+		{"truncated", worker(0, "6", "8") + strings.Repeat("x", int(startupLogLimitBytes)), 1, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			weights, kv := parseVLLMStartupMemoryMiB(tc.logs, tc.workers)
+			for i, got := range []*float64{weights, kv} {
+				want := []float64{tc.weights, tc.kv}[i]
+				if want == 0 {
+					require.Nil(t, got)
+				} else {
+					require.NotNil(t, got)
+					require.InDelta(t, want*1024, *got, 0.01)
+				}
+			}
+		})
+	}
 }

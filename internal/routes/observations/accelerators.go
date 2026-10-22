@@ -28,7 +28,7 @@ var physicalMetrics = []string{
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
 	"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info",
 	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info",
-	"neutree_node_accelerator_hcu_info", "lmcache_mp_l1_memory_usage_bytes",
+	"neutree_node_accelerator_hcu_info",
 }
 
 var replicaMetrics = []string{
@@ -170,6 +170,12 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		// A range vector preserves original scrape timestamps. An instant vector
 		// reports evaluation time and can make old measurements look fresh.
 		queries := []string{selector + "}[90s]"}
+		// Read usage and scrape health together as range vectors, preserving the
+		// actual sample timestamps rather than replacing them with query time.
+		l1Selector := fmt.Sprintf(`{__name__=~"lmcache_mp_l1_memory_usage_bytes|up",job="neutree-zcache",workspace=%s,neutree_cluster=%s`, strconv.Quote(workspace), strconv.Quote(cluster))
+		if resource == "clusters" {
+			queries = append(queries, l1Selector+"}[90s]")
+		}
 		if len(devices) > 0 {
 			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info"}
 			byNode := map[string][]string{}
@@ -179,7 +185,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			for node, uuids := range byNode {
 				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
 				if zcacheEnabled {
-					queries = append(queries, fmt.Sprintf("{__name__=\"lmcache_mp_l1_memory_usage_bytes\",workspace=%s,neutree_cluster=%s,node=%s}[90s]", strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node)))
+					queries = append(queries, l1Selector+",node="+strconv.Quote(node)+"}[90s]")
 				}
 			}
 		}
@@ -257,6 +263,19 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 	}
 
 	result := []Sample{}
+	up := map[[2]string]bool{}
+	for _, series := range response.Data.Result {
+		if series.Metric["__name__"] != "up" || series.Metric["job"] != "neutree-zcache" || len(series.Values) == 0 {
+			continue
+		}
+		last := series.Values[len(series.Values)-1]
+		var timestamp float64
+		var raw string
+		if json.Unmarshal(last[0], &timestamp) == nil && json.Unmarshal(last[1], &raw) == nil &&
+			timestamp >= float64(now.Unix()-90) && timestamp <= float64(now.Unix()+5) {
+			up[[2]string{series.Metric["job"], series.Metric["instance"]}] = raw == "1"
+		}
+	}
 
 	for _, series := range response.Data.Result {
 		if len(series.Values) == 0 {
@@ -273,7 +292,7 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 			}
 			name = "vllm:kv_cache_usage_perc"
 		} else if isNodeL1Usage {
-			if series.Metric["node"] == "" {
+			if series.Metric["node"] == "" || !up[[2]string{series.Metric["job"], series.Metric["instance"]}] {
 				continue
 			}
 		} else if series.Metric["accelerator_uuid"] == "" {
@@ -304,6 +323,9 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 		}
 		if labels["endpoint"] == "" && series.Metric["application"] != "" {
 			labels["endpoint"] = series.Metric["application"]
+		}
+		if isNodeL1Usage && series.Metric["pod"] != "" {
+			labels["pod"] = series.Metric["pod"]
 		}
 
 		result = append(result, Sample{Metric: name, Labels: labels, Value: value, ObservedAt: timestamp})

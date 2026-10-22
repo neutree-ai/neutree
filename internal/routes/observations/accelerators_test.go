@@ -35,8 +35,9 @@ func TestDecodeKVCacheAndNodeL1Samples(t *testing.T) {
 	now := time.Now()
 	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
  {"metric":{"__name__":"vllm:gpu_cache_usage_perc","application":"chat","replica":"chat-pod-0"},"values":[[%d,"0.42"]]},
- {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a"},"values":[[%d,"2147483648"]]}
- ]}}`, now.Unix()-10, now.Unix()-12)
+ {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","job":"neutree-zcache","instance":"runtime","pod":"cache-pod"},"values":[[%d,"2147483648"]]},
+ {"metric":{"__name__":"up","job":"neutree-zcache","instance":"runtime"},"values":[[%d,"1"]]}
+ ]}}`, now.Unix()-10, now.Unix()-12, now.Unix()-12)
 	samples, err := decodeSamples([]byte(body), now)
 	require.NoError(t, err)
 	require.Len(t, samples, 2)
@@ -53,6 +54,30 @@ func TestRejectPartialOrMalformedResponse(t *testing.T) {
 	for _, body := range []string{`{}`, `{"status":"success","isPartial":true,"data":{"resultType":"matrix"}}`, `{"status":"success","data":{"resultType":"vector"}}`} {
 		_, err := decodeSamples([]byte(body), time.Now())
 		require.Error(t, err)
+	}
+}
+
+func TestL1SamplesRequireHealthyScrapeAndKeepOriginalTime(t *testing.T) {
+	now := time.Now()
+	for _, state := range []string{"0", "1"} {
+		body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
+ {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","pod":"old","job":"neutree-zcache","instance":"old"},"values":[[%d,"6442450944"]]},
+ {"metric":{"__name__":"up","job":"neutree-zcache","instance":"old"},"values":[[%d,"%s"]]},
+ {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","pod":"new","job":"neutree-zcache","instance":"new"},"values":[[%d,"0"]]},
+ {"metric":{"__name__":"up","job":"neutree-zcache","instance":"new"},"values":[[%d,"1"]]}
+ ]}}`, now.Unix()-40, now.Unix()-10, state, now.Unix()-5, now.Unix()-5)
+		samples, err := decodeSamples([]byte(body), now)
+		require.NoError(t, err)
+		want := 1
+		if state == "1" {
+			want = 2
+		}
+		require.Len(t, samples, want)
+		latest := samples[len(samples)-1]
+		require.Zero(t, latest.Value)
+		require.Equal(t, "new", latest.Labels["pod"])
+		require.Equal(t, float64(now.Unix()-5), latest.ObservedAt)
+		require.NotContains(t, latest.Labels, "instance")
 	}
 }
 
