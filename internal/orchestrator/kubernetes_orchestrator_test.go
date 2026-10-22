@@ -2215,7 +2215,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp_size":        4,
 			},
 		},
@@ -2230,7 +2230,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2288,7 +2288,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2306,7 +2306,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2329,7 +2329,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp-size":        "2",
 			},
 		},
@@ -2353,7 +2353,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp_size":        "1",
 			},
 		},
@@ -2368,7 +2368,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 	}
@@ -4021,135 +4021,67 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 	assert.Nil(t, status.Resources)
 }
 
-func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
+func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 	cases := []struct {
 		templateKey string
 		engineName  string
 	}{
-		{
-			templateKey: "vllm-v0.31.0",
-			engineName:  v1.EngineNameVLLM,
-		},
-		{
-			templateKey: "vllm-v0.24.0-p2",
-			engineName:  v1.EngineNameVLLM,
-		},
-		{
-			templateKey: "vllm-v0.17.1-p2",
-			engineName:  v1.EngineNameVLLM,
-		},
-		{
-			templateKey: "sglang-v0.5.10-p2",
-			engineName:  v1.EngineNameSGLang,
-		},
+		{"vllm-v0.31.0", v1.EngineNameVLLM},
+		{"vllm-v0.24.0-p2", v1.EngineNameVLLM},
+		{"vllm-v0.17.1-p2", v1.EngineNameVLLM},
+		{"sglang-v0.5.10-p2", v1.EngineNameSGLang},
 	}
-	booleanCases := []struct {
-		name    string
-		value   interface{}
-		enabled bool
+	values := []struct {
+		name  string
+		value interface{}
+		want  string
 	}{
-		{name: "bool true", value: true, enabled: true},
-		{name: "string true", value: "true", enabled: true},
-		{name: "bool false", value: false},
-		{name: "string false", value: "false"},
+		{"bool true", true, "true"},
+		{"string true", "true", "true"},
+		{"bool false", false, "false"},
+		{"string false", "false", "false"},
+		{"integer", 1, "1"},
+		{"zero", 0, "0"},
+		{"empty string", "", ""},
 	}
-
+	keys := []string{"enable_prefix_caching", "no-enable-prefix-caching", "trust-remote-code", "enforce_eager",
+		"disable-log-stats", "aggregate_engine_logging", "skip_tokenizer_init", "hf_token"}
 	for _, tc := range cases {
 		t.Run(tc.templateKey, func(t *testing.T) {
-			tmpl := realEmbeddedTemplate(t, tc.templateKey)
-			optionalFlags := []string{"enable_prefix_caching", "trust-remote-code", "enforce_eager"}
-			storeTrueFlags := []string{"disable-log-stats", "aggregate_engine_logging"}
-			valueArgs := map[string]interface{}{
-				"revision":      "false",
-				"tokenizer":     "true",
-				"max_model_len": "4096",
-				"max-num-seqs":  256,
-			}
-			if tc.engineName == v1.EngineNameSGLang {
-				optionalFlags = []string{"experts_shared_outer_loras"}
-				storeTrueFlags = []string{"skip_tokenizer_init", "trust-remote-code", "is_embedding"}
-				valueArgs = map[string]interface{}{
-					"revision":             "false",
-					"tokenizer_path":       "true",
-					"context_length":       "4096",
-					"max-running-requests": 256,
-				}
-			}
-			flagName := func(key string) string {
-				if tc.engineName == v1.EngineNameSGLang {
-					return strings.ReplaceAll(key, "_", "-")
-				}
-				return key
-			}
-
-			for _, booleanCase := range booleanCases {
-				t.Run(booleanCase.name, func(t *testing.T) {
-					engineArgs := make(map[string]interface{})
-					for key, value := range valueArgs {
-						engineArgs[key] = value
+			for _, value := range values {
+				t.Run(value.name, func(t *testing.T) {
+					data := newDeploymentManifestVariables()
+					data.EndpointName = "test-endpoint"
+					data.NeutreeVersion = "test"
+					data.ClusterName = "test-cluster"
+					data.Workspace = "test-workspace"
+					data.RoutingLogic = "roundrobin"
+					data.Namespace = "test-namespace"
+					data.EngineName = tc.engineName
+					data.EngineVersion = "test"
+					data.ImagePrefix = "registry.example.com"
+					data.ImageRepo = "engine"
+					data.ImageTag = "test"
+					data.ModelArgs = map[string]interface{}{
+						"task": "text-generation", "path": "/models/test", "serve_name": "test",
 					}
-					for _, key := range optionalFlags {
-						engineArgs[key] = booleanCase.value
+					for _, key := range keys {
+						data.EngineArgs[key] = value.value
 					}
-					for _, key := range storeTrueFlags {
-						engineArgs[key] = booleanCase.value
-					}
-
-					data := DeploymentManifestVariables{
-						NeutreeVersion:  "v0.1.0",
-						ClusterName:     "test-cluster",
-						Workspace:       "test-workspace",
-						Namespace:       "default",
-						ImagePrefix:     "registry.example.com",
-						ImageRepo:       "myrepo",
-						ImageTag:        "v1.0.0",
-						ImagePullSecret: "my-secret",
-						EngineName:      tc.engineName,
-						EngineVersion:   "v1.0.0",
-						EndpointName:    "test-endpoint",
-						ModelArgs: map[string]interface{}{
-							"name":          "gpt-4",
-							"task":          "text-generation",
-							"path":          "/mnt/models/gpt-4",
-							"registry_type": "bentoml",
-							"registry_path": "/mnt/registry/gpt-4-model",
-							"serve_name":    "gpt-4-serve",
-						},
-						EngineArgs: engineArgs,
-						Resources: map[string]string{
-							"cpu":    "500m",
-							"memory": "1Gi",
-						},
-						RoutingLogic: "roundrobin",
-						Replicas:     1,
-					}
-
-					objs, err := buildDeploymentObjects(tmpl, data)
-					require.NoError(t, err, "template render must succeed")
-
-					tokens := extractEngineCLITokens(t, objs)
-
-					for _, key := range optionalFlags {
-						flag := flagName(key)
-						if booleanCase.enabled {
-							assertFlagWithoutValue(t, tokens, "--"+flag)
-							assert.NotContains(t, tokens, "--no-"+flag)
-						} else {
-							assertFlagWithoutValue(t, tokens, "--no-"+flag)
-							assert.NotContains(t, tokens, "--"+flag)
+					prepareEngineArgsForTemplate(data.EngineArgs, tc.engineName)
+					objects, err := buildDeploymentObjects(realEmbeddedTemplate(t, tc.templateKey), data)
+					require.NoError(t, err)
+					tokens := extractEngineCLITokens(t, objects)
+					for _, key := range keys {
+						flag := "--" + key
+						if tc.engineName == v1.EngineNameSGLang {
+							flag = strings.ReplaceAll(flag, "_", "-")
 						}
-					}
-					for _, key := range storeTrueFlags {
-						flag := flagName(key)
-						if booleanCase.enabled {
-							assertFlagWithoutValue(t, tokens, "--"+flag)
+						if value.want == "" {
+							assertFlagWithoutValue(t, tokens, flag)
 						} else {
-							assert.NotContains(t, tokens, "--"+flag)
+							assertFlagWithValue(t, tokens, flag, value.want)
 						}
-						assert.NotContains(t, tokens, "--no-"+flag)
-					}
-					for key, value := range valueArgs {
-						assertFlagWithValue(t, tokens, "--"+flagName(key), fmt.Sprint(value))
 					}
 				})
 			}

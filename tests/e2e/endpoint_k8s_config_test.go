@@ -512,7 +512,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 
 		It("should deploy with all schema data types", Label("C2642246", "C2724892"), func() {
-			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
+			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgsK8s()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
@@ -539,7 +539,6 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
 
@@ -557,14 +556,15 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).NotTo(ContainSubstring(fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())),
 					"list arg must not remain a single JSON array token")
 
-				Expect(allArgs).To(ContainElement("--no-enable_prefix_caching"),
-					"BooleanOptionalAction false must emit the negative flag")
 				Expect(allArgs).NotTo(ContainElement("--enable_prefix_caching"),
-					"BooleanOptionalAction false must not emit the positive flag")
-				negativeFlagIdx := slices.Index(allArgs, "--no-enable_prefix_caching")
-				if negativeFlagIdx+1 < len(allArgs) {
-					Expect(allArgs[negativeFlagIdx+1]).To(HavePrefix("--"),
-						"negative boolean flag must not have a value")
+					"unconfigured key must not emit a flag")
+				for _, flag := range []string{"--enforce_eager", "--no-enable-prefix-caching"} {
+					flagIdx := slices.Index(allArgs, flag)
+					Expect(flagIdx).NotTo(Equal(-1), "empty-string arg must emit %s", flag)
+					if flagIdx+1 < len(allArgs) {
+						Expect(allArgs[flagIdx+1]).To(HavePrefix("--"),
+							"empty-string arg %s must not have a value", flag)
+					}
 				}
 
 				found = true
@@ -610,7 +610,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		It("should deploy SGLang with all schema data types", Label("C2649562"), func() {
 			yamlPath := applyEndpoint(schemaEpName, clusterName,
 				withEngine("sglang", profileEngineVersionFor("sglang")),
-				withEngineArgs(allSchemaTypesEngineArgsSGLang()))
+				withEngineArgs(allSchemaTypesEngineArgsSGLangK8s()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
@@ -638,7 +638,11 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
 				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean true (flag-only)")
+				flagIdx := slices.Index(allArgs, "--disable-cuda-graph")
+				Expect(flagIdx).NotTo(Equal(-1), "empty-string arg must emit --disable-cuda-graph")
+				if flagIdx+1 < len(allArgs) {
+					Expect(allArgs[flagIdx+1]).To(HavePrefix("--"), "empty-string arg must not have a value")
+				}
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
@@ -648,11 +652,11 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
 
 				Expect(argsStr).NotTo(ContainSubstring("--skip-tokenizer-init"),
-					"store_true false must not emit its flag (kebab form)")
+					"unconfigured key must not emit a flag (kebab form)")
 				Expect(argsStr).NotTo(ContainSubstring("--skip_tokenizer_init"),
-					"store_true false must not emit its flag (underscore form)")
+					"unconfigured key must not emit a flag (underscore form)")
 				Expect(allArgs).NotTo(ContainElement("--no-skip-tokenizer-init"),
-					"store_true false must not emit a negative flag")
+					"unconfigured key must not emit a negative flag")
 
 				found = true
 

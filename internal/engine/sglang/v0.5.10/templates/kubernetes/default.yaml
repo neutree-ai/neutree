@@ -115,54 +115,9 @@ spec:
                time so the same dict drives the CLI here and the Python
                kwargs on the SSH/Ray path. */}}
           {{- if .EngineArgs }}
-          {{- $storeTrueArgs := list
-             "abort-on-priority-when-disabled" "allow-auto-truncate" "checkpoint-engine-wait-weights-before-ready"
-             "collect-tokens-histogram" "constrained-json-disable-any-whitespace" "delete-ckpt-after-loading"
-             "disable-chunked-prefix-cache" "disable-cuda-graph" "disable-cuda-graph-padding" "disable-custom-all-reduce"
-             "disable-fast-image-processor" "disable-flashinfer-autotune" "disable-flashinfer-cutlass-moe-fp4-allgather"
-             "disable-hybrid-swa-memory" "disable-outlines-disk-cache" "disable-overlap-schedule" "disable-piecewise-cuda-graph"
-             "disable-priority-preemption" "disable-radix-cache" "disable-shared-experts-fusion" "disable-tokenizer-batch-decode"
-             "disaggregation-decode-enable-offload-kvcache" "enable-adaptive-dispatch-to-encoder" "enable-aiter-allreduce-fusion"
-             "enable-attn-tp-input-scattered" "enable-broadcast-mm-inputs-process" "enable-cache-report" "enable-cudagraph-gc"
-             "enable-custom-logit-processor" "enable-deterministic-inference" "enable-double-sparsity" "enable-dp-attention"
-             "enable-dp-lm-head" "enable-draft-weights-cpu-backup" "enable-dynamic-batch-tokenizer" "enable-dynamic-chunking"
-             "enable-elastic-expert-backup" "enable-eplb" "enable-expert-distribution-metrics" "enable-flashinfer-allreduce-fusion"
-             "enable-fp32-lm-head" "enable-fused-moe-sum-all-reduce" "enable-fused-qk-norm-rope" "enable-hierarchical-cache"
-             "enable-hisparse" "enable-layerwise-nvtx-marker" "enable-lmcache" "enable-lora" "enable-lora-overlap-loading"
-             "enable-memory-saver" "enable-metrics" "enable-metrics-for-all-schedulers" "enable-mfu-metrics" "enable-mixed-chunk"
-             "enable-mm-global-cache" "enable-mscclpp" "enable-multi-layer-eagle" "enable-multimodal" "enable-nan-detection"
-             "enable-nccl-nvls" "enable-nsa-prefill-context-parallel" "enable-p2p-check" "enable-pdmux"
-             "enable-precise-embedding-interpolation" "enable-prefill-context-parallel" "enable-prefill-delayer" "enable-prefix-mm-cache"
-             "enable-priority-scheduling" "enable-profile-cuda-graph" "enable-request-time-stats-logging" "enable-return-hidden-states"
-             "enable-return-routed-experts" "enable-single-batch-overlap" "enable-ssl-refresh" "enable-streaming-session"
-             "enable-symm-mem" "enable-tokenizer-batch-encode" "enable-torch-compile" "enable-torch-compile-debug-mode"
-             "enable-torch-symm-mem" "enable-trace" "enable-two-batch-overlap" "enable-weights-cpu-backup" "encoder-only"
-             "enforce-disable-flashinfer-allreduce-fusion" "enforce-piecewise-cuda-graph" "export-metrics-to-file"
-             "flashinfer-mla-disable-ragged" "grpc-mode" "incremental-streaming-output" "is-embedding" "keep-mm-feature-on-device"
-             "language-only" "log-requests" "mm-enable-dp-encoder" "pre-warm-nccl" "quantize-and-serve"
-             "remote-instance-weight-loader-start-seed-via-transfer-engine" "schedule-low-priority-values-first" "show-time-cost"
-             "skip-server-warmup" "skip-tokenizer-init" "sleep-on-idle" "stream-output" "stream-response-default-include-usage"
-             "triton-attention-reduce-in-fp32" "trust-remote-code" "use-ray" "weight-loader-disable-mmap"
-          }}
-          {{- $booleanOptionalArgs := list
-             "experts-shared-outer-loras"
-          }}
           {{- range $key, $value := .EngineArgs }}
-          {{- $flag := $key | replace "_" "-" }}
-          {{- $text := printf "%v" $value }}
-          {{- if and (has $flag $storeTrueArgs) (or (eq $text "true") (eq $text "false")) }}
-          {{- if eq $text "true" }}
-          - --{{ $flag }}
-          {{- end }}
-          {{- else if and (has $flag $booleanOptionalArgs) (or (eq $text "true") (eq $text "false")) }}
-          - --{{ if eq $text "false" }}no-{{ end }}{{ $flag }}
-          {{- else if and (hasPrefix "no-" $flag) (has (trimPrefix "no-" $flag) $booleanOptionalArgs)
-                         (or (eq $text "true") (eq $text "false")) }}
-          {{- if eq $text "true" }}
-          - --{{ $flag }}
-          {{- end }}
-          {{- else }}
-          - --{{ $flag }}
+          - --{{ $key | replace "_" "-" }}
+          {{- if ne (printf "%v" $value) "" }}
           - "{{ $value }}"
           {{- end }}
           {{- end }}

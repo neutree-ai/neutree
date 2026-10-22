@@ -65,6 +65,71 @@ An Endpoint is a deployed inference service. Key configurations:
 - **Variables**: Engine-specific parameters (e.g., `gpu_memory_utilization` for vLLM), validated against engine's schema
 - **Env**: Environment variables injected into the inference container
 
+### Kubernetes Engine Arguments
+
+The built-in Kubernetes templates render `spec.variables.engine_args` as CLI
+arguments. They do not infer boolean actions from parameter names or maintain
+engine-specific flag lists:
+
+- A non-empty scalar value produces `--key value`. Booleans, including native
+  `true` and `false`, are passed as the literal strings `true` and `false`.
+- An empty string produces only `--key`, with no following value token. Omit
+  the key entirely when the option should not be passed. An empty string is
+  not a way to pass an empty value token to an option that requires a value.
+- Existing vLLM list expansion and engine-argument JSON serialization are
+  unchanged. SGLang still converts underscore option names to hyphenated CLI
+  names; vLLM preserves the configured spelling.
+
+For example, a vLLM Kubernetes endpoint can configure:
+
+```yaml
+spec:
+  variables:
+    engine_args:
+      enforce_eager: ""
+      no-enable-prefix-caching: ""
+      max_model_len: 4096
+      revision: "false"
+```
+
+This emits `--enforce_eager --max_model_len 4096
+--no-enable-prefix-caching --revision false` as separate argv tokens.
+
+Parameters implemented as `store_true`, `store_false`, or
+`BooleanOptionalAction` do not accept a following `true` or `false` value.
+Configure the actual positive or negative CLI option with `""` instead. To
+leave a one-way flag unset, omit its key; do not configure `false`. Optional-value
+options also preserve the supplied value: for example, `hf_token: true` emits
+`--hf_token true`, whereas `hf_token: ""` emits the bare `--hf_token` option.
+Check the selected engine version's CLI before choosing an option name.
+
+Existing Kubernetes configurations that relied on automatic boolean-to-flag
+conversion must be migrated to this explicit form before their next deployment
+reconciliation. The SGLang metrics default uses `enable_metrics: ""` on Kubernetes
+so it remains a bare flag; the SSH/Ray default remains the native boolean `true`.
+SSH/Ray applications receive Python argument values rather than these CLI tokens
+and retain their existing typed-argument behavior.
+
+#### Schema and UI Compatibility
+
+For a CLI-only schema, represent flag-only inputs as strings so an explicit
+empty string can mean a bare flag. If a parameter genuinely supports multiple
+input types, JSON Schema can express them with, for example,
+`"type": ["string", "boolean"]`; do not assume this changes how the CLI consumes
+arguments. Under literal passthrough, even a native boolean becomes a value
+token, not a bare flag.
+
+The current UI only handles individual schema types. It has no union-type
+selector and skips newly added empty values, so changing a schema alone does
+not enable reliable creation of bare flags or selection between string and
+boolean values. Configure explicit empty-string flags through Endpoint YAML/API
+until the UI supports preserving empty strings and choosing a union type.
+
+The built-in engine schemas are shared with SSH/Ray. This change does not
+bulk-convert boolean fields to strings, because doing so would change the
+Python-argument input contract. Schema and UI follow-up must distinguish CLI
+inputs from native Python arguments and preserve the latter's types.
+
 ## Load Balancing
 
 When an endpoint has multiple replicas, the routing strategy affects KV cache hit rates. Supported strategies:

@@ -1498,9 +1498,7 @@ func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath strin
 }
 
 // allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON
-// Schema data types. enforce_eager covers the true-bool path (flag emitted with
-// no value); enable_prefix_caching covers BooleanOptionalAction false
-// (--no-enable_prefix_caching).
+// Schema data types, including native booleans for SSH engine configuration.
 func allSchemaTypesEngineArgs() []EngineArg {
 	return []EngineArg{
 		{Key: "dtype", Value: "half"},
@@ -1514,23 +1512,44 @@ func allSchemaTypesEngineArgs() []EngineArg {
 	}
 }
 
+func allSchemaTypesEngineArgsK8s() []EngineArg {
+	return []EngineArg{
+		{Key: "dtype", Value: "half"},
+		{Key: "max_model_len", Value: "4096"},
+		{Key: "gpu_memory_utilization", Value: "0.85"},
+		{Key: "enforce_eager", Value: `""`},
+		{Key: "no-enable-prefix-caching", Value: `""`},
+		{Key: "seed", Value: "42"},
+		{Key: "served_model_name", Value: fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())},
+		{Key: "override_generation_config", Value: `'{"temperature": 0.8}'`},
+	}
+}
+
 // allSchemaTypesEngineArgsSGLang returns an engine_args slice for the SGLang
 // engine covering int / float / bool / string / string-enum / object /
-// nested-object. Keys use ServerArgs dataclass field names (underscore form);
-// the K8s template applies sprig replace "_" "-" so the CLI side sees kebab.
-// Array types are intentionally absent — SGLang's only array-shaped CLI flag
-// is `--cuda-graph-bs` (nargs="+"), which the single-token K8s template can't
-// render.
-//
-// disable_cuda_graph covers the true-bool path (flag emitted with no value);
-// skip_tokenizer_init covers the false-bool path (flag dropped entirely,
-// since SGLang argparse rejects `--flag false` for store_true flags).
+// nested-object. Keys use ServerArgs dataclass field names (underscore form),
+// with native booleans for SSH engine configuration.
 func allSchemaTypesEngineArgsSGLang() []EngineArg {
 	return []EngineArg{
 		{Key: "tp_size", Value: "1"},
 		{Key: "mem_fraction_static", Value: "0.85"},
 		{Key: "disable_cuda_graph", Value: "true"},
 		{Key: "skip_tokenizer_init", Value: "false"},
+		{Key: "dtype", Value: "auto"},
+		{Key: "chunked_prefill_size", Value: "8192"},
+		{Key: "served_model_name", Value: "neu-sglang-test"},
+		{Key: "attention_backend", Value: "torch_native"},
+		{Key: "cuda_graph_max_bs", Value: "4"},
+		{Key: "preferred_sampling_params", Value: `'{"temperature": 0.7, "top_p": 0.9}'`},
+		{Key: "json_model_override_args", Value: `'{"max_position_embeddings": 32768}'`},
+	}
+}
+
+func allSchemaTypesEngineArgsSGLangK8s() []EngineArg {
+	return []EngineArg{
+		{Key: "tp_size", Value: "1"},
+		{Key: "mem_fraction_static", Value: "0.85"},
+		{Key: "disable_cuda_graph", Value: `""`},
 		{Key: "dtype", Value: "auto"},
 		{Key: "chunked_prefill_size", Value: "8192"},
 		{Key: "served_model_name", Value: "neu-sglang-test"},

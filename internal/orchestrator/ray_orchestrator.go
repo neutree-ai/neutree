@@ -1090,7 +1090,7 @@ func setDefaultSGLangEnableMetricsForApplication(endpoint *v1.Endpoint, app *das
 		engineArgs = make(map[string]interface{})
 	}
 
-	setDefaultSGLangEnableMetrics(endpoint.Spec.Engine.Engine, engineArgs)
+	setDefaultSGLangEnableMetrics(endpoint.Spec.Engine.Engine, engineArgs, true)
 	app.Args["engine_args"] = engineArgs
 }
 

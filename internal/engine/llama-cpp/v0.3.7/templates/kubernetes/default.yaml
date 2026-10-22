@@ -102,7 +102,7 @@ spec:
               --model $(find {{ .ModelArgs.path }} -path "*/{{ .ModelArgs.file }}" | head -n 1)
               --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
               {{- if eq .ModelArgs.task "text-embedding" }} --embedding true{{- end }}
-              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }} "{{ $value }}" {{- end }}{{- end }}
+              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{ if ne (printf "%v" $value) "" }} "{{ $value }}"{{ end }} {{- end }}{{- end }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}

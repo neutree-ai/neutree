@@ -122,30 +122,7 @@ spec:
           - classify
           {{- end }}
           {{- if .EngineArgs }}
-          {{- $storeTrueArgs := list
-             "aggregate-engine-logging" "data-parallel-multi-port-external-lb" "disable-log-stats" "grpc" "headless"
-          }}
-          {{- $booleanOptionalArgs := list
-             "allow-credentials" "allow-deprecated-quantization" "async-scheduling" "calculate-kv-scales" "cudagraph-metrics"
-             "data-parallel-external-lb" "data-parallel-hybrid-lb" "disable-cascade-attn" "disable-chunked-mm-input"
-             "disable-custom-all-reduce" "disable-fastapi-docs" "disable-hybrid-kv-cache-manager" "disable-nccl-for-dp-synchronization"
-             "disable-sliding-window" "disable-uvicorn-access-log" "enable-auto-tool-choice" "enable-chunked-prefill"
-             "enable-cumem-allocator" "enable-dbo" "enable-elastic-ep" "enable-ep-weight-filter" "enable-eplb" "enable-expert-parallel"
-             "enable-flash-late-interaction" "enable-flashinfer-autotune" "enable-force-include-usage" "enable-layerwise-nvtx-tracing"
-             "enable-log-deltas" "enable-log-outputs" "enable-log-requests" "enable-logging-iteration-details" "enable-lora"
-             "enable-mamba-cache-stochastic-rounding" "enable-mfu-metrics" "enable-mixed-moe-lora-format" "enable-mm-embeds"
-             "enable-offline-docs" "enable-prefix-caching" "enable-prompt-embeds" "enable-prompt-tokens-details"
-             "enable-request-id-headers" "enable-return-routed-experts" "enable-server-load-tracking" "enable-sleep-mode"
-             "enable-ssl-refresh" "enable-tokenizer-info-endpoint" "enable-tower-connector-lora" "enforce-eager"
-             "exclude-tools-when-tool-choice-none" "fail-on-environ-validation" "fully-sharded-loras" "interleave-mm-strings"
-             "jit-monitor-verbose" "kv-cache-metrics" "kv-sharing-fast-prefill" "language-model-only" "log-error-stack" "mm-encoder-only"
-             "numa-bind" "ray-workers-use-nsight" "return-tokens-as-token-ids" "scheduler-reserve-full-isl" "skip-mm-profiling"
-             "skip-tokenizer-init" "specialize-active-lora" "tokens-only" "trust-remote-code" "trust-request-chat-template"
-             "use-fp64-gumbel" "use-tqdm-on-load"
-          }}
           {{- range $key, $value := .EngineArgs }}
-          {{- $flag := $key | replace "_" "-" }}
-          {{- $text := printf "%v" $value }}
           {{- if kindIs "slice" $value }}
           {{- if gt (len $value) 0 }}
           - --{{ $key }}
@@ -153,24 +130,11 @@ spec:
           - {{ $item | quote }}
           {{- end }}
           {{- end }}
-          {{- else if and (has $flag $storeTrueArgs) (or (eq $text "true") (eq $text "false")) }}
-          {{- if eq $text "true" }}
-          - --{{ $key }}
-          {{- end }}
-          {{- else if and (has $flag $booleanOptionalArgs) (or (eq $text "true") (eq $text "false")) }}
-          - --{{ if eq $text "false" }}no-{{ end }}{{ $key }}
-          {{- else if and (hasPrefix "no-" $flag) (has (trimPrefix "no-" $flag) $booleanOptionalArgs)
-                         (or (eq $text "true") (eq $text "false")) }}
-          {{- if eq $text "true" }}
-          - --{{ $key }}
-          {{- end }}
-          {{- else if and (eq $flag "hf-token") (kindIs "bool" $value) }}
-          {{- if $value }}
-          - --{{ $key }}
-          {{- end }}
           {{- else }}
           - --{{ $key }}
+          {{- if ne (printf "%v" $value) "" }}
           - "{{ $value }}"
+          {{- end }}
           {{- end }}
           {{- end }}
           {{- end }}

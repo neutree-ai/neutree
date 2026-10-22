@@ -131,7 +131,7 @@ func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVa
 	}
 }
 
-func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]interface{}) {
+func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]interface{}, defaultValue interface{}) {
 	if engineName != v1.EngineNameSGLang {
 		return
 	}
@@ -144,7 +144,7 @@ func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]inte
 		return
 	}
 
-	engineArgs["enable_metrics"] = true
+	engineArgs["enable_metrics"] = defaultValue
 }
 
 // setEngineTensorParallelDefault auto-sets the engine's tensor-parallel-size
@@ -188,7 +188,7 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 		}
 	}
 
-	setDefaultSGLangEnableMetrics(engine.Metadata.Name, data.EngineArgs)
+	setDefaultSGLangEnableMetrics(engine.Metadata.Name, data.EngineArgs, "")
 
 	// Auto-set tensor-parallel-size after user args are merged, so we can
 	// detect user-provided values in either key format. Applies to engines
