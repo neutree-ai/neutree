@@ -125,15 +125,15 @@ spec:
           {{- range $key, $value := .EngineArgs }}
           {{- if kindIs "slice" $value }}
           {{- if gt (len $value) 0 }}
-          - --{{ $key }}
+          - {{ printf "--%s" $key | quote }}
           {{- range $item := $value }}
           - {{ $item | quote }}
           {{- end }}
           {{- end }}
           {{- else }}
-          - --{{ $key }}
+          - {{ printf "--%s" $key | quote }}
           {{- if ne (printf "%v" $value) "" }}
-          - "{{ $value }}"
+          - {{ $value | quote }}
           {{- end }}
           {{- end }}
           {{- end }}

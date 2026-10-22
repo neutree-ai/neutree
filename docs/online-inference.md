@@ -76,7 +76,13 @@ engine-specific flag lists:
 - An empty string produces only `--key`, with no following value token. Omit
   the key entirely when the option should not be passed. An empty string is
   not a way to pass an empty value token to an option that requires a value.
-- Existing vLLM list expansion and engine-argument JSON serialization are
+- Every vLLM/SGLang option and value token is YAML-quoted by the template.
+  Quotes, backslashes, and line breaks survive YAML decoding without becoming
+  extra characters in the engine's argv. Structured values are serialized to
+  JSON first, without pre-escaping them for YAML. llama.cpp's shell command
+  quotes each engine option/value for the shell, then quotes the complete
+  command for YAML so shell substitutions in values remain literal.
+- Existing vLLM list expansion, including JSON-array string expansion, is
   unchanged. SGLang still converts underscore option names to hyphenated CLI
   names; vLLM preserves the configured spelling.
 
@@ -102,6 +108,15 @@ leave a one-way flag unset, omit its key; do not configure `false`. Optional-val
 options also preserve the supplied value: for example, `hf_token: true` emits
 `--hf_token true`, whereas `hf_token: ""` emits the bare `--hf_token` option.
 Check the selected engine version's CLI before choosing an option name.
+
+Supply JSON objects or ordinary JSON strings without manually adding YAML
+backslash escapes. For example, use `config: '{"method":"mtp"}'`, not a string
+whose actual contents are `{\"method\":\"mtp\"}`; actual backslashes in strings
+are now preserved as data. Normal JSON/YAML document encoding is still required.
+Custom deploy templates registered under the built-in engine names must also
+quote their raw argument values, rather than wrap pre-escaped values in manual
+double quotes. This also applies to templates distributed in engine packages.
+Other engine names retain the legacy argument-preparation behavior.
 
 Existing Kubernetes configurations that relied on automatic boolean-to-flag
 conversion must be migrated to this explicit form before their next deployment

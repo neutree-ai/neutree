@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -87,8 +88,14 @@ func TestKubernetesTemplatesPassThroughCLIValues(t *testing.T) {
 		{"string", "main", "main"},
 		{"whitespace", " ", " "},
 		{"empty string", "", ""},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"literal escaped JSON", `{\"ratio\":\"1:1\"}`, `{\"ratio\":\"1:1\"}`},
 	}
-	keys := []string{"disable_log_stats", "enable_prefix_caching", "no_enable_prefix_caching", "hf_token", "skip_tokenizer_init", "revision"}
+	keys := []string{"disable_log_stats", "enable_prefix_caching", "no_enable_prefix_caching", "hf_token", "skip_tokenizer_init", "revision",
+		"custom: option", "quoted\"option"}
 	for _, template := range templates {
 		t.Run(template.name, func(t *testing.T) {
 			for _, key := range keys {
@@ -123,9 +130,17 @@ func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
 		value any
 		want  string
 	}{
-		{"bool true", true, "--verbose \"true\""},
-		{"bool false", false, "--verbose \"false\""},
-		{"empty string", "", "--verbose"},
+		{"bool true", true, "true"},
+		{"bool false", false, "false"},
+		{"integer", 1, "1"},
+		{"zero", 0, "0"},
+		{"empty string", "", ""},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"apostrophe", "it's literal", "it's literal"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -138,8 +153,17 @@ func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
 			object := mustFindRenderedObjectByKind(t, objects.Items, "Deployment")
 			deployment := &appsv1.Deployment{}
 			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, deployment))
-			command := strings.TrimSpace(deployment.Spec.Template.Spec.Containers[0].Args[0])
-			assert.True(t, strings.HasSuffix(command, test.want), "command: %s", command)
+			command := deployment.Spec.Template.Spec.Containers[0].Args[0]
+			stub := `python3() { printf '%s\0' "$@"; }; find() { printf '%s\n' /tmp/model.gguf; }; `
+			output, err := exec.Command("bash", "-c", stub+command).Output()
+			require.NoError(t, err)
+			tokens := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+			want := []string{"--verbose"}
+			if test.want != "" {
+				want = append(want, test.want)
+			}
+			require.GreaterOrEqual(t, len(tokens), len(want))
+			assert.Equal(t, want, tokens[len(tokens)-len(want):])
 		})
 	}
 }

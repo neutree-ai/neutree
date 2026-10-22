@@ -97,12 +97,17 @@ spec:
             - bash
             - -c
           args:
-            - >-
-              python3 -m llama_cpp.server
-              --model $(find {{ .ModelArgs.path }} -path "*/{{ .ModelArgs.file }}" | head -n 1)
-              --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
-              {{- if eq .ModelArgs.task "text-embedding" }} --embedding true{{- end }}
-              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }}{{ if ne (printf "%v" $value) "" }} "{{ $value }}"{{ end }} {{- end }}{{- end }}
+            {{- $command := printf "python3 -m llama_cpp.server --model $(find %s -path \"*/%s\" | head -n 1) --host 0.0.0.0 --port 8000 --model_alias %s" .ModelArgs.path .ModelArgs.file .ModelArgs.serve_name }}
+            {{- if eq .ModelArgs.task "text-embedding" }}
+            {{- $command = printf "%s --embedding true" $command }}
+            {{- end }}
+            {{- range $key, $value := .EngineArgs }}
+            {{- $command = printf "%s '%s'" $command (printf "--%s" $key | replace "'" "'\"'\"'") }}
+            {{- if ne (printf "%v" $value) "" }}
+            {{- $command = printf "%s '%s'" $command (printf "%v" $value | replace "'" "'\"'\"'") }}
+            {{- end }}
+            {{- end }}
+            - {{ $command | quote }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}

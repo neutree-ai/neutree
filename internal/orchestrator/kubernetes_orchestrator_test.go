@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2087,7 +2088,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "map values are YAML-escaped for template rendering",
+			name: "map values are JSON-serialized for template quoting",
 			engine: &v1.Engine{
 				Metadata: &v1.Metadata{
 					Name: "vllm",
@@ -2104,7 +2105,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"speculative-config": `{\"method\":\"mtp\"}`,
+				"speculative-config": `{"method":"mtp"}`,
 				"max-model-len":      "4096",
 			},
 		},
@@ -2482,7 +2483,7 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	assert.Equal(t, []interface{}{"base-model", "neu-vllm-list-alias"}, args["served_model_name"])
 	assert.Equal(t, []interface{}{"a.Processor", "b.Processor"}, args["logits_processors"])
 	assert.Equal(t, []interface{}{"a.example.com", "b.example.com"}, args["allowed_media_domains"])
-	assert.Equal(t, `{\"temperature\":0.8}`, args["override_generation_config"])
+	assert.Equal(t, `{"temperature":0.8}`, args["override_generation_config"])
 	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
 	assert.Equal(t, "false", args["enable_prefix_caching"])
 }
@@ -2495,6 +2496,14 @@ func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
 	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
 
 	assert.Equal(t, `[1,2]`, args["cuda_graph_bs"])
+}
+
+func TestPrepareEngineArgsForTemplate_CustomEngineKeepsLegacyEscaping(t *testing.T) {
+	args := map[string]interface{}{
+		"config": map[string]interface{}{"method": "mtp"},
+	}
+	prepareEngineArgsForTemplate(args, "custom-engine")
+	assert.Equal(t, `{\"method\":\"mtp\"}`, args["config"])
 }
 
 func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
@@ -2510,7 +2519,7 @@ func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
 
 	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
 
-	assert.Equal(t, `[{\"name\":\"trace\",\"path\":\"hooks.TraceHook\"}]`, args["forward_hooks"])
+	assert.Equal(t, `[{"name":"trace","path":"hooks.TraceHook"}]`, args["forward_hooks"])
 	assert.Equal(t, `[29500,29501]`, args["remote_instance_weight_loader_send_weights_group_ports"])
 }
 
@@ -4030,6 +4039,7 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 		{"vllm-v0.24.0-p2", v1.EngineNameVLLM},
 		{"vllm-v0.17.1-p2", v1.EngineNameVLLM},
 		{"sglang-v0.5.10-p2", v1.EngineNameSGLang},
+		{"llama-cpp-v0.3.7-p2", v1.EngineNameLlamaCpp},
 	}
 	values := []struct {
 		name  string
@@ -4043,6 +4053,16 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 		{"integer", 1, "1"},
 		{"zero", 0, "0"},
 		{"empty string", "", ""},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"apostrophe", "it's literal", "it's literal"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"literal escaped JSON", `{\"ratio\":\"1:1\"}`, `{\"ratio\":\"1:1\"}`},
+		{"native object", map[string]interface{}{"ratio": "1:1", "enabled": true}, `{"enabled":true,"ratio":"1:1"}`},
+		{"native object with special text", map[string]interface{}{"path": `C:\models\weights`, "text": "it's \"quoted\"\n$(printf expanded)"},
+			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)"}`},
+		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
 	}
 	keys := []string{"enable_prefix_caching", "no-enable-prefix-caching", "trust-remote-code", "enforce_eager",
 		"disable-log-stats", "aggregate_engine_logging", "skip_tokenizer_init", "hf_token"}
@@ -4063,7 +4083,7 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 					data.ImageRepo = "engine"
 					data.ImageTag = "test"
 					data.ModelArgs = map[string]interface{}{
-						"task": "text-generation", "path": "/models/test", "serve_name": "test",
+						"task": "text-generation", "path": "/models/test", "serve_name": "test", "file": "",
 					}
 					for _, key := range keys {
 						data.EngineArgs[key] = value.value
@@ -4072,6 +4092,13 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 					objects, err := buildDeploymentObjects(realEmbeddedTemplate(t, tc.templateKey), data)
 					require.NoError(t, err)
 					tokens := extractEngineCLITokens(t, objects)
+					if tc.engineName == v1.EngineNameLlamaCpp {
+						require.Len(t, tokens, 3)
+						stub := `python3() { printf '%s\0' "$@"; }; find() { printf '%s\n' /tmp/model.gguf; }; `
+						output, err := exec.Command("bash", "-c", stub+tokens[2]).Output()
+						require.NoError(t, err)
+						tokens = strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+					}
 					for _, key := range keys {
 						flag := "--" + key
 						if tc.engineName == v1.EngineNameSGLang {

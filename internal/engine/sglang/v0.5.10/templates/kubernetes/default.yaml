@@ -116,9 +116,9 @@ spec:
                kwargs on the SSH/Ray path. */}}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
-          - --{{ $key | replace "_" "-" }}
+          - {{ $key | replace "_" "-" | printf "--%s" | quote }}
           {{- if ne (printf "%v" $value) "" }}
-          - "{{ $value }}"
+          - {{ $value | quote }}
           {{- end }}
           {{- end }}
           {{- end }}
