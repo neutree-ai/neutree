@@ -7,6 +7,57 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsCleanupCandidate(t *testing.T) {
+	tests := []struct {
+		name   string
+		before *imageSnapshot
+		after  *imageSnapshot
+		want   bool
+	}{
+		{
+			name:  "nil snapshot is never eligible",
+			after: &imageSnapshot{refs: map[string]string{"example/image:v1": "sha256:new"}},
+			want:  false,
+		},
+		{
+			name:   "missing post-push ref is not eligible",
+			before: &imageSnapshot{ids: map[string]struct{}{}, refs: map[string]string{}},
+			after:  &imageSnapshot{refs: map[string]string{}},
+			want:   false,
+		},
+		{
+			name:   "empty post-push ID is not eligible",
+			before: &imageSnapshot{ids: map[string]struct{}{}, refs: map[string]string{}},
+			after:  &imageSnapshot{refs: map[string]string{"example/image:v1": ""}},
+			want:   false,
+		},
+		{
+			name:   "pre-existing ref is not eligible",
+			before: &imageSnapshot{ids: map[string]struct{}{}, refs: map[string]string{"example/image:v1": "sha256:old"}},
+			after:  &imageSnapshot{refs: map[string]string{"example/image:v1": "sha256:new"}},
+			want:   false,
+		},
+		{
+			name:   "pre-existing ID is not eligible",
+			before: &imageSnapshot{ids: map[string]struct{}{"sha256:existing": {}}, refs: map[string]string{}},
+			after:  &imageSnapshot{refs: map[string]string{"example/image:v1": "sha256:existing"}},
+			want:   false,
+		},
+		{
+			name:   "new ref on a new ID is eligible",
+			before: &imageSnapshot{ids: map[string]struct{}{}, refs: map[string]string{}},
+			after:  &imageSnapshot{refs: map[string]string{"example/image:v1": "sha256:new"}},
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isCleanupCandidate(tt.before, tt.after, "example/image:v1"))
+		})
+	}
+}
+
 func TestImagePusherBuildTargetImage(t *testing.T) {
 	pusher, err := NewImagePusher() // No API client needed for testing buildTargetImage
 	require.NoError(t, err, "Failed to create ImagePusher")
