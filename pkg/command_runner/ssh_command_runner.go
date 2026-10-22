@@ -55,40 +55,59 @@ func (e *sshConnectionError) Unwrap() []error {
 
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
+type SSHCommandRunnerOption func(*SSHCommandRunner)
+
+func WithSSHProcessExecute(execute SSHProcessExecute) SSHCommandRunnerOption {
+	return func(runner *SSHCommandRunner) {
+		if execute != nil {
+			runner.sshProcessExecute = execute
+		}
+	}
+}
+
 // SSHCommandRunner represents an SSH command runner.
 type SSHCommandRunner struct {
-	nodeID         string
-	processExecute ProcessExecute
-	sshPrivateKey  string
-	sshUser        string
-	sshControlPath string
-	sshIP          string
+	nodeID            string
+	processExecute    ProcessExecute
+	sshProcessExecute SSHProcessExecute
+	sshPrivateKey     string
+	sshUser           string
+	sshControlPath    string
+	sshIP             string
 }
 
 type CommonArgs struct {
-	NodeID         string
-	SshIP          string
-	AuthConfig     v1.Auth
-	SSHControlPath string
-	ProcessExecute ProcessExecute
+	NodeID            string
+	SshIP             string
+	AuthConfig        v1.Auth
+	SSHControlPath    string
+	ProcessExecute    ProcessExecute
+	SSHProcessExecute SSHProcessExecute
 }
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
-func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string, processExecute ProcessExecute) *SSHCommandRunner {
-	return &SSHCommandRunner{
-		nodeID:         nodeID,
-		processExecute: processExecute,
-		sshPrivateKey:  authConfig.SSHPrivateKey,
-		sshUser:        authConfig.SSHUser,
-		sshControlPath: sshControlPath,
-		sshIP:          sshIP,
+func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string,
+	processExecute ProcessExecute, options ...SSHCommandRunnerOption) *SSHCommandRunner {
+	runner := &SSHCommandRunner{
+		nodeID:            nodeID,
+		processExecute:    processExecute,
+		sshProcessExecute: executeSSHProcess,
+		sshPrivateKey:     authConfig.SSHPrivateKey,
+		sshUser:           authConfig.SSHUser,
+		sshControlPath:    sshControlPath,
+		sshIP:             sshIP,
 	}
+	for _, option := range options {
+		option(runner)
+	}
+
+	return runner
 }
 
 // Run runs a command over SSH.
 func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool, portForward []string, withOutput bool,
 	environmentVariables map[string]interface{}, sshOptionsOverrideSSHKey string, shutdownAfterRun bool) (string, error) {
-	sshCommand := []string{"ssh"}
+	sshCommand := []string{"ssh", "-T"}
 
 	if portForward != nil {
 		for _, pf := range portForward {
@@ -127,23 +146,22 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	klog.V(4).Infof("Node %s running `%s`", s.nodeID, cmd)
 	klog.V(4).Infof("Node %s running full command is `%s`", s.nodeID, strings.Join(sshCommand, " "))
 
-	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:])
+	output, err := s.sshProcessExecute(ctx, sshCommand[0], sshCommand[1:])
 	if err != nil {
+		message := "SSH command failed"
 		if exitOnFail {
-			return "", fmt.Errorf("command failed:\n\n  %s\n", strings.Join(sshCommand, " "))
+			message = "command failed"
 		}
 
-		failMsg := "SSH command failed."
-		if len(output) > 0 {
-			failMsg += "\n" + string(output)
-			failMsg += "\nSee above for the output from the failure."
+		if diagnostic := strings.TrimSpace(output.Stderr); diagnostic != "" {
+			return "", fmt.Errorf("%s: %w: %s", message, err, diagnostic)
 		}
 
-		return "", errors.New(failMsg)
+		return "", fmt.Errorf("%s: %w", message, err)
 	}
 
 	if withOutput {
-		return string(output), nil
+		return output.Stdout, nil
 	}
 
 	return "", nil
@@ -162,9 +180,9 @@ func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []str
 	connectCommand = append(connectCommand, sshCommand[last])
 	connectCommand = append(connectCommand, "uptime")
 
-	output, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
+	output, err := s.sshProcessExecute(ctx, connectCommand[0], connectCommand[1:])
 	if err != nil {
-		if outputText := strings.TrimSpace(string(output)); outputText != "" {
+		if outputText := strings.TrimSpace(output.Stderr); outputText != "" {
 			return fmt.Errorf("%w: %s", err, outputText)
 		}
 

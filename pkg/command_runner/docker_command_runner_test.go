@@ -20,10 +20,11 @@ func newDockerCommandRunner(dockerConfig *v1.Docker, executor *commandmocks.Mock
 	}
 
 	sshConfig := &CommonArgs{
-		NodeID:         testNode,
-		AuthConfig:     authConfig,
-		SshIP:          testSSHIP,
-		ProcessExecute: executor.Execute,
+		NodeID:            testNode,
+		AuthConfig:        authConfig,
+		SshIP:             testSSHIP,
+		ProcessExecute:    executor.Execute,
+		SSHProcessExecute: mockSSHProcessExecute(executor),
 	}
 
 	return NewDockerCommandRunner(dockerConfig, sshConfig)

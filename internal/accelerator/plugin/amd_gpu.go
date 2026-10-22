@@ -30,7 +30,8 @@ func init() { //nolint: gochecknoinits
 }
 
 type AMDGPUAcceleratorPlugin struct {
-	executor command.Executor
+	executor          command.Executor
+	sshProcessExecute command_runner.SSHProcessExecute
 }
 
 func (p *AMDGPUAcceleratorPlugin) Handle() AcceleratorPluginHandle {
@@ -118,7 +119,7 @@ func (p *AMDGPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, no
 	sshRunner := command_runner.NewSSHCommandRunner(nodeIP, nodeIP, v1.Auth{
 		SSHUser:       auth.SSHUser,
 		SSHPrivateKey: sshKeyPath,
-	}, "", p.executor.Execute)
+	}, "", p.executor.Execute, command_runner.WithSSHProcessExecute(p.sshProcessExecute))
 
 	// amdgpu-dkms never install amd-smi or rocm-smi, so we can only use lspci to get gpu number.
 	// todo: more analysis for lspci output

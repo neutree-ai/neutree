@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 	testEnvVars       = map[string]interface{}{"ENV1": "value1", "ENV2": "value2"}
 	testPortForward   = []string{"8080:localhost:8080"}
 	testSSHOptions    = []string{
+		"-T",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
@@ -38,7 +40,17 @@ func newSSHCommandRunner(exector *commandmocks.MockExecutor) *SSHCommandRunner {
 	return NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
 		SSHPrivateKey: testSSHPrivateKey,
 		SSHUser:       testSSHUser,
-	}, "", exector.Execute)
+	}, "", exector.Execute, WithSSHProcessExecute(mockSSHProcessExecute(exector)))
+}
+
+func mockSSHProcessExecute(executor *commandmocks.MockExecutor) SSHProcessExecute {
+	return func(ctx context.Context, name string, args []string) (SSHProcessOutput, error) {
+		output, err := executor.Execute(ctx, name, args)
+		if err != nil {
+			return SSHProcessOutput{Stderr: string(output)}, err
+		}
+		return SSHProcessOutput{Stdout: string(output)}, nil
+	}
 }
 
 func TestNewSSHCommandRunner(t *testing.T) {
@@ -128,7 +140,7 @@ func TestSSHCommandRunner_Run_WithPortForward(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
-	expectedArgs := append([]string{"ssh", "-L", "8080:localhost:8080"}, testSSHOptions...)
+	expectedArgs := append([]string{"ssh", "-T", "-L", "8080:localhost:8080"}, testSSHOptions[1:]...)
 	expectedArgs = append(expectedArgs, testCommand)
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
@@ -184,6 +196,7 @@ func TestSSHCommandRunner_Run_WithSSHOptionsOverride(t *testing.T) {
 	overrideKey := "override_key"
 	expectedArgs := []string{
 		"ssh",
+		"-T",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",

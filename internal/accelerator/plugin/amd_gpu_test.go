@@ -54,7 +54,7 @@ func TestAMDGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, testLspciOuput, nil)
-	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
@@ -71,7 +71,7 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
-	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
@@ -85,7 +85,7 @@ func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T)
 func TestAMDGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
-	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor}
+	p := &AMDGPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
@@ -135,7 +135,8 @@ func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 			mockExector := &commandmocks.MockExecutor{}
 			tt.mockSetup(mockExector)
 			p := &AMDGPUAcceleratorPlugin{
-				executor: mockExector,
+				executor:          mockExector,
+				sshProcessExecute: mockSSHProcessExecute(mockExector.Execute),
 			}
 			// Test GetNodeAcceleratorInfo method
 			accelerators, err := p.getNodeAcceleratorInfo(context.Background(), "127.0.0.1", v1.Auth{
@@ -153,9 +154,9 @@ func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo_ConnectionFailureExposes
 	mockExec.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		cmds := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmds, " "), "uptime")
-	}).Return([]byte(""), errors.New("exit status 255: ssh: connect to host 10.255.1.54 port 22: Connection refused")).Once()
+	}).Return([]byte("ssh: connect to host 10.255.1.54 port 22: Connection refused"), errors.New("exit status 255")).Once()
 
-	p := &AMDGPUAcceleratorPlugin{executor: mockExec}
+	p := &AMDGPUAcceleratorPlugin{executor: mockExec, sshProcessExecute: mockSSHProcessExecute(mockExec.Execute)}
 	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.255.1.54", v1.Auth{
 		SSHUser:       "root",
 		SSHPrivateKey: "MTIzCg==",
@@ -184,7 +185,7 @@ func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo_CommandFailureKeepsPCIWo
 		assert.Contains(t, strings.Join(cmds, " "), "lspci -nn")
 	}).Return([]byte("lspci: command not found"), errors.New("exit status 127")).Once()
 
-	p := &AMDGPUAcceleratorPlugin{executor: mockExec}
+	p := &AMDGPUAcceleratorPlugin{executor: mockExec, sshProcessExecute: mockSSHProcessExecute(mockExec.Execute)}
 	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.0.0.5", v1.Auth{
 		SSHUser:       "root",
 		SSHPrivateKey: "MTIzCg==",
@@ -195,6 +196,7 @@ func TestAMDGPUAcceleratorPlugin_GetNodeAcceleratorInfo_CommandFailureKeepsPCIWo
 		"post-connection command failure must not look like a connection failure")
 	assert.Contains(t, err.Error(), "get node 10.0.0.5 pci info failed",
 		"command-phase failure must keep the pci-info wording")
+	assert.Contains(t, err.Error(), "lspci: command not found", "command stderr must survive")
 	assert.NotContains(t, err.Error(), "hint:",
 		"command-phase failure must not carry the static-cluster hint")
 	mockExec.AssertExpectations(t)
@@ -250,7 +252,8 @@ func TestAMDGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			mockExector := &commandmocks.MockExecutor{}
 			tt.mockSetup(mockExector)
 			p := &AMDGPUAcceleratorPlugin{
-				executor: mockExector,
+				executor:          mockExector,
+				sshProcessExecute: mockSSHProcessExecute(mockExector.Execute),
 			}
 			// Test GetNodeRuntimeConfig method
 			runtimeConfig, err := p.GetNodeRuntimeConfig(context.Background(), &v1.GetNodeRuntimeConfigRequest{

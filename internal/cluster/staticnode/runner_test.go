@@ -39,6 +39,7 @@ func TestSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 			return []byte("ok\n"), nil
 		},
 	}
+	factory.SSHProcessExecute = staticNodeSSHProcessExecute(factory.ProcessExecute)
 
 	runner, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
 		Metadata: &v1.Metadata{
@@ -79,6 +80,17 @@ func TestSSHRunnerFactoryWrapsSSHRunner(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
+func staticNodeSSHProcessExecute(execute commandrunner.ProcessExecute) commandrunner.SSHProcessExecute {
+	return func(ctx context.Context, name string, args []string) (commandrunner.SSHProcessOutput, error) {
+		output, err := execute(ctx, name, args)
+		if err != nil {
+			return commandrunner.SSHProcessOutput{Stderr: string(output)}, err
+		}
+
+		return commandrunner.SSHProcessOutput{Stdout: string(output)}, nil
+	}
+}
+
 type processCall struct {
 	name string
 	args []string
@@ -112,6 +124,7 @@ func TestStaticNodeRunnerControlPathScopedToRunnerKeyDir(t *testing.T) {
 			return []byte("up\n"), nil
 		},
 	}
+	factory.SSHProcessExecute = staticNodeSSHProcessExecute(factory.ProcessExecute)
 
 	runner, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
 		Metadata: &v1.Metadata{
@@ -174,6 +187,7 @@ func TestSSHRunnerFactoryControlPathOverride(t *testing.T) {
 		},
 		SSHControlPath: override,
 	}
+	factory.SSHProcessExecute = staticNodeSSHProcessExecute(factory.ProcessExecute)
 
 	runner, err := factory.NewStaticNodeRunner(context.Background(), &v1.StaticNode{
 		Metadata: &v1.Metadata{
