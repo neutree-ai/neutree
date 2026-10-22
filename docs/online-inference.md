@@ -82,9 +82,12 @@ engine-specific flag lists:
   JSON first, without pre-escaping them for YAML. llama.cpp's shell command
   quotes each engine option/value for the shell, then quotes the complete
   command for YAML so shell substitutions in values remain literal.
-- Existing vLLM list expansion, including JSON-array string expansion, is
-  unchanged. SGLang still converts underscore option names to hyphenated CLI
-  names; vLLM preserves the configured spelling.
+- Existing vLLM list expansion for native lists and raw JSON-array strings is
+  unchanged; legacy pre-escaped JSON in string list items is also normalized.
+  Historically pre-escaped JSON-array strings are normalized after list
+  detection and remain a single JSON value token. SGLang still converts
+  underscore option names to hyphenated CLI names; vLLM preserves the configured
+  spelling.
 
 For example, a vLLM Kubernetes endpoint can configure:
 
@@ -109,10 +112,16 @@ options also preserve the supplied value: for example, `hf_token: true` emits
 `--hf_token true`, whereas `hf_token: ""` emits the bare `--hf_token` option.
 Check the selected engine version's CLI before choosing an option name.
 
-Supply JSON objects or ordinary JSON strings without manually adding YAML
-backslash escapes. For example, use `config: '{"method":"mtp"}'`, not a string
-whose actual contents are `{\"method\":\"mtp\"}`; actual backslashes in strings
-are now preserved as data. Normal JSON/YAML document encoding is still required.
+Supply native objects or raw JSON strings without manually adding YAML
+backslash escapes, for example, `config: '{"method":"mtp"}'`. Historical strings
+whose actual contents are `{\"method\":\"mtp\"}` remain compatible: argument
+preparation decodes exactly one JSON/YAML-compatible string-escape layer only
+when the result is a valid JSON object or array. Native object serialization
+is unchanged. Raw valid JSON, ordinary strings and backslashes, invalid
+pseudo-JSON such as `{'111':'222'}`, and scalar strings remain unchanged.
+This is not universal string unescaping
+or single-quoted JSON repair. Normal JSON/YAML document encoding is still required.
+
 Custom deploy templates registered under the built-in engine names must also
 quote their raw argument values, rather than wrap pre-escaped values in manual
 double quotes. This also applies to templates distributed in engine packages.

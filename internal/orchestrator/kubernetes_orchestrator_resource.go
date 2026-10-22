@@ -218,7 +218,16 @@ func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string
 			}
 
 			if list, ok := toInterfaceSlice(listValue); ok {
-				args[k] = list
+				values := make([]interface{}, len(list))
+				for index, item := range list {
+					values[index] = item
+					if _, ok := item.(string); ok {
+						values[index] = serializeEngineArgValue(item)
+					}
+				}
+
+				args[k] = values
+
 				continue
 			}
 		}
@@ -228,7 +237,15 @@ func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string
 }
 
 func serializeEngineArgValue(value interface{}) interface{} {
-	switch value.(type) {
+	switch val := value.(type) {
+	case string:
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+val+`"`), &decoded); err == nil {
+			trimmed := strings.TrimSpace(decoded)
+			if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && json.Valid([]byte(decoded)) {
+				return decoded
+			}
+		}
 	case map[string]interface{}, []interface{}:
 		encoded, err := json.Marshal(value)
 		if err == nil {
