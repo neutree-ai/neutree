@@ -1499,8 +1499,8 @@ func applyEndpoint(name, cluster string, opts ...EndpointOption) (yamlPath strin
 
 // allSchemaTypesEngineArgs returns an engine_args slice covering multiple JSON
 // Schema data types. enforce_eager covers the true-bool path (flag emitted with
-// no value); enable_prefix_caching covers the false-bool path (flag dropped
-// entirely, since vLLM argparse rejects `--flag false` for store_true flags).
+// no value); enable_prefix_caching covers BooleanOptionalAction false
+// (--no-enable_prefix_caching).
 func allSchemaTypesEngineArgs() []EngineArg {
 	return []EngineArg{
 		{Key: "dtype", Value: "half"},

@@ -4021,122 +4021,138 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 	assert.Nil(t, status.Resources)
 }
 
-// TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
-// K8s deploy templates that ship engine_args through to vLLM / SGLang CLI
-// argparse. Both engines' boolean flags are registered with
-// action="store_true": they accept `--flag` (no value follows) and reject
-// `--flag false` (nargs=0). The template contract is therefore:
-//
-//   - value "true"  (bool or string) -> emit "--<flag>" only
-//   - value "false" (bool or string) -> emit nothing (engine takes its default)
-//   - anything else                   -> emit "--<flag>" followed by "<value>"
-//
-// The test renders the embedded production templates (not an inline fixture),
-// passes a matrix of bool/string true/false alongside non-boolean values, and
-// asserts the rendered CLI tokens never contain a literal "false" token.
 func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 	cases := []struct {
-		name        string
 		templateKey string
+		engineName  string
 	}{
 		{
-			name:        "vllm-v0.31.0",
 			templateKey: "vllm-v0.31.0",
+			engineName:  v1.EngineNameVLLM,
 		},
 		{
-			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",
+			engineName:  v1.EngineNameVLLM,
 		},
 		{
-			name:        "vllm-v0.17.1-p2",
 			templateKey: "vllm-v0.17.1-p2",
+			engineName:  v1.EngineNameVLLM,
 		},
 		{
-			name:        "sglang-v0.5.10-p2",
 			templateKey: "sglang-v0.5.10-p2",
+			engineName:  v1.EngineNameSGLang,
 		},
+	}
+	booleanCases := []struct {
+		name    string
+		value   interface{}
+		enabled bool
+	}{
+		{name: "bool true", value: true, enabled: true},
+		{name: "string true", value: "true", enabled: true},
+		{name: "bool false", value: false},
+		{name: "string false", value: "false"},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.templateKey, func(t *testing.T) {
 			tmpl := realEmbeddedTemplate(t, tc.templateKey)
-
-			data := DeploymentManifestVariables{
-				NeutreeVersion:  "v0.1.0",
-				ClusterName:     "test-cluster",
-				Workspace:       "test-workspace",
-				Namespace:       "default",
-				ImagePrefix:     "registry.example.com",
-				ImageRepo:       "myrepo",
-				ImageTag:        "v1.0.0",
-				ImagePullSecret: "my-secret",
-				EngineName:      "test-engine",
-				EngineVersion:   "v1.0.0",
-				EndpointName:    "test-endpoint",
-				ModelArgs: map[string]interface{}{
-					"name":          "gpt-4",
-					"task":          "text-generation",
-					"path":          "/mnt/models/gpt-4",
-					"registry_type": "bentoml",
-					"registry_path": "/mnt/registry/gpt-4-model",
-					"serve_name":    "gpt-4-serve",
-				},
-				EngineArgs: map[string]interface{}{
-					// Boolean false in both bool and string form, kebab and
-					// underscore key shape: the skip branch must drop the flag
-					// regardless of how the key was spelled.
-					"enable_prefix_caching": false,
-					"skip-tokenizer-init":   "false",
-					// Boolean true in both forms: emit flag, no following value.
-					// Keys are kebab-form so the SGLang template's
-					// `replace "_" "-"` step is a no-op here — `replace` is
-					// evaluated in the true/non-bool branches but not the skip
-					// branch, so true booleans are the right place to assert
-					// the rendered flag name matches across engines.
-					"trust-remote-code": true,
-					"is-embedding":      "true",
-					// Non-boolean values: emit flag followed by quoted value.
-					"max-model-len": "4096",
-					"max-num-seqs":  256,
-				},
-				Resources: map[string]string{
-					"cpu":    "500m",
-					"memory": "1Gi",
-				},
-				RoutingLogic: "roundrobin",
-				Replicas:     1,
+			optionalFlags := []string{"enable_prefix_caching", "trust-remote-code", "enforce_eager"}
+			storeTrueFlags := []string{"disable-log-stats", "aggregate_engine_logging"}
+			valueArgs := map[string]interface{}{
+				"revision":      "false",
+				"tokenizer":     "true",
+				"max_model_len": "4096",
+				"max-num-seqs":  256,
+			}
+			if tc.engineName == v1.EngineNameSGLang {
+				optionalFlags = []string{"experts_shared_outer_loras"}
+				storeTrueFlags = []string{"skip_tokenizer_init", "trust-remote-code", "is_embedding"}
+				valueArgs = map[string]interface{}{
+					"revision":             "false",
+					"tokenizer_path":       "true",
+					"context_length":       "4096",
+					"max-running-requests": 256,
+				}
+			}
+			flagName := func(key string) string {
+				if tc.engineName == v1.EngineNameSGLang {
+					return strings.ReplaceAll(key, "_", "-")
+				}
+				return key
 			}
 
-			objs, err := buildDeploymentObjects(tmpl, data)
-			require.NoError(t, err, "template render must succeed")
+			for _, booleanCase := range booleanCases {
+				t.Run(booleanCase.name, func(t *testing.T) {
+					engineArgs := make(map[string]interface{})
+					for key, value := range valueArgs {
+						engineArgs[key] = value
+					}
+					for _, key := range optionalFlags {
+						engineArgs[key] = booleanCase.value
+					}
+					for _, key := range storeTrueFlags {
+						engineArgs[key] = booleanCase.value
+					}
 
-			tokens := extractEngineCLITokens(t, objs)
+					data := DeploymentManifestVariables{
+						NeutreeVersion:  "v0.1.0",
+						ClusterName:     "test-cluster",
+						Workspace:       "test-workspace",
+						Namespace:       "default",
+						ImagePrefix:     "registry.example.com",
+						ImageRepo:       "myrepo",
+						ImageTag:        "v1.0.0",
+						ImagePullSecret: "my-secret",
+						EngineName:      tc.engineName,
+						EngineVersion:   "v1.0.0",
+						EndpointName:    "test-endpoint",
+						ModelArgs: map[string]interface{}{
+							"name":          "gpt-4",
+							"task":          "text-generation",
+							"path":          "/mnt/models/gpt-4",
+							"registry_type": "bentoml",
+							"registry_path": "/mnt/registry/gpt-4-model",
+							"serve_name":    "gpt-4-serve",
+						},
+						EngineArgs: engineArgs,
+						Resources: map[string]string{
+							"cpu":    "500m",
+							"memory": "1Gi",
+						},
+						RoutingLogic: "roundrobin",
+						Replicas:     1,
+					}
 
-			// (1) False booleans must be skipped entirely — no flag, no value.
-			//     Check both kebab and underscore forms because SGLang transforms
-			//     `_` to `-` at render time while vLLM passes the key through.
-			assert.NotContains(t, tokens, "--enable-prefix-caching",
-				"bool false engine_arg must not emit its flag (kebab form)")
-			assert.NotContains(t, tokens, "--enable_prefix_caching",
-				"bool false engine_arg must not emit its flag (underscore form)")
-			assert.NotContains(t, tokens, "--skip-tokenizer-init",
-				"string false engine_arg must not emit its flag")
-			// The literal token `false` must never reach the CLI: argparse rejects
-			// `--flag false` for store_true booleans.
-			for _, tok := range tokens {
-				assert.NotEqual(t, "false", tok,
-					"no CLI token should be the literal string \"false\"")
+					objs, err := buildDeploymentObjects(tmpl, data)
+					require.NoError(t, err, "template render must succeed")
+
+					tokens := extractEngineCLITokens(t, objs)
+
+					for _, key := range optionalFlags {
+						flag := flagName(key)
+						if booleanCase.enabled {
+							assertFlagWithoutValue(t, tokens, "--"+flag)
+							assert.NotContains(t, tokens, "--no-"+flag)
+						} else {
+							assertFlagWithoutValue(t, tokens, "--no-"+flag)
+							assert.NotContains(t, tokens, "--"+flag)
+						}
+					}
+					for _, key := range storeTrueFlags {
+						flag := flagName(key)
+						if booleanCase.enabled {
+							assertFlagWithoutValue(t, tokens, "--"+flag)
+						} else {
+							assert.NotContains(t, tokens, "--"+flag)
+						}
+						assert.NotContains(t, tokens, "--no-"+flag)
+					}
+					for key, value := range valueArgs {
+						assertFlagWithValue(t, tokens, "--"+flagName(key), fmt.Sprint(value))
+					}
+				})
 			}
-
-			// (2) True booleans (bool + string forms) must emit just the flag.
-			//     The token immediately after must not be "true" — it should be
-			//     the next engine_arg flag or a CLI token following it.
-			assertFlagWithoutValue(t, tokens, "--trust-remote-code")
-			assertFlagWithoutValue(t, tokens, "--is-embedding")
-
-			// (3) Non-boolean engine_args must emit `--<flag>` followed by value.
-			assertFlagWithValue(t, tokens, "--max-model-len", "4096")
-			assertFlagWithValue(t, tokens, "--max-num-seqs", "256")
 		})
 	}
 }

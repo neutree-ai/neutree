@@ -83,8 +83,8 @@ spec:
               --task="{{ .ModelArgs.task }}"
           env:
             {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
             {{ end }}
           {{- if .VolumeMounts }}
           volumeMounts:
@@ -114,8 +114,8 @@ spec:
               {{- end }}
           env:
             {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
             {{ end }}
           ports:
             - containerPort: 8000
