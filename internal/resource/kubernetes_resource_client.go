@@ -32,7 +32,6 @@ const (
 var (
 	vllmModelLoadingRegex     = regexp.MustCompile(`Model loading took ([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
 	vllmAvailableKVCacheRegex = regexp.MustCompile(`Available KV cache memory:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)`)
-	vllmWorkerRegex           = regexp.MustCompile(`\(([^)]*(?:Worker|EngineCore)[^)]*)\)`)
 )
 
 type kubernetesNeutreeDeviceAnnotation struct {
@@ -296,7 +295,8 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			continue
 		}
 
-		if prev, exists := prevByPod[podName]; exists && prev.ContainerID == containerID {
+		if prev, exists := prevByPod[podName]; exists && prev.ContainerID == containerID &&
+			(prev.ModelWeightsMiB != nil || prev.KVCacheCapacityMiB != nil) {
 			instances[i].ContainerID = prev.ContainerID
 			instances[i].ModelWeightsMiB = prev.ModelWeightsMiB
 			instances[i].KVCacheCapacityMiB = prev.KVCacheCapacityMiB
@@ -312,7 +312,7 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			continue
 		}
 
-		limit := startupLogLimitBytes + 1
+		limit := startupLogLimitBytes
 
 		stream, err := c.podLogClient.GetPodLogs(logCtx, cluster, namespace, pod.Name, &corev1.PodLogOptions{
 			Container:  containerName,
@@ -331,9 +331,13 @@ func (c *K8sResourceClient) populateEndpointStartupMemoryStats(
 			continue
 		}
 
-		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs), len(instances[i].Devices))
+		weightsMiB, kvCacheMiB := parseVLLMStartupMemoryMiB(string(rawLogs))
 		if overrideUnderscore || overrideDash {
 			kvCacheMiB = nil
+		}
+
+		if weightsMiB == nil && kvCacheMiB == nil {
+			continue
 		}
 
 		instances[i].ContainerID = containerID
@@ -362,65 +366,29 @@ func mainContainerReadyStatus(pod corev1.Pod) (string, string, bool) {
 	return containerName, "", false
 }
 
-func parseVLLMStartupMemoryMiB(logs string, workers int) (*float64, *float64) {
-	if int64(len(logs)) > startupLogLimitBytes || workers < 1 {
-		return nil, nil
-	}
-
-	return parseWorkerMemoryMiB(vllmModelLoadingRegex, logs, workers, false),
-		parseWorkerMemoryMiB(vllmAvailableKVCacheRegex, logs, workers, true)
+func parseVLLMStartupMemoryMiB(logs string) (*float64, *float64) {
+	return parseStartupMemoryMiB(vllmModelLoadingRegex, logs, false),
+		parseStartupMemoryMiB(vllmAvailableKVCacheRegex, logs, true)
 }
 
-// Logs provide rounded per-worker measurements, not device UUIDs. Reuse a
-// value across devices only when every worker is present and the spread is
-// within the UI's 0.1 GiB precision. KV memory remains a budget approximation.
-func parseWorkerMemoryMiB(pattern *regexp.Regexp, logs string, workers int, takeMin bool) *float64 {
-	values := make(map[string]float64)
+// Startup logs provide replica-level representative values: maximum model
+// weights and minimum available KV memory among the records read.
+func parseStartupMemoryMiB(pattern *regexp.Regexp, logs string, takeMin bool) *float64 {
+	var value float64
 
-	for _, line := range strings.Split(logs, "\n") {
-		match := pattern.FindStringSubmatch(line)
-		if len(match) < 2 {
-			continue
-		}
-
+	for _, match := range pattern.FindAllStringSubmatch(logs, -1) {
 		gib, err := strconv.ParseFloat(match[1], 64)
 		if err != nil || gib <= 0 {
 			continue
 		}
 
-		worker := ""
-		if id := vllmWorkerRegex.FindStringSubmatch(line); len(id) > 1 {
-			worker = id[1]
-		} else if workers > 1 {
-			continue
+		if value == 0 || (takeMin && gib < value) || (!takeMin && gib > value) {
+			value = gib
 		}
-
-		values[worker] = gib
 	}
 
-	if len(values) != workers {
+	if value == 0 {
 		return nil
-	}
-
-	var low, high float64
-
-	for _, value := range values {
-		if low == 0 || value < low {
-			low = value
-		}
-
-		if value > high {
-			high = value
-		}
-	}
-
-	if high-low > 0.1+1e-9 {
-		return nil
-	}
-
-	value := high
-	if takeMin {
-		value = low
 	}
 
 	mib := roundFloat64ToTwoDecimals(value * 1024)
