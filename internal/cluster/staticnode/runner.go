@@ -16,9 +16,8 @@ import (
 )
 
 type SSHRunnerFactory struct {
-	ProcessExecute    commandrunner.ProcessExecute
-	SSHProcessExecute commandrunner.SSHProcessExecute
-	SSHControlPath    string
+	ProcessExecute commandrunner.ProcessExecute
+	SSHControlPath string
 }
 
 func NewSSHRunnerFactory() *SSHRunnerFactory {
@@ -59,12 +58,10 @@ func (f *SSHRunnerFactory) NewStaticNodeRunner(
 	}
 
 	var processExecute commandrunner.ProcessExecute
-	var sshProcessExecute commandrunner.SSHProcessExecute
 	sshControlPath := ""
 
 	if f != nil {
 		processExecute = f.ProcessExecute
-		sshProcessExecute = f.SSHProcessExecute
 		sshControlPath = f.SSHControlPath
 	}
 
@@ -93,7 +90,6 @@ func (f *SSHRunnerFactory) NewStaticNodeRunner(
 			auth,
 			sshControlPath,
 			processExecute,
-			commandrunner.WithSSHProcessExecute(sshProcessExecute),
 		),
 		cleanupDir: cleanupDir,
 	}, nil

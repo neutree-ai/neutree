@@ -40,17 +40,7 @@ func newSSHCommandRunner(exector *commandmocks.MockExecutor) *SSHCommandRunner {
 	return NewSSHCommandRunner(testNode, testSSHIP, v1.Auth{
 		SSHPrivateKey: testSSHPrivateKey,
 		SSHUser:       testSSHUser,
-	}, "", exector.Execute, WithSSHProcessExecute(mockSSHProcessExecute(exector)))
-}
-
-func mockSSHProcessExecute(executor *commandmocks.MockExecutor) SSHProcessExecute {
-	return func(ctx context.Context, name string, args []string) (SSHProcessOutput, error) {
-		output, err := executor.Execute(ctx, name, args)
-		if err != nil {
-			return SSHProcessOutput{Stderr: string(output)}, err
-		}
-		return SSHProcessOutput{Stdout: string(output)}, nil
-	}
+	}, "", exector.Execute)
 }
 
 func TestNewSSHCommandRunner(t *testing.T) {
@@ -90,7 +80,7 @@ func TestSSHCommandRunner_Run_WithError(t *testing.T) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
-	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("with error"), errors.New("ssh failed"))
+	mockExec.On("Execute", mock.Anything, "ssh", sshOptionsWithCommand).Return([]byte("partial stdout"), errors.New("ssh failed: with error"))
 
 	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
 
@@ -311,14 +301,14 @@ func TestSSHCommandRunner_CheckConnection_PreservesUnderlyingErrorAsConnectionFa
 	mockExec.AssertExpectations(t)
 }
 
-func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFailureDetail(t *testing.T) {
+func TestSSHCommandRunner_CheckConnection_PreservesExecutorErrorAsConnectionFailureDetail(t *testing.T) {
 	mockExec := new(commandmocks.MockExecutor)
 	runner := newSSHCommandRunner(mockExec)
 
 	mockExec.On("Execute", mock.Anything, "ssh", mock.Anything).Run(func(args mock.Arguments) {
 		cmd := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
-	}).Return([]byte("ssh: connect to host 127.0.0.1 port 22: Connection refused\n"), errors.New("exit status 255")).Once()
+	}).Return([]byte(""), errors.New("exit status 255: ssh: connect to host 127.0.0.1 port 22: Connection refused")).Once()
 
 	_, err := runner.Run(context.Background(), testCommand, false, nil, true, nil, "", false)
 
@@ -328,7 +318,7 @@ func TestSSHCommandRunner_CheckConnection_PreservesExecutorOutputAsConnectionFai
 	assert.Contains(t, err.Error(), "exit status 255",
 		"message should preserve the process exit status")
 	assert.Contains(t, err.Error(), "Connection refused",
-		"message should preserve SSH stderr returned as executor output")
+		"message should preserve SSH stderr included in the executor error")
 	assert.Contains(t, err.Error(), "hint:",
 		"message should include the static-cluster troubleshooting hint section")
 	mockExec.AssertExpectations(t)

@@ -9,6 +9,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/command"
 )
 
 var (
@@ -55,53 +56,42 @@ func (e *sshConnectionError) Unwrap() []error {
 
 type ProcessExecute func(ctx context.Context, name string, args []string) ([]byte, error)
 
-type SSHCommandRunnerOption func(*SSHCommandRunner)
-
-func WithSSHProcessExecute(execute SSHProcessExecute) SSHCommandRunnerOption {
-	return func(runner *SSHCommandRunner) {
-		if execute != nil {
-			runner.sshProcessExecute = execute
-		}
-	}
-}
-
 // SSHCommandRunner represents an SSH command runner.
 type SSHCommandRunner struct {
-	nodeID            string
-	processExecute    ProcessExecute
-	sshProcessExecute SSHProcessExecute
-	sshPrivateKey     string
-	sshUser           string
-	sshControlPath    string
-	sshIP             string
+	nodeID         string
+	processExecute ProcessExecute
+
+	sshPrivateKey  string
+	sshUser        string
+	sshControlPath string
+	sshIP          string
 }
 
 type CommonArgs struct {
-	NodeID            string
-	SshIP             string
-	AuthConfig        v1.Auth
-	SSHControlPath    string
-	ProcessExecute    ProcessExecute
-	SSHProcessExecute SSHProcessExecute
+	NodeID         string
+	SshIP          string
+	AuthConfig     v1.Auth
+	SSHControlPath string
+	ProcessExecute ProcessExecute
 }
 
 // NewSSHCommandRunner creates a new SSHCommandRunner instance.
 func NewSSHCommandRunner(nodeID string, sshIP string, authConfig v1.Auth, sshControlPath string,
-	processExecute ProcessExecute, options ...SSHCommandRunnerOption) *SSHCommandRunner {
-	runner := &SSHCommandRunner{
-		nodeID:            nodeID,
-		processExecute:    processExecute,
-		sshProcessExecute: executeSSHProcess,
-		sshPrivateKey:     authConfig.SSHPrivateKey,
-		sshUser:           authConfig.SSHUser,
-		sshControlPath:    sshControlPath,
-		sshIP:             sshIP,
-	}
-	for _, option := range options {
-		option(runner)
+	processExecute ProcessExecute) *SSHCommandRunner {
+	if processExecute == nil {
+		executor := &command.OSExecutor{}
+		processExecute = executor.Execute
 	}
 
-	return runner
+	return &SSHCommandRunner{
+		nodeID:         nodeID,
+		processExecute: processExecute,
+
+		sshPrivateKey:  authConfig.SSHPrivateKey,
+		sshUser:        authConfig.SSHUser,
+		sshControlPath: sshControlPath,
+		sshIP:          sshIP,
+	}
 }
 
 // Run runs a command over SSH.
@@ -146,22 +136,18 @@ func (s *SSHCommandRunner) Run(ctx context.Context, cmd string, exitOnFail bool,
 	klog.V(4).Infof("Node %s running `%s`", s.nodeID, cmd)
 	klog.V(4).Infof("Node %s running full command is `%s`", s.nodeID, strings.Join(sshCommand, " "))
 
-	output, err := s.sshProcessExecute(ctx, sshCommand[0], sshCommand[1:])
+	output, err := s.processExecute(ctx, sshCommand[0], sshCommand[1:])
 	if err != nil {
 		message := "SSH command failed"
 		if exitOnFail {
 			message = "command failed"
 		}
 
-		if diagnostic := strings.TrimSpace(output.Stderr); diagnostic != "" {
-			return "", fmt.Errorf("%s: %w: %s", message, err, diagnostic)
-		}
-
 		return "", fmt.Errorf("%s: %w", message, err)
 	}
 
 	if withOutput {
-		return output.Stdout, nil
+		return string(output), nil
 	}
 
 	return "", nil
@@ -180,16 +166,9 @@ func (s *SSHCommandRunner) checkConnection(ctx context.Context, sshCommand []str
 	connectCommand = append(connectCommand, sshCommand[last])
 	connectCommand = append(connectCommand, "uptime")
 
-	output, err := s.sshProcessExecute(ctx, connectCommand[0], connectCommand[1:])
-	if err != nil {
-		if outputText := strings.TrimSpace(output.Stderr); outputText != "" {
-			return fmt.Errorf("%w: %s", err, outputText)
-		}
+	_, err := s.processExecute(ctx, connectCommand[0], connectCommand[1:])
 
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (s *SSHCommandRunner) getSSHOptions(sshOptionsOverrideSSHKey string) []string {

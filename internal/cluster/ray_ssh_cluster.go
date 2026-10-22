@@ -41,7 +41,6 @@ var _ ClusterReconcile = &sshRayClusterReconciler{}
 
 type sshRayClusterReconciler struct {
 	executor           command.Executor
-	sshProcessExecute  command_runner.SSHProcessExecute
 	acceleratorManager accelerator.Manager
 	storage            storage.Storage
 }
@@ -584,9 +583,8 @@ func (c *sshRayClusterReconciler) buildSSHCommandArgs(reconcileCtx *ReconcileCon
 			SSHUser:       reconcileCtx.sshClusterConfig.Auth.SSHUser,
 			SSHPrivateKey: reconcileCtx.sshConfigGenerator.SSHKeyPath(),
 		},
-		SSHControlPath:    "",
-		ProcessExecute:    c.executor.Execute,
-		SSHProcessExecute: c.sshProcessExecute,
+		SSHControlPath: "",
+		ProcessExecute: c.executor.Execute,
 	}
 }
 

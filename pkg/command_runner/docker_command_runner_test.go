@@ -20,11 +20,10 @@ func newDockerCommandRunner(dockerConfig *v1.Docker, executor *commandmocks.Mock
 	}
 
 	sshConfig := &CommonArgs{
-		NodeID:            testNode,
-		AuthConfig:        authConfig,
-		SshIP:             testSSHIP,
-		ProcessExecute:    executor.Execute,
-		SSHProcessExecute: mockSSHProcessExecute(executor),
+		NodeID:         testNode,
+		AuthConfig:     authConfig,
+		SshIP:          testSSHIP,
+		ProcessExecute: executor.Execute,
 	}
 
 	return NewDockerCommandRunner(dockerConfig, sshConfig)
@@ -138,7 +137,7 @@ func TestCheckContainerStatus_ContainerNotFound(t *testing.T) {
 		assert.Contains(t, strings.Join(cmd, " "), "uptime")
 	}).Return([]byte("success"), nil).Once()
 	mockExecutor.On("Execute", mock.Anything, "ssh", mock.Anything).
-		Return([]byte("No such object"), errors.New(""))
+		Return([]byte(""), errors.New("exit status 1: No such object"))
 
 	runner := newDockerCommandRunner(&v1.Docker{
 		ContainerName: "test-container",

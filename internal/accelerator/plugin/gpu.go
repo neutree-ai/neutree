@@ -96,8 +96,7 @@ func init() { //nolint:gochecknoinits
 }
 
 type GPUAcceleratorPlugin struct {
-	executor          command.Executor
-	sshProcessExecute command_runner.SSHProcessExecute
+	executor command.Executor
 }
 
 func (p *GPUAcceleratorPlugin) Resource() string {
@@ -177,7 +176,7 @@ func (p *GPUAcceleratorPlugin) getNodeAcceleratorInfo(ctx context.Context, nodeI
 	sshRunner := command_runner.NewSSHCommandRunner(nodeIP, nodeIP, v1.Auth{
 		SSHUser:       auth.SSHUser,
 		SSHPrivateKey: sshKeyPath,
-	}, "", p.executor.Execute, command_runner.WithSSHProcessExecute(p.sshProcessExecute))
+	}, "", p.executor.Execute)
 
 	// Use lspci instead of nvidia-smi to detect GPU hardware.
 	// lspci reads PCI bus info directly, independent of driver status,

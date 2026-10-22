@@ -242,7 +242,6 @@ func TestUpCluster(t *testing.T) {
 
 			sshRayClusterReconciler := &sshRayClusterReconciler{
 				executor:           mockCmdExecutor,
-				sshProcessExecute:  mockSSHProcessExecute(mockCmdExecutor.Execute),
 				acceleratorManager: mockAccelManager,
 			}
 
@@ -504,7 +503,6 @@ func TestStartNode(t *testing.T) {
 
 			sshRayClusterReconciler := &sshRayClusterReconciler{
 				executor:           mockCmdExecutor,
-				sshProcessExecute:  mockSSHProcessExecute(mockCmdExecutor.Execute),
 				acceleratorManager: mockAccelManager,
 			}
 
@@ -569,8 +567,7 @@ func TestDrainNode(t *testing.T) {
 			tt.setupMock(mockCmdExecutor)
 
 			sshRayClusterReconciler := &sshRayClusterReconciler{
-				executor:          mockCmdExecutor,
-				sshProcessExecute: mockSSHProcessExecute(mockCmdExecutor.Execute),
+				executor: mockCmdExecutor,
 			}
 
 			err := sshRayClusterReconciler.drainNode(&ReconcileContext{
@@ -805,8 +802,7 @@ func TestStopNode(t *testing.T) {
 			tt.setupMock(mockCmdExecutor)
 
 			sshRayClusterReconciler := &sshRayClusterReconciler{
-				executor:          mockCmdExecutor,
-				sshProcessExecute: mockSSHProcessExecute(mockCmdExecutor.Execute),
+				executor: mockCmdExecutor,
 			}
 
 			err := sshRayClusterReconciler.stopNode(&ReconcileContext{
@@ -873,8 +869,7 @@ func TestDownCluster(t *testing.T) {
 			}
 
 			r := &sshRayClusterReconciler{
-				executor:          mockExec,
-				sshProcessExecute: mockSSHProcessExecute(mockExec.Execute),
+				executor: mockExec,
 			}
 
 			// Test

@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	dashboardmocks "github.com/neutree-ai/neutree/internal/ray/dashboard/mocks"
 	"github.com/neutree-ai/neutree/internal/util"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
-	"github.com/neutree-ai/neutree/pkg/command_runner"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -25,48 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/utils/pointer"
 )
-
-func mockSSHProcessExecute(execute command_runner.ProcessExecute) command_runner.SSHProcessExecute {
-	return func(ctx context.Context, name string, args []string) (command_runner.SSHProcessOutput, error) {
-		output, err := execute(ctx, name, args)
-		if err != nil {
-			return command_runner.SSHProcessOutput{Stderr: string(output)}, err
-		}
-
-		return command_runner.SSHProcessOutput{Stdout: string(output)}, nil
-	}
-}
-
-func TestBuildSSHCommandArgsSeparatesExecutors(t *testing.T) {
-	mockExecutor := &commandmocks.MockExecutor{}
-	mockExecutor.On("Execute", mock.Anything, "bash", []string{"ray up"}).Return([]byte("local ray output"), nil).Once()
-	var sshCalls int
-	reconciler := &sshRayClusterReconciler{
-		executor: mockExecutor,
-		sshProcessExecute: func(_ context.Context, name string, args []string) (command_runner.SSHProcessOutput, error) {
-			sshCalls++
-			assert.Equal(t, "ssh", name)
-			assert.Equal(t, []string{"-T"}, args)
-			return command_runner.SSHProcessOutput{Stdout: "remote stdout", Stderr: "startup warning"}, nil
-		},
-	}
-	args := reconciler.buildSSHCommandArgs(&ReconcileContext{
-		sshClusterConfig:   &v1.RaySSHProvisionClusterConfig{Auth: v1.Auth{SSHUser: "ray"}},
-		sshConfigGenerator: newRaySSHLocalConfigGenerator("test"),
-	}, "10.0.0.10")
-
-	require.NotNil(t, args.SSHProcessExecute)
-	output, err := args.SSHProcessExecute(context.Background(), "ssh", []string{"-T"})
-	require.NoError(t, err)
-	assert.Equal(t, "remote stdout", output.Stdout)
-	assert.Equal(t, "startup warning", output.Stderr)
-	assert.Equal(t, 1, sshCalls)
-	localOutput, err := args.ProcessExecute(context.Background(), "bash", []string{"ray up"})
-	require.NoError(t, err)
-	assert.Equal(t, "local ray output", string(localOutput))
-	assert.Equal(t, 1, sshCalls)
-	mockExecutor.AssertExpectations(t)
-}
 
 func TestInitializeCluster(t *testing.T) {
 	tests := []struct {
@@ -176,7 +132,6 @@ func TestInitializeCluster(t *testing.T) {
 				acceleratorManager: acceleratorManager,
 				storage:            storage,
 				executor:           e,
-				sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 			}
 
 			err := r.initialize(&ReconcileContext{
@@ -420,7 +375,6 @@ func TestReconcileHeadNode(t *testing.T) {
 			r := &sshRayClusterReconciler{
 				acceleratorManager: acceleratorManager,
 				executor:           e,
-				sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 				storage:            &s,
 			}
 
@@ -529,7 +483,6 @@ func TestReconcileHeadNode_RecoveryReason(t *testing.T) {
 			r := &sshRayClusterReconciler{
 				acceleratorManager: acceleratorManager,
 				executor:           e,
-				sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 				storage:            &s,
 			}
 
@@ -592,7 +545,6 @@ func TestInitHeadNode_DashboardVerifyFailureHint(t *testing.T) {
 	r := &sshRayClusterReconciler{
 		acceleratorManager: acceleratorManager,
 		executor:           e,
-		sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 		storage:            &s,
 	}
 
@@ -986,7 +938,6 @@ func TestReconcileWorkerNode(t *testing.T) {
 			r := &sshRayClusterReconciler{
 				acceleratorManager: acceleratorManager,
 				executor:           e,
-				sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 			}
 
 			err := r.reconcileWorkerNode(&ReconcileContext{
@@ -1446,7 +1397,6 @@ func TestUpgradeCluster(t *testing.T) {
 				acceleratorManager: acceleratorManager,
 				storage:            storage,
 				executor:           e,
-				sshProcessExecute:  mockSSHProcessExecute(e.Execute),
 			}
 
 			err := r.upgradeCluster(&ReconcileContext{

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/command"
 )
 
 func installSSHOutputFixture(t *testing.T) string {
@@ -44,9 +45,7 @@ fi
 func outputFixtureRunner(t *testing.T) *SSHCommandRunner {
 	t.Helper()
 	return NewSSHCommandRunner("node", "127.0.0.1", v1.Auth{SSHUser: "tester"}, "",
-		func(ctx context.Context, name string, args []string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).CombinedOutput()
-		})
+		(&command.OSExecutor{}).Execute)
 }
 
 func TestSSHCommandRunnerDefaultSeparatesStartupStderr(t *testing.T) {

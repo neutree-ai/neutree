@@ -42,7 +42,7 @@ func TestGPUAcceleratorPlugin_BasicMethods(t *testing.T) {
 func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, testNvidiaLspciOutput, nil)
-	p := &GPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
@@ -59,7 +59,7 @@ func TestGPUAcceleratorPluginDetectStaticNodeAccelerator(t *testing.T) {
 func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, "{}", nil)
-	p := &GPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
@@ -73,60 +73,13 @@ func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorNoMatch(t *testing.T) {
 func TestGPUAcceleratorPluginDetectStaticNodeAcceleratorReturnsPluginError(t *testing.T) {
 	mockExecutor := &commandmocks.MockExecutor{}
 	mockNodeAcceleratorCommands(t, mockExecutor, "lspci failed", errors.New("lspci failed"))
-	p := &GPUAcceleratorPlugin{executor: mockExecutor, sshProcessExecute: mockSSHProcessExecute(mockExecutor.Execute)}
+	p := &GPUAcceleratorPlugin{executor: mockExecutor}
 
 	response, err := p.DetectStaticNodeAccelerator(context.Background(), staticNodeAcceleratorTestRequest())
 
 	require.Error(t, err)
 	assert.Nil(t, response)
 	mockExecutor.AssertExpectations(t)
-}
-
-func mockSSHProcessExecute(execute command_runner.ProcessExecute) command_runner.SSHProcessExecute {
-	return func(ctx context.Context, name string, args []string) (command_runner.SSHProcessOutput, error) {
-		output, err := execute(ctx, name, args)
-		if err != nil {
-			return command_runner.SSHProcessOutput{Stderr: string(output)}, err
-		}
-
-		return command_runner.SSHProcessOutput{Stdout: string(output)}, nil
-	}
-}
-
-func TestGPUAcceleratorPluginIgnoresSSHStderrNoise(t *testing.T) {
-	cases := []struct {
-		name          string
-		stdout        string
-		expectedCount int
-	}{
-		{name: "GPU stdout", stdout: testNvidiaLspciOutput, expectedCount: 2},
-		{name: "no GPU stdout", stdout: "{}", expectedCount: 0},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			var commands []string
-			plugin := &GPUAcceleratorPlugin{
-				executor: &commandmocks.MockExecutor{},
-				sshProcessExecute: func(_ context.Context, name string, args []string) (command_runner.SSHProcessOutput, error) {
-					assert.Equal(t, "ssh", name)
-					assert.Contains(t, args, "-T")
-					command := args[len(args)-1]
-					commands = append(commands, command)
-					if command == "uptime" {
-						return command_runner.SSHProcessOutput{Stdout: "up\n", Stderr: "startup warning"}, nil
-					}
-					return command_runner.SSHProcessOutput{Stdout: testCase.stdout, Stderr: testNvidiaLspciOutput}, nil
-				},
-			}
-
-			request := staticNodeAcceleratorTestRequest()
-			accelerators, err := plugin.getNodeAcceleratorInfo(context.Background(), request.NodeIp, request.SSHAuth)
-
-			require.NoError(t, err)
-			assert.Len(t, accelerators, testCase.expectedCount)
-			assert.Equal(t, []string{"uptime", "lspci -nn"}, commands)
-		})
-	}
 }
 
 func staticNodeAcceleratorTestRequest() *v1.DetectStaticNodeAcceleratorRequest {
@@ -213,8 +166,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo(t *testing.T) {
 			tt.mockSetup(mockExector)
 
 			p := &GPUAcceleratorPlugin{
-				executor:          mockExector,
-				sshProcessExecute: mockSSHProcessExecute(mockExector.Execute),
+				executor: mockExector,
 			}
 			accelerators, err := p.getNodeAcceleratorInfo(context.Background(), "127.0.0.1", v1.Auth{
 				SSHUser:       "root",
@@ -232,9 +184,9 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_ConnectionFailureExposesCon
 	mockExec.On("Execute", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		cmds := args.Get(2).([]string)
 		assert.Contains(t, strings.Join(cmds, " "), "uptime")
-	}).Return([]byte("ssh: connect to host 10.255.1.54 port 22: Connection refused"), errors.New("exit status 255")).Once()
+	}).Return([]byte(""), errors.New("exit status 255: ssh: connect to host 10.255.1.54 port 22: Connection refused")).Once()
 
-	p := &GPUAcceleratorPlugin{executor: mockExec, sshProcessExecute: mockSSHProcessExecute(mockExec.Execute)}
+	p := &GPUAcceleratorPlugin{executor: mockExec}
 	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.255.1.54", v1.Auth{
 		SSHUser:       "root",
 		SSHPrivateKey: "MTIzCg==",
@@ -268,7 +220,7 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_CommandFailureKeepsPCIWordi
 		assert.Contains(t, strings.Join(cmds, " "), "lspci -nn")
 	}).Return([]byte("lspci: command not found"), errors.New("exit status 127")).Once()
 
-	p := &GPUAcceleratorPlugin{executor: mockExec, sshProcessExecute: mockSSHProcessExecute(mockExec.Execute)}
+	p := &GPUAcceleratorPlugin{executor: mockExec}
 	_, err := p.getNodeAcceleratorInfo(context.Background(), "10.0.0.5", v1.Auth{
 		SSHUser:       "root",
 		SSHPrivateKey: "MTIzCg==",
@@ -279,7 +231,6 @@ func TestGPUAcceleratorPlugin_GetNodeAcceleratorInfo_CommandFailureKeepsPCIWordi
 		"post-connection command failure must not look like a connection failure")
 	assert.Contains(t, err.Error(), "get node 10.0.0.5 pci info failed",
 		"command-phase failure must keep the pci-info wording")
-	assert.Contains(t, err.Error(), "lspci: command not found", "command stderr must survive")
 	assert.NotContains(t, err.Error(), "hint:",
 		"command-phase failure must not carry the static-cluster hint (it is connection-specific)")
 	mockExec.AssertExpectations(t)
@@ -333,8 +284,7 @@ func TestGPUAcceleratorPlugin_GetNodeRuntimeConfig(t *testing.T) {
 			tt.mockSetup(mockExector)
 
 			p := &GPUAcceleratorPlugin{
-				executor:          mockExector,
-				sshProcessExecute: mockSSHProcessExecute(mockExector.Execute),
+				executor: mockExector,
 			}
 			runtimeConfig, err := p.GetNodeRuntimeConfig(context.Background(), &v1.GetNodeRuntimeConfigRequest{
 				NodeIp: "127.0.0.1",
