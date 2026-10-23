@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -77,6 +78,41 @@ func TestLDAPToken_RefreshFailureDoesNotBlockLogin(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	d.storage.AssertNotCalled(t, "UpdateUserProfile", mock.Anything, mock.Anything)
+}
+
+// A later OIDC login takes the provider's new display name. A claim the
+// provider leaves out (here the email) keeps the stored value.
+func TestOIDCCallback_LaterLoginRefreshesProfile(t *testing.T) {
+	e := newOIDCTestEnv(t)
+	e.idp.Claims = map[string]any{"preferred_username": "kc.alice", "name": "KC Alice Renamed"}
+	userID := uuid.New()
+
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
+		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+	e.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
+		Return(&types.AdminGetUserResponse{User: types.User{
+			ID: userID, Email: e.placeholderEmail(),
+			UserMetadata: internalauth.ExternalUserMetadata("kc.alice", "KC Alice", "alice@example.org"),
+			AppMetadata:  internalauth.ExternalAppMetadata(internalauth.OIDCSource, testOIDCID),
+		}}, nil).Once()
+	e.client.EXPECT().AdminUpdateUser(types.AdminUpdateUserRequest{
+		UserID:       userID,
+		UserMetadata: map[string]any{"name": "KC Alice Renamed"},
+	}).Return(&types.AdminUpdateUserResponse{User: types.User{
+		ID: userID, Email: e.placeholderEmail(),
+		UserMetadata: internalauth.ExternalUserMetadata("kc.alice", "KC Alice Renamed", "alice@example.org"),
+	}}, nil).Once()
+	expectProfile(e.storage, userID.String(), "KC Alice", "alice@example.org")
+	e.storage.EXPECT().UpdateUserProfile(userID.String(), &v1.UserProfile{
+		Metadata: &v1.Metadata{Name: "profile-name", DisplayName: "KC Alice Renamed", Labels: map[string]string{"k": "v"}},
+		Spec:     &v1.UserProfileSpec{Email: "alice@example.org"},
+	}).Return(nil).Once()
+	e.sessions.EXPECT().GenerateMagicLink(mock.Anything, e.placeholderEmail()).
+		Return(&internalauth.MagicLink{UserID: userID.String(), HashedToken: "hashed-token"}, nil).Once()
+
+	_, fragment := redirectFragment(t, e.loginFlow(t))
+
+	assert.Equal(t, url.Values{"token_hash": {"hashed-token"}, "type": {"magiclink"}}, fragment)
 }
 
 // A later login of a user created before identity_source_name was recorded

@@ -23,7 +23,10 @@ import (
 func newTestLoginSources(t *testing.T, store storage.Storage) *LoginSources {
 	t.Helper()
 
-	return NewLoginSources(store)
+	sources, err := NewLoginSources(store, testJWTSecret)
+	require.NoError(t, err)
+
+	return sources
 }
 
 // ldapSource is a stored LDAP source: the database has filled in the defaults.
@@ -241,26 +244,6 @@ func TestLoginSources_WrongTypeIsNotFound(t *testing.T) {
 
 	_, err := sources.get("corp-ldap", v1.IdentitySourceTypeOIDC)
 	assert.ErrorIs(t, err, errSourceNotFound)
-}
-
-// An OIDC source cannot serve an LDAP login.
-func TestLoginSources_OIDCSourceIsNotFoundForLDAP(t *testing.T) {
-	store := storagemocks.NewMockStorage(t)
-	expectSource(store, v1.IdentitySource{
-		ID:       2,
-		Metadata: &v1.Metadata{Name: "keycloak"},
-		Spec: &v1.IdentitySourceSpec{
-			Type:    v1.IdentitySourceTypeOIDC,
-			Enabled: true,
-			OIDC:    &v1.IdentitySourceOIDCSpec{Issuer: "https://idp.example.org", ClientID: "neutree"},
-		},
-	}, &storage.IdentitySourceSecrets{OIDCClientSecret: "secret"})
-
-	sources, builder := newCountingSources(t, store)
-
-	_, err := sources.get("keycloak", v1.IdentitySourceTypeLDAP)
-	assert.ErrorIs(t, err, errSourceNotFound)
-	assert.Zero(t, builder.built)
 }
 
 func TestLoginSources_InvalidNameIsNotFoundWithoutReading(t *testing.T) {

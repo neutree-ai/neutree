@@ -4,12 +4,15 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"sync"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/identitysource"
 	"github.com/neutree-ai/neutree/pkg/identity/ldap"
+	"github.com/neutree-ai/neutree/pkg/identity/oidc"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -26,29 +29,48 @@ var (
 )
 
 // LoginSources resolves the identity sources users log in with from the
-// database and keeps the LDAP authenticators built from them.
+// database and keeps the LDAP authenticators and OIDC relying parties built
+// from them.
 //
 // Every login reads the source and its secrets, so a change, a disable or a
 // delete applies to the next login. The built client is kept while neither
-// changed. A source that is gone, or a failed read, drops its client.
+// changed, so an OIDC provider keeps its discovery document and keys. A
+// source that is gone, or a failed read, drops its client.
 type LoginSources struct {
 	store storage.Storage
+	// codec seals the OIDC login state cookie of every source; the source
+	// name is bound into each sealed state.
+	codec *stateCodec
+	now   func() time.Time
 
 	newLDAP func(ldap.Config) (LDAPAuthenticator, error)
+	newOIDC func(oidc.Config) (OIDCRelyingParty, error)
 
 	mu      sync.Mutex
 	entries map[string]*loginSource
 }
 
-// NewLoginSources reads identity sources from store.
-func NewLoginSources(store storage.Storage) *LoginSources {
+// NewLoginSources reads identity sources from store. stateSecret keys the
+// OIDC login state cookie; it is the JWT secret neutree-api shares with
+// GoTrue and PostgREST, so every replica can finish a login another started.
+func NewLoginSources(store storage.Storage, stateSecret string) (*LoginSources, error) {
+	codec, err := newStateCodec(stateSecret)
+	if err != nil {
+		return nil, err
+	}
+
 	return &LoginSources{
 		store: store,
+		codec: codec,
+		now:   time.Now,
 		newLDAP: func(cfg ldap.Config) (LDAPAuthenticator, error) {
 			return ldap.New(cfg, ldap.NewDialer(cfg))
 		},
+		newOIDC: func(cfg oidc.Config) (OIDCRelyingParty, error) {
+			return oidc.New(cfg)
+		},
 		entries: map[string]*loginSource{},
-	}
+	}, nil
 }
 
 // loginSource is an enabled identity source ready for logins. It is not
@@ -59,6 +81,20 @@ type loginSource struct {
 	fingerprint [sha256.Size]byte
 
 	ldap LDAPAuthenticator
+	oidc *oidcSource
+}
+
+// oidcSource is what an OIDC login needs of its source.
+type oidcSource struct {
+	name string
+	rp   OIDCRelyingParty
+	// allowedRedirects are the UI locations a login may return to; the first
+	// one is the default.
+	allowedRedirects []*url.URL
+	// cookiePath and cookieSecure scope the state cookie to the callback of
+	// spec.oidc.redirect_url.
+	cookiePath   string
+	cookieSecure bool
 }
 
 // resolve returns the enabled source of the given type a login asked for.
@@ -192,7 +228,33 @@ func (s *LoginSources) build(entry *loginSource, spec *v1.IdentitySourceSpec, se
 
 		return nil
 	case v1.IdentitySourceTypeOIDC:
-		// There is no OIDC login yet; get refuses the source by its type.
+		if spec.OIDC == nil {
+			return errors.New("spec.oidc is missing")
+		}
+
+		callback, err := url.Parse(spec.OIDC.RedirectURL)
+		if err != nil || callback.Path == "" {
+			return fmt.Errorf("invalid OIDC redirect URL %q", spec.OIDC.RedirectURL)
+		}
+
+		allowed, err := parseOIDCAllowedRedirects(spec.OIDC.AllowedRedirects)
+		if err != nil {
+			return err
+		}
+
+		rp, err := s.newOIDC(identitysource.OIDCConfig(spec.OIDC, secrets.OIDCClientSecret))
+		if err != nil {
+			return err
+		}
+
+		entry.oidc = &oidcSource{
+			name:             entry.name,
+			rp:               rp,
+			allowedRedirects: allowed,
+			cookiePath:       callback.Path,
+			cookieSecure:     callback.Scheme == "https",
+		}
+
 		return nil
 	default:
 		return fmt.Errorf("unknown type %q", spec.Type)
