@@ -17,6 +17,7 @@ func (k *kubernetesOrchestrator) configureEndpointCache(ctx *OrchestratorContext
 	if err != nil {
 		return err
 	}
+
 	count := 0
 
 	for i := range objects.Items {

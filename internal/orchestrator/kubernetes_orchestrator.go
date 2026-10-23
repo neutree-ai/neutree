@@ -247,6 +247,15 @@ func computeEndpointSpecHash(endpoint *v1.Endpoint) (string, error) {
 }
 
 func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error {
+	ready, err := k.kvCacheProviders.DeploymentReady(ctx.Endpoint, ctx.Cluster)
+	if err != nil {
+		return err
+	}
+
+	if !ready {
+		return nil
+	}
+
 	namespace := util.ClusterNamespace(ctx.Cluster)
 
 	renderVars, err := k.buildManifestVariables(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.Engine, ctx.ImageRegistry)
@@ -538,7 +547,14 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 	}
 
 	if endpoint.Status != nil && endpoint.Status.KVCache != nil {
-		status.KVCache, err = k.kvCacheProviders.ObserveDependencies(context.Background(), ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
+		observedEndpoint := *endpoint
+		observedEndpoint.Status = status
+
+		if status.KVCache == nil {
+			status.KVCache = endpoint.Status.KVCache
+		}
+
+		status.KVCache, err = k.kvCacheProviders.ObserveDependencies(context.Background(), ctrlClient, util.ClusterNamespace(deployedCluster), &observedEndpoint)
 		if err != nil {
 			return nil, err
 		}
@@ -552,7 +568,7 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 	namespace string,
 	cluster *v1.Cluster,
 	endpoint *v1.Endpoint,
-) (*v1.EndpointStatus, error) {
+) (result *v1.EndpointStatus, resultErr error) {
 	var exists bool
 
 	// now we only use deployment to deploy endpoint,
@@ -575,6 +591,12 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 	} else {
 		exists = true
 	}
+
+	defer func() {
+		if resultErr == nil && result != nil {
+			resultErr = k.kvCacheProviders.ObserveDeployment(endpoint, cluster, dep, result)
+		}
+	}()
 
 	isDeleting := endpoint.GetDeletionTimestamp() != ""
 
@@ -637,6 +659,36 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 				Phase:        v1.EndpointPhaseDEPLOYING,
 				ErrorMessage: "Endpoint pausing in progress: waiting for all pods to terminate",
 			}, nil
+		}
+	}
+
+	ready, err := k.kvCacheProviders.DeploymentReady(endpoint, cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ready {
+		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for cache runtime upgrade"}, nil
+	}
+
+	if stored := dep.Annotations[annEndpointSpecHash]; stored != "" {
+		current, err := computeEndpointSpecHash(endpoint)
+		if err != nil {
+			return nil, err
+		}
+
+		if current != stored {
+			return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for the current endpoint configuration"}, nil
+		}
+	}
+
+	if dep.Status.ObservedGeneration < dep.Generation {
+		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for deployment observation"}, nil
+	}
+
+	for _, condition := range dep.Status.Conditions {
+		if condition.Type == appsv1.DeploymentProgressing && condition.Status == corev1.ConditionFalse && condition.Reason == "ProgressDeadlineExceeded" {
+			return &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED, ErrorMessage: condition.Message}, nil
 		}
 	}
 

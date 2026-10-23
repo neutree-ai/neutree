@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -21,7 +22,6 @@ type Provider interface {
 type Providers map[string]Provider
 
 func (p Providers) Get(name string) (Provider, error) {
-
 	if provider := p[name]; provider != nil {
 		return provider, nil
 	}
@@ -34,9 +34,7 @@ func (p Providers) Get(name string) (Provider, error) {
 }
 
 func Validate(endpoint *v1.Endpoint, cluster *v1.Cluster, providers Providers) error {
-
 	if endpoint.Spec.KVCache == nil {
-
 		return nil
 	}
 
@@ -50,7 +48,6 @@ func Validate(endpoint *v1.Endpoint, cluster *v1.Cluster, providers Providers) e
 }
 
 func DecodeOptions(raw json.RawMessage, target interface{}) error {
-
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
@@ -80,4 +77,64 @@ func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, nam
 	}
 
 	return observer.ObserveDependencies(ctx, c, namespace, endpoint)
+}
+
+// DeploymentGate delays applying a new template while a shared cache dependency
+// is being upgraded. Existing Pods keep running; deletion and pause remain usable.
+type DeploymentGate interface {
+	DeploymentReady(*v1.Endpoint, *v1.Cluster) (bool, error)
+}
+
+func (p Providers) DeploymentReady(endpoint *v1.Endpoint, cluster *v1.Cluster) (bool, error) {
+	name := ""
+	if endpoint.Spec.KVCache != nil {
+		name = endpoint.Spec.KVCache.Provider
+	} else if endpoint.Status != nil && endpoint.Status.KVCache != nil {
+		name = endpoint.Status.KVCache.Provider
+	}
+
+	if name == "" {
+		return true, nil
+	}
+
+	provider, err := p.Get(name)
+	if err != nil {
+		return false, err
+	}
+
+	if gate, ok := provider.(DeploymentGate); ok {
+		return gate.DeploymentReady(endpoint, cluster)
+	}
+
+	return true, nil
+}
+
+// DeploymentStatusObserver enriches the Endpoint's own observation of its
+// deployment. Cluster-level workflows consume the resulting status only.
+type DeploymentStatusObserver interface {
+	ObserveDeployment(*v1.Endpoint, *v1.Cluster, *appsv1.Deployment, *v1.EndpointStatus) error
+}
+
+func (p Providers) ObserveDeployment(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment, status *v1.EndpointStatus) error {
+	name := ""
+	if endpoint.Spec.KVCache != nil {
+		name = endpoint.Spec.KVCache.Provider
+	} else if endpoint.Status != nil && endpoint.Status.KVCache != nil {
+		name = endpoint.Status.KVCache.Provider
+	}
+
+	if name == "" {
+		return nil
+	}
+
+	provider, err := p.Get(name)
+	if err != nil {
+		return err
+	}
+
+	if observer, ok := provider.(DeploymentStatusObserver); ok {
+		return observer.ObserveDeployment(endpoint, cluster, dep, status)
+	}
+
+	return nil
 }
