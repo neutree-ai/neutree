@@ -26,10 +26,13 @@ type ResourceNode struct {
 }
 
 type EndpointInstanceResource struct {
-	InstanceID string
-	ReplicaID  string
-	NodeID     string
-	Devices    []v1.DeviceAllocation
+	InstanceID         string
+	ReplicaID          string
+	NodeID             string
+	ContainerID        string
+	ModelWeightsMiB    *float64
+	KVCacheCapacityMiB *float64
+	Devices            []v1.DeviceAllocation
 }
 
 func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNode {
