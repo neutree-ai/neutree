@@ -2554,6 +2554,111 @@ func TestPrepareEngineArgsForTemplate(t *testing.T) {
 	}
 }
 
+func TestSerializeEngineArgValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "native object",
+			input:    map[string]interface{}{"method": "mtp"},
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "native interface slice",
+			input:    []interface{}{"a", 1, true},
+			expected: `["a",1,true]`,
+		},
+		{
+			name:     "native typed slice",
+			input:    []string{"a", "b"},
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "raw JSON object",
+			input:    `{"method":"mtp"}`,
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "raw JSON array",
+			input:    `["a","b"]`,
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "legacy escaped JSON object",
+			input:    `{\"method\":\"mtp\"}`,
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "legacy escaped JSON array",
+			input:    `[\"a\",\"b\"]`,
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "JSON with whitespace",
+			input:    "  {\\\"method\\\":\\\"mtp\\\"}  ",
+			expected: "  {\"method\":\"mtp\"}  ",
+		},
+		{
+			name:     "invalid JSON",
+			input:    `{\"method\":}`,
+			expected: `{\"method\":}`,
+		},
+		{
+			name:     "single quoted object is not repaired",
+			input:    `{'method':'mtp'}`,
+			expected: `{'method':'mtp'}`,
+		},
+		{
+			name:     "JSON scalar is unchanged",
+			input:    `\"mtp\"`,
+			expected: `\"mtp\"`,
+		},
+		{
+			name:     "ordinary Windows path is unchanged",
+			input:    `C:\models\weights`,
+			expected: `C:\models\weights`,
+		},
+		{
+			name:     "double escaped JSON is unchanged",
+			input:    `{\\\"method\\\":\\\"mtp\\\"}`,
+			expected: `{\\\"method\\\":\\\"mtp\\\"}`,
+		},
+		{
+			name:     "boolean true is unchanged",
+			input:    true,
+			expected: true,
+		},
+		{
+			name:     "boolean false is unchanged",
+			input:    false,
+			expected: false,
+		},
+		{
+			name:     "zero is unchanged",
+			input:    0,
+			expected: 0,
+		},
+		{
+			name:     "empty string is unchanged",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "nil is unchanged",
+			input:    nil,
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, serializeEngineArgValue(tt.input))
+		})
+	}
+}
+
 func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	legacyItems := []interface{}{`{\"method\":\"mtp\"}`}
 	args := map[string]interface{}{

@@ -239,6 +239,9 @@ func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string
 func serializeEngineArgValue(value interface{}) interface{} {
 	switch val := value.(type) {
 	case string:
+		// Legacy K8s templates placed JSON inside YAML double quotes, so existing
+		// values may contain one layer of YAML/JSON quote escaping. Decode that
+		// layer only for valid JSON objects or arrays before the template quotes it.
 		var decoded string
 		if err := json.Unmarshal([]byte(`"`+val+`"`), &decoded); err == nil {
 			trimmed := strings.TrimSpace(decoded)
