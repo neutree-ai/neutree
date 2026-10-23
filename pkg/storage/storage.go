@@ -254,6 +254,13 @@ type IdentitySourceSecrets struct {
 	OIDCClientSecret string `json:"oidc_client_secret"`
 }
 
+type SessionStorage interface {
+	// IsSessionActive reports whether the GoTrue session sessionID of userID
+	// still stands: it exists, has not timed out, and its user is neither
+	// banned nor deleted.
+	IsSessionActive(sessionID, userID string) (bool, error)
+}
+
 type IdentitySourceStorage interface {
 	// CreateIdentitySource creates a new identity source in the database.
 	CreateIdentitySource(data *v1.IdentitySource) error
@@ -294,6 +301,7 @@ type Storage interface {
 	StaticNodeStorage
 	ExternalIdentityStorage
 	IdentitySourceStorage
+	SessionStorage
 
 	// CallDatabaseFunction calls a database function with the given name and parameters.
 	CallDatabaseFunction(name string, params map[string]interface{}, result interface{}) error

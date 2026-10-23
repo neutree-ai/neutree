@@ -1206,6 +1206,18 @@ func (s *postgrestStorage) ListLoginIdentitySources() ([]v1.LoginIdentitySource,
 	return response, nil
 }
 
+func (s *postgrestStorage) IsSessionActive(sessionID, userID string) (bool, error) {
+	var active bool
+	if err := s.CallDatabaseFunction("session_is_active", map[string]interface{}{
+		"p_session_id": sessionID,
+		"p_user_id":    userID,
+	}, &active); err != nil {
+		return false, err
+	}
+
+	return active, nil
+}
+
 func (s *postgrestStorage) GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error) {
 	var response []IdentitySourceSecrets
 	if err := s.CallDatabaseFunction("get_identity_source_secrets", map[string]interface{}{"p_name": name}, &response); err != nil {
