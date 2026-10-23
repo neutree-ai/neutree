@@ -340,6 +340,8 @@ func TestAuthRoutes_Registration(t *testing.T) {
 		{"ldap route present with LDAP", true, "/api/v1/auth/ldap/token", true},
 		{"signup route gone", false, "/api/v1/auth/signup", false},
 		{"signup route gone with LDAP", true, "/api/v1/auth/signup", false},
+		{"GoTrue authorize proxy gone", false, "/api/v1/auth/authorize", false},
+		{"GoTrue callback proxy gone", false, "/api/v1/auth/callback", false},
 	}
 
 	for _, tc := range cases {

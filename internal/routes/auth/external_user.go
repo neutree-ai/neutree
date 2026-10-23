@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -21,6 +23,14 @@ var (
 	linkRetryAttempts = 5
 	linkRetryDelay    = 200 * time.Millisecond
 )
+
+// placeholderEmail is the GoTrue email of an external account. The external
+// ID is case-sensitive and may hold any character, so the local part is its
+// hash.
+func placeholderEmail(sourceName, domain, externalID string) string {
+	sum := sha256.Sum256([]byte(externalID))
+	return hex.EncodeToString(sum[:])[:32] + "@" + sourceName + "." + domain
+}
 
 // externalAccount is an account authenticated by an external identity source,
 // as needed to find or create the GoTrue user it owns.

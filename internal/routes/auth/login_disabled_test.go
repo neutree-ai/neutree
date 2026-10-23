@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -56,4 +57,24 @@ func TestLDAPToken_ExpiredBanAllowsLogin(t *testing.T) {
 	w := d.login(t)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// A banned user finishing an OIDC login gets its own error code, not
+// server_error.
+func TestOIDCCallback_BannedUserIsRefused(t *testing.T) {
+	e := newOIDCTestEnv(t)
+	userID := uuid.New()
+	until := time.Now().Add(time.Hour)
+
+	e.storage.EXPECT().GetExternalIdentity(testOIDCLinkSource, e.externalID()).
+		Return(&storage.ExternalIdentity{UserID: userID.String()}, nil).Once()
+	e.client.EXPECT().AdminGetUser(types.AdminGetUserRequest{UserID: userID}).
+		Return(&types.AdminGetUserResponse{User: types.User{ID: userID, Email: e.placeholderEmail(), BannedUntil: &until}}, nil).Once()
+
+	base, fragment := redirectFragment(t, e.loginFlow(t))
+
+	assert.Equal(t, testRedirectTo, base)
+	assert.Equal(t, url.Values{"error": {oidcErrUserDisabled}}, fragment)
+	e.sessions.AssertNotCalled(t, "GenerateMagicLink", mock.Anything, mock.Anything)
+	e.client.AssertNotCalled(t, "AdminUpdateUser", mock.Anything)
 }
