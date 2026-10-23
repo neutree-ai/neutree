@@ -228,87 +228,129 @@ func TestHandleGetLogs_MissingParameters(t *testing.T) {
 }
 
 func TestHandleGetLogs_HEAD_Request(t *testing.T) {
-	mockStorage := new(mocks.MockStorage)
-	deps := setupTestDeps(mockStorage)
-
-	endpoint := v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-		Spec: &v1.EndpointSpec{
-			Cluster: "test-cluster",
-		},
+	tests := []struct {
+		name        string
+		clusterType string
+		logType     string
+		podCalls    int
+	}{
+		{name: "SSH", clusterType: v1.SSHClusterType, logType: "application"},
+		{name: "Kubernetes", clusterType: v1.KubernetesClusterType, logType: "logs", podCalls: 1},
 	}
 
-	cluster := v1.Cluster{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-cluster",
-		},
-		Spec: &v1.ClusterSpec{
-			Type: v1.KubernetesClusterType,
-		},
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(test *testing.T) {
+			mockStorage := new(mocks.MockStorage)
+			mockHTTPClient := utilmocks.NewMockHTTPClient(test)
+			kubernetesClient := utilmocks.NewMockK8sClient(test)
+			deps := &Dependencies{Storage: mockStorage, HTTPClient: mockHTTPClient, K8sClient: kubernetesClient}
+			if testCase.clusterType == v1.KubernetesClusterType {
+				kubernetesClient.On("GetPod", mock.Anything, mock.Anything, mock.Anything, "pod-123").Return(endpointLogTestPod(), nil).Once()
+			}
+
+			endpoint := v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "test-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Cluster: "test-cluster",
+				},
+			}
+			cluster := v1.Cluster{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "test-cluster",
+				},
+				Spec: &v1.ClusterSpec{
+					Type: testCase.clusterType,
+				},
+			}
+
+			mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
+			mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+
+			ginContext, recorder := createLogsMockContext(http.MethodHead, "/api/v1/endpoints/default/test-endpoint/logs/pod-123/"+testCase.logType)
+			handler := handleGetLogs(deps)
+			handler(ginContext)
+
+			assert.Equal(test, http.StatusOK, recorder.Code)
+			assert.Equal(test, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
+			assert.Equal(test, "chunked", recorder.Header().Get("Transfer-Encoding"))
+			assert.Equal(test, "nosniff", recorder.Header().Get("X-Content-Type-Options"))
+			assert.Empty(test, recorder.Header().Get("Content-Disposition"))
+			assert.Empty(test, recorder.Body.String())
+			mockHTTPClient.AssertNotCalled(test, "Get", mock.Anything)
+			kubernetesClient.AssertNotCalled(test, "GetPodLogs", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+			kubernetesClient.AssertNumberOfCalls(test, "GetPod", testCase.podCalls)
+
+			mockStorage.AssertExpectations(test)
+		})
 	}
-
-	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
-	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
-
-	c, w := createLogsMockContext("HEAD", "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
-
-	handler := handleGetLogs(deps)
-	handler(c)
-
-	// HEAD request should return 200 with headers but no body
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
-	assert.Equal(t, "chunked", w.Header().Get("Transfer-Encoding"))
-	assert.Empty(t, w.Body.String())
-
-	mockStorage.AssertExpectations(t)
 }
 
 func TestHandleGetLogs_DownloadParameter(t *testing.T) {
-	mockStorage := new(mocks.MockStorage)
-	deps := setupTestDeps(mockStorage)
-
-	endpoint := v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
+	tests := []struct {
+		name        string
+		clusterType string
+		logType     string
+		filename    string
+	}{
+		{
+			name: "SSH", clusterType: v1.SSHClusterType, logType: "application",
+			filename: "default-test-endpoint-pod-123-application.log",
 		},
-		Spec: &v1.EndpointSpec{
-			Cluster: "test-cluster",
-		},
-	}
-
-	cluster := v1.Cluster{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-cluster",
-		},
-		Spec: &v1.ClusterSpec{
-			Type: v1.KubernetesClusterType,
+		{
+			name: "Kubernetes", clusterType: v1.KubernetesClusterType, logType: "logs",
+			filename: "default-test-endpoint-pod-123-serve-current.log",
 		},
 	}
 
-	mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
-	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(test *testing.T) {
+			mockStorage := new(mocks.MockStorage)
+			mockHTTPClient := utilmocks.NewMockHTTPClient(test)
+			kubernetesClient := utilmocks.NewMockK8sClient(test)
+			deps := &Dependencies{Storage: mockStorage, HTTPClient: mockHTTPClient, K8sClient: kubernetesClient}
+			if testCase.clusterType == v1.KubernetesClusterType {
+				kubernetesClient.On("GetPod", mock.Anything, mock.Anything, mock.Anything, "pod-123").Return(endpointLogTestPod(), nil).Once()
+			}
 
-	c, w := createLogsMockContext("HEAD", "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
-	// Set query parameter properly
-	c.Request.URL.RawQuery = "download=true"
+			endpoint := v1.Endpoint{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "test-endpoint",
+				},
+				Spec: &v1.EndpointSpec{
+					Cluster: "test-cluster",
+				},
+			}
+			cluster := v1.Cluster{
+				Metadata: &v1.Metadata{
+					Workspace: "default",
+					Name:      "test-cluster",
+				},
+				Spec: &v1.ClusterSpec{
+					Type: testCase.clusterType,
+				},
+			}
 
-	handler := handleGetLogs(deps)
-	handler(c)
+			mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
+			mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
 
-	// Should have Content-Disposition header when download=true
-	assert.Equal(t, http.StatusOK, w.Code)
-	contentDisposition := w.Header().Get("Content-Disposition")
-	assert.Contains(t, contentDisposition, "attachment")
-	assert.Contains(t, contentDisposition, "default-test-endpoint-pod-123-logs.log")
+			path := "/api/v1/endpoints/default/test-endpoint/logs/pod-123/" + testCase.logType
+			ginContext, recorder := createLogsMockContext(http.MethodHead, path)
+			ginContext.Request.URL.RawQuery = "download=true"
+			handler := handleGetLogs(deps)
+			handler(ginContext)
 
-	mockStorage.AssertExpectations(t)
+			assert.Equal(test, http.StatusOK, recorder.Code)
+			assert.Equal(test, "attachment; filename="+testCase.filename, recorder.Header().Get("Content-Disposition"))
+			assert.Empty(test, recorder.Body.String())
+
+			mockStorage.AssertExpectations(test)
+		})
+	}
 }
 
 func TestHandleGetLogs_LinesParameter(t *testing.T) {
@@ -343,6 +385,13 @@ func TestHandleGetLogs_LinesParameter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockStorage := new(mocks.MockStorage)
 			deps := setupTestDeps(mockStorage)
+			kubernetesClient := utilmocks.NewMockK8sClient(t)
+			deps.K8sClient = kubernetesClient
+			kubernetesClient.On("GetPod", mock.Anything, mock.Anything, mock.Anything, "pod-123").Return(endpointLogTestPod(), nil).Once()
+			kubernetesClient.On("GetPodLogs", mock.Anything, mock.Anything, mock.Anything, "pod-123",
+				mock.MatchedBy(func(options *corev1.PodLogOptions) bool {
+					return options.TailLines != nil && *options.TailLines == tt.expectedLines
+				})).Return(io.NopCloser(strings.NewReader("logs")), nil).Once()
 
 			endpoint := v1.Endpoint{
 				Metadata: &v1.Metadata{
@@ -367,7 +416,7 @@ func TestHandleGetLogs_LinesParameter(t *testing.T) {
 			mockStorage.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
 			mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
 
-			c, w := createLogsMockContext("HEAD", "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
+			c, w := createLogsMockContext("GET", "/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs")
 			// Set query parameter properly
 			if tt.queryParam != "" {
 				c.Request.URL.RawQuery = tt.queryParam
@@ -781,42 +830,21 @@ func TestStreamK8sLogs_Success(t *testing.T) {
 		},
 	}
 
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-	}
-
-	// Mock successful pod get
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{Name: "serve"},
-			},
-		},
-	}
-	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
-
-	// Mock successful log stream
+	lines := int64(1000)
+	options := &corev1.PodLogOptions{Container: "serve", TailLines: &lines, Timestamps: true}
 	logContent := "k8s log line 1\nk8s log line 2\n"
-	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", mock.Anything).
-		Return(io.NopCloser(strings.NewReader(logContent)), nil)
+	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", options).
+		Return(io.NopCloser(strings.NewReader(logContent)), nil).Once()
 
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	// Create a request with context
-	req := httptest.NewRequest("GET", "/logs", nil)
-	c.Request = req
+	ginContext, recorder := createLogsMockContext(http.MethodGet, "/logs")
 
-	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+	err := streamK8sLogs(ginContext, ginContext.Request.Context(), cluster, mockK8sClient, "pod-123", options)
 
 	assert.NoError(t, err)
-	assert.Equal(t, logContent, w.Body.String())
+	assert.Equal(t, logContent, recorder.Body.String())
 }
 
-func TestStreamK8sLogs_GetPodError(t *testing.T) {
+func TestPrepareK8sLogOptions_GetPodError(t *testing.T) {
 	mockK8sClient := utilmocks.NewMockK8sClient(t)
 
 	cluster := &v1.Cluster{
@@ -836,24 +864,19 @@ func TestStreamK8sLogs_GetPodError(t *testing.T) {
 		},
 	}
 
-	// Mock GetPod error
 	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").
-		Return((*corev1.Pod)(nil), errors.New("pod not found"))
+		Return((*corev1.Pod)(nil), errors.New("pod not found")).Once()
 
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	// Create a request with context
-	req := httptest.NewRequest("GET", "/logs", nil)
-	c.Request = req
+	ginContext, _ := createLogsMockContext(http.MethodGet, "/logs")
 
-	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+	options, err := prepareK8sLogOptions(ginContext, ginContext.Request.Context(), cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
 
+	assert.Nil(t, options)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "pod not found")
 }
 
-func TestStreamK8sLogs_NoContainers(t *testing.T) {
+func TestPrepareK8sLogOptions_NoContainers(t *testing.T) {
 	mockK8sClient := utilmocks.NewMockK8sClient(t)
 
 	cluster := &v1.Cluster{
@@ -873,23 +896,14 @@ func TestStreamK8sLogs_NoContainers(t *testing.T) {
 		},
 	}
 
-	// Mock pod without any containers
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{},
-		},
-	}
-	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+	pod := &corev1.Pod{ObjectMeta: endpointLogTestPod().ObjectMeta}
+	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil).Once()
 
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	// Create a request with context
-	req := httptest.NewRequest("GET", "/logs", nil)
-	c.Request = req
+	ginContext, _ := createLogsMockContext(http.MethodGet, "/logs")
 
-	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+	options, err := prepareK8sLogOptions(ginContext, ginContext.Request.Context(), cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
 
+	assert.Nil(t, options)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no containers found")
 }
@@ -907,35 +921,14 @@ func TestStreamK8sLogs_GetPodLogsError(t *testing.T) {
 		},
 	}
 
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-	}
+	lines := int64(1000)
+	options := &corev1.PodLogOptions{Container: "serve", TailLines: &lines, Timestamps: true}
+	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", options).
+		Return(nil, errors.New("failed to get logs")).Once()
 
-	// Mock successful pod get
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{Name: "serve"},
-			},
-		},
-	}
-	mockK8sClient.On("GetPod", mock.Anything, cluster, mock.Anything, "pod-123").Return(pod, nil)
+	ginContext, _ := createLogsMockContext(http.MethodGet, "/logs")
 
-	// Mock GetPodLogs error
-	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", mock.Anything).
-		Return(nil, errors.New("failed to get logs"))
-
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	// Create a request with context
-	req := httptest.NewRequest("GET", "/logs", nil)
-	c.Request = req
-
-	err := streamK8sLogs(c, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+	err := streamK8sLogs(ginContext, ginContext.Request.Context(), cluster, mockK8sClient, "pod-123", options)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get logs")
@@ -1135,13 +1128,7 @@ func TestHandleGetLogs_K8sCluster_Success(t *testing.T) {
 	mockStorage.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil)
 
 	// Mock successful pod get
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{Name: "serve"},
-			},
-		},
-	}
+	pod := endpointLogTestPod()
 	mockK8sClient.On("GetPod", mock.Anything, &cluster, mock.Anything, "pod-123").Return(pod, nil)
 
 	// Mock successful log stream

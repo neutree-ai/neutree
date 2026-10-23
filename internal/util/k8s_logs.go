@@ -40,12 +40,58 @@ func GetEndpointPods(ctx context.Context, cluster *v1.Cluster, endpoint *v1.Endp
 	return podList.Items, nil
 }
 
+type ContainerLogInfo struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	RestartCount int32  `json:"restart_count"`
+	Started      bool   `json:"started"`
+}
+
 // EndpointLogInfo returns information about available logs for an endpoint
 type EndpointLogInfo struct {
 	ReplicaID     string
 	PodName       string
 	ContainerName string
 	Status        string
+	Containers    []ContainerLogInfo
+}
+
+func GetPodLogContainers(pod *corev1.Pod) []ContainerLogInfo {
+	containerStatuses := make(map[string]corev1.ContainerStatus, len(pod.Status.ContainerStatuses))
+	for _, status := range pod.Status.ContainerStatuses {
+		containerStatuses[status.Name] = status
+	}
+
+	initStatuses := make(map[string]corev1.ContainerStatus, len(pod.Status.InitContainerStatuses))
+	for _, status := range pod.Status.InitContainerStatuses {
+		initStatuses[status.Name] = status
+	}
+
+	containers := make([]ContainerLogInfo, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers))
+
+	for _, container := range pod.Spec.Containers {
+		status := containerStatuses[container.Name]
+		containers = append(containers, ContainerLogInfo{
+			Name:         container.Name,
+			Type:         "container",
+			RestartCount: status.RestartCount,
+			Started: status.State.Running != nil || status.State.Terminated != nil ||
+				status.LastTerminationState.Terminated != nil || status.RestartCount > 0,
+		})
+	}
+
+	for _, container := range pod.Spec.InitContainers {
+		status := initStatuses[container.Name]
+		containers = append(containers, ContainerLogInfo{
+			Name:         container.Name,
+			Type:         "initContainer",
+			RestartCount: status.RestartCount,
+			Started: status.State.Running != nil || status.State.Terminated != nil ||
+				status.LastTerminationState.Terminated != nil || status.RestartCount > 0,
+		})
+	}
+
+	return containers
 }
 
 // GetEndpointLogsInfo retrieves log information for all replicas of an endpoint
@@ -69,6 +115,7 @@ func GetEndpointLogsInfo(ctx context.Context, cluster *v1.Cluster, endpoint *v1.
 			PodName:       pod.Name,
 			ContainerName: containerName,
 			Status:        string(pod.Status.Phase),
+			Containers:    GetPodLogContainers(&pod),
 		}
 		logInfos = append(logInfos, logInfo)
 	}
