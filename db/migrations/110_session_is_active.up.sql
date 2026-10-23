@@ -2,8 +2,8 @@
 --
 -- Whether a GoTrue session still stands: it exists, has not passed its
 -- not_after, and its user is not banned or deleted. A GoTrue access token is
--- valid until it expires, even after its session was ended (logout, or the
--- organization sync deactivating the user) or its user banned. neutree-api
+-- valid until it expires, even after its session was ended (logout) or its
+-- user banned. neutree-api
 -- asks this for the session_id claim of every user token it accepts, so such
 -- a token stops working within its cache period instead of at its expiry.
 --

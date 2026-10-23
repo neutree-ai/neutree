@@ -19,9 +19,8 @@ const sessionCacheSweepSize = 4096
 
 // verifySessionActive refuses a user token whose GoTrue session no longer
 // stands. The signature and expiry say who the token is for and how long it
-// lasts, not whether the session was ended since (logout, the organization
-// sync deactivating the user) or the user banned: GoTrue keeps such a token
-// valid until it expires.
+// lasts, not whether the session was ended since (logout) or the user
+// banned: GoTrue keeps such a token valid until it expires.
 //
 // A token without a session_id claim is not a GoTrue session token: GoTrue
 // puts the claim in every access token it issues, so only a holder of the JWT
