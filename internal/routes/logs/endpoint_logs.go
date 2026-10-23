@@ -6,18 +6,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+const k8sLogType = "logs"
 
 type Dependencies struct {
 	Storage         storage.Storage
@@ -51,9 +56,12 @@ type ReplicaInfo struct {
 
 // LogInfo represents log information
 type LogInfo struct {
-	Type        string `json:"type"` // "application" | "stderr" | "stdout" | "logs"
-	URL         string `json:"url"`
-	DownloadURL string `json:"download_url"`
+	Type          string `json:"type"` // "application" | "stderr" | "stdout" | "logs"
+	URL           string `json:"url"`
+	DownloadURL   string `json:"download_url"`
+	ContainerName string `json:"container_name,omitempty"`
+	RestartCount  int32  `json:"restart_count,omitempty"`
+	Started       bool   `json:"started,omitempty"`
 }
 
 // RayApplicationsResponse represents Ray Dashboard API response structure.
@@ -106,6 +114,8 @@ func setupStreamingResponse(c *gin.Context, download bool, filename string) {
 func RegisterEndpointLogsRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	logsGroup := group.Group("/endpoints/:workspace/:name")
 	logsGroup.Use(middlewares...)
+	// Log routes access cluster APIs directly, so check workspace permissions before accessing logs.
+	logsGroup.Use(middleware.RequireWorkspacePermission("endpoint:read", middleware.PermissionDependencies{Storage: deps.Storage}))
 
 	// Log sources discovery
 	logsGroup.GET("/log-sources", handleGetLogSources(deps))
@@ -207,12 +217,46 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Setup unified streaming response headers
-		filename := fmt.Sprintf("%s-%s-%s-%s.log", workspace, name, replicaID, logType)
+		var options *corev1.PodLogOptions
+		var filenameSuffix string
+
+		switch cluster.Spec.Type {
+		case v1.SSHClusterType:
+			filenameSuffix = logType
+		case v1.KubernetesClusterType:
+			options, err = prepareK8sLogOptions(c, c.Request.Context(), cluster, deps.K8sClient, endpoint, replicaID, logType, lines)
+			if err != nil {
+				klog.Errorf("Failed to prepare Kubernetes logs: %v", err)
+
+				status := http.StatusInternalServerError
+				if apierrors.IsBadRequest(err) {
+					status = http.StatusBadRequest
+				} else if apierrors.IsNotFound(err) {
+					status = http.StatusNotFound
+				}
+
+				c.JSON(status, gin.H{"error": err.Error()})
+
+				return
+			}
+
+			filenameSuffix = options.Container + "-current"
+			if options.Previous {
+				filenameSuffix = options.Container + "-previous"
+			}
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("unsupported cluster type: %s", cluster.Spec.Type),
+			})
+
+			return
+		}
+
+		filename := fmt.Sprintf("%s-%s-%s-%s.log", workspace, name, replicaID, filenameSuffix)
 		setupStreamingResponse(c, download, filename)
 
 		// For HEAD requests, only return headers without body
-		if c.Request.Method == "HEAD" {
+		if c.Request.Method == http.MethodHead {
 			return
 		}
 
@@ -223,7 +267,7 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 		case v1.SSHClusterType:
 			streamErr = streamRayLogs(c, cluster, deps.HTTPClient, workspace, name, replicaID, logType, lines)
 		case v1.KubernetesClusterType:
-			streamErr = streamK8sLogs(c, cluster, deps.K8sClient, endpoint, replicaID, logType, lines)
+			streamErr = streamK8sLogs(c, cluster, deps.K8sClient, endpoint, replicaID, options)
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("unsupported cluster type: %s", cluster.Spec.Type),
@@ -426,13 +470,21 @@ func getK8sLogSources(cluster *v1.Cluster, endpoint *v1.Endpoint, workspace, end
 	replicas := []ReplicaInfo{}
 
 	for _, info := range logInfos {
-		logs := []LogInfo{
-			{
-				Type:        "logs",
-				URL:         fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs", workspace, endpointName, info.ReplicaID),
-				DownloadURL: fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs?download=true", workspace, endpointName, info.ReplicaID),
-			},
+		baseURL := fmt.Sprintf("/api/v1/endpoints/%s/%s/logs/%s/logs", workspace, endpointName, info.ReplicaID)
+		logs := make([]LogInfo, 0, len(info.Containers))
+
+		for _, container := range info.Containers {
+			logURL := fmt.Sprintf("%s?container=%s", baseURL, url.QueryEscape(container.Name))
+			logs = append(logs, LogInfo{
+				Type:          k8sLogType,
+				URL:           logURL,
+				DownloadURL:   logURL + "&download=true",
+				ContainerName: container.Name,
+				RestartCount:  container.RestartCount,
+				Started:       container.Started,
+			})
 		}
+
 		replicas = append(replicas, ReplicaInfo{
 			ReplicaID: info.ReplicaID,
 			Logs:      logs,
@@ -581,53 +633,69 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 	return nil
 }
 
-// streamK8sLogs streams logs from Kubernetes cluster directly to the response
-func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint, replicaID, logType string, lines int64) error {
+// streamK8sLogs streams current or previous logs from a regular or init container.
+func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint,
+	replicaID string, options *corev1.PodLogOptions,
+) error {
 	_ = endpoint // Reserved for future use
 
-	if logType != "logs" {
-		return fmt.Errorf("unsupported log type for Kubernetes: %s (only 'logs' is supported)", logType)
-	}
-
 	ctx := c.Request.Context()
-	namespace := util.ClusterNamespace(cluster)
 
-	// Get pod to determine container name
-	pod, err := k8sClient.GetPod(ctx, cluster, namespace, replicaID)
-	if err != nil {
-		return fmt.Errorf("failed to get pod %s: %v", replicaID, err)
-	}
-
-	// Find the main container (first non-init container)
-	var containerName string
-	if len(pod.Spec.Containers) > 0 {
-		containerName = pod.Spec.Containers[0].Name
-	} else {
-		return fmt.Errorf("no containers found in pod %s", replicaID)
-	}
-
-	// Configure log options
-	logOptions := &corev1.PodLogOptions{
-		Container:  containerName,
-		Timestamps: true,
-	}
-
-	if lines > 0 {
-		logOptions.TailLines = &lines
-	}
-
-	// Get log stream
-	stream, err := k8sClient.GetPodLogs(ctx, cluster, namespace, replicaID, logOptions)
+	stream, err := k8sClient.GetPodLogs(ctx, cluster, util.ClusterNamespace(cluster), replicaID, options)
 	if err != nil {
 		return fmt.Errorf("failed to stream logs: %v", err)
 	}
 	defer stream.Close()
 
-	// Stream logs directly to response without buffering in memory
 	_, err = io.Copy(c.Writer, stream)
 	if err != nil {
 		return fmt.Errorf("failed to copy logs: %v", err)
 	}
 
 	return nil
+}
+
+func prepareK8sLogOptions(c *gin.Context, ctx context.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint,
+	replicaID, logType string, lines int64,
+) (*corev1.PodLogOptions, error) {
+	if logType != k8sLogType {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("unsupported log type for Kubernetes: %s (only 'logs' is supported)", logType))
+	}
+
+	previous, err := strconv.ParseBool(c.DefaultQuery("previous", "false"))
+	if err != nil {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("previous must be a boolean: %v", err))
+	}
+
+	pod, err := k8sClient.GetPod(ctx, cluster, util.ClusterNamespace(cluster), replicaID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod %s: %w", replicaID, err)
+	}
+
+	// A caller can supply any replica ID; restrict it to this endpoint's inference pods.
+	if pod.Labels["workspace"] != endpoint.Metadata.Workspace || pod.Labels["endpoint"] != endpoint.Metadata.Name || pod.Labels["app"] != "inference" {
+		return nil, apierrors.NewBadRequest("pod does not belong to this endpoint")
+	}
+
+	containerName := c.Query("container")
+	if containerName == "" {
+		if len(pod.Spec.Containers) == 0 {
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("no containers found in pod %s", replicaID))
+		}
+
+		containerName = pod.Spec.Containers[0].Name
+	}
+
+	for _, container := range util.GetPodLogContainers(pod) {
+		if container.Name == containerName {
+			options := &corev1.PodLogOptions{Container: containerName, Previous: previous, Timestamps: true}
+			if lines > 0 {
+				options.TailLines = &lines
+			}
+
+			return options, nil
+		}
+	}
+
+	return nil, apierrors.NewBadRequest("container does not belong to the selected pod")
 }
