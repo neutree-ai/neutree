@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,6 +43,8 @@ func (f fakeClusterCredentials) GetClusterCredentials(_, _ string) (*v1.Cluster,
 
 type fakeBenchRunner struct {
 	commands []string
+	model    string
+	result   string
 }
 
 func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr io.Writer) error {
@@ -51,9 +54,19 @@ func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr 
 	case command == benchmarkPreflightCommand():
 		_, _ = io.WriteString(stdout, "usage\n")
 	case strings.HasPrefix(command, "python3 -c "):
-		_, _ = io.WriteString(stdout, `{"data":[{"name":"router-model"}]}`)
+		model := r.model
+		if model == "" {
+			model = "router-model"
+		}
+
+		_, _ = fmt.Fprintf(stdout, `{"data":[{"name":%q}]}`, model)
 	case strings.HasPrefix(command, "cat -- "):
-		_, _ = io.WriteString(stdout, `{"completed":20}`)
+		result := r.result
+		if result == "" {
+			result = `{"completed":20,"failed":0,"duration":1.5,"request_throughput":2.5,"output_throughput":10.5,"p50_ttft_ms":12.5,"p99_ttft_ms":25.5}`
+		}
+
+		_, _ = io.WriteString(stdout, result)
 	case strings.HasPrefix(command, "rm -rf -- "):
 		return nil
 	default:
@@ -87,6 +100,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	runner := &fakeBenchRunner{}
 	resolverCalled := false
 	outputDir := t.TempDir()
+	var progress bytes.Buffer
 
 	output, err := run(context.Background(), dependencies{
 		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
@@ -109,14 +123,15 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 			}, nil
 		},
 	}, Options{
-		Workspace:     "default",
-		Endpoint:      "chat",
-		InputLens:     []int{16},
-		OutputLens:    []int{4},
-		Concurrencies: []int{2},
-		NumPrompts:    20,
-		RequestRate:   "inf",
-		OutputDir:     outputDir,
+		Workspace:      "default",
+		Endpoint:       "chat",
+		InputLens:      []int{16},
+		OutputLens:     []int{4},
+		Concurrencies:  []int{2},
+		NumPrompts:     20,
+		RequestRate:    "inf",
+		OutputDir:      outputDir,
+		ProgressWriter: &progress,
 	})
 	require.NoError(t, err)
 	require.True(t, resolverCalled)
@@ -125,7 +140,11 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	caseDir := filepath.Join(output, "input-16-output-4-concurrency-2")
 	result, err := os.ReadFile(filepath.Join(caseDir, "result.json"))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"completed":20}`, string(result))
+	require.JSONEq(
+		t,
+		`{"completed":20,"failed":0,"duration":1.5,"request_throughput":2.5,"output_throughput":10.5,"p50_ttft_ms":12.5,"p99_ttft_ms":25.5}`,
+		string(result),
+	)
 
 	stdout, err := os.ReadFile(filepath.Join(caseDir, "stdout.log"))
 	require.NoError(t, err)
@@ -152,6 +171,70 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.True(t, strings.HasPrefix(runner.commands[3], "cat -- "))
 	require.True(t, strings.HasPrefix(runner.commands[4], "rm -rf -- "))
 	require.True(t, strings.HasPrefix(runner.commands[5], "rm -rf -- "))
+
+	progressOutput := progress.String()
+	require.Contains(t, progressOutput, "benchmark starting: endpoint=default/chat cases=1")
+	require.Contains(t, progressOutput, "benchmark endpoint resolving")
+	require.Contains(t, progressOutput, "benchmark endpoint resolved: cluster=cluster-a")
+	require.Contains(t, progressOutput, "benchmark cluster resolving: cluster=cluster-a")
+	require.Contains(t, progressOutput, "benchmark cluster resolved: type=kubernetes")
+	require.Contains(t, progressOutput, "benchmark credentials resolving: cluster=cluster-a")
+	require.Contains(t, progressOutput, "benchmark credentials resolved: cluster=cluster-a")
+	require.Contains(t, progressOutput, "benchmark target resolving")
+	require.Contains(t, progressOutput, "benchmark target resolved: platform=kubernetes runtime=pod/chat-a:vllm")
+	require.Contains(t, progressOutput, "benchmark artifacts: "+output)
+	require.Contains(t, progressOutput, "benchmark preflight started")
+	require.Contains(t, progressOutput, "benchmark preflight completed: model=router-model")
+	require.Contains(t, progressOutput, "benchmark case 1/1 started: input_len=16 output_len=4 concurrency=2 num_prompts=20 request_rate=inf")
+	require.Contains(t, progressOutput, "benchmark case 1/1 command: umask 077 &&")
+	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+runner.commands[2])
+	require.Contains(t, progressOutput, "benchmark case 1/1 completed: result=")
+	require.Contains(t, progressOutput, "completed=20 failed=0 duration_s=1.50 request_per_s=2.50 output_tokens_per_s=10.50 p50_ttft_ms=12.50 p99_ttft_ms=25.50")
+	require.Contains(t, progressOutput, "benchmark completed: cases=1 result_dir="+output)
+	require.NotContains(t, progressOutput, "secret-kubeconfig")
+}
+
+func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
+	endpoint, cluster, credentialCluster := benchmarkFixtures()
+	runner := &fakeBenchRunner{
+		model:  "https://model-user:model-secret@models.example.test/qwen?token=model-token#fragment",
+		result: `{"future_result_schema":true}`,
+	}
+	var progress bytes.Buffer
+
+	output, err := run(context.Background(), dependencies{
+		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
+			resourceKey("Endpoint", "default", "chat"):     mustJSON(t, endpoint),
+			resourceKey("Cluster", "default", "cluster-a"): mustJSON(t, cluster),
+		}},
+		clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
+		resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
+			return BenchTarget{
+				Platform:  "kubernetes",
+				RuntimeID: "pod/chat-a:vllm",
+				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
+				Tokenizer: "/models/chat",
+				runner:    runner,
+			}, nil
+		},
+	}, Options{
+		Workspace:      "default",
+		Endpoint:       "chat",
+		InputLens:      []int{16},
+		OutputLens:     []int{4},
+		Concurrencies:  []int{2},
+		NumPrompts:     20,
+		RequestRate:    "inf",
+		OutputDir:      t.TempDir(),
+		ProgressWriter: &progress,
+	})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
+	require.Contains(t, progress.String(), "benchmark case 1/1 completed: result=")
+	require.Contains(t, progress.String(), "summary=unavailable")
+	require.Contains(t, progress.String(), "benchmark preflight completed: model=https://models.example.test/qwen")
+	require.NotContains(t, progress.String(), "model-secret")
+	require.NotContains(t, progress.String(), "model-token")
 }
 
 func TestRunRejectsMissingMatchingClusterCredentials(t *testing.T) {
@@ -238,14 +321,19 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 	}}
 
 	t.Run("preflight", func(t *testing.T) {
+		var progress bytes.Buffer
+		options := validOptions(t.TempDir())
+		options.ProgressWriter = &progress
+
 		output, err := run(context.Background(), dependencies{
 			resources:          resources,
 			clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
 			resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
 				return BenchTarget{runner: outputRunner{err: fmt.Errorf("preflight failed")}}, nil
 			},
-		}, validOptions(t.TempDir()))
+		}, options)
 		require.ErrorContains(t, err, "preflight")
+		require.Contains(t, progress.String(), "benchmark preflight failed: vllm benchmark preflight failed: preflight failed")
 
 		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
 		require.NoError(t, readErr)
@@ -254,14 +342,19 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 
 	t.Run("case", func(t *testing.T) {
 		runner := &caseFailureRunner{}
+		var progress bytes.Buffer
+		options := validOptions(t.TempDir())
+		options.ProgressWriter = &progress
+
 		output, err := run(context.Background(), dependencies{
 			resources:          resources,
 			clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
 			resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
 				return BenchTarget{BaseURL: "http://router-service.ns.svc.cluster.local:8000/default/chat", runner: runner}, nil
 			},
-		}, validOptions(t.TempDir()))
+		}, options)
 		require.ErrorContains(t, err, "benchmark case")
+		require.Contains(t, progress.String(), "benchmark case 1/1 failed: case failed")
 
 		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
 		require.NoError(t, readErr)

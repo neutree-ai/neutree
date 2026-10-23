@@ -86,15 +86,16 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 	}
 
 	options := internalbench.Options{
-		Workspace:     raw.workspace,
-		Endpoint:      endpoint,
-		InputLens:     inputLens,
-		OutputLens:    outputLens,
-		Concurrencies: concurrencies,
-		NumPrompts:    raw.numPrompts,
-		RequestRate:   raw.requestRate,
-		OutputDir:     raw.outputDir,
-		Timeout:       raw.timeout,
+		Workspace:      raw.workspace,
+		Endpoint:       endpoint,
+		InputLens:      inputLens,
+		OutputLens:     outputLens,
+		Concurrencies:  concurrencies,
+		NumPrompts:     raw.numPrompts,
+		RequestRate:    raw.requestRate,
+		OutputDir:      raw.outputDir,
+		Timeout:        raw.timeout,
+		ProgressWriter: cmd.OutOrStdout(),
 	}
 	if err := options.Validate(); err != nil {
 		return err

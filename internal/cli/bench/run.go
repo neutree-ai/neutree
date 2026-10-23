@@ -97,6 +97,15 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", err
 	}
 
+	progress := newProgressReporter(options.ProgressWriter)
+	benchmarkCases := expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
+	progress.printf(
+		"benchmark starting: endpoint=%s/%s cases=%d",
+		options.Workspace,
+		options.Endpoint,
+		len(benchmarkCases),
+	)
+
 	if deps.resources == nil {
 		return "", fmt.Errorf("resource client is required")
 	}
@@ -104,6 +113,8 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 	if deps.clusterCredentials == nil {
 		return "", fmt.Errorf("cluster credential client is required")
 	}
+
+	progress.printf("benchmark endpoint resolving")
 
 	endpoint, err := loadEndpoint(deps.resources, options.Workspace, options.Endpoint)
 	if err != nil {
@@ -114,6 +125,10 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", err
 	}
 
+	progress.printf("benchmark endpoint resolved: cluster=%s", endpoint.Spec.Cluster)
+
+	progress.printf("benchmark cluster resolving: cluster=%s", endpoint.Spec.Cluster)
+
 	cluster, err := loadCluster(deps.resources, options.Workspace, endpoint.Spec.Cluster)
 	if err != nil {
 		return "", err
@@ -123,14 +138,22 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", err
 	}
 
+	progress.printf("benchmark cluster resolved: type=%s", cluster.Spec.Type)
+
+	progress.printf("benchmark credentials resolving: cluster=%s", endpoint.Spec.Cluster)
+
 	credentialCluster, err := deps.clusterCredentials.GetClusterCredentials(options.Workspace, endpoint.Spec.Cluster)
 	if err != nil {
 		return "", fmt.Errorf("get cluster credentials: %w", err)
 	}
 
+	progress.printf("benchmark credentials resolved: cluster=%s", endpoint.Spec.Cluster)
+
 	if deps.resolveTarget == nil {
 		return "", fmt.Errorf("benchmark target resolver is required")
 	}
+
+	progress.printf("benchmark target resolving")
 
 	target, err := deps.resolveTarget(ctx, endpoint, cluster, credentialCluster)
 	if err != nil {
@@ -141,6 +164,12 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", fmt.Errorf("benchmark target runner is required")
 	}
 
+	progress.printf(
+		"benchmark target resolved: platform=%s runtime=%s",
+		target.Platform,
+		target.RuntimeID,
+	)
+
 	defer func() {
 		_ = target.Close()
 	}()
@@ -149,6 +178,8 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 	if err != nil {
 		return "", err
 	}
+
+	progress.printf("benchmark artifacts: %s", output)
 
 	result := manifest{
 		FormatVersion:    "v1",
@@ -166,7 +197,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			Tokenizer:      target.Tokenizer,
 			ModelSelection: "first-v1-model",
 		},
-		Cases: make([]manifestCase, 0, len(options.InputLens)*len(options.OutputLens)*len(options.Concurrencies)),
+		Cases: make([]manifestCase, 0, len(benchmarkCases)),
 	}
 	if err := writeManifest(output, result); err != nil {
 		return output, err
@@ -176,13 +207,19 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 
 	defer cancel()
 
+	progress.printf("benchmark preflight started: checking vllm bench and discovering model")
+
 	model, err := runPreflight(runCtx, target.runner, target.BaseURL, output)
 	if err != nil {
 		result.Error = err.Error()
 		_ = writeManifest(output, result)
 
+		progress.printf("benchmark preflight failed: %v", err)
+
 		return output, err
 	}
+
+	progress.printf("benchmark preflight completed: model=%s", redactProgressCommandValue(model))
 
 	target.Model = model
 	result.Target.Model = model
@@ -195,8 +232,21 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 
 	defer cleanupRemoteDirectory(target.runner, remoteRoot)
 
-	benchmarkCases := expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
-	for _, benchmarkCase := range benchmarkCases {
+	for caseIndex, benchmarkCase := range benchmarkCases {
+		caseNumber := caseIndex + 1
+		command := progressBenchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
+		progress.printf(
+			"benchmark case %d/%d started: input_len=%d output_len=%d concurrency=%d num_prompts=%d request_rate=%s",
+			caseNumber,
+			len(benchmarkCases),
+			benchmarkCase.InputLen,
+			benchmarkCase.OutputLen,
+			benchmarkCase.Concurrency,
+			options.NumPrompts,
+			options.RequestRate,
+		)
+		progress.printf("benchmark case %d/%d command: %s", caseNumber, len(benchmarkCases), command)
+
 		entry := manifestCase{Case: benchmarkCase, StartedAt: time.Now().UTC()}
 		result.Cases = append(result.Cases, entry)
 
@@ -206,23 +256,49 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 
 		err := runCase(runCtx, target.runner, target, options, benchmarkCase, output, remoteRoot)
 		completedAt := time.Now().UTC()
-		caseIndex := len(result.Cases) - 1
-		result.Cases[caseIndex].CompletedAt = completedAt
+		manifestCaseIndex := len(result.Cases) - 1
+		result.Cases[manifestCaseIndex].CompletedAt = completedAt
 
 		if err != nil {
-			result.Cases[caseIndex].Status = benchmarkFailedStatus
-			result.Cases[caseIndex].Error = err.Error()
+			result.Cases[manifestCaseIndex].Status = benchmarkFailedStatus
+			result.Cases[manifestCaseIndex].Error = err.Error()
 			result.Error = err.Error()
 			_ = writeManifest(output, result)
+
+			progress.printf("benchmark case %d/%d failed: %v", caseNumber, len(benchmarkCases), err)
 
 			return output, fmt.Errorf("benchmark case %s: %w", benchmarkCase.Name(), err)
 		}
 
-		result.Cases[caseIndex].Status = benchmarkSucceededStatus
+		result.Cases[manifestCaseIndex].Status = benchmarkSucceededStatus
 		if err := writeManifest(output, result); err != nil {
 			return output, err
 		}
+
+		resultPath := benchmarkCaseResultPath(output, benchmarkCase)
+
+		summaryText := benchmarkResultSummaryText(resultPath)
+		if summaryText == "" {
+			progress.printf(
+				"benchmark case %d/%d completed: result=%s summary=unavailable",
+				caseNumber,
+				len(benchmarkCases),
+				resultPath,
+			)
+
+			continue
+		}
+
+		progress.printf(
+			"benchmark case %d/%d completed: result=%s %s",
+			caseNumber,
+			len(benchmarkCases),
+			resultPath,
+			summaryText,
+		)
 	}
+
+	progress.printf("benchmark completed: cases=%d result_dir=%s", len(benchmarkCases), output)
 
 	return output, nil
 }
@@ -401,10 +477,10 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 	}
 	defer stderr.Close() //nolint:errcheck
 
-	remoteResultDir := filepath.ToSlash(filepath.Join(remoteRoot, benchmarkCase.Name()))
+	remoteResultDir := benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase)
 	defer cleanupRemoteDirectory(runner, remoteResultDir)
 
-	command := buildBenchCommand(target, benchmarkCase, options.NumPrompts, options.RequestRate, remoteResultDir)
+	command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
 	if err := writeCommandFile(filepath.Join(caseOutput, benchmarkCommandFileName), command); err != nil {
 		return err
 	}
@@ -433,6 +509,24 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 	}
 
 	return nil
+}
+
+func benchmarkCaseRemoteResultDirectory(remoteRoot string, benchmarkCase Case) string {
+	return filepath.ToSlash(filepath.Join(remoteRoot, benchmarkCase.Name()))
+}
+
+func benchmarkCaseResultPath(output string, benchmarkCase Case) string {
+	return filepath.Join(output, benchmarkCase.Name(), benchmarkResultFileName)
+}
+
+func benchmarkCaseCommand(target BenchTarget, options Options, benchmarkCase Case, remoteRoot string) string {
+	return buildBenchCommand(
+		target,
+		benchmarkCase,
+		options.NumPrompts,
+		options.RequestRate,
+		benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase),
+	)
 }
 
 func cleanupRemoteDirectory(runner remoteRunner, directory string) {
