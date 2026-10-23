@@ -28,7 +28,7 @@ var physicalMetrics = []string{
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
 	"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info",
 	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info",
-	"neutree_node_accelerator_hcu_info",
+	"neutree_node_accelerator_hcu_info", "neutree_node_accelerator_iluvatar_info",
 }
 
 var replicaMetrics = []string{
@@ -69,6 +69,9 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 
 		if resource == "endpoints" {
 			permission = "endpoint:read"
+
+			route.GET("/performance-observations", middleware.RequireWorkspacePermission(permission,
+				middleware.PermissionDependencies{Storage: deps.Storage}), performanceHandler(deps))
 		}
 
 		if resource == "clusters" {
@@ -183,7 +186,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		}
 
 		if len(devices) > 0 {
-			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info"}
+			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info", "neutree_node_accelerator_iluvatar_info"}
 
 			byNode := map[string][]string{}
 			for _, device := range devices {
