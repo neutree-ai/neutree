@@ -54,6 +54,8 @@ func TestPerformanceWindowNormalizationAndQueryScope(t *testing.T) {
 		require.Contains(t, q, `application="chat"`)
 		require.Contains(t, q, "[1h]")
 		require.Contains(t, q, `node=~"^(worker\\.1)$"`)
+		require.NotContains(t, q, "lmcache_mp_lookup_hit_tokens_total")
+		require.NotContains(t, q, "0 * (sum(up")
 
 		body := `{"status":"success","data":{"resultType":"vector","result":[
 			{"metric":{"metric":"ttft_p95_seconds"},"value":[1792736000,"0.185"]},

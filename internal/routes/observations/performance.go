@@ -243,6 +243,13 @@ func buildPerformanceQuery(workspace, cluster, endpoint, window string, zcacheEn
 		labeledMetric("cum_l0_hit_rate", fmt.Sprintf("%s or %s", l0BySourceCum, l0PrefixCum)),
 	}
 
+	if zcacheEnabled {
+		parts = append(parts,
+			labeledMetric("l1_hit_rate", l1WinExpr),
+			labeledMetric("cum_l1_hit_rate", l1CumExpr),
+		)
+	}
+
 	if zcacheEnabled && len(nodes) > 0 {
 		escaped := make([]string, 0, len(nodes))
 		for _, node := range nodes {
@@ -253,40 +260,19 @@ func buildPerformanceQuery(workspace, cluster, endpoint, window string, zcacheEn
 		l1Sel := fmt.Sprintf(`job="neutree-zcache",workspace=%s,neutree_cluster=%s,node=~%s`,
 			strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(nodeRegex))
 
-		l1ZcacheWin := fmt.Sprintf(
-			"(sum(sum by(node) (increase(lmcache_mp_lookup_hit_tokens_total{%s}[%s]) and on(job,instance) (up{%s} == 1))) / "+
-				"((sum(sum by(node) (increase(lmcache_mp_lookup_requested_tokens_total{%s}[%s]) and "+
-				"on(job,instance) (up{%s} == 1)))) > 0))",
-			l1Sel, window, l1Sel, l1Sel, window, l1Sel)
-		l1ZcacheCum := fmt.Sprintf(
-			"(sum(max by(node) (lmcache_mp_lookup_hit_tokens_total{%s} and on(job,instance) (up{%s} == 1))) / "+
-				"((sum(max by(node) (lmcache_mp_lookup_requested_tokens_total{%s} and "+
-				"on(job,instance) (up{%s} == 1)))) > 0))",
-			l1Sel, l1Sel, l1Sel, l1Sel)
-
-		l1WinExpr = fmt.Sprintf("%s or %s", l1WinExpr, l1ZcacheWin)
-		l1CumExpr = fmt.Sprintf("%s or %s", l1CumExpr, l1ZcacheCum)
-
 		parts = append(parts,
 			labeledMetric("l1_read_bytes_per_second", fmt.Sprintf(
 				`sum(sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{%s,phase="staging",direction="h2d"}[%s]) `+
 					`and on(job,instance) (up{%s} == 1))) or `+
-					`sum(sum by(node) (rate(lmcache_mp_read_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1))) or `+
-					`(0 * (sum(up{%s} == 1) > 0))`,
-				l1Sel, window, l1Sel, l1Sel, window, l1Sel, l1Sel)),
+					`sum(sum by(node) (rate(lmcache_mp_read_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1)))`,
+				l1Sel, window, l1Sel, l1Sel, window, l1Sel)),
 			labeledMetric("l1_write_bytes_per_second", fmt.Sprintf(
 				`sum(sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{%s,phase="staging",direction="d2h"}[%s]) `+
 					`and on(job,instance) (up{%s} == 1))) or `+
-					`sum(sum by(node) (rate(lmcache_mp_write_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1))) or `+
-					`(0 * (sum(up{%s} == 1) > 0))`,
-				l1Sel, window, l1Sel, l1Sel, window, l1Sel, l1Sel)),
+					`sum(sum by(node) (rate(lmcache_mp_write_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1)))`,
+				l1Sel, window, l1Sel, l1Sel, window, l1Sel)),
 		)
 	}
-
-	parts = append(parts,
-		labeledMetric("l1_hit_rate", l1WinExpr),
-		labeledMetric("cum_l1_hit_rate", l1CumExpr),
-	)
 
 	return strings.Join(parts, " or ")
 }
