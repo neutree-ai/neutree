@@ -41,7 +41,7 @@ spec:
 {{- if .E2E_ENV }}
   env:
 {{- range $k, $v := .E2E_ENV }}
-    {{ $k }}: "{{ $v }}"
+    {{ $k | printf "%q" }}: {{ $v | printf "%q" }}
 {{- end }}
 {{- end }}
   replicas:

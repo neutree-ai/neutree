@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -77,15 +78,21 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			cluster v1.Cluster
 			ep      v1.Endpoint
 		)
+		expectedEnv := map[string]string{
+			"E2E_TEST_KEY": "e2e_test_value",
+			"RATIO":        "1:1",
+			"QUOTED":       `"1:1"`,
+			"JSON":         `{"ratio":"1:1","enabled":true}`,
+			"BACKSLASH":    `C:\models\weights`,
+			"MULTILINE":    "first line\nsecond line",
+		}
 
 		BeforeAll(func() {
 			epName = "e2e-ep-k8s-cfg-" + Cfg.RunID
 
 			yamlPath := applyEndpoint(epName, clusterName,
 				withCPU("4"), withMemory("8"),
-				withEnv(map[string]string{
-					"E2E_TEST_KEY": "e2e_test_value",
-				}))
+				withEnv(expectedEnv))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(epName)
@@ -202,13 +209,10 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 					continue
 				}
 
-				envMap := map[string]any{}
-				for _, e := range c.Env {
-					envMap[e.Name] = e.Value
+				for key, value := range expectedEnv {
+					Expect(c.Env).To(ContainElement(corev1.EnvVar{Name: key, Value: value}),
+						"engine container should preserve custom env var %s", key)
 				}
-
-				Expect(envMap).To(HaveKeyWithValue("E2E_TEST_KEY", "e2e_test_value"),
-					"container should have custom env var E2E_TEST_KEY")
 				found = true
 
 				break
@@ -217,7 +221,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 			Expect(found).To(BeTrue(), "should find engine container in endpoint deployment %s", epName)
 		})
 
-		It("should have model-downloader initContainer with download path", Label("C2613481"), func() {
+		It("should have model-downloader initContainer with download path and custom env vars", Label("C2613481"), func() {
 			ctx := context.Background()
 			d, err := k8sH.GetDeployment(ctx, namespace, epName)
 			Expect(err).NotTo(HaveOccurred(), "should find endpoint deployment %s", epName)
@@ -229,6 +233,10 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 					argsStr := strings.Join(ic.Args, " ")
 					Expect(argsStr).To(ContainSubstring("--path"),
 						"model-downloader initContainer should have --path arg")
+					for key, value := range expectedEnv {
+						Expect(ic.Env).To(ContainElement(corev1.EnvVar{Name: key, Value: value}),
+							"model-downloader initContainer should preserve custom env var %s", key)
+					}
 					found = true
 
 					break
@@ -504,7 +512,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		})
 
 		It("should deploy with all schema data types", Label("C2642246", "C2724892"), func() {
-			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgs()))
+			yamlPath := applyEndpoint(schemaEpName, clusterName, withEngineArgs(allSchemaTypesEngineArgsK8s()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
@@ -531,7 +539,6 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--max_model_len"), "integer")
 				Expect(argsStr).To(ContainSubstring("--gpu_memory_utilization"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--enforce_eager"), "boolean true (flag-only)")
 				Expect(argsStr).To(ContainSubstring("--seed"), "integer")
 				Expect(argsStr).To(ContainSubstring("--override_generation_config"), "object/JSON")
 
@@ -549,15 +556,15 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).NotTo(ContainSubstring(fmt.Sprintf(`["%s","neu-vllm-list-alias"]`, profileModelName())),
 					"list arg must not remain a single JSON array token")
 
-				// Boolean false engine_args must drop the flag entirely. vLLM
-				// argparse rejects `--flag false` (store_true is nargs=0), so
-				// the template skips both `--<flag>` and `"false"` when the
-				// value is the literal string "false".
-				Expect(argsStr).NotTo(ContainSubstring("--enable_prefix_caching"),
-					"boolean false engine_arg must not emit its flag")
-				for _, tok := range allArgs {
-					Expect(tok).NotTo(Equal("false"),
-						"no CLI token should be the literal string \"false\"")
+				Expect(allArgs).NotTo(ContainElement("--enable_prefix_caching"),
+					"unconfigured key must not emit a flag")
+				for _, flag := range []string{"--enforce_eager", "--no-enable-prefix-caching"} {
+					flagIdx := slices.Index(allArgs, flag)
+					Expect(flagIdx).NotTo(Equal(-1), "empty-string arg must emit %s", flag)
+					if flagIdx+1 < len(allArgs) {
+						Expect(allArgs[flagIdx+1]).To(HavePrefix("--"),
+							"empty-string arg %s must not have a value", flag)
+					}
 				}
 
 				found = true
@@ -603,7 +610,7 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 		It("should deploy SGLang with all schema data types", Label("C2649562"), func() {
 			yamlPath := applyEndpoint(schemaEpName, clusterName,
 				withEngine("sglang", profileEngineVersionFor("sglang")),
-				withEngineArgs(allSchemaTypesEngineArgsSGLang()))
+				withEngineArgs(allSchemaTypesEngineArgsSGLangK8s()))
 			defer os.Remove(yamlPath)
 
 			waitEndpointRunning(schemaEpName)
@@ -631,7 +638,11 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				// kebab-case CLI flags (sprig replace "_" "-"); assert kebab.
 				Expect(argsStr).To(ContainSubstring("--tp-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--mem-fraction-static"), "number/float")
-				Expect(argsStr).To(ContainSubstring("--disable-cuda-graph"), "boolean true (flag-only)")
+				flagIdx := slices.Index(allArgs, "--disable-cuda-graph")
+				Expect(flagIdx).NotTo(Equal(-1), "empty-string arg must emit --disable-cuda-graph")
+				if flagIdx+1 < len(allArgs) {
+					Expect(allArgs[flagIdx+1]).To(HavePrefix("--"), "empty-string arg must not have a value")
+				}
 				Expect(argsStr).To(ContainSubstring("--dtype"), "string enum")
 				Expect(argsStr).To(ContainSubstring("--chunked-prefill-size"), "integer")
 				Expect(argsStr).To(ContainSubstring("--served-model-name"), "string")
@@ -640,20 +651,12 @@ var _ = Describe("K8s Endpoint Config", Ordered, Label("endpoint", "k8s", "confi
 				Expect(argsStr).To(ContainSubstring("--preferred-sampling-params"), "object/JSON")
 				Expect(argsStr).To(ContainSubstring("--json-model-override-args"), "object/JSON")
 
-				// Boolean false engine_args must drop the flag entirely. SGLang
-				// argparse rejects `--flag false` (store_true is nargs=0), so
-				// the template skips both `--<flag>` and `"false"` when the
-				// value is the literal string "false". Check both kebab and
-				// underscore forms because the SGLang template applies sprig
-				// `replace "_" "-"` only on the emit branches.
 				Expect(argsStr).NotTo(ContainSubstring("--skip-tokenizer-init"),
-					"boolean false engine_arg must not emit its flag (kebab form)")
+					"unconfigured key must not emit a flag (kebab form)")
 				Expect(argsStr).NotTo(ContainSubstring("--skip_tokenizer_init"),
-					"boolean false engine_arg must not emit its flag (underscore form)")
-				for _, tok := range allArgs {
-					Expect(tok).NotTo(Equal("false"),
-						"no CLI token should be the literal string \"false\"")
-				}
+					"unconfigured key must not emit a flag (underscore form)")
+				Expect(allArgs).NotTo(ContainElement("--no-skip-tokenizer-init"),
+					"unconfigured key must not emit a negative flag")
 
 				found = true
 

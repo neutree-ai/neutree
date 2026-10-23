@@ -84,8 +84,8 @@ spec:
               --task="{{ .ModelArgs.task }}"
           env:
            {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
+           - name: {{ $key | quote }}
+             value: {{ $value | quote }}
            {{ end }}
           {{- if .VolumeMounts }}
           volumeMounts:
@@ -125,18 +125,16 @@ spec:
           {{- range $key, $value := .EngineArgs }}
           {{- if kindIs "slice" $value }}
           {{- if gt (len $value) 0 }}
-          - --{{ $key }}
+          - {{ printf "--%s" $key | quote }}
           {{- range $item := $value }}
           - {{ $item | quote }}
           {{- end }}
           {{- end }}
-          {{- else if eq (printf "%v" $value) "true" }}
-          - --{{ $key }}
-          {{- else if eq (printf "%v" $value) "false" }}
-          {{- /* skip: store_true flags reject "--flag false"; passing false means "leave at default" */ -}}
           {{- else }}
-          - --{{ $key }}
-          - "{{ $value }}"
+          - {{ printf "--%s" $key | quote }}
+          {{- if ne (printf "%v" $value) "" }}
+          - {{ $value | quote }}
+          {{- end }}
           {{- end }}
           {{- end }}
           {{- end }}
@@ -151,8 +149,8 @@ spec:
               {{- end }}
           env:
            {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
+           - name: {{ $key | quote }}
+             value: {{ $value | quote }}
            {{ end }}
           ports:
             - containerPort: 8000

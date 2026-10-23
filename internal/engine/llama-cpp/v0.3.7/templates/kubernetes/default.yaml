@@ -83,8 +83,8 @@ spec:
               --task="{{ .ModelArgs.task }}"
           env:
             {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
             {{ end }}
           {{- if .VolumeMounts }}
           volumeMounts:
@@ -97,12 +97,17 @@ spec:
             - bash
             - -c
           args:
-            - >-
-              python3 -m llama_cpp.server
-              --model $(find {{ .ModelArgs.path }} -path "*/{{ .ModelArgs.file }}" | head -n 1)
-              --host 0.0.0.0 --port 8000 --model_alias {{ .ModelArgs.serve_name }}
-              {{- if eq .ModelArgs.task "text-embedding" }} --embedding true{{- end }}
-              {{- if .EngineArgs }}{{- range $key, $value := .EngineArgs }} --{{ $key }} "{{ $value }}" {{- end }}{{- end }}
+            {{- $command := printf "python3 -m llama_cpp.server --model $(find %s -path \"*/%s\" | head -n 1) --host 0.0.0.0 --port 8000 --model_alias %s" .ModelArgs.path .ModelArgs.file .ModelArgs.serve_name }}
+            {{- if eq .ModelArgs.task "text-embedding" }}
+            {{- $command = printf "%s --embedding true" $command }}
+            {{- end }}
+            {{- range $key, $value := .EngineArgs }}
+            {{- $command = printf "%s '%s'" $command (printf "--%s" $key | replace "'" "'\"'\"'") }}
+            {{- if ne (printf "%v" $value) "" }}
+            {{- $command = printf "%s '%s'" $command (printf "%v" $value | replace "'" "'\"'\"'") }}
+            {{- end }}
+            {{- end }}
+            - {{ $command | quote }}
           resources:
             limits:
               {{- range $key, $value := .Resources }}
@@ -114,8 +119,8 @@ spec:
               {{- end }}
           env:
             {{ range $key, $value := .Env }}
-            - name: {{ $key }}
-              value: "{{ $value }}"
+            - name: {{ $key | quote }}
+              value: {{ $value | quote }}
             {{ end }}
           ports:
             - containerPort: 8000
