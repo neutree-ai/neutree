@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import pickle
 from pathlib import Path
 import sys
 from typing import Annotated, Literal
@@ -10,13 +11,14 @@ from unittest.mock import AsyncMock, Mock
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from serve._utils.vllm_transcription import transcription_response, transcription_results
 
 
 class RequestModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
     file: UploadFile
     model: str | None = None
     language: str | None = None
@@ -56,6 +58,7 @@ class TranscriptionTransportTests(unittest.TestCase):
         self.streams = []
 
         def remote(audio, payload):
+            pickle.dumps((audio, payload))
             stream = RayStream(transcription_results(self.backend, RequestModel, audio, payload))
             self.streams.append(stream)
             return stream
@@ -93,6 +96,24 @@ class TranscriptionTransportTests(unittest.TestCase):
         self.assertEqual(request.temperature, 0.25)
         self.assertTrue(request.file.file.closed)
         self.assertIsNone(self.handler.create_transcription.call_args.args[2])
+
+    def test_extra_upload_is_not_forwarded_to_ray(self):
+        response = self.client.post(
+            "/v1/audio/transcriptions",
+            data={"model": "asr", "timestamp_granularities[]": ["word", "segment"]},
+            files={
+                "file": ("clip.wav", b"audio", "audio/wav"),
+                "extra": ("extra.wav", b"x" * (1024 * 1024 + 1), "audio/wav"),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"text": "hello"})
+        audio, payload = self.handle.create_transcription.remote.call_args.args
+        self.assertEqual(audio, b"audio")
+        self.assertEqual(payload["model"], "asr")
+        self.assertEqual(payload["timestamp_granularities[]"], ["word", "segment"])
+        self.assertNotIn("file", payload)
+        self.assertNotIn("extra", payload)
 
     def test_text_and_verbose_json(self):
         response = self.post({"response_format": "text"})

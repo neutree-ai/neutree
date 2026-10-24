@@ -61,7 +61,11 @@ async def transcription_response(backend, request, max_audio_filesize_mb):
     if not audio_data:
         return JSONResponse(_error("Audio file is empty", 400), status_code=400)
 
-    payload = request.model_dump(exclude={"file"}, by_alias=True, exclude_unset=True)
+    # vLLM allows extra fields, which can contain additional uploaded files.
+    payload = request.model_dump(
+        include=set(type(request).model_fields) - {"file"},
+        by_alias=True, exclude_unset=True,
+    )
     result = backend.options(stream=True).create_transcription.remote(audio_data, payload)
     try:
         first = await result.__anext__()
