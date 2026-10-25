@@ -1,0 +1,18 @@
+# Self-hosted labels used by existing release and daily Quick Start E2E runners.
+self-hosted-runner:
+  labels:
+    - serve-builder
+    - X64
+    - neutree-e2e
+    - amd64-k8s
+    - arm64-k8s
+    - amd64-vm
+    - amd64-l20-k8s
+    - amd64-t4-static
+
+paths:
+  .github/workflows/daily-e2e.yaml:
+    ignore:
+      # GitHub Actions supports concurrency.queue, but actionlint v1.7.12 has
+      # not added it to the concurrency schema yet.
+      - 'unexpected key "queue" for "concurrency" section'
