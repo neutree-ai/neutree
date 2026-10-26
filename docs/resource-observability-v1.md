@@ -25,13 +25,12 @@ The cluster's existing node GPU grid and endpoint runtime allocation grid show a
 
 The first version keeps allocation segments separate from the physical-usage bar: summing workload usage is not guaranteed to equal physical-card usage. It does not infer measured usage from `allocatable - available`. FP16 throughput is explicitly an estimate (nominal or calibrated peak multiplied by utilization), not a hardware FLOPS counter.
 
-## FLOPS and topology
+## FLOPS
 
 The cluster resource summary includes healthy-device FP16 capacity and utilization-based estimates, with per-model overrides in `metadata.annotations["neutree.ai/accelerator-tflops"]`. Metadata-only updates preserve spec and other metadata. Unknown models or missing utilization keep totals/usage unknown. The dictionary uses longest substring matches and explicit per-product calibration wins.
 
 `GET /api/v1/clusters/:workspace/:name/accelerator-utilization-trend` requires cluster read access and queries a server-owned 30-day window with a six-hour step. Each point uses six-hour mean utilization; duplicate scrape targets are reduced with max by node/UUID/product. The browser applies current calibration to historical reported devices. Gaps are not zeros and historical values do not reconstruct past calibration or health.
 
-The topology tab groups current physical GPUs by node and reported NUMA domain, with PCIe details, temperature/power, assignment links, and a shared hardware drawer. Interconnect banners reflect node-reported capability flags, not measured pairwise edges.
 
 ## Deferred collector work
 

@@ -106,12 +106,6 @@ Validate the Kong Nginx worker process value shared by every Kong workload.
 {{- $value -}}
 {{- end -}}
 
-{{/*
-Resolve the AI inference trace store (VictoriaLogs) base URL.
-Returns the in-cluster VictoriaLogs service when victorialogs.enabled is true,
-otherwise the externally configured system.aiTraceStoreUrl. Empty when neither
-is set — callers treat the empty result as "AI inference trace disabled".
-*/}}
 {{- define "neutree.metricsQueryUrl" -}}
 {{- if .Values.metrics.queryUrl -}}
 {{- .Values.metrics.queryUrl | trimSuffix "/" -}}
@@ -120,6 +114,12 @@ is set — callers treat the empty result as "AI inference trace disabled".
 {{- end -}}
 {{- end -}}
 
+{{/*
+Resolve the AI inference trace store (VictoriaLogs) base URL.
+Returns the in-cluster VictoriaLogs service when victorialogs.enabled is true,
+otherwise the externally configured system.aiTraceStoreUrl. Empty when neither
+is set — callers treat the empty result as "AI inference trace disabled".
+*/}}
 {{- define "neutree.aiTraceStoreUrl" -}}
 {{- if .Values.victorialogs.enabled -}}
 {{- printf "http://%s-victorialogs-service:9428" (include "neutree.fullname" .) -}}
