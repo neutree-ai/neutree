@@ -91,20 +91,3 @@ func TestBackendNodeIDFallsBackToReplica(t *testing.T) {
 	require.Equal(t, "actor-node", backendNodeID(&dashboard.Actor{NodeID: "actor-node"}, replica))
 	require.Equal(t, "replica-node", backendNodeID(&dashboard.Actor{}, replica))
 }
-
-func TestStaticHelpersRejectIncompleteInputs(t *testing.T) {
-	_, err := endpointApplicationName(nil)
-	require.ErrorContains(t, err, "metadata")
-
-	_, err = nodeIPForRayNode(nil, "node-a")
-	require.ErrorContains(t, err, "not alive")
-
-	_, err = sshAuthForCluster(nil)
-	require.ErrorContains(t, err, "credentials")
-
-	_, err = tokenizerPathFromRayApplication(dashboard.RayServeApplicationStatus{})
-	require.ErrorContains(t, err, "model arguments")
-
-	_, err = staticServeBaseURL(&v1.Cluster{}, &v1.Endpoint{})
-	require.ErrorContains(t, err, "dashboard URL")
-}

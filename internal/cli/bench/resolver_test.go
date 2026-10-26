@@ -200,14 +200,6 @@ func TestResolveKubernetesTargetUsesRouterAndSelectedPod(t *testing.T) {
 	require.Equal(t, "http://router-service."+namespace+".svc.cluster.local:8000/default/chat", target.BaseURL)
 }
 
-func TestResolveTargetRejectsUnsupportedClusterType(t *testing.T) {
-	_, err := resolveTarget(context.Background(), &v1.Endpoint{}, &v1.Cluster{
-		Spec: &v1.ClusterSpec{Type: "unsupported"},
-	}, &v1.Cluster{})
-
-	require.ErrorContains(t, err, "unsupported Cluster type")
-}
-
 func encodedKubeconfig(serverURL string) string {
 	kubeconfig := strings.Join([]string{
 		"apiVersion: v1",

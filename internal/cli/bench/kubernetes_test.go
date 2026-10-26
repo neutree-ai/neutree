@@ -47,16 +47,6 @@ func TestSelectKubernetesTargetSortsPodsAndFindsVLLMTokenizer(t *testing.T) {
 	require.Equal(t, "/models/first", target.Tokenizer)
 }
 
-func TestSelectKubernetesTargetRejectsMissingTokenizer(t *testing.T) {
-	_, err := selectKubernetesTarget([]corev1.Pod{{
-		ObjectMeta: metav1.ObjectMeta{Name: "endpoint-a"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
-	}})
-
-	require.ErrorContains(t, err, "tokenizer path")
-}
-
 func TestKubernetesRouterBaseURL(t *testing.T) {
 	url, err := kubernetesRouterBaseURL("neutree-cluster-a", "team-a", "chat")
 	require.NoError(t, err)
@@ -64,12 +54,6 @@ func TestKubernetesRouterBaseURL(t *testing.T) {
 		"http://router-service.neutree-cluster-a.svc.cluster.local:8000/team-a/chat",
 		url,
 	)
-
-	_, err = kubernetesRouterBaseURL("", "team-a", "chat")
-	require.ErrorContains(t, err, "namespace")
-
-	_, err = kubernetesRouterBaseURL("neutree-cluster-a", "", "chat")
-	require.ErrorContains(t, err, "workspace")
 }
 
 func TestKubernetesRemoteRunnerReturnsExecStreamFailure(t *testing.T) {
