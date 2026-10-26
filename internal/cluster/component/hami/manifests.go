@@ -236,12 +236,16 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 				"kubernetesVersion", serverVersion.GitVersion,
 				"minorVersion", minorVersion,
 				"detectedVersion", detectedVersion)
-		} else {
-			h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
-				"kubernetesVersion", serverVersion.GitVersion,
-				"minorVersion", minorVersion,
-				"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
+
+			return schedulerVersion
 		}
+
+		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
+			"kubernetesVersion", serverVersion.GitVersion,
+			"minorVersion", minorVersion,
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
+
+		return schedulerVersion
 	}
 
 	return schedulerVersion
