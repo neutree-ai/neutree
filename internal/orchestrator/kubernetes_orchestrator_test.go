@@ -946,7 +946,7 @@ func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
 		ImageTag:        "v1.0.0",
 		ImagePullSecret: "my-secret",
 		EngineName:      "vllm",
-		EngineVersion:   "v0.17.1",
+		EngineVersion:   "v0.24.0-p2",
 		EndpointName:    "test-endpoint",
 		ModelArgs: map[string]interface{}{
 			"name":          "gpt-4",
@@ -971,7 +971,7 @@ func TestBuildVllmDeploymentWithPodAnnotations(t *testing.T) {
 		Replicas:     1,
 	}
 
-	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.17.1-p2"), data)
+	objs, err := buildDeploymentObjects(realEmbeddedTemplate(t, "vllm-v0.24.0-p2"), data)
 	require.NoError(t, err)
 	require.Len(t, objs.Items, 1)
 
@@ -4048,10 +4048,6 @@ func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
 			templateKey: "vllm-v0.24.0-p2",
 		},
 		{
-			name:        "vllm-v0.17.1-p2",
-			templateKey: "vllm-v0.17.1-p2",
-		},
-		{
 			name:        "sglang-v0.5.10-p2",
 			templateKey: "sglang-v0.5.10-p2",
 		},
@@ -4153,10 +4149,6 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 		{
 			name:        "vllm-v0.24.0-p2",
 			templateKey: "vllm-v0.24.0-p2",
-		},
-		{
-			name:        "vllm-v0.17.1-p2",
-			templateKey: "vllm-v0.17.1-p2",
 		},
 	}
 
