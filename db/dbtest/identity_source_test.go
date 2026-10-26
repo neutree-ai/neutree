@@ -544,6 +544,8 @@ func TestIdentitySource_Validation(t *testing.T) {
 		{"negative timeout", nil, ldapSpec(func(l map[string]any) { l["timeout"] = -1 }), "10258"},
 		{"filter without placeholder", nil, ldapSpec(func(l map[string]any) { l["user_filter"] = "(uid=*)" }), "10257"},
 		{"ldap CA not PEM", nil, ldapSpec(func(l map[string]any) { l["ca_cert"] = "junk" }), "10258"},
+		{"oidc missing client_secret", nil, oidcSpec(func(map[string]any) {}), "10255"},
+		{"oidc blank client_secret", nil, oidcSpec(func(o map[string]any) { o["client_secret"] = "" }), "10255"},
 		{"oidc missing client_id", nil, oidcSpec(func(o map[string]any) { delete(o, "client_id") }), "10255"},
 		{"oidc without allowed_redirects", nil, oidcSpec(func(o map[string]any) { o["allowed_redirects"] = []string{} }), "10255"},
 		{"oidc issuer not http", nil, oidcSpec(func(o map[string]any) { o["issuer"] = "ftp://idp" }), "10256"},
@@ -654,6 +656,54 @@ func TestIdentitySource_PublicLoginList(t *testing.T) {
 	t.Run("service storage sees the same list", func(t *testing.T) {
 		if !loginListHas(t, enabled.Metadata.Name) || loginListHas(t, disabled.Metadata.Name) {
 			t.Error("storage login list disagrees with the anonymous one")
+		}
+	})
+}
+
+func TestIdentitySource_OIDCClientSecretRequired(t *testing.T) {
+	token := adminToken(t)
+	name := newIdentitySourceName("oidc-secret")
+	spec := func(secret string, enabled bool) string {
+		return identitySourceJSON(map[string]any{"name": name}, map[string]any{"type": "oidc", "enabled": enabled, "oidc": oidcSpecJSON(secret)})
+	}
+	source := createIdentitySource(t, token, spec("client-secret-"+name, true))
+	path := fmt.Sprintf("/identity_sources?id=eq.%d", source.ID)
+
+	t.Run("a blank secret on update keeps the stored one", func(t *testing.T) {
+		if code, raw := postgrestAs(t, token, http.MethodPatch, path, spec("", false)); code != http.StatusOK {
+			t.Fatalf("PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+
+		if got := storedSecrets(t, name).OIDCClientSecret; got != "client-secret-"+name {
+			t.Errorf("client secret = %q, want it kept", got)
+		}
+	})
+
+	// A source stored without a secret (created before it was required).
+	if _, err := GetTestDB(t).Exec(`UPDATE api.identity_source_secrets SET client_secret = NULL WHERE identity_source_id = $1`, source.ID); err != nil {
+		t.Fatalf("failed to clear the secret: %v", err)
+	}
+
+	t.Run("an edit without a stored secret is refused", func(t *testing.T) {
+		code, raw := postgrestAs(t, token, http.MethodPatch, path, spec("", true))
+		if code != http.StatusBadRequest || !strings.Contains(raw, `"code":"10255"`) || !strings.Contains(raw, "client_secret") {
+			t.Errorf("PATCH = HTTP %d, want 400 with code 10255 for client_secret: %s", code, raw)
+		}
+	})
+
+	t.Run("a status-only write still passes", func(t *testing.T) {
+		if code, raw := postgrestAs(t, token, http.MethodPatch, path, `{"status":{"phase":"Failed","error_message":"x"}}`); code != http.StatusOK {
+			t.Errorf("status PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+	})
+
+	t.Run("a new secret fixes it", func(t *testing.T) {
+		if code, raw := postgrestAs(t, token, http.MethodPatch, path, spec("rotated", true)); code != http.StatusOK {
+			t.Fatalf("PATCH = HTTP %d, want 200: %s", code, raw)
+		}
+
+		if got := storedSecrets(t, name).OIDCClientSecret; got != "rotated" {
+			t.Errorf("client secret = %q, want rotated", got)
 		}
 	})
 }
