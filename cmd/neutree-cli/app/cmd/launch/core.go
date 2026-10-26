@@ -3,9 +3,11 @@ package launch
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -26,6 +28,7 @@ type neutreeCoreInstallOptions struct {
 	dbPassword            string
 	metricsRemoteWriteURL string
 	grafanaURL            string
+	gatewayExternalURL    string
 	version               string
 	adminPassword         string
 
@@ -76,6 +79,7 @@ Configuration Options:
   --jwt-secret             JWT secret for authentication
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
+  --gateway-external-url   URL users call the inference gateway at (default: http://<node-ip>:80)
   --kong-worker-processes  Kong Nginx workers: positive integer or auto; auto follows host CPU and can increase PostgreSQL connection pressure
   --version                Component version (default: CLI release version, or v0.0.1 for non-release/local builds)
   --victorialogs-retention-period VictoriaLogs log retention period (default: 30d; e.g. 30d, 90d, 1y)
@@ -91,13 +95,20 @@ Examples:
   neutree-cli launch neutree-core --version <compatible-version-for-your-cli-release-line>
 
   # With remote metrics storage and Grafana
-  neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030`,
+  neutree-cli launch neutree-core --metrics-remote-write-url http://metrics.example.com --grafana-url http://grafana.example.com:3030
+
+  # Behind a reverse proxy that terminates TLS for the gateway
+  neutree-cli launch neutree-core --gateway-external-url https://api.example.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if options.jwtSecret == "" {
 				return fmt.Errorf("--jwt-secret is required")
 			}
 
 			if _, err := normalizeKongWorkerProcesses(options.kongWorkerProcesses, false); err != nil {
+				return err
+			}
+
+			if _, err := resolveGatewayExternalURL(options.gatewayExternalURL, ""); err != nil {
 				return err
 			}
 
@@ -114,6 +125,8 @@ Examples:
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.gatewayExternalURL, "gateway-external-url", "",
+		"URL users call the inference gateway at, shown as the endpoint service URL (default: http://<node-ip>:80)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.kongWorkerProcesses, "kong-worker-processes", defaultKongWorkerProcesses,
 		`Kong Nginx worker processes ("auto" or a positive integer; "auto" follows host CPU and can increase PostgreSQL connection pressure)`)
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.version, "version", defaultNeutreeCoreVersion(), "neutree core version")
@@ -209,6 +222,11 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		return err
 	}
 
+	gatewayExternalURL, err := resolveGatewayExternalURL(options.gatewayExternalURL, options.nodeIP)
+	if err != nil {
+		return err
+	}
+
 	renderedCoreWorkDir := filepath.Join(outputWorkDir, "neutree-core")
 
 	// extract neutree core deploy manifests
@@ -272,6 +290,7 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		"DbPassword":                   options.dbPassword,
 		"MetricsRemoteWriteURL":        options.metricsRemoteWriteURL,
 		"GrafanaURL":                   options.grafanaURL,
+		"GatewayExternalURL":           gatewayExternalURL,
 		"VictoriaMetricsVersion":       component.VictoriaMetrics,
 		"VictoriaLogsRetentionPeriod":  options.victorialogsRetentionPeriod,
 		"NeutreeVersion":               options.version,
@@ -304,6 +323,23 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	}
 
 	return nil
+}
+
+// resolveGatewayExternalURL returns the address endpoint service URLs are built
+// from. Without an override it is Kong's host port, which is wrong as soon as a
+// reverse proxy or domain sits in front of the gateway.
+func resolveGatewayExternalURL(value, nodeIP string) (string, error) {
+	if value == "" {
+		return fmt.Sprintf("http://%s:80", nodeIP), nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+		parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("invalid --gateway-external-url value %q: must be an http or https URL without query or fragment", value)
+	}
+
+	return strings.TrimSuffix(value, "/"), nil
 }
 
 func normalizeKongWorkerProcesses(value string, defaultWhenEmpty bool) (string, error) {
