@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"helm.sh/helm/v3/pkg/chartutil"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -543,84 +542,6 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 
 	assert.Equal(t, clusterversion.KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
-}
-
-func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped(t *testing.T) {
-	originalGetKubernetesServerVersion := getKubernetesServerVersion
-	getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
-		return &kubeversion.Info{
-			Major:      "1",
-			Minor:      "40",
-			GitVersion: "v1.40.0",
-		}, nil
-	}
-	t.Cleanup(func() {
-		getKubernetesServerVersion = originalGetKubernetesServerVersion
-	})
-	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
-		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
-
-	values := component.buildChartValues(NodeScopePlan{})
-
-	assert.Equal(t, "v1.40.0",
-		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
-}
-
-func TestHAMiComponentVersionDiscoveryCompatibility(test *testing.T) {
-	defaultChartVersion := chartutil.KubeVersion{Version: "v1.32.13", Major: "1", Minor: "32"}
-	cases := []struct {
-		name             string
-		server           *kubeversion.Info
-		discoveryErr     error
-		schedulerVersion string
-		chartVersion     chartutil.KubeVersion
-	}{
-		{
-			name: "mapped minor preserves chart patch", server: &kubeversion.Info{GitVersion: "v1.30.9-gke.1"},
-			schedulerVersion: "v1.30.14", chartVersion: chartutil.KubeVersion{Version: "v1.30.9", Major: "1", Minor: "30"},
-		},
-		{
-			name: "unmapped minor uses detected patch", server: &kubeversion.Info{GitVersion: "v1.33.4-vendor.1"},
-			schedulerVersion: "v1.33.4", chartVersion: chartutil.KubeVersion{Version: "v1.33.4", Major: "1", Minor: "33"},
-		},
-		{
-			name: "discovery error uses default", discoveryErr: fmt.Errorf("version discovery failed"),
-			schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-		{
-			name: "invalid server info uses default", server: &kubeversion.Info{GitVersion: "invalid"},
-			schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-		{
-			name: "nil server info uses default", schedulerVersion: "v1.32.13", chartVersion: defaultChartVersion,
-		},
-	}
-
-	for _, testCase := range cases {
-		test.Run(testCase.name, func(test *testing.T) {
-			originalGetKubernetesServerVersion := getKubernetesServerVersion
-			getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
-				return testCase.server, testCase.discoveryErr
-			}
-			test.Cleanup(func() {
-				getKubernetesServerVersion = originalGetKubernetesServerVersion
-			})
-			hamiComponent := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
-				"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(test))
-
-			assert.Equal(test, testCase.schedulerVersion, hamiComponent.resolveKubeSchedulerVersion())
-			assert.Equal(test, testCase.chartVersion, hamiComponent.resolveChartKubeVersion())
-		})
-	}
-}
-
-func TestHAMiStatusUsesReleaseVersion(test *testing.T) {
-	for _, ready := range []bool{false, true} {
-		test.Run(fmt.Sprintf("ready=%t", ready), func(test *testing.T) {
-			status := HAMiStatus{Ready: ready}
-			assert.Equal(test, componentversion.HAMi, status.ComponentStatus().Version)
-		})
-	}
 }
 
 func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {

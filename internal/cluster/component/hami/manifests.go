@@ -228,32 +228,7 @@ func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 		return clusterversion.DefaultKubeSchedulerVersion
 	}
 
-	minorVersion := clusterversion.KubernetesServerMajorMinor(serverVersion)
-	schedulerVersion := clusterversion.KubeSchedulerVersion(serverVersion)
-
-	if _, ok := clusterversion.KubeSchedulerVersionsByMinor[minorVersion]; !ok {
-		gitVersion := ""
-		if serverVersion != nil {
-			gitVersion = serverVersion.GitVersion
-		}
-
-		detectedVersion := clusterversion.KubernetesServerVersion(serverVersion)
-		if detectedVersion != "" {
-			h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
-				"kubernetesVersion", gitVersion,
-				"minorVersion", minorVersion,
-				"detectedVersion", detectedVersion)
-
-			return schedulerVersion
-		}
-
-		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
-			"kubernetesVersion", gitVersion,
-			"minorVersion", minorVersion,
-			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
-	}
-
-	return schedulerVersion
+	return clusterversion.KubeSchedulerVersion(serverVersion)
 }
 
 func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {

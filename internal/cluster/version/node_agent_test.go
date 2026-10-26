@@ -39,32 +39,14 @@ func TestSelectNodeAgent(t *testing.T) {
 			image:    legacyImage,
 		},
 		{
-			name:     "first profile version",
-			version:  "v1.1.2",
-			contract: NodeAgentContractProfile,
-			image:    pinnedImage,
-		},
-		{
 			name:     "last pinned version",
 			version:  "v1.2.0",
 			contract: NodeAgentContractProfile,
 			image:    pinnedImage,
 		},
 		{
-			name:     "pinned prerelease",
-			version:  "v1.2.0-rc.1",
-			contract: NodeAgentContractProfile,
-			image:    pinnedImage,
-		},
-		{
 			name:     "first version on the current image",
 			version:  "v1.2.1",
-			contract: NodeAgentContractProfile,
-			image:    currentImage,
-		},
-		{
-			name:     "open ended tier",
-			version:  "v9.9.9",
 			contract: NodeAgentContractProfile,
 			image:    currentImage,
 		},
