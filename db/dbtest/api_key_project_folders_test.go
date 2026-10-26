@@ -335,3 +335,42 @@ func TestAPIKeyProjectSearchEscapesWildcards(t *testing.T) {
 		}
 	})
 }
+
+// A key that has a display name is found by its metadata.name too, not only by
+// the display name.
+func TestAPIKeyProjectSearchMatchesKeyName(t *testing.T) {
+	db := GetTestDB(t)
+	user := CreateTestUser(t, "folder-search", "folder-search@example.com", "password")
+	grantWorkspaceRead(t, db, user.ID, "search")
+
+	withKeyOwnerContext(t, db, user.ID, func(tx *sql.Tx) {
+		if _, err := tx.Exec(`
+			SELECT api.create_api_key(
+				'default', 'apikey-search-001', 0, 'Shared Key',
+				NULL, NULL, NULL, 'private description'
+			)
+		`); err != nil {
+			t.Fatalf("create key: %v", err)
+		}
+
+		for term, want := range map[string]int{
+			"Shared Key":          1,
+			"apikey-search-001":   1,
+			"private description": 1,
+			"apikey-other":        0,
+		} {
+			var listed, counted int
+			if err := tx.QueryRow(`
+				SELECT
+					(SELECT COALESCE(sum(api_key_count), 0)
+					 FROM api.get_api_key_project_groups('default', $1, NULL, 1, 50)),
+					api.count_api_key_project_group_api_keys('default', $1, NULL)
+			`, term).Scan(&listed, &counted); err != nil {
+				t.Fatalf("search %q: %v", term, err)
+			}
+			if listed != want || counted != want {
+				t.Fatalf("searching %q listed %d and counted %d API keys, want %d", term, listed, counted, want)
+			}
+		}
+	})
+}
