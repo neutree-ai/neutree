@@ -118,6 +118,9 @@ scrape_configs:
   - source_labels: [__meta_kubernetes_pod_label_endpoint]
     action: replace
     target_label: application
+  - source_labels: [__meta_kubernetes_pod_label_endpoint]
+    action: replace
+    target_label: endpoint
   # Add fixed labels to all scraped metrics
   - target_label: deployment
     replacement: Backend
@@ -135,6 +138,30 @@ scrape_configs:
     regex: 'sglang[:_](.+)'
     target_label: __name__
     replacement: 'sglang:$1'
+# Shared cache metrics are discovered per endpoint, never through a load-balanced Service address.
+- job_name: 'neutree-zcache'
+  kubernetes_sd_configs:
+  - role: endpoints
+    namespaces:
+      names:
+      - {{ .Namespace }}
+  relabel_configs:
+  - source_labels:
+    - __meta_kubernetes_service_label_zcache_smartx_com_scrape
+    - __meta_kubernetes_service_label_app_kubernetes_io_component
+    - __meta_kubernetes_endpoint_port_name
+    action: keep
+    regex: 'true;lmcache;metrics'
+  - source_labels: [__meta_kubernetes_namespace]
+    target_label: namespace
+  - source_labels: [__meta_kubernetes_pod_name]
+    target_label: pod
+  - source_labels: [__meta_kubernetes_pod_node_name]
+    target_label: node
+  - target_label: neutree_cluster
+    replacement: {{ .ClusterName | quote }}
+  - target_label: workspace
+    replacement: {{ .Workspace | quote }}
 {{ if .EnableNodeExporter }}
 # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
 - job_name: 'node-exporter-http'
