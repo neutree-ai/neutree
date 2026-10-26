@@ -62,9 +62,12 @@ func TestSSHAndDockerRemoteRunnersExecuteQuotedCommands(t *testing.T) {
 	sshProgram := filepath.Join(sshDirectory, "ssh")
 	sshScript := `#!/bin/sh
 last=""
+batch_mode=no
 for value in "$@"; do
   last="$value"
+  if [ "$value" = "BatchMode=yes" ]; then batch_mode=yes; fi
 done
+if [ "$batch_mode" != "yes" ]; then exit 3; fi
 if [ "$last" = "fail" ]; then
   echo failed >&2
   exit 2

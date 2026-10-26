@@ -18,6 +18,10 @@ import (
 var dockerContainerIDPattern = regexp.MustCompile(`(?i)docker(?:[-/])([0-9a-f]{12,64})(?:\.scope)?`)
 
 func resolveStaticTarget(ctx context.Context, cluster, credentialCluster *v1.Cluster, endpoint *v1.Endpoint) (BenchTarget, error) {
+	if err := ctx.Err(); err != nil {
+		return BenchTarget{}, err
+	}
+
 	if cluster == nil || cluster.Status == nil || strings.TrimSpace(cluster.Status.DashboardURL) == "" {
 		return BenchTarget{}, fmt.Errorf("cluster dashboard URL is required for SSH benchmark")
 	}
@@ -28,10 +32,18 @@ func resolveStaticTarget(ctx context.Context, cluster, credentialCluster *v1.Clu
 	}
 
 	service := dashboard.NewDashboardService(cluster.Status.DashboardURL)
+	if client, ok := service.(*dashboard.Client); ok {
+		service = client.WithContext(ctx)
+	}
+
 	applications, err := service.GetServeApplications()
 
 	if err != nil {
 		return BenchTarget{}, fmt.Errorf("get Ray Serve applications: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return BenchTarget{}, err
 	}
 
 	application, ok := applications.Applications[appName]
@@ -49,6 +61,10 @@ func resolveStaticTarget(ctx context.Context, cluster, credentialCluster *v1.Clu
 		return BenchTarget{}, fmt.Errorf("resolve Backend actor %s: %w", replica.ActorID, err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return BenchTarget{}, err
+	}
+
 	if actor == nil || actor.PID <= 0 {
 		return BenchTarget{}, fmt.Errorf("Backend actor %s has no running PID", replica.ActorID)
 	}
@@ -56,6 +72,10 @@ func resolveStaticTarget(ctx context.Context, cluster, credentialCluster *v1.Clu
 	nodes, err := service.ListNodes()
 	if err != nil {
 		return BenchTarget{}, fmt.Errorf("list Ray nodes: %w", err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return BenchTarget{}, err
 	}
 
 	nodeIP, err := nodeIPForRayNode(nodes, backendNodeID(actor, replica))

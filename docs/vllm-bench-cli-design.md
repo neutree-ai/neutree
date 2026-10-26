@@ -10,11 +10,11 @@
 
 ## Summary
 
-This RFC proposes `neutree-cli exp bench --engine vllm ENDPOINT` as the
-fast path for benchmarking a managed inference Endpoint. The operator provides
-an Endpoint and workload shape; the CLI resolves the Cluster, chooses one
-runtime, derives routing and tokenizer details, runs `vllm bench serve`, and
-collects artifacts on the CLI host.
+This RFC proposes `neutree-cli exp bench ENDPOINT` as the fast path for
+benchmarking a managed inference Endpoint. The operator provides an Endpoint
+and workload shape; the CLI resolves the Endpoint engine and Cluster, chooses
+one runtime, derives routing and tokenizer details, runs `vllm bench serve`,
+and collects artifacts on the CLI host.
 
 The benchmark client is co-located with a selected inference runtime. Requests
 still use the normal Router or Ray Serve route, so the result measures the
@@ -28,15 +28,16 @@ tokenizer path, constructing a vLLM command, and retrieving its result. The
 steps differ between Kubernetes and static Ray clusters and make routine
 capacity checks slow and error-prone.
 
-The proposed command keeps that complexity in the CLI while preserving the
-normal serving route and existing authorization model.
+The proposed command keeps neutral orchestration in the CLI while preserving
+the normal serving route and existing authorization model. Engine-specific
+benchmark behavior remains in the selected workload runtime.
 
 ## Proposal
 
 ### Command
 
 ```bash
-neutree-cli exp bench --engine vllm ENDPOINT \
+neutree-cli exp bench ENDPOINT \
   --workspace default \
   --input-lens 16384 \
   --output-lens 2048 \
@@ -46,8 +47,16 @@ neutree-cli exp bench --engine vllm ENDPOINT \
   --output-dir ./results
 ```
 
-`--engine` is required and initially accepts only `vllm`. The command accepts
-only Running text-generation Endpoints backed by vLLM.
+The Endpoint's `spec.engine.engine` is the source of truth; the command does
+not accept an engine flag. The initial implementation accepts only Running
+text-generation Endpoints backed by vLLM and returns an unsupported-engine
+error for every other Endpoint engine.
+
+The CLI owns generic orchestration: input validation, case-matrix expansion,
+artifacts, cancellation, and lifecycle reporting. The selected workload runtime
+owns engine-specific benchmark behavior. In this release that behavior is
+`vllm bench serve` in the selected vLLM runtime; a future engine adds another
+runtime adapter without changing the command surface.
 
 `--input-lens`, `--output-lens`, and `--concurrencies` accept comma-separated
 or repeated positive integers. The CLI de-duplicates and sorts values, then
@@ -203,6 +212,7 @@ Endpoint-route, local-artifact combination.
 | Run the client outside the target Cluster | Adds external gateway and network effects that do not represent the in-cluster serving path. |
 | Benchmark one replica directly | Bypasses Router or Ray Serve behavior and changes what the result means. |
 | Add a control-plane benchmark resource | Requires persistence, scheduling, retention, and UI before validating the basic CLI workflow. |
+| Port vLLM bench semantics into a generic Go client | Couples the neutral CLI to vLLM tokenizer, request, and result-version behavior. Keep those details in the vLLM runtime; future engines supply their own runtime behavior behind the same CLI contract. |
 
 ## Compatibility, Rollout, and Rollback
 

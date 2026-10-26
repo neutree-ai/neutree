@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,12 +33,16 @@ type ListOptions struct {
 
 // list retrieves a list of resources based on query parameters
 func (s *resourceService) list(params url.Values, result interface{}) error {
+	return s.listContext(context.Background(), params, result)
+}
+
+func (s *resourceService) listContext(ctx context.Context, params url.Values, result interface{}) error {
 	url := s.baseUrl
 	if len(params) > 0 {
 		url = s.baseUrl + "?" + params.Encode()
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
@@ -61,6 +66,10 @@ func (s *resourceService) list(params url.Values, result interface{}) error {
 
 // get retrieves a single resource by name and workspace
 func (s *resourceService) get(workspace, name string, result interface{}) error {
+	return s.getContext(context.Background(), workspace, name, result)
+}
+
+func (s *resourceService) getContext(ctx context.Context, workspace, name string, result interface{}) error {
 	if name == "" {
 		return fmt.Errorf("%s name cannot be empty", s.resourceName)
 	}
@@ -75,7 +84,7 @@ func (s *resourceService) get(workspace, name string, result interface{}) error 
 
 	url := s.baseUrl + "?" + params.Encode()
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}

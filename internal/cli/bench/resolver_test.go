@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -56,6 +57,43 @@ func (f fakeDashboardService) GetActorLog(string, string, int) (string, error) {
 
 func (f fakeDashboardService) ListActors([]dashboard.ActorFilter, bool, int) (*dashboard.ActorsResponse, error) {
 	return f.actors, f.actorsErr
+}
+
+func TestResolveStaticTargetCancelsBlockedDashboardRequest(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolveStaticTarget(ctx,
+			&v1.Cluster{Status: &v1.ClusterStatus{DashboardURL: server.URL}}, nil,
+			&v1.Endpoint{Metadata: &v1.Metadata{Workspace: "default", Name: "chat"}})
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dashboard request did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("dashboard request did not stop after cancellation")
+	}
 }
 
 func TestResolveStaticTargetUsesBackendActorAndDockerContainer(t *testing.T) {

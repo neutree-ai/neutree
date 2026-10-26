@@ -2,7 +2,6 @@ package bench
 
 import (
 	"fmt"
-	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -22,9 +21,6 @@ type Options struct {
 	RequestRate   string
 	OutputDir     string
 	Timeout       time.Duration
-	// ProgressWriter receives human-readable lifecycle events. A nil writer
-	// suppresses progress output for callers that use the package directly.
-	ProgressWriter io.Writer
 }
 
 // Case is one independent point in the input/output/concurrency matrix.

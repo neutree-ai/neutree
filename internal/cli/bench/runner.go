@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	internalutil "github.com/neutree-ai/neutree/internal/util"
@@ -63,6 +64,7 @@ func (r *sshRemoteRunner) Run(ctx context.Context, command string, stdout, stder
 	}
 
 	args := []string{
+		"-o", "BatchMode=yes",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
@@ -77,6 +79,8 @@ func (r *sshRemoteRunner) Run(ctx context.Context, command string, stdout, stder
 
 	args = append(args, sshDestination(r.auth.SSHUser, r.host), command)
 	process := exec.CommandContext(ctx, "ssh", args...)
+	isolateSSHProcess(process)
+	process.WaitDelay = 2 * time.Second
 	process.Stdout = stdout
 	process.Stderr = stderr
 

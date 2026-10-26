@@ -9,22 +9,6 @@ import (
 	"strings"
 )
 
-type progressReporter struct {
-	writer io.Writer
-}
-
-func newProgressReporter(writer io.Writer) progressReporter {
-	if writer == nil {
-		writer = io.Discard
-	}
-
-	return progressReporter{writer: writer}
-}
-
-func (r progressReporter) printf(format string, args ...any) {
-	_, _ = fmt.Fprintf(r.writer, format+"\n", args...)
-}
-
 // benchmarkResultSummary is the small, stable subset of a vLLM result that
 // is useful for progress output. The complete version-dependent result stays
 // in result.json.

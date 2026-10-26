@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/client"
@@ -23,7 +26,7 @@ type fakeResourceGetter struct {
 	resources map[string]json.RawMessage
 }
 
-func (f fakeResourceGetter) Get(kind, workspace, name string) (json.RawMessage, error) {
+func (f fakeResourceGetter) GetContext(_ context.Context, kind, workspace, name string) (json.RawMessage, error) {
 	value, ok := f.resources[kind+"/"+workspace+"/"+name]
 	if !ok {
 		return nil, fmt.Errorf("not found")
@@ -37,7 +40,7 @@ type fakeClusterCredentials struct {
 	err     error
 }
 
-func (f fakeClusterCredentials) GetClusterCredentials(_, _ string) (*v1.Cluster, error) {
+func (f fakeClusterCredentials) GetClusterCredentialsContext(_ context.Context, _, _ string) (*v1.Cluster, error) {
 	return f.cluster, f.err
 }
 
@@ -47,12 +50,50 @@ type fakeBenchRunner struct {
 	result   string
 }
 
+func TestRunProgressUsesKlogStderr(t *testing.T) {
+	const childEnvironment = "NEUTREE_BENCH_KLOG_TEST_CHILD"
+	if os.Getenv(childEnvironment) == "1" {
+		_, err := run(context.Background(), dependencies{}, validOptions(t.TempDir()))
+		require.ErrorContains(t, err, "resource client is required")
+		return
+	}
+
+	command := exec.Command(os.Args[0], "-test.run=^TestRunProgressUsesKlogStderr$")
+	command.Env = append(os.Environ(), childEnvironment+"=1")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	require.NoError(t, command.Run())
+	require.NotContains(t, stdout.String(), "benchmark starting")
+	require.Regexp(t, `(?m)^I[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\s+[0-9]+ run\.go:[0-9]+\] benchmark starting: endpoint=default/chat cases=1$`, stderr.String())
+}
+
+func captureBenchmarkProgress(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	state := klog.CaptureState()
+	t.Cleanup(state.Restore)
+
+	output := &bytes.Buffer{}
+	klog.LogToStderr(false)
+	klog.SetOutput(output)
+
+	return output
+}
+
 func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr io.Writer) error {
 	r.commands = append(r.commands, command)
 
 	switch {
 	case command == benchmarkPreflightCommand():
 		_, _ = io.WriteString(stdout, "usage\n")
+	case strings.Contains(command, "# neutree-bench-supervisor"):
+		_, _ = io.WriteString(stdout, "benchmark output\n")
+		_, _ = io.WriteString(stderr, "benchmark diagnostics\n")
+	case strings.Contains(command, "set -C"):
+		return nil
+	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
+		return nil
 	case strings.HasPrefix(command, "python3 -c "):
 		model := r.model
 		if model == "" {
@@ -100,7 +141,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	runner := &fakeBenchRunner{}
 	resolverCalled := false
 	outputDir := t.TempDir()
-	var progress bytes.Buffer
+	progress := captureBenchmarkProgress(t)
 
 	output, err := run(context.Background(), dependencies{
 		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
@@ -123,15 +164,14 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 			}, nil
 		},
 	}, Options{
-		Workspace:      "default",
-		Endpoint:       "chat",
-		InputLens:      []int{16},
-		OutputLens:     []int{4},
-		Concurrencies:  []int{2},
-		NumPrompts:     20,
-		RequestRate:    "inf",
-		OutputDir:      outputDir,
-		ProgressWriter: &progress,
+		Workspace:     "default",
+		Endpoint:      "chat",
+		InputLens:     []int{16},
+		OutputLens:    []int{4},
+		Concurrencies: []int{2},
+		NumPrompts:    20,
+		RequestRate:   "inf",
+		OutputDir:     outputDir,
 	})
 	require.NoError(t, err)
 	require.True(t, resolverCalled)
@@ -163,16 +203,22 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, string(manifest), `"status": "Succeeded"`)
 	require.NotContains(t, string(manifest), "secret-kubeconfig")
 
-	require.Len(t, runner.commands, 6)
+	require.Len(t, runner.commands, 8)
 	require.Equal(t, benchmarkPreflightCommand(), runner.commands[0])
 	require.Contains(t, runner.commands[1], "/v1/models")
-	require.Contains(t, runner.commands[2], "vllm bench serve")
-	require.Contains(t, runner.commands[2], "--model 'router-model'")
-	require.True(t, strings.HasPrefix(runner.commands[3], "cat -- "))
-	require.True(t, strings.HasPrefix(runner.commands[4], "rm -rf -- "))
-	require.True(t, strings.HasPrefix(runner.commands[5], "rm -rf -- "))
+	require.Contains(t, runner.commands[2], "mkdir --")
+	require.Contains(t, runner.commands[3], "set -C")
+	require.Contains(t, runner.commands[4], "vllm bench serve")
+	require.Contains(t, string(command), "--model 'router-model'")
+	require.True(t, strings.HasPrefix(runner.commands[5], "cat -- "))
+	require.True(t, strings.HasPrefix(runner.commands[6], "rm -rf -- "))
+	require.True(t, strings.HasPrefix(runner.commands[7], "rm -rf -- "))
 
 	progressOutput := progress.String()
+	for _, line := range strings.Split(strings.TrimSpace(progressOutput), "\n") {
+		require.Regexp(t, `^I[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\s+[0-9]+ run\.go:[0-9]+\] `, line)
+	}
+
 	require.Contains(t, progressOutput, "benchmark starting: endpoint=default/chat cases=1")
 	require.Contains(t, progressOutput, "benchmark endpoint resolving")
 	require.Contains(t, progressOutput, "benchmark endpoint resolved: cluster=cluster-a")
@@ -187,7 +233,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, progressOutput, "benchmark preflight completed: model=router-model")
 	require.Contains(t, progressOutput, "benchmark case 1/1 started: input_len=16 output_len=4 concurrency=2 num_prompts=20 request_rate=inf")
 	require.Contains(t, progressOutput, "benchmark case 1/1 command: umask 077 &&")
-	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+runner.commands[2])
+	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+strings.TrimSpace(string(command)))
 	require.Contains(t, progressOutput, "benchmark case 1/1 completed: result=")
 	require.Contains(t, progressOutput, "completed=20 failed=0 duration_s=1.50 request_per_s=2.50 output_tokens_per_s=10.50 p50_ttft_ms=12.50 p99_ttft_ms=25.50")
 	require.Contains(t, progressOutput, "benchmark completed: cases=1 result_dir="+output)
@@ -200,7 +246,7 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 		model:  "https://model-user:model-secret@models.example.test/qwen?token=model-token#fragment",
 		result: `{"future_result_schema":true}`,
 	}
-	var progress bytes.Buffer
+	progress := captureBenchmarkProgress(t)
 
 	output, err := run(context.Background(), dependencies{
 		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
@@ -218,15 +264,14 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 			}, nil
 		},
 	}, Options{
-		Workspace:      "default",
-		Endpoint:       "chat",
-		InputLens:      []int{16},
-		OutputLens:     []int{4},
-		Concurrencies:  []int{2},
-		NumPrompts:     20,
-		RequestRate:    "inf",
-		OutputDir:      t.TempDir(),
-		ProgressWriter: &progress,
+		Workspace:     "default",
+		Endpoint:      "chat",
+		InputLens:     []int{16},
+		OutputLens:    []int{4},
+		Concurrencies: []int{2},
+		NumPrompts:    20,
+		RequestRate:   "inf",
+		OutputDir:     t.TempDir(),
 	})
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
@@ -313,6 +358,40 @@ func TestRunUsesConfiguredAPIClient(t *testing.T) {
 	require.ErrorContains(t, err, "get Endpoint")
 }
 
+func TestRunTimeoutCancelsEndpointRequest(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		close(started)
+		select {
+		case <-request.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+
+	options := validOptions(t.TempDir())
+	options.Timeout = 200 * time.Millisecond
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), client.NewClient(server.URL), options)
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Endpoint request did not start")
+	}
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Endpoint request did not stop on timeout")
+	}
+}
+
 func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 	endpoint, cluster, credentialCluster := benchmarkFixtures()
 	resources := fakeResourceGetter{resources: map[string]json.RawMessage{
@@ -321,9 +400,8 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 	}}
 
 	t.Run("preflight", func(t *testing.T) {
-		var progress bytes.Buffer
+		progress := captureBenchmarkProgress(t)
 		options := validOptions(t.TempDir())
-		options.ProgressWriter = &progress
 
 		output, err := run(context.Background(), dependencies{
 			resources:          resources,
@@ -334,6 +412,7 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 		}, options)
 		require.ErrorContains(t, err, "preflight")
 		require.Contains(t, progress.String(), "benchmark preflight failed: vllm benchmark preflight failed: preflight failed")
+		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark preflight failed:`, progress.String())
 
 		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
 		require.NoError(t, readErr)
@@ -342,9 +421,8 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 
 	t.Run("case", func(t *testing.T) {
 		runner := &caseFailureRunner{}
-		var progress bytes.Buffer
+		progress := captureBenchmarkProgress(t)
 		options := validOptions(t.TempDir())
-		options.ProgressWriter = &progress
 
 		output, err := run(context.Background(), dependencies{
 			resources:          resources,
@@ -355,6 +433,7 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 		}, options)
 		require.ErrorContains(t, err, "benchmark case")
 		require.Contains(t, progress.String(), "benchmark case 1/1 failed: case failed")
+		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark case 1/1 failed:`, progress.String())
 
 		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
 		require.NoError(t, readErr)
@@ -414,8 +493,14 @@ func (r *emptyResultRunner) Run(_ context.Context, command string, stdout, _ io.
 type caseFailureRunner struct{}
 
 func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.Writer) error {
-	if command == benchmarkPreflightCommand() || strings.HasPrefix(command, "rm -rf -- ") {
+	if command == benchmarkPreflightCommand() || strings.HasPrefix(command, "rm -rf -- ") ||
+		strings.HasPrefix(command, "umask 077 && mkdir -- ") ||
+		strings.Contains(command, "set -C") || strings.Contains(command, "# neutree-bench-cancel") {
 		return nil
+	}
+
+	if strings.Contains(command, "# neutree-bench-supervisor") {
+		return fmt.Errorf("case failed")
 	}
 
 	if strings.HasPrefix(command, "python3 -c ") {

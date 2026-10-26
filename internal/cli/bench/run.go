@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/client"
@@ -25,15 +28,16 @@ const (
 	measurementScopeRoute    = "endpoint-route"
 	benchmarkSucceededStatus = "Succeeded"
 	benchmarkFailedStatus    = "Failed"
+	benchmarkCanceledStatus  = "Canceled"
 	remoteCleanupTimeout     = 30 * time.Second
 )
 
 type resourceGetter interface {
-	Get(kind, workspace, name string) (json.RawMessage, error)
+	GetContext(ctx context.Context, kind, workspace, name string) (json.RawMessage, error)
 }
 
 type clusterCredentialsGetter interface {
-	GetClusterCredentials(workspace, name string) (*v1.Cluster, error)
+	GetClusterCredentialsContext(ctx context.Context, workspace, name string) (*v1.Cluster, error)
 }
 
 type targetResolver func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error)
@@ -97,9 +101,15 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", err
 	}
 
-	progress := newProgressReporter(options.ProgressWriter)
+	runCtx, cancel := benchmarkContext(ctx, options.Timeout)
+	defer cancel()
+
+	if err := runCtx.Err(); err != nil {
+		return "", err
+	}
+
 	benchmarkCases := expandCases(options.InputLens, options.OutputLens, options.Concurrencies)
-	progress.printf(
+	klog.Infof(
 		"benchmark starting: endpoint=%s/%s cases=%d",
 		options.Workspace,
 		options.Endpoint,
@@ -114,61 +124,10 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", fmt.Errorf("cluster credential client is required")
 	}
 
-	progress.printf("benchmark endpoint resolving")
-
-	endpoint, err := loadEndpoint(deps.resources, options.Workspace, options.Endpoint)
+	endpoint, target, err := resolveRunTarget(runCtx, deps, options)
 	if err != nil {
 		return "", err
 	}
-
-	if err := validateEndpoint(endpoint); err != nil {
-		return "", err
-	}
-
-	progress.printf("benchmark endpoint resolved: cluster=%s", endpoint.Spec.Cluster)
-
-	progress.printf("benchmark cluster resolving: cluster=%s", endpoint.Spec.Cluster)
-
-	cluster, err := loadCluster(deps.resources, options.Workspace, endpoint.Spec.Cluster)
-	if err != nil {
-		return "", err
-	}
-
-	if err := validateCluster(cluster); err != nil {
-		return "", err
-	}
-
-	progress.printf("benchmark cluster resolved: type=%s", cluster.Spec.Type)
-
-	progress.printf("benchmark credentials resolving: cluster=%s", endpoint.Spec.Cluster)
-
-	credentialCluster, err := deps.clusterCredentials.GetClusterCredentials(options.Workspace, endpoint.Spec.Cluster)
-	if err != nil {
-		return "", fmt.Errorf("get cluster credentials: %w", err)
-	}
-
-	progress.printf("benchmark credentials resolved: cluster=%s", endpoint.Spec.Cluster)
-
-	if deps.resolveTarget == nil {
-		return "", fmt.Errorf("benchmark target resolver is required")
-	}
-
-	progress.printf("benchmark target resolving")
-
-	target, err := deps.resolveTarget(ctx, endpoint, cluster, credentialCluster)
-	if err != nil {
-		return "", err
-	}
-
-	if target.runner == nil {
-		return "", fmt.Errorf("benchmark target runner is required")
-	}
-
-	progress.printf(
-		"benchmark target resolved: platform=%s runtime=%s",
-		target.Platform,
-		target.RuntimeID,
-	)
 
 	defer func() {
 		_ = target.Close()
@@ -179,7 +138,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return "", err
 	}
 
-	progress.printf("benchmark artifacts: %s", output)
+	klog.Infof("benchmark artifacts: %s", output)
 
 	result := manifest{
 		FormatVersion:    "v1",
@@ -203,23 +162,19 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return output, err
 	}
 
-	runCtx, cancel := benchmarkContext(ctx, options.Timeout)
-
-	defer cancel()
-
-	progress.printf("benchmark preflight started: checking vllm bench and discovering model")
+	klog.Info("benchmark preflight started: checking vllm bench and discovering model")
 
 	model, err := runPreflight(runCtx, target.runner, target.BaseURL, output)
 	if err != nil {
 		result.Error = err.Error()
 		_ = writeManifest(output, result)
 
-		progress.printf("benchmark preflight failed: %v", err)
+		klog.Errorf("benchmark preflight failed: %v", err)
 
 		return output, err
 	}
 
-	progress.printf("benchmark preflight completed: model=%s", redactProgressCommandValue(model))
+	klog.Infof("benchmark preflight completed: model=%s", redactProgressCommandValue(model))
 
 	target.Model = model
 	result.Target.Model = model
@@ -229,13 +184,36 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 	}
 
 	remoteRoot := filepath.ToSlash(filepath.Join("/tmp", "neutree-bench-"+filepath.Base(output)))
+	if err := prepareRemoteRoot(runCtx, target.runner, remoteRoot); err != nil {
+		err = contextOrError(runCtx, err)
+		result.Error = err.Error()
+		_ = writeManifest(output, result)
 
-	defer cleanupRemoteDirectory(target.runner, remoteRoot)
+		return output, err
+	}
+
+	preserveReason := ""
+
+	defer func() {
+		if preserveReason != "" {
+			klog.Warningf("%s; inspect %s in %s", preserveReason, remoteRoot, target.RuntimeID)
+			return
+		}
+
+		cleanupRemoteDirectory(target.runner, remoteRoot)
+	}()
 
 	for caseIndex, benchmarkCase := range benchmarkCases {
+		if err := runCtx.Err(); err != nil {
+			result.Error = err.Error()
+			_ = writeManifest(output, result)
+
+			return output, err
+		}
+
 		caseNumber := caseIndex + 1
 		command := progressBenchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
-		progress.printf(
+		klog.Infof(
 			"benchmark case %d/%d started: input_len=%d output_len=%d concurrency=%d num_prompts=%d request_rate=%s",
 			caseNumber,
 			len(benchmarkCases),
@@ -245,7 +223,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			options.NumPrompts,
 			options.RequestRate,
 		)
-		progress.printf("benchmark case %d/%d command: %s", caseNumber, len(benchmarkCases), command)
+		klog.Infof("benchmark case %d/%d command: %s", caseNumber, len(benchmarkCases), command)
 
 		entry := manifestCase{Case: benchmarkCase, StartedAt: time.Now().UTC()}
 		result.Cases = append(result.Cases, entry)
@@ -260,12 +238,17 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		result.Cases[manifestCaseIndex].CompletedAt = completedAt
 
 		if err != nil {
-			result.Cases[manifestCaseIndex].Status = benchmarkFailedStatus
+			result.Cases[manifestCaseIndex].Status = benchmarkCaseErrorStatus(err)
+			preserveReason = remotePreservationReason(err)
 			result.Cases[manifestCaseIndex].Error = err.Error()
 			result.Error = err.Error()
 			_ = writeManifest(output, result)
 
-			progress.printf("benchmark case %d/%d failed: %v", caseNumber, len(benchmarkCases), err)
+			if errors.Is(err, context.Canceled) {
+				klog.Infof("benchmark case %d/%d canceled: %v", caseNumber, len(benchmarkCases), err)
+			} else {
+				klog.Errorf("benchmark case %d/%d failed: %v", caseNumber, len(benchmarkCases), err)
+			}
 
 			return output, fmt.Errorf("benchmark case %s: %w", benchmarkCase.Name(), err)
 		}
@@ -279,7 +262,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 
 		summaryText := benchmarkResultSummaryText(resultPath)
 		if summaryText == "" {
-			progress.printf(
+			klog.Infof(
 				"benchmark case %d/%d completed: result=%s summary=unavailable",
 				caseNumber,
 				len(benchmarkCases),
@@ -289,7 +272,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			continue
 		}
 
-		progress.printf(
+		klog.Infof(
 			"benchmark case %d/%d completed: result=%s %s",
 			caseNumber,
 			len(benchmarkCases),
@@ -298,13 +281,73 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		)
 	}
 
-	progress.printf("benchmark completed: cases=%d result_dir=%s", len(benchmarkCases), output)
+	klog.Infof("benchmark completed: cases=%d result_dir=%s", len(benchmarkCases), output)
 
 	return output, nil
 }
 
-func loadEndpoint(resources resourceGetter, workspace, name string) (*v1.Endpoint, error) {
-	raw, err := resources.Get("Endpoint", workspace, name)
+func resolveRunTarget(ctx context.Context, deps dependencies, options Options) (*v1.Endpoint, BenchTarget, error) {
+	klog.Info("benchmark endpoint resolving")
+
+	endpoint, err := loadEndpoint(ctx, deps.resources, options.Workspace, options.Endpoint)
+	if err := contextOrError(ctx, err); err != nil {
+		return nil, BenchTarget{}, err
+	}
+
+	if err := validateEndpoint(endpoint); err != nil {
+		return nil, BenchTarget{}, err
+	}
+
+	klog.Infof("benchmark endpoint resolved: cluster=%s", endpoint.Spec.Cluster)
+	klog.Infof("benchmark cluster resolving: cluster=%s", endpoint.Spec.Cluster)
+
+	cluster, err := loadCluster(ctx, deps.resources, options.Workspace, endpoint.Spec.Cluster)
+	if err := contextOrError(ctx, err); err != nil {
+		return nil, BenchTarget{}, err
+	}
+
+	if err := validateCluster(cluster); err != nil {
+		return nil, BenchTarget{}, err
+	}
+
+	klog.Infof("benchmark cluster resolved: type=%s", cluster.Spec.Type)
+	klog.Infof("benchmark credentials resolving: cluster=%s", endpoint.Spec.Cluster)
+
+	credentialCluster, err := deps.clusterCredentials.GetClusterCredentialsContext(ctx, options.Workspace, endpoint.Spec.Cluster)
+	if err := contextOrError(ctx, err); err != nil {
+		return nil, BenchTarget{}, fmt.Errorf("get cluster credentials: %w", err)
+	}
+
+	klog.Infof("benchmark credentials resolved: cluster=%s", endpoint.Spec.Cluster)
+
+	if deps.resolveTarget == nil {
+		return nil, BenchTarget{}, fmt.Errorf("benchmark target resolver is required")
+	}
+
+	klog.Info("benchmark target resolving")
+
+	target, err := deps.resolveTarget(ctx, endpoint, cluster, credentialCluster)
+	if err != nil {
+		return nil, BenchTarget{}, contextOrError(ctx, err)
+	}
+
+	if err := ctx.Err(); err != nil {
+		_ = target.Close()
+		return nil, BenchTarget{}, err
+	}
+
+	if target.runner == nil {
+		_ = target.Close()
+		return nil, BenchTarget{}, fmt.Errorf("benchmark target runner is required")
+	}
+
+	klog.Infof("benchmark target resolved: platform=%s runtime=%s", target.Platform, target.RuntimeID)
+
+	return endpoint, target, nil
+}
+
+func loadEndpoint(ctx context.Context, resources resourceGetter, workspace, name string) (*v1.Endpoint, error) {
+	raw, err := resources.GetContext(ctx, "Endpoint", workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("get Endpoint %q: %w", name, err)
 	}
@@ -317,8 +360,8 @@ func loadEndpoint(resources resourceGetter, workspace, name string) (*v1.Endpoin
 	return endpoint, nil
 }
 
-func loadCluster(resources resourceGetter, workspace, name string) (*v1.Cluster, error) {
-	raw, err := resources.Get("Cluster", workspace, name)
+func loadCluster(ctx context.Context, resources resourceGetter, workspace, name string) (*v1.Cluster, error) {
+	raw, err := resources.GetContext(ctx, "Cluster", workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("get Cluster %q: %w", name, err)
 	}
@@ -425,6 +468,34 @@ func benchmarkContext(ctx context.Context, timeout time.Duration) (context.Conte
 	return context.WithTimeout(ctx, timeout)
 }
 
+func contextOrError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return err
+}
+
+func benchmarkCaseErrorStatus(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return benchmarkCanceledStatus
+	}
+
+	return benchmarkFailedStatus
+}
+
+func remotePreservationReason(err error) string {
+	if errors.Is(err, errRemoteTerminationUnconfirmed) {
+		return "remote benchmark termination was not confirmed"
+	}
+
+	if errors.Is(err, errRemoteArtifactsPreserved) {
+		return "remote benchmark directory was retained"
+	}
+
+	return ""
+}
+
 func runPreflight(ctx context.Context, runner remoteRunner, baseURL, output string) (string, error) {
 	stdout, err := createOutputFile(filepath.Join(output, preflightStdoutFileName))
 	if err != nil {
@@ -478,24 +549,51 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 	defer stderr.Close() //nolint:errcheck
 
 	remoteResultDir := benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase)
-	defer cleanupRemoteDirectory(runner, remoteResultDir)
+	preserveRemote := true
+
+	defer func() {
+		if !preserveRemote {
+			cleanupRemoteDirectory(runner, remoteResultDir)
+		}
+	}()
 
 	command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
 	if err := writeCommandFile(filepath.Join(caseOutput, benchmarkCommandFileName), command); err != nil {
 		return err
 	}
 
-	if err := runner.Run(ctx, command, stdout, stderr); err != nil {
+	if err := prepareBenchmarkControl(ctx, runner, remoteResultDir); err != nil {
+		return fmt.Errorf("%w: %w", errRemoteArtifactsPreserved, contextOrError(ctx, err))
+	}
+
+	preserveRemote = false
+
+	if err := runControlledBenchmark(ctx, runner, remoteResultDir, command, stdout, stderr); err != nil {
+		preserveRemote = errors.Is(err, errRemoteTerminationUnconfirmed)
 		return err
 	}
 
-	result, err := createOutputFile(filepath.Join(caseOutput, benchmarkResultFileName))
+	if err := collectBenchmarkResult(ctx, runner, remoteResultDir, caseOutput, stderr); err != nil {
+		preserveRemote = true
+		return fmt.Errorf("%w: %w", errRemoteArtifactsPreserved, err)
+	}
+
+	return nil
+}
+
+func collectBenchmarkResult(ctx context.Context, runner remoteRunner, remoteResultDir, caseOutput string, stderr io.Writer) error {
+	resultPath := filepath.Join(caseOutput, benchmarkResultFileName)
+	partialPath := resultPath + ".partial"
+
+	result, err := createOutputFile(partialPath)
 	if err != nil {
 		return err
 	}
+
 	defer result.Close() //nolint:errcheck
 
-	if err := runner.Run(ctx, remoteResultCommand(remoteResultDir), result, stderr); err != nil {
+	err = runner.Run(ctx, remoteResultCommand(remoteResultDir), result, stderr)
+	if err := contextOrError(ctx, err); err != nil {
 		return fmt.Errorf("copy benchmark result: %w", err)
 	}
 
@@ -506,6 +604,14 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 
 	if info.Size() == 0 {
 		return fmt.Errorf("copied benchmark result is empty")
+	}
+
+	if err := result.Close(); err != nil {
+		return fmt.Errorf("close copied benchmark result: %w", err)
+	}
+
+	if err := os.Rename(partialPath, resultPath); err != nil {
+		return fmt.Errorf("publish benchmark result: %w", err)
 	}
 
 	return nil
@@ -533,7 +639,9 @@ func cleanupRemoteDirectory(runner remoteRunner, directory string) {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteCleanupTimeout)
 	defer cancel()
 
-	_ = runner.Run(ctx, remoteCleanupCommand(directory), io.Discard, io.Discard)
+	if err := runner.Run(ctx, remoteCleanupCommand(directory), io.Discard, io.Discard); err != nil {
+		klog.Warningf("failed to clean remote benchmark directory %s: %v", directory, err)
+	}
 }
 
 func createOutputFile(path string) (*os.File, error) {
