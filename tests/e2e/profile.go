@@ -11,8 +11,8 @@ import (
 
 const (
 	defaultModelVersion           = "latest"
-	maintainedVLLMVersionPrevious = "v0.17.1-p2"
-	maintainedVLLMVersionCurrent  = "v0.24.0-p2"
+	maintainedVLLMVersionPrevious = "v0.24.0-p2"
+	maintainedVLLMVersionCurrent  = "v0.31.0"
 	// defaultEngineName is the engine looked up by helpers that don't take an
 	// explicit engine name (renderEndpoint default, profileEngineVersion, etc.).
 	// Tests that target a different engine pass it via withEngine(name, version).

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,6 +95,11 @@ func (c Config) Validate() error {
 
 	if c.ClientID == "" {
 		return fmt.Errorf("%w: client ID is required", ErrInvalidConfig)
+	}
+
+	// Only confidential clients are supported.
+	if strings.TrimSpace(c.ClientSecret) == "" {
+		return fmt.Errorf("%w: client secret is required", ErrInvalidConfig)
 	}
 
 	if !slices.Contains(c.Scopes, ScopeOpenID) {

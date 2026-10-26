@@ -67,7 +67,7 @@ An Endpoint is a deployed inference service. Key configurations:
 
 ## Speech-to-text with the vLLM Ray Serve adapter
 
-The adapters for vLLM v0.17.1, v0.24.0 and v0.31.0 expose
+The adapters for vLLM v0.24.0 and v0.31.0 expose
 `POST /v1/audio/transcriptions`. Send `multipart/form-data` with an audio `file`
 and the served `model` name. Optional fields, including `language`, `prompt`,
 `temperature`, `response_format`, `stream` and repeated
@@ -98,7 +98,6 @@ streaming. It does not load vLLM, decode audio, download models or run inference
 Real engine-image/GPU validation is still required before claiming inference
 compatibility. The versioned imports and serving signatures were checked against
 the tagged upstream implementations:
-[v0.17.1](https://github.com/vllm-project/vllm/blob/v0.17.1/vllm/entrypoints/openai/speech_to_text/serving.py),
 [v0.24.0](https://github.com/vllm-project/vllm/blob/v0.24.0/vllm/entrypoints/speech_to_text/transcription/serving.py),
 [v0.31.0](https://github.com/vllm-project/vllm/blob/v0.31.0/vllm/entrypoints/speech_to_text/transcription/serving.py).
 

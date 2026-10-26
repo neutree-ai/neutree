@@ -23,7 +23,7 @@ class RequestModel(BaseModel):
     response_format: str = "json"
 
 
-VERSIONS = ("v0_17_1", "v0_24_0", "v0_31_0")
+VERSIONS = ("v0_24_0", "v0_31_0")
 
 
 def load_methods(version):
@@ -61,20 +61,14 @@ class VersionedTranscriptionTests(unittest.IsolatedAsyncioTestCase):
                     calls.append((engine_client, models, request_logger))
                     return handler
 
-                def old(engine_client, models, *, request_logger,
-                        return_tokens_as_token_ids=False, enable_force_include_usage=False,
-                        log_error_stack=False):
-                    return current(engine_client, models, request_logger=request_logger)
-
-                prefix = "vllm.entrypoints.openai.speech_to_text" if version == "v0_17_1" else "vllm.entrypoints.speech_to_text.transcription"
-                module = SimpleNamespace(OpenAIServingTranscription=old if version == "v0_17_1" else current)
+                prefix = "vllm.entrypoints.speech_to_text.transcription"
+                module = SimpleNamespace(OpenAIServingTranscription=current)
                 backend.openai_serving_transcription = None
-                backend.engine = Mock(get_supported_tasks=AsyncMock(return_value=("transcription",)))
+                backend.engine = Mock()
                 backend._ensure_supported_tasks = AsyncMock(return_value=("transcription",))
                 backend._ensure_models = AsyncMock(return_value="models")
                 backend.return_tokens_as_token_ids = False
                 backend.enable_force_include_usage = False
-                backend.log_error_stack = False
                 with patch.dict(sys.modules, {prefix + ".serving": module}):
                     self.assertIs(await backend._ensure_transcription(), handler)
                     self.assertIs(await backend._ensure_transcription(), handler)
@@ -92,7 +86,6 @@ class VersionedTranscriptionTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(version=version):
                 _, backend, _ = load_methods(version)
                 backend.openai_serving_transcription = None
-                backend.engine = Mock(get_supported_tasks=AsyncMock(return_value=("generate",)))
                 backend._ensure_supported_tasks = AsyncMock(return_value=("generate",))
                 results = [item async for item in backend.create_transcription(b"audio", {})]
                 self.assertEqual(results[0]["error"]["code"], 400)
@@ -105,7 +98,7 @@ class VersionedTranscriptionTests(unittest.IsolatedAsyncioTestCase):
                 route = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "transcriptions")
                 self.assertEqual(route.decorator_list[0].args[0].value, "/v1/audio/transcriptions")
                 self.assertIn("Form()", ast.unparse(route.args.args[1].annotation))
-                expected = "vllm.entrypoints.openai.speech_to_text.protocol" if version == "v0_17_1" else "vllm.entrypoints.speech_to_text.transcription.protocol"
+                expected = "vllm.entrypoints.speech_to_text.transcription.protocol"
                 self.assertTrue(any(isinstance(node, ast.ImportFrom) and node.module == expected and any(name.name == "TranscriptionRequest" for name in node.names) for node in tree.body))
 
                 async def generate(*args):

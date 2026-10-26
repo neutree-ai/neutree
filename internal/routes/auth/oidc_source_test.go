@@ -223,3 +223,16 @@ func TestOIDCCallback_UnreadableStateFallback(t *testing.T) {
 		})
 	}
 }
+
+// A source stored without a client secret is misconfigured: no login starts.
+func TestOIDCAuthorize_SourceWithoutClientSecret(t *testing.T) {
+	e := newOIDCTestEnv(t)
+	idp := oidctest.New(t, "neutree", "client-secret")
+	expectSource(e.storage, oidcSourceFor("no-secret", idp, true), &storage.IdentitySourceSecrets{})
+
+	w := e.get(t, "/api/v1/auth/oidc/authorize?source=no-secret&redirect_to="+url.QueryEscape(testRedirectTo))
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, msgSourceUnavailable, errorBody(t, w))
+	assert.Nil(t, stateCookie(t, w))
+}

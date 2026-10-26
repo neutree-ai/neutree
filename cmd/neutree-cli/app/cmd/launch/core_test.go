@@ -343,6 +343,93 @@ func TestPrepareNeutreeCoreDeployConfigRendersControlPlaneStopGracePeriod(t *tes
 	}
 }
 
+func TestNewNeutreeCoreInstallCmdRejectsInvalidGatewayExternalURL(t *testing.T) {
+	cmd := NewNeutreeCoreInstallCmd(&mocks.MockExecutor{}, &commonOptions{
+		workDir:    t.TempDir(),
+		deployType: constants.DeployTypeLocal,
+		deployMode: constants.DeployModeSingle,
+	})
+	cmd.SetArgs([]string{
+		"--jwt-secret", "test-secret",
+		"--gateway-external-url", "api.example.com",
+	})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --gateway-external-url")
+}
+
+func TestResolveGatewayExternalURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    string
+		wantErr bool
+	}{
+		{name: "defaults to kong host port on node ip", want: "http://192.168.1.1:80"},
+		{name: "keeps https domain", value: "https://api.example.com", want: "https://api.example.com"},
+		{name: "keeps port and path", value: "http://gw.example.com:8080/neutree", want: "http://gw.example.com:8080/neutree"},
+		{name: "trims trailing slash", value: "https://api.example.com/", want: "https://api.example.com"},
+		{name: "rejects missing scheme", value: "api.example.com", wantErr: true},
+		{name: "rejects unsupported scheme", value: "ftp://api.example.com", wantErr: true},
+		{name: "rejects missing host", value: "https://", wantErr: true},
+		{name: "rejects query", value: "https://api.example.com?a=b", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveGatewayExternalURL(tt.value, "192.168.1.1")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid --gateway-external-url")
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPrepareNeutreeCoreDeployConfigRendersGatewayExternalURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "defaults to node ip", want: "--gateway-proxy-url=http://192.168.1.1:80"},
+		{name: "renders override", value: "https://api.example.com/", want: "--gateway-proxy-url=https://api.example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			options := neutreeCoreInstallOptions{
+				commonOptions: &commonOptions{
+					workDir:    workDir,
+					nodeIP:     "192.168.1.1",
+					deployType: constants.DeployTypeLocal,
+					deployMode: constants.DeployModeSingle,
+				},
+				jwtSecret:          "test-secret",
+				version:            "v1.0.0",
+				gatewayExternalURL: tt.value,
+			}
+
+			require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+			project, err := cli.ProjectFromOptions(&cli.ProjectOptions{
+				ConfigPaths: []string{filepath.Join(workDir, "neutree-core", "docker-compose.yml")},
+			})
+			require.NoError(t, err)
+
+			service, err := project.GetService("neutree-core")
+			require.NoError(t, err)
+			assert.Contains(t, []string(service.Command), tt.want)
+		})
+	}
+}
+
 func TestPrepareNeutreeCoreDeployConfigRendersKongWorkerProcesses(t *testing.T) {
 	tests := []struct {
 		name        string
