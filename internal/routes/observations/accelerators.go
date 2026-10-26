@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,8 +35,6 @@ var physicalMetrics = []string{
 var replicaMetrics = []string{
 	"neutree_endpoint_replica_accelerator_memory_used_bytes",
 	"neutree_endpoint_replica_accelerator_utilization_ratio",
-	"vllm:kv_cache_usage_perc",
-	"vllm:gpu_cache_usage_perc",
 }
 
 type Dependencies struct {
@@ -191,16 +190,15 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 				byNode[device[0]] = append(byNode[device[0]], regexp.QuoteMeta(device[1]))
 			}
 
+			nodes := make([]string, 0, len(byNode))
 			for node, uuids := range byNode {
+				nodes = append(nodes, regexp.QuoteMeta(node))
 				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
-				if zcacheEnabled {
-					queries = append(queries, l1Selector+",node="+strconv.Quote(node)+"}[90s]")
-				}
 			}
-		}
-
-		if zcacheEnabled {
-			queries = append(queries, fmt.Sprintf("{__name__=~\"vllm:kv_cache_usage_perc|vllm:gpu_cache_usage_perc\",workspace=%s,neutree_cluster=%s,application=%s}[90s]", strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(endpoint)))
+			if zcacheEnabled {
+				sort.Strings(nodes)
+				queries = append(queries, l1Selector+",node=~"+strconv.Quote(strings.Join(nodes, "|"))+"}[90s]")
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
@@ -307,16 +305,9 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 		}
 
 		name := series.Metric["__name__"]
-		isKVCacheUsage := name == "vllm:kv_cache_usage_perc" || name == "vllm:gpu_cache_usage_perc"
 		isNodeL1Usage := name == "lmcache_mp_l1_memory_usage_bytes"
 
-		if isKVCacheUsage {
-			if series.Metric["replica"] == "" || (series.Metric["endpoint"] == "" && series.Metric["application"] == "") {
-				continue
-			}
-
-			name = "vllm:kv_cache_usage_perc"
-		} else if isNodeL1Usage {
+		if isNodeL1Usage {
 			if series.Metric["node"] == "" || !up[[2]string{series.Metric["job"], series.Metric["instance"]}] {
 				continue
 			}

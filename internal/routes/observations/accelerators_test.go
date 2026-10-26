@@ -31,23 +31,18 @@ func TestSamplesPreserveZeroAndScrapeTime(t *testing.T) {
 	require.NotContains(t, samples[0].Labels, "instance")
 }
 
-func TestDecodeKVCacheAndNodeL1Samples(t *testing.T) {
+func TestDecodeNodeL1Samples(t *testing.T) {
 	now := time.Now()
 	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
- {"metric":{"__name__":"vllm:gpu_cache_usage_perc","application":"chat","replica":"chat-pod-0"},"values":[[%d,"0.42"]]},
  {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","job":"neutree-zcache","instance":"runtime","pod":"cache-pod"},"values":[[%d,"2147483648"]]},
  {"metric":{"__name__":"up","job":"neutree-zcache","instance":"runtime"},"values":[[%d,"1"]]}
- ]}}`, now.Unix()-10, now.Unix()-12, now.Unix()-12)
+ ]}}`, now.Unix()-12, now.Unix()-12)
 	samples, err := decodeSamples([]byte(body), now)
 	require.NoError(t, err)
-	require.Len(t, samples, 2)
-	require.Equal(t, "vllm:kv_cache_usage_perc", samples[0].Metric)
-	require.Equal(t, "chat", samples[0].Labels["endpoint"])
-	require.Equal(t, "chat-pod-0", samples[0].Labels["replica"])
-	require.InDelta(t, 0.42, samples[0].Value, 1e-6)
-	require.Equal(t, "lmcache_mp_l1_memory_usage_bytes", samples[1].Metric)
-	require.Equal(t, "node-a", samples[1].Labels["node"])
-	require.InDelta(t, 2147483648.0, samples[1].Value, 1e-3)
+	require.Len(t, samples, 1)
+	require.Equal(t, "lmcache_mp_l1_memory_usage_bytes", samples[0].Metric)
+	require.Equal(t, "node-a", samples[0].Labels["node"])
+	require.InDelta(t, 2147483648.0, samples[0].Value, 1e-3)
 }
 
 func TestRejectPartialOrMalformedResponse(t *testing.T) {
@@ -197,4 +192,43 @@ func TestEndpointOnlyReaderGetsAssignedHardware(t *testing.T) {
 	require.Len(t, queries, 3)
 	require.Contains(t, w.Body.String(), `"hccs_capable":"1"`)
 	require.NotContains(t, w.Body.String(), "hidden")
+}
+
+func TestEndpointCacheUsesOneScopedL1Query(t *testing.T) {
+	s := mocks.NewMockStorage(t)
+	permission(t, s, true)
+	s.On("ListEndpoint", resourceFilter("tenant", "model")).Return([]v1.Endpoint{{
+		Spec: &v1.EndpointSpec{Cluster: "cluster", KVCache: &v1.EndpointKVCacheSpec{Provider: "zcache"}},
+		Status: &v1.EndpointStatus{Resources: &v1.EndpointResourceStatus{Replicas: []v1.ReplicaDeviceAllocation{
+			{NodeID: "node.a", Devices: []v1.DeviceAllocation{{UUID: "gpu-1"}, {UUID: "gpu-2"}}},
+			{NodeID: "node-b", Devices: []v1.DeviceAllocation{{UUID: "gpu-3"}}},
+		}}},
+	}}, nil)
+	var queries []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	}))
+	defer upstream.Close()
+
+	w := httptest.NewRecorder()
+	router(&Dependencies{Storage: s, MetricsURL: upstream.URL}, true).ServeHTTP(w,
+		httptest.NewRequest("GET", "/endpoints/tenant/model/accelerator-observations", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	// One replica query, two physical-device queries, and one shared L1 query.
+	require.Len(t, queries, 4)
+	l1Queries := 0
+	for _, query := range queries {
+		require.NotContains(t, query, "vllm:kv_cache_usage_perc")
+		require.NotContains(t, query, "vllm:gpu_cache_usage_perc")
+		if strings.Contains(query, "lmcache_mp_l1_memory_usage_bytes") {
+			l1Queries++
+			require.Contains(t, query, `node=~"node-b|node\\.a"`)
+			require.Contains(t, query, `workspace="tenant"`)
+			require.Contains(t, query, `neutree_cluster="cluster"`)
+			require.Contains(t, query, `lmcache_mp_l1_memory_usage_bytes|up`)
+			require.NotContains(t, query, "accelerator_uuid")
+		}
+	}
+	require.Equal(t, 1, l1Queries)
 }
