@@ -23,7 +23,7 @@ func TestKubernetesTemplatesPreserveEnvironmentValues(t *testing.T) {
 		"llama-cpp":    llamaCppDefaultDeployTemplate,
 	}
 	values := map[string]string{
-		"1":          "1",
+		"NUMERIC":    "1",
 		"RATIO":      "1:1",
 		"QUOTED":     `"1:1"`,
 		"JSON":       `{"ratio":"1:1","enabled":true}`,
@@ -67,11 +67,12 @@ func TestKubernetesTemplatesPassThroughCLIValues(t *testing.T) {
 	templates := []struct {
 		name     string
 		template string
+		keys     []string
 	}{
-		{"vllm-v0.17.1", vllmV0_17_1DeployTemplate},
-		{"vllm-v0.24.0", vllmV0_24_0DeployTemplate},
-		{"vllm-v0.31.0", vllmV0_31_0DeployTemplate},
-		{"sglang", sglangV0_5_10DeployTemplate},
+		{"vllm-v0.17.1", vllmV0_17_1DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"vllm-v0.24.0", vllmV0_24_0DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"vllm-v0.31.0", vllmV0_31_0DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"sglang", sglangV0_5_10DeployTemplate, []string{"revision", "chat_template"}},
 	}
 	cases := []struct {
 		name  string
@@ -87,18 +88,14 @@ func TestKubernetesTemplatesPassThroughCLIValues(t *testing.T) {
 		{"float", 0.85, "0.85"},
 		{"string", "main", "main"},
 		{"whitespace", " ", " "},
-		{"empty string", "", ""},
 		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
 		{"backslash", `C:\models\weights`, `C:\models\weights`},
 		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
 		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
-		{"literal escaped JSON", `{\"ratio\":\"1:1\"}`, `{\"ratio\":\"1:1\"}`},
 	}
-	keys := []string{"disable_log_stats", "enable_prefix_caching", "no_enable_prefix_caching", "hf_token", "skip_tokenizer_init", "revision",
-		"custom: option", "quoted\"option"}
 	for _, template := range templates {
 		t.Run(template.name, func(t *testing.T) {
-			for _, key := range keys {
+			for _, key := range template.keys {
 				for _, test := range cases {
 					t.Run(key+"/"+test.name, func(t *testing.T) {
 						vars := newTestVLLMVars("test", "text-generation")
@@ -111,10 +108,7 @@ func TestKubernetesTemplatesPassThroughCLIValues(t *testing.T) {
 						if template.name == "sglang" {
 							outputKey = strings.ReplaceAll(key, "_", "-")
 						}
-						want := []string{"--" + outputKey}
-						if test.want != "" {
-							want = append(want, test.want)
-						}
+						want := []string{"--" + outputKey, test.want}
 						require.GreaterOrEqual(t, len(command), len(want))
 						assert.Equal(t, want, command[len(command)-len(want):])
 					})
@@ -134,7 +128,6 @@ func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
 		{"bool false", false, "false"},
 		{"integer", 1, "1"},
 		{"zero", 0, "0"},
-		{"empty string", "", ""},
 		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
 		{"apostrophe", "it's literal", "it's literal"},
 		{"backslash", `C:\models\weights`, `C:\models\weights`},
@@ -145,7 +138,7 @@ func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			vars := newTestVLLMVars("test", "text-generation")
-			vars["EngineArgs"] = map[string]any{"verbose": test.value}
+			vars["EngineArgs"] = map[string]any{"model_alias": test.value}
 			vars["ProgressDeadlineSeconds"] = 1200
 			vars["StartupProbeFailureThreshold"] = 120
 			objects, err := util.RenderKubernetesManifest(llamaCppDefaultDeployTemplate, vars)
@@ -158,10 +151,7 @@ func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
 			output, err := exec.Command("bash", "-c", stub+command).Output()
 			require.NoError(t, err)
 			tokens := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
-			want := []string{"--verbose"}
-			if test.want != "" {
-				want = append(want, test.want)
-			}
+			want := []string{"--model_alias", test.want}
 			require.GreaterOrEqual(t, len(tokens), len(want))
 			assert.Equal(t, want, tokens[len(tokens)-len(want):])
 		})

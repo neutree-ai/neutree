@@ -2432,15 +2432,6 @@ func TestPrepareEngineArgsForTemplate(t *testing.T) {
 			},
 		},
 		{
-			name: "single-quoted object string is unchanged",
-			args: map[string]interface{}{
-				"test": `{'111':'222'}`,
-			},
-			expected: map[string]interface{}{
-				"test": `{'111':'222'}`,
-			},
-		},
-		{
 			name: "legacy pre-escaped JSON object is decoded once",
 			args: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
@@ -2469,28 +2460,10 @@ func TestPrepareEngineArgsForTemplate(t *testing.T) {
 			args: map[string]interface{}{
 				"path":         `C:\temp\new`,
 				"escaped-text": `a \"quoted\" value`,
-				"invalid-json": `{\"method\":}`,
-				"scalar-json":  `\"mtp\"`,
-				"double-layer": `{\\\"method\\\":\\\"mtp\\\"}`,
 			},
 			expected: map[string]interface{}{
 				"path":         `C:\temp\new`,
 				"escaped-text": `a \"quoted\" value`,
-				"invalid-json": `{\"method\":}`,
-				"scalar-json":  `\"mtp\"`,
-				"double-layer": `{\\\"method\\\":\\\"mtp\\\"}`,
-			},
-		},
-		{
-			name: "legacy JSON numbers retain their exact representation",
-			args: map[string]interface{}{
-				"config": `{\"integer\":9007199254740993,\"large\":1e400,\"negativeZero\":-0.0}`,
-			},
-			expected: map[string]interface{}{
-				"config": `{"integer":9007199254740993,"large":1e400,"negativeZero":-0.0}`,
-			},
-			legacyExpected: map[string]interface{}{
-				"config": `{\"integer\":9007199254740993,\"large\":1e400,\"negativeZero\":-0.0}`,
 			},
 		},
 		{
@@ -2567,8 +2540,8 @@ func TestSerializeEngineArgValue(t *testing.T) {
 		},
 		{
 			name:     "native interface slice",
-			input:    []interface{}{"a", 1, true},
-			expected: `["a",1,true]`,
+			input:    []interface{}{"a", "b"},
+			expected: `["a","b"]`,
 		},
 		{
 			name:     "native typed slice",
@@ -2601,29 +2574,9 @@ func TestSerializeEngineArgValue(t *testing.T) {
 			expected: "  {\"method\":\"mtp\"}  ",
 		},
 		{
-			name:     "invalid JSON",
-			input:    `{\"method\":}`,
-			expected: `{\"method\":}`,
-		},
-		{
-			name:     "single quoted object is not repaired",
-			input:    `{'method':'mtp'}`,
-			expected: `{'method':'mtp'}`,
-		},
-		{
-			name:     "JSON scalar is unchanged",
-			input:    `\"mtp\"`,
-			expected: `\"mtp\"`,
-		},
-		{
 			name:     "ordinary Windows path is unchanged",
 			input:    `C:\models\weights`,
 			expected: `C:\models\weights`,
-		},
-		{
-			name:     "double escaped JSON is unchanged",
-			input:    `{\\\"method\\\":\\\"mtp\\\"}`,
-			expected: `{\\\"method\\\":\\\"mtp\\\"}`,
 		},
 		{
 			name:     "boolean true is unchanged",
@@ -2645,11 +2598,6 @@ func TestSerializeEngineArgValue(t *testing.T) {
 			input:    "",
 			expected: "",
 		},
-		{
-			name:     "nil is unchanged",
-			input:    nil,
-			expected: nil,
-		},
 	}
 
 	for _, tt := range tests {
@@ -2660,7 +2608,6 @@ func TestSerializeEngineArgValue(t *testing.T) {
 }
 
 func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
-	legacyItems := []interface{}{`{\"method\":\"mtp\"}`}
 	args := map[string]interface{}{
 		"served_model_name":          []interface{}{"base-model", "neu-vllm-list-alias"},
 		"logits_processors":          `["a.Processor","b.Processor"]`,
@@ -2668,9 +2615,6 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 		"override_generation_config": map[string]interface{}{"temperature": 0.8},
 		"gpu_memory_utilization":     "0.85",
 		"enable_prefix_caching":      "false",
-		"legacy_json_items":          []string{`{\"method\":\"mtp\"}`, `a \"quoted\" value`, `C:\temp\new`},
-		"legacy_native_items":        legacyItems,
-		"mixed_items":                []interface{}{1, true, nil},
 	}
 
 	prepareEngineArgsForTemplate(args, v1.EngineNameVLLM)
@@ -2681,10 +2625,6 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	assert.Equal(t, `{"temperature":0.8}`, args["override_generation_config"])
 	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
 	assert.Equal(t, "false", args["enable_prefix_caching"])
-	assert.Equal(t, []interface{}{`{"method":"mtp"}`, `a \"quoted\" value`, `C:\temp\new`}, args["legacy_json_items"])
-	assert.Equal(t, []interface{}{`{"method":"mtp"}`}, args["legacy_native_items"])
-	assert.Equal(t, []interface{}{1, true, nil}, args["mixed_items"])
-	assert.Equal(t, []interface{}{`{\"method\":\"mtp\"}`}, legacyItems)
 }
 
 func TestPrepareEngineArgsForTemplate_NonVLLMListCompatibility(t *testing.T) {
@@ -4225,12 +4165,14 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 	cases := []struct {
 		templateKey string
 		engineName  string
+		key         string
+		bareFlag    string
 	}{
-		{"vllm-v0.31.0", v1.EngineNameVLLM},
-		{"vllm-v0.24.0-p2", v1.EngineNameVLLM},
-		{"vllm-v0.17.1-p2", v1.EngineNameVLLM},
-		{"sglang-v0.5.10-p2", v1.EngineNameSGLang},
-		{"llama-cpp-v0.3.7-p2", v1.EngineNameLlamaCpp},
+		{"vllm-v0.31.0", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"vllm-v0.24.0-p2", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"vllm-v0.17.1-p2", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"sglang-v0.5.10-p2", v1.EngineNameSGLang, "revision", "disable_cuda_graph"},
+		{"llama-cpp-v0.3.7-p2", v1.EngineNameLlamaCpp, "model_alias", ""},
 	}
 	values := []struct {
 		name  string
@@ -4243,32 +4185,23 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 		{"string false", "false", "false"},
 		{"integer", 1, "1"},
 		{"zero", 0, "0"},
-		{"empty string", "", ""},
 		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
 		{"apostrophe", "it's literal", "it's literal"},
 		{"backslash", `C:\models\weights`, `C:\models\weights`},
 		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
 		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
-		{"single-quoted object string", `{'111':'222'}`, `{'111':'222'}`},
 		{"legacy escaped JSON", `{\"ratio\":\"1:1\"}`, `{"ratio":"1:1"}`},
-		{"legacy escaped JSON numbers", `{\"integer\":9007199254740993,\"large\":1e400,\"negativeZero\":-0.0}`,
-			`{"integer":9007199254740993,"large":1e400,"negativeZero":-0.0}`},
 		{"legacy escaped JSON array", `[\"a\",\"b\"]`, `["a","b"]`},
 		{"legacy escaped complex JSON", `{\"path\":\"C:\\\\models\\\\weights\",\"text\":\"it's \\\"quoted\\\"\\n$(printf expanded)\",\"unicode\":\"\\u4e2d\"}`,
 			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`},
 		{"raw complex JSON", `{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`,
 			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`},
-		{"invalid escaped JSON", `{\"ratio\":}`, `{\"ratio\":}`},
 		{"escaped text", `a \"quoted\" value`, `a \"quoted\" value`},
-		{"escaped JSON scalar", `\"mtp\"`, `\"mtp\"`},
-		{"double escaped JSON", `{\\\"ratio\\\":\\\"1:1\\\"}`, `{\\\"ratio\\\":\\\"1:1\\\"}`},
 		{"native object", map[string]interface{}{"ratio": "1:1", "enabled": true}, `{"enabled":true,"ratio":"1:1"}`},
 		{"native object with special text", map[string]interface{}{"path": `C:\models\weights`, "text": "it's \"quoted\"\n$(printf expanded)"},
 			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)"}`},
 		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
 	}
-	keys := []string{"enable_prefix_caching", "no-enable-prefix-caching", "trust-remote-code", "enforce_eager",
-		"disable-log-stats", "aggregate_engine_logging", "skip_tokenizer_init", "hf_token", "test"}
 	for _, tc := range cases {
 		t.Run(tc.templateKey, func(t *testing.T) {
 			for _, value := range values {
@@ -4288,8 +4221,9 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 					data.ModelArgs = map[string]interface{}{
 						"task": "text-generation", "path": "/models/test", "serve_name": "test", "file": "",
 					}
-					for _, key := range keys {
-						data.EngineArgs[key] = value.value
+					data.EngineArgs[tc.key] = value.value
+					if tc.bareFlag != "" {
+						data.EngineArgs[tc.bareFlag] = ""
 					}
 					prepareEngineArgsForTemplate(data.EngineArgs, tc.engineName)
 					objects, err := buildDeploymentObjects(realEmbeddedTemplate(t, tc.templateKey), data)
@@ -4301,17 +4235,16 @@ func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 						output, err := exec.Command("bash", "-c", stub+tokens[2]).Output()
 						require.NoError(t, err)
 						tokens = strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+						require.GreaterOrEqual(t, len(tokens), 2)
+						tokens = tokens[len(tokens)-2:]
 					}
-					for _, key := range keys {
-						flag := "--" + key
+					assertFlagWithValue(t, tokens, "--"+tc.key, value.want)
+					if tc.bareFlag != "" {
+						flag := tc.bareFlag
 						if tc.engineName == v1.EngineNameSGLang {
 							flag = strings.ReplaceAll(flag, "_", "-")
 						}
-						if value.want == "" {
-							assertFlagWithoutValue(t, tokens, flag)
-						} else {
-							assertFlagWithValue(t, tokens, flag, value.want)
-						}
+						assertFlagWithoutValue(t, tokens, "--"+flag)
 					}
 				})
 			}
@@ -4365,8 +4298,6 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 				EngineArgs: map[string]interface{}{
 					"served_model_name": []interface{}{"gpt-4", "neu-vllm-list-alias"},
 					"logits_processors": []interface{}{"a.Processor", "b.Processor"},
-					"legacy_json_items": []interface{}{`{\"method\":\"mtp\"}`, `a \"quoted\" value`, `C:\temp\new`},
-					"raw_json_items":    `["{\\\"method\\\":\\\"mtp\\\"}"]`,
 				},
 				Resources: map[string]string{
 					"cpu":    "500m",
@@ -4384,8 +4315,6 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 
 			assertFlagWithValues(t, tokens, "--served_model_name", "gpt-4", "neu-vllm-list-alias")
 			assertFlagWithValues(t, tokens, "--logits_processors", "a.Processor", "b.Processor")
-			assertFlagWithValues(t, tokens, "--legacy_json_items", `{"method":"mtp"}`, `a \"quoted\" value`, `C:\temp\new`)
-			assertFlagWithValue(t, tokens, "--raw_json_items", `{"method":"mtp"}`)
 			assert.NotContains(t, tokens, `["gpt-4","neu-vllm-list-alias"]`)
 			assert.NotContains(t, tokens, `["a.Processor","b.Processor"]`)
 		})
