@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/pkg/command"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
 )
 
@@ -413,6 +412,9 @@ for argument do
     last_argument="$argument"
 done
 printf '%s\n' "$*" >> "$NEU_TEST_SSH_CALLS"
+if [ "$NEU_TEST_SSH_STARTUP_FAILURE" = 1 ]; then
+    neutree_missing_startup_command
+fi
 printf '%s' "$NEU_TEST_SSH_STDERR" >&2
 if [ "$last_argument" = uptime ]; then
     printf 'up\n'
@@ -428,32 +430,37 @@ fi
 	t.Setenv("NEU_TEST_SSH_STDOUT", "")
 	t.Setenv("NEU_TEST_SSH_STDERR", "")
 	t.Setenv("NEU_TEST_SSH_STATUS", "0")
+	t.Setenv("NEU_TEST_SSH_STARTUP_FAILURE", "0")
 	return callsFile
 }
 
 func outputFixtureRunner(t *testing.T) *SSHCommandRunner {
 	t.Helper()
-	return NewSSHCommandRunner("node", "127.0.0.1", v1.Auth{SSHUser: "tester"}, "",
-		(&command.OSExecutor{}).Execute)
+	return NewSSHCommandRunner("node", "127.0.0.1", v1.Auth{SSHUser: "tester"}, "", nil)
 }
 
 func TestSSHCommandRunnerDefaultSeparatesStartupStderr(t *testing.T) {
-	callsFile := installSSHOutputFixture(t)
-	t.Setenv("NEU_TEST_SSH_STDOUT", "{\"running\":true}\n")
-	t.Setenv("NEU_TEST_SSH_STDERR", "bashrc: missing-command: command not found")
-	runner := outputFixtureRunner(t)
-	output, err := runner.Run(context.Background(), "docker inspect fixture", true, nil, true, nil, "", false)
-	require.NoError(t, err)
-	assert.Equal(t, "{\"running\":true}\n", output)
-	assert.True(t, json.Valid([]byte(output)))
-	calls, err := os.ReadFile(callsFile)
-	require.NoError(t, err)
-	lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
-	require.Len(t, lines, 2)
-	assert.True(t, strings.HasPrefix(lines[0], "-T "))
-	assert.True(t, strings.HasSuffix(lines[0], " uptime"))
-	assert.True(t, strings.HasPrefix(lines[1], "-T "))
-	assert.True(t, strings.HasSuffix(lines[1], " docker inspect fixture"))
+	for _, startupFailure := range []string{"0", "1"} {
+		t.Run("startup_failure_"+startupFailure, func(t *testing.T) {
+			callsFile := installSSHOutputFixture(t)
+			t.Setenv("NEU_TEST_SSH_STARTUP_FAILURE", startupFailure)
+			t.Setenv("NEU_TEST_SSH_STDOUT", "{\"running\":true}\n")
+			t.Setenv("NEU_TEST_SSH_STDERR", "bashrc: missing-command: command not found")
+			runner := outputFixtureRunner(t)
+			output, err := runner.Run(context.Background(), "docker inspect fixture", true, nil, true, nil, "", false)
+			require.NoError(t, err)
+			assert.Equal(t, "{\"running\":true}\n", output)
+			assert.True(t, json.Valid([]byte(output)))
+			calls, err := os.ReadFile(callsFile)
+			require.NoError(t, err)
+			lines := strings.Split(strings.TrimSpace(string(calls)), "\n")
+			require.Len(t, lines, 2)
+			assert.True(t, strings.HasPrefix(lines[0], "-T "))
+			assert.True(t, strings.HasSuffix(lines[0], " uptime"))
+			assert.True(t, strings.HasPrefix(lines[1], "-T "))
+			assert.True(t, strings.HasSuffix(lines[1], " docker inspect fixture"))
+		})
+	}
 }
 
 func TestSSHCommandRunnerDefaultDoesNotFilterStdout(t *testing.T) {
@@ -481,12 +488,13 @@ func TestSSHCommandRunnerDefaultPreservesFailureStderrAndCause(t *testing.T) {
 		t.Run(map[bool]string{false: "normal", true: "exitOnFail"}[exitOnFail], func(t *testing.T) {
 			callsFile := installSSHOutputFixture(t)
 			t.Setenv("NEU_TEST_SSH_STDOUT", "partial output")
-			t.Setenv("NEU_TEST_SSH_STDERR", "No such object: fixture")
+			diagnostic := strings.Repeat("startup noise\n", 2000) + "No such object: fixture\n"
+			t.Setenv("NEU_TEST_SSH_STDERR", diagnostic)
 			t.Setenv("NEU_TEST_SSH_STATUS", "7")
 			output, err := outputFixtureRunner(t).Run(context.Background(), "secret-command", exitOnFail, nil, true, nil, "", false)
 			require.Error(t, err)
 			assert.Empty(t, output)
-			assert.Contains(t, err.Error(), "No such object: fixture")
+			assert.True(t, strings.HasSuffix(err.Error(), diagnostic), "failure must retain the full stderr diagnostic")
 			assert.NotContains(t, err.Error(), "partial output")
 			assert.NotContains(t, err.Error(), "secret-command")
 			assert.NotErrorIs(t, err, ErrConnectionFailed)
