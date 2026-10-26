@@ -70,6 +70,9 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 
 		if resource == "endpoints" {
 			permission = "endpoint:read"
+
+			route.GET("/performance-observations", middleware.RequireWorkspacePermission(permission,
+				middleware.PermissionDependencies{Storage: deps.Storage}), performanceHandler(deps))
 		}
 
 		if resource == "clusters" {
