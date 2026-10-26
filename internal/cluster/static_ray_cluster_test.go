@@ -761,7 +761,9 @@ func TestStaticRayReconcilerCalculateResourcesFromStaticNodeDeviceSnapshotsSkips
 	assert.Equal(t, float64(100), allocatableProduct.Virtualization.CoreUnits)
 	require.Len(t, resources.NodeResources["192.168.19.218"].Devices, 2)
 	assert.Equal(t, int64(15360), resources.NodeResources["192.168.19.218"].Devices[0].Allocatable.MemoryMiB)
-	assert.Equal(t, int64(0), resources.NodeResources["192.168.19.218"].Devices[1].Allocatable.MemoryMiB)
+	assert.False(t, resources.NodeResources["192.168.19.218"].Devices[1].Health)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, resources.NodeResources["192.168.19.218"].Devices[1].Allocatable)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, resources.NodeResources["192.168.19.218"].Devices[1].Available)
 	mockDashboard.AssertExpectations(t)
 	store.AssertExpectations(t)
 }

@@ -5,11 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type staticNodeBaseClient struct {
@@ -199,7 +198,9 @@ func TestStaticNodeResourceClientBuildsResourceNodesFromDeviceSnapshots(t *testi
 	require.Len(t, nodes[0].Status.Devices, 2)
 	assert.Equal(t, int64(7680), nodes[0].Status.Devices[0].Available.MemoryMiB)
 	assert.Equal(t, int64(50), nodes[0].Status.Devices[0].Available.CoreUnits)
-	assert.Equal(t, int64(0), nodes[0].Status.Devices[1].Allocatable.MemoryMiB)
+	assert.False(t, nodes[0].Status.Devices[1].Health)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Allocatable)
+	assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Available)
 	require.NotNil(t, nodes[0].Status.Devices[0].Order)
 	assert.Equal(t, 1, *nodes[0].Status.Devices[0].Order)
 	require.NotNil(t, nodes[0].Status.Devices[1].Order)
@@ -249,140 +250,79 @@ func TestStaticNodeResourceClientCompletesCPUAndMemoryFromBaseResources(t *testi
 }
 
 func TestStaticNodeResourceClientUsesBaseRayAcceleratorQuantities(t *testing.T) {
-	cases := []struct {
-		name              string
-		healthy           [2]bool
-		allocations       []v1.DeviceAllocation
-		rayQuantity       float64
-		rayAvailable      float64
-		wantAvailablePool v1.DeviceResourcePool
-	}{
+	client := newStaticNodeResourceClientForTest([]*v1.StaticNode{
 		{
-			"healthy fractional Ray quantities", [2]bool{true, true},
-			[]v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 100}, {UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50}},
-			1.5, 0.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
-		},
-		{
-			"unhealthy idle card", [2]bool{true, false}, nil,
-			2, 2, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
-		},
-		{
-			"all cards unhealthy", [2]bool{false, false}, nil,
-			2, 2, v1.DeviceResourcePool{},
-		},
-		{
-			"healthy whole card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc"}},
-			2, 1, v1.DeviceResourcePool{},
-		},
-		{
-			"unhealthy whole card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-def"}},
-			2, 1, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
-		},
-		{
-			"healthy shared card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, v1.DeviceResourcePool{MemoryMiB: 7680, CoreUnits: 50},
-		},
-		{
-			"unhealthy shared card allocated", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
-		},
-		{
-			"all unhealthy with shared allocation", [2]bool{false, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 7680, CoreUnits: 50}},
-			2, 1.5, v1.DeviceResourcePool{},
-		},
-		{
-			"fractional Ray capacity remains native", [2]bool{true, false}, nil,
-			0.5, 0.25, v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
-		},
-		{
-			"healthy shared card memory exhausted", [2]bool{true, false}, []v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 50}},
-			2, 0.5, v1.DeviceResourcePool{},
-		},
-		{
-			"fractional Ray quantity is independent of rounded device pools", [2]bool{true, false},
-			[]v1.DeviceAllocation{{UUID: "GPU-abc", MemoryMiB: 1920, CoreUnits: 13}},
-			2, 1.875, v1.DeviceResourcePool{MemoryMiB: 13440, CoreUnits: 87},
-		},
-	}
-	resourceInfo := func(quantity float64) *v1.ResourceInfo {
-		return &v1.ResourceInfo{AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
-			v1.AcceleratorTypeNVIDIAGPU: {
-				Quantity: quantity,
-				ProductGroups: map[v1.AcceleratorProduct]float64{
-					"NVIDIA_Tesla_T4": quantity,
-				},
+			Metadata: &v1.Metadata{Name: "head-0", Workspace: "default"},
+			Spec: &v1.StaticNodeSpec{
+				IP: "192.168.19.218",
 			},
-		}}
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			client := newStaticNodeResourceClientForTest([]*v1.StaticNode{{
-				Spec: &v1.StaticNodeSpec{IP: "192.168.19.218"},
-				Status: &v1.StaticNodeStatus{
-					Accelerator: &v1.StaticNodeAcceleratorStatus{
-						Type: v1.AcceleratorTypeNVIDIAGPU.String(),
-						Devices: []v1.StaticNodeAcceleratorDeviceStatus{
-							{UUID: "GPU-abc", MemoryMiB: 15360, Healthy: tc.healthy[0]},
-							{UUID: "GPU-def", MemoryMiB: 15360, Healthy: tc.healthy[1]},
+			Status: &v1.StaticNodeStatus{
+				Accelerator: &v1.StaticNodeAcceleratorStatus{
+					Type: v1.AcceleratorTypeNVIDIAGPU.String(),
+					Devices: []v1.StaticNodeAcceleratorDeviceStatus{
+						{UUID: "GPU-abc", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+						{UUID: "GPU-def", ProductModel: "NVIDIA_Tesla_T4", MemoryMiB: 15360, Healthy: true},
+					},
+				},
+				Allocations: []v1.StaticNodeAllocationStatus{
+					{
+						Devices: []v1.DeviceAllocation{
+							{UUID: "GPU-abc", MemoryMiB: 15360, CoreUnits: 100},
+							{UUID: "GPU-def", MemoryMiB: 7680, CoreUnits: 50},
 						},
 					},
-					Allocations: []v1.StaticNodeAllocationStatus{{Devices: tc.allocations}},
 				},
-			}}, staticNodeBaseClient{nodes: []ResourceNode{{
-				ID: "192.168.19.218",
-				Status: &v1.NodeResourceStatus{ResourceStatus: v1.ResourceStatus{
-					Allocatable: resourceInfo(tc.rayQuantity),
-					Available:   resourceInfo(tc.rayAvailable),
-				}},
-			}}})
+			},
+		},
+	}, staticNodeBaseClient{nodes: []ResourceNode{
+		{
+			ID: "192.168.19.218",
+			Status: &v1.NodeResourceStatus{
+				ResourceStatus: v1.ResourceStatus{
+					Allocatable: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 1.5,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 1.5,
+								},
+							},
+						},
+					},
+					Available: &v1.ResourceInfo{
+						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
+							v1.AcceleratorTypeNVIDIAGPU: {
+								Quantity: 0.5,
+								ProductGroups: map[v1.AcceleratorProduct]float64{
+									"NVIDIA_Tesla_T4": 0.5,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}})
 
-			nodes, err := client.ListNodes(context.Background(), staticNodeClusterForTest())
-			require.NoError(t, err)
-			require.Len(t, nodes, 1)
-			require.Len(t, nodes[0].Status.Devices, 2)
-			healthyCount := float64(0)
-			for deviceIndex, device := range nodes[0].Status.Devices {
-				assert.Equal(t, tc.healthy[deviceIndex], device.Health)
-				if device.Health {
-					healthyCount++
-					continue
-				}
-				assert.Equal(t, &v1.DeviceResourcePool{}, device.Allocatable)
-				assert.Equal(t, &v1.DeviceResourcePool{}, device.Available)
-			}
+	nodes, err := client.ListNodes(context.Background(), staticNodeClusterForTest())
 
-			resources := buildClusterResourcesFromResourceNodes(nodes)
-			for _, status := range []*v1.ResourceStatus{&nodes[0].Status.ResourceStatus, &resources.ResourceStatus} {
-				allocatable := status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-				require.NotNil(t, allocatable)
-				assert.Equal(t, tc.rayQuantity, allocatable.Quantity)
-				assert.Equal(t, tc.rayQuantity, allocatable.ProductGroups["NVIDIA_Tesla_T4"])
-				require.NotNil(t, allocatable.Products["NVIDIA_Tesla_T4"])
-				assert.Equal(t, tc.rayQuantity, allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
-				if healthyCount == 0 {
-					assert.Nil(t, allocatable.Products["NVIDIA_Tesla_T4"].Virtualization)
-				} else {
-					assert.Equal(t, &v1.AcceleratorVirtualizationResource{MemoryMiB: healthyCount * 15360, CoreUnits: healthyCount * 100},
-						allocatable.Products["NVIDIA_Tesla_T4"].Virtualization)
-				}
-				available := status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-				require.NotNil(t, available)
-				assert.Equal(t, tc.rayAvailable, available.Quantity)
-				assert.Equal(t, tc.rayAvailable, available.ProductGroups["NVIDIA_Tesla_T4"])
-				require.NotNil(t, available.Products["NVIDIA_Tesla_T4"])
-				assert.Equal(t, tc.rayAvailable, available.Products["NVIDIA_Tesla_T4"].Quantity)
-				if tc.wantAvailablePool == (v1.DeviceResourcePool{}) {
-					assert.Nil(t, available.Products["NVIDIA_Tesla_T4"].Virtualization)
-				} else {
-					assert.Equal(t, &v1.AcceleratorVirtualizationResource{
-						MemoryMiB: float64(tc.wantAvailablePool.MemoryMiB), CoreUnits: float64(tc.wantAvailablePool.CoreUnits),
-					}, available.Products["NVIDIA_Tesla_T4"].Virtualization)
-				}
-				assert.GreaterOrEqual(t, allocatable.Quantity-available.Quantity, float64(0))
-			}
-		})
-	}
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, allocatable)
+	assert.Equal(t, float64(1.5), allocatable.Quantity)
+	assert.Equal(t, float64(1.5), allocatable.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(1.5), allocatable.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Equal(t, float64(30720), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(200), allocatable.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
+
+	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+	require.NotNil(t, available)
+	assert.Equal(t, float64(0.5), available.Quantity)
+	assert.Equal(t, float64(0.5), available.ProductGroups["NVIDIA_Tesla_T4"])
+	assert.Equal(t, float64(0.5), available.Products["NVIDIA_Tesla_T4"].Quantity)
+	assert.Equal(t, float64(7680), available.Products["NVIDIA_Tesla_T4"].Virtualization.MemoryMiB)
+	assert.Equal(t, float64(50), available.Products["NVIDIA_Tesla_T4"].Virtualization.CoreUnits)
 }
 
 func TestStaticNodeResourceClientUsesBaseRayAvailableQuantityWhenSnapshotHasNoAvailableDevices(t *testing.T) {

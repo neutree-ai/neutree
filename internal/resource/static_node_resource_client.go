@@ -229,11 +229,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		allocatablePool := staticNodeDeviceAllocatablePool(device)
 		availablePool := staticNodeDeviceAvailablePool(device, allocation)
 
-		if !device.Healthy {
-			allocatablePool = &v1.DeviceResourcePool{}
-			availablePool = &v1.DeviceResourcePool{}
-		}
-
 		nodeStatus.Devices = append(nodeStatus.Devices, &v1.DeviceResource{
 			UUID:        device.UUID,
 			Product:     baseProduct,
