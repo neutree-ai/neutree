@@ -131,7 +131,7 @@ func (k *kubernetesOrchestrator) setEngineDefaultArgs(data *DeploymentManifestVa
 	}
 }
 
-func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]interface{}) {
+func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]interface{}, defaultValue interface{}) {
 	if engineName != v1.EngineNameSGLang {
 		return
 	}
@@ -144,7 +144,7 @@ func setDefaultSGLangEnableMetrics(engineName string, engineArgs map[string]inte
 		return
 	}
 
-	engineArgs["enable_metrics"] = true
+	engineArgs["enable_metrics"] = defaultValue
 }
 
 // setEngineTensorParallelDefault auto-sets the engine's tensor-parallel-size
@@ -188,62 +188,82 @@ func (k *kubernetesOrchestrator) setEngineArgs(data *DeploymentManifestVariables
 		}
 	}
 
-	setDefaultSGLangEnableMetrics(engine.Metadata.Name, data.EngineArgs)
+	setDefaultSGLangEnableMetrics(engine.Metadata.Name, data.EngineArgs, "")
 
 	// Auto-set tensor-parallel-size after user args are merged, so we can
 	// detect user-provided values in either key format. Applies to engines
 	// that expose a TP arg (vLLM / SGLang).
 	setEngineTensorParallelDefault(data, endpoint, engine)
 
-	// Prepare engine arg values for YAML double-quoted template rendering.
-	// Handles native maps, unescaped JSON strings, and pre-escaped strings.
+	// Prepare structured values for template quoting; custom engines retain
+	// the legacy YAML double-quoted value contract.
 	prepareEngineArgsForTemplate(data.EngineArgs, engine.Metadata.Name)
 }
 
 func prepareEngineArgsForTemplate(args map[string]interface{}, engineName string) {
-	if engineName != v1.EngineNameVLLM {
+	if engineName != v1.EngineNameVLLM && engineName != v1.EngineNameSGLang && engineName != v1.EngineNameLlamaCpp {
 		escapeEngineArgsForTemplate(args)
 		return
 	}
 
 	for k, v := range args {
-		if list, ok := toInterfaceSlice(v); ok {
-			args[k] = list
-			continue
-		}
+		if engineName == v1.EngineNameVLLM {
+			listValue := v
 
-		if val, ok := v.(string); ok {
-			var parsed interface{}
-			if err := json.Unmarshal([]byte(val), &parsed); err == nil {
-				if list, ok := toInterfaceSlice(parsed); ok {
-					args[k] = list
-					continue
+			if val, ok := v.(string); ok {
+				var parsed interface{}
+				if err := json.Unmarshal([]byte(val), &parsed); err == nil {
+					listValue = parsed
 				}
+			}
+
+			if list, ok := toInterfaceSlice(listValue); ok {
+				values := make([]interface{}, len(list))
+				for index, item := range list {
+					values[index] = item
+					if _, ok := item.(string); ok {
+						values[index] = serializeEngineArgValue(item)
+					}
+				}
+
+				args[k] = values
+
+				continue
 			}
 		}
 
-		args[k] = prepareEngineArgValueForDoubleQuote(v)
+		args[k] = serializeEngineArgValue(v)
 	}
 }
 
-func prepareEngineArgValueForDoubleQuote(v interface{}) interface{} {
-	switch val := v.(type) {
-	case map[string]interface{}, []interface{}:
-		b, err := json.Marshal(v)
-		if err == nil {
-			return escapeForYAMLDoubleQuote(string(b))
-		}
+func serializeEngineArgValue(value interface{}) interface{} {
+	switch val := value.(type) {
 	case string:
-		var parsed interface{}
-		if err := json.Unmarshal([]byte(val), &parsed); err == nil {
-			switch parsed.(type) {
-			case map[string]interface{}, []interface{}:
-				return escapeForYAMLDoubleQuote(val)
+		// Legacy K8s templates placed JSON inside YAML double quotes, so existing
+		// values may contain one layer of YAML/JSON quote escaping. Decode that
+		// layer only for valid JSON objects or arrays before the template quotes it.
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+val+`"`), &decoded); err == nil {
+			trimmed := strings.TrimSpace(decoded)
+			if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && json.Valid([]byte(decoded)) {
+				return decoded
+			}
+		}
+	case map[string]interface{}, []interface{}:
+		encoded, err := json.Marshal(value)
+		if err == nil {
+			return string(encoded)
+		}
+	default:
+		if list, ok := toInterfaceSlice(value); ok {
+			encoded, err := json.Marshal(list)
+			if err == nil {
+				return string(encoded)
 			}
 		}
 	}
 
-	return v
+	return value
 }
 
 func toInterfaceSlice(v interface{}) ([]interface{}, bool) {

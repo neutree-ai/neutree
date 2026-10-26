@@ -1,0 +1,159 @@
+package engine
+
+import (
+	"os/exec"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/neutree-ai/neutree/internal/util"
+)
+
+func TestKubernetesTemplatesPreserveEnvironmentValues(t *testing.T) {
+	templates := map[string]string{
+		"vllm-v0.17.1": vllmV0_17_1DeployTemplate,
+		"vllm-v0.24.0": vllmV0_24_0DeployTemplate,
+		"vllm-v0.31.0": vllmV0_31_0DeployTemplate,
+		"sglang":       sglangV0_5_10DeployTemplate,
+		"llama-cpp":    llamaCppDefaultDeployTemplate,
+	}
+	values := map[string]string{
+		"NUMERIC":    "1",
+		"RATIO":      "1:1",
+		"QUOTED":     `"1:1"`,
+		"JSON":       `{"ratio":"1:1","enabled":true}`,
+		"BACKSLASH":  `C:\models\weights`,
+		"MULTILINE":  "first\nsecond\tthird\r\nfourth",
+		"BOOL":       "false",
+		"NUMBER":     "0123",
+		"EMPTY":      "",
+		"WHITESPACE": "  value  ",
+	}
+
+	for name, template := range templates {
+		t.Run(name, func(t *testing.T) {
+			vars := newTestVLLMVars("test", "text-generation")
+			vars["Env"] = values
+			vars["ProgressDeadlineSeconds"] = 1200
+			vars["StartupProbeFailureThreshold"] = 120
+			objects, err := util.RenderKubernetesManifest(template, vars)
+			require.NoError(t, err)
+			object := mustFindRenderedObjectByKind(t, objects.Items, "Deployment")
+			deployment := &appsv1.Deployment{}
+			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, deployment))
+			containers := append([]corev1.Container{}, deployment.Spec.Template.Spec.InitContainers...)
+			containers = append(containers, deployment.Spec.Template.Spec.Containers...)
+			require.GreaterOrEqual(t, len(containers), 2)
+
+			for _, container := range containers {
+				t.Run(container.Name, func(t *testing.T) {
+					actual := make(map[string]string, len(container.Env))
+					for _, variable := range container.Env {
+						actual[variable.Name] = variable.Value
+					}
+					assert.Equal(t, values, actual)
+				})
+			}
+		})
+	}
+}
+
+func TestKubernetesTemplatesPassThroughCLIValues(t *testing.T) {
+	templates := []struct {
+		name     string
+		template string
+		keys     []string
+	}{
+		{"vllm-v0.17.1", vllmV0_17_1DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"vllm-v0.24.0", vllmV0_24_0DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"vllm-v0.31.0", vllmV0_31_0DeployTemplate, []string{"revision", "tokenizer_revision"}},
+		{"sglang", sglangV0_5_10DeployTemplate, []string{"revision", "chat_template"}},
+	}
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"bool true", true, "true"},
+		{"bool false", false, "false"},
+		{"string true", "true", "true"},
+		{"string false", "false", "false"},
+		{"integer", 1, "1"},
+		{"zero", 0, "0"},
+		{"float", 0.85, "0.85"},
+		{"string", "main", "main"},
+		{"whitespace", " ", " "},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+	}
+	for _, template := range templates {
+		t.Run(template.name, func(t *testing.T) {
+			for _, key := range template.keys {
+				for _, test := range cases {
+					t.Run(key+"/"+test.name, func(t *testing.T) {
+						vars := newTestVLLMVars("test", "text-generation")
+						vars["EngineArgs"] = map[string]any{key: test.value}
+						objects, err := util.RenderKubernetesManifest(template.template, vars)
+						require.NoError(t, err)
+						deployment := mustFindRenderedObjectByKind(t, objects.Items, "Deployment")
+						command := mustExtractContainerCommand(t, deployment.Object, "vllm-engine")
+						outputKey := key
+						if template.name == "sglang" {
+							outputKey = strings.ReplaceAll(key, "_", "-")
+						}
+						want := []string{"--" + outputKey, test.want}
+						require.GreaterOrEqual(t, len(command), len(want))
+						assert.Equal(t, want, command[len(command)-len(want):])
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestLlamaCppTemplatePassesThroughCLIValues(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"bool true", true, "true"},
+		{"bool false", false, "false"},
+		{"integer", 1, "1"},
+		{"zero", 0, "0"},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"apostrophe", "it's literal", "it's literal"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			vars := newTestVLLMVars("test", "text-generation")
+			vars["EngineArgs"] = map[string]any{"model_alias": test.value}
+			vars["ProgressDeadlineSeconds"] = 1200
+			vars["StartupProbeFailureThreshold"] = 120
+			objects, err := util.RenderKubernetesManifest(llamaCppDefaultDeployTemplate, vars)
+			require.NoError(t, err)
+			object := mustFindRenderedObjectByKind(t, objects.Items, "Deployment")
+			deployment := &appsv1.Deployment{}
+			require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, deployment))
+			command := deployment.Spec.Template.Spec.Containers[0].Args[0]
+			stub := `python3() { printf '%s\0' "$@"; }; find() { printf '%s\n' /tmp/model.gguf; }; `
+			output, err := exec.Command("bash", "-c", stub+command).Output()
+			require.NoError(t, err)
+			tokens := strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+			want := []string{"--model_alias", test.want}
+			require.GreaterOrEqual(t, len(tokens), len(want))
+			assert.Equal(t, want, tokens[len(tokens)-len(want):])
+		})
+	}
+}

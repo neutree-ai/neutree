@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2087,7 +2089,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "map values are YAML-escaped for template rendering",
+			name: "map values are JSON-serialized for template quoting",
 			engine: &v1.Engine{
 				Metadata: &v1.Metadata{
 					Name: "vllm",
@@ -2104,7 +2106,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"speculative-config": `{\"method\":\"mtp\"}`,
+				"speculative-config": `{"method":"mtp"}`,
 				"max-model-len":      "4096",
 			},
 		},
@@ -2215,7 +2217,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp_size":        4,
 			},
 		},
@@ -2230,7 +2232,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2288,7 +2290,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2306,7 +2308,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 		{
@@ -2329,7 +2331,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp-size":        "2",
 			},
 		},
@@ -2353,7 +2355,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 				"tp_size":        "1",
 			},
 		},
@@ -2368,7 +2370,7 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 				Spec: &v1.EndpointSpec{},
 			},
 			expectedArgs: map[string]interface{}{
-				"enable_metrics": true,
+				"enable_metrics": "",
 			},
 		},
 	}
@@ -2382,46 +2384,86 @@ func TestKubernetesOrchestrator_setEngineArgs(t *testing.T) {
 	}
 }
 
-func TestEscapeEngineArgsForTemplate(t *testing.T) {
+func TestPrepareEngineArgsForTemplate(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     map[string]interface{}
-		expected map[string]interface{}
+		name           string
+		args           map[string]interface{}
+		expected       map[string]interface{}
+		vllmExpected   map[string]interface{}
+		legacyExpected map[string]interface{}
 	}{
 		{
-			name: "native map is JSON-serialized and YAML-escaped",
+			name: "native map is JSON-serialized",
 			args: map[string]interface{}{
 				"speculative-config": map[string]interface{}{"method": "mtp"},
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 			},
 		},
 		{
-			name: "native slice is JSON-serialized and YAML-escaped",
+			name: "native slice follows engine list semantics",
 			args: map[string]interface{}{
 				"allowed-origins": []interface{}{"http://localhost", "https://example.com"},
 			},
 			expected: map[string]interface{}{
+				"allowed-origins": `["http://localhost","https://example.com"]`,
+			},
+			vllmExpected: map[string]interface{}{
+				"allowed-origins": []interface{}{"http://localhost", "https://example.com"},
+			},
+			legacyExpected: map[string]interface{}{
 				"allowed-origins": `[\"http://localhost\",\"https://example.com\"]`,
 			},
 		},
 		{
-			name: "unescaped JSON string is YAML-escaped",
+			name: "JSON object string is unchanged",
 			args: map[string]interface{}{
 				"speculative-config": `{"method":"mtp"}`,
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 			},
 		},
 		{
-			name: "pre-escaped string is left as-is",
+			name: "legacy pre-escaped JSON object is decoded once",
 			args: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
+			},
+		},
+		{
+			name: "legacy pre-escaped JSON array remains one JSON value",
+			args: map[string]interface{}{
+				"config": `[\"a\",\"b\"]`,
+			},
+			expected: map[string]interface{}{
+				"config": `["a","b"]`,
+			},
+			legacyExpected: map[string]interface{}{
+				"config": `[\"a\",\"b\"]`,
+			},
+		},
+		{
+			name: "non-JSON escape sequences are unchanged",
+			args: map[string]interface{}{
+				"path":         `C:\temp\new`,
+				"escaped-text": `a \"quoted\" value`,
+			},
+			expected: map[string]interface{}{
+				"path":         `C:\temp\new`,
+				"escaped-text": `a \"quoted\" value`,
 			},
 		},
 		{
@@ -2451,6 +2493,12 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 				"dtype":              "float16",
 			},
 			expected: map[string]interface{}{
+				"speculative-config": `{"method":"mtp"}`,
+				"max-model-len":      "4096",
+				"override-config":    `{"temperature":0.5}`,
+				"dtype":              "float16",
+			},
+			legacyExpected: map[string]interface{}{
 				"speculative-config": `{\"method\":\"mtp\"}`,
 				"max-model-len":      "4096",
 				"override-config":    `{\"temperature\":0.5}`,
@@ -2459,10 +2507,102 @@ func TestEscapeEngineArgsForTemplate(t *testing.T) {
 		},
 	}
 
+	for _, engineName := range []string{v1.EngineNameVLLM, v1.EngineNameSGLang, v1.EngineNameLlamaCpp, "custom-engine"} {
+		t.Run(engineName, func(t *testing.T) {
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					args := maps.Clone(tt.args)
+					expected := tt.expected
+					if engineName == v1.EngineNameVLLM && tt.vllmExpected != nil {
+						expected = tt.vllmExpected
+					}
+					if engineName == "custom-engine" && tt.legacyExpected != nil {
+						expected = tt.legacyExpected
+					}
+					prepareEngineArgsForTemplate(args, engineName)
+					assert.Equal(t, expected, args)
+				})
+			}
+		})
+	}
+}
+
+func TestSerializeEngineArgValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    interface{}
+		expected interface{}
+	}{
+		{
+			name:     "native object",
+			input:    map[string]interface{}{"method": "mtp"},
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "native interface slice",
+			input:    []interface{}{"a", "b"},
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "native typed slice",
+			input:    []string{"a", "b"},
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "raw JSON object",
+			input:    `{"method":"mtp"}`,
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "raw JSON array",
+			input:    `["a","b"]`,
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "legacy escaped JSON object",
+			input:    `{\"method\":\"mtp\"}`,
+			expected: `{"method":"mtp"}`,
+		},
+		{
+			name:     "legacy escaped JSON array",
+			input:    `[\"a\",\"b\"]`,
+			expected: `["a","b"]`,
+		},
+		{
+			name:     "JSON with whitespace",
+			input:    "  {\\\"method\\\":\\\"mtp\\\"}  ",
+			expected: "  {\"method\":\"mtp\"}  ",
+		},
+		{
+			name:     "ordinary Windows path is unchanged",
+			input:    `C:\models\weights`,
+			expected: `C:\models\weights`,
+		},
+		{
+			name:     "boolean true is unchanged",
+			input:    true,
+			expected: true,
+		},
+		{
+			name:     "boolean false is unchanged",
+			input:    false,
+			expected: false,
+		},
+		{
+			name:     "zero is unchanged",
+			input:    0,
+			expected: 0,
+		},
+		{
+			name:     "empty string is unchanged",
+			input:    "",
+			expected: "",
+		},
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			escapeEngineArgsForTemplate(tt.args)
-			assert.Equal(t, tt.expected, tt.args)
+			assert.Equal(t, tt.expected, serializeEngineArgValue(tt.input))
 		})
 	}
 }
@@ -2482,7 +2622,7 @@ func TestPrepareEngineArgsForTemplate_VLLMListSemantics(t *testing.T) {
 	assert.Equal(t, []interface{}{"base-model", "neu-vllm-list-alias"}, args["served_model_name"])
 	assert.Equal(t, []interface{}{"a.Processor", "b.Processor"}, args["logits_processors"])
 	assert.Equal(t, []interface{}{"a.example.com", "b.example.com"}, args["allowed_media_domains"])
-	assert.Equal(t, `{\"temperature\":0.8}`, args["override_generation_config"])
+	assert.Equal(t, `{"temperature":0.8}`, args["override_generation_config"])
 	assert.Equal(t, "0.85", args["gpu_memory_utilization"])
 	assert.Equal(t, "false", args["enable_prefix_caching"])
 }
@@ -2510,7 +2650,7 @@ func TestPrepareEngineArgsForTemplate_SGLangJSONListSemantics(t *testing.T) {
 
 	prepareEngineArgsForTemplate(args, v1.EngineNameSGLang)
 
-	assert.Equal(t, `[{\"name\":\"trace\",\"path\":\"hooks.TraceHook\"}]`, args["forward_hooks"])
+	assert.Equal(t, `[{"name":"trace","path":"hooks.TraceHook"}]`, args["forward_hooks"])
 	assert.Equal(t, `[29500,29501]`, args["remote_instance_weight_loader_send_weights_group_ports"])
 }
 
@@ -4021,122 +4161,93 @@ func TestKubernetesOrchestrator_getEndpointStatsIgnoresResourceStatusError(t *te
 	assert.Nil(t, status.Resources)
 }
 
-// TestBuildDeployment_BooleanEngineArgs pins the boolean handling in the
-// K8s deploy templates that ship engine_args through to vLLM / SGLang CLI
-// argparse. Both engines' boolean flags are registered with
-// action="store_true": they accept `--flag` (no value follows) and reject
-// `--flag false` (nargs=0). The template contract is therefore:
-//
-//   - value "true"  (bool or string) -> emit "--<flag>" only
-//   - value "false" (bool or string) -> emit nothing (engine takes its default)
-//   - anything else                   -> emit "--<flag>" followed by "<value>"
-//
-// The test renders the embedded production templates (not an inline fixture),
-// passes a matrix of bool/string true/false alongside non-boolean values, and
-// asserts the rendered CLI tokens never contain a literal "false" token.
-func TestBuildDeployment_BooleanEngineArgs(t *testing.T) {
+func TestBuildDeployment_PassThroughEngineArgs(t *testing.T) {
 	cases := []struct {
-		name        string
 		templateKey string
+		engineName  string
+		key         string
+		bareFlag    string
 	}{
-		{
-			name:        "vllm-v0.31.0",
-			templateKey: "vllm-v0.31.0",
-		},
-		{
-			name:        "vllm-v0.24.0-p2",
-			templateKey: "vllm-v0.24.0-p2",
-		},
-		{
-			name:        "vllm-v0.17.1-p2",
-			templateKey: "vllm-v0.17.1-p2",
-		},
-		{
-			name:        "sglang-v0.5.10-p2",
-			templateKey: "sglang-v0.5.10-p2",
-		},
+		{"vllm-v0.31.0", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"vllm-v0.24.0-p2", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"vllm-v0.17.1-p2", v1.EngineNameVLLM, "revision", "enforce_eager"},
+		{"sglang-v0.5.10-p2", v1.EngineNameSGLang, "revision", "disable_cuda_graph"},
+		{"llama-cpp-v0.3.7-p2", v1.EngineNameLlamaCpp, "model_alias", ""},
 	}
-
+	values := []struct {
+		name  string
+		value interface{}
+		want  string
+	}{
+		{"bool true", true, "true"},
+		{"string true", "true", "true"},
+		{"bool false", false, "false"},
+		{"string false", "false", "false"},
+		{"integer", 1, "1"},
+		{"zero", 0, "0"},
+		{"quotes", "a \"quoted\" value", "a \"quoted\" value"},
+		{"apostrophe", "it's literal", "it's literal"},
+		{"backslash", `C:\models\weights`, `C:\models\weights`},
+		{"line breaks", "first\nsecond\tthird\r\nfourth", "first\nsecond\tthird\r\nfourth"},
+		{"JSON string", `{"ratio":"1:1","enabled":true}`, `{"ratio":"1:1","enabled":true}`},
+		{"legacy escaped JSON", `{\"ratio\":\"1:1\"}`, `{"ratio":"1:1"}`},
+		{"legacy escaped JSON array", `[\"a\",\"b\"]`, `["a","b"]`},
+		{"legacy escaped complex JSON", `{\"path\":\"C:\\\\models\\\\weights\",\"text\":\"it's \\\"quoted\\\"\\n$(printf expanded)\",\"unicode\":\"\\u4e2d\"}`,
+			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`},
+		{"raw complex JSON", `{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`,
+			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)","unicode":"\u4e2d"}`},
+		{"escaped text", `a \"quoted\" value`, `a \"quoted\" value`},
+		{"native object", map[string]interface{}{"ratio": "1:1", "enabled": true}, `{"enabled":true,"ratio":"1:1"}`},
+		{"native object with special text", map[string]interface{}{"path": `C:\models\weights`, "text": "it's \"quoted\"\n$(printf expanded)"},
+			`{"path":"C:\\models\\weights","text":"it's \"quoted\"\n$(printf expanded)"}`},
+		{"shell expansion", "$(printf expanded) $HOME `printf changed`", "$(printf expanded) $HOME `printf changed`"},
+	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tmpl := realEmbeddedTemplate(t, tc.templateKey)
-
-			data := DeploymentManifestVariables{
-				NeutreeVersion:  "v0.1.0",
-				ClusterName:     "test-cluster",
-				Workspace:       "test-workspace",
-				Namespace:       "default",
-				ImagePrefix:     "registry.example.com",
-				ImageRepo:       "myrepo",
-				ImageTag:        "v1.0.0",
-				ImagePullSecret: "my-secret",
-				EngineName:      "test-engine",
-				EngineVersion:   "v1.0.0",
-				EndpointName:    "test-endpoint",
-				ModelArgs: map[string]interface{}{
-					"name":          "gpt-4",
-					"task":          "text-generation",
-					"path":          "/mnt/models/gpt-4",
-					"registry_type": "bentoml",
-					"registry_path": "/mnt/registry/gpt-4-model",
-					"serve_name":    "gpt-4-serve",
-				},
-				EngineArgs: map[string]interface{}{
-					// Boolean false in both bool and string form, kebab and
-					// underscore key shape: the skip branch must drop the flag
-					// regardless of how the key was spelled.
-					"enable_prefix_caching": false,
-					"skip-tokenizer-init":   "false",
-					// Boolean true in both forms: emit flag, no following value.
-					// Keys are kebab-form so the SGLang template's
-					// `replace "_" "-"` step is a no-op here — `replace` is
-					// evaluated in the true/non-bool branches but not the skip
-					// branch, so true booleans are the right place to assert
-					// the rendered flag name matches across engines.
-					"trust-remote-code": true,
-					"is-embedding":      "true",
-					// Non-boolean values: emit flag followed by quoted value.
-					"max-model-len": "4096",
-					"max-num-seqs":  256,
-				},
-				Resources: map[string]string{
-					"cpu":    "500m",
-					"memory": "1Gi",
-				},
-				RoutingLogic: "roundrobin",
-				Replicas:     1,
+		t.Run(tc.templateKey, func(t *testing.T) {
+			for _, value := range values {
+				t.Run(value.name, func(t *testing.T) {
+					data := newDeploymentManifestVariables()
+					data.EndpointName = "test-endpoint"
+					data.NeutreeVersion = "test"
+					data.ClusterName = "test-cluster"
+					data.Workspace = "test-workspace"
+					data.RoutingLogic = "roundrobin"
+					data.Namespace = "test-namespace"
+					data.EngineName = tc.engineName
+					data.EngineVersion = "test"
+					data.ImagePrefix = "registry.example.com"
+					data.ImageRepo = "engine"
+					data.ImageTag = "test"
+					data.ModelArgs = map[string]interface{}{
+						"task": "text-generation", "path": "/models/test", "serve_name": "test", "file": "",
+					}
+					data.EngineArgs[tc.key] = value.value
+					if tc.bareFlag != "" {
+						data.EngineArgs[tc.bareFlag] = ""
+					}
+					prepareEngineArgsForTemplate(data.EngineArgs, tc.engineName)
+					objects, err := buildDeploymentObjects(realEmbeddedTemplate(t, tc.templateKey), data)
+					require.NoError(t, err)
+					tokens := extractEngineCLITokens(t, objects)
+					if tc.engineName == v1.EngineNameLlamaCpp {
+						require.Len(t, tokens, 3)
+						stub := `python3() { printf '%s\0' "$@"; }; find() { printf '%s\n' /tmp/model.gguf; }; `
+						output, err := exec.Command("bash", "-c", stub+tokens[2]).Output()
+						require.NoError(t, err)
+						tokens = strings.Split(strings.TrimSuffix(string(output), "\x00"), "\x00")
+						require.GreaterOrEqual(t, len(tokens), 2)
+						tokens = tokens[len(tokens)-2:]
+					}
+					assertFlagWithValue(t, tokens, "--"+tc.key, value.want)
+					if tc.bareFlag != "" {
+						flag := tc.bareFlag
+						if tc.engineName == v1.EngineNameSGLang {
+							flag = strings.ReplaceAll(flag, "_", "-")
+						}
+						assertFlagWithoutValue(t, tokens, "--"+flag)
+					}
+				})
 			}
-
-			objs, err := buildDeploymentObjects(tmpl, data)
-			require.NoError(t, err, "template render must succeed")
-
-			tokens := extractEngineCLITokens(t, objs)
-
-			// (1) False booleans must be skipped entirely — no flag, no value.
-			//     Check both kebab and underscore forms because SGLang transforms
-			//     `_` to `-` at render time while vLLM passes the key through.
-			assert.NotContains(t, tokens, "--enable-prefix-caching",
-				"bool false engine_arg must not emit its flag (kebab form)")
-			assert.NotContains(t, tokens, "--enable_prefix_caching",
-				"bool false engine_arg must not emit its flag (underscore form)")
-			assert.NotContains(t, tokens, "--skip-tokenizer-init",
-				"string false engine_arg must not emit its flag")
-			// The literal token `false` must never reach the CLI: argparse rejects
-			// `--flag false` for store_true booleans.
-			for _, tok := range tokens {
-				assert.NotEqual(t, "false", tok,
-					"no CLI token should be the literal string \"false\"")
-			}
-
-			// (2) True booleans (bool + string forms) must emit just the flag.
-			//     The token immediately after must not be "true" — it should be
-			//     the next engine_arg flag or a CLI token following it.
-			assertFlagWithoutValue(t, tokens, "--trust-remote-code")
-			assertFlagWithoutValue(t, tokens, "--is-embedding")
-
-			// (3) Non-boolean engine_args must emit `--<flag>` followed by value.
-			assertFlagWithValue(t, tokens, "--max-model-len", "4096")
-			assertFlagWithValue(t, tokens, "--max-num-seqs", "256")
 		})
 	}
 }
@@ -4196,6 +4307,7 @@ func TestBuildDeployment_VLLMListEngineArgs(t *testing.T) {
 				Replicas:     1,
 			}
 
+			prepareEngineArgsForTemplate(data.EngineArgs, v1.EngineNameVLLM)
 			objs, err := buildDeploymentObjects(tmpl, data)
 			require.NoError(t, err, "template render must succeed")
 

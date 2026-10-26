@@ -84,8 +84,8 @@ spec:
               --task="{{ .ModelArgs.task }}"
           env:
            {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
+           - name: {{ $key | quote }}
+             value: {{ $value | quote }}
            {{ end }}
           {{- if .VolumeMounts }}
           volumeMounts:
@@ -116,13 +116,9 @@ spec:
                kwargs on the SSH/Ray path. */}}
           {{- if .EngineArgs }}
           {{- range $key, $value := .EngineArgs }}
-          {{- if eq (printf "%v" $value) "true" }}
-          - --{{ $key | replace "_" "-" }}
-          {{- else if eq (printf "%v" $value) "false" }}
-          {{- /* skip: store_true flags reject "--flag false"; passing false means "leave at default" */ -}}
-          {{- else }}
-          - --{{ $key | replace "_" "-" }}
-          - "{{ $value }}"
+          - {{ $key | replace "_" "-" | printf "--%s" | quote }}
+          {{- if ne (printf "%v" $value) "" }}
+          - {{ $value | quote }}
           {{- end }}
           {{- end }}
           {{- end }}
@@ -137,8 +133,8 @@ spec:
               {{- end }}
           env:
            {{ range $key, $value := .Env }}
-           - name: {{ $key }}
-             value: "{{ $value }}"
+           - name: {{ $key | quote }}
+             value: {{ $value | quote }}
            {{ end }}
           ports:
             - containerPort: 8000
