@@ -208,6 +208,12 @@ ENVTEST_ASSETS_DIR=$(shell pwd)/bin
 test: prepare-build-cli mockgen fmt vet lint ## Run unit test
 	go test -coverprofile coverage.out -covermode=atomic $(shell go list ./... | grep -v 'e2e\|mocks\|db/dbtest')
 
+PYTHON ?= python3.12
+
+.PHONY: python-test
+python-test: ## Run cluster-image-builder and downloader Python unit tests (no GPU required)
+	PYTHONPATH="$(CURDIR)/python:$(CURDIR)/cluster-image-builder$${PYTHONPATH:+:$$PYTHONPATH}" $(PYTHON) -m pytest cluster-image-builder python --ignore=cluster-image-builder/downloader --cov=serve._utils.serve_errors --cov-branch --cov-report=term-missing --cov-fail-under=80 -q
+
 LABEL_FILTER ?=
 E2E_TIMEOUT ?= 30m
 

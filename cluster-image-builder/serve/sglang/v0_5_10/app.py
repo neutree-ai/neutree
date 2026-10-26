@@ -11,15 +11,13 @@ Architecture:
           SGLang's StreamingResponse is not Ray-serialisable across actors.
 """
 
-from __future__ import annotations
-
 import asyncio
 import enum
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette_context.middleware import RawContextMiddleware
@@ -28,15 +26,27 @@ from starlette_context.plugins import RequestIdPlugin
 from ray import serve
 from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
-from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
+from ray.serve.handle import DeploymentHandle
 
 from downloader import build_request_from_model_args, download_with_markers, get_downloader
 from serve._metrics.prometheus_multiproc import install_stable_prometheus_multiproc_dir
 from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.serve_errors import (
+    RequestInputError,
+    backend_error,
+    error_response,
+    error_stream,
+    input_error_handler,
+    is_streaming,
+    read_json_object,
+    stream_error_response,
+    stream_error_status,
+)
 
 logger = logging.getLogger("ray.serve")
+_WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
 
 
 class SchedulerType(str, enum.Enum):
@@ -102,69 +112,65 @@ class _FakeRawRequest:
         return False
 
 
-def _extract_serializable(result) -> Any:
-    """Convert a serving-handler result to a Ray-serialisable Python value."""
-    try:
-        from fastapi.responses import ORJSONResponse
-        if isinstance(result, ORJSONResponse):
-            import orjson
-            return orjson.loads(result.body)
-    except ImportError:
-        pass
+def _backend_error(exc: Exception, where: str):
+    if isinstance(exc, RequestInputError):
+        return backend_error(exc, where)
+    if isinstance(exc, HTTPException) and 400 <= exc.status_code < 500:
+        message, kind, status = str(exc.detail), str(exc.status_code), exc.status_code
+    elif isinstance(exc, ValueError):
+        message, kind, status = str(exc), "BadRequest", 400
+    else:
+        return backend_error(exc, where)
+    logger.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
+    return {"object": "error", "message": message, "type": kind, "code": status, "param": None}
 
-    if isinstance(result, StreamingResponse):
-        raise RuntimeError(
-            "Non-streaming request returned StreamingResponse — "
-            "verify stream=False in the payload."
-        )
 
-    if hasattr(result, "model_dump"):
-        return result.model_dump()
+def _stream_error(exc: Exception, where: str):
+    result = _backend_error(exc, where)
+    if isinstance(result, dict) and "error" in result:
+        return result
+    return {"error": result}
 
-    return result
+
+def _extract_serializable(result) -> Dict[str, Any]:
+    """Keep the HTTP status and JSON data inside this wrapper's wire envelope."""
+    status = 200
+    if isinstance(result, JSONResponse):
+        content, status = json.loads(result.body), result.status_code
+    elif hasattr(result, "model_dump"):
+        content = result.model_dump(mode="json")
+    else:
+        content = result
+    if not isinstance(result, JSONResponse) and isinstance(content, dict):
+        if content.get("object") == "error":
+            status = stream_error_status(content)
+        elif "error" in content:
+            status = stream_error_status(content["error"])
+    json.dumps(content, allow_nan=False)
+    return {_WIRE_RESPONSE_MARKER: True, "content": content, "status_code": status}
 
 
 async def _iter_response_body(result) -> AsyncGenerator[str, None]:
-    """Yield SSE chunks (as strings) from a serving-handler StreamingResponse.
-
-    Bytes chunks are decoded so the result can be safely sent over the Ray
-    actor boundary as Python strings.
-    """
     if isinstance(result, StreamingResponse):
         async for chunk in result.body_iterator:
             if isinstance(chunk, bytes):
                 chunk = chunk.decode("utf-8")
+            if not isinstance(chunk, str):
+                if hasattr(chunk, "model_dump"):
+                    chunk = chunk.model_dump(mode="json")
+                chunk = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
             yield chunk
         return
-
-    # If the handler returned an error response (ORJSONResponse) instead of
-    # streaming, wrap it as a single SSE error frame followed by [DONE].
-    try:
-        from fastapi.responses import ORJSONResponse
-        if isinstance(result, ORJSONResponse):
-            import orjson
-            error_data = orjson.loads(result.body)
-            yield f"data: {json.dumps(error_data)}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-    except ImportError:
-        pass
-
-    data = result.model_dump() if hasattr(result, "model_dump") else result
-    yield f"data: {json.dumps(data)}\n\n"
-    yield "data: [DONE]\n\n"
+    content = _extract_serializable(result)["content"]
+    if isinstance(content, dict) and content.get("object") == "error":
+        content = {"error": content}
+    async for frame in error_stream(content):
+        yield frame
 
 
 def _to_json_response(result) -> JSONResponse:
-    """Wrap a backend-returned serialisable value in a JSONResponse."""
-    if isinstance(result, dict):
-        # SGLang error payloads use object='error' and include an HTTP code.
-        if result.get("object") == "error":
-            status = result.get("code", 400)
-            return JSONResponse(content=result, status_code=status)
-        return JSONResponse(content=result)
-    if hasattr(result, "model_dump"):
-        return JSONResponse(content=result.model_dump())
+    if isinstance(result, dict) and result.get(_WIRE_RESPONSE_MARKER):
+        return JSONResponse(content=result["content"], status_code=result["status_code"])
     return JSONResponse(content=result)
 
 
@@ -347,62 +353,80 @@ class Backend:
     # dump) and a streaming method (async generator yielding SSE strings).
 
     async def chat_completion(self, payload: Dict[str, Any]) -> Any:
-        from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-        payload = {**payload, "stream": False}
-        result = await self._ensure_chat().handle_request(
-            ChatCompletionRequest(**payload), _FakeRawRequest()
-        )
-        return _extract_serializable(result)
+        try:
+            from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
+            is_streaming(payload)
+            result = await self._ensure_chat().handle_request(
+                ChatCompletionRequest(**{**payload, "stream": False}), _FakeRawRequest()
+            )
+            return _extract_serializable(result)
+        except Exception as exc:
+            return _extract_serializable(_backend_error(exc, "chat_completion"))
 
     async def chat_completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
-        from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
-        payload = {**payload, "stream": True}
-        result = await self._ensure_chat().handle_request(
-            ChatCompletionRequest(**payload), _FakeRawRequest()
-        )
-        async for chunk in _iter_response_body(result):
-            yield chunk
+        try:
+            from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
+            is_streaming(payload)
+            result = await self._ensure_chat().handle_request(
+                ChatCompletionRequest(**{**payload, "stream": True}), _FakeRawRequest()
+            )
+            async for chunk in _iter_response_body(result):
+                yield chunk
+        except Exception as exc:
+            async for chunk in error_stream(_stream_error(exc, "chat_completion_stream")):
+                yield chunk
 
     async def completion(self, payload: Dict[str, Any]) -> Any:
-        from sglang.srt.entrypoints.openai.protocol import CompletionRequest
-        payload = {**payload, "stream": False}
-        result = await self._ensure_completion().handle_request(
-            CompletionRequest(**payload), _FakeRawRequest()
-        )
-        return _extract_serializable(result)
+        try:
+            from sglang.srt.entrypoints.openai.protocol import CompletionRequest
+            is_streaming(payload)
+            result = await self._ensure_completion().handle_request(
+                CompletionRequest(**{**payload, "stream": False}), _FakeRawRequest()
+            )
+            return _extract_serializable(result)
+        except Exception as exc:
+            return _extract_serializable(_backend_error(exc, "completion"))
 
     async def completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
-        from sglang.srt.entrypoints.openai.protocol import CompletionRequest
-        payload = {**payload, "stream": True}
-        result = await self._ensure_completion().handle_request(
-            CompletionRequest(**payload), _FakeRawRequest()
-        )
-        async for chunk in _iter_response_body(result):
-            yield chunk
+        try:
+            from sglang.srt.entrypoints.openai.protocol import CompletionRequest
+            is_streaming(payload)
+            result = await self._ensure_completion().handle_request(
+                CompletionRequest(**{**payload, "stream": True}), _FakeRawRequest()
+            )
+            async for chunk in _iter_response_body(result):
+                yield chunk
+        except Exception as exc:
+            async for chunk in error_stream(_stream_error(exc, "completion_stream")):
+                yield chunk
 
     async def embedding(self, payload: Dict[str, Any]) -> Any:
-        from sglang.srt.entrypoints.openai.protocol import EmbeddingRequest
-        result = await self._ensure_embedding().handle_request(
-            EmbeddingRequest(**payload), _FakeRawRequest()
-        )
-        return _extract_serializable(result)
+        try:
+            from sglang.srt.entrypoints.openai.protocol import EmbeddingRequest
+            result = await self._ensure_embedding().handle_request(
+                EmbeddingRequest(**payload), _FakeRawRequest()
+            )
+            return _extract_serializable(result)
+        except Exception as exc:
+            return _extract_serializable(_backend_error(exc, "embedding"))
 
     def get_model_info(self) -> Dict[str, Any]:
-        tm = self.engine.tokenizer_manager
-        context_len = None
-        model_config = getattr(tm, "model_config", None)
-        if model_config is not None:
-            context_len = getattr(model_config, "context_len", None)
-        return {
-            "model_path": self.model_path,
-            "served_model_name": self.served_model_name,
-            "model_task": self.model_task,
-            "context_len": context_len,
-            "is_generation": getattr(tm, "is_generation", True),
-        }
+        try:
+            tm = self.engine.tokenizer_manager
+            model_config = getattr(tm, "model_config", None)
+            return _extract_serializable({
+                "model_path": self.model_path,
+                "served_model_name": self.served_model_name,
+                "model_task": self.model_task,
+                "context_len": getattr(model_config, "context_len", None),
+                "is_generation": getattr(tm, "is_generation", True),
+            })
+        except Exception as exc:
+            return _extract_serializable(_backend_error(exc, "get_model_info"))
 
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
 app.add_middleware(
     CORSMiddleware,
@@ -420,37 +444,54 @@ class Controller:
         self.backend = backend
         logger.info("[Controller] Initialized with backend handle")
 
+    async def _stream(self, method: str, payload: Dict[str, Any]):
+        try:
+            chunks = getattr(self.backend.options(stream=True), method).remote(payload)
+            first = await chunks.__anext__()
+        except StopAsyncIteration:
+            return StreamingResponse(content=iter(()), media_type="text/event-stream")
+        except Exception:
+            logger.exception("Failed to initialize SGLang stream")
+            return error_response("Failed to initialize completion stream", 500, "InternalServerError")
+        failure = stream_error_response(first)
+        if failure is not None:
+            content = json.loads(failure.body)
+            # SGLang uses a nested SSE error but a flat HTTP error response.
+            if isinstance(content.get("error"), dict) and content["error"].get("object") == "error":
+                return JSONResponse(content=content["error"], status_code=failure.status_code)
+            return failure
+
+        async def with_first():
+            yield first
+            async for chunk in chunks:
+                yield chunk
+        return StreamingResponse(content=with_first(), media_type="text/event-stream")
+
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
-        payload = await request.json()
-        if payload.get("stream", False):
-            gen: DeploymentResponseGenerator = (
-                self.backend.options(stream=True).chat_completion_stream.remote(payload)
-            )
-            return StreamingResponse(content=gen, media_type="text/event-stream")
-        result = await self.backend.options(stream=False).chat_completion.remote(payload)
-        return _to_json_response(result)
+        payload = await read_json_object(request)
+        if is_streaming(payload):
+            return await self._stream("chat_completion_stream", payload)
+        return _to_json_response(await self.backend.options(stream=False).chat_completion.remote(payload))
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
-        payload = await request.json()
-        if payload.get("stream", False):
-            gen: DeploymentResponseGenerator = (
-                self.backend.options(stream=True).completion_stream.remote(payload)
-            )
-            return StreamingResponse(content=gen, media_type="text/event-stream")
-        result = await self.backend.options(stream=False).completion.remote(payload)
-        return _to_json_response(result)
+        payload = await read_json_object(request)
+        if is_streaming(payload):
+            return await self._stream("completion_stream", payload)
+        return _to_json_response(await self.backend.options(stream=False).completion.remote(payload))
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
-        payload = await request.json()
-        result = await self.backend.options(stream=False).embedding.remote(payload)
-        return _to_json_response(result)
+        payload = await read_json_object(request)
+        return _to_json_response(await self.backend.options(stream=False).embedding.remote(payload))
 
     @app.get("/v1/models")
     async def models(self, request: Request):
-        info = await self.backend.get_model_info.remote()
+        result = await self.backend.get_model_info.remote()
+        if result["status_code"] >= 400:
+            return _to_json_response(result)
+        info = result["content"]
         return JSONResponse(content={
             "object": "list",
             "data": [{

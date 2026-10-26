@@ -33,6 +33,38 @@ Examples:
 
 When adding or modifying a Python module, create or update the co-located test file.
 
+The `python-test` CI job and the local `make python-test` target run all unit
+tests under `cluster-image-builder/` and `python/`, including Serve utilities,
+engine wrappers, metrics, replica schedulers, and model downloaders. They do
+not require a GPU, inference engines, or model downloads.
+
+Python 3.12 is used locally and in CI (`actions/setup-python`). From the
+repository root, install the test dependencies once:
+
+```bash
+python3.12 -m pip install pytest pytest-cov 'pydantic>=2,<3' 'starlette<1' fastapi httpx \
+  -r python/neutree/downloader/requirements.txt
+make python-test
+```
+
+The target defaults to `python3.12`. Use
+`make python-test PYTHON=/path/to/venv/bin/python` to select a Python 3.12
+virtual environment. The target sets both package roots on `PYTHONPATH`, excludes the
+generated `cluster-image-builder/downloader/` copy, and enforces at least 80%
+statement/branch coverage for `serve._utils.serve_errors`. It does not run Go
+build, lint, or test prerequisites. Downloader tests use temporary files and
+local HTTP servers; wrapper tests use fake serving calls. Real engine images
+and Ray deployments still need inference E2E verification.
+
+`serve/_utils/` is maintained in this repository. Enterprise consumers must
+sync the package and its tests from community rather than maintaining a
+separate implementation. Change shared behavior here before syncing it.
+
+`serve_errors.py` handles input validation, logging, JSON and SSE errors without
+importing an inference engine. Unexpected exceptions use a fixed 500 response;
+the original exception stays in server logs. Conversion of known engine business errors belongs in the versioned wrapper,
+alongside its serving API calls.
+
 ## Database Integration Tests
 
 - **Location**: `db/dbtest/` — spins up a real PostgreSQL + PostgREST + GoTrue via `db/docker-compose.test.yml`.
