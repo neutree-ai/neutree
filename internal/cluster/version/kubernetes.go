@@ -21,16 +21,16 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.32": "v1.32.13",
 }
 
-func KubeSchedulerVersion(serverVersion *kubeversion.Info) string {
+func KubeSchedulerVersion(serverVersion *kubeversion.Info) (schedulerVersion string, mapped bool) {
 	if schedulerVersion, ok := KubeSchedulerVersionsByMinor[KubernetesServerMajorMinor(serverVersion)]; ok {
-		return schedulerVersion
+		return schedulerVersion, true
 	}
 
 	if detectedVersion := KubernetesServerVersion(serverVersion); detectedVersion != "" {
-		return detectedVersion
+		return detectedVersion, false
 	}
 
-	return DefaultKubeSchedulerVersion
+	return DefaultKubeSchedulerVersion, false
 }
 
 func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
@@ -44,7 +44,7 @@ func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.Kub
 
 func KubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
 	majorMinor, err := semver.MajorMinor(version)
-	if err != nil || majorMinor == "" {
+	if err != nil {
 		return chartutil.KubeVersion{
 			Version: version,
 			Major:   "1",

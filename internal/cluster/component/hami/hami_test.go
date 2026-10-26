@@ -3,10 +3,12 @@ package hami
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -542,6 +544,66 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 
 	assert.Equal(t, clusterversion.KubeSchedulerVersionsByMinor["1.30"],
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
+}
+
+func TestHAMiComponentKubeSchedulerVersionPreservesFallbackBehavior(t *testing.T) {
+	tests := []struct {
+		name          string
+		serverVersion *kubeversion.Info
+		wantVersion   string
+		wantLog       map[string]interface{}
+		wantPanic     bool
+	}{
+		{
+			name:          "unmapped minor",
+			serverVersion: &kubeversion.Info{GitVersion: "v1.33.4"},
+			wantVersion:   "v1.33.4",
+			wantLog: map[string]interface{}{
+				"msg":               "Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
+				"kubernetesVersion": "v1.33.4",
+				"minorVersion":      "1.33",
+				"detectedVersion":   "v1.33.4",
+			},
+		},
+		{
+			name:          "invalid discovery",
+			serverVersion: &kubeversion.Info{GitVersion: "invalid"},
+			wantVersion:   clusterversion.DefaultKubeSchedulerVersion,
+			wantLog: map[string]interface{}{
+				"msg":               "Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
+				"kubernetesVersion": "invalid",
+				"minorVersion":      "",
+				"defaultVersion":    clusterversion.DefaultKubeSchedulerVersion,
+			},
+		},
+		{name: "nil discovery preserves existing panic", wantPanic: true},
+	}
+
+	originalGetKubernetesServerVersion := getKubernetesServerVersion
+	t.Cleanup(func() {
+		getKubernetesServerVersion = originalGetKubernetesServerVersion
+	})
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
+				return testCase.serverVersion, nil
+			}
+			var logRecord map[string]interface{}
+			component := &HAMiComponent{
+				cluster: newTestCluster(),
+				logger: funcr.NewJSON(func(entry string) {
+					require.NoError(t, json.Unmarshal([]byte(entry), &logRecord))
+				}, funcr.Options{}),
+			}
+			if testCase.wantPanic {
+				assert.Panics(t, func() { component.resolveKubeSchedulerVersion() })
+				return
+			}
+
+			assert.Equal(t, testCase.wantVersion, component.resolveKubeSchedulerVersion())
+			assert.Subset(t, logRecord, testCase.wantLog)
+		})
+	}
 }
 
 func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {

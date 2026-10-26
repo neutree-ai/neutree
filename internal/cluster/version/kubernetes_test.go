@@ -28,7 +28,13 @@ func TestKubeSchedulerVersionFallback(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			assert.Equal(t, testCase.want, KubeSchedulerVersion(testCase.serverVersion))
+			schedulerVersion, mapped := KubeSchedulerVersion(testCase.serverVersion)
+			assert.Equal(t, testCase.want, schedulerVersion)
+			assert.False(t, mapped)
 		})
 	}
+}
+
+func TestKubeVersionFromBaseVersionPreservesEmptyVersionBehavior(t *testing.T) {
+	assert.Panics(t, func() { KubeVersionFromBaseVersion("") })
 }
