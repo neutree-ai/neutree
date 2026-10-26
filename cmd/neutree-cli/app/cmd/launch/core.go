@@ -27,6 +27,7 @@ type neutreeCoreInstallOptions struct {
 	jwtSecret             string
 	dbPassword            string
 	metricsRemoteWriteURL string
+	metricsQueryURL       string
 	grafanaURL            string
 	gatewayExternalURL    string
 	version               string
@@ -77,6 +78,7 @@ Components Included:
 
 Configuration Options:
   --jwt-secret             JWT secret for authentication
+  --metrics-query-url Prometheus query URL (defaults to the local obs-stack when no external remote write is configured)
   --metrics-remote-write-url Remote metrics storage URL
   --grafana-url            Grafana dashboard URL for system info API
   --gateway-external-url   URL users call the inference gateway at (default: http://<node-ip>:80)
@@ -123,6 +125,7 @@ Examples:
 
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsQueryURL, "metrics-query-url", "", "Prometheus query URL reachable from the API container (distinct from remote write)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.gatewayExternalURL, "gateway-external-url", "",
@@ -284,11 +287,18 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 		modelScopeEndpoint = model_registry.DefaultModelScopeEndpoint
 	}
 
+	// The local obs-stack publishes vmselect on the host, outside the core network.
+	// Never derive a query endpoint from an external remote-write URL.
+	metricsQueryURL := options.metricsQueryURL
+	if metricsQueryURL == "" && options.metricsRemoteWriteURL == "" {
+		metricsQueryURL = fmt.Sprintf("http://%s:8481/select/0/prometheus", options.nodeIP)
+	}
 	templateParams := map[string]string{
 		"NeutreeCoreWorkDir":           coreWorkDir,
 		"JwtSecret":                    options.jwtSecret,
 		"DbPassword":                   options.dbPassword,
 		"MetricsRemoteWriteURL":        options.metricsRemoteWriteURL,
+		"MetricsQueryURL":              metricsQueryURL,
 		"GrafanaURL":                   options.grafanaURL,
 		"GatewayExternalURL":           gatewayExternalURL,
 		"VictoriaMetricsVersion":       component.VictoriaMetrics,

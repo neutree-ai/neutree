@@ -46,5 +46,6 @@ type APIConfig struct {
 	AuthEndpoint     string
 	GrafanaURL       string
 	AITraceStoreURL  string
+	MetricsURL       string
 	Version          string
 }
