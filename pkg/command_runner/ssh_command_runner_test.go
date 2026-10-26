@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -411,14 +412,17 @@ func installSSHOutputFixture(t *testing.T) string {
 for argument do
     last_argument="$argument"
 done
-printf '%s\n' "$*" >> "$NEU_TEST_SSH_CALLS"
 if [ "$NEU_TEST_SSH_STARTUP_FAILURE" = 1 ]; then
     neutree_missing_startup_command
 fi
 printf '%s' "$NEU_TEST_SSH_STDERR" >&2
+printf '%s\n' "$*" >> "$NEU_TEST_SSH_CALLS"
 if [ "$last_argument" = uptime ]; then
     printf 'up\n'
 else
+    if [ "$NEU_TEST_SSH_BLOCK" = 1 ]; then
+        exec sleep 30
+    fi
     printf '%s' "$NEU_TEST_SSH_STDOUT"
     exit "${NEU_TEST_SSH_STATUS:-0}"
 fi
@@ -431,6 +435,7 @@ fi
 	t.Setenv("NEU_TEST_SSH_STDERR", "")
 	t.Setenv("NEU_TEST_SSH_STATUS", "0")
 	t.Setenv("NEU_TEST_SSH_STARTUP_FAILURE", "0")
+	t.Setenv("NEU_TEST_SSH_BLOCK", "0")
 	return callsFile
 }
 
@@ -504,6 +509,39 @@ func TestSSHCommandRunnerDefaultPreservesFailureStderrAndCause(t *testing.T) {
 			calls, readErr := os.ReadFile(callsFile)
 			require.NoError(t, readErr)
 			assert.Len(t, strings.Split(strings.TrimSpace(string(calls)), "\n"), 2)
+		})
+	}
+
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			callsFile := installSSHOutputFixture(t)
+			t.Setenv("NEU_TEST_SSH_BLOCK", "1")
+			t.Setenv("NEU_TEST_SSH_STDERR", "startup warning")
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			runner := outputFixtureRunner(t)
+			result := make(chan error, 1)
+			go func() {
+				_, err := runner.Run(ctx, "long command", true, nil, true, nil, "", false)
+				result <- err
+			}()
+			require.Eventually(t, func() bool {
+				calls, err := os.ReadFile(callsFile)
+				return err == nil && strings.Count(string(calls), "\n") == 2
+			}, time.Second, 10*time.Millisecond)
+			if cause == context.Canceled {
+				cancel()
+			}
+			select {
+			case err := <-result:
+				require.ErrorIs(t, err, cause)
+				assert.NotErrorIs(t, err, ErrConnectionFailed)
+				assert.Contains(t, err.Error(), "startup warning")
+				var exitError *exec.ExitError
+				require.ErrorAs(t, err, &exitError)
+			case <-time.After(5 * time.Second):
+				t.Fatal("runner did not finish after context cancellation")
+			}
 		})
 	}
 }
