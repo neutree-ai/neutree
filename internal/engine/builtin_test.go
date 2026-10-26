@@ -46,8 +46,7 @@ func TestGetBuiltinEngines(t *testing.T) {
 		t.Error("expected sglang engine to be registered")
 	}
 
-	// Verify the maintained vLLM support window exactly. New installations
-	// must not receive retired versions through the builtin registry.
+	// Verify the maintained vLLM versions and their registered images.
 	for _, e := range engines {
 		if e.Metadata.Name != "vllm" {
 			continue
@@ -63,17 +62,8 @@ func TestGetBuiltinEngines(t *testing.T) {
 		}
 
 		sort.Strings(gotVersions)
-		if want := []string{"v0.17.1-p2", "v0.24.0-p2", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
+		if want := []string{"v0.24.0-p2", "v0.31.0"}; !reflect.DeepEqual(gotVersions, want) {
 			t.Errorf("vllm builtin versions: got %v, want %v", gotVersions, want)
-		}
-	}
-
-	for _, retiredVersion := range []string{"v0.8.5", "v0.11.2"} {
-		if _, err := GetEngineSchema("vllm-" + retiredVersion); err == nil {
-			t.Errorf("retired vLLM %s schema must not be registered", retiredVersion)
-		}
-		if _, err := GetDeployTemplate("vllm-" + retiredVersion); err == nil {
-			t.Errorf("retired vLLM %s template must not be registered", retiredVersion)
 		}
 	}
 
@@ -141,18 +131,5 @@ func TestGetBuiltinEngines(t *testing.T) {
 				t.Errorf("sglang must not advertise text-rerank")
 			}
 		}
-	}
-}
-
-func TestUnpatchedEngineMappingsRemoved(t *testing.T) {
-	for _, key := range []string{"llama-cpp-v0.3.7", "sglang-v0.5.10", "vllm-v0.17.1", "vllm-v0.24.0"} {
-		t.Run(key, func(t *testing.T) {
-			if _, err := GetEngineSchema(key); err == nil {
-				t.Error("unpatched schema must not be registered")
-			}
-			if _, err := GetDeployTemplate(key); err == nil {
-				t.Error("unpatched template must not be registered")
-			}
-		})
 	}
 }

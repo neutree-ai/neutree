@@ -815,8 +815,8 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 	}{
 		{
 			name:               "plain version",
-			engineVersion:      "v0.11.2",
-			expectedImportPath: "serve.vllm.v0_11_2.app:app_builder",
+			engineVersion:      "v0.24.0",
+			expectedImportPath: "serve.vllm.v0_24_0.app:app_builder",
 		},
 		{
 			name:               "new plain version",
@@ -825,13 +825,13 @@ func TestEndpointToApplication_ImportPathStripsVariantSuffix(t *testing.T) {
 		},
 		{
 			name:               "cuda variant stripped",
-			engineVersion:      "v0.17.1-cu130",
-			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
+			engineVersion:      "v0.24.0-cu130",
+			expectedImportPath: "serve.vllm.v0_24_0.app:app_builder",
 		},
 		{
 			name:               "rocm variant stripped",
-			engineVersion:      "v0.17.1-rocm60",
-			expectedImportPath: "serve.vllm.v0_17_1.app:app_builder",
+			engineVersion:      "v0.24.0-rocm60",
+			expectedImportPath: "serve.vllm.v0_24_0.app:app_builder",
 		},
 		{
 			name:               "non-semver version used as-is",
