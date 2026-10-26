@@ -15,7 +15,9 @@ import (
 )
 
 // handleUpdateUser proxies PUT /auth/user, refusing changes to the fields the
-// caller's identity source manages.
+// caller's identity source manages, including the user_metadata keys it owns
+// (GoTrue merges "data" into user_metadata, from which the database derives
+// the profile email).
 //
 // The source comes from the caller's access token, validated like any other
 // bearer token. A request whose token does not validate is proxied unchanged:
@@ -60,6 +62,14 @@ func handleUpdateUser(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		if key := managedMetadataKeyIn(body); key != "" {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": fmt.Sprintf("data.%s is managed by the %s identity source and cannot be changed here", key, source),
+			})
+
+			return
+		}
+
 		request.RestoreBody(c, bodyBytes)
 		proxyHandler(c)
 	}
@@ -76,6 +86,34 @@ func protectedFieldIn(body map[string]json.RawMessage, protected []string) strin
 		for _, field := range protected {
 			if strings.EqualFold(key, field) {
 				return field
+			}
+		}
+	}
+
+	return ""
+}
+
+// managedMetadataKeyIn returns the first user_metadata key owned by the
+// identity source that the body's "data" sets or removes (null removes a key),
+// or "". A "data" value that is not an object is left for GoTrue to reject.
+func managedMetadataKeyIn(body map[string]json.RawMessage) string {
+	managed := auth.ExternalUserMetadataKeys()
+
+	for key, value := range body {
+		if !strings.EqualFold(key, "data") {
+			continue
+		}
+
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(value, &data); err != nil {
+			continue
+		}
+
+		for dataKey := range data {
+			for _, field := range managed {
+				if strings.EqualFold(dataKey, field) {
+					return field
+				}
 			}
 		}
 	}

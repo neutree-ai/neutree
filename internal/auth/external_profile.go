@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,12 @@ type ExternalProfile struct {
 // externalUserMetadataKeys are the user_metadata keys ExternalUserMetadata
 // may set.
 var externalUserMetadataKeys = []string{"preferred_username", "name", "email"}
+
+// ExternalUserMetadataKeys returns the user_metadata keys the identity source
+// owns for an external user, which the user must not change.
+func ExternalUserMetadataKeys() []string {
+	return slices.Clone(externalUserMetadataKeys)
+}
 
 // ExternalUserMetadata builds user_metadata for an externally managed user.
 // There is no username key: api.handle_new_user then derives the profile name

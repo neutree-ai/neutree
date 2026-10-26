@@ -99,8 +99,11 @@ func TestConnectionTest_OIDC(t *testing.T) {
 
 	untrusted := oidcSpec(idp)
 	untrusted.OIDC.CACert = ""
-	err = ConnectionTest(context.Background(), &v1.IdentitySource{Spec: untrusted}, nil)
+	err = ConnectionTest(context.Background(), &v1.IdentitySource{Spec: untrusted}, &storage.IdentitySourceSecrets{OIDCClientSecret: "secret"})
 	assert.ErrorIs(t, err, oidc.ErrDiscovery)
+
+	err = ConnectionTest(context.Background(), &v1.IdentitySource{Spec: oidcSpec(idp)}, nil)
+	assert.ErrorIs(t, err, oidc.ErrInvalidConfig, "no client secret")
 }
 
 func TestConnectionTest_LDAPUnreachable(t *testing.T) {
