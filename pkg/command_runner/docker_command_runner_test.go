@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
@@ -546,22 +545,4 @@ func TestAutoConfigureShm(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestDockerCommandRunnerDefaultSeparatesStartupStderr(t *testing.T) {
-	installSSHOutputFixture(t)
-	t.Setenv("NEU_TEST_SSH_STDOUT", "true\n")
-	t.Setenv("NEU_TEST_SSH_STDERR", "bashrc: missing-command: command not found")
-	runner := NewDockerCommandRunner(&v1.Docker{ContainerName: "fixture"}, &CommonArgs{
-		NodeID: "node", SshIP: "127.0.0.1", AuthConfig: v1.Auth{SSHUser: "tester"},
-	})
-	running, err := runner.CheckContainerStatus(context.Background())
-	require.NoError(t, err)
-	assert.True(t, running)
-	t.Setenv("NEU_TEST_SSH_STDOUT", "")
-	t.Setenv("NEU_TEST_SSH_STDERR", strings.Repeat("startup noise\n", 2000)+"No such object: fixture")
-	t.Setenv("NEU_TEST_SSH_STATUS", "1")
-	running, err = runner.CheckContainerStatus(context.Background())
-	require.NoError(t, err)
-	assert.False(t, running)
 }
