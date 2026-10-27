@@ -229,11 +229,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		allocatablePool := staticNodeDeviceAllocatablePool(device)
 		availablePool := staticNodeDeviceAvailablePool(device, allocation)
 
-		if !device.Healthy {
-			allocatablePool = &v1.DeviceResourcePool{}
-			availablePool = &v1.DeviceResourcePool{}
-		}
-
 		nodeStatus.Devices = append(nodeStatus.Devices, &v1.DeviceResource{
 			UUID:        device.UUID,
 			Product:     baseProduct,
@@ -246,11 +241,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
-		if device.Healthy {
-			addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
-		}
+		addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 
-		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
+		if hasDeviceAvailableCapacity(availablePool) {
 			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
 		}
 	}

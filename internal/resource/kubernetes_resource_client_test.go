@@ -2,6 +2,7 @@ package resource
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
@@ -338,78 +339,141 @@ func TestK8sResourceClientListEndpointInstancesWithMultipleNeutreeAllocations(t 
 }
 
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "gpu-node",
-			Labels: map[string]string{
-				plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
-				plugin.NvidiaGPUCountResource:             "2",
-			},
-			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
-					{"uuid":"GPU-1","product_model":"Annotation-T4","memory_mib":15360,"healthy":true,"minor_number":3},
-					{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":true,"minor_number":0}
-				]`,
-			},
+	cases := []struct {
+		name                  string
+		healthy               bool
+		allocation            string
+		wantAvailable         v1.DeviceResourcePool
+		wantAvailableQuantity float64
+	}{
+		{
+			name:                  "healthy allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
 		},
-		Status: corev1.NodeStatus{
-			Allocatable: corev1.ResourceList{
-				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
-				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
-				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
-			},
+		{
+			name:                  "unhealthy allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
+		},
+		{
+			name:                  "healthy idle",
+			healthy:               true,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "unhealthy idle",
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "healthy partially allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
+		},
+		{
+			name:                  "unhealthy partially allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
 		},
 	}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "infer-1",
-			Namespace: "default",
-			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
-					{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}
-				]`,
-			},
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "gpu-node",
-		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
-		},
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+						plugin.NvidiaGPUCountResource:             "2",
+					},
+					Annotations: map[string]string{
+						resourceparser.NeutreeAcceleratorDevicesAnnotation: fmt.Sprintf(`[
+							{"uuid":"GPU-1","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":3},
+							{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":0}
+						]`, testCase.healthy, testCase.healthy),
+					},
+				},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{
+						corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+						corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+						plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
+					},
+				},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "infer-1",
+					Namespace: "default",
+					Annotations: map[string]string{
+						resourceparser.NeutreeAcceleratorAllocationsAnnotation: testCase.allocation,
+					},
+				},
+				Spec:   corev1.PodSpec{NodeName: "gpu-node"},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}
+
+			ctrClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, pod).Build()
+			client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+			})
+
+			nodes, err := client.ListNodes(context.Background(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			require.Len(t, nodes[0].Status.Devices, 2)
+			device := nodes[0].Status.Devices[0]
+			assert.Equal(t, "GPU-1", device.UUID)
+			assert.Equal(t, "Tesla-T4", device.Product)
+			assert.Equal(t, testCase.healthy, device.Health)
+			assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, device.Allocatable)
+			assert.Equal(t, &testCase.wantAvailable, device.Available)
+			assert.Equal(t, "GPU-2", nodes[0].Status.Devices[1].UUID)
+			assert.Equal(t, "Tesla-T4", nodes[0].Status.Devices[1].Product)
+			assert.Equal(t, testCase.healthy, nodes[0].Status.Devices[1].Health)
+			assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Available)
+			require.NotNil(t, device.Order)
+			assert.Equal(t, 1, *device.Order)
+			require.NotNil(t, nodes[0].Status.Devices[1].Order)
+			assert.Equal(t, 0, *nodes[0].Status.Devices[1].Order)
+
+			for index, info := range []*v1.ResourceInfo{nodes[0].Status.Allocatable, nodes[0].Status.Available} {
+				wantQuantity := float64(2)
+				wantVirtualization := &v1.AcceleratorVirtualizationResource{MemoryMiB: 30720, CoreUnits: 200}
+				if index == 1 {
+					wantQuantity = testCase.wantAvailableQuantity
+					wantVirtualization = &v1.AcceleratorVirtualizationResource{
+						MemoryMiB: 15360 + float64(testCase.wantAvailable.MemoryMiB),
+						CoreUnits: 100 + float64(testCase.wantAvailable.CoreUnits),
+					}
+				}
+				group := info.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+				require.NotNil(t, group)
+				assert.Equal(t, wantQuantity, group.Quantity)
+				assert.Equal(t, wantQuantity, group.ProductGroups["Tesla-T4"])
+				product := group.Products["Tesla-T4"]
+				require.NotNil(t, product)
+				assert.Equal(t, wantQuantity, product.Quantity)
+				assert.Equal(t, wantVirtualization, product.Virtualization)
+			}
+			metadata := nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+			require.NotNil(t, metadata)
+			require.NotNil(t, metadata.Products["Tesla-T4"])
+			assert.Equal(t, float64(15360), metadata.Products["Tesla-T4"].MemoryTotalMiB)
+		})
 	}
-
-	ctrClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(node, pod).
-		Build()
-	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
-		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
-	})
-
-	nodes, err := client.ListNodes(context.Background(), nil)
-
-	require.NoError(t, err)
-	require.Len(t, nodes, 1)
-	require.Len(t, nodes[0].Status.Devices, 2)
-	require.Equal(t, "Tesla-T4", nodes[0].Status.Devices[0].Product)
-	require.Equal(t, "Tesla-T4", nodes[0].Status.Devices[1].Product)
-	require.Equal(t, int64(0), nodes[0].Status.Devices[0].Available.MemoryMiB)
-	require.Equal(t, int64(15360), nodes[0].Status.Devices[1].Available.MemoryMiB)
-	require.NotNil(t, nodes[0].Status.Devices[0].Order)
-	require.Equal(t, 1, *nodes[0].Status.Devices[0].Order)
-	require.NotNil(t, nodes[0].Status.Devices[1].Order)
-	require.Equal(t, 0, *nodes[0].Status.Devices[1].Order)
-	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(2), allocatable.Quantity)
-	require.Equal(t, float64(30720), allocatable.Products["Tesla-T4"].Virtualization.MemoryMiB)
-	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(1), available.Quantity)
-	require.Equal(t, float64(1), available.ProductGroups["Tesla-T4"])
-	require.Equal(t, float64(1), available.Products["Tesla-T4"].Quantity)
-	require.Equal(t, float64(15360), available.Products["Tesla-T4"].Virtualization.MemoryMiB)
 }
 
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQuantity(t *testing.T) {

@@ -497,11 +497,6 @@ func buildKubernetesNeutreeAcceleratorResources(
 			CoreUnits: nonNegativeInt64(allocatable.CoreUnits - used.coreUnits),
 		}
 
-		if !device.healthy {
-			allocatable = &v1.DeviceResourcePool{}
-			available = &v1.DeviceResourcePool{}
-		}
-
 		deviceResources = append(deviceResources, &v1.DeviceResource{
 			UUID:        device.uuid,
 			Product:     string(product),
@@ -511,10 +506,6 @@ func buildKubernetesNeutreeAcceleratorResources(
 			Allocatable: allocatable,
 			Available:   available,
 		})
-
-		if !device.healthy {
-			continue
-		}
 
 		addKubernetesNeutreeProductResource(allocatableGroup, product, 1, allocatable)
 		var availablePool *v1.DeviceResourcePool
