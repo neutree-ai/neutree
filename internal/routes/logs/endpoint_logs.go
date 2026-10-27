@@ -280,7 +280,7 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 			klog.Errorf("Failed to stream logs: %v", streamErr)
 
 			// Gin stages streaming headers until the first write, so acquisition errors can still return JSON.
-			if cluster.Spec.Type == v1.KubernetesClusterType && !c.Writer.Written() {
+			if !c.Writer.Written() {
 				headers := c.Writer.Header()
 				headers.Del("Content-Type")
 				headers.Del("Content-Disposition")

@@ -1062,6 +1062,59 @@ func TestHandleGetLogs_SSHCluster_Success(t *testing.T) {
 	mockStorage.AssertExpectations(t)
 }
 
+func TestHandleGetLogs_SSHCluster_StreamError(test *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name     string
+		response *http.Response
+		err      error
+		message  string
+	}{
+		{name: "connection error", err: errors.New("timeout"), message: "failed to fetch logs: timeout"},
+		{
+			name: "upstream error", message: "Ray logs API returned status 500",
+			response: &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader("unavailable"))},
+		},
+	}
+	for _, testCase := range tests {
+		test.Run(testCase.name, func(test *testing.T) {
+			store := mocks.NewMockStorage(test)
+			httpClient := utilmocks.NewMockHTTPClient(test)
+			endpoint := v1.Endpoint{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "test-endpoint"},
+				Spec:     &v1.EndpointSpec{Cluster: "test-cluster"},
+			}
+			cluster := v1.Cluster{
+				Metadata: &v1.Metadata{Workspace: "default", Name: "test-cluster"},
+				Spec:     &v1.ClusterSpec{Type: v1.SSHClusterType},
+				Status:   &v1.ClusterStatus{DashboardURL: "http://ray-dashboard:8265"},
+			}
+			store.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil).Once()
+			store.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Once()
+			appsResponse := `{"applications":{"default_test-endpoint":{"deployments":{"Backend":{"replicas":[{"replica_id":"replica-1","actor_id":"actor-1"}]}}}}}`
+			httpClient.On("Get", "http://ray-dashboard:8265/api/serve/applications/").Return(&http.Response{
+				StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(appsResponse)),
+			}, nil).Once()
+			httpClient.On("Get", "http://ray-dashboard:8265/api/v0/logs/file?actor_id=actor-1&suffix=err&lines=1000&format=text").
+				Return(testCase.response, testCase.err).Once()
+			router := gin.New()
+			router.GET("/api/v1/endpoints/:workspace/:name/logs/:replica_id/:log_type",
+				handleGetLogs(&Dependencies{Storage: store, HTTPClient: httpClient}))
+			request := httptest.NewRequest(http.MethodGet,
+				"/api/v1/endpoints/default/test-endpoint/logs/replica-1/stderr?download=true", nil)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(test, http.StatusInternalServerError, recorder.Code)
+			assert.JSONEq(test, fmt.Sprintf(`{"error":%q}`, testCase.message), recorder.Body.String())
+			assert.Equal(test, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+			assert.Empty(test, recorder.Header().Get("Content-Disposition"))
+			assert.Empty(test, recorder.Header().Get("Transfer-Encoding"))
+		})
+	}
+}
+
 func TestHandleGetLogs_K8sCluster_Success(t *testing.T) {
 	mockStorage := new(mocks.MockStorage)
 	mockK8sClient := utilmocks.NewMockK8sClient(t)
