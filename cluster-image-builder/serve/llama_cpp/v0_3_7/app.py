@@ -12,14 +12,15 @@ from ray import serve
 from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
 from llama_cpp.server.model import LlamaProxy
-from llama_cpp.server.app import create_chat_completion, create_completion
+from llama_cpp.server.app import create_chat_completion, create_completion, router as native_router
+from llama_cpp.server.types import CreateChatCompletionRequest, CreateCompletionRequest, CreateEmbeddingRequest
 
 from fastapi.middleware.cors import CORSMiddleware
 from starlette_context.plugins import RequestIdPlugin
@@ -42,6 +43,29 @@ from serve._utils.serve_errors import (
 
 
 _WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
+
+
+def _native_error_response(exc: Exception, payload, where: str):
+    if isinstance(exc, RequestInputError):
+        return backend_error(exc, where)
+    try:
+        if isinstance(exc, HTTPException):
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+        try:
+            if "messages" in payload:
+                body = CreateChatCompletionRequest(**payload)
+            elif "prompt" in payload:
+                body = CreateCompletionRequest(**payload)
+            else:
+                body = CreateEmbeddingRequest(**payload)
+        except Exception:
+            body = None
+        endpoint = create_chat_completion if isinstance(body, CreateChatCompletionRequest) else create_completion
+        route = next(route for route in native_router.routes if route.endpoint is endpoint)
+        status_code, detail = route.error_message_wrapper(error=exc, body=body)
+        return JSONResponse({"error": detail}, status_code=status_code)
+    except Exception as mapping_error:
+        return backend_error(mapping_error, f"{where} error formatting")
 
 
 async def _stream_chunks(chunks):
@@ -219,14 +243,17 @@ class Backend:
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
 
     def _to_wire_response(self, result: Any) -> Dict[str, Any]:
-        if isinstance(result, JSONResponse):
-            content, status_code = json.loads(result.body), result.status_code
-        else:
-            content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
-            status_code = 200
-        if status_code == 200 and isinstance(content, dict) and "error" in content:
-            status_code = stream_error_status(content["error"])
-        json.dumps(content, allow_nan=False)
+        try:
+            if isinstance(result, JSONResponse):
+                content, status_code = json.loads(result.body), result.status_code
+            else:
+                content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+                status_code = 200
+            if status_code == 200 and isinstance(content, dict) and "error" in content:
+                status_code = stream_error_status(content["error"])
+            json.dumps(content, allow_nan=False)
+        except Exception as exc:
+            content, status_code = backend_error(exc, "response serialization"), 500
         return {_WIRE_RESPONSE_MARKER: True, "content": content, "status_code": status_code}
 
     async def generate(self, payload: Any):
@@ -242,8 +269,9 @@ class Backend:
                 return _stream_chunks(response)
             return self._to_wire_response(response)
         except Exception as exc:
-            error = backend_error(exc, "generate")
-            return error_stream(error) if stream else self._to_wire_response(error)
+            if stream:
+                return error_stream(backend_error(exc, "generate"))
+            return self._to_wire_response(_native_error_response(exc, payload, "generate"))
 
     async def generate_embeddings(self, payload: Any):
         try:
@@ -253,7 +281,7 @@ class Backend:
             response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
             return self._to_wire_response(response)
         except Exception as exc:
-            return self._to_wire_response(backend_error(exc, "generate_embeddings"))
+            return self._to_wire_response(_native_error_response(exc, payload, "generate_embeddings"))
 
     async def show_available_models(self) -> Dict[str, Any]:
         try:

@@ -14,7 +14,8 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
 
@@ -22,15 +23,25 @@ class Result(BaseModel):
     value: str = "ok"
 
 
+class ErrorResponse(BaseModel):
+    object: str = "error"
+    message: str
+    type: str
+    param: Optional[str] = None
+    code: int
+
+
+class RequestModel(BaseModel):
+    stream: bool = False
+    max_tokens: int = Field(default=1, gt=0)
+
+
 @pytest.fixture
 def wrapper(monkeypatch):
     protocol = ModuleType("sglang.srt.entrypoints.openai.protocol")
-    def request_model(**payload):
-        if payload.get("bad_request"):
-            raise ValueError("invalid schema")
-        return payload
+    protocol.ErrorResponse = ErrorResponse
     for name in ("ChatCompletionRequest", "CompletionRequest", "EmbeddingRequest"):
-        setattr(protocol, name, request_model)
+        setattr(protocol, name, RequestModel)
     monkeypatch.setitem(sys.modules, protocol.__name__, protocol)
     source = Path(__file__).with_name("app.py")
     tree = ast.parse(source.read_text())
@@ -46,13 +57,13 @@ def wrapper(monkeypatch):
                 if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     method.decorator_list = []
             body.append(cls)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response", "_handle_request"}:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id in {"app", "_WIRE_RESPONSE_MARKER"} for n in node.targets):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
             body.append(copy.deepcopy(node))
-    namespace = dict(Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI, HTTPException=HTTPException, Request=Request, JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, logger=logging.getLogger("test.sglang"), json=json)
+    namespace = dict(Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI, HTTPException=HTTPException, Request=Request, RequestValidationError=RequestValidationError, ValidationError=ValidationError, JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, logger=logging.getLogger("test.sglang"), json=json)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
     for name in ("chat", "completion", "embedding"):
@@ -80,13 +91,11 @@ def test_success_is_plain_wire(wrapper, method):
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-@pytest.mark.parametrize("stage", ["init", "schema", "serving", "serialization"])
+@pytest.mark.parametrize("stage", ["init", "serving", "serialization"])
 def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage):
     ensure, payload = getattr(wrapper.backend, "_ensure_" + handler), {}
     if stage == "init":
         ensure.side_effect = RuntimeError("init failed")
-    elif stage == "schema":
-        payload["bad_request"] = True
     elif stage == "serving":
         ensure.return_value.handle_request.side_effect = ValueError("too long")
     else:
@@ -256,14 +265,12 @@ def test_stream_rpc_failure_is_json_500(wrapper, route):
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-@pytest.mark.parametrize("stage", ["init", "schema", "serving"])
+@pytest.mark.parametrize("stage", ["init", "serving"])
 def test_stream_start_is_contained_before_iterator(wrapper, method, handler, stage):
     payload = {"stream": True}
     ensure = getattr(wrapper.backend, "_ensure_" + handler)
     if stage == "init":
         ensure.side_effect = RuntimeError("init failed")
-    elif stage == "schema":
-        payload["bad_request"] = True
     else:
         ensure.return_value.handle_request.side_effect = ValueError("too long")
     frames = asyncio.run(collect(getattr(wrapper.backend, method)(payload)))
@@ -425,3 +432,44 @@ def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler,
         response = http.post("/chat", json={"stream": True})
         assert response.status_code == 500
         assert response.json() == expected
+
+
+@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding"), ("chat_completion_stream", "chat"), ("completion_stream", "completion")])
+@pytest.mark.parametrize("invalid_tokens", [0, "invalid", [1]])
+@pytest.mark.parametrize("handler_failure", [False, True])
+def test_request_schema_errors_match_native_http_validation(wrapper, method, handler, invalid_tokens, handler_failure):
+    native_app = FastAPI()
+
+    # SGLang v0.5.10 http_server.py:421-454: its HTTP validation contract.
+    @native_app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        # Ray has no HTTP route source context; retain FastAPI's actual field errors.
+        exc = RequestValidationError(exc.errors(), body=exc.body)
+        message, errors = str(exc), str(exc.errors())
+        if errors and errors != message:
+            message = f"{message} {errors}"
+        return JSONResponse({"object": "error", "message": message, "type": "Bad Request", "code": 400, "param": None}, status_code=400)
+
+    @native_app.post("/generate")
+    async def generate(request: RequestModel):
+        raise AssertionError("invalid request reached serving")
+
+    ensure = getattr(wrapper.backend, "_ensure_" + handler)
+    if handler_failure:
+        ensure.side_effect = RuntimeError("handler initialization failed")
+    payload = {"max_tokens": invalid_tokens}
+    if method.endswith("_stream"):
+        payload["stream"] = True
+    expected = TestClient(native_app).post("/generate", json=payload)
+    assert expected.status_code == 400
+    if method.endswith("_stream"):
+        frames = asyncio.run(collect(getattr(wrapper.backend, method)(payload)))
+        assert json.loads(frames[0].removeprefix("data:")) == {"error": expected.json()}
+        assert frames[-1] == "data: [DONE]\n\n"
+        assert frames.count("data: [DONE]\n\n") == 1
+    else:
+        wire = call(wrapper, method, payload)
+        assert wire["status_code"] == 400
+        assert wire["content"] == expected.json()
+    ensure.assert_not_called()
+    ensure.return_value.handle_request.assert_not_called()

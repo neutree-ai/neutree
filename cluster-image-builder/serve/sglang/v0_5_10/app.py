@@ -18,7 +18,9 @@ import logging
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette_context.middleware import RawContextMiddleware
 from starlette_context.plugins import RequestIdPlugin
@@ -110,6 +112,26 @@ class _FakeRawRequest:
 
     async def is_disconnected(self) -> bool:
         return False
+
+
+async def _handle_request(get_handler, request_type, payload):
+    try:
+        request = request_type(**payload)
+    except ValidationError as exc:
+        from sglang.srt.entrypoints.openai.protocol import ErrorResponse
+
+        # Match SGLang HTTP validation without importing its server module.
+        errors = [
+            {**error, "loc": ("body",) + error["loc"]}
+            for error in exc.errors(include_url=False)
+        ]
+        validation_error = RequestValidationError(errors, body=payload)
+        message, errors_text = str(validation_error), str(validation_error.errors())
+        if errors_text and errors_text != message:
+            message = f"{message} {errors_text}"
+        error = ErrorResponse(message=message, type="Bad Request", code=400)
+        return JSONResponse(content=error.model_dump(), status_code=400)
+    return await get_handler().handle_request(request, _FakeRawRequest())
 
 
 def _extract_serializable(result) -> Dict[str, Any]:
@@ -336,8 +358,8 @@ class Backend:
         try:
             from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
             is_streaming(payload)
-            result = await self._ensure_chat().handle_request(
-                ChatCompletionRequest(**{**payload, "stream": False}), _FakeRawRequest()
+            result = await _handle_request(
+                self._ensure_chat, ChatCompletionRequest, {**payload, "stream": False}
             )
             return _extract_serializable(result)
         except Exception as exc:
@@ -347,8 +369,8 @@ class Backend:
         try:
             from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
             is_streaming(payload)
-            result = await self._ensure_chat().handle_request(
-                ChatCompletionRequest(**{**payload, "stream": True}), _FakeRawRequest()
+            result = await _handle_request(
+                self._ensure_chat, ChatCompletionRequest, {**payload, "stream": True}
             )
             async for chunk in _iter_response_body(result):
                 yield chunk
@@ -360,8 +382,8 @@ class Backend:
         try:
             from sglang.srt.entrypoints.openai.protocol import CompletionRequest
             is_streaming(payload)
-            result = await self._ensure_completion().handle_request(
-                CompletionRequest(**{**payload, "stream": False}), _FakeRawRequest()
+            result = await _handle_request(
+                self._ensure_completion, CompletionRequest, {**payload, "stream": False}
             )
             return _extract_serializable(result)
         except Exception as exc:
@@ -371,8 +393,8 @@ class Backend:
         try:
             from sglang.srt.entrypoints.openai.protocol import CompletionRequest
             is_streaming(payload)
-            result = await self._ensure_completion().handle_request(
-                CompletionRequest(**{**payload, "stream": True}), _FakeRawRequest()
+            result = await _handle_request(
+                self._ensure_completion, CompletionRequest, {**payload, "stream": True}
             )
             async for chunk in _iter_response_body(result):
                 yield chunk
@@ -383,9 +405,7 @@ class Backend:
     async def embedding(self, payload: Dict[str, Any]) -> Any:
         try:
             from sglang.srt.entrypoints.openai.protocol import EmbeddingRequest
-            result = await self._ensure_embedding().handle_request(
-                EmbeddingRequest(**payload), _FakeRawRequest()
-            )
+            result = await _handle_request(self._ensure_embedding, EmbeddingRequest, payload)
             return _extract_serializable(result)
         except Exception as exc:
             return _extract_serializable(backend_error(exc, "embedding"))
