@@ -579,6 +579,7 @@ type MetricsManifestVariables struct {
 	VirtualizationMetricsScrapeTargets []metricsScrapeTarget
 	EnableVMAgent                      bool
 	VMAgentConfig                      string
+	CacheScrapeConfig                  string
 
 	// InferenceDefaultPort is the port the neutree-inference job scrapes when an
 	// engine version does not declare a different one.

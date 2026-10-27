@@ -559,3 +559,12 @@ func sampleNames(samples []adapter.Sample) map[string]struct{} {
 
 	return result
 }
+
+func TestDCGMPowerIsNormalizedInWatts(t *testing.T) {
+	samples := nvidiaNormalizeAcceleratorSamples(adapter.CanonicalLabels{Node: "worker"}, `DCGM_FI_DEV_POWER_USAGE{UUID="GPU-1",gpu="0",modelName="Tesla-T4"} 42.5`)
+	require.Len(t, samples, 1)
+	require.Equal(t, "neutree_accelerator_power_usage_watts", samples[0].Name)
+	require.Equal(t, 42.5, samples[0].Value)
+	require.Equal(t, "worker", samples[0].Labels["node"])
+	require.Equal(t, "GPU-1", samples[0].Labels["accelerator_uuid"])
+}
