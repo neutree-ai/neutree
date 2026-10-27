@@ -2,9 +2,7 @@ package proxies
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,7 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -117,45 +115,32 @@ func handleTestConnectivity(deps *Dependencies) gin.HandlerFunc {
 		}
 
 		start := time.Now()
-		resp, err := client.Do(httpReq)
+		ids, err := utils.FetchModelIDs(client, httpReq)
 		latencyMs := time.Since(start).Milliseconds()
 
 		if err != nil {
 			c.JSON(http.StatusOK, testConnectivityResponse{
 				Success:   false,
 				LatencyMs: latencyMs,
-				Error:     "connection failed: " + err.Error(),
+				Error:     err.Error(),
 			})
 
 			return
 		}
 
-		defer resp.Body.Close()
+		models := make([]string, 0, len(ids))
 
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
-
-		if resp.StatusCode != http.StatusOK {
-			errMsg := fmt.Sprintf("upstream returned HTTP %d", resp.StatusCode)
-			if len(body) > 0 {
-				errMsg += ": " + string(body)
+		for _, id := range ids {
+			if id != "" {
+				models = append(models, id)
 			}
-
-			c.JSON(http.StatusOK, testConnectivityResponse{
-				Success:   false,
-				LatencyMs: latencyMs,
-				Error:     errMsg,
-			})
-
-			return
 		}
 
-		// Validate OpenAI-compatible model list response
-		models, parseErr := parseModelIDs(body)
-		if parseErr != nil {
+		if len(models) == 0 {
 			c.JSON(http.StatusOK, testConnectivityResponse{
 				Success:   false,
 				LatencyMs: latencyMs,
-				Error:     "upstream response is not a valid OpenAI-compatible model list: " + parseErr.Error(),
+				Error:     "upstream response is not a valid OpenAI-compatible model list: no models found in response",
 			})
 
 			return
@@ -226,12 +211,12 @@ func resolveModelsURL(deps *Dependencies, req *testConnectivityRequest) (string,
 		return "", fmt.Errorf("cluster %s not found for endpoint %s", ep.Spec.Cluster, endpointName)
 	}
 
-	scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+	serviceURL, err := utils.FormatServiceURL(&clusters[0], ep)
 	if err != nil {
 		return "", fmt.Errorf("failed to get cluster serve address: %w", err)
 	}
 
-	return fmt.Sprintf("%s://%s:%d/%s/%s/v1/models", scheme, host, port, workspace, endpointName), nil
+	return serviceURL + "/v1/models", nil
 }
 
 // backfillAuthCredential fetches the stored external endpoint and backfills
@@ -298,40 +283,4 @@ func backfillAuthCredential(c *gin.Context, deps *Dependencies, req *testConnect
 			return
 		}
 	}
-}
-
-// parseModelIDs validates and extracts model IDs from an OpenAI-compatible /models response.
-// Returns error if body is not valid JSON, missing "data" array, or contains no models.
-func parseModelIDs(body []byte) ([]string, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-
-	dataRaw, ok := raw["data"]
-	if !ok {
-		return nil, fmt.Errorf("missing \"data\" field")
-	}
-
-	var data []struct {
-		ID string `json:"id"`
-	}
-
-	if err := json.Unmarshal(dataRaw, &data); err != nil {
-		return nil, fmt.Errorf("\"data\" is not a valid array: %w", err)
-	}
-
-	ids := make([]string, 0, len(data))
-
-	for _, m := range data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
-		}
-	}
-
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("no models found in response")
-	}
-
-	return ids, nil
 }

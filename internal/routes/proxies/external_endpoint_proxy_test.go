@@ -116,6 +116,35 @@ func TestHandleTestConnectivity(t *testing.T) {
 			wantErrContain: "no models found",
 		},
 		{
+			name: "mixed empty and missing ids retain order duplicates and whitespace",
+			mockServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprint(w, `{"data":[{"id":"b"},{"id":""},{},{"id":null},null,{"id":" b "},{"id":"b"}]}`)
+				}))
+			},
+			wantHTTPStatus: http.StatusOK,
+			wantSuccess:    true,
+			wantModels:     []string{"b", " b ", "b"},
+		},
+		{
+			name: "all empty ids are rejected",
+			mockServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = fmt.Fprint(w, `{"data":[{"id":""},{"id":""}]}`)
+				}))
+			},
+			wantHTTPStatus: http.StatusOK,
+			wantErrContain: "no models found",
+		},
+		{
+			name: "empty body is rejected",
+			mockServer: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+			},
+			wantHTTPStatus: http.StatusOK,
+			wantErrContain: "invalid JSON",
+		},
+		{
 			name: "connection refused",
 			body: `{"upstream":{"url":"http://127.0.0.1:1"}}`,
 			// port 1 should be unreachable
@@ -204,6 +233,7 @@ func TestHandleTestConnectivityEndpointRef(t *testing.T) {
 		return len(opt.Filters) == 2
 	})).Return([]v1.Endpoint{
 		{
+			Metadata: &v1.Metadata{Workspace: "test-ws", Name: "my-endpoint"},
 			Spec: &v1.EndpointSpec{
 				Cluster: "my-cluster",
 			},
@@ -434,64 +464,6 @@ func TestHandleTestConnectivityCredentialBackfill(t *testing.T) {
 			assert.Equal(t, tt.wantAuthHeader, receivedAuth)
 
 			mockStorage.AssertExpectations(t)
-		})
-	}
-}
-
-func TestParseModelIDs(t *testing.T) {
-	tests := []struct {
-		name       string
-		body       string
-		want       []string
-		wantErr    bool
-		errContain string
-	}{
-		{
-			name: "valid response",
-			body: `{"data":[{"id":"model-a"},{"id":"model-b"}]}`,
-			want: []string{"model-a", "model-b"},
-		},
-		{
-			name:       "empty data",
-			body:       `{"data":[]}`,
-			wantErr:    true,
-			errContain: "no models found",
-		},
-		{
-			name:       "invalid json",
-			body:       `not json`,
-			wantErr:    true,
-			errContain: "invalid JSON",
-		},
-		{
-			name:       "missing data field",
-			body:       `{"object":"list"}`,
-			wantErr:    true,
-			errContain: "missing \"data\" field",
-		},
-		{
-			name: "skip empty ids",
-			body: `{"data":[{"id":"model-a"},{"id":""}]}`,
-			want: []string{"model-a"},
-		},
-		{
-			name:       "all empty ids",
-			body:       `{"data":[{"id":""},{"id":""}]}`,
-			wantErr:    true,
-			errContain: "no models found",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseModelIDs([]byte(tt.body))
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errContain)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.want, got)
-			}
 		})
 	}
 }
