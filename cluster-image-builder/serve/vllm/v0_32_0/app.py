@@ -21,7 +21,7 @@ from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.v1.engine.async_llm import AsyncLLM
 # v0.32.0 layout: error protocol lives under entrypoints.serve.engine, and
 # OpenAIServingRender was replaced by vllm.renderers.online_renderer.OnlineRenderer.
-from vllm.entrypoints.chat_utils import ChatTemplateConfig, load_chat_template
+from vllm.renderers.chat_utils import ChatTemplateConfig, load_chat_template
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.entrypoints.serve.engine.protocol import ErrorResponse, ErrorInfo
