@@ -224,7 +224,7 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 		case v1.SSHClusterType:
 			filenameSuffix = logType
 		case v1.KubernetesClusterType:
-			options, err = prepareK8sLogOptions(c, c.Request.Context(), cluster, deps.K8sClient, endpoint, replicaID, logType, lines)
+			options, err = prepareK8sLogOptions(c, cluster, deps.K8sClient, endpoint, replicaID, logType, lines)
 			if err != nil {
 				klog.Errorf("Failed to prepare Kubernetes logs: %v", err)
 
@@ -267,7 +267,7 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 		case v1.SSHClusterType:
 			streamErr = streamRayLogs(c, cluster, deps.HTTPClient, workspace, name, replicaID, logType, lines)
 		case v1.KubernetesClusterType:
-			streamErr = streamK8sLogs(c, cluster, deps.K8sClient, endpoint, replicaID, options)
+			streamErr = streamK8sLogs(c, cluster, deps.K8sClient, replicaID, options)
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("unsupported cluster type: %s", cluster.Spec.Type),
@@ -278,8 +278,23 @@ func handleGetLogs(deps *Dependencies) gin.HandlerFunc {
 
 		if streamErr != nil {
 			klog.Errorf("Failed to stream logs: %v", streamErr)
-			// Note: Cannot return JSON error after streaming has started
-			// Connection will be terminated
+
+			// Gin stages streaming headers until the first write, so acquisition errors can still return JSON.
+			if cluster.Spec.Type == v1.KubernetesClusterType && !c.Writer.Written() {
+				headers := c.Writer.Header()
+				headers.Del("Content-Type")
+				headers.Del("Content-Disposition")
+				headers.Del("Transfer-Encoding")
+
+				status := http.StatusInternalServerError
+				if apierrors.IsBadRequest(streamErr) {
+					status = http.StatusBadRequest
+				} else if apierrors.IsNotFound(streamErr) {
+					status = http.StatusNotFound
+				}
+
+				c.JSON(status, gin.H{"error": streamErr.Error()})
+			}
 		}
 	}
 }
@@ -634,16 +649,14 @@ func streamRayLogs(c *gin.Context, cluster *v1.Cluster, httpClient util.HTTPClie
 }
 
 // streamK8sLogs streams current or previous logs from a regular or init container.
-func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint,
+func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient,
 	replicaID string, options *corev1.PodLogOptions,
 ) error {
-	_ = endpoint // Reserved for future use
-
 	ctx := c.Request.Context()
 
 	stream, err := k8sClient.GetPodLogs(ctx, cluster, util.ClusterNamespace(cluster), replicaID, options)
 	if err != nil {
-		return fmt.Errorf("failed to stream logs: %v", err)
+		return fmt.Errorf("failed to stream logs: %w", err)
 	}
 	defer stream.Close()
 
@@ -655,7 +668,7 @@ func streamK8sLogs(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient
 	return nil
 }
 
-func prepareK8sLogOptions(c *gin.Context, ctx context.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint,
+func prepareK8sLogOptions(c *gin.Context, cluster *v1.Cluster, k8sClient util.K8sClient, endpoint *v1.Endpoint,
 	replicaID, logType string, lines int64,
 ) (*corev1.PodLogOptions, error) {
 	if logType != k8sLogType {
@@ -667,7 +680,7 @@ func prepareK8sLogOptions(c *gin.Context, ctx context.Context, cluster *v1.Clust
 		return nil, apierrors.NewBadRequest(fmt.Sprintf("previous must be a boolean: %v", err))
 	}
 
-	pod, err := k8sClient.GetPod(ctx, cluster, util.ClusterNamespace(cluster), replicaID)
+	pod, err := k8sClient.GetPod(c.Request.Context(), cluster, util.ClusterNamespace(cluster), replicaID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod %s: %w", replicaID, err)
 	}

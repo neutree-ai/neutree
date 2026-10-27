@@ -10,13 +10,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -788,13 +791,6 @@ func TestStreamK8sLogs_Success(t *testing.T) {
 		},
 	}
 
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
-	}
-
 	lines := int64(1000)
 	options := &corev1.PodLogOptions{Container: "serve", TailLines: &lines, Timestamps: true}
 	logContent := "k8s log line 1\nk8s log line 2\n"
@@ -803,7 +799,7 @@ func TestStreamK8sLogs_Success(t *testing.T) {
 
 	ginContext, recorder := createLogsMockContext(http.MethodGet, "/logs")
 
-	err := streamK8sLogs(ginContext, cluster, mockK8sClient, endpoint, "pod-123", options)
+	err := streamK8sLogs(ginContext, cluster, mockK8sClient, "pod-123", options)
 
 	assert.NoError(t, err)
 	assert.Equal(t, logContent, recorder.Body.String())
@@ -847,46 +843,63 @@ func TestPrepareK8sLogOptions_NoContainers(t *testing.T) {
 
 	ginContext, _ := createLogsMockContext(http.MethodGet, "/logs")
 
-	options, err := prepareK8sLogOptions(ginContext, ginContext.Request.Context(), cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
+	options, err := prepareK8sLogOptions(ginContext, cluster, mockK8sClient, endpoint, "pod-123", "logs", 1000)
 
 	assert.Nil(t, options)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no containers found")
 }
 
-func TestStreamK8sLogs_GetPodLogsError(t *testing.T) {
-	mockK8sClient := utilmocks.NewMockK8sClient(t)
-
-	cluster := &v1.Cluster{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-cluster",
+func TestHandleK8sLogs_GetPodLogsError(test *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{
+			name: "previous unavailable", err: apierrors.NewBadRequest("previous terminated container serve not found"),
+			status: http.StatusBadRequest,
 		},
-		Spec: &v1.ClusterSpec{
-			Type: v1.KubernetesClusterType,
+		{
+			name: "pod removed during acquisition", err: apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "pod-123"),
+			status: http.StatusNotFound,
 		},
+		{name: "upstream unavailable", err: errors.New("kubernetes unavailable"), status: http.StatusInternalServerError},
 	}
+	for _, testCase := range tests {
+		test.Run(testCase.name, func(test *testing.T) {
+			router, kubernetesClient := newK8sLogsTestRouter(test)
+			kubernetesClient.On("GetPod", mock.Anything, mock.Anything, mock.Anything, "pod-123").Return(endpointLogTestPod(), nil).Once()
+			kubernetesClient.On("GetPodLogs", mock.Anything, mock.Anything, mock.Anything, "pod-123", mock.Anything).
+				Return(nil, testCase.err).Once()
+			request := httptest.NewRequest(http.MethodGet,
+				"/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs?container=serve&previous=true&download=true", nil)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
 
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "default",
-			Name:      "test-endpoint",
-		},
+			require.Equal(test, testCase.status, recorder.Code)
+			assert.JSONEq(test, fmt.Sprintf(`{"error":%q}`, "failed to stream logs: "+testCase.err.Error()), recorder.Body.String())
+			assert.Equal(test, "application/json; charset=utf-8", recorder.Header().Get("Content-Type"))
+			assert.Empty(test, recorder.Header().Get("Content-Disposition"))
+			assert.Empty(test, recorder.Header().Get("Transfer-Encoding"))
+		})
 	}
+}
 
-	lines := int64(1000)
-	options := &corev1.PodLogOptions{Container: "serve", TailLines: &lines, Timestamps: true}
-	mockK8sClient.On("GetPodLogs", mock.Anything, cluster, mock.Anything, "pod-123", options).
-		Return(nil, errors.New("failed to get logs")).Once()
+func TestHandleK8sLogs_StreamErrorAfterWrite(test *testing.T) {
+	router, kubernetesClient := newK8sLogsTestRouter(test)
+	kubernetesClient.On("GetPod", mock.Anything, mock.Anything, mock.Anything, "pod-123").Return(endpointLogTestPod(), nil).Once()
+	stream := io.NopCloser(io.MultiReader(strings.NewReader("partial log\n"), iotest.ErrReader(errors.New("stream interrupted"))))
+	kubernetesClient.On("GetPodLogs", mock.Anything, mock.Anything, mock.Anything, "pod-123", mock.Anything).Return(stream, nil).Once()
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/endpoints/default/test-endpoint/logs/pod-123/logs?container=serve&previous=true&download=true", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
 
-	ginContext, recorder := createLogsMockContext(http.MethodGet, "/logs")
-
-	err := streamK8sLogs(ginContext, cluster, mockK8sClient, endpoint, "pod-123", options)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get logs")
-	assert.False(t, ginContext.Writer.Written())
-	assert.Empty(t, recorder.Body.String())
+	assert.Equal(test, http.StatusOK, recorder.Code)
+	assert.Equal(test, "partial log\n", recorder.Body.String())
+	assert.Equal(test, "text/plain; charset=utf-8", recorder.Header().Get("Content-Type"))
+	assert.Contains(test, recorder.Header().Get("Content-Disposition"), "serve-previous.log")
 }
 
 // ===== Tests for handleGetLogSources with mock HTTP client =====
