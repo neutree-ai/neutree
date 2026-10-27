@@ -31,7 +31,7 @@ spec:
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
-            - job
+            - job-wr
             - {{ include "neutree.fullname" . }}-migration-job-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
@@ -39,7 +39,7 @@ spec:
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
-            - job
+            - job-wr
             - {{ include "neutree.fullname" . }}-kong-pre-upgrade-migrations-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
@@ -167,7 +167,7 @@ spec:
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
-            - job
+            - job-wr
             - {{ include "neutree.fullname" . }}-migration-job-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
@@ -175,7 +175,7 @@ spec:
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
-            - job
+            - job-wr
             - {{ include "neutree.fullname" . }}-kong-init-migrations-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
@@ -757,7 +757,7 @@ spec:
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
           args:
-            - job
+            - job-wr
             - {{ include "neutree.fullname" . }}-migration-job-{{ .Release.Revision }}
             - -n
             - {{ .Release.Namespace }}
