@@ -544,6 +544,27 @@ func TestHAMiComponentKubeSchedulerVersionUsesDetectedClusterMinor(t *testing.T)
 		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
 }
 
+func TestHAMiComponentKubeSchedulerVersionUsesDetectedVersionWhenMinorIsUnmapped(t *testing.T) {
+	originalGetKubernetesServerVersion := getKubernetesServerVersion
+	getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
+		return &kubeversion.Info{
+			Major:      "1",
+			Minor:      "40",
+			GitVersion: "v1.40.0",
+		}, nil
+	}
+	t.Cleanup(func() {
+		getKubernetesServerVersion = originalGetKubernetesServerVersion
+	})
+	component := NewHAMiComponent(newTestCluster(), "neutree-system", "registry.example.com/neutree",
+		"image-pull-secret", v1.KubernetesClusterConfig{}, newHAMiFakeClient(t))
+
+	values := component.buildChartValues(NodeScopePlan{})
+
+	assert.Equal(t, "v1.40.0",
+		nestedMap(t, values, "scheduler", "kubeScheduler", "image")["tag"])
+}
+
 func TestHAMiPreflightRejectsUnsupportedClusterVersion(t *testing.T) {
 	cluster := newTestCluster()
 	cluster.Spec.Version = "v1.0.9"
