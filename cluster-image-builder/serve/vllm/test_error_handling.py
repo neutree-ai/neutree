@@ -6,12 +6,11 @@ import asyncio
 import copy
 import json
 import logging
-import sys
 from pathlib import Path
 from http import HTTPStatus
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, Request
@@ -75,38 +74,17 @@ class TemplateSyntaxError(TemplateError):
     pass
 
 
-def upstream_error(exc):
-    missing = isinstance(exc, NativeNotFoundError)
-    return ErrorResponse(error=ErrorInfo(
-        message=str(exc), type="NotFoundError" if missing else "BadRequestError",
-        code=404 if missing else 400, param=getattr(exc, "parameter", None),
-    ))
-
 
 @pytest.fixture(params=("v0_24_0", "v0_31_0"))
-def wrapper(request, monkeypatch):
+def wrapper(request):
     app_path = Path(__file__).parent / request.param / "app.py"
     tree = ast.parse(app_path.read_text())
     names = {"generate", "generate_embeddings", "rerank", "show_available_models", "_to_wire_response", "_to_wire_stream"}
-    native_error_module = (
-        "vllm.entrypoints.serve.utils.error_response" if request.param == "v0_24_0"
-        else "vllm.entrypoints.serve.exception_handling.error_response"
-    )
-    factory = Mock(side_effect=upstream_error)
-    for path in ("vllm", "vllm.entrypoints", "vllm.entrypoints.serve", "vllm.entrypoints.serve.utils",
-                 "vllm.entrypoints.serve.exception_handling", native_error_module, "vllm.exceptions"):
-        module = ModuleType(path)
-        module.__path__ = []
-        monkeypatch.setitem(sys.modules, path, module)
-    sys.modules[native_error_module].create_error_response = factory
-    sys.modules["vllm.exceptions"].VLLMNotFoundError = NativeNotFoundError
-    sys.modules["vllm.exceptions"].VLLMClientError = NativeClientError
-    sys.modules["vllm.exceptions"].GracefulHTTPError = NativeGracefulHTTPError
     validation_base = ValueError if request.param == "v0_24_0" else NativeClientError
     validation_error = type("NativeValidationError", (validation_base,), {"parameter": "input_tokens"})
     body = []
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module in {"serve._utils.serve_errors", "vllm.exceptions"}:
+        if isinstance(node, ast.ImportFrom) and node.module == "serve._utils.serve_errors":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id in {"_WIRE_RESPONSE_MARKER", "app"} for target in node.targets
@@ -116,7 +94,7 @@ def wrapper(request, monkeypatch):
               and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler"):
             body.append(copy.deepcopy(node))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "_result_to_response", "_stream_error_status", "_stream_error_response", "_backend_error",
+            "_result_to_response",
         }:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
@@ -143,8 +121,7 @@ def wrapper(request, monkeypatch):
     backend.openai_serving_embedding = AsyncMock(return_value=Model())
     backend.openai_serving_score = AsyncMock(return_value=Model())
     backend._ensure_models = AsyncMock(return_value=SimpleNamespace(show_available_models=AsyncMock(return_value=Model())))
-    return SimpleNamespace(namespace=namespace, backend=backend, factory=factory,
-                           validation_error=validation_error, native_error_module=native_error_module)
+    return SimpleNamespace(namespace=namespace, backend=backend, validation_error=validation_error)
 
 
 def call_backend(wrapper, method, payload=None):
@@ -158,7 +135,6 @@ def test_backend_success_returns_plain_wire(wrapper, method):
     assert wire["status_code"] == 200
     assert wire["content"] == {"value": "ok"}
     json.dumps(wire)
-    wrapper.factory.assert_not_called()
 
 
 @pytest.mark.parametrize("method,initializer", (
@@ -171,14 +147,13 @@ def test_lazy_initialization_exceptions_are_contained(wrapper, method, initializ
     wire = call_backend(wrapper, method)
     assert wire["status_code"] == 500
     assert wire["content"]["error"]["message"] == "Internal server error"
-    wrapper.factory.assert_not_called()
 
 
 @pytest.mark.parametrize("method,attribute", (
     ("generate", "openai_serving_chat"), ("generate_embeddings", "openai_serving_embedding"),
     ("rerank", "openai_serving_score"), ("show_available_models", "_ensure_models"),
 ))
-def test_serving_exception_preserves_upstream_error(wrapper, method, attribute):
+def test_escaping_serving_exception_is_neutree_error(wrapper, method, attribute):
     error = wrapper.validation_error("input too long")
     if method == "generate":
         target = wrapper.backend.openai_serving_chat.create_chat_completion
@@ -188,16 +163,17 @@ def test_serving_exception_preserves_upstream_error(wrapper, method, attribute):
         target = getattr(wrapper.backend, attribute)
     target.side_effect = error
     wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 400
-    assert wire["content"]["error"]["param"] == "input_tokens"
-    wrapper.factory.assert_called_once_with(error)
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
 def test_request_model_exception_is_contained(wrapper, method):
     wire = call_backend(wrapper, method, {"invalid_model": True})
-    assert wire["status_code"] == 400
-    assert wire["content"]["error"]["message"] == "request model rejected"
+    assert wire["status_code"] == 500
+    assert wire["content"]["error"]["message"] == "Internal server error"
 
 
 @pytest.mark.parametrize("payload", (None, [], "body", 1, True))
@@ -205,7 +181,6 @@ def test_non_mapping_backend_payload_is_contained(wrapper, payload):
     wire = asyncio.run(wrapper.backend.generate(payload))
     assert wire["status_code"] == 400
     assert "error" in wire["content"]
-    wrapper.factory.assert_not_called()
 
 
 @pytest.mark.parametrize("payload", ({"stream": "true"}, {"stream": "false"}, {"stream": 1}, {"stream": None}))
@@ -233,7 +208,6 @@ def test_wire_serialization_failure_is_contained(wrapper, method, error_type):
     wire = call_backend(wrapper, method)
     assert wire["status_code"] == 500
     assert wire["content"]["error"]["message"] == "Internal server error"
-    wrapper.factory.assert_not_called()
 
 
 @pytest.mark.parametrize("value", (float("nan"), float("inf")))
@@ -251,7 +225,6 @@ def test_wire_nonfinite_numbers_are_rejected_before_ray(wrapper, value, as_model
     assert wire["content"] == {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
-    wrapper.factory.assert_not_called()
     # The Controller's real encoder must accept the boundary's replacement error.
     JSONResponse(content=wire["content"], status_code=wire["status_code"])
 
@@ -264,7 +237,6 @@ def test_cancellation_still_propagates(wrapper, method, initializer):
     getattr(wrapper.backend, initializer).side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         call_backend(wrapper, method)
-    wrapper.factory.assert_not_called()
 
 
 def test_backend_streams_preserve_first_and_midstream_errors(wrapper):
@@ -274,7 +246,7 @@ def test_backend_streams_preserve_first_and_midstream_errors(wrapper):
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
     stream = call_backend(wrapper, "generate", {"stream": True})
     chunks = asyncio.run(collect(stream))
-    assert json.loads(chunks[0].removeprefix("data:"))["error"]["code"] == 400
+    assert json.loads(chunks[0].removeprefix("data:"))["error"]["code"] == 500
     assert chunks[-1] == "data: [DONE]\n\n"
 
     async def broken_stream():
@@ -284,7 +256,7 @@ def test_backend_streams_preserve_first_and_midstream_errors(wrapper):
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = broken_stream()
     chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
     assert chunks[0] == "data: first\n\n"
-    assert json.loads(chunks[1].removeprefix("data:"))["error"]["message"] == "midstream"
+    assert json.loads(chunks[1].removeprefix("data:"))["error"]["message"] == "Internal server error"
     assert chunks[2] == "data: [DONE]\n\n"
 
 
@@ -415,14 +387,17 @@ def test_backend_in_band_error_keeps_upstream_details(wrapper):
     ("generate", "_ensure_chat"), ("generate_embeddings", "_ensure_embedding"),
     ("rerank", "_ensure_score"), ("show_available_models", "_ensure_models"),
 ))
-def test_server_error_does_not_import_native_error_factory(wrapper, monkeypatch, method, initializer):
+@pytest.mark.parametrize("error_type", (RuntimeError, ValueError, TypeError, NativeNotFoundError))
+def test_escaping_errors_do_not_import_engine_helpers(wrapper, monkeypatch, method, initializer, error_type):
     original_import = builtins.__import__
-    def block_native_factory(name, *args, **kwargs):
-        if name == wrapper.native_error_module:
-            raise AssertionError("server errors must not load the engine error factory")
+    engine_imports = []
+    def block_engine_import(name, *args, **kwargs):
+        if name.startswith(("vllm", "sglang", "llama_cpp", "torch")):
+            engine_imports.append(name)
+            raise AssertionError("exception containment must not import engine helpers")
         return original_import(name, *args, **kwargs)
-    monkeypatch.setattr(builtins, "__import__", block_native_factory)
-    getattr(wrapper.backend, initializer).side_effect = RuntimeError("private engine failure")
+    monkeypatch.setattr(builtins, "__import__", block_engine_import)
+    getattr(wrapper.backend, initializer).side_effect = error_type("private engine failure")
 
     wire = call_backend(wrapper, method)
 
@@ -430,16 +405,15 @@ def test_server_error_does_not_import_native_error_factory(wrapper, monkeypatch,
     assert wire["content"] == {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
-    wrapper.factory.assert_not_called()
+    assert not engine_imports
 
 
-def test_native_not_found_keeps_404(wrapper):
+def test_escaping_native_not_found_is_neutree_error(wrapper):
     error = NativeNotFoundError("unknown native model")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
     wire = call_backend(wrapper, "generate")
-    assert wire["status_code"] == 404
-    assert wire["content"]["error"]["type"] == "NotFoundError"
-    wrapper.factory.assert_called_once_with(error)
+    assert wire["status_code"] == 500
+    assert wire["content"]["error"]["type"] == "InternalServerError"
 
 
 @pytest.mark.parametrize("stage", ("before_stream", "midstream"))
@@ -462,50 +436,48 @@ def test_server_stream_errors_use_neutral_error_without_native_factory(wrapper, 
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
     assert frames[-1] == "data: [DONE]\n\n"
-    wrapper.factory.assert_not_called()
 
 
-def test_native_error_factory_failure_uses_neutral_server_error(wrapper):
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = ValueError("bad input")
-    wrapper.factory.side_effect = RuntimeError("native mapper unavailable")
+@pytest.mark.parametrize("error_type", (ValueError, TypeError, TemplateError, TemplateSyntaxError, QueueOverflowError, MaxQueuedTokensError))
+@pytest.mark.parametrize("stage", ("call", "first", "midstream"))
+def test_escaping_stream_exceptions_are_neutree_errors(wrapper, error_type, stage):
+    error = error_type() if error_type in (QueueOverflowError, MaxQueuedTokensError) else error_type("private error")
+    async def chunks():
+        if stage == "midstream":
+            yield 'data: {"choices":[]}\n\n'
+        raise error
+        yield
+    target = wrapper.backend.openai_serving_chat.create_chat_completion
+    if stage == "call":
+        target.side_effect = error
+    else:
+        target.return_value = chunks()
+    async def collect():
+        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
+    frames = asyncio.run(collect())
+    assert json.loads(frames[-2].removeprefix("data:")) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    assert frames.count("data: [DONE]\n\n") == 1
 
+
+@pytest.mark.parametrize("status", (400, 404, 422, 429, 500, 503))
+def test_native_error_values_are_preserved_in_both_modes(wrapper, status):
+    result = ErrorResponse(error=ErrorInfo(message="native error details", type="NativeError", code=status, param="model"))
+    target = wrapper.backend.openai_serving_chat.create_chat_completion
+    target.return_value = result
     wire = call_backend(wrapper, "generate")
-
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "Internal server error"
-
-
-@pytest.mark.parametrize("error_type", (TemplateError, TemplateSyntaxError))
-def test_template_errors_preserve_original_native_response(wrapper, error_type):
-    error = error_type("invalid template")
-    expected = ErrorResponse(error=ErrorInfo(message="invalid template", type="BadRequestError", code=400))
-    wrapper.factory.side_effect = None
-    wrapper.factory.return_value = expected
-
-    result = wrapper.namespace["_backend_error"](error, "generate")
-
-    assert result is expected
-    wrapper.factory.assert_called_once_with(error)
-    assert wrapper.backend._to_wire_response(result)["status_code"] == 400
-
-
-@pytest.mark.parametrize("wrapper", ("v0_31_0",), indirect=True)
-@pytest.mark.parametrize("error_type", (QueueOverflowError, MaxQueuedTokensError))
-def test_queue_errors_preserve_original_native_503_response(wrapper, error_type):
-    error = error_type()
-    # These upstream exceptions carry HTTPStatus, not a bare int: the factory uses .value.
-    assert error.http_status is HTTPStatus.SERVICE_UNAVAILABLE
-    expected = ErrorResponse(error=ErrorInfo(
-        message=str(error), type=error.http_status.phrase, code=error.http_status.value,
-    ))
-    wrapper.factory.side_effect = None
-    wrapper.factory.return_value = expected
-
-    result = wrapper.namespace["_backend_error"](error, "generate")
-
-    assert result is expected
-    wrapper.factory.assert_called_once_with(error)
-    assert wrapper.backend._to_wire_response(result)["status_code"] == 503
+    assert wire["status_code"] == status
+    assert wire["content"] == result.model_dump(mode="json")
+    assert wrapper.namespace["_result_to_response"](wire).status_code == status
+    async def chunks():
+        yield f"data: {json.dumps(result.model_dump())}\n\n"
+        yield "data: [DONE]\n\n"
+    expected = [f"data: {json.dumps(result.model_dump())}\n\n", "data: [DONE]\n\n"]
+    target.return_value = chunks()
+    async def collect():
+        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
+    assert asyncio.run(collect()) == expected
 
 
 @pytest.mark.parametrize("value", (float("nan"), float("inf"), object()))
@@ -524,4 +496,3 @@ def test_stream_serialization_errors_are_server_errors(wrapper, value, midstream
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
     assert frames.count("data: [DONE]\n\n") == 1
-    wrapper.factory.assert_not_called()

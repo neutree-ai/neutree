@@ -46,7 +46,7 @@ def wrapper(monkeypatch):
                 if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     method.decorator_list = []
             body.append(cls)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response", "_backend_error", "_stream_error"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response"}:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id in {"app", "_WIRE_RESPONSE_MARKER"} for n in node.targets):
             body.append(copy.deepcopy(node))
@@ -92,20 +92,22 @@ def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage
     else:
         ensure.return_value.handle_request.return_value = {"value": object()}
     wire = call(wrapper, method, payload)
-    assert wire["status_code"] == (400 if stage in {"schema", "serving"} else 500)
-    if stage in {"schema", "serving"}:
-        assert wire["content"]["object"] == "error"
-    else:
-        assert wire["content"]["error"] == {"message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None}
+    assert wire["status_code"] == 500
+    assert wire["content"]["error"] == {"message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None}
     json.dumps(wire)
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-def test_backend_preserves_returned_http_status(wrapper, method, handler):
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = JSONResponse({"object": "error", "message": "not found", "type": "NotFound", "code": 404, "param": None}, status_code=404)
+@pytest.mark.parametrize("status", [400, 404, 503])
+def test_backend_preserves_returned_http_status(wrapper, method, handler, status):
+    native = {"object": "error", "message": "native error detail", "type": str(status), "code": status, "param": None}
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = JSONResponse(native, status_code=status)
     wire = call(wrapper, method)
-    assert wire["status_code"] == 404
-    assert wrapper.namespace["_to_json_response"](wire).status_code == 404
+    assert wire["status_code"] == status
+    assert wire["content"] == native
+    response = wrapper.namespace["_to_json_response"](wire)
+    assert response.status_code == status
+    assert json.loads(response.body) == native
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
@@ -117,8 +119,8 @@ def test_cancellation_unwinds(wrapper, method, handler):
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("when", ["before", "midstream"])
-@pytest.mark.parametrize("exc,status", [(RuntimeError("engine failed"), 500), (ValueError("bad request"), 400)])
-def test_stream_exception_is_native_error_and_done(wrapper, method, handler, when, exc, status):
+@pytest.mark.parametrize("exc", [RuntimeError("private engine failure"), ValueError("private validation failure"), HTTPException(429, "private HTTP failure")])
+def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, handler, when, exc):
     async def chunks():
         if when == "midstream":
             yield b'data: {"choices":[]}\n\n'
@@ -126,7 +128,10 @@ def test_stream_exception_is_native_error_and_done(wrapper, method, handler, whe
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
     assert frames[-1] == "data: [DONE]\n\n"
-    assert json.loads(frames[-2].removeprefix("data:"))["error"]["code"] == status
+    assert json.loads(frames[-2].removeprefix("data:")) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    assert frames.count("data: [DONE]\n\n") == 1
     if when == "midstream":
         assert frames[0] == 'data: {"choices":[]}\n\n'
 
@@ -262,14 +267,17 @@ def test_stream_start_is_contained_before_iterator(wrapper, method, handler, sta
     else:
         ensure.return_value.handle_request.side_effect = ValueError("too long")
     frames = asyncio.run(collect(getattr(wrapper.backend, method)(payload)))
-    assert json.loads(frames[0].removeprefix("data:"))["error"]["code"] == (500 if stage == "init" else 400)
+    assert json.loads(frames[0].removeprefix("data:")) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
     assert frames[-1] == "data: [DONE]\n\n"
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-def test_stream_native_error_response_is_preserved(wrapper, method, handler):
-    native = {"object": "error", "code": 429, "message": "busy", "type": "429", "param": None}
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = JSONResponse(native, status_code=429)
+@pytest.mark.parametrize("status", [400, 429, 503])
+def test_stream_native_error_response_is_preserved(wrapper, method, handler, status):
+    native = {"object": "error", "code": status, "message": "native failure detail", "type": str(status), "param": None}
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = JSONResponse(native, status_code=status)
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
     assert json.loads(frames[0].removeprefix("data:")) == {"error": native}
     assert frames[-1] == "data: [DONE]\n\n"
@@ -315,22 +323,36 @@ def test_response_http_status_is_authoritative(wrapper):
     assert wire["status_code"] == 429
 
 
-@pytest.mark.parametrize("exc,status,kind,message", [
-    (ValueError("bad request"), 400, "BadRequest", "bad request"),
-    (HTTPException(429, "busy"), 429, "429", "busy"),
-])
-def test_client_business_errors_keep_native_protocol(wrapper, exc, status, kind, message):
-    assert wrapper.namespace["_backend_error"](exc, "test") == {
-        "object": "error", "message": message, "type": kind, "code": status, "param": None,
-    }
-
-
-@pytest.mark.parametrize("exc", [RuntimeError("private server details"), HTTPException(503, "private server details")])
-def test_generic_server_error_uses_engine_neutral_shape(wrapper, exc):
-    error = wrapper.namespace["_backend_error"](exc, "test")
-    assert error == {"error": {
+@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
+@pytest.mark.parametrize("exc", [ValueError("private validation failure"), HTTPException(400, "private HTTP failure"), HTTPException(503, "private server failure")])
+def test_escaped_serving_errors_use_neutral_boundary(wrapper, method, handler, exc):
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.side_effect = exc
+    wire = call(wrapper, method)
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
+
+
+@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
+@pytest.mark.parametrize("exc", [HTTPException(400, "private HTTP failure"), HTTPException(503, "private server failure")])
+def test_escaped_stream_setup_errors_use_neutral_boundary(wrapper, method, handler, exc):
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.side_effect = exc
+    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
+    assert json.loads(frames[0].removeprefix("data:")) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
+def test_native_stream_error_frames_are_preserved(wrapper, method, handler):
+    frames = ['data: {"choices":[]}\n\n', 'data: {"error":{"object":"error","message":"native failure detail","type":"BadRequestError","code":400,"param":null}}\n\n', 'data: [DONE]\n\n']
+    async def chunks():
+        for frame in frames:
+            yield frame
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
+    assert asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True}))) == frames
 
 
 def test_server_error_path_never_imports_engine(wrapper):
@@ -345,11 +367,18 @@ def test_server_error_path_never_imports_engine(wrapper):
     assert wire["content"]["error"]["message"] == "Internal server error"
 
 
-def test_backend_stream_validation_uses_shared_request_error(wrapper):
-    wire = call(wrapper, "chat_completion", {"stream": "false"})
-    assert wire["status_code"] == 400
-    assert wire["content"]["error"]["code"] == 400
-    wrapper.backend._ensure_chat.assert_not_called()
+@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("chat_completion_stream", "chat"), ("completion_stream", "completion")])
+def test_backend_stream_validation_uses_shared_request_error(wrapper, method, handler):
+    if method.endswith("_stream"):
+        frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": "false"})))
+        error = json.loads(frames[0].removeprefix("data:"))
+        assert frames[-1] == "data: [DONE]\n\n"
+    else:
+        wire = call(wrapper, method, {"stream": "false"})
+        assert wire["status_code"] == 400
+        error = wire["content"]
+    assert error["error"]["code"] == 400
+    getattr(wrapper.backend, "_ensure_" + handler).assert_not_called()
 
 
 def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper):

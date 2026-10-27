@@ -5,28 +5,23 @@ import builtins
 import copy
 import json
 import logging
-import re
-import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import Any, Dict, Optional, AsyncGenerator
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import JSONResponse, StreamingResponse
-
-from serve._utils.serve_errors import RequestInputError, backend_error
 
 
 APP_PATH = Path(__file__).with_name("app.py")
 
 
 @pytest.fixture
-def wrapper(monkeypatch):
+def wrapper():
     tree, body = ast.parse(APP_PATH.read_text()), []
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env":
@@ -35,7 +30,7 @@ def wrapper(monkeypatch):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
             body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_filter_supported", "_result_to_response", "_stream_chunks", "_backend_error"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_filter_supported", "_result_to_response", "_stream_chunks"}:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
             cls = copy.deepcopy(node)
@@ -52,12 +47,7 @@ def wrapper(monkeypatch):
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(APP_PATH), "exec"), ns)
     backend = object.__new__(ns["Backend"])
     backend.model_settings, backend.model_id = object(), "fixture"
-    def server_error(exc, where, payload=None):
-        from serve._utils.serve_errors import backend_error
-        return backend_error(exc, where)
-    error = Mock(side_effect=server_error)
-    monkeypatch.setitem(ns, "_backend_error", error)
-    return SimpleNamespace(namespace=ns, backend=backend, llama=llama, load=load, error=error)
+    return SimpleNamespace(namespace=ns, backend=backend, llama=llama, load=load)
 
 
 def call(wrapper, method="generate", payload=None):
@@ -73,7 +63,6 @@ def test_success_is_plain_wire(wrapper, method, payload):
     result = call(wrapper, method, payload)
     assert result["status_code"] == 200
     json.dumps(result)
-    wrapper.error.assert_not_called()
 
 
 @pytest.mark.parametrize("method,payload", [("generate", {"messages": []}), ("generate_embeddings", {"input": "hi"})])
@@ -217,90 +206,85 @@ def test_stream_cancellation_propagates(wrapper):
     wrapper.llama.create_chat_completion.return_value = chunks()
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    wrapper.error.assert_not_called()
 
 
-@pytest.fixture
-def native(monkeypatch):
-    errors, types = ModuleType("llama_cpp.server.errors"), ModuleType("llama_cpp.server.types")
-    class Chat(BaseModel):
-        messages: list[dict]
-        max_tokens: int = 16
-    class Completion(BaseModel):
-        prompt: str
-        max_tokens: int = 16
-    detail = {"message": "native context error", "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}
-    formatter = Mock(return_value=(400, detail))
-    errors.RouteErrorHandler = SimpleNamespace(pattern_and_formatters={re.compile(r"Requested tokens \((\d+)\) exceed context window of (\d+)"): formatter})
-    types.CreateChatCompletionRequest, types.CreateCompletionRequest = Chat, Completion
-    monkeypatch.setitem(sys.modules, "llama_cpp.server.errors", errors)
-    monkeypatch.setitem(sys.modules, "llama_cpp.server.types", types)
-    tree = ast.parse(Path(__file__).with_name("app.py").read_text())
-    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_backend_error")
-    namespace = {"backend_error": backend_error, "RequestInputError": RequestInputError, "JSONResponse": JSONResponse}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), "app.py", "exec"), namespace)
-    return SimpleNamespace(adapt=namespace["_backend_error"], formatter=formatter, detail=detail)
-
-
-@pytest.mark.parametrize("payload", [{"messages": []}, {"prompt": "hi"}])
-def test_native_formatter_keeps_symbolic_code(native, payload):
-    response = native.adapt(ValueError("Requested tokens (17) exceed context window of 16"), "generate", payload)
-    assert response == {"error": native.detail}
-    native.formatter.assert_called_once()
-    body, match = native.formatter.call_args.args
-    assert body.max_tokens == 16 and match.group(1) == "17"
-
-
-@pytest.mark.parametrize("error", [RuntimeError("failed"), ValueError("unknown"), TypeError("internal")])
-def test_unknown_errors_remain_500(native, error):
-    response = native.adapt(error, "generate", {"prompt": "x"})
-    assert response == {"error": {"message": "Internal server error", "type": "InternalServerError", "param": None, "code": 500}}
-    native.formatter.assert_not_called()
-
-
-def test_bad_model_does_not_mask_original_error(native):
-    error = ValueError("Requested tokens (17) exceed context window of 16")
-    response = native.adapt(error, "generate", {"messages": 1})
-    assert response["error"]["message"] == "Internal server error"
-    native.formatter.assert_not_called()
-
-
-def test_input_error_is_400(native):
-    assert native.adapt(RequestInputError("invalid body"), "generate")["error"]["code"] == 400
-
-
-@pytest.mark.parametrize("error", [RuntimeError("private error"), TypeError("private type error"), RequestInputError("bad input")])
-def test_generic_error_never_imports_llama(native, error):
+@pytest.mark.parametrize("attribute,payload", [
+    ("create_chat_completion", {"messages": []}),
+    ("create_completion", {"prompt": "hi"}),
+])
+@pytest.mark.parametrize("message", [
+    "Requested tokens (17) exceed context window of 16",
+    "Model path does not exist: private.gguf",
+])
+@pytest.mark.parametrize("mode", ["nonstream", "before", "midstream"])
+def test_escaped_errors_are_neutral_without_engine_error_imports(wrapper, attribute, payload, message, mode):
+    if mode == "nonstream":
+        getattr(wrapper.llama, attribute).side_effect = ValueError(message)
+    else:
+        def chunks():
+            if mode == "midstream":
+                yield {"choices": []}
+            raise ValueError(message)
+        getattr(wrapper.llama, attribute).return_value = chunks()
     original_import = builtins.__import__
     def forbid_native(name, *args, **kwargs):
         if name.startswith("llama_cpp"):
-            raise AssertionError("generic error handling imported an engine")
+            raise AssertionError("escaped error handling imported an engine")
         return original_import(name, *args, **kwargs)
+    expected = {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "param": None, "code": 500,
+    }}
     with patch.object(builtins, "__import__", side_effect=forbid_native) as importer:
-        response = native.adapt(error, "generate", {"prompt": "x"})
+        result = call(wrapper, payload={**payload, "stream": mode != "nonstream"})
+        if mode == "nonstream":
+            assert result["status_code"] == 500
+            assert result["content"] == expected
+        else:
+            frames = asyncio.run(collect(result))
+            assert json.loads(frames[-2].removeprefix("data:")) == expected
+            assert frames.count("data: [DONE]\n\n") == 1
+            if mode == "midstream":
+                assert json.loads(frames[0].removeprefix("data:")) == {"choices": []}
     assert not any(call.args[0].startswith("llama_cpp") for call in importer.call_args_list)
-    assert response["error"]["code"] == (400 if isinstance(error, RequestInputError) else 500)
-    if response["error"]["code"] == 500:
-        assert "private" not in json.dumps(response)
 
 
-def test_native_model_not_found_formatter_is_reused(native, monkeypatch):
-    detail = {"message": "native missing model", "type": "invalid_request_error", "param": None, "code": "model_not_found"}
-    formatter = Mock(return_value=(400, detail))
-    handler = sys.modules["llama_cpp.server.errors"].RouteErrorHandler
-    monkeypatch.setattr(handler, "pattern_and_formatters", {re.compile(r"Model path does not exist: (.+)"): formatter})
-    response = native.adapt(ValueError("Model path does not exist: foo.gguf"), "generate", {"prompt": "hi"})
-    assert response == {"error": detail}
-    formatter.assert_called_once()
+@pytest.mark.parametrize("status,code", [(400, "context_length_exceeded"), (429, "rate_limit_exceeded")])
+def test_returned_engine_error_keeps_status_and_symbolic_code(wrapper, status, code):
+    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": code}}
+    wrapper.llama.create_chat_completion.return_value = JSONResponse(content, status_code=status)
+    wire = call(wrapper, payload={"messages": []})
+    assert wire["status_code"] == status
+    assert wire["content"] == content
+    http, _ = client(wrapper, result=wire)
+    response = http.post("/v1/chat/completions", json={"messages": []})
+    assert response.status_code == status
+    assert response.json() == content
 
 
-@pytest.mark.parametrize("payload", [None, {"input": "hi"}])
-def test_errors_without_generation_body_use_neutral_server_error(native, payload):
-    response = native.adapt(RuntimeError("failed"), "embedding", payload)
-    assert response["error"]["code"] == 500
+def test_returned_engine_error_dict_keeps_symbolic_code(wrapper):
+    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}}
+    wrapper.llama.create_chat_completion.return_value = content
+    wire = call(wrapper, payload={"messages": []})
+    assert wire["status_code"] == 400
+    assert wire["content"] == content
 
 
-def test_native_formatter_failure_uses_neutral_server_error(native):
-    native.formatter.side_effect = RuntimeError("private formatter failure")
-    response = native.adapt(ValueError("Requested tokens (17) exceed context window of 16"), "generate", {"prompt": "hi"})
-    assert response["error"]["message"] == "Internal server error"
+@pytest.mark.parametrize("midstream", [False, True])
+def test_returned_stream_error_keeps_native_fields(wrapper, midstream):
+    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}}
+    chunks = [{"choices": []}, content] if midstream else [content]
+    wrapper.llama.create_chat_completion.return_value = iter(chunks)
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    assert json.loads(frames[-2].removeprefix("data:")) == content
+    assert frames.count("data: [DONE]\n\n") == 1
+    async def stream():
+        for frame in frames:
+            yield frame
+    http, _ = client(wrapper, stream=stream())
+    response = http.post("/v1/chat/completions", json={"messages": [], "stream": True})
+    if midstream:
+        assert response.status_code == 200
+        assert content == json.loads(response.text.split("\n\n")[1].removeprefix("data:"))
+    else:
+        assert response.status_code == 400
+        assert response.json() == content

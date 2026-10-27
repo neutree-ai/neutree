@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette_context.middleware import RawContextMiddleware
@@ -112,61 +112,33 @@ class _FakeRawRequest:
         return False
 
 
-def _backend_error(exc: Exception, where: str):
-    if isinstance(exc, RequestInputError):
-        return backend_error(exc, where)
-    if isinstance(exc, HTTPException) and 400 <= exc.status_code < 500:
-        message, kind, status = str(exc.detail), str(exc.status_code), exc.status_code
-    elif isinstance(exc, ValueError):
-        message, kind, status = str(exc), "BadRequest", 400
-    else:
-        return backend_error(exc, where)
-    logger.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
-    return {"object": "error", "message": message, "type": kind, "code": status, "param": None}
-
-
-def _stream_error(exc: Exception, where: str):
-    result = _backend_error(exc, where)
-    if isinstance(result, dict) and "error" in result:
-        return result
-    return {"error": result}
-
-
 def _extract_serializable(result) -> Dict[str, Any]:
     """Keep the HTTP status and JSON data inside this wrapper's wire envelope."""
     status = 200
-    try:
-        if isinstance(result, JSONResponse):
-            content, status = json.loads(result.body), result.status_code
-        elif hasattr(result, "model_dump"):
-            content = result.model_dump(mode="json")
-        else:
-            content = result
-        if not isinstance(result, JSONResponse) and isinstance(content, dict):
-            if content.get("object") == "error":
-                status = stream_error_status(content)
-            elif "error" in content:
-                status = stream_error_status(content["error"])
-        json.dumps(content, allow_nan=False)
-    except Exception as exc:
-        content, status = backend_error(exc, "response serialization"), 500
+    if isinstance(result, JSONResponse):
+        content, status = json.loads(result.body), result.status_code
+    elif hasattr(result, "model_dump"):
+        content = result.model_dump(mode="json")
+    else:
+        content = result
+    if not isinstance(result, JSONResponse) and isinstance(content, dict):
+        if content.get("object") == "error":
+            status = stream_error_status(content)
+        elif "error" in content:
+            status = stream_error_status(content["error"])
+    json.dumps(content, allow_nan=False)
     return {_WIRE_RESPONSE_MARKER: True, "content": content, "status_code": status}
 
 
 async def _iter_response_body(result) -> AsyncGenerator[str, None]:
     if isinstance(result, StreamingResponse):
         async for chunk in result.body_iterator:
-            try:
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8")
-                if not isinstance(chunk, str):
-                    if hasattr(chunk, "model_dump"):
-                        chunk = chunk.model_dump(mode="json")
-                    chunk = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
-            except Exception as exc:
-                async for frame in error_stream(backend_error(exc, "stream serialization")):
-                    yield frame
-                return
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8")
+            if not isinstance(chunk, str):
+                if hasattr(chunk, "model_dump"):
+                    chunk = chunk.model_dump(mode="json")
+                chunk = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
             yield chunk
         return
     content = _extract_serializable(result)["content"]
@@ -369,7 +341,7 @@ class Backend:
             )
             return _extract_serializable(result)
         except Exception as exc:
-            return _extract_serializable(_backend_error(exc, "chat_completion"))
+            return _extract_serializable(backend_error(exc, "chat_completion"))
 
     async def chat_completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         try:
@@ -381,7 +353,7 @@ class Backend:
             async for chunk in _iter_response_body(result):
                 yield chunk
         except Exception as exc:
-            async for chunk in error_stream(_stream_error(exc, "chat_completion_stream")):
+            async for chunk in error_stream(backend_error(exc, "chat_completion_stream")):
                 yield chunk
 
     async def completion(self, payload: Dict[str, Any]) -> Any:
@@ -393,7 +365,7 @@ class Backend:
             )
             return _extract_serializable(result)
         except Exception as exc:
-            return _extract_serializable(_backend_error(exc, "completion"))
+            return _extract_serializable(backend_error(exc, "completion"))
 
     async def completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         try:
@@ -405,7 +377,7 @@ class Backend:
             async for chunk in _iter_response_body(result):
                 yield chunk
         except Exception as exc:
-            async for chunk in error_stream(_stream_error(exc, "completion_stream")):
+            async for chunk in error_stream(backend_error(exc, "completion_stream")):
                 yield chunk
 
     async def embedding(self, payload: Dict[str, Any]) -> Any:
@@ -416,7 +388,7 @@ class Backend:
             )
             return _extract_serializable(result)
         except Exception as exc:
-            return _extract_serializable(_backend_error(exc, "embedding"))
+            return _extract_serializable(backend_error(exc, "embedding"))
 
     def get_model_info(self) -> Dict[str, Any]:
         try:
@@ -430,7 +402,7 @@ class Backend:
                 "is_generation": getattr(tm, "is_generation", True),
             })
         except Exception as exc:
-            return _extract_serializable(_backend_error(exc, "get_model_info"))
+            return _extract_serializable(backend_error(exc, "get_model_info"))
 
 
 app = FastAPI()

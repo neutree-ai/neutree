@@ -44,39 +44,13 @@ from serve._utils.serve_errors import (
 _WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
 
 
-def _backend_error(exc: Exception, where: str, payload=None) -> dict:
-    if (
-        isinstance(exc, ValueError)
-        and not isinstance(exc, RequestInputError)
-        and isinstance(payload, dict)
-        and ("messages" in payload or "prompt" in payload)
-    ):
-        try:
-            from llama_cpp.server.errors import RouteErrorHandler
-            from llama_cpp.server.types import CreateChatCompletionRequest, CreateCompletionRequest
-
-            for pattern, formatter in RouteErrorHandler.pattern_and_formatters.items():
-                match = pattern.search(str(exc))
-                if match is not None:
-                    request_type = CreateChatCompletionRequest if "messages" in payload else CreateCompletionRequest
-                    try:
-                        body = request_type(**payload)
-                    except (TypeError, ValueError):
-                        break
-                    status_code, detail = formatter(body, match)
-                    return {"error": detail}
-        except Exception as mapping_error:
-            return backend_error(mapping_error, f"{where} error formatting")
-    return backend_error(exc, where)
-
-
-async def _stream_chunks(chunks, payload):
+async def _stream_chunks(chunks):
     try:
         async for chunk in iterate_in_threadpool(chunks):
             yield f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as exc:
-        async for frame in error_stream(_backend_error(exc, "stream interrupted", payload)):
+        async for frame in error_stream(backend_error(exc, "stream interrupted")):
             yield frame
 
 
@@ -265,10 +239,10 @@ class Backend:
             else:
                 response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
             if stream:
-                return _stream_chunks(response, payload)
+                return _stream_chunks(response)
             return self._to_wire_response(response)
         except Exception as exc:
-            error = _backend_error(exc, "generate", payload)
+            error = backend_error(exc, "generate")
             return error_stream(error) if stream else self._to_wire_response(error)
 
     async def generate_embeddings(self, payload: Any):
@@ -279,7 +253,7 @@ class Backend:
             response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
             return self._to_wire_response(response)
         except Exception as exc:
-            return self._to_wire_response(_backend_error(exc, "generate_embeddings", payload))
+            return self._to_wire_response(backend_error(exc, "generate_embeddings"))
 
     async def show_available_models(self) -> Dict[str, Any]:
         try:
@@ -293,7 +267,7 @@ class Backend:
                 }]
             })
         except Exception as exc:
-            return self._to_wire_response(_backend_error(exc, "show_available_models"))
+            return self._to_wire_response(backend_error(exc, "show_available_models"))
 
 
 app = FastAPI()

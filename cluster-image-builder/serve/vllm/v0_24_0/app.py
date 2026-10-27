@@ -18,7 +18,6 @@ from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.exceptions import VLLMNotFoundError
 from vllm.v1.engine.async_llm import AsyncLLM
 # v0.24.0 modules are organized into endpoint-specific sub-packages.
 from vllm.entrypoints.chat_utils import ChatTemplateConfig, load_chat_template
@@ -54,22 +53,6 @@ from serve._utils.vllm_task_translate import task_kwargs as _task_kwargs
 
 
 _WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
-
-
-def _backend_error(exc: Exception, where: str) -> Any:
-    if isinstance(exc, RequestInputError):
-        return backend_error(exc, where)
-    if isinstance(exc, (ValueError, TypeError, OverflowError, VLLMNotFoundError)) or any(
-        cls.__name__ == "TemplateError" for cls in type(exc).__mro__
-    ):
-        # Known business/HTTP errors keep their native status; unknown failures stay generic.
-        try:
-            from vllm.entrypoints.serve.utils.error_response import create_error_response
-            logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
-            return create_error_response(exc)
-        except Exception as mapping_error:
-            return backend_error(mapping_error, where)
-    return backend_error(exc, where)
 
 
 class SchedulerType(str, enum.Enum):
@@ -363,22 +346,18 @@ class Backend:
         return self.openai_serving_score
 
     def _to_wire_response(self, result: Any) -> Dict[str, Any]:
-        try:
-            status_code = result.error.code if isinstance(result, ErrorResponse) else 200
-            if isinstance(result, JSONResponse):
-                content = json.loads(result.body)
-                status_code = result.status_code
-            elif hasattr(result, "model_dump"):
-                content = result.model_dump(mode="json")
-            else:
-                content = result
-            if status_code == 200 and isinstance(content, dict) and "error" in content:
-                status_code = stream_error_status(content["error"])
-            # Fail inside the Backend guard rather than sending engine objects to Controller.
-            json.dumps(content, allow_nan=False)
-        except Exception as exc:
-            content = backend_error(exc, "response serialization")
-            status_code = 500
+        status_code = result.error.code if isinstance(result, ErrorResponse) else 200
+        if isinstance(result, JSONResponse):
+            content = json.loads(result.body)
+            status_code = result.status_code
+        elif hasattr(result, "model_dump"):
+            content = result.model_dump(mode="json")
+        else:
+            content = result
+        if status_code == 200 and isinstance(content, dict) and "error" in content:
+            status_code = stream_error_status(content["error"])
+        # Fail inside the Backend guard rather than sending engine objects to Controller.
+        json.dumps(content, allow_nan=False)
         return {
             _WIRE_RESPONSE_MARKER: True,
             "content": content,
@@ -391,17 +370,11 @@ class Backend:
                 if isinstance(chunk, (str, bytes)):
                     yield chunk
                 else:
-                    try:
-                        if hasattr(chunk, "model_dump"):
-                            chunk = chunk.model_dump(mode="json")
-                        frame = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
-                    except Exception as exc:
-                        async for frame in error_stream(backend_error(exc, "stream serialization")):
-                            yield frame
-                        return
-                    yield frame
+                    if hasattr(chunk, "model_dump"):
+                        chunk = chunk.model_dump(mode="json")
+                    yield f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
         except Exception as exc:
-            async for frame in error_stream(_backend_error(exc, "stream interrupted")):
+            async for frame in error_stream(backend_error(exc, "stream interrupted")):
                 yield frame
 
     async def generate(self, payload: Any):
@@ -416,7 +389,7 @@ class Backend:
                 return self._to_wire_stream(result)
             return self._to_wire_response(result)
         except Exception as exc:
-            error = _backend_error(exc, "generate")
+            error = backend_error(exc, "generate")
             if stream:
                 return error_stream(error)
             return self._to_wire_response(error)
@@ -427,7 +400,7 @@ class Backend:
             request = EmbeddingCompletionRequest(**payload)
             return self._to_wire_response(await self.openai_serving_embedding(request, None))
         except Exception as exc:
-            return self._to_wire_response(_backend_error(exc, "generate_embeddings"))
+            return self._to_wire_response(backend_error(exc, "generate_embeddings"))
 
     async def rerank(self, payload: Any):
         try:
@@ -435,14 +408,14 @@ class Backend:
             request = RerankRequest(**payload)
             return self._to_wire_response(await self.openai_serving_score(request, None))
         except Exception as exc:
-            return self._to_wire_response(_backend_error(exc, "rerank"))
+            return self._to_wire_response(backend_error(exc, "rerank"))
 
     async def show_available_models(self):
         try:
             models = await self._ensure_models()
             return self._to_wire_response(await models.show_available_models())
         except Exception as exc:
-            return self._to_wire_response(_backend_error(exc, "show_available_models"))
+            return self._to_wire_response(backend_error(exc, "show_available_models"))
 
 
 app = FastAPI()
