@@ -8,6 +8,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deploy"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -67,6 +68,13 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	if variables.EnableVMAgent {
+		for _, name := range m.cacheProviders.Names() {
+			provider, _ := m.cacheProviders.Get(name)
+			if metricsProvider, ok := provider.(clustercache.MetricsProvider); ok {
+				variables.CacheScrapeConfig += metricsProvider.MetricsScrapeConfig(m.cluster, m.namespace)
+			}
+		}
+
 		vmagentConfig, err := renderKubernetesVMAgentConfig(variables)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to render vmagent config for cluster %s", m.cluster.Metadata.Name)
