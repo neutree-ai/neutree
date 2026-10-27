@@ -14,6 +14,9 @@ type Accelerator interface {
 	DiscoverHardware(context.Context) (HardwareSnapshot, error)
 }
 
+// HardwareHealthProvider evaluates hardware health without mutating its inputs or
+// any storage reachable from them. Implementations must return an independently
+// owned snapshot that shares no mutable storage with inputs or provider state.
 type HardwareHealthProvider interface {
 	EvaluateHardwareHealth(HardwareSnapshot, CommonEvidence) HardwareSnapshot
 }

@@ -340,29 +340,48 @@ func TestK8sResourceClientListEndpointInstancesWithMultipleNeutreeAllocations(t 
 
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 	cases := []struct {
-		name                    string
-		healthy                 bool
-		allocation              string
-		wantAvailable           v1.DeviceResourcePool
-		wantAllocatableQuantity float64
+		name                  string
+		healthy               bool
+		allocation            string
+		wantAvailable         v1.DeviceResourcePool
+		wantAvailableQuantity float64
 	}{
 		{
-			name:                    "healthy allocated",
-			healthy:                 true,
-			allocation:              `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
-			wantAvailable:           v1.DeviceResourcePool{},
-			wantAllocatableQuantity: 2,
+			name:                  "healthy allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
 		},
 		{
-			name:                    "unhealthy idle",
-			wantAvailable:           v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
-			wantAllocatableQuantity: 1,
+			name:                  "unhealthy allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
 		},
 		{
-			name:                    "unhealthy allocated",
-			allocation:              `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
-			wantAvailable:           v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
-			wantAllocatableQuantity: 1,
+			name:                  "healthy idle",
+			healthy:               true,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "unhealthy idle",
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "healthy partially allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
+		},
+		{
+			name:                  "unhealthy partially allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
 		},
 	}
 
@@ -381,8 +400,8 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 					Annotations: map[string]string{
 						resourceparser.NeutreeAcceleratorDevicesAnnotation: fmt.Sprintf(`[
 							{"uuid":"GPU-1","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":3},
-							{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":true,"minor_number":0}
-						]`, testCase.healthy),
+							{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":0}
+						]`, testCase.healthy, testCase.healthy),
 					},
 				},
 				Status: corev1.NodeStatus{
@@ -423,7 +442,7 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 			assert.Equal(t, &testCase.wantAvailable, device.Available)
 			assert.Equal(t, "GPU-2", nodes[0].Status.Devices[1].UUID)
 			assert.Equal(t, "Tesla-T4", nodes[0].Status.Devices[1].Product)
-			assert.True(t, nodes[0].Status.Devices[1].Health)
+			assert.Equal(t, testCase.healthy, nodes[0].Status.Devices[1].Health)
 			assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Available)
 			require.NotNil(t, device.Order)
 			assert.Equal(t, 1, *device.Order)
@@ -431,9 +450,14 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 			assert.Equal(t, 0, *nodes[0].Status.Devices[1].Order)
 
 			for index, info := range []*v1.ResourceInfo{nodes[0].Status.Allocatable, nodes[0].Status.Available} {
-				wantQuantity := float64(1)
-				if index == 0 {
-					wantQuantity = testCase.wantAllocatableQuantity
+				wantQuantity := float64(2)
+				wantVirtualization := &v1.AcceleratorVirtualizationResource{MemoryMiB: 30720, CoreUnits: 200}
+				if index == 1 {
+					wantQuantity = testCase.wantAvailableQuantity
+					wantVirtualization = &v1.AcceleratorVirtualizationResource{
+						MemoryMiB: 15360 + float64(testCase.wantAvailable.MemoryMiB),
+						CoreUnits: 100 + float64(testCase.wantAvailable.CoreUnits),
+					}
 				}
 				group := info.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
 				require.NotNil(t, group)
@@ -442,10 +466,12 @@ func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
 				product := group.Products["Tesla-T4"]
 				require.NotNil(t, product)
 				assert.Equal(t, wantQuantity, product.Quantity)
-				require.NotNil(t, product.Virtualization)
-				assert.Equal(t, wantQuantity*15360, product.Virtualization.MemoryMiB)
-				assert.Equal(t, wantQuantity*100, product.Virtualization.CoreUnits)
+				assert.Equal(t, wantVirtualization, product.Virtualization)
 			}
+			metadata := nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+			require.NotNil(t, metadata)
+			require.NotNil(t, metadata.Products["Tesla-T4"])
+			assert.Equal(t, float64(15360), metadata.Products["Tesla-T4"].MemoryTotalMiB)
 		})
 	}
 }

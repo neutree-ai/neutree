@@ -353,7 +353,7 @@ func (s *Server) discoverAdapterHardware(
 	return accel.DiscoverHardware(hardwareCtx)
 }
 
-func (server *Server) evaluateAdapterHardwareHealth(
+func (s *Server) evaluateAdapterHardwareHealth(
 	accelerator adapter.Accelerator,
 	hardware adapter.HardwareSnapshot,
 	exporter *model.ScrapeResult,
@@ -363,13 +363,13 @@ func (server *Server) evaluateAdapterHardwareHealth(
 		return hardware
 	}
 
-	evidence := adapter.CommonEvidence{Labels: server.config.Labels}
+	evidence := adapter.CommonEvidence{Labels: s.config.Labels}
 	if exporter != nil {
 		evidence.ExporterText = exporter.Body
 		evidence.ExporterUp = exporter.Up
 	}
 
-	return provider.EvaluateHardwareHealth(hardware.Clone(), evidence).Clone()
+	return provider.EvaluateHardwareHealth(hardware, evidence)
 }
 
 // adapterMetricResult converts common host facts into the public adapter
