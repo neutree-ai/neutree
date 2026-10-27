@@ -283,6 +283,19 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 			Expect(servedModelNames).To(Equal([]interface{}{profileModelName(), "neu-vllm-list-alias"}))
 		})
 
+		It("should discover the serving model names in endpoint status", func() {
+			ep := getEndpoint(schemaEpName)
+			code, modelIDs, body, err := listOpenAIModelIDs(ep.Status.ServiceURL)
+			Expect(err).NotTo(HaveOccurred(), "list models failed: %s", body)
+			Expect(code).To(Equal(200), "list models failed: %s", body)
+			Expect(modelIDs).To(ContainElements(profileModelName(), "neu-vllm-list-alias"))
+
+			Eventually(func() []string {
+				return getEndpoint(schemaEpName).Status.ServedModels
+			}, IntermediatePhaseTimeout, "2s").Should(Equal(modelIDs),
+				"status must preserve the serving API's model order")
+		})
+
 		It("should serve inference with all-types config", func() {
 			ep := getEndpoint(schemaEpName)
 
