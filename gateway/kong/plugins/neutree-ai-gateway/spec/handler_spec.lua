@@ -170,6 +170,78 @@ describe("make_message_start()", function()
     end)
 end)
 
+describe("anthropic stream translation termination (NEU-875)", function()
+    local previous_kong, previous_ngx
+
+    before_each(function()
+        previous_kong, previous_ngx = _G.kong, _G.ngx
+    end)
+    after_each(function()
+        _G.kong, _G.ngx = previous_kong, previous_ngx
+    end)
+
+    -- Mirror the per-request state access() seeds before streaming, plus the
+    -- bits only finish_stream consumes (request_model / usage estimate).
+    local function new_ctx()
+        return {
+            message_started = false,
+            open_block_type = nil,
+            current_tool_index = nil,
+            next_block_index = 0,
+            anthropic_block_index = 0,
+            pending_signature = nil,
+            sse_buffer = "",
+            input_tokens = 0,
+            output_tokens = 0,
+            output_chars = 0,
+            usage_seen = false,
+            saw_event = false,
+            finish_events_sent = false,
+            request_model = "m",
+            input_tokens_estimate = 0,
+        }
+    end
+
+    -- Feed upstream chunks through handle_anthropic_stream_body (one call per
+    -- chunk, last one with the end-of-stream flag) and return the translated
+    -- SSE the client would receive.
+    local function translate(chunks)
+        local ctx = new_ctx()
+        _G.kong = { ctx = { plugin = ctx } }
+        local out = {}
+        for i, chunk in ipairs(chunks) do
+            _G.ngx = { arg = { chunk, i == #chunks }, now = function() return 0 end }
+            T.handle_anthropic_stream_body()
+            out[#out + 1] = _G.ngx.arg[1]
+        end
+        return table.concat(out)
+    end
+
+    local content_chunk = 'data: {"id":"1","model":"m","choices":'
+        .. '[{"delta":{"content":"hi"},"index":0}]}\n\n'
+    local stop_chunk = 'data: {"id":"1","choices":[{"delta":{},"finish_reason":"stop","index":0}],'
+        .. '"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\n'
+
+    local function assert_anthropic_terminated(out)
+        assert.is_false(has(out, "[DONE]"), "anthropic stream must not contain [DONE]")
+        assert.is_true(has(out, "event: message_stop"))
+        -- message_stop is the final frame and appears exactly once.
+        local _, count = out:gsub("event: message_stop", "")
+        assert.are.equal(1, count)
+        assert.is_truthy(out:find("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n$"))
+    end
+
+    it("ends at message_stop without [DONE] when the upstream sends [DONE]", function()
+        local out = translate({ content_chunk, stop_chunk, "data: [DONE]\n\n", "" })
+        assert_anthropic_terminated(out)
+    end)
+
+    it("ends at message_stop without [DONE] when only is_last terminates the stream", function()
+        local out = translate({ content_chunk, stop_chunk })
+        assert_anthropic_terminated(out)
+    end)
+end)
+
 describe("routing counter errors at protocol boundaries", function()
     for _, path in ipairs({ "/v1/chat/completions", "/anthropic/v1/messages" }) do
         it("returns 500 and logs the underlying failure for " .. path, function()
