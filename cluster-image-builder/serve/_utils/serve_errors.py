@@ -14,7 +14,7 @@ class RequestInputError(ValueError):
 async def read_json_object(request) -> dict:
     try:
         payload = await request.json()
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except ValueError as exc:
         raise RequestInputError("Request body must be valid JSON") from exc
     if not isinstance(payload, dict):
         raise RequestInputError("Request body must be a JSON object")

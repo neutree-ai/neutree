@@ -29,7 +29,7 @@ def request(body):
     return Request({"type": "http", "headers": []}, receive)
 
 
-@pytest.mark.parametrize("body", [b"", b"not json", b'{"input":}', b"\xff", b"null", b"[]", b'"x"', b"1", b"true"])
+@pytest.mark.parametrize("body", [b"", b"not json", b'{"input":}', b"\xff", b"null", b"[]", b'"x"', b"1", b"true", b"1" * 5000, b'{"input":' + b"1" * 5000 + b"}"])
 def test_bad_json_never_reaches_business_handler(body):
     app = FastAPI()
     app.add_exception_handler(errors.RequestInputError, errors.input_error_handler)

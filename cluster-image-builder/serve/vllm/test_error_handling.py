@@ -216,10 +216,11 @@ def test_invalid_stream_never_reaches_serving(wrapper, payload):
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
-def test_wire_serialization_failure_is_contained(wrapper, method):
+@pytest.mark.parametrize("error_type", (RuntimeError, ValueError, TypeError))
+def test_wire_serialization_failure_is_contained(wrapper, method, error_type):
     class BrokenModel:
         def model_dump(self, **kwargs):
-            raise RuntimeError("serialization failed")
+            raise error_type("serialization failed")
     if method == "generate":
         target = wrapper.backend.openai_serving_chat.create_chat_completion
     elif method == "generate_embeddings":
@@ -246,9 +247,11 @@ def test_wire_nonfinite_numbers_are_rejected_before_ray(wrapper, value, as_model
 
     wire = call_backend(wrapper, "generate")
 
-    assert "error" in wire["content"]
-    wrapper.factory.assert_called_once()
-    assert isinstance(wrapper.factory.call_args.args[0], ValueError)
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    wrapper.factory.assert_not_called()
     # The Controller's real encoder must accept the boundary's replacement error.
     JSONResponse(content=wire["content"], status_code=wire["status_code"])
 
@@ -503,3 +506,22 @@ def test_queue_errors_preserve_original_native_503_response(wrapper, error_type)
     assert result is expected
     wrapper.factory.assert_called_once_with(error)
     assert wrapper.backend._to_wire_response(result)["status_code"] == 503
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), object()))
+@pytest.mark.parametrize("midstream", (False, True))
+def test_stream_serialization_errors_are_server_errors(wrapper, value, midstream):
+    async def chunks():
+        if midstream:
+            yield 'data: {"choices":[]}\n\n'
+        yield {"value": value}
+    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
+    async def collect():
+        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
+    frames = asyncio.run(collect())
+    error_index = 1 if midstream else 0
+    assert json.loads(frames[error_index].removeprefix("data:")) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    assert frames.count("data: [DONE]\n\n") == 1
+    wrapper.factory.assert_not_called()

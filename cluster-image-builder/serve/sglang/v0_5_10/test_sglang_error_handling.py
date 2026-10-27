@@ -117,15 +117,16 @@ def test_cancellation_unwinds(wrapper, method, handler):
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("when", ["before", "midstream"])
-def test_stream_exception_is_native_error_and_done(wrapper, method, handler, when):
+@pytest.mark.parametrize("exc,status", [(RuntimeError("engine failed"), 500), (ValueError("bad request"), 400)])
+def test_stream_exception_is_native_error_and_done(wrapper, method, handler, when, exc, status):
     async def chunks():
         if when == "midstream":
             yield b'data: {"choices":[]}\n\n'
-        raise RuntimeError("engine failed")
+        raise exc
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
     assert frames[-1] == "data: [DONE]\n\n"
-    assert json.loads(frames[-2].removeprefix("data:"))["error"]["code"] == 500
+    assert json.loads(frames[-2].removeprefix("data:"))["error"]["code"] == status
     if when == "midstream":
         assert frames[0] == 'data: {"choices":[]}\n\n'
 
@@ -289,7 +290,23 @@ def test_stream_cancellation_unwinds(wrapper, method, handler):
 def test_nonfinite_result_is_caught_before_ray_transfer(wrapper, method, handler, number):
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = {"number": number}
     wire = call(wrapper, method)
-    assert wire["content"]["object"] == "error"
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    json.dumps(wire, allow_nan=False)
+
+
+@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
+@pytest.mark.parametrize("exc", [ValueError("private serializer details"), TypeError("private serializer details")])
+def test_model_dump_failure_is_server_error(wrapper, method, handler, exc):
+    result = SimpleNamespace(model_dump=Mock(side_effect=exc))
+    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = result
+    wire = call(wrapper, method)
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
     json.dumps(wire, allow_nan=False)
 
 
@@ -350,10 +367,32 @@ def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper)
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler):
+@pytest.mark.parametrize("when", ["before", "midstream"])
+@pytest.mark.parametrize("chunk", [
+    pytest.param({"value": object()}, id="unsupported-value"),
+    pytest.param({"value": float("nan")}, id="nan"),
+    pytest.param({"value": float("inf")}, id="infinity"),
+    pytest.param(SimpleNamespace(model_dump=Mock(side_effect=ValueError("private serializer details"))), id="model-dump-value-error"),
+    pytest.param(SimpleNamespace(model_dump=Mock(side_effect=TypeError("private serializer details"))), id="model-dump-type-error"),
+])
+def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler, when, chunk):
     async def chunks():
-        yield {"value": object()}
+        if when == "midstream":
+            yield 'data: {"choices":[]}\n\n'
+        yield chunk
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[0].removeprefix("data:"))["error"]["code"] == 500
+    expected = {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+    }}
+    assert json.loads(frames[-2].removeprefix("data:")) == expected
     assert frames[-1] == "data: [DONE]\n\n"
+    assert frames.count("data: [DONE]\n\n") == 1
+    if when == "midstream":
+        assert frames[0] == 'data: {"choices":[]}\n\n'
+    else:
+        getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
+        http, _ = stream_client(wrapper, getattr(wrapper.backend, method)({"stream": True}))
+        response = http.post("/chat", json={"stream": True})
+        assert response.status_code == 500
+        assert response.json() == expected

@@ -363,18 +363,22 @@ class Backend:
         return self.openai_serving_score
 
     def _to_wire_response(self, result: Any) -> Dict[str, Any]:
-        status_code = result.error.code if isinstance(result, ErrorResponse) else 200
-        if isinstance(result, JSONResponse):
-            content = json.loads(result.body)
-            status_code = result.status_code
-        elif hasattr(result, "model_dump"):
-            content = result.model_dump(mode="json")
-        else:
-            content = result
-        if status_code == 200 and isinstance(content, dict) and "error" in content:
-            status_code = stream_error_status(content["error"])
-        # Fail inside the Backend guard rather than sending engine objects to Controller.
-        json.dumps(content, allow_nan=False)
+        try:
+            status_code = result.error.code if isinstance(result, ErrorResponse) else 200
+            if isinstance(result, JSONResponse):
+                content = json.loads(result.body)
+                status_code = result.status_code
+            elif hasattr(result, "model_dump"):
+                content = result.model_dump(mode="json")
+            else:
+                content = result
+            if status_code == 200 and isinstance(content, dict) and "error" in content:
+                status_code = stream_error_status(content["error"])
+            # Fail inside the Backend guard rather than sending engine objects to Controller.
+            json.dumps(content, allow_nan=False)
+        except Exception as exc:
+            content = backend_error(exc, "response serialization")
+            status_code = 500
         return {
             _WIRE_RESPONSE_MARKER: True,
             "content": content,
@@ -387,9 +391,15 @@ class Backend:
                 if isinstance(chunk, (str, bytes)):
                     yield chunk
                 else:
-                    if hasattr(chunk, "model_dump"):
-                        chunk = chunk.model_dump(mode="json")
-                    yield f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
+                    try:
+                        if hasattr(chunk, "model_dump"):
+                            chunk = chunk.model_dump(mode="json")
+                        frame = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
+                    except Exception as exc:
+                        async for frame in error_stream(backend_error(exc, "stream serialization")):
+                            yield frame
+                        return
+                    yield frame
         except Exception as exc:
             async for frame in error_stream(_backend_error(exc, "stream interrupted")):
                 yield frame

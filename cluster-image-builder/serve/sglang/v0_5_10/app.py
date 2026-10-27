@@ -135,30 +135,38 @@ def _stream_error(exc: Exception, where: str):
 def _extract_serializable(result) -> Dict[str, Any]:
     """Keep the HTTP status and JSON data inside this wrapper's wire envelope."""
     status = 200
-    if isinstance(result, JSONResponse):
-        content, status = json.loads(result.body), result.status_code
-    elif hasattr(result, "model_dump"):
-        content = result.model_dump(mode="json")
-    else:
-        content = result
-    if not isinstance(result, JSONResponse) and isinstance(content, dict):
-        if content.get("object") == "error":
-            status = stream_error_status(content)
-        elif "error" in content:
-            status = stream_error_status(content["error"])
-    json.dumps(content, allow_nan=False)
+    try:
+        if isinstance(result, JSONResponse):
+            content, status = json.loads(result.body), result.status_code
+        elif hasattr(result, "model_dump"):
+            content = result.model_dump(mode="json")
+        else:
+            content = result
+        if not isinstance(result, JSONResponse) and isinstance(content, dict):
+            if content.get("object") == "error":
+                status = stream_error_status(content)
+            elif "error" in content:
+                status = stream_error_status(content["error"])
+        json.dumps(content, allow_nan=False)
+    except Exception as exc:
+        content, status = backend_error(exc, "response serialization"), 500
     return {_WIRE_RESPONSE_MARKER: True, "content": content, "status_code": status}
 
 
 async def _iter_response_body(result) -> AsyncGenerator[str, None]:
     if isinstance(result, StreamingResponse):
         async for chunk in result.body_iterator:
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8")
-            if not isinstance(chunk, str):
-                if hasattr(chunk, "model_dump"):
-                    chunk = chunk.model_dump(mode="json")
-                chunk = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
+            try:
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode("utf-8")
+                if not isinstance(chunk, str):
+                    if hasattr(chunk, "model_dump"):
+                        chunk = chunk.model_dump(mode="json")
+                    chunk = f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
+            except Exception as exc:
+                async for frame in error_stream(backend_error(exc, "stream serialization")):
+                    yield frame
+                return
             yield chunk
         return
     content = _extract_serializable(result)["content"]
