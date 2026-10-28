@@ -49,6 +49,8 @@ func NewBuilder() *Builder {
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		"accelerator-observations": func(deps *RouteOptions) error {
 			observations.RegisterRoutes(deps.Group, deps.Middlewares, &observations.Dependencies{
+				ClusterCacheProviders:   deps.Config.ClusterCacheProviders,
+				KVCacheProviders:        deps.Config.KVCacheProviders,
 				Storage:                 deps.Config.Storage,
 				MetricsURL:              deps.Config.MetricsURL,
 				ExtraAcceleratorMetrics: deps.Config.ExtraAcceleratorMetrics,

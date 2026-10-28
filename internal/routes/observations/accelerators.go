@@ -19,6 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
+	"github.com/neutree-ai/neutree/pkg/cacheobservations"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -37,6 +40,8 @@ var replicaMetrics = []string{
 }
 
 type Dependencies struct {
+	ClusterCacheProviders   *clustercache.Providers
+	KVCacheProviders        kvcache.Providers
 	Storage                 storage.Storage
 	MetricsURL              string
 	Client                  *http.Client
@@ -44,12 +49,7 @@ type Dependencies struct {
 	ExtraAcceleratorLabels  []string
 }
 
-type Sample struct {
-	Metric     string            `json:"metric"`
-	Labels     map[string]string `json:"labels"`
-	Value      float64           `json:"value"`
-	ObservedAt float64           `json:"observed_at"`
-}
+type Sample = cacheobservations.Sample
 
 type Snapshot struct {
 	Status  string   `json:"status"`
@@ -96,7 +96,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 		metrics := append(append([]string{}, physicalMetrics...), deps.ExtraAcceleratorMetrics...)
 		var devices [][2]string
-		zcacheEnabled := false
+		var cacheProvider any
 
 		if resource == "endpoints" {
 			items, err := deps.Storage.ListEndpoint(resourceFilter(workspace, name))
@@ -112,7 +112,9 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			}
 
 			cluster, endpoint = items[0].Spec.Cluster, name
-			zcacheEnabled = items[0].Spec.KVCache != nil && items[0].Spec.KVCache.Provider == "zcache"
+			if cache := items[0].Spec.KVCache; cache != nil {
+				cacheProvider, _ = deps.KVCacheProviders.Get(cache.Provider)
+			}
 			metrics = replicaMetrics
 
 			if status := items[0].Status; status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
@@ -146,6 +148,15 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 				return
 			}
 
+			providerName := ""
+			if items[0].Spec != nil && items[0].Spec.Cache != nil {
+				providerName = items[0].Spec.Cache.Provider
+			}
+			if providerName == "" && items[0].Status != nil && items[0].Status.Cache != nil {
+				providerName = items[0].Status.Cache.Provider
+			}
+			cacheProvider, _ = deps.ClusterCacheProviders.Get(providerName)
+
 			// Cluster visibility alone must not reveal workload measurements.
 			allowed, err := middleware.CheckWorkspacePermission(deps.Storage, c.GetString("user_id"), workspace, "endpoint:read")
 
@@ -175,13 +186,6 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		// A range vector preserves original scrape timestamps. An instant vector
 		// reports evaluation time and can make old measurements look fresh.
 		queries := []string{selector + "}[90s]"}
-		// Read usage and scrape health together as range vectors, preserving the
-		// actual sample timestamps rather than replacing them with query time.
-		l1Selector := fmt.Sprintf(`{__name__=~"lmcache_mp_l1_memory_usage_bytes|up",job="neutree-zcache",workspace=%s,neutree_cluster=%s`,
-			strconv.Quote(workspace), strconv.Quote(cluster))
-		if resource == "clusters" {
-			queries = append(queries, l1Selector+"}[90s]")
-		}
 
 		if len(devices) > 0 {
 			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info"}
@@ -192,14 +196,9 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 				byNode[device[0]] = append(byNode[device[0]], regexp.QuoteMeta(device[1]))
 			}
 
-			nodes := make([]string, 0, len(byNode))
 			for node, uuids := range byNode {
-				nodes = append(nodes, regexp.QuoteMeta(node))
+
 				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
-			}
-			if zcacheEnabled {
-				sort.Strings(nodes)
-				queries = append(queries, l1Selector+",node=~"+strconv.Quote(strings.Join(nodes, "|"))+"}[90s]")
 			}
 		}
 
@@ -218,6 +217,26 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			samples = append(samples, batch...)
 		}
 
+		if provider, ok := cacheProvider.(cacheobservations.ResourceProvider); ok {
+			nodes := []string{}
+			seen := map[string]bool{}
+			for _, device := range devices {
+				if !seen[device[0]] {
+					nodes = append(nodes, device[0])
+					seen[device[0]] = true
+				}
+			}
+			sort.Strings(nodes)
+			for _, query := range provider.ResourceQueries(cacheobservations.Scope{Workspace: workspace, Cluster: cluster, Endpoint: endpoint, Nodes: nodes}) {
+				batch, err := querySamples(ctx, deps, query.Expression, query.Decode)
+				if err != nil {
+					c.JSON(503, gin.H{"error": "monitoring unavailable"})
+					return
+				}
+				samples = append(samples, batch...)
+			}
+		}
+
 		status := "ok"
 
 		if len(samples) == 0 {
@@ -228,7 +247,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 	}
 }
 
-func querySamples(ctx context.Context, deps *Dependencies, query string) ([]Sample, error) {
+func querySamples(ctx context.Context, deps *Dependencies, query string, decode ...func([]byte, time.Time) ([]Sample, error)) ([]Sample, error) {
 	u, err := url.Parse(strings.TrimRight(deps.MetricsURL, "/") + "/api/v1/query")
 	if err != nil {
 		return nil, err
@@ -259,6 +278,9 @@ func querySamples(ctx context.Context, deps *Dependencies, query string) ([]Samp
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 
+	if len(decode) > 0 && decode[0] != nil {
+		return decode[0](body, time.Now())
+	}
 	return decodeSamples(body, time.Now(), deps.ExtraAcceleratorLabels...)
 }
 
@@ -284,36 +306,13 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 	}
 
 	result := []Sample{}
-	up := map[[2]string]bool{}
-
-	for _, series := range response.Data.Result {
-		if series.Metric["__name__"] != "up" || series.Metric["job"] != "neutree-zcache" || len(series.Values) == 0 {
-			continue
-		}
-
-		last := series.Values[len(series.Values)-1]
-		var timestamp float64
-
-		var raw string
-		if json.Unmarshal(last[0], &timestamp) == nil && json.Unmarshal(last[1], &raw) == nil &&
-			timestamp >= float64(now.Unix()-90) && timestamp <= float64(now.Unix()+5) {
-			up[[2]string{series.Metric["job"], series.Metric["instance"]}] = raw == "1"
-		}
-	}
-
 	for _, series := range response.Data.Result {
 		if len(series.Values) == 0 {
 			continue
 		}
 
 		name := series.Metric["__name__"]
-		isNodeL1Usage := name == "lmcache_mp_l1_memory_usage_bytes"
-
-		if isNodeL1Usage {
-			if series.Metric["node"] == "" || !up[[2]string{series.Metric["job"], series.Metric["instance"]}] {
-				continue
-			}
-		} else if series.Metric["accelerator_uuid"] == "" {
+		if series.Metric["accelerator_uuid"] == "" {
 			continue
 		}
 
@@ -342,10 +341,6 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 
 		if labels["endpoint"] == "" && series.Metric["application"] != "" {
 			labels["endpoint"] = series.Metric["application"]
-		}
-
-		if isNodeL1Usage && series.Metric["pod"] != "" {
-			labels["pod"] = series.Metric["pod"]
 		}
 
 		result = append(result, Sample{Metric: name, Labels: labels, Value: value, ObservedAt: timestamp})

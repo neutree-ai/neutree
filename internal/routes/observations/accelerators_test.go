@@ -11,9 +11,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/cacheobservations"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"regexp"
+	"strconv"
 )
 
 func TestSamplesPreserveZeroAndScrapeTime(t *testing.T) {
@@ -31,48 +35,10 @@ func TestSamplesPreserveZeroAndScrapeTime(t *testing.T) {
 	require.NotContains(t, samples[0].Labels, "instance")
 }
 
-func TestDecodeNodeL1Samples(t *testing.T) {
-	now := time.Now()
-	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
- {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","job":"neutree-zcache","instance":"runtime","pod":"cache-pod"},"values":[[%d,"2147483648"]]},
- {"metric":{"__name__":"up","job":"neutree-zcache","instance":"runtime"},"values":[[%d,"1"]]}
- ]}}`, now.Unix()-12, now.Unix()-12)
-	samples, err := decodeSamples([]byte(body), now)
-	require.NoError(t, err)
-	require.Len(t, samples, 1)
-	require.Equal(t, "lmcache_mp_l1_memory_usage_bytes", samples[0].Metric)
-	require.Equal(t, "node-a", samples[0].Labels["node"])
-	require.InDelta(t, 2147483648.0, samples[0].Value, 1e-3)
-}
-
 func TestRejectPartialOrMalformedResponse(t *testing.T) {
 	for _, body := range []string{`{}`, `{"status":"success","isPartial":true,"data":{"resultType":"matrix"}}`, `{"status":"success","data":{"resultType":"vector"}}`} {
 		_, err := decodeSamples([]byte(body), time.Now())
 		require.Error(t, err)
-	}
-}
-
-func TestL1SamplesRequireHealthyScrapeAndKeepOriginalTime(t *testing.T) {
-	now := time.Now()
-	for _, state := range []string{"0", "1"} {
-		body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[
- {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","pod":"old","job":"neutree-zcache","instance":"old"},"values":[[%d,"6442450944"]]},
- {"metric":{"__name__":"up","job":"neutree-zcache","instance":"old"},"values":[[%d,"%s"]]},
- {"metric":{"__name__":"lmcache_mp_l1_memory_usage_bytes","node":"node-a","pod":"new","job":"neutree-zcache","instance":"new"},"values":[[%d,"0"]]},
- {"metric":{"__name__":"up","job":"neutree-zcache","instance":"new"},"values":[[%d,"1"]]}
- ]}}`, now.Unix()-40, now.Unix()-10, state, now.Unix()-5, now.Unix()-5)
-		samples, err := decodeSamples([]byte(body), now)
-		require.NoError(t, err)
-		want := 1
-		if state == "1" {
-			want = 2
-		}
-		require.Len(t, samples, want)
-		latest := samples[len(samples)-1]
-		require.Zero(t, latest.Value)
-		require.Equal(t, "new", latest.Labels["pod"])
-		require.Equal(t, float64(now.Unix()-5), latest.ObservedAt)
-		require.NotContains(t, latest.Labels, "instance")
 	}
 }
 
@@ -198,7 +164,7 @@ func TestEndpointCacheUsesOneScopedL1Query(t *testing.T) {
 	s := mocks.NewMockStorage(t)
 	permission(t, s, true)
 	s.On("ListEndpoint", resourceFilter("tenant", "model")).Return([]v1.Endpoint{{
-		Spec: &v1.EndpointSpec{Cluster: "cluster", KVCache: &v1.EndpointKVCacheSpec{Provider: "zcache"}},
+		Spec: &v1.EndpointSpec{Cluster: "cluster", KVCache: &v1.EndpointKVCacheSpec{Provider: "example"}},
 		Status: &v1.EndpointStatus{Resources: &v1.EndpointResourceStatus{Replicas: []v1.ReplicaDeviceAllocation{
 			{NodeID: "node.a", Devices: []v1.DeviceAllocation{{UUID: "gpu-1"}, {UUID: "gpu-2"}}},
 			{NodeID: "node-b", Devices: []v1.DeviceAllocation{{UUID: "gpu-3"}}},
@@ -212,7 +178,7 @@ func TestEndpointCacheUsesOneScopedL1Query(t *testing.T) {
 	defer upstream.Close()
 
 	w := httptest.NewRecorder()
-	router(&Dependencies{Storage: s, MetricsURL: upstream.URL}, true).ServeHTTP(w,
+	router(&Dependencies{Storage: s, MetricsURL: upstream.URL, KVCacheProviders: kvcache.Providers{"example": resourceObserver{}}}, true).ServeHTTP(w,
 		httptest.NewRequest("GET", "/endpoints/tenant/model/accelerator-observations", nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	// One replica query, two physical-device queries, and one shared L1 query.
@@ -221,16 +187,19 @@ func TestEndpointCacheUsesOneScopedL1Query(t *testing.T) {
 	for _, query := range queries {
 		require.NotContains(t, query, "vllm:kv_cache_usage_perc")
 		require.NotContains(t, query, "vllm:gpu_cache_usage_perc")
-		if strings.Contains(query, "lmcache_mp_l1_memory_usage_bytes") {
+		if strings.Contains(query, "example_cache") {
 			l1Queries++
 			require.Contains(t, query, `node=~"node-b|node\\.a"`)
 			require.Contains(t, query, `workspace="tenant"`)
 			require.Contains(t, query, `neutree_cluster="cluster"`)
-			require.Contains(t, query, `lmcache_mp_l1_memory_usage_bytes|up`)
+			require.Contains(t, query, `example_cache`)
 			require.NotContains(t, query, "accelerator_uuid")
 		}
 	}
 	require.Equal(t, 1, l1Queries)
+	var snap Snapshot
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &snap))
+	require.Equal(t, []Sample{{Metric: "example_cache", Value: 0, ObservedAt: 123}}, snap.Samples)
 }
 
 func TestHardwareLabelsRequireExplicitExtension(t *testing.T) {
@@ -243,4 +212,16 @@ func TestHardwareLabelsRequireExplicitExtension(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "1", samples[0].Labels["example_capable"])
 	require.NotContains(t, samples[0].Labels, "private")
+}
+
+type resourceObserver struct{ kvcache.VLLMNative }
+
+func (resourceObserver) ResourceQueries(scope cacheobservations.Scope) []cacheobservations.Query {
+	nodes := []string{}
+	for _, node := range scope.Nodes {
+		nodes = append(nodes, regexp.QuoteMeta(node))
+	}
+	return []cacheobservations.Query{{Expression: fmt.Sprintf(`example_cache{workspace=%s,neutree_cluster=%s,node=~%s}`, strconv.Quote(scope.Workspace), strconv.Quote(scope.Cluster), strconv.Quote(strings.Join(nodes, "|"))), Decode: func([]byte, time.Time) ([]cacheobservations.Sample, error) {
+		return []cacheobservations.Sample{{Metric: "example_cache", Value: 0, ObservedAt: 123}}, nil
+	}}}
 }
