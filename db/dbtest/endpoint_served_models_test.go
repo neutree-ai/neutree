@@ -41,15 +41,24 @@ func TestEndpointServedModelsRoundTrip(t *testing.T) {
 	s := NewTestStorage(t)
 	id := insertServedModelsEndpoint(t, db, "served-model-roundtrip", "default", `{"phase":"Running"}`, false)
 
-	for _, models := range [][]string{{"z-first-alias", "a-second-alias"}, {}} {
-		require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
-			Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: models},
-		}))
-		got, err := s.GetEndpoint(strconv.Itoa(id))
-		require.NoError(t, err)
-		require.NotNil(t, got.Status)
-		assert.Equal(t, models, got.Status.ServedModels, "PostgREST must preserve model order and explicit empty lists")
-	}
+	require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
+		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{"z-first-alias", "a-second-alias"}},
+	}))
+	got, err := s.GetEndpoint(strconv.Itoa(id))
+	require.NoError(t, err)
+	require.NotNil(t, got.Status)
+	assert.Equal(t, []string{"z-first-alias", "a-second-alias"}, got.Status.ServedModels,
+		"PostgREST must preserve the order reported by the engine")
+
+	// An empty observation carries no candidates, exactly like an endpoint that
+	// has never been probed, so the field is omitted rather than stored as [].
+	require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
+		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{}},
+	}))
+	got, err = s.GetEndpoint(strconv.Itoa(id))
+	require.NoError(t, err)
+	require.NotNil(t, got.Status)
+	assert.Empty(t, got.Status.ServedModels)
 }
 
 func TestWorkspaceModelsUsesFirstServedModel(t *testing.T) {
