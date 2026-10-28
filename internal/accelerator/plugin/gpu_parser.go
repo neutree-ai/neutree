@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type GPUResourceParser struct {
@@ -54,25 +55,17 @@ func parseStandardNvidiaKubernetesResources(
 	}
 
 	memoryTotalMiB := parseNodeMemoryMiB(labels[NvidiaGPUMemoryNodeLabelKey])
-	if memoryTotalMiB <= 0 {
-		return resourceInfo, nil
+	peak := accelerator.LookupPeakFP16TFLOPS(product, peakFP16TFLOPS)
+	if memoryTotalMiB > 0 || peak != nil {
+		resourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+				productKey: {MemoryTotalMiB: memoryTotalMiB, PeakFP16TFLOPS: peak},
+			}},
+		}
 	}
-
-	group.Products = map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{
-		productKey: {
-			Quantity: totalGPUs,
-		},
+	if memoryTotalMiB > 0 {
+		group.Products = map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{productKey: {Quantity: totalGPUs}}
 	}
-	resourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
-		v1.AcceleratorTypeNVIDIAGPU: {
-			Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
-				productKey: {
-					MemoryTotalMiB: memoryTotalMiB,
-				},
-			},
-		},
-	}
-
 	return resourceInfo, nil
 }
 
@@ -131,6 +124,14 @@ func (p *GPUResourceParser) ParseFromRay(resource map[string]float64) (*v1.Resou
 				},
 			},
 		},
+	}
+
+	if peak := accelerator.LookupPeakFP16TFLOPS(productName, peakFP16TFLOPS); peak != nil {
+		resourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
+			v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
+				v1.AcceleratorProduct(productName): {PeakFP16TFLOPS: peak},
+			}},
+		}
 	}
 
 	return resourceInfo, nil

@@ -163,14 +163,13 @@ func allocationMatchesPod(allocation v1.StaticNodeAllocationStatus, pod corev1.P
 }
 
 type kubernetesDeviceAnnotation struct {
-	ID             string   `json:"id,omitempty"`
-	UUID           string   `json:"uuid,omitempty"`
-	ProductName    string   `json:"product_name,omitempty"`
-	ProductModel   string   `json:"product_model,omitempty"`
-	MinorNumber    *int     `json:"minor_number,omitempty"`
-	MemoryMiB      int64    `json:"memory_mib,omitempty"`
-	Healthy        bool     `json:"healthy,omitempty"`
-	PeakFP16TFLOPS *float64 `json:"peak_fp16_tflops,omitempty"`
+	ID           string `json:"id,omitempty"`
+	UUID         string `json:"uuid,omitempty"`
+	ProductName  string `json:"product_name,omitempty"`
+	ProductModel string `json:"product_model,omitempty"`
+	MinorNumber  *int   `json:"minor_number,omitempty"`
+	MemoryMiB    int64  `json:"memory_mib,omitempty"`
+	Healthy      bool   `json:"healthy,omitempty"`
 }
 
 type kubernetesAllocationAnnotation struct {
@@ -199,14 +198,13 @@ func kubernetesDeviceAnnotations(devices []v1.StaticNodeAcceleratorDeviceStatus)
 		}
 
 		result = append(result, kubernetesDeviceAnnotation{
-			ID:             device.ID,
-			UUID:           device.UUID,
-			ProductName:    device.ProductName,
-			ProductModel:   device.ProductModel,
-			MinorNumber:    minorNumber,
-			MemoryMiB:      device.MemoryMiB,
-			Healthy:        device.Healthy,
-			PeakFP16TFLOPS: device.PeakFP16TFLOPS,
+			ID:           device.ID,
+			UUID:         device.UUID,
+			ProductName:  device.ProductName,
+			ProductModel: device.ProductModel,
+			MinorNumber:  minorNumber,
+			MemoryMiB:    device.MemoryMiB,
+			Healthy:      device.Healthy,
 		})
 	}
 

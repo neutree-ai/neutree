@@ -1,4 +1,4 @@
-package adapter
+package accelerator
 
 import "strings"
 

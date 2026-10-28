@@ -251,10 +251,6 @@ func (s HardwareSnapshot) Clone() HardwareSnapshot {
 				copied.MinorNumber = &minor
 			}
 
-			if device.PeakFP16TFLOPS != nil {
-				peak := *device.PeakFP16TFLOPS
-				copied.PeakFP16TFLOPS = &peak
-			}
 			result.Accelerator.Devices = append(result.Accelerator.Devices, copied)
 		}
 	}

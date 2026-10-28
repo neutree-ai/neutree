@@ -1,4 +1,4 @@
-package nvidia
+package plugin
 
 // Nominal per-card FP16 peak estimates carried over from the UI defaults.
 var peakFP16TFLOPS = map[string]float64{

@@ -220,6 +220,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
+	// The control-plane parser owns model specifications; old agent snapshots need not repeat them.
+	mergeAcceleratorMetadata(metadata, base.AcceleratorMetadata)
+
 	for _, device := range node.Status.Accelerator.Devices {
 		if device.UUID == "" {
 			continue
@@ -239,7 +242,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 			Available:   availablePool,
 		})
 
-		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB, device.PeakFP16TFLOPS)
+		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
 		addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 
@@ -636,9 +639,8 @@ func addStaticNodeAcceleratorMetadata(
 	acceleratorType v1.AcceleratorType,
 	product string,
 	memoryMiB int64,
-	peakFP16TFLOPS *float64,
 ) {
-	if metadata == nil || acceleratorType == "" || product == "" || (memoryMiB <= 0 && peakFP16TFLOPS == nil) {
+	if metadata == nil || acceleratorType == "" || product == "" || memoryMiB <= 0 {
 		return
 	}
 
@@ -660,7 +662,9 @@ func addStaticNodeAcceleratorMetadata(
 		acceleratorMetadata.Products[v1.AcceleratorProduct(product)] = productMetadata
 	}
 
-	productMetadata.Merge(&v1.AcceleratorProductMetadata{MemoryTotalMiB: float64(memoryMiB), PeakFP16TFLOPS: peakFP16TFLOPS})
+	if productMetadata.MemoryTotalMiB == 0 {
+		productMetadata.MemoryTotalMiB = float64(memoryMiB)
+	}
 }
 
 func staticNodeResourceKey(node *v1.StaticNode) string {

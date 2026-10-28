@@ -81,12 +81,11 @@ func (a *accelerator) DiscoverHardware(ctx context.Context) (adapter.HardwareSna
 
 	for _, info := range infos {
 		device := v1.StaticNodeAcceleratorDeviceStatus{
-			ID:             info.Index,
-			UUID:           info.UUID,
-			ProductName:    info.Product,
-			ProductModel:   info.Product,
-			PeakFP16TFLOPS: adapter.LookupPeakFP16TFLOPS(info.Product, peakFP16TFLOPS),
-			Healthy:        true, // Preserve the discovery default unless DCGM health metrics can be evaluated.
+			ID:           info.Index,
+			UUID:         info.UUID,
+			ProductName:  info.Product,
+			ProductModel: info.Product,
+			Healthy:      true, // Preserve the discovery default unless DCGM health metrics can be evaluated.
 		}
 
 		if info.MemoryTotalMiB != "" {

@@ -61,8 +61,6 @@ func TestNvidiaAdapterDiscoversHardware(t *testing.T) {
 			assert.True(t, snapshot.Accelerator.Devices[0].Healthy)
 			assert.Equal(t, "GPU-def", snapshot.Accelerator.Devices[0].UUID)
 			assert.Equal(t, int64(46068), snapshot.Accelerator.Devices[0].MemoryMiB)
-			require.NotNil(t, snapshot.Accelerator.Devices[0].PeakFP16TFLOPS)
-			require.Equal(t, 119.5, *snapshot.Accelerator.Devices[0].PeakFP16TFLOPS)
 			require.NotNil(t, snapshot.Accelerator.Devices[0].MinorNumber)
 			assert.Equal(t, 3, *snapshot.Accelerator.Devices[0].MinorNumber)
 			require.Len(t, snapshot.Details, 1)

@@ -151,8 +151,6 @@ type StaticNodeAcceleratorDeviceStatus struct {
 	MinorNumber *int `json:"minor_number,omitempty"`
 	// MemoryMiB is the device memory capacity in MiB.
 	MemoryMiB int64 `json:"memory_mib,omitempty"`
-	// PeakFP16TFLOPS is the optional per-device product specification, not a measurement.
-	PeakFP16TFLOPS *float64 `json:"peak_fp16_tflops,omitempty"`
 	// Healthy reports whether the plugin considers this device usable.
 	Healthy bool `json:"healthy,omitempty"`
 }
