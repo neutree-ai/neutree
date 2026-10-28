@@ -172,8 +172,8 @@ func TestEndpointOnlyReaderGetsAssignedHardware(t *testing.T) {
 			require.NotContains(t, q, `endpoint=`)
 			require.NotContains(t, q, "neutree_accelerator_memory_used_bytes")
 			require.NotContains(t, q, "neutree_accelerator_utilization_ratio")
-			require.Contains(t, q, "neutree_node_accelerator_npu_info")
-			require.Contains(t, q, "neutree_node_accelerator_hcu_info")
+			require.Contains(t, q, "neutree_node_accelerator_example_info")
+			require.Contains(t, q, "neutree_node_accelerator_other_info")
 			if strings.Contains(q, `node="node-a"`) {
 				require.Contains(t, q, `accelerator_uuid=~"gpu\\.1"`)
 				require.NotContains(t, q, "gpu-2")
@@ -183,14 +183,14 @@ func TestEndpointOnlyReaderGetsAssignedHardware(t *testing.T) {
 				require.NotContains(t, q, "gpu.1")
 			}
 		}
-		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"neutree_node_accelerator_npu_info","node":"node-a","accelerator_uuid":"gpu.1","driver_version":"24.1","hccs_capable":"1","private":"hidden"},"values":[[%d,"1"]]}]}}`, time.Now().Unix()-20)
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"neutree_node_accelerator_example_info","node":"node-a","accelerator_uuid":"gpu.1","driver_version":"24.1","example_capable":"1","private":"hidden"},"values":[[%d,"1"]]}]}}`, time.Now().Unix()-20)
 	}))
 	defer upstream.Close()
 	w := httptest.NewRecorder()
-	router(&Dependencies{Storage: s, MetricsURL: upstream.URL}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/model/accelerator-observations", nil))
+	router(&Dependencies{Storage: s, MetricsURL: upstream.URL, ExtraAcceleratorMetrics: []string{"neutree_node_accelerator_example_info", "neutree_node_accelerator_other_info"}, ExtraAcceleratorLabels: []string{"example_capable"}}, true).ServeHTTP(w, httptest.NewRequest("GET", "/endpoints/tenant/model/accelerator-observations", nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	require.Len(t, queries, 3)
-	require.Contains(t, w.Body.String(), `"hccs_capable":"1"`)
+	require.Contains(t, w.Body.String(), `"example_capable":"1"`)
 	require.NotContains(t, w.Body.String(), "hidden")
 }
 
@@ -231,4 +231,16 @@ func TestEndpointCacheUsesOneScopedL1Query(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, l1Queries)
+}
+
+func TestHardwareLabelsRequireExplicitExtension(t *testing.T) {
+	now := time.Now()
+	body := fmt.Sprintf(`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"neutree_node_accelerator_example_info","node":"node","accelerator_uuid":"gpu","example_capable":"1","private":"hidden"},"values":[[%d,"1"]]}]}}`, now.Unix())
+	samples, err := decodeSamples([]byte(body), now)
+	require.NoError(t, err)
+	require.NotContains(t, samples[0].Labels, "example_capable")
+	samples, err = decodeSamples([]byte(body), now, "example_capable")
+	require.NoError(t, err)
+	require.Equal(t, "1", samples[0].Labels["example_capable"])
+	require.NotContains(t, samples[0].Labels, "private")
 }

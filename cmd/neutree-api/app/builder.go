@@ -48,7 +48,12 @@ func NewBuilder() *Builder {
 		"ai-traces":       LogsRouteFactory(logs.RegisterAITraceRoutes),
 		"system":          SystemRouteFactory(system.RegisterSystemRoutes),
 		"accelerator-observations": func(deps *RouteOptions) error {
-			observations.RegisterRoutes(deps.Group, deps.Middlewares, &observations.Dependencies{Storage: deps.Config.Storage, MetricsURL: deps.Config.MetricsURL})
+			observations.RegisterRoutes(deps.Group, deps.Middlewares, &observations.Dependencies{
+				Storage:                 deps.Config.Storage,
+				MetricsURL:              deps.Config.MetricsURL,
+				ExtraAcceleratorMetrics: deps.Config.ExtraAcceleratorMetrics,
+				ExtraAcceleratorLabels:  deps.Config.ExtraAcceleratorLabels,
+			})
 			return nil
 		},
 		// Auth route (no auth required for authentication itself)

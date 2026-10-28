@@ -28,8 +28,7 @@ var physicalMetrics = []string{
 	"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes",
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
 	"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info",
-	"neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info",
-	"neutree_node_accelerator_hcu_info", "neutree_node_accelerator_iluvatar_info",
+	"neutree_node_accelerator_nvidia_info",
 }
 
 var replicaMetrics = []string{
@@ -38,9 +37,11 @@ var replicaMetrics = []string{
 }
 
 type Dependencies struct {
-	Storage    storage.Storage
-	MetricsURL string
-	Client     *http.Client
+	Storage                 storage.Storage
+	MetricsURL              string
+	Client                  *http.Client
+	ExtraAcceleratorMetrics []string
+	ExtraAcceleratorLabels  []string
 }
 
 type Sample struct {
@@ -93,7 +94,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		workspace, name := c.Param("workspace"), c.Param("name")
 		cluster, endpoint := name, ""
 
-		metrics := append([]string{}, physicalMetrics...)
+		metrics := append(append([]string{}, physicalMetrics...), deps.ExtraAcceleratorMetrics...)
 		var devices [][2]string
 		zcacheEnabled := false
 
@@ -183,7 +184,8 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		}
 
 		if len(devices) > 0 {
-			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info", "neutree_node_accelerator_npu_info", "neutree_node_accelerator_hcu_info", "neutree_node_accelerator_iluvatar_info"}
+			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info"}
+			physical = append(physical, deps.ExtraAcceleratorMetrics...)
 
 			byNode := map[string][]string{}
 			for _, device := range devices {
@@ -257,10 +259,10 @@ func querySamples(ctx context.Context, deps *Dependencies, query string) ([]Samp
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 
-	return decodeSamples(body, time.Now())
+	return decodeSamples(body, time.Now(), deps.ExtraAcceleratorLabels...)
 }
 
-func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
+func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample, error) {
 	var response struct {
 		Status    string `json:"status"`
 		IsPartial bool   `json:"isPartial"`
@@ -331,8 +333,8 @@ func decodeSamples(body []byte, now time.Time) ([]Sample, error) {
 
 		labels := map[string]string{}
 
-		for _, key := range strings.Fields("node accelerator_uuid accelerator_index accelerator_type product endpoint replica instance_id vdevice_index " +
-			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch hccs_capable") {
+		for _, key := range append(strings.Fields("node accelerator_uuid accelerator_index accelerator_type product endpoint replica instance_id vdevice_index "+
+			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch"), extraLabels...) {
 			if value, ok := series.Metric[key]; ok {
 				labels[key] = value
 			}
