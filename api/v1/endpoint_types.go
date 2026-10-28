@@ -94,10 +94,13 @@ type EndpointResourceStatus struct {
 }
 
 type ReplicaDeviceAllocation struct {
-	InstanceID string             `json:"instance_id"`
-	ReplicaID  string             `json:"replica_id,omitempty"`
-	NodeID     string             `json:"node_id,omitempty"`
-	Devices    []DeviceAllocation `json:"devices,omitempty"`
+	InstanceID         string             `json:"instance_id"`
+	ReplicaID          string             `json:"replica_id,omitempty"`
+	NodeID             string             `json:"node_id,omitempty"`
+	ContainerID        string             `json:"container_id,omitempty"`
+	ModelWeightsMiB    *float64           `json:"model_weights_mib,omitempty"`
+	KVCacheCapacityMiB *float64           `json:"kv_cache_capacity_mib,omitempty"`
+	Devices            []DeviceAllocation `json:"devices,omitempty"`
 }
 
 type DeviceAllocation struct {

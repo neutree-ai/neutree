@@ -3,7 +3,10 @@ package resource
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
@@ -988,4 +991,210 @@ func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnno
 	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA_A100"])
 	require.Equal(t, float64(81920),
 		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_A100"].MemoryTotalMiB)
+}
+
+type fakePodLogClient struct {
+	calls   int
+	logs    string
+	getLogs func(context.Context) (io.ReadCloser, error)
+}
+
+func (f *fakePodLogClient) GetPod(context.Context, *v1.Cluster, string, string) (*corev1.Pod, error) {
+	return nil, nil
+}
+
+func (f *fakePodLogClient) GetPodLogs(ctx context.Context, _ *v1.Cluster, _, _ string, opts *corev1.PodLogOptions) (io.ReadCloser, error) {
+	f.calls++
+	if f.getLogs != nil {
+		return f.getLogs(ctx)
+	}
+	return io.NopCloser(strings.NewReader(f.logs)), nil
+}
+
+func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: k8sClusterNamespaceForTest(),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46080,"core_units":100}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node-1",
+			Containers: []corev1.Container{
+				{Name: "vllm"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "vllm",
+					Ready:       true,
+					ContainerID: "containerd://cid-1",
+				},
+			},
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+	logClient := &fakePodLogClient{
+		logs: "INFO 10-22 10:00:00 [gpu_model_runner.py:123] Model loading took 14.5000 GiB and 3.21 seconds\n" +
+			"INFO 10-22 10:00:02 [gpu_worker.py:234] Available KV cache memory: 23.25 GiB\n",
+	}
+	resClient := NewK8sResourceClient(ctrClient, nil)
+	resClient.podLogClient = logClient
+	builder := NewResourceViewBuilder(resClient)
+
+	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+	status, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Len(t, status.Replicas, 1)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, "containerd://cid-1", status.Replicas[0].ContainerID)
+	require.NotNil(t, status.Replicas[0].ModelWeightsMiB)
+	require.InDelta(t, 14848.0, *status.Replicas[0].ModelWeightsMiB, 0.01)
+	require.NotNil(t, status.Replicas[0].KVCacheCapacityMiB)
+	require.InDelta(t, 23808.0, *status.Replicas[0].KVCacheCapacityMiB, 0.01)
+
+	// Subsequent reconcile with the same containerID reuses cached values without calling GetPodLogs.
+	endpoint.Status = &v1.EndpointStatus{Resources: status}
+	status2, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, status.Replicas[0].ModelWeightsMiB, status2.Replicas[0].ModelWeightsMiB)
+	require.Equal(t, status.Replicas[0].KVCacheCapacityMiB, status2.Replicas[0].KVCacheCapacityMiB)
+
+	for _, key := range []string{"num_gpu_blocks_override", "num-gpu-blocks-override"} {
+		endpoint.Spec.Variables = map[string]interface{}{"engine_args": map[string]interface{}{key: 128}}
+		for _, cached := range []bool{true, false} {
+			endpoint.Status.Resources = status
+			if !cached {
+				endpoint.Status.Resources = nil
+			}
+			got, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+			require.NoError(t, err)
+			require.NotNil(t, got.Replicas[0].ModelWeightsMiB)
+			require.Nil(t, got.Replicas[0].KVCacheCapacityMiB, key)
+		}
+	}
+	endpoint.Spec.Variables = nil
+	// A successful read with no matching startup lines is cached for this container.
+	endpoint.Status.Resources = nil
+	logClient.logs = "starting up\n"
+	calls := logClient.calls
+	empty, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.Equal(t, "containerd://cid-1", empty.Replicas[0].ContainerID)
+	endpoint.Status.Resources = empty
+	logClient.logs = "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes))
+	stillEmpty, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.Nil(t, stillEmpty.Replicas[0].ModelWeightsMiB)
+	require.Nil(t, stillEmpty.Replicas[0].KVCacheCapacityMiB)
+
+	// A new container must be read even when the previous container had no data.
+	pod.Status.ContainerStatuses[0].ContainerID = "containerd://cid-2"
+	require.NoError(t, ctrClient.Status().Update(context.Background(), pod))
+	filled, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, logClient.calls)
+	require.Equal(t, "containerd://cid-2", filled.Replicas[0].ContainerID)
+	require.InDelta(t, 6144.0, *filled.Replicas[0].ModelWeightsMiB, 0.01)
+	require.InDelta(t, 8192.0, *filled.Replicas[0].KVCacheCapacityMiB, 0.01)
+	endpoint.Status.Resources = nil
+	logClient.getLogs = func(ctx context.Context) (io.ReadCloser, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), startupLogTimeout)
+		return &blockedLogReader{ctx: ctx}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	got, err := builder.BuildEndpointResources(ctx, k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Nil(t, got.Replicas[0].ModelWeightsMiB)
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	require.Empty(t, got.Replicas[0].ContainerID)
+
+	// Request failures also leave collection incomplete.
+	endpoint.Status.Resources = got
+	logClient.getLogs = func(context.Context) (io.ReadCloser, error) {
+		return nil, context.Canceled
+	}
+	failed, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Empty(t, failed.Replicas[0].ContainerID)
+
+	// Failed reads are retried, rather than cached as a successful empty result.
+	endpoint.Status.Resources = failed
+	logClient.getLogs = nil
+	calls = logClient.calls
+	retried, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.NotNil(t, retried.Replicas[0].ModelWeightsMiB)
+
+	for _, engine := range []string{"sglang", "llama-cpp", "custom"} {
+		endpoint.Spec.Engine.Engine = engine
+		endpoint.Status.Resources = nil
+		calls = logClient.calls
+		result, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+		require.NoError(t, err)
+		require.Equal(t, calls, logClient.calls, engine)
+		require.Empty(t, result.Replicas[0].ContainerID)
+		require.Nil(t, result.Replicas[0].ModelWeightsMiB)
+	}
+
+}
+
+type blockedLogReader struct{ ctx context.Context }
+
+func (r *blockedLogReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+func (r *blockedLogReader) Close() error { return nil }
+
+func TestVLLMStartupMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		logs        string
+		weights, kv float64
+	}{
+		{"plain", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 6, 8},
+		{"mixed prefixes and different budgets", "Model loading took 6 GiB\nAvailable KV cache memory: 12.10 GiB\n(Worker_TP1 pid=11) Model loading took 7 GiB\n(Worker_TP1 pid=11) Available KV cache memory: 12.35 GiB\n", 7, 12.10},
+		{"shared nested prefix", "(outer) (EngineCore pid=1) Model loading took 7 GiB\n(outer) (EngineCore pid=1) Model loading took 6 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 9 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 8 GiB\n", 7, 8},
+		{"weights only", "Model loading took 6 GiB\n", 6, 0},
+		{"no positive values", "Model loading took 0 GiB\nAvailable KV cache memory: 0 GiB\n", 0, 0},
+		{"empty", "", 0, 0},
+		{"long running log", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes)), 6, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			weights, kv := parseVLLMStartupMemoryMiB(tc.logs)
+			for i, got := range []*float64{weights, kv} {
+				want := []float64{tc.weights, tc.kv}[i]
+				if want == 0 {
+					require.Nil(t, got)
+				} else {
+					require.NotNil(t, got)
+					require.InDelta(t, want*1024, *got, 0.01)
+				}
+			}
+		})
+	}
 }
