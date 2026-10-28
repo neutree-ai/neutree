@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +18,6 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"regexp"
-	"strconv"
 )
 
 func TestSamplesPreserveZeroAndScrapeTime(t *testing.T) {
