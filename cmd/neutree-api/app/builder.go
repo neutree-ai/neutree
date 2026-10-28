@@ -73,6 +73,7 @@ func NewBuilder() *Builder {
 		"rest/rpc":                  ProxiesRouteFactory(proxies.RegisterPostgrestRPCProxyRoutes),
 		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
 		"rest/identity-sources":     ProxiesRouteFactory(proxies.RegisterIdentitySourceRoutes),
+		"rest/log-sinks":            ProxiesRouteFactory(proxies.RegisterLogSinkRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -117,6 +118,7 @@ func NewBuilder() *Builder {
 		"rest/rpc":                  {"auth"},
 		"rest/external-endpoints":   {"auth"},
 		"rest/identity-sources":     {"auth"},
+		"rest/log-sinks":            {"auth"},
 		"credentials":               {"auth"},
 	}
 
