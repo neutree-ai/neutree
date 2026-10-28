@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/cacheobservations"
 )
 
 type PerformanceMetrics struct {
@@ -79,13 +79,19 @@ func performanceHandler(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		zcacheEnabled := items[0].Spec.KVCache != nil && items[0].Spec.KVCache.Provider == "zcache"
-		nodes := collectEndpointNodes(zcacheEnabled, status)
+		nodes := collectEndpointNodes(status)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		query := buildPerformanceQuery(workspace, items[0].Spec.Cluster, name, window, zcacheEnabled, nodes)
+		queries := []string{buildPerformanceQuery(workspace, items[0].Spec.Cluster, name, window)}
+		if cache := items[0].Spec.KVCache; cache != nil {
+			provider, _ := deps.KVCacheProviders.Get(cache.Provider)
+			if observer, ok := provider.(cacheobservations.PerformanceProvider); ok {
+				queries = append(queries, observer.PerformanceQueries(cacheobservations.Scope{Workspace: workspace, Cluster: items[0].Spec.Cluster, Endpoint: name, Window: window, Nodes: nodes})...)
+			}
+		}
+		query := strings.Join(queries, " or ")
 
 		values, err := queryVector(ctx, deps, query)
 		if err != nil {
@@ -106,8 +112,8 @@ func performanceHandler(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
-func collectEndpointNodes(zcacheEnabled bool, status *v1.EndpointStatus) []string {
-	if !zcacheEnabled || status == nil || status.Resources == nil {
+func collectEndpointNodes(status *v1.EndpointStatus) []string {
+	if status == nil || status.Resources == nil {
 		return nil
 	}
 
@@ -136,7 +142,7 @@ func labeledMetric(name, expr string) string {
 	return fmt.Sprintf(`label_replace((%s), "metric", %s, "", "")`, expr, strconv.Quote(name))
 }
 
-func buildPerformanceQuery(workspace, cluster, endpoint, window string, zcacheEnabled bool, nodes []string) string {
+func buildPerformanceQuery(workspace, cluster, endpoint, window string) string {
 	sel := fmt.Sprintf("workspace=%s,neutree_cluster=%s,application=%s",
 		strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(endpoint))
 
@@ -182,13 +188,6 @@ func buildPerformanceQuery(workspace, cluster, endpoint, window string, zcacheEn
 		"(sum(vllm:prefix_cache_hits_total{%s} or vllm:gpu_prefix_cache_hits_total{%s}) / "+
 			"((sum(vllm:prefix_cache_queries_total{%s} or vllm:gpu_prefix_cache_queries_total{%s})) > 0))",
 		sel, sel, sel, sel)
-
-	l1WinExpr := fmt.Sprintf(
-		"((sum(increase(vllm:prompt_tokens_by_source_total{%s,source=\"external_kv_transfer\"}[%s])) or (0 * (%s))) / (%s))",
-		sel, window, srcTotalWin, srcTotalWin)
-	l1CumExpr := fmt.Sprintf(
-		"((sum(vllm:prompt_tokens_by_source_total{%s,source=\"external_kv_transfer\"}) or (0 * (%s))) / (%s))",
-		sel, srcTotalCum, srcTotalCum)
 
 	parts := []string{
 		labeledMetric("ttft_p95_seconds", fmt.Sprintf(
@@ -241,37 +240,6 @@ func buildPerformanceQuery(workspace, cluster, endpoint, window string, zcacheEn
 			sel, window, sel, window)),
 		labeledMetric("l0_hit_rate", fmt.Sprintf("%s or %s", l0BySourceWin, l0PrefixWin)),
 		labeledMetric("cum_l0_hit_rate", fmt.Sprintf("%s or %s", l0BySourceCum, l0PrefixCum)),
-	}
-
-	if zcacheEnabled {
-		parts = append(parts,
-			labeledMetric("l1_hit_rate", l1WinExpr),
-			labeledMetric("cum_l1_hit_rate", l1CumExpr),
-		)
-	}
-
-	if zcacheEnabled && len(nodes) > 0 {
-		escaped := make([]string, 0, len(nodes))
-		for _, node := range nodes {
-			escaped = append(escaped, regexp.QuoteMeta(node))
-		}
-
-		nodeRegex := "^(" + strings.Join(escaped, "|") + ")$"
-		l1Sel := fmt.Sprintf(`job="neutree-zcache",workspace=%s,neutree_cluster=%s,node=~%s`,
-			strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(nodeRegex))
-
-		parts = append(parts,
-			labeledMetric("l1_read_bytes_per_second", fmt.Sprintf(
-				`sum(sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{%s,phase="staging",direction="h2d"}[%s]) `+
-					`and on(job,instance) (up{%s} == 1))) or `+
-					`sum(sum by(node) (rate(lmcache_mp_read_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1)))`,
-				l1Sel, window, l1Sel, l1Sel, window, l1Sel)),
-			labeledMetric("l1_write_bytes_per_second", fmt.Sprintf(
-				`sum(sum by(node) (rate(lmcache_mp_transfer_phase_bytes_total{%s,phase="staging",direction="d2h"}[%s]) `+
-					`and on(job,instance) (up{%s} == 1))) or `+
-					`sum(sum by(node) (rate(lmcache_mp_write_bytes_total{%s}[%s]) and on(job,instance) (up{%s} == 1)))`,
-				l1Sel, window, l1Sel, l1Sel, window, l1Sel)),
-		)
 	}
 
 	return strings.Join(parts, " or ")

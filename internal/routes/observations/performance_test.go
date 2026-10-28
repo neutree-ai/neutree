@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/pkg/cacheobservations"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/storage/mocks"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +37,7 @@ func TestPerformanceWindowNormalizationAndQueryScope(t *testing.T) {
 	s.On("ListEndpoint", resourceFilter("tenant", "chat")).Return([]v1.Endpoint{{
 		Spec: &v1.EndpointSpec{
 			Cluster: "cluster-a",
-			KVCache: &v1.EndpointKVCacheSpec{Provider: "zcache"},
+			KVCache: &v1.EndpointKVCacheSpec{Provider: "example"},
 		},
 		Status: &v1.EndpointStatus{
 			Phase: v1.EndpointPhaseRUNNING,
@@ -53,8 +55,7 @@ func TestPerformanceWindowNormalizationAndQueryScope(t *testing.T) {
 		require.Contains(t, q, `neutree_cluster="cluster-a"`)
 		require.Contains(t, q, `application="chat"`)
 		require.Contains(t, q, "[1h]")
-		require.Contains(t, q, `node=~"^(worker\\.1)$"`)
-		require.NotContains(t, q, "lmcache_mp_lookup_hit_tokens_total")
+		require.Contains(t, q, "example_cache_performance")
 		require.NotContains(t, q, "0 * (sum(up")
 
 		body := `{"status":"success","data":{"resultType":"vector","result":[
@@ -79,7 +80,7 @@ func TestPerformanceWindowNormalizationAndQueryScope(t *testing.T) {
 	})}
 
 	w := httptest.NewRecorder()
-	router(&Dependencies{Storage: s, MetricsURL: "http://vmselect", Client: client}, true).ServeHTTP(
+	router(&Dependencies{Storage: s, MetricsURL: "http://vmselect", Client: client, KVCacheProviders: kvcache.Providers{"example": performanceObserver{t: t}}}, true).ServeHTTP(
 		w, httptest.NewRequest("GET", "/endpoints/tenant/chat/performance-observations?window=1h", nil),
 	)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -124,4 +125,14 @@ func TestPerformanceCumulativeFallbackWhenWindowIdle(t *testing.T) {
 	require.InDelta(t, 0.0, *m.TotalTokensPerSecond, 1e-6)
 	require.InDelta(t, 0.25, *m.L0HitRate, 1e-6)
 	require.InDelta(t, 0.62, *m.L1HitRate, 1e-6)
+}
+
+type performanceObserver struct {
+	kvcache.VLLMNative
+	t *testing.T
+}
+
+func (p performanceObserver) PerformanceQueries(scope cacheobservations.Scope) []string {
+	require.Equal(p.t, cacheobservations.Scope{Workspace: "tenant", Cluster: "cluster-a", Endpoint: "chat", Window: "1h", Nodes: []string{"worker.1"}}, scope)
+	return []string{"example_cache_performance"}
 }
