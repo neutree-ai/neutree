@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/pkg/cacheobservations"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
@@ -69,7 +70,6 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 
 		if resource == "endpoints" {
 			permission = "endpoint:read"
-
 		}
 
 		if resource == "clusters" {
@@ -112,29 +112,14 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			}
 
 			cluster, endpoint = items[0].Spec.Cluster, name
+
 			if cache := items[0].Spec.KVCache; cache != nil {
 				cacheProvider, _ = deps.KVCacheProviders.Get(cache.Provider)
 			}
+
 			metrics = replicaMetrics
 
-			if status := items[0].Status; status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
-				seen := map[[2]string]bool{}
-
-				for _, replica := range status.Resources.Replicas {
-					for _, device := range replica.Devices {
-						node := device.NodeID
-						if node == "" {
-							node = replica.NodeID
-						}
-
-						key := [2]string{node, device.UUID}
-						if node != "" && device.UUID != "" && !seen[key] {
-							devices = append(devices, key)
-							seen[key] = true
-						}
-					}
-				}
-			}
+			devices = endpointDevices(items[0].Status)
 		} else {
 			items, err := deps.Storage.ListCluster(resourceFilter(workspace, name))
 
@@ -152,9 +137,11 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			if items[0].Spec != nil && items[0].Spec.Cache != nil {
 				providerName = items[0].Spec.Cache.Provider
 			}
+
 			if providerName == "" && items[0].Status != nil && items[0].Status.Cache != nil {
 				providerName = items[0].Status.Cache.Provider
 			}
+
 			cacheProvider, _ = deps.ClusterCacheProviders.Get(providerName)
 
 			// Cluster visibility alone must not reveal workload measurements.
@@ -177,7 +164,8 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			return
 		}
 
-		selector := fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s", strconv.Quote(strings.Join(metrics, "|")), strconv.Quote(workspace), strconv.Quote(cluster))
+		selector := fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s",
+			strconv.Quote(strings.Join(metrics, "|")), strconv.Quote(workspace), strconv.Quote(cluster))
 
 		if endpoint != "" {
 			selector += ",endpoint=" + strconv.Quote(endpoint)
@@ -188,7 +176,10 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 		queries := []string{selector + "}[90s]"}
 
 		if len(devices) > 0 {
-			physical := []string{"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius", "neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info"}
+			physical := []string{
+				"neutree_accelerator_memory_total_bytes", "neutree_accelerator_temperature_celsius",
+				"neutree_accelerator_power_usage_watts", "neutree_node_accelerator_hardware_info", "neutree_node_accelerator_nvidia_info",
+			}
 			physical = append(physical, deps.ExtraAcceleratorMetrics...)
 
 			byNode := map[string][]string{}
@@ -197,8 +188,9 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 			}
 
 			for node, uuids := range byNode {
-
-				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]", strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster), strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
+				queries = append(queries, fmt.Sprintf("{__name__=~%s,workspace=%s,neutree_cluster=%s,node=%s,accelerator_uuid=~%s}[90s]",
+					strconv.Quote(strings.Join(physical, "|")), strconv.Quote(workspace), strconv.Quote(cluster),
+					strconv.Quote(node), strconv.Quote(strings.Join(uuids, "|"))))
 			}
 		}
 
@@ -219,6 +211,7 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 
 		if provider, ok := cacheProvider.(cacheobservations.ResourceProvider); ok {
 			nodes := []string{}
+
 			seen := map[string]bool{}
 			for _, device := range devices {
 				if !seen[device[0]] {
@@ -226,13 +219,16 @@ func handler(deps *Dependencies, resource string) gin.HandlerFunc {
 					seen[device[0]] = true
 				}
 			}
+
 			sort.Strings(nodes)
+
 			for _, query := range provider.ResourceQueries(cacheobservations.Scope{Workspace: workspace, Cluster: cluster, Endpoint: endpoint, Nodes: nodes}) {
 				batch, err := querySamples(ctx, deps, query.Expression, query.Decode)
 				if err != nil {
 					c.JSON(503, gin.H{"error": "monitoring unavailable"})
 					return
 				}
+
 				samples = append(samples, batch...)
 			}
 		}
@@ -281,6 +277,7 @@ func querySamples(ctx context.Context, deps *Dependencies, query string, decode 
 	if len(decode) > 0 && decode[0] != nil {
 		return decode[0](body, time.Now())
 	}
+
 	return decodeSamples(body, time.Now(), deps.ExtraAcceleratorLabels...)
 }
 
@@ -306,12 +303,14 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 	}
 
 	result := []Sample{}
+
 	for _, series := range response.Data.Result {
 		if len(series.Values) == 0 {
 			continue
 		}
 
 		name := series.Metric["__name__"]
+
 		if series.Metric["accelerator_uuid"] == "" {
 			continue
 		}
@@ -326,14 +325,16 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 
 		value, err := strconv.ParseFloat(raw, 64)
 
-		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || timestamp < float64(now.Unix()-90) || timestamp > float64(now.Unix()+5) {
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 ||
+			timestamp < float64(now.Unix()-90) || timestamp > float64(now.Unix()+5) {
 			continue
 		}
 
 		labels := map[string]string{}
 
 		for _, key := range append(strings.Fields("node accelerator_uuid accelerator_index accelerator_type product endpoint replica instance_id vdevice_index "+
-			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch"), extraLabels...) {
+			"memory_total_bytes architecture cuda_capability driver_version cuda_driver_version pcie_bus_id pcie_generation pcie_width numa_node nvlink nvswitch"),
+			extraLabels...) {
 			if value, ok := series.Metric[key]; ok {
 				labels[key] = value
 			}
@@ -347,4 +348,29 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 	}
 
 	return result, nil
+}
+
+func endpointDevices(status *v1.EndpointStatus) [][2]string {
+	var devices [][2]string
+
+	if status != nil && status.Resources != nil && status.Phase != "Paused" && status.Phase != "Deleted" {
+		seen := map[[2]string]bool{}
+
+		for _, replica := range status.Resources.Replicas {
+			for _, device := range replica.Devices {
+				node := device.NodeID
+				if node == "" {
+					node = replica.NodeID
+				}
+
+				key := [2]string{node, device.UUID}
+				if node != "" && device.UUID != "" && !seen[key] {
+					devices = append(devices, key)
+					seen[key] = true
+				}
+			}
+		}
+	}
+
+	return devices
 }

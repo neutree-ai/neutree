@@ -8,6 +8,7 @@ func LookupPeakFP16TFLOPS(product string, specifications map[string]float64) *fl
 	name := strings.ToUpper(product)
 	longest := 0
 	var peak *float64
+
 	for model, value := range specifications {
 		if len(model) > longest && strings.Contains(name, strings.ToUpper(model)) {
 			longest = len(model)
@@ -15,5 +16,6 @@ func LookupPeakFP16TFLOPS(product string, specifications map[string]float64) *fl
 			peak = &copy
 		}
 	}
+
 	return peak
 }

@@ -125,7 +125,8 @@ Examples:
 
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.jwtSecret, "jwt-secret", "", "neutree core jwt secret (required)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.dbPassword, "db-password", "pgpassword", "database password for postgres superuser")
-	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsQueryURL, "metrics-query-url", "", "Prometheus query URL reachable from the API container (distinct from remote write)")
+	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsQueryURL, "metrics-query-url", "",
+		"Prometheus query URL reachable from the API container (distinct from remote write)")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.metricsRemoteWriteURL, "metrics-remote-write-url", "", "metrics remote write url")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.grafanaURL, "grafana-url", "", "grafana dashboard url for system info API")
 	neutreeCoreInstallCmd.PersistentFlags().StringVar(&options.gatewayExternalURL, "gateway-external-url", "",
@@ -293,6 +294,7 @@ func prepareNeutreeCoreDeployConfigInWorkDir(options neutreeCoreInstallOptions, 
 	if metricsQueryURL == "" && options.metricsRemoteWriteURL == "" {
 		metricsQueryURL = fmt.Sprintf("http://%s:8481/select/0/prometheus", options.nodeIP)
 	}
+
 	templateParams := map[string]string{
 		"NeutreeCoreWorkDir":           coreWorkDir,
 		"JwtSecret":                    options.jwtSecret,

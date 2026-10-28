@@ -230,6 +230,7 @@ func mergeAcceleratorMetadata(target, source map[v1.AcceleratorType]*v1.Accelera
 			if targetMetadata.Products[product] == nil {
 				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{}
 			}
+
 			targetMetadata.Products[product].Merge(sourceProduct)
 		}
 	}

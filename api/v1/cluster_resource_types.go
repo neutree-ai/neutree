@@ -320,9 +320,11 @@ func (m *AcceleratorProductMetadata) Merge(other *AcceleratorProductMetadata) {
 	if other == nil {
 		return
 	}
+
 	if m.MemoryTotalMiB == 0 {
 		m.MemoryTotalMiB = other.MemoryTotalMiB
 	}
+
 	if m.PeakFP16TFLOPS == nil && other.PeakFP16TFLOPS != nil {
 		value := *other.PeakFP16TFLOPS
 		m.PeakFP16TFLOPS = &value

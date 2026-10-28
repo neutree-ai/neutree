@@ -56,6 +56,7 @@ func parseStandardNvidiaKubernetesResources(
 
 	memoryTotalMiB := parseNodeMemoryMiB(labels[NvidiaGPUMemoryNodeLabelKey])
 	peak := accelerator.LookupPeakFP16TFLOPS(product, peakFP16TFLOPS)
+
 	if memoryTotalMiB > 0 || peak != nil {
 		resourceInfo.AcceleratorMetadata = map[v1.AcceleratorType]*v1.AcceleratorMetadata{
 			v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
@@ -63,9 +64,11 @@ func parseStandardNvidiaKubernetesResources(
 			}},
 		}
 	}
+
 	if memoryTotalMiB > 0 {
 		group.Products = map[v1.AcceleratorProduct]*v1.AcceleratorProductResource{productKey: {Quantity: totalGPUs}}
 	}
+
 	return resourceInfo, nil
 }
 
