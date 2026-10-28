@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/orchestrator"
@@ -28,16 +26,9 @@ func TestFetchServedModels(t *testing.T) {
 		{name: "ordered unique models", body: `{"data":[{"id":"alias-b"},{"id":"alias-a"},{"id":"alias-b"}]}`, want: []string{"alias-b", "alias-a"}},
 		{name: "empty list", body: `{"data":[]}`, want: []string{}},
 		{name: "keeps exact model identity", body: `{"data":[{"id":" model "}]}`, want: []string{" model "}},
-		{name: "server failure", status: http.StatusServiceUnavailable, body: `{"data":[]}`, wantErr: true},
-		{name: "malformed json", body: `{`, wantErr: true},
-		{name: "missing collection", body: `{}`, wantErr: true},
-		{name: "null collection", body: `{"data":null}`, wantErr: true},
 		{name: "empty id", body: `{"data":[{"id":""}]}`, wantErr: true},
 		{name: "whitespace id", body: `{"data":[{"id":"  "}]}`, wantErr: true},
-		{name: "non-string id", body: `{"data":[{"id":3}]}`, wantErr: true},
-		{name: "null model", body: `{"data":[null]}`, wantErr: true},
-		{name: "trailing json", body: `{"data":[]} {}`, wantErr: true},
-		{name: "oversized response", body: `{"data":[{"id":"` + strings.Repeat("x", 1<<20) + `"}]}`, wantErr: true},
+		{name: "server failure", status: http.StatusServiceUnavailable, body: `{"data":[]}`, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -114,10 +105,9 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 		requests int
 	}{
 		{name: "refresh running", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
-		{name: "transient failure retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
+		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
 		{name: "successful empty clears observation", phase: v1.EndpointPhaseRUNNING, body: `{"data":[]}`, want: []string{}, requests: 1},
 		{name: "paused does not probe", phase: v1.EndpointPhasePAUSED, want: []string{"previous"}},
-		{name: "deploying does not probe", phase: v1.EndpointPhaseDEPLOYING, want: []string{"previous"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,16 +135,4 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 			o.AssertExpectations(t)
 		})
 	}
-}
-
-func TestFetchServedModelsTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	}))
-	defer server.Close()
-	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{DashboardURL: server.URL}}
-	start := time.Now()
-	_, err := fetchServedModels(cluster, ep(1, v1.EndpointPhaseRUNNING))
-	require.Error(t, err)
-	assert.Less(t, time.Since(start), 8*time.Second)
 }

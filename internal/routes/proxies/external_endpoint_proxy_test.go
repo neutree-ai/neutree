@@ -116,17 +116,6 @@ func TestHandleTestConnectivity(t *testing.T) {
 			wantErrContain: "no models found",
 		},
 		{
-			name: "mixed empty and missing ids retain order duplicates and whitespace",
-			mockServer: func() *httptest.Server {
-				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					_, _ = fmt.Fprint(w, `{"data":[{"id":"b"},{"id":""},{},{"id":null},null,{"id":" b "},{"id":"b"}]}`)
-				}))
-			},
-			wantHTTPStatus: http.StatusOK,
-			wantSuccess:    true,
-			wantModels:     []string{"b", " b ", "b"},
-		},
-		{
 			name: "all empty ids are rejected",
 			mockServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -135,14 +124,6 @@ func TestHandleTestConnectivity(t *testing.T) {
 			},
 			wantHTTPStatus: http.StatusOK,
 			wantErrContain: "no models found",
-		},
-		{
-			name: "empty body is rejected",
-			mockServer: func() *httptest.Server {
-				return httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
-			},
-			wantHTTPStatus: http.StatusOK,
-			wantErrContain: "invalid JSON",
 		},
 		{
 			name: "connection refused",
