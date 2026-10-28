@@ -239,7 +239,7 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 			Available:   availablePool,
 		})
 
-		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
+		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB, device.PeakFP16TFLOPS)
 
 		addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 
@@ -636,8 +636,9 @@ func addStaticNodeAcceleratorMetadata(
 	acceleratorType v1.AcceleratorType,
 	product string,
 	memoryMiB int64,
+	peakFP16TFLOPS *float64,
 ) {
-	if metadata == nil || acceleratorType == "" || product == "" || memoryMiB <= 0 {
+	if metadata == nil || acceleratorType == "" || product == "" || (memoryMiB <= 0 && peakFP16TFLOPS == nil) {
 		return
 	}
 
@@ -659,9 +660,7 @@ func addStaticNodeAcceleratorMetadata(
 		acceleratorMetadata.Products[v1.AcceleratorProduct(product)] = productMetadata
 	}
 
-	if productMetadata.MemoryTotalMiB == 0 {
-		productMetadata.MemoryTotalMiB = float64(memoryMiB)
-	}
+	productMetadata.Merge(&v1.AcceleratorProductMetadata{MemoryTotalMiB: float64(memoryMiB), PeakFP16TFLOPS: peakFP16TFLOPS})
 }
 
 func staticNodeResourceKey(node *v1.StaticNode) string {

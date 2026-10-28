@@ -227,11 +227,10 @@ func mergeAcceleratorMetadata(target, source map[v1.AcceleratorType]*v1.Accelera
 				continue
 			}
 
-			if _, exists := targetMetadata.Products[product]; !exists {
-				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{
-					MemoryTotalMiB: sourceProduct.MemoryTotalMiB,
-				}
+			if targetMetadata.Products[product] == nil {
+				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{}
 			}
+			targetMetadata.Products[product].Merge(sourceProduct)
 		}
 	}
 }

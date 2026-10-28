@@ -35,11 +35,12 @@ var (
 )
 
 type kubernetesNeutreeDeviceAnnotation struct {
-	ID          string `json:"id,omitempty"`
-	UUID        string `json:"uuid,omitempty"`
-	MinorNumber *int   `json:"minor_number,omitempty"`
-	MemoryMiB   int64  `json:"memory_mib,omitempty"`
-	Healthy     bool   `json:"healthy,omitempty"`
+	ID             string   `json:"id,omitempty"`
+	UUID           string   `json:"uuid,omitempty"`
+	MinorNumber    *int     `json:"minor_number,omitempty"`
+	MemoryMiB      int64    `json:"memory_mib,omitempty"`
+	Healthy        bool     `json:"healthy,omitempty"`
+	PeakFP16TFLOPS *float64 `json:"peak_fp16_tflops,omitempty"`
 }
 
 type kubernetesNeutreeDeviceOrder struct {
@@ -53,12 +54,13 @@ type kubernetesNeutreeDeviceUsage struct {
 }
 
 type kubernetesNeutreeDeviceResource struct {
-	uuid        string
-	memoryMiB   int64
-	coreUnits   int64
-	healthy     bool
-	minorNumber *int
-	order       *int
+	peakFP16TFLOPS *float64
+	uuid           string
+	memoryMiB      int64
+	coreUnits      int64
+	healthy        bool
+	minorNumber    *int
+	order          *int
 }
 
 type kubernetesNeutreeAcceleratorResources struct {
@@ -606,12 +608,13 @@ func parseKubernetesNeutreeDeviceResources(
 
 		order := orders[uuid]
 		result = append(result, kubernetesNeutreeDeviceResource{
-			uuid:        uuid,
-			memoryMiB:   device.MemoryMiB,
-			coreUnits:   kubernetesDefaultDeviceCoreUnits,
-			healthy:     device.Healthy,
-			minorNumber: order.MinorNumber,
-			order:       order.Order,
+			uuid:           uuid,
+			peakFP16TFLOPS: device.PeakFP16TFLOPS,
+			memoryMiB:      device.MemoryMiB,
+			coreUnits:      kubernetesDefaultDeviceCoreUnits,
+			healthy:        device.Healthy,
+			minorNumber:    order.MinorNumber,
+			order:          order.Order,
 		})
 	}
 
@@ -693,11 +696,12 @@ func buildKubernetesNeutreeAcceleratorResources(
 			availablePool,
 		)
 
-		if _, exists := metadata.Products[product]; !exists && allocatable.MemoryMiB > 0 {
-			metadata.Products[product] = &v1.AcceleratorProductMetadata{
-				MemoryTotalMiB: float64(allocatable.MemoryMiB),
-			}
+		if metadata.Products[product] == nil {
+			metadata.Products[product] = &v1.AcceleratorProductMetadata{}
 		}
+		metadata.Products[product].Merge(&v1.AcceleratorProductMetadata{
+			MemoryTotalMiB: float64(allocatable.MemoryMiB), PeakFP16TFLOPS: device.peakFP16TFLOPS,
+		})
 	}
 
 	return &kubernetesNeutreeAcceleratorResources{

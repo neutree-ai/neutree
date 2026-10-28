@@ -136,6 +136,11 @@ type AcceleratorMetadata struct {
 
 type AcceleratorProductMetadata struct {
 	MemoryTotalMiB float64 `json:"memory_total_mib,omitempty"`
+	// PeakFP16TFLOPS is the nominal per-physical-device FP16 peak estimate,
+	// using the existing product specification convention (not measured throughput).
+	// Nil means unknown, including conflicting specifications for the same product.
+	PeakFP16TFLOPS   *float64 `json:"peak_fp16_tflops,omitempty"`
+	peakFP16Conflict bool
 }
 
 type DeviceResource struct {
@@ -309,4 +314,23 @@ func (c *ClusterResources) String() string {
 	}
 
 	return output
+}
+
+// Merge fills missing product metadata and keeps conflicting peaks unknown.
+// Conflict state is local to aggregation; it is not part of the API payload.
+func (m *AcceleratorProductMetadata) Merge(other *AcceleratorProductMetadata) {
+	if other == nil {
+		return
+	}
+	if m.MemoryTotalMiB == 0 {
+		m.MemoryTotalMiB = other.MemoryTotalMiB
+	}
+	if m.peakFP16Conflict || other.peakFP16Conflict ||
+		(m.PeakFP16TFLOPS != nil && other.PeakFP16TFLOPS != nil && *m.PeakFP16TFLOPS != *other.PeakFP16TFLOPS) {
+		m.PeakFP16TFLOPS = nil
+		m.peakFP16Conflict = true
+	} else if m.PeakFP16TFLOPS == nil && other.PeakFP16TFLOPS != nil {
+		value := *other.PeakFP16TFLOPS
+		m.PeakFP16TFLOPS = &value
+	}
 }
