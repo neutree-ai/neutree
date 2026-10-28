@@ -23,15 +23,48 @@
 - **Style**: stub the Kong PDK as globals before loading the handler, then drive its public entry points (`handler:access(conf)`), so tests pin the plugin's decision for a request shape rather than the shape of its internals.
 - **Priorities are load-bearing**: `PRIORITY` decides which plugin enforces first (Kong runs high to low within a phase, and `kong.response.exit` aborts the rest of the phase). `internal/gateway/kong_plugin_priority_test.go` pins the values; read it before reasoning about ordering.
 
-## Python Tests (co-located)
+## Python Unit Tests
 
-Python tests use `test_<module>.py` naming and live **in the same directory as the source file** (not a separate `tests/`).
+Python unit tests use **pytest** and **Python 3.12**. The local
+`make python-test` target and the `python-test` CI job collect tests under
+`cluster-image-builder/` and `python/`. The generated
+`cluster-image-builder/downloader/` copy is excluded to avoid duplicate tests.
 
-Examples:
-- `cluster-image-builder/serve/_utils/coerce.py` → `test_coerce.py`
-- `python/neutree/downloader/huggingface.py` → `test_huggingface.py`
+### Running tests
 
-When adding or modifying a Python module, create or update the co-located test file.
+From the repository root, install the shared test dependencies and run the suite:
+
+```bash
+python3.12 -m pip install -r python/requirements-test.txt
+make python-test
+```
+
+The target defaults to `python3.12`. Use
+`make python-test PYTHON=/path/to/venv/bin/python` to select a Python 3.12
+virtual environment. The target sets both package roots on `PYTHONPATH` and
+applies the coverage settings defined in the `Makefile`; it has no Go build,
+lint, or test prerequisites.
+
+To run one test file directly, set the same import paths:
+
+```bash
+PYTHONPATH=python:cluster-image-builder python3.12 -m pytest path/to/test_module.py -q
+```
+
+### Adding tests
+
+- Place `test_<module>.py` beside the source file. Add or update tests when changing
+  a Python module; files under the two collection roots are discovered automatically.
+- Use `test_` function names and `pytest.mark.parametrize` for input variations.
+  Cover expected behavior, invalid inputs, and relevant failure paths.
+- Keep unit tests independent of GPUs, inference engine installations, model
+  downloads, and external services. Replace external calls with mocks or fixtures;
+  use temporary files and restore patched imports, environment variables, and globals
+  after each test. Real deployment behavior belongs in E2E tests.
+- Add test dependencies to `python/requirements-test.txt`, shared by local setup
+  and CI. Reuse existing runtime requirements with `-r` where appropriate; paths
+  are relative to the requirements file.
+- Run the changed test file while iterating, then `make python-test` before submitting.
 
 ## Database Integration Tests
 

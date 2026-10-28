@@ -1,6 +1,7 @@
 import os
 import enum
 import json
+import logging
 import time
 import inspect
 import fnmatch
@@ -11,13 +12,15 @@ from ray import serve
 from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from starlette.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
 from llama_cpp.server.model import LlamaProxy
-from llama_cpp.server.app import create_chat_completion, create_completion
+from llama_cpp.server.app import create_chat_completion, create_completion, router as native_router
+from llama_cpp.server.types import CreateChatCompletionRequest, CreateCompletionRequest, CreateEmbeddingRequest
 
 from fastapi.middleware.cors import CORSMiddleware
 from starlette_context.plugins import RequestIdPlugin
@@ -26,6 +29,60 @@ from starlette_context.middleware import RawContextMiddleware
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.serve_errors import (
+    RequestInputError,
+    backend_error,
+    error_response,
+    error_stream,
+    input_error_handler,
+    is_streaming,
+    read_json_object,
+    stream_error_response,
+    stream_error_status,
+)
+
+
+_WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
+
+
+def _native_error_response(exc: Exception, payload, where: str):
+    if isinstance(exc, RequestInputError):
+        return backend_error(exc, where)
+    try:
+        if isinstance(exc, HTTPException):
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+        try:
+            if "messages" in payload:
+                body = CreateChatCompletionRequest(**payload)
+            elif "prompt" in payload:
+                body = CreateCompletionRequest(**payload)
+            else:
+                body = CreateEmbeddingRequest(**payload)
+        except Exception:
+            body = None
+        endpoint = create_chat_completion if isinstance(body, CreateChatCompletionRequest) else create_completion
+        route = next(route for route in native_router.routes if route.endpoint is endpoint)
+        status_code, detail = route.error_message_wrapper(error=exc, body=body)
+        return JSONResponse({"error": detail}, status_code=status_code)
+    except Exception as mapping_error:
+        return backend_error(mapping_error, f"{where} error formatting")
+
+
+async def _stream_chunks(chunks):
+    try:
+        async for chunk in iterate_in_threadpool(chunks):
+            yield f"data: {json.dumps(chunk, allow_nan=False)}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as exc:
+        async for frame in error_stream(backend_error(exc, "stream interrupted")):
+            yield frame
+
+
+def _result_to_response(result) -> JSONResponse:
+    if isinstance(result, dict) and result.get(_WIRE_RESPONSE_MARKER):
+        return JSONResponse(content=result["content"], status_code=result["status_code"])
+    return JSONResponse(content=result)
+
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
@@ -185,35 +242,64 @@ class Backend:
         # Ensure model can be loaded without errors
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
 
+    def _to_wire_response(self, result: Any) -> Dict[str, Any]:
+        try:
+            if isinstance(result, JSONResponse):
+                content, status_code = json.loads(result.body), result.status_code
+            else:
+                content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+                status_code = 200
+            if status_code == 200 and isinstance(content, dict) and "error" in content:
+                status_code = stream_error_status(content["error"])
+            json.dumps(content, allow_nan=False)
+        except Exception as exc:
+            content, status_code = backend_error(exc, "response serialization"), 500
+        return {_WIRE_RESPONSE_MARKER: True, "content": content, "status_code": status_code}
+
     async def generate(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        if "messages" in payload:
-            # Chat completion
-            response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
-            return response
-        else:
-            # Regular completion
-            response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
-            return response
+        stream = False
+        try:
+            stream = is_streaming(payload)
+            llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            if "messages" in payload:
+                response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
+            else:
+                response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
+            if stream:
+                return _stream_chunks(response)
+            return self._to_wire_response(response)
+        except Exception as exc:
+            if stream:
+                return error_stream(backend_error(exc, "generate"))
+            return self._to_wire_response(_native_error_response(exc, payload, "generate"))
 
     async def generate_embeddings(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
-        return response
+        try:
+            if not isinstance(payload, dict):
+                raise RequestInputError("Request body must be a JSON object")
+            llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
+            return self._to_wire_response(response)
+        except Exception as exc:
+            return self._to_wire_response(_native_error_response(exc, payload, "generate_embeddings"))
 
     async def show_available_models(self) -> Dict[str, Any]:
-        """Return a list of available models"""
-        return {
-            "object": "list",
-            "data": [{
-                "id": self.model_id,
-                "object": "model",
-                "permissions": [],
-                "owned_by": "local",
-            }]
-        }
+        try:
+            return self._to_wire_response({
+                "object": "list",
+                "data": [{
+                    "id": self.model_id,
+                    "object": "model",
+                    "permissions": [],
+                    "owned_by": "local",
+                }]
+            })
+        except Exception as exc:
+            return self._to_wire_response(backend_error(exc, "show_available_models"))
+
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -239,26 +325,29 @@ class Controller:
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         """Chat completions endpoint"""
-        req_obj = await request.json()
-        stream = req_obj.get("stream", False)
-
+        req_obj = await read_json_object(request)
+        stream = is_streaming(req_obj)
         if stream:
-            # Get the streaming generator from the backend
-            r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
+            try:
+                r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
+                first_chunk = await r.__anext__()
+            except StopAsyncIteration:
+                return StreamingResponse(content=iter(()), media_type="text/event-stream")
+            except Exception:
+                logging.exception("Failed to initialize completion stream")
+                return error_response("Failed to initialize completion stream", 500, "InternalServerError")
+            first_error = stream_error_response(first_chunk)
+            if first_error is not None:
+                return first_error
 
-            async def event_generator():
+            async def stream_with_first_chunk():
+                yield first_chunk
                 async for chunk in r:
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                yield "data: [DONE]\n\n"
+                    yield chunk
 
-            return StreamingResponse(
-                content=event_generator(),
-                media_type="text/event-stream"
-            )
-        else:
-            # Handle non-streaming response
-            result = await self.backend.options(stream=False).generate.remote(req_obj)
-            return JSONResponse(content=result)
+            return StreamingResponse(content=stream_with_first_chunk(), media_type="text/event-stream")
+        result = await self.backend.options(stream=False).generate.remote(req_obj)
+        return _result_to_response(result)
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
@@ -270,14 +359,14 @@ class Controller:
     async def models(self, request: Request):
         """Available models endpoint"""
         result = await self.backend.show_available_models.remote()
-        return JSONResponse(content=result)
+        return _result_to_response(result)
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint"""
-        req_obj = await request.json()
+        req_obj = await read_json_object(request)
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
-        return JSONResponse(content=result)
+        return _result_to_response(result)
 
     @app.get("/health")
     async def health(self):

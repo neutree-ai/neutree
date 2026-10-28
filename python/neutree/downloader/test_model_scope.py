@@ -437,7 +437,11 @@ class TestOffline(ModelScopeTestCase):
         self.assertEqual(_Hub.requests, [])
 
     def test_unreachable_hub_names_the_real_problem(self):
-        with mock.patch.dict(os.environ, {"MODELSCOPE_ENDPOINT": "http://127.0.0.1:1"}):
+        with mock.patch.dict(os.environ, {
+            "MODELSCOPE_ENDPOINT": "http://127.0.0.1:1",
+            "no_proxy": "127.0.0.1",
+            "NO_PROXY": "127.0.0.1",
+        }):
             with self.assertRaises(ModelScopeDownloadUnavailable) as ctx:
                 self.download()
 
