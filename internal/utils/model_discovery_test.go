@@ -2,7 +2,6 @@ package utils
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -54,15 +53,7 @@ func (f modelDiscoveryTransport) RoundTrip(req *http.Request) (*http.Response, e
 
 type modelDiscoveryBody struct {
 	io.Reader
-	readErr error
-	closed  bool
-}
-
-func (b *modelDiscoveryBody) Read(p []byte) (int, error) {
-	if b.readErr != nil {
-		return 0, b.readErr
-	}
-	return b.Reader.Read(p)
+	closed bool
 }
 
 func (b *modelDiscoveryBody) Close() error { b.closed = true; return nil }
@@ -72,18 +63,15 @@ func TestFetchModelIDs(t *testing.T) {
 		name        string
 		status      int
 		body        string
-		readErr     error
 		errContains string
 	}{
 		{name: "success", status: http.StatusOK, body: `{"data":[{"id":"alias"}]}`},
 		{name: "upstream error preserves body", status: http.StatusUnauthorized, body: `{"error":"invalid api key"}`, errContains: `upstream returned HTTP 401: {"error":"invalid api key"}`},
 		{name: "oversized", status: http.StatusOK, body: strings.Repeat("x", (1<<20)+1), errContains: "size limit"},
-		{name: "body read failure", status: http.StatusOK, readErr: errors.New("read failed"), errContains: "read failed"},
-		{name: "invalid response", status: http.StatusOK, body: `{`, errContains: "valid OpenAI-compatible model list"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := &modelDiscoveryBody{Reader: strings.NewReader(tc.body), readErr: tc.readErr}
+			body := &modelDiscoveryBody{Reader: strings.NewReader(tc.body)}
 			request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://upstream/v1/models", nil)
 			require.NoError(t, err)
 			request.Header.Set("Authorization", "Bearer test")

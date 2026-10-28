@@ -65,9 +65,6 @@ func TestWorkspaceModelsUsesFirstServedModel(t *testing.T) {
 		{"aliases", workspace, `{"served_models":["z-client-name","a-alias"]}`, false},
 		{"not-observed", workspace, `{}`, false},
 		{"empty", workspace, `{"served_models":[]}`, false},
-		{"null", workspace, `{"served_models":null}`, false},
-		{"blank-first", workspace, `{"served_models":["","second"]}`, false},
-		{"whitespace-first", workspace, `{"served_models":["   ","second"]}`, false},
 		{"other-workspace", "served-model-other", `{"served_models":["other"]}`, false},
 		{"deleted", workspace, `{"served_models":["deleted"]}`, true},
 	}

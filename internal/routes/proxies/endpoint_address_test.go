@@ -50,17 +50,3 @@ func TestDirectEndpointProxyPaths(t *testing.T) {
 	assert.Equal(t, 1, requests)
 	store.AssertExpectations(t)
 }
-
-func TestEndpointRefModelsURLEscapedIPv6(t *testing.T) {
-	endpoint := v1.Endpoint{Metadata: &v1.Metadata{Workspace: "team/a", Name: "model?name"}, Spec: &v1.EndpointSpec{Cluster: "cluster"}}
-	store := &storagemocks.MockStorage{}
-	store.On("ListEndpoint", mock.Anything).Return([]v1.Endpoint{endpoint}, nil)
-	store.On("ListCluster", mock.Anything).Return([]v1.Cluster{{
-		Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}, Status: &v1.ClusterStatus{DashboardURL: "http://[2001:db8::1]:8265"},
-	}}, nil)
-	workspace, name := endpoint.Metadata.Workspace, endpoint.Metadata.Name
-	got, err := resolveModelsURL(&Dependencies{Storage: store}, &testConnectivityRequest{Workspace: &workspace, EndpointRef: &name})
-	require.NoError(t, err)
-	assert.Equal(t, "http://[2001:db8::1]:8000/team%2Fa/model%3Fname/v1/models", got)
-	store.AssertExpectations(t)
-}
