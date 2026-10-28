@@ -85,12 +85,16 @@ func performanceHandler(deps *Dependencies) gin.HandlerFunc {
 		defer cancel()
 
 		queries := []string{buildPerformanceQuery(workspace, items[0].Spec.Cluster, name, window)}
+
 		if cache := items[0].Spec.KVCache; cache != nil {
 			provider, _ := deps.KVCacheProviders.Get(cache.Provider)
 			if observer, ok := provider.(cacheobservations.PerformanceProvider); ok {
-				queries = append(queries, observer.PerformanceQueries(cacheobservations.Scope{Workspace: workspace, Cluster: items[0].Spec.Cluster, Endpoint: name, Window: window, Nodes: nodes})...)
+				queries = append(queries, observer.PerformanceQueries(cacheobservations.Scope{
+					Workspace: workspace, Cluster: items[0].Spec.Cluster, Endpoint: name, Window: window, Nodes: nodes,
+				})...)
 			}
 		}
+
 		query := strings.Join(queries, " or ")
 
 		values, err := queryVector(ctx, deps, query)
@@ -360,7 +364,7 @@ func decodeVector(body []byte) (map[string]float64, error) {
 		return nil, err
 	}
 
-	if response.Status != "success" || response.IsPartial || response.Data.ResultType != "vector" {
+	if response.Status != monitoringSuccess || response.IsPartial || response.Data.ResultType != "vector" {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 

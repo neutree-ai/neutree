@@ -110,7 +110,7 @@ func queryTrend(ctx context.Context, deps *Dependencies, workspace, cluster stri
 		return nil, err
 	}
 
-	if result.Status != "success" || result.IsPartial || result.Data.ResultType != "matrix" {
+	if result.Status != monitoringSuccess || result.IsPartial || result.Data.ResultType != "matrix" {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 
