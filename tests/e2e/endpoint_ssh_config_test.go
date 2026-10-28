@@ -383,5 +383,25 @@ var _ = Describe("SSH Endpoint Config", Ordered, Label("endpoint", "ssh", "confi
 			Expect(err).NotTo(HaveOccurred())
 			Expect(code).To(Equal(200), "inference failed: %s", body)
 		})
+
+		It("should report the engine_args served_model_name as the model id", func() {
+			ep := getEndpoint(schemaEpName)
+
+			code, modelIDs, body, err := listOpenAIModelIDs(ep.Status.ServiceURL)
+			Expect(err).NotTo(HaveOccurred(), "list models failed: %s", body)
+			Expect(code).To(Equal(200), "list models failed: %s", body)
+
+			// The engine is built from the merged engine_args, so the alias is
+			// the name it serves. Reporting the deployment name instead would
+			// point discovery — and the model allowlist built from it — at a
+			// name the engine does not answer to.
+			Expect(modelIDs).To(ContainElement("neu-sglang-test"))
+			Expect(modelIDs).NotTo(ContainElement(profileModelName()))
+
+			code, body, err = inferChatWithModel(ep.Status.ServiceURL, "neu-sglang-test",
+				"Hello SGLang via the reported model id")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(code).To(Equal(200), "inference with the reported model id failed: %s", body)
+		})
 	})
 })
