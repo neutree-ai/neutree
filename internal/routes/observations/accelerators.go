@@ -28,6 +28,8 @@ import (
 
 const maxResponseBytes = 8 << 20
 
+const monitoringSuccess = "success"
+
 var physicalMetrics = []string{
 	"neutree_accelerator_memory_used_bytes", "neutree_accelerator_memory_total_bytes",
 	"neutree_accelerator_utilization_ratio", "neutree_accelerator_temperature_celsius",
@@ -70,6 +72,9 @@ func RegisterRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps 
 
 		if resource == "endpoints" {
 			permission = "endpoint:read"
+
+			route.GET("/performance-observations", middleware.RequireWorkspacePermission(permission,
+				middleware.PermissionDependencies{Storage: deps.Storage}), performanceHandler(deps))
 		}
 
 		if resource == "clusters" {
@@ -298,7 +303,7 @@ func decodeSamples(body []byte, now time.Time, extraLabels ...string) ([]Sample,
 		return nil, err
 	}
 
-	if response.Status != "success" || response.IsPartial || response.Data.ResultType != "matrix" {
+	if response.Status != monitoringSuccess || response.IsPartial || response.Data.ResultType != "matrix" {
 		return nil, fmt.Errorf("invalid monitoring response")
 	}
 
