@@ -320,6 +320,38 @@ func TestMonitorRelaysBenchmarkOutputToTheCLIStream(t *testing.T) {
 	require.Contains(t, string(log), "benchmark output")
 }
 
+// vllm bench prints nothing but the tqdm bar while it runs and writes its
+// metrics table on the way out. Every case has to hand that table to the CLI
+// before the case ends, so the second case never truncates the first one's
+// result.
+func TestMonitorKeepsTheFinalOutputOfEveryCase(t *testing.T) {
+	requirePython(t)
+
+	// The table goes to the benchmark's block-buffered stdout, the way vllm
+	// bench prints it, so it reaches the monitor when the benchmark exits.
+	command := "exec python3 -c " + shellQuote(`import sys
+for step in range(3):
+    sys.stderr.write("\r%d/3" % step)
+    sys.stderr.flush()
+print("Serving Benchmark Result")
+print("Successful requests: 20")
+`)
+
+	for caseNumber := 1; caseNumber <= 2; caseNumber++ {
+		remoteDir := filepath.Join(t.TempDir(), "case")
+		runner := localCommandRunner{}
+		require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+
+		output := &lockedBuffer{}
+		require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, command, output))
+		require.Contains(t, output.String(), "Serving Benchmark Result", "case %d", caseNumber)
+
+		log, err := os.ReadFile(benchmarkLogPath(remoteDir))
+		require.NoError(t, err)
+		require.Contains(t, string(log), "Serving Benchmark Result", "case %d", caseNumber)
+	}
+}
+
 func TestPrepareBenchmarkControlCreatesDirectoryExclusively(t *testing.T) {
 	remoteDir := filepath.Join(t.TempDir(), "case")
 	runner := localCommandRunner{}
