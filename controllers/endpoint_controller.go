@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"reflect"
+	"slices"
 	"strconv"
 
 	"github.com/neutree-ai/neutree/pkg/kvcache"
@@ -221,6 +222,13 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		} else {
 			status.ServiceURL = serviceURL
 		}
+
+		models, err := c.getServedModels(obj)
+		if err != nil {
+			klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)
+		} else {
+			status.ServedModels = models
+		}
 	}
 
 	return status, nil
@@ -247,6 +255,10 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 
 	// Update if service URL changed
 	if obj.Status.ServiceURL != normalizedStatus.ServiceURL {
+		return true
+	}
+
+	if !slices.Equal(obj.Status.ServedModels, normalizedStatus.ServedModels) {
 		return true
 	}
 
@@ -309,6 +321,10 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
 	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
 		status.ServiceURL = obj.Status.ServiceURL
+	}
+
+	if status.ServedModels == nil && obj.Status != nil {
+		status.ServedModels = obj.Status.ServedModels
 	}
 
 	c.preserveResources(obj, status)

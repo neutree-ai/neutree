@@ -524,6 +524,7 @@ type ApiEndpointSpec struct {
 }
 
 type ApiEndpointStatus struct {
+	ServedModels               []string    `json:"served_models"`
 	Phase                      string      `json:"phase"`
 	ServiceUrl                 string      `json:"service_url"`
 	LastTransitionTime         interface{} `json:"last_transition_time"`

@@ -53,7 +53,7 @@ func TestModelSource(t *testing.T) {
 	})
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+		INSERT INTO api.endpoints (api_version, kind, spec, metadata, status)
 		VALUES (
 			'v1',
 			'Endpoint',
@@ -66,7 +66,8 @@ func TestModelSource(t *testing.T) {
 				NULL, NULL, NULL,
 				NULL
 			)::api.endpoint_spec,
-			ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
+			ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
+			jsonb_populate_record(NULL::api.endpoint_status, jsonb_build_object('served_models', jsonb_build_array($3::text)))
 		)`, ieName, ws, ieModel); err != nil {
 		t.Fatalf("insert internal endpoint: %v", err)
 	}

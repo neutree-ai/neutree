@@ -1289,20 +1289,6 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	}
 }
 
-// formatServiceURL constructs the service URL for an endpoint.
-func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {
-	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
-		return "", errors.New("cluster dashboard URL is not available")
-	}
-
-	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
-	}
-	// Ray serve applications are typically exposed on port 8000 by default
-	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
-}
-
 func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {
 	return fmt.Sprintf("%s_%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 }
