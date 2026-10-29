@@ -73,7 +73,10 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 		args = append(args, "--trust-remote-code")
 	}
 
-	return "umask 077 && mkdir -p -- " + shellQuote(resultDir) + " && vllm bench serve " + strings.Join(args, " ")
+	// `exec` replaces the shell with the benchmark, so the monitor is the
+	// benchmark's direct parent and reaps it. The result directory is created
+	// by prepareBenchmarkControl before the benchmark starts.
+	return "exec vllm bench serve " + strings.Join(args, " ")
 }
 
 func benchmarkPreflightCommand() string {
@@ -101,10 +104,6 @@ func benchmarkMonitorCommand(remoteDir, command string, lease time.Duration) str
 	}
 
 	return "python3 -c " + shellQuote(benchmarkMonitorScript) + " " + strings.Join(args, " ")
-}
-
-func benchmarkLogTailCommand(logPath string) string {
-	return "tail -n +1 -F -- " + shellQuote(logPath)
 }
 
 func remoteResultCommand(resultDir string) string {

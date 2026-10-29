@@ -269,8 +269,8 @@ func TestControlledBenchmarkNormalAndFailedExit(t *testing.T) {
 }
 
 // vllm bench draws its progress bar as carriage-return frames. They have to
-// reach the log byte for byte, because the CLI renders them on the terminal
-// from the tailed log.
+// reach the CLI stream and the log byte for byte, because that is what makes
+// the bar advance on the terminal instead of printing one line per frame.
 func TestMonitorKeepsProgressFramesInTheLog(t *testing.T) {
 	remoteDir := filepath.Join(t.TempDir(), "case")
 	runner := localCommandRunner{}
@@ -303,27 +303,21 @@ func TestRenewRemoteLeaseStampsUntilStopped(t *testing.T) {
 	require.Equal(t, count, renewals())
 }
 
-func TestTailRemoteLogStreamsAppendedLines(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), benchmarkLogFileName)
-	require.NoError(t, os.WriteFile(logPath, []byte("first line\n"), 0600))
+// The CLI holds the monitor's stream open for the whole case, so the monitor
+// relays the benchmark output onto it: no second remote process has to be
+// found and stopped when the CLI is interrupted.
+func TestMonitorRelaysBenchmarkOutputToTheCLIStream(t *testing.T) {
+	remoteDir := filepath.Join(t.TempDir(), "case")
+	runner := localCommandRunner{}
+	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
 
 	output := &lockedBuffer{}
-	stop := tailRemoteLog(context.Background(), localCommandRunner{}, logPath, output)
-	defer stop()
+	require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, "echo benchmark output", output))
+	require.Contains(t, output.String(), "benchmark output")
 
-	require.Eventually(t, func() bool {
-		return strings.Contains(output.String(), "first line")
-	}, 5*time.Second, 50*time.Millisecond)
-
-	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0600)
+	log, err := os.ReadFile(benchmarkLogPath(remoteDir))
 	require.NoError(t, err)
-	_, err = file.WriteString("second line\n")
-	require.NoError(t, err)
-	require.NoError(t, file.Close())
-
-	require.Eventually(t, func() bool {
-		return strings.Contains(output.String(), "second line")
-	}, 5*time.Second, 50*time.Millisecond)
+	require.Contains(t, string(log), "benchmark output")
 }
 
 func TestPrepareBenchmarkControlCreatesDirectoryExclusively(t *testing.T) {
@@ -447,10 +441,6 @@ func (r *cancelLifecycleRunner) Run(ctx context.Context, command string, stdout,
 		close(r.stopped)
 
 		return nil
-	case strings.HasPrefix(command, "tail -n +1 -F -- "):
-		<-ctx.Done()
-
-		return ctx.Err()
 	case strings.HasPrefix(command, "touch -- "):
 		return nil
 	case strings.HasPrefix(command, "python3 -c "):

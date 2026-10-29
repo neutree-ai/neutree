@@ -34,14 +34,20 @@ var errRemoteTerminationUnconfirmed = errors.New("remote benchmark termination n
 // stops the benchmark when the CLI writes the cancel file or stops renewing the
 // lease. A canceled run exits 130, an unresponsive process group exits 137.
 //
-// The benchmark writes its tqdm progress bar into the same log as its regular
-// output, so the CLI can tail it and show completed requests while it runs.
+// The monitor relays the benchmark output on its own stdout, which is the
+// stream the CLI already holds open, so the live log needs no second remote
+// process to track down when the CLI is interrupted. The command it runs starts
+// with `exec`, so the benchmark replaces the shell and the monitor is its
+// parent: it reaps the benchmark itself instead of leaving it to the
+// container's PID 1, which never reaps.
 const benchmarkMonitorScript = `# neutree-bench-monitor
 import os
+import select
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 renew, cancel, log, result_dir = sys.argv[1:5]
@@ -51,11 +57,54 @@ command = sys.argv[6]
 if os.path.exists(cancel):
     sys.exit(130)
 
+def prctl(option, value):
+    try:
+        import ctypes
+        ctypes.CDLL(None).prctl(option, value, 0, 0, 0)
+    except Exception:
+        pass
+
+# Benchmark descendants that outlive their parent re-parent to the monitor
+# rather than to a PID 1 that does not reap them, so nothing is left defunct.
+prctl(36, 1)  # PR_SET_CHILD_SUBREAPER
+# A canceled exec session kills the monitor; the benchmark must not keep
+# running without the process that enforces its lease.
+def die_with_monitor():
+    prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+
 open(renew, "w").close()
 log_file = open(log, "wb")
 child = subprocess.Popen(
-    ["sh", "-c", command], stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True
+    ["sh", "-c", command],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    start_new_session=True,
+    preexec_fn=die_with_monitor,
 )
+
+def relay():
+    fd = child.stdout.fileno()
+    while True:
+        if not select.select([fd], [], [], 0.2)[0]:
+            # A benchmark descendant can keep the pipe open after the benchmark
+            # itself exited; stop instead of waiting for a write end that may
+            # never close.
+            if child.poll() is not None:
+                return
+            continue
+        data = os.read(fd, 65536)
+        if not data:
+            return
+        log_file.write(data)
+        log_file.flush()
+        try:
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            pass  # the CLI is gone; the log file still records the run
+
+relay_thread = threading.Thread(target=relay, daemon=True)
+relay_thread.start()
 
 def kill_group(sig):
     try:
@@ -77,6 +126,18 @@ def stop():
             time.sleep(0.05)
     return child.poll() is not None
 
+def finish(code):
+    relay_thread.join(2)
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if pid == 0:
+            time.sleep(0.02)
+    sys.exit(code)
+
 expired = False
 while child.poll() is None:
     if os.path.exists(cancel):
@@ -90,14 +151,14 @@ if child.poll() is None:
     if not stop():
         sys.stderr.write("neutree-bench: benchmark process group did not stop\n")
         sys.stderr.flush()
-        sys.exit(137)
+        finish(137)
     if expired and not os.path.exists(os.path.join(result_dir, "result.json")):
         shutil.rmtree(result_dir, ignore_errors=True)
-    sys.exit(130)
+    finish(130)
 
 kill_group(signal.SIGKILL)
 code = child.returncode
-sys.exit(code if code >= 0 else 128 - code)
+finish(code if code >= 0 else 128 - code)
 `
 
 func benchmarkRenewPath(remoteDir string) string {
@@ -177,10 +238,11 @@ func requestRemoteCancel(runner remoteRunner, remoteDir string) error {
 	return nil
 }
 
-// runControlledBenchmark runs one case under the remote monitor. The execution
-// stream is not tied to ctx, because the monitor must stay reachable until it
-// confirms that the benchmark process group is gone.
-func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir, command string, diagnostics io.Writer) error {
+// runControlledBenchmark runs one case under the remote monitor and writes
+// everything the monitor relays to output. The execution stream is not tied to
+// ctx, because the monitor must stay reachable until it confirms that the
+// benchmark process group is gone.
+func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir, command string, output io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -191,7 +253,7 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 	done := make(chan error, 1)
 
 	go func() {
-		done <- runner.Run(runCtx, benchmarkMonitorCommand(remoteDir, command, remoteLeaseTimeout), io.Discard, diagnostics)
+		done <- runner.Run(runCtx, benchmarkMonitorCommand(remoteDir, command, remoteLeaseTimeout), output, output)
 	}()
 
 	select {

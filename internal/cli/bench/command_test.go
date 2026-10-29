@@ -22,6 +22,9 @@ func TestBuildBenchCommandUsesExplicitModelAndTokenizer(t *testing.T) {
 	require.Contains(t, command, "--model 'Qwen/Qwen3.8-27B-FP8'")
 	require.Contains(t, command, "--tokenizer '/models/a model'")
 	require.Contains(t, command, "--result-filename 'result.json'")
+	// The benchmark replaces its shell, so the monitor is its direct parent and
+	// reaps it instead of leaving it to a PID 1 that never does.
+	require.True(t, strings.HasPrefix(command, "exec vllm bench serve"), command)
 	// The tqdm bar is the only live progress vllm bench reports. Suppressing it
 	// leaves the run silent until the final metrics table.
 	require.NotContains(t, command, "--disable-tqdm")

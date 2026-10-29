@@ -557,13 +557,10 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 		return err
 	}
 
-	// The tail runs until the case ends so the local stdout.log holds the whole
-	// benchmark log, including the lines the monitor writes while stopping. The
-	// same lines are mirrored to stderr, which is where progress goes.
+	// The monitor relays the benchmark output on the stream this CLI already
+	// holds open, so the live log reaches stderr and stdout.log without a
+	// second remote process to clean up on interrupt.
 	logOutput := io.MultiWriter(stdout, os.Stderr)
-
-	stopTail := tailRemoteLog(ctx, runner, benchmarkLogPath(remoteResultDir), logOutput)
-	defer stopTail()
 
 	stopRenew := renewRemoteLease(ctx, runner, benchmarkRenewPath(remoteResultDir), remoteRenewInterval)
 	defer stopRenew()

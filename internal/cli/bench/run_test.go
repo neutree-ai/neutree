@@ -128,8 +128,6 @@ func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr 
 	case strings.Contains(command, "# neutree-bench-monitor"):
 		_, _ = io.WriteString(stdout, "benchmark output\n")
 		_, _ = io.WriteString(stderr, "benchmark diagnostics\n")
-	case strings.HasPrefix(command, "tail -n +1 -F -- "):
-		_, _ = io.WriteString(stdout, "benchmark log output\n")
 	case strings.HasPrefix(command, "touch -- "), strings.HasPrefix(command, ": > "):
 		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
@@ -228,8 +226,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 
 	stdout, err := os.ReadFile(filepath.Join(caseDir, "stdout.log"))
 	require.NoError(t, err)
-	require.Contains(t, string(stdout), "benchmark log output")
-	require.Contains(t, string(stdout), "benchmark diagnostics")
+	require.Contains(t, string(stdout), "benchmark output")
 
 	command, err := os.ReadFile(filepath.Join(caseDir, benchmarkCommandFileName))
 	require.NoError(t, err)
@@ -252,12 +249,9 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 		return strings.Contains(value, "# neutree-bench-monitor")
 	})
 	require.Contains(t, monitor, "vllm bench serve")
+	require.Contains(t, monitor, "benchmark.log")
 	require.Contains(t, monitor, ".neutree-bench-renew")
 	require.Contains(t, monitor, ".neutree-bench-cancel")
-
-	require.Contains(t, findBenchCommand(runner.commands, func(value string) bool {
-		return strings.HasPrefix(value, "tail -n +1 -F -- ")
-	}), "benchmark.log")
 
 	require.Equal(t, 2, countBenchCommands(runner.commands, func(value string) bool {
 		return strings.HasPrefix(value, "rm -rf -- ")
@@ -281,7 +275,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, progressOutput, "benchmark preflight started")
 	require.Contains(t, progressOutput, "benchmark preflight completed: model=router-model")
 	require.Contains(t, progressOutput, "benchmark case 1/1 started: input_len=16 output_len=4 concurrency=2 num_prompts=20 request_rate=inf")
-	require.Contains(t, progressOutput, "benchmark case 1/1 command: umask 077 &&")
+	require.Contains(t, progressOutput, "benchmark case 1/1 command: exec vllm bench serve")
 	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+strings.TrimSpace(string(command)))
 	require.Contains(t, progressOutput, "benchmark case 1/1 completed: result=")
 	require.Contains(t, progressOutput, "completed=20 failed=0 duration_s=1.50 request_per_s=2.50 output_tokens_per_s=10.50 p50_ttft_ms=12.50 p99_ttft_ms=25.50")
@@ -510,8 +504,7 @@ func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.
 		strings.HasPrefix(command, "umask 077 && mkdir -- "),
 		strings.HasPrefix(command, "rm -rf -- "),
 		strings.HasPrefix(command, "touch -- "),
-		strings.HasPrefix(command, ": > "),
-		strings.HasPrefix(command, "tail -n +1 -F -- "):
+		strings.HasPrefix(command, ": > "):
 		return nil
 	case strings.Contains(command, "# neutree-bench-monitor"):
 		return fmt.Errorf("case failed")

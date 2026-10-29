@@ -1,14 +1,11 @@
 package bench
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-
-	"k8s.io/klog/v2"
 )
 
 // benchmarkResultSummary is the small, stable subset of a vLLM result that
@@ -201,25 +198,4 @@ func benchmarkResultSummaryText(path string) string {
 	}
 
 	return summary.String()
-}
-
-// tailRemoteLog streams the remote benchmark log into out until the returned
-// stop function runs. It keeps running while the CLI is being canceled so the
-// shutdown output still reaches the local file.
-func tailRemoteLog(ctx context.Context, runner remoteRunner, logPath string, out io.Writer) func() {
-	tailCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-
-		if err := runner.Run(tailCtx, benchmarkLogTailCommand(logPath), out, io.Discard); err != nil && tailCtx.Err() == nil {
-			klog.Warningf("failed to stream remote benchmark log %s: %v", logPath, err)
-		}
-	}()
-
-	return func() {
-		cancel()
-		<-done
-	}
 }
