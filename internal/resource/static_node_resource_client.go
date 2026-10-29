@@ -220,6 +220,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
+	// The control-plane parser owns model specifications; old agent snapshots need not repeat them.
+	mergeAcceleratorMetadata(metadata, base.AcceleratorMetadata)
+
 	for _, device := range node.Status.Accelerator.Devices {
 		if device.UUID == "" {
 			continue

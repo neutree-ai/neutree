@@ -136,6 +136,10 @@ type AcceleratorMetadata struct {
 
 type AcceleratorProductMetadata struct {
 	MemoryTotalMiB float64 `json:"memory_total_mib,omitempty"`
+	// PeakFP16TFLOPS is the nominal per-physical-device FP16 peak estimate,
+	// using the existing product specification convention (not measured throughput).
+	// Nil means the control-plane plugin has no specification for this product.
+	PeakFP16TFLOPS *float64 `json:"peak_fp16_tflops,omitempty"`
 }
 
 type DeviceResource struct {
@@ -309,4 +313,20 @@ func (c *ClusterResources) String() string {
 	}
 
 	return output
+}
+
+// Merge fills missing product metadata from the owning control-plane plugin.
+func (m *AcceleratorProductMetadata) Merge(other *AcceleratorProductMetadata) {
+	if other == nil {
+		return
+	}
+
+	if m.MemoryTotalMiB == 0 {
+		m.MemoryTotalMiB = other.MemoryTotalMiB
+	}
+
+	if m.PeakFP16TFLOPS == nil && other.PeakFP16TFLOPS != nil {
+		value := *other.PeakFP16TFLOPS
+		m.PeakFP16TFLOPS = &value
+	}
 }

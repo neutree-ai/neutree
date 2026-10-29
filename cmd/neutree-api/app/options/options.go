@@ -118,6 +118,7 @@ func (o *Options) Config() (*config.APIConfig, error) {
 		AuthEndpoint:     o.External.AuthEndpoint,
 		GrafanaURL:       grafanaExternalURL,
 		AITraceStoreURL:  o.External.AITraceStoreURL,
+		MetricsURL:       o.External.MetricsURL,
 		Version:          version.Get().AppVersion,
 	}, nil
 }

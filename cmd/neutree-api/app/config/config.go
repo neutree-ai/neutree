@@ -42,9 +42,12 @@ type APIConfig struct {
 	PublicRegistryQueryCacheTTL time.Duration
 
 	// External services
-	StorageAccessURL string
-	AuthEndpoint     string
-	GrafanaURL       string
-	AITraceStoreURL  string
-	Version          string
+	StorageAccessURL        string
+	AuthEndpoint            string
+	GrafanaURL              string
+	AITraceStoreURL         string
+	ExtraAcceleratorMetrics []string
+	ExtraAcceleratorLabels  []string
+	MetricsURL              string
+	Version                 string
 }

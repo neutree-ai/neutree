@@ -1056,3 +1056,20 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	return string(output)
 }
+
+func TestMetricsQueryURLRendering(t *testing.T) {
+	for _, tc := range []struct{ name, write, query, want string }{
+		{name: "local obs stack", want: "http://192.168.1.1:8481/select/0/prometheus"},
+		{name: "external query", write: "http://external/insert", query: "http://external/select/0/prometheus", want: "http://external/select/0/prometheus"},
+		{name: "external write is not query", write: "http://external/insert"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := neutreeCoreInstallOptions{commonOptions: &commonOptions{workDir: dir, nodeIP: "192.168.1.1", deployType: constants.DeployTypeLocal, deployMode: constants.DeployModeSingle}, jwtSecret: "test-secret", version: "v1.0.0", metricsRemoteWriteURL: tc.write, metricsQueryURL: tc.query}
+			require.NoError(t, prepareNeutreeCoreDeployConfig(opts))
+			data, err := os.ReadFile(filepath.Join(dir, "neutree-core", "docker-compose.yml"))
+			require.NoError(t, err)
+			require.Contains(t, string(data), "--metrics-url=${NEUTREE_METRICS_QUERY_URL:-"+tc.want+"}")
+		})
+	}
+}
