@@ -61,6 +61,14 @@ func (o Options) Validate() error {
 		return fmt.Errorf("num-prompts must be > 0")
 	}
 
+	// vLLM never exceeds --num-prompts in flight, so a higher value would only
+	// mislabel the case.
+	for _, concurrency := range o.Concurrencies {
+		if concurrency > o.NumPrompts {
+			return fmt.Errorf("concurrency %d exceeds num-prompts %d", concurrency, o.NumPrompts)
+		}
+	}
+
 	if !validRequestRate(o.RequestRate) {
 		return fmt.Errorf("request-rate must be inf or a finite number > 0")
 	}

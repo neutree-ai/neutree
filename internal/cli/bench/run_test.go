@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,9 +46,46 @@ func (f fakeClusterCredentials) GetClusterCredentialsContext(_ context.Context, 
 }
 
 type fakeBenchRunner struct {
+	mu       sync.Mutex
 	commands []string
 	model    string
 	result   string
+}
+
+func (r *fakeBenchRunner) record(command string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.commands = append(r.commands, command)
+}
+
+func (r *fakeBenchRunner) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]string(nil), r.commands...)
+}
+
+func findBenchCommand(commands []string, match func(string) bool) string {
+	for _, command := range commands {
+		if match(command) {
+			return command
+		}
+	}
+
+	return ""
+}
+
+func countBenchCommands(commands []string, match func(string) bool) int {
+	count := 0
+
+	for _, command := range commands {
+		if match(command) {
+			count++
+		}
+	}
+
+	return count
 }
 
 func TestRunProgressUsesKlogStderr(t *testing.T) {
@@ -82,15 +120,17 @@ func captureBenchmarkProgress(t *testing.T) *bytes.Buffer {
 }
 
 func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr io.Writer) error {
-	r.commands = append(r.commands, command)
+	r.record(command)
 
 	switch {
 	case command == benchmarkPreflightCommand():
 		_, _ = io.WriteString(stdout, "usage\n")
-	case strings.Contains(command, "# neutree-bench-supervisor"):
+	case strings.Contains(command, "# neutree-bench-monitor"):
 		_, _ = io.WriteString(stdout, "benchmark output\n")
 		_, _ = io.WriteString(stderr, "benchmark diagnostics\n")
-	case strings.Contains(command, "set -C"):
+	case strings.HasPrefix(command, "tail -n +1 -F -- "):
+		_, _ = io.WriteString(stdout, "benchmark log output\n")
+	case strings.HasPrefix(command, "touch -- "), strings.HasPrefix(command, ": > "):
 		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
 		return nil
@@ -159,7 +199,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 				Platform:  "kubernetes",
 				RuntimeID: "pod/chat-a:vllm",
 				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
-				Tokenizer: "/models/chat",
+				Tokenizer: tokenizerOptions{Path: "/models/chat"},
 				runner:    runner,
 			}, nil
 		},
@@ -188,7 +228,8 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 
 	stdout, err := os.ReadFile(filepath.Join(caseDir, "stdout.log"))
 	require.NoError(t, err)
-	require.Contains(t, string(stdout), "benchmark output")
+	require.Contains(t, string(stdout), "benchmark log output")
+	require.Contains(t, string(stdout), "benchmark diagnostics")
 
 	command, err := os.ReadFile(filepath.Join(caseDir, benchmarkCommandFileName))
 	require.NoError(t, err)
@@ -203,16 +244,24 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, string(manifest), `"status": "Succeeded"`)
 	require.NotContains(t, string(manifest), "secret-kubeconfig")
 
-	require.Len(t, runner.commands, 8)
 	require.Equal(t, benchmarkPreflightCommand(), runner.commands[0])
 	require.Contains(t, runner.commands[1], "/v1/models")
-	require.Contains(t, runner.commands[2], "mkdir --")
-	require.Contains(t, runner.commands[3], "set -C")
-	require.Contains(t, runner.commands[4], "vllm bench serve")
 	require.Contains(t, string(command), "--model 'router-model'")
-	require.True(t, strings.HasPrefix(runner.commands[5], "cat -- "))
-	require.True(t, strings.HasPrefix(runner.commands[6], "rm -rf -- "))
-	require.True(t, strings.HasPrefix(runner.commands[7], "rm -rf -- "))
+
+	monitor := findBenchCommand(runner.commands, func(value string) bool {
+		return strings.Contains(value, "# neutree-bench-monitor")
+	})
+	require.Contains(t, monitor, "vllm bench serve")
+	require.Contains(t, monitor, ".neutree-bench-renew")
+	require.Contains(t, monitor, ".neutree-bench-cancel")
+
+	require.Contains(t, findBenchCommand(runner.commands, func(value string) bool {
+		return strings.HasPrefix(value, "tail -n +1 -F -- ")
+	}), "benchmark.log")
+
+	require.Equal(t, 2, countBenchCommands(runner.commands, func(value string) bool {
+		return strings.HasPrefix(value, "rm -rf -- ")
+	}), "the case directory and the run root are removed on success")
 
 	progressOutput := progress.String()
 	for _, line := range strings.Split(strings.TrimSpace(progressOutput), "\n") {
@@ -259,7 +308,7 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 				Platform:  "kubernetes",
 				RuntimeID: "pod/chat-a:vllm",
 				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
-				Tokenizer: "/models/chat",
+				Tokenizer: tokenizerOptions{Path: "/models/chat"},
 				runner:    runner,
 			}, nil
 		},
@@ -277,9 +326,7 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
 	require.Contains(t, progress.String(), "benchmark case 1/1 completed: result=")
 	require.Contains(t, progress.String(), "summary=unavailable")
-	require.Contains(t, progress.String(), "benchmark preflight completed: model=https://models.example.test/qwen")
-	require.NotContains(t, progress.String(), "model-secret")
-	require.NotContains(t, progress.String(), "model-token")
+	require.Contains(t, progress.String(), "benchmark preflight completed: model="+runner.model)
 }
 
 func TestRunUsesConfiguredAPIClient(t *testing.T) {
@@ -378,6 +425,35 @@ func TestRunRecordsPreflightAndCaseFailures(t *testing.T) {
 	})
 }
 
+func TestRunFailsCaseWhenNoRequestCompletes(t *testing.T) {
+	endpoint, cluster, credentialCluster := benchmarkFixtures()
+	runner := &fakeBenchRunner{result: `{"completed":0,"failed":20,"duration":1.5}`}
+	progress := captureBenchmarkProgress(t)
+
+	output, err := run(context.Background(), dependencies{
+		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
+			resourceKey("Endpoint", "default", "chat"):     mustJSON(t, endpoint),
+			resourceKey("Cluster", "default", "cluster-a"): mustJSON(t, cluster),
+		}},
+		clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
+		resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
+			return BenchTarget{
+				Platform:  "kubernetes",
+				RuntimeID: "pod/chat-a:vllm",
+				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
+				runner:    runner,
+			}, nil
+		},
+	}, validOptions(t.TempDir()))
+	require.ErrorContains(t, err, "benchmark completed 0 requests")
+	require.Contains(t, progress.String(), "benchmark case 1/1 failed: benchmark completed 0 requests")
+
+	manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
+	require.NoError(t, readErr)
+	require.Contains(t, string(manifest), `"status": "Failed"`)
+	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
+}
+
 func TestRuntimeFileHelpersHandleFailures(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(file, []byte("x"), 0600))
@@ -403,7 +479,7 @@ func TestRuntimeFileHelpersHandleFailures(t *testing.T) {
 
 func TestRunCaseRejectsEmptyCopiedResult(t *testing.T) {
 	runner := &emptyResultRunner{}
-	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: "/models/chat"}, Options{
+	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: tokenizerOptions{Path: "/models/chat"}}, Options{
 		NumPrompts:  1,
 		RequestRate: "inf",
 	}, Case{InputLen: 1, OutputLen: 1, Concurrency: 1}, t.TempDir(), "/tmp/neutree-bench-test")
@@ -429,22 +505,23 @@ func (r *emptyResultRunner) Run(_ context.Context, command string, stdout, _ io.
 type caseFailureRunner struct{}
 
 func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.Writer) error {
-	if command == benchmarkPreflightCommand() || strings.HasPrefix(command, "rm -rf -- ") ||
-		strings.HasPrefix(command, "umask 077 && mkdir -- ") ||
-		strings.Contains(command, "set -C") || strings.Contains(command, "# neutree-bench-cancel") {
+	switch {
+	case command == benchmarkPreflightCommand(),
+		strings.HasPrefix(command, "umask 077 && mkdir -- "),
+		strings.HasPrefix(command, "rm -rf -- "),
+		strings.HasPrefix(command, "touch -- "),
+		strings.HasPrefix(command, ": > "),
+		strings.HasPrefix(command, "tail -n +1 -F -- "):
 		return nil
-	}
+	case strings.Contains(command, "# neutree-bench-monitor"):
+		return fmt.Errorf("case failed")
+	case strings.HasPrefix(command, "python3 -c "):
+		_, _ = io.WriteString(stdout, `{"data":[{"id":"router-model"}]}`)
 
-	if strings.Contains(command, "# neutree-bench-supervisor") {
+		return nil
+	default:
 		return fmt.Errorf("case failed")
 	}
-
-	if strings.HasPrefix(command, "python3 -c ") {
-		_, _ = io.WriteString(stdout, `{"data":[{"id":"router-model"}]}`)
-		return nil
-	}
-
-	return fmt.Errorf("case failed")
 }
 
 func benchmarkFixtures() (v1.Endpoint, v1.Cluster, v1.Cluster) {

@@ -1,186 +1,111 @@
 package bench
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"k8s.io/klog/v2"
 )
 
 const (
-	benchmarkControlFileName    = ".neutree-bench-control"
-	remoteStreamShutdownTimeout = 2 * time.Second
+	benchmarkRenewFileName  = ".neutree-bench-renew"
+	benchmarkCancelFileName = ".neutree-bench-cancel"
+
+	// remoteLeaseTimeout is how long the monitor tolerates a stale renewal.
+	// remoteRenewInterval keeps the lease fresh while the CLI is alive, so three
+	// consecutive failed renewals, a killed CLI, or a suspended laptop stop the
+	// benchmark instead of leaving it running on the GPU.
+	remoteLeaseTimeout  = 60 * time.Second
+	remoteRenewInterval = 10 * time.Second
+	remoteRenewTimeout  = 5 * time.Second
 )
 
-var (
-	errRemoteTerminationUnconfirmed = errors.New("remote benchmark termination not confirmed")
-	errRemoteArtifactsPreserved     = errors.New("remote benchmark directory retained for inspection")
-)
+// remoteStopGrace bounds how long the CLI waits for the monitor to confirm it
+// stopped the benchmark after a cancellation request.
+var remoteStopGrace = 10 * time.Second
 
-// The supervisor retains ownership of the child until it has signaled the
-// isolated process group, so its PID cannot be reused during termination.
-const benchmarkSupervisorScript = `# neutree-bench-supervisor
-import fcntl
+var errRemoteTerminationUnconfirmed = errors.New("remote benchmark termination not confirmed")
+
+// The monitor owns the benchmark's process group and renews nothing itself: it
+// stops the benchmark when the CLI writes the cancel file or stops renewing the
+// lease. A canceled run exits 130, an unresponsive process group exits 137.
+//
+// The benchmark writes its tqdm progress bar into the same log as its regular
+// output, so the CLI can tail it and show completed requests while it runs.
+const benchmarkMonitorScript = `# neutree-bench-monitor
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import time
 
-def read_state(control):
-    control.seek(0)
-    return control.read().strip()
+renew, cancel, log, result_dir = sys.argv[1:5]
+lease = float(sys.argv[5])
+command = sys.argv[6]
 
-def write_state(control, value):
-    control.seek(0)
-    control.write(value + "\n")
-    control.truncate()
-    control.flush()
+if os.path.exists(cancel):
+    sys.exit(130)
 
-def signal_group(child, sig):
+open(renew, "w").close()
+log_file = open(log, "wb")
+child = subprocess.Popen(
+    ["sh", "-c", command], stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True
+)
+
+def kill_group(sig):
     try:
         os.killpg(child.pid, sig)
-        return True
     except ProcessLookupError:
         return False
-    except PermissionError:
-        status = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-        if status is None:
-            raise
-        child.wait()
-        try:
-            os.killpg(child.pid, 0)
-        except ProcessLookupError:
-            return False
-        raise RuntimeError("cannot confirm benchmark process group termination")
+    return True
 
-def has_live_members(child):
-    if sys.platform.startswith("linux"):
-        with os.scandir("/proc") as entries:
-            for entry in entries:
-                if not entry.name.isdecimal():
-                    continue
-                try:
-                    if os.getpgid(int(entry.name)) != child.pid:
-                        continue
-                    with open(os.path.join(entry.path, "stat")) as stat:
-                        data = stat.read()
-                except (FileNotFoundError, ProcessLookupError):
-                    continue
-                end = data.rfind(")")
-                fields = data[end + 2:].split()
-                if end < 0 or len(fields) < 3:
-                    raise RuntimeError("invalid process stat")
-                if fields[2] == str(child.pid) and fields[0] not in ("Z", "X"):
-                    return True
-        return False
-    if sys.platform == "darwin":
-        output = subprocess.check_output(["ps", "-A", "-o", "pid=", "-o", "pgid=", "-o", "state="], text=True)
-        for line in output.splitlines():
-            fields = line.split()
-            if len(fields) != 3:
-                raise RuntimeError("invalid process listing")
-            if fields[1] == str(child.pid) and fields[2][0] not in ("Z", "X"):
-                return True
-        return False
-    raise RuntimeError("cannot inspect benchmark process group on this platform")
-
-def stop_group(child):
-    if not signal_group(child, signal.SIGTERM):
-        return child.wait()
+def stop():
+    if not kill_group(signal.SIGTERM):
+        return child.poll() is not None
     deadline = time.monotonic() + 2
-    while has_live_members(child):
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.1)
-    if not signal_group(child, signal.SIGKILL):
-        return child.wait()
-    deadline = time.monotonic() + 2
-    while has_live_members(child):
-        if time.monotonic() >= deadline:
-            raise TimeoutError("benchmark process group is still running")
-        time.sleep(0.1)
-    return child.wait()
+    while child.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if child.poll() is None:
+        kill_group(signal.SIGKILL)
+        deadline = time.monotonic() + 2
+        while child.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    return child.poll() is not None
 
-with open(sys.argv[1], "r+") as control:
-    fcntl.flock(control, fcntl.LOCK_EX)
-    state = read_state(control)
-    if state == "cancel":
-        write_state(control, "finished")
-        sys.exit(130)
-    if state != "":
-        raise RuntimeError("invalid benchmark control state")
-    try:
-        child = subprocess.Popen(["sh", "-c", sys.argv[2]], start_new_session=True)
-    except Exception:
-        write_state(control, "finished")
-        raise
-    write_state(control, "running")
-    fcntl.flock(control, fcntl.LOCK_UN)
+expired = False
+while child.poll() is None:
+    if os.path.exists(cancel):
+        break
+    if time.time() - os.stat(renew).st_mtime > lease:
+        expired = True
+        break
+    time.sleep(0.2)
 
-    while True:
-        fcntl.flock(control, fcntl.LOCK_EX)
-        state = read_state(control)
-        fcntl.flock(control, fcntl.LOCK_UN)
-        if state == "cancel":
-            stop_group(child)
-            fcntl.flock(control, fcntl.LOCK_EX)
-            write_state(control, "finished")
-            sys.exit(130)
-        status = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-        if status is None:
-            time.sleep(0.1)
-            continue
-        fcntl.flock(control, fcntl.LOCK_EX)
-        if read_state(control) == "cancel":
-            fcntl.flock(control, fcntl.LOCK_UN)
-            continue
-        fcntl.flock(control, fcntl.LOCK_UN)
-        code = stop_group(child)
-        fcntl.flock(control, fcntl.LOCK_EX)
-        write_state(control, "finished")
-        sys.exit(code if code >= 0 else 128 - code)
+if child.poll() is None:
+    if not stop():
+        sys.stderr.write("neutree-bench: benchmark process group did not stop\n")
+        sys.stderr.flush()
+        sys.exit(137)
+    if expired and not os.path.exists(os.path.join(result_dir, "result.json")):
+        shutil.rmtree(result_dir, ignore_errors=True)
+    sys.exit(130)
+
+kill_group(signal.SIGKILL)
+code = child.returncode
+sys.exit(code if code >= 0 else 128 - code)
 `
 
-const benchmarkCancelScript = `# neutree-bench-cancel
-import fcntl
-import sys
-import time
+func benchmarkRenewPath(remoteDir string) string {
+	return filepath.ToSlash(filepath.Join(remoteDir, benchmarkRenewFileName))
+}
 
-with open(sys.argv[1], "r+") as control:
-    deadline = time.monotonic() + float(sys.argv[2])
-    while True:
-        try:
-            fcntl.flock(control, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            if time.monotonic() >= deadline:
-                raise TimeoutError("benchmark control lock is unavailable")
-            time.sleep(0.1)
-            continue
-        control.seek(0)
-        state = control.read().strip()
-        if state == "finished":
-            sys.exit(0)
-        if state not in ("", "running", "cancel"):
-            raise RuntimeError("invalid benchmark control state")
-        control.seek(0)
-        control.write("cancel\n")
-        control.truncate()
-        control.flush()
-        fcntl.flock(control, fcntl.LOCK_UN)
-        if time.monotonic() >= deadline:
-            raise TimeoutError("benchmark supervisor did not confirm termination")
-        time.sleep(0.1)
-`
-
-func benchmarkControlPath(remoteDir string) string {
-	return filepath.ToSlash(filepath.Join(remoteDir, benchmarkControlFileName))
+func benchmarkCancelPath(remoteDir string) string {
+	return filepath.ToSlash(filepath.Join(remoteDir, benchmarkCancelFileName))
 }
 
 func prepareRemoteRoot(ctx context.Context, runner remoteRunner, remoteRoot string) error {
@@ -192,90 +117,100 @@ func prepareRemoteRoot(ctx context.Context, runner remoteRunner, remoteRoot stri
 	return nil
 }
 
+// prepareBenchmarkControl creates the case directory exclusively, so the
+// benchmark never writes into a directory it does not own.
 func prepareBenchmarkControl(ctx context.Context, runner remoteRunner, remoteDir string) error {
-	command := "umask 077 && mkdir -- " + shellQuote(remoteDir) +
-		" && (set -C; : > " + shellQuote(benchmarkControlPath(remoteDir)) + ")"
+	command := "umask 077 && mkdir -- " + shellQuote(remoteDir)
 	if err := runner.Run(ctx, command, io.Discard, io.Discard); err != nil {
-		return fmt.Errorf("prepare remote benchmark control: %w", err)
+		return fmt.Errorf("prepare remote benchmark directory: %w", err)
 	}
 
 	return nil
 }
 
-func supervisedBenchmarkCommand(remoteDir, command string) string {
-	return "python3 -c " + shellQuote(benchmarkSupervisorScript) + " " +
-		shellQuote(benchmarkControlPath(remoteDir)) + " " + shellQuote(command)
-}
+// renewRemoteLease keeps the monitor's lease fresh until the returned stop
+// function runs.
+func renewRemoteLease(ctx context.Context, runner remoteRunner, renewPath string, interval time.Duration) func() {
+	renewCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 
-func cancelRemoteBenchmark(ctx context.Context, runner remoteRunner, remoteDir string) error {
-	command := "python3 -c " + shellQuote(benchmarkCancelScript) + " " + shellQuote(benchmarkControlPath(remoteDir)) + " 15"
-	var stderr bytes.Buffer
+	go func() {
+		defer close(done)
 
-	if err := runner.Run(ctx, command, io.Discard, &stderr); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return fmt.Errorf("cancel remote benchmark: %w: %s", err, detail)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+			}
+
+			renewCtx, cancelRenew := context.WithTimeout(context.Background(), remoteRenewTimeout)
+			err := runner.Run(renewCtx, benchmarkRenewCommand(renewPath), io.Discard, io.Discard)
+
+			cancelRenew()
+
+			if err != nil {
+				klog.Warningf("failed to renew remote benchmark lease %s: %v", renewPath, err)
+			}
 		}
+	}()
 
-		return fmt.Errorf("cancel remote benchmark: %w", err)
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// requestRemoteCancel asks the monitor to stop. A failed request is not fatal:
+// the lease expires and the monitor stops the benchmark on its own.
+func requestRemoteCancel(runner remoteRunner, remoteDir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteCleanupTimeout)
+	defer cancel()
+
+	if err := runner.Run(ctx, benchmarkCancelCommand(benchmarkCancelPath(remoteDir)), io.Discard, io.Discard); err != nil {
+		return fmt.Errorf("request remote benchmark cancellation: %w", err)
 	}
 
 	return nil
 }
 
-func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir, command string, stdout, stderr io.Writer) error {
+// runControlledBenchmark runs one case under the remote monitor. The execution
+// stream is not tied to ctx, because the monitor must stay reachable until it
+// confirms that the benchmark process group is gone.
+func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir, command string, diagnostics io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancel()
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRun()
 
 	done := make(chan error, 1)
+
 	go func() {
-		done <- runner.Run(runCtx, supervisedBenchmarkCommand(remoteDir, command), stdout, stderr)
+		done <- runner.Run(runCtx, benchmarkMonitorCommand(remoteDir, command, remoteLeaseTimeout), io.Discard, diagnostics)
 	}()
 
-	var runErr error
-	completed := false
 	select {
-	case runErr = <-done:
-		completed = true
-
-		if runErr == nil && ctx.Err() == nil {
-			return nil
+	case runErr := <-done:
+		if ctx.Err() == nil {
+			return runErr
 		}
 	case <-ctx.Done():
 	}
 
-	if ctx.Err() != nil {
-		klog.Infof("benchmark cancellation requested; stopping remote case %s", remoteDir)
+	if err := requestRemoteCancel(runner, remoteDir); err != nil {
+		klog.Warningf("%v; the remote lease stops the benchmark within %s", err, remoteLeaseTimeout)
 	}
 
-	stopCtx, stop := context.WithTimeout(context.Background(), remoteCleanupTimeout)
-	stopErr := cancelRemoteBenchmark(stopCtx, runner, remoteDir)
-
-	stop()
-
-	cancel()
-	var streamErr error
-
-	if !completed {
-		select {
-		case runErr = <-done:
-		case <-time.After(remoteStreamShutdownTimeout):
-			streamErr = fmt.Errorf("remote execution stream did not close")
-		}
+	select {
+	case <-done:
+	case <-time.After(remoteStopGrace):
+		return fmt.Errorf("%w: %w", errRemoteTerminationUnconfirmed, ctx.Err())
 	}
 
-	if stopErr != nil || streamErr != nil {
-		return fmt.Errorf("%w: %w", errRemoteTerminationUnconfirmed, errors.Join(ctx.Err(), runErr, stopErr, streamErr))
-	}
-
-	if err := ctx.Err(); err != nil {
-		klog.Infof("remote benchmark stopped: %s", remoteDir)
-		return err
-	}
-
-	return runErr
+	return ctx.Err()
 }

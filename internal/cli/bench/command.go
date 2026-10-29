@@ -3,6 +3,7 @@ package bench
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -13,6 +14,14 @@ const (
 	benchmarkPercentileMetrics = "ttft,tpot,itl,e2el"
 )
 
+// tokenizerOptions carries the tokenizer settings the serving engine runs
+// with. vllm bench reuses them so prompt token lengths match the server.
+type tokenizerOptions struct {
+	Path            string
+	Mode            string
+	TrustRemoteCode bool
+}
+
 // BenchTarget contains the target-specific information shared by every case.
 // runner and cleanup are intentionally private so they cannot enter the local
 // JSON manifest.
@@ -21,7 +30,7 @@ type BenchTarget struct {
 	RuntimeID string
 	BaseURL   string
 	Model     string
-	Tokenizer string
+	Tokenizer tokenizerOptions
 
 	runner  remoteRunner
 	cleanup func() error
@@ -53,8 +62,15 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 		"--save-detailed",
 		"--metric-percentiles", shellQuote(benchmarkPercentiles),
 		"--percentile-metrics", shellQuote(benchmarkPercentileMetrics),
-		"--tokenizer", shellQuote(target.Tokenizer),
-		"--disable-tqdm",
+		"--tokenizer", shellQuote(target.Tokenizer.Path),
+	}
+
+	if target.Tokenizer.Mode != "" {
+		args = append(args, "--tokenizer-mode", shellQuote(target.Tokenizer.Mode))
+	}
+
+	if target.Tokenizer.TrustRemoteCode {
+		args = append(args, "--trust-remote-code")
 	}
 
 	return "umask 077 && mkdir -p -- " + shellQuote(resultDir) + " && vllm bench serve " + strings.Join(args, " ")
@@ -62,6 +78,33 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 
 func benchmarkPreflightCommand() string {
 	return "vllm bench serve --help"
+}
+
+// benchmarkRenewCommand stamps the lease file. The monitor compares its mtime
+// with its own clock, so hosts never have to agree on wall-clock time.
+func benchmarkRenewCommand(renewPath string) string {
+	return "touch -- " + shellQuote(renewPath)
+}
+
+func benchmarkCancelCommand(cancelPath string) string {
+	return ": > " + shellQuote(cancelPath)
+}
+
+func benchmarkMonitorCommand(remoteDir, command string, lease time.Duration) string {
+	args := []string{
+		shellQuote(benchmarkRenewPath(remoteDir)),
+		shellQuote(benchmarkCancelPath(remoteDir)),
+		shellQuote(benchmarkLogPath(remoteDir)),
+		shellQuote(remoteDir),
+		strconv.Itoa(int(lease / time.Second)),
+		shellQuote(command),
+	}
+
+	return "python3 -c " + shellQuote(benchmarkMonitorScript) + " " + strings.Join(args, " ")
+}
+
+func benchmarkLogTailCommand(logPath string) string {
+	return "tail -n +1 -F -- " + shellQuote(logPath)
 }
 
 func remoteResultCommand(resultDir string) string {

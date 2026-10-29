@@ -24,7 +24,7 @@ const (
 	benchmarkResultFileName  = "result.json"
 	benchmarkCommandFileName = "command.sh"
 	benchmarkStdoutFileName  = "stdout.log"
-	benchmarkStderrFileName  = "stderr.log"
+	benchmarkLogFileName     = "benchmark.log"
 	measurementScopeRoute    = "endpoint-route"
 	benchmarkSucceededStatus = "Succeeded"
 	benchmarkFailedStatus    = "Failed"
@@ -65,12 +65,14 @@ type manifestEndpoint struct {
 }
 
 type manifestTarget struct {
-	Platform       string `json:"platform"`
-	RuntimeID      string `json:"runtime_id"`
-	BaseURL        string `json:"base_url"`
-	Model          string `json:"model,omitempty"`
-	Tokenizer      string `json:"tokenizer"`
-	ModelSelection string `json:"model_selection"`
+	Platform        string `json:"platform"`
+	RuntimeID       string `json:"runtime_id"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model,omitempty"`
+	Tokenizer       string `json:"tokenizer"`
+	TokenizerMode   string `json:"tokenizer_mode,omitempty"`
+	TrustRemoteCode bool   `json:"trust_remote_code,omitempty"`
+	ModelSelection  string `json:"model_selection"`
 }
 
 type manifestCase struct {
@@ -150,11 +152,13 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			Cluster:   endpoint.Spec.Cluster,
 		},
 		Target: manifestTarget{
-			Platform:       target.Platform,
-			RuntimeID:      target.RuntimeID,
-			BaseURL:        target.BaseURL,
-			Tokenizer:      target.Tokenizer,
-			ModelSelection: "first-v1-model",
+			Platform:        target.Platform,
+			RuntimeID:       target.RuntimeID,
+			BaseURL:         target.BaseURL,
+			Tokenizer:       target.Tokenizer.Path,
+			TokenizerMode:   target.Tokenizer.Mode,
+			TrustRemoteCode: target.Tokenizer.TrustRemoteCode,
+			ModelSelection:  "first-v1-model",
 		},
 		Cases: make([]manifestCase, 0, len(benchmarkCases)),
 	}
@@ -174,7 +178,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return output, err
 	}
 
-	klog.Infof("benchmark preflight completed: model=%s", redactProgressCommandValue(model))
+	klog.Infof("benchmark preflight completed: model=%s", model)
 
 	target.Model = model
 	result.Target.Model = model
@@ -192,11 +196,11 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return output, err
 	}
 
-	preserveReason := ""
+	preserveRoot := true
 
 	defer func() {
-		if preserveReason != "" {
-			klog.Warningf("%s; inspect %s in %s", preserveReason, remoteRoot, target.RuntimeID)
+		if preserveRoot {
+			klog.Warningf("remote benchmark directory retained: %s on %s", remoteRoot, target.RuntimeID)
 			return
 		}
 
@@ -212,7 +216,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		}
 
 		caseNumber := caseIndex + 1
-		command := progressBenchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
+		command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
 		klog.Infof(
 			"benchmark case %d/%d started: input_len=%d output_len=%d concurrency=%d num_prompts=%d request_rate=%s",
 			caseNumber,
@@ -239,7 +243,6 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 
 		if err != nil {
 			result.Cases[manifestCaseIndex].Status = benchmarkCaseErrorStatus(err)
-			preserveReason = remotePreservationReason(err)
 			result.Cases[manifestCaseIndex].Error = err.Error()
 			result.Error = err.Error()
 			_ = writeManifest(output, result)
@@ -280,6 +283,8 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			summaryText,
 		)
 	}
+
+	preserveRoot = false
 
 	klog.Infof("benchmark completed: cases=%d result_dir=%s", len(benchmarkCases), output)
 
@@ -484,18 +489,6 @@ func benchmarkCaseErrorStatus(err error) string {
 	return benchmarkFailedStatus
 }
 
-func remotePreservationReason(err error) string {
-	if errors.Is(err, errRemoteTerminationUnconfirmed) {
-		return "remote benchmark termination was not confirmed"
-	}
-
-	if errors.Is(err, errRemoteArtifactsPreserved) {
-		return "remote benchmark directory was retained"
-	}
-
-	return ""
-}
-
 func runPreflight(ctx context.Context, runner remoteRunner, baseURL, output string) (string, error) {
 	stdout, err := createOutputFile(filepath.Join(output, preflightStdoutFileName))
 	if err != nil {
@@ -530,7 +523,9 @@ func runPreflight(ctx context.Context, runner remoteRunner, baseURL, output stri
 	return model, nil
 }
 
-func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, options Options, benchmarkCase Case, output, remoteRoot string) error {
+// runCase runs one benchmark case. It removes the remote case directory only
+// after the case succeeds, so a failed or canceled run stays inspectable.
+func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, options Options, benchmarkCase Case, output, remoteRoot string) (err error) {
 	caseOutput := filepath.Join(output, benchmarkCase.Name())
 	if err := os.MkdirAll(caseOutput, 0700); err != nil {
 		return fmt.Errorf("create case output directory: %w", err)
@@ -542,19 +537,15 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 	}
 	defer stdout.Close() //nolint:errcheck
 
-	stderr, err := createOutputFile(filepath.Join(caseOutput, benchmarkStderrFileName))
-	if err != nil {
-		return err
-	}
-	defer stderr.Close() //nolint:errcheck
-
 	remoteResultDir := benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase)
-	preserveRemote := true
 
 	defer func() {
-		if !preserveRemote {
-			cleanupRemoteDirectory(runner, remoteResultDir)
+		if err != nil {
+			klog.Warningf("remote benchmark directory retained: %s", remoteResultDir)
+			return
 		}
+
+		cleanupRemoteDirectory(runner, remoteResultDir)
 	}()
 
 	command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
@@ -563,19 +554,42 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 	}
 
 	if err := prepareBenchmarkControl(ctx, runner, remoteResultDir); err != nil {
-		return fmt.Errorf("%w: %w", errRemoteArtifactsPreserved, contextOrError(ctx, err))
-	}
-
-	preserveRemote = false
-
-	if err := runControlledBenchmark(ctx, runner, remoteResultDir, command, stdout, stderr); err != nil {
-		preserveRemote = errors.Is(err, errRemoteTerminationUnconfirmed)
 		return err
 	}
 
-	if err := collectBenchmarkResult(ctx, runner, remoteResultDir, caseOutput, stderr); err != nil {
-		preserveRemote = true
-		return fmt.Errorf("%w: %w", errRemoteArtifactsPreserved, err)
+	// The tail runs until the case ends so the local stdout.log holds the whole
+	// benchmark log, including the lines the monitor writes while stopping. The
+	// same lines are mirrored to stderr, which is where progress goes.
+	logOutput := io.MultiWriter(stdout, os.Stderr)
+
+	stopTail := tailRemoteLog(ctx, runner, benchmarkLogPath(remoteResultDir), logOutput)
+	defer stopTail()
+
+	stopRenew := renewRemoteLease(ctx, runner, benchmarkRenewPath(remoteResultDir), remoteRenewInterval)
+	defer stopRenew()
+
+	if err := runControlledBenchmark(ctx, runner, remoteResultDir, command, logOutput); err != nil {
+		return err
+	}
+
+	if err := collectBenchmarkResult(ctx, runner, remoteResultDir, caseOutput, stdout); err != nil {
+		return err
+	}
+
+	return validateBenchmarkResult(caseOutput)
+}
+
+// validateBenchmarkResult rejects a result the serving route produced without
+// completing any request. vLLM exits successfully and writes result.json in
+// that case, so a non-empty file alone does not mean the case passed.
+func validateBenchmarkResult(caseOutput string) error {
+	summary, err := readBenchmarkResultSummary(filepath.Join(caseOutput, benchmarkResultFileName))
+	if err != nil {
+		return fmt.Errorf("read benchmark result summary: %w", err)
+	}
+
+	if summary.Completed != nil && *summary.Completed == 0 {
+		return fmt.Errorf("benchmark completed 0 requests")
 	}
 
 	return nil
@@ -619,6 +633,10 @@ func collectBenchmarkResult(ctx context.Context, runner remoteRunner, remoteResu
 
 func benchmarkCaseRemoteResultDirectory(remoteRoot string, benchmarkCase Case) string {
 	return filepath.ToSlash(filepath.Join(remoteRoot, benchmarkCase.Name()))
+}
+
+func benchmarkLogPath(remoteDir string) string {
+	return filepath.ToSlash(filepath.Join(remoteDir, benchmarkLogFileName))
 }
 
 func benchmarkCaseResultPath(output string, benchmarkCase Case) string {

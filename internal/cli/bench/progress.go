@@ -1,12 +1,14 @@
 package bench
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 // benchmarkResultSummary is the small, stable subset of a vLLM result that
@@ -201,29 +203,23 @@ func benchmarkResultSummaryText(path string) string {
 	return summary.String()
 }
 
-// Progress can reach shared terminal or CI logs, unlike the local command.sh.
-func progressBenchmarkCaseCommand(target BenchTarget, options Options, benchmarkCase Case, remoteRoot string) string {
-	target.BaseURL = redactProgressCommandValue(target.BaseURL)
-	target.Model = redactProgressCommandValue(target.Model)
-	target.Tokenizer = redactProgressCommandValue(target.Tokenizer)
+// tailRemoteLog streams the remote benchmark log into out until the returned
+// stop function runs. It keeps running while the CLI is being canceled so the
+// shutdown output still reaches the local file.
+func tailRemoteLog(ctx context.Context, runner remoteRunner, logPath string, out io.Writer) func() {
+	tailCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	done := make(chan struct{})
 
-	return benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
-}
+	go func() {
+		defer close(done)
 
-func redactProgressCommandValue(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return "<redacted>"
+		if err := runner.Run(tailCtx, benchmarkLogTailCommand(logPath), out, io.Discard); err != nil && tailCtx.Err() == nil {
+			klog.Warningf("failed to stream remote benchmark log %s: %v", logPath, err)
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
 	}
-
-	if parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" {
-		return value
-	}
-
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-
-	return parsed.String()
 }

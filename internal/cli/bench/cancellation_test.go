@@ -33,6 +33,33 @@ func (localCommandRunner) Run(ctx context.Context, command string, stdout, stder
 	return process.Run()
 }
 
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(data)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func requirePython(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is required")
+	}
+}
+
 func waitForPID(t *testing.T, path string) int {
 	t.Helper()
 
@@ -56,9 +83,7 @@ func waitForPID(t *testing.T, path string) int {
 }
 
 func TestControlledBenchmarkCancellationStopsOnlyItsProcessGroup(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 is required")
-	}
+	requirePython(t)
 
 	root := t.TempDir()
 	remoteDir := filepath.Join(root, "case")
@@ -94,8 +119,9 @@ time.sleep(15)
 	command := "exec python3 -c " + shellQuote(script) + " " + shellQuote(ready) + " " + shellQuote(childReady) + " " + shellQuote(survived)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+
 	go func() {
-		done <- runControlledBenchmark(ctx, runner, remoteDir, command, io.Discard, io.Discard)
+		done <- runControlledBenchmark(ctx, runner, remoteDir, command, io.Discard)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -113,7 +139,7 @@ time.sleep(15)
 	case err := <-done:
 		require.ErrorIs(t, err, context.Canceled)
 		done <- err
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("canceled benchmark did not stop")
 	}
 
@@ -123,99 +149,14 @@ time.sleep(15)
 	require.NoFileExists(t, survived)
 }
 
-func TestCancellationBeforeSupervisorStartsPreventsLateLaunch(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 is required")
-	}
+func TestMonitorStopsBenchmarkWhenLeaseExpires(t *testing.T) {
+	requirePython(t)
 
 	root := t.TempDir()
 	remoteDir := filepath.Join(root, "case")
 	runner := localCommandRunner{}
 	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	stopped := make(chan error, 1)
-	go func() {
-		stopped <- cancelRemoteBenchmark(ctx, runner, remoteDir)
-	}()
-
-	require.Eventually(t, func() bool {
-		state, err := os.ReadFile(benchmarkControlPath(remoteDir))
-		return err == nil && strings.TrimSpace(string(state)) == "cancel"
-	}, 5*time.Second, 20*time.Millisecond)
-
-	started := filepath.Join(root, "started")
-	err := runner.Run(ctx, supervisedBenchmarkCommand(remoteDir, "touch -- "+shellQuote(started)), io.Discard, io.Discard)
-	require.Error(t, err)
-	require.NoError(t, <-stopped)
-	require.NoFileExists(t, started)
-}
-
-func TestCancellationControlLockWaitIsBounded(t *testing.T) {
-	root := t.TempDir()
-	remoteDir := filepath.Join(root, "case")
-	runner := localCommandRunner{}
-	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
-	ready := filepath.Join(root, "locked")
-	locker := exec.Command("python3", "-c", `import fcntl, sys, time
-with open(sys.argv[1], "r+") as control:
-    fcntl.flock(control, fcntl.LOCK_EX)
-    with open(sys.argv[2], "w") as ready:
-        ready.write("locked")
-    time.sleep(5)
-`, benchmarkControlPath(remoteDir), ready)
-	require.NoError(t, locker.Start())
-	t.Cleanup(func() {
-		_ = locker.Process.Kill()
-		_ = locker.Wait()
-	})
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(ready)
-		return err == nil
-	}, 3*time.Second, 20*time.Millisecond)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	command := "python3 -c " + shellQuote(benchmarkCancelScript) + " " + shellQuote(benchmarkControlPath(remoteDir)) + " 0.5"
-	var stderr bytes.Buffer
-	err := runner.Run(ctx, command, io.Discard, &stderr)
-	require.Error(t, err)
-	require.NoError(t, ctx.Err())
-	require.Contains(t, stderr.String(), "benchmark control lock is unavailable")
-}
-
-func TestSupervisorTerminationSafety(t *testing.T) {
-	end := strings.Index(benchmarkSupervisorScript, "\nwith open(sys.argv[1]")
-	require.NotEqual(t, -1, end)
-	script := benchmarkSupervisorScript[:end] + `
-original_has_live_members = has_live_members
-signals = []
-signal_group = lambda child, sig: signals.append(sig) or True
-has_live_members = lambda child: False
-class Child:
-    pid = os.getpgrp()
-    def wait(self):
-        return 0
-stop_group(Child())
-assert signals == [signal.SIGTERM, signal.SIGKILL], signals
-sys.platform = "unsupported"
-try:
-    original_has_live_members(Child())
-except RuntimeError:
-    pass
-else:
-    raise AssertionError("unsupported platform must fail closed")
-`
-	output, err := exec.Command("python3", "-c", script).CombinedOutput()
-	require.NoError(t, err, string(output))
-}
-
-func TestSupervisorDoesNotConfirmWhileProcessGroupRemainsAlive(t *testing.T) {
-	root := t.TempDir()
-	remoteDir := filepath.Join(root, "case")
-	runner := localCommandRunner{}
-	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
 	ready := filepath.Join(root, "benchmark.pid")
 	childScript := `import os, sys, time
 with open(sys.argv[1], "w") as f:
@@ -223,69 +164,174 @@ with open(sys.argv[1], "w") as f:
 time.sleep(30)
 `
 	command := "exec python3 -c " + shellQuote(childScript) + " " + shellQuote(ready)
-	supervisor := strings.Replace(benchmarkSupervisorScript, "os.killpg(child.pid, sig)", "None", 1)
-	require.NotEqual(t, benchmarkSupervisorScript, supervisor)
-	supervisorCommand := "python3 -c " + shellQuote(supervisor) + " " + shellQuote(benchmarkControlPath(remoteDir)) + " " + shellQuote(command)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	finished := make(chan struct{})
-	supervisorLogPath := filepath.Join(root, "supervisor.log")
-	supervisorLog, err := os.OpenFile(supervisorLogPath, os.O_CREATE|os.O_RDWR, 0600)
-	require.NoError(t, err)
-	go func() {
-		defer close(finished)
-		done <- runner.Run(ctx, supervisorCommand, supervisorLog, supervisorLog)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		if data, readErr := os.ReadFile(ready); readErr == nil {
-			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil && pid > 0 {
-				if group, groupErr := syscall.Getpgid(pid); groupErr == nil && group == pid {
-					_ = syscall.Kill(-pid, syscall.SIGKILL)
-				}
-			}
-		}
-		select {
-		case <-finished:
-			_ = supervisorLog.Close()
-		case <-time.After(3 * time.Second):
-			t.Error("supervisor did not exit after cancellation")
-		}
-	})
-	waitForPID(t, ready)
 
-	cancelCommand := "python3 -c " + shellQuote(benchmarkCancelScript) + " " + shellQuote(benchmarkControlPath(remoteDir)) + " 5"
-	var stderr bytes.Buffer
-	err = runner.Run(ctx, cancelCommand, io.Discard, &stderr)
-	require.Error(t, err)
-	require.Contains(t, stderr.String(), "benchmark supervisor did not confirm termination")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- runner.Run(ctx, benchmarkMonitorCommand(remoteDir, command, time.Second), io.Discard, io.Discard)
+	}()
+
+	pid := waitForPID(t, ready)
+
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		supervisorStderr, readErr := os.ReadFile(supervisorLogPath)
-		require.NoError(t, readErr)
-		require.Contains(t, string(supervisorStderr), "benchmark process group is still running")
-	case <-time.After(time.Second):
-		t.Fatal("supervisor did not report the live process group")
+		require.NoDirExists(t, remoteDir)
+	case <-time.After(12 * time.Second):
+		t.Fatal("monitor did not stop the benchmark after the lease expired")
 	}
-	state, err := os.ReadFile(benchmarkControlPath(remoteDir))
-	require.NoError(t, err)
-	require.Equal(t, "cancel", strings.TrimSpace(string(state)))
+
+	require.ErrorIs(t, syscall.Kill(pid, 0), syscall.ESRCH)
 }
 
-func TestBenchmarkControlFailsClosed(t *testing.T) {
+func TestMonitorSkipsBenchmarkWhenCancellationWasRequested(t *testing.T) {
+	requirePython(t)
+
 	root := t.TempDir()
 	remoteDir := filepath.Join(root, "case")
 	runner := localCommandRunner{}
 	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
-	require.Error(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+	require.NoError(t, runner.Run(
+		context.Background(),
+		benchmarkCancelCommand(benchmarkCancelPath(remoteDir)),
+		io.Discard,
+		io.Discard,
+	))
 
-	started := filepath.Join(root, "unexpected-start")
-	missingDir := filepath.Join(root, "missing")
-	err := runner.Run(context.Background(), supervisedBenchmarkCommand(missingDir, "touch -- "+shellQuote(started)), io.Discard, io.Discard)
+	started := filepath.Join(root, "started")
+	err := runner.Run(
+		context.Background(),
+		benchmarkMonitorCommand(remoteDir, "touch -- "+shellQuote(started), remoteLeaseTimeout),
+		io.Discard,
+		io.Discard,
+	)
 	require.Error(t, err)
 	require.NoFileExists(t, started)
+}
+
+func TestControlledBenchmarkStopsDescendantWhenLeaderExits(t *testing.T) {
+	root := t.TempDir()
+	remoteDir := filepath.Join(root, "case")
+	runner := localCommandRunner{}
+	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+
+	ready := filepath.Join(root, "descendant-ready")
+	survived := filepath.Join(root, "descendant-survived")
+	script := `import os, subprocess, sys, time
+child = '''import signal, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], "w") as f:
+    f.write("ready")
+time.sleep(4)
+with open(sys.argv[2], "w") as f:
+    f.write("still running")
+'''
+subprocess.Popen([sys.executable, "-c", child, sys.argv[1], sys.argv[2]])
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.01)
+`
+	command := "exec python3 -c " + shellQuote(script) + " " + shellQuote(ready) + " " + shellQuote(survived)
+	require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, command, io.Discard))
+	time.Sleep(2500 * time.Millisecond)
+	require.NoFileExists(t, survived)
+}
+
+func TestControlledBenchmarkNormalAndFailedExit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		wantErr bool
+	}{
+		{name: "success", command: "echo benchmark output"},
+		{name: "failure", command: "echo benchmark failure && exit 7", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remoteDir := filepath.Join(t.TempDir(), "case")
+			runner := localCommandRunner{}
+			require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+
+			err := runControlledBenchmark(context.Background(), runner, remoteDir, tc.command, io.Discard)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.NotErrorIs(t, err, errRemoteTerminationUnconfirmed)
+			} else {
+				require.NoError(t, err)
+			}
+
+			log, readErr := os.ReadFile(benchmarkLogPath(remoteDir))
+			require.NoError(t, readErr)
+			require.Contains(t, string(log), "benchmark")
+		})
+	}
+}
+
+// vllm bench draws its progress bar as carriage-return frames. They have to
+// reach the log byte for byte, because the CLI renders them on the terminal
+// from the tailed log.
+func TestMonitorKeepsProgressFramesInTheLog(t *testing.T) {
+	remoteDir := filepath.Join(t.TempDir(), "case")
+	runner := localCommandRunner{}
+	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+
+	command := `printf 'progress 1/3\rprogress 2/3\rprogress 3/3\r'; echo finished`
+	require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, command, io.Discard))
+
+	log, err := os.ReadFile(benchmarkLogPath(remoteDir))
+	require.NoError(t, err)
+	require.Contains(t, string(log), "progress 1/3\rprogress 2/3\rprogress 3/3\r")
+	require.Contains(t, string(log), "finished")
+}
+
+func TestRenewRemoteLeaseStampsUntilStopped(t *testing.T) {
+	renewPath := filepath.Join(t.TempDir(), benchmarkRenewFileName)
+	runner := &fakeBenchRunner{}
+	renewals := func() int {
+		return countBenchCommands(runner.snapshot(), func(command string) bool {
+			return command == benchmarkRenewCommand(renewPath)
+		})
+	}
+
+	stop := renewRemoteLease(context.Background(), runner, renewPath, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return renewals() >= 2 }, 3*time.Second, 10*time.Millisecond)
+	stop()
+
+	count := renewals()
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, count, renewals())
+}
+
+func TestTailRemoteLogStreamsAppendedLines(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), benchmarkLogFileName)
+	require.NoError(t, os.WriteFile(logPath, []byte("first line\n"), 0600))
+
+	output := &lockedBuffer{}
+	stop := tailRemoteLog(context.Background(), localCommandRunner{}, logPath, output)
+	defer stop()
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(output.String(), "first line")
+	}, 5*time.Second, 50*time.Millisecond)
+
+	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0600)
+	require.NoError(t, err)
+	_, err = file.WriteString("second line\n")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+
+	require.Eventually(t, func() bool {
+		return strings.Contains(output.String(), "second line")
+	}, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestPrepareBenchmarkControlCreatesDirectoryExclusively(t *testing.T) {
+	remoteDir := filepath.Join(t.TempDir(), "case")
+	runner := localCommandRunner{}
+
+	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
+	require.Error(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
 }
 
 func TestRemoteRootIsCreatedExclusively(t *testing.T) {
@@ -297,17 +343,21 @@ func TestRemoteRootIsCreatedExclusively(t *testing.T) {
 
 	runner := localCommandRunner{}
 	require.Error(t, prepareRemoteRoot(context.Background(), runner, existing))
+
 	data, err := os.ReadFile(marker)
 	require.NoError(t, err)
 	require.Equal(t, "keep", string(data))
 	require.NoError(t, prepareRemoteRoot(context.Background(), runner, filepath.Join(root, "new")))
 }
 
+// rootCollisionRunner fails the run root creation, which is the only mkdir that
+// does not target a case directory.
 type rootCollisionRunner struct{ runner *fakeBenchRunner }
 
 func (r rootCollisionRunner) Run(ctx context.Context, command string, stdout, stderr io.Writer) error {
-	if strings.HasPrefix(command, "umask 077 && mkdir -- ") && !strings.Contains(command, "set -C") {
-		r.runner.commands = append(r.runner.commands, command)
+	if strings.HasPrefix(command, "umask 077 && mkdir -- ") && !strings.Contains(command, "input-") {
+		r.runner.record(command)
+
 		return fmt.Errorf("directory already exists")
 	}
 
@@ -328,9 +378,11 @@ func TestRunDoesNotRemoveUnownedRemoteRoot(t *testing.T) {
 		},
 	}, validOptions(t.TempDir()))
 	require.ErrorContains(t, err, "directory already exists")
+
 	manifestBytes, err := os.ReadFile(filepath.Join(output, manifestFileName))
 	require.NoError(t, err)
 	require.Contains(t, string(manifestBytes), "directory already exists")
+
 	for _, command := range runner.commands {
 		require.False(t, strings.HasPrefix(command, "rm -rf -- "), "unowned directory must not be removed")
 	}
@@ -346,64 +398,11 @@ func TestRunCaseDoesNotRemoveUnownedDirectory(t *testing.T) {
 
 	err := runCase(context.Background(), localCommandRunner{}, BenchTarget{}, Options{NumPrompts: 1, RequestRate: "inf"},
 		benchmarkCase, t.TempDir(), remoteRoot)
-	require.ErrorIs(t, err, errRemoteArtifactsPreserved)
+	require.ErrorContains(t, err, "prepare remote benchmark directory")
+
 	data, readErr := os.ReadFile(marker)
 	require.NoError(t, readErr)
 	require.Equal(t, "keep", string(data))
-}
-
-func TestControlledBenchmarkNormalAndFailedExit(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		command string
-		wantErr bool
-	}{
-		{name: "success", command: "exit 0"},
-		{name: "failure", command: "exit 7", wantErr: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			remoteDir := filepath.Join(t.TempDir(), "case")
-			runner := localCommandRunner{}
-			require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
-
-			err := runControlledBenchmark(context.Background(), runner, remoteDir, tc.command, io.Discard, io.Discard)
-			if tc.wantErr {
-				require.Error(t, err)
-				require.NotErrorIs(t, err, errRemoteTerminationUnconfirmed)
-			} else {
-				require.NoError(t, err)
-			}
-			state, readErr := os.ReadFile(benchmarkControlPath(remoteDir))
-			require.NoError(t, readErr)
-			require.Equal(t, "finished", strings.TrimSpace(string(state)))
-		})
-	}
-}
-
-func TestControlledBenchmarkStopsDescendantWhenLeaderExits(t *testing.T) {
-	root := t.TempDir()
-	remoteDir := filepath.Join(root, "case")
-	runner := localCommandRunner{}
-	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
-	ready := filepath.Join(root, "descendant-ready")
-	survived := filepath.Join(root, "descendant-survived")
-	script := `import os, subprocess, sys, time
-child = '''import signal, sys, time
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-with open(sys.argv[1], "w") as f:
-    f.write("ready")
-time.sleep(4)
-with open(sys.argv[2], "w") as f:
-    f.write("still running")
-'''
-subprocess.Popen([sys.executable, "-c", child, sys.argv[1], sys.argv[2]])
-while not os.path.exists(sys.argv[1]):
-    time.sleep(0.01)
-`
-	command := "exec python3 -c " + shellQuote(script) + " " + shellQuote(ready) + " " + shellQuote(survived)
-	require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, command, io.Discard, io.Discard))
-	time.Sleep(2500 * time.Millisecond)
-	require.NoFileExists(t, survived)
 }
 
 type cancelLifecycleRunner struct {
@@ -417,6 +416,7 @@ type cancelLifecycleRunner struct {
 func (r *cancelLifecycleRunner) record(event string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.events = append(r.events, event)
 }
 
@@ -424,36 +424,46 @@ func (r *cancelLifecycleRunner) Run(ctx context.Context, command string, stdout,
 	switch {
 	case command == benchmarkPreflightCommand():
 		return nil
-	case strings.Contains(command, "# neutree-bench-supervisor"):
+	case strings.Contains(command, "# neutree-bench-monitor"):
 		r.record("start")
 		close(r.started)
+
 		select {
 		case <-r.stopped:
-			return fmt.Errorf("supervisor canceled")
+			return fmt.Errorf("benchmark canceled")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	case strings.Contains(command, "# neutree-bench-cancel"):
+	case strings.HasPrefix(command, ": > "):
 		r.record("stop")
 		if ctx.Err() != nil {
 			return fmt.Errorf("cleanup context is already canceled")
 		}
+
 		if r.stopErr != nil {
 			return r.stopErr
 		}
+
 		close(r.stopped)
+
+		return nil
+	case strings.HasPrefix(command, "tail -n +1 -F -- "):
+		<-ctx.Done()
+
+		return ctx.Err()
+	case strings.HasPrefix(command, "touch -- "):
 		return nil
 	case strings.HasPrefix(command, "python3 -c "):
 		_, _ = io.WriteString(stdout, `{"data":[{"name":"router-model"}]}`)
-		return nil
-	case strings.Contains(command, "set -C"):
-		r.record("prepare")
+
 		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
-		r.record("root")
+		r.record("prepare")
+
 		return nil
 	case strings.HasPrefix(command, "rm -rf -- "):
 		r.record("remove")
+
 		return nil
 	default:
 		return fmt.Errorf("unexpected remote command")
@@ -466,20 +476,24 @@ func TestControlledBenchmarkStopsOnDeadline(t *testing.T) {
 	defer cancel()
 
 	done := make(chan error, 1)
+
 	go func() {
-		done <- runControlledBenchmark(ctx, runner, "/tmp/bench-case", "benchmark", io.Discard, io.Discard)
+		done <- runControlledBenchmark(ctx, runner, "/tmp/bench-case", "benchmark", io.Discard)
 	}()
+
 	select {
 	case <-runner.started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("benchmark did not start")
 	}
+
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	case <-time.After(3 * time.Second):
 		t.Fatal("deadline did not stop benchmark")
 	}
+
 	require.Contains(t, runner.events, "stop")
 }
 
@@ -489,7 +503,7 @@ type stalledExecutionRunner struct {
 }
 
 func (r stalledExecutionRunner) Run(_ context.Context, command string, _, _ io.Writer) error {
-	if strings.Contains(command, "# neutree-bench-supervisor") {
+	if strings.Contains(command, "# neutree-bench-monitor") {
 		close(r.started)
 		<-r.release
 	}
@@ -498,30 +512,32 @@ func (r stalledExecutionRunner) Run(_ context.Context, command string, _, _ io.W
 }
 
 func TestControlledBenchmarkBoundsStalledStreamShutdown(t *testing.T) {
+	previousGrace := remoteStopGrace
+	remoteStopGrace = 200 * time.Millisecond
+	t.Cleanup(func() { remoteStopGrace = previousGrace })
+
 	runner := stalledExecutionRunner{started: make(chan struct{}), release: make(chan struct{})}
 	t.Cleanup(func() { close(runner.release) })
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan error, 1)
+
 	go func() {
-		done <- runControlledBenchmark(ctx, runner, "/tmp/bench-case", "benchmark", io.Discard, io.Discard)
+		done <- runControlledBenchmark(ctx, runner, "/tmp/bench-case", "benchmark", io.Discard)
 	}()
+
 	<-runner.started
 	cancel()
+
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, context.Canceled)
 		require.ErrorIs(t, err, errRemoteTerminationUnconfirmed)
-		require.ErrorContains(t, err, "remote execution stream did not close")
 	case <-time.After(5 * time.Second):
 		t.Fatal("stream shutdown was not bounded")
 	}
-}
-
-type cancelAfterResultRunner struct {
-	runner *fakeBenchRunner
-	cancel context.CancelFunc
 }
 
 type cancelDuringResultRunner struct {
@@ -531,9 +547,10 @@ type cancelDuringResultRunner struct {
 
 func (r cancelDuringResultRunner) Run(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	if strings.HasPrefix(command, "cat -- ") {
-		r.runner.commands = append(r.runner.commands, command)
+		r.runner.record(command)
 		_, _ = io.WriteString(stdout, `{"partial":`)
 		r.cancel()
+
 		return ctx.Err()
 	}
 
@@ -556,23 +573,30 @@ func TestRunCancellationDuringResultCopyRetainsRemoteAndPartialResult(t *testing
 		},
 	}, validOptions(t.TempDir()))
 	require.ErrorIs(t, err, context.Canceled)
-	require.ErrorIs(t, err, errRemoteArtifactsPreserved)
 
 	caseDir := filepath.Join(output, "input-16-output-4-concurrency-2")
 	require.NoFileExists(t, filepath.Join(caseDir, benchmarkResultFileName))
+
 	partial, err := os.ReadFile(filepath.Join(caseDir, benchmarkResultFileName+".partial"))
 	require.NoError(t, err)
 	require.Equal(t, `{"partial":`, string(partial))
 
 	manifestBytes, err := os.ReadFile(filepath.Join(output, manifestFileName))
 	require.NoError(t, err)
+
 	var got manifest
 	require.NoError(t, json.Unmarshal(manifestBytes, &got))
 	require.Len(t, got.Cases, 1)
 	require.Equal(t, benchmarkCanceledStatus, got.Cases[0].Status)
+
 	for _, command := range runner.commands {
 		require.False(t, strings.HasPrefix(command, "rm -rf -- "), "remote results must be retained")
 	}
+}
+
+type cancelAfterResultRunner struct {
+	runner *fakeBenchRunner
+	cancel context.CancelFunc
 }
 
 func (r cancelAfterResultRunner) Run(ctx context.Context, command string, stdout, stderr io.Writer) error {
@@ -606,90 +630,77 @@ func TestRunCancellationBetweenCasesDoesNotStartAnotherCase(t *testing.T) {
 
 	manifestBytes, err := os.ReadFile(filepath.Join(output, manifestFileName))
 	require.NoError(t, err)
+
 	var got manifest
 	require.NoError(t, json.Unmarshal(manifestBytes, &got))
 	require.Len(t, got.Cases, 1)
 	require.Equal(t, benchmarkSucceededStatus, got.Cases[0].Status)
 	require.Contains(t, got.Error, "context canceled")
 
-	var started int
-	for _, command := range runner.commands {
-		if strings.Contains(command, "# neutree-bench-supervisor") {
-			started++
-		}
-	}
-	require.Equal(t, 1, started)
+	require.Equal(t, 1, countBenchCommands(runner.commands, func(command string) bool {
+		return strings.Contains(command, "# neutree-bench-monitor")
+	}))
 }
 
 func TestRunCancellationStopsBeforeCleaningAndPreservesManifest(t *testing.T) {
-	for _, tc := range []struct {
-		name            string
-		stopErr         error
-		wantRemove      bool
-		wantUnconfirmed bool
-	}{
-		{name: "confirmed", wantRemove: true},
-		{name: "unconfirmed", stopErr: fmt.Errorf("exec unavailable"), wantUnconfirmed: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			endpoint, cluster, credentialCluster := benchmarkFixtures()
-			runner := &cancelLifecycleRunner{started: make(chan struct{}), stopped: make(chan struct{}), stopErr: tc.stopErr}
-			deps := dependencies{
-				resources: fakeResourceGetter{resources: map[string]json.RawMessage{
-					resourceKey("Endpoint", "default", "chat"):     mustJSON(t, endpoint),
-					resourceKey("Cluster", "default", "cluster-a"): mustJSON(t, cluster),
-				}},
-				clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
-				resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
-					return BenchTarget{BaseURL: "http://router/default/chat", runner: runner}, nil
-				},
-			}
-			options := validOptions(t.TempDir())
-			options.Concurrencies = []int{1, 2}
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			type result struct {
-				output string
-				err    error
-			}
-			done := make(chan result, 1)
-			go func() {
-				output, err := run(ctx, deps, options)
-				done <- result{output: output, err: err}
-			}()
-
-			select {
-			case <-runner.started:
-			case <-time.After(3 * time.Second):
-				t.Fatal("benchmark did not start")
-			}
-			cancel()
-			var got result
-			select {
-			case got = <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("cancellation did not complete")
-			}
-
-			require.ErrorIs(t, got.err, context.Canceled)
-			if tc.wantUnconfirmed {
-				require.ErrorIs(t, got.err, errRemoteTerminationUnconfirmed)
-			}
-			manifestBytes, err := os.ReadFile(filepath.Join(got.output, manifestFileName))
-			require.NoError(t, err)
-			var gotManifest manifest
-			require.NoError(t, json.Unmarshal(manifestBytes, &gotManifest))
-			require.Len(t, gotManifest.Cases, 1)
-			require.Equal(t, "Canceled", gotManifest.Cases[0].Status)
-			require.FileExists(t, filepath.Join(got.output, "input-16-output-4-concurrency-1", benchmarkStdoutFileName))
-			require.Greater(t, indexOfEvent(runner.events, "stop"), indexOfEvent(runner.events, "start"))
-			if tc.wantRemove {
-				require.Greater(t, indexOfEvent(runner.events, "remove"), indexOfEvent(runner.events, "stop"))
-			} else {
-				require.NotContains(t, runner.events, "remove")
-			}
-		})
+	endpoint, cluster, credentialCluster := benchmarkFixtures()
+	runner := &cancelLifecycleRunner{started: make(chan struct{}), stopped: make(chan struct{})}
+	deps := dependencies{
+		resources: fakeResourceGetter{resources: map[string]json.RawMessage{
+			resourceKey("Endpoint", "default", "chat"):     mustJSON(t, endpoint),
+			resourceKey("Cluster", "default", "cluster-a"): mustJSON(t, cluster),
+		}},
+		clusterCredentials: fakeClusterCredentials{cluster: &credentialCluster},
+		resolveTarget: func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error) {
+			return BenchTarget{BaseURL: "http://router/default/chat", runner: runner}, nil
+		},
 	}
+	options := validOptions(t.TempDir())
+	options.Concurrencies = []int{1, 2}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	type result struct {
+		output string
+		err    error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		output, err := run(ctx, deps, options)
+		done <- result{output: output, err: err}
+	}()
+
+	select {
+	case <-runner.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("benchmark did not start")
+	}
+
+	cancel()
+
+	var got result
+
+	select {
+	case got = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("cancellation did not complete")
+	}
+
+	require.ErrorIs(t, got.err, context.Canceled)
+
+	manifestBytes, err := os.ReadFile(filepath.Join(got.output, manifestFileName))
+	require.NoError(t, err)
+
+	var gotManifest manifest
+	require.NoError(t, json.Unmarshal(manifestBytes, &gotManifest))
+	require.Len(t, gotManifest.Cases, 1)
+	require.Equal(t, benchmarkCanceledStatus, gotManifest.Cases[0].Status)
+	require.FileExists(t, filepath.Join(got.output, "input-16-output-4-concurrency-1", benchmarkStdoutFileName))
+	require.Greater(t, indexOfEvent(runner.events, "stop"), indexOfEvent(runner.events, "start"))
+	require.NotContains(t, runner.events, "remove", "a canceled case must keep its remote directory")
 }
 
 func indexOfEvent(events []string, target string) int {

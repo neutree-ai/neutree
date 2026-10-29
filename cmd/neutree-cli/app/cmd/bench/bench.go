@@ -47,9 +47,12 @@ The command does not perform special Admin-role validation; insufficient
 permissions are reported by the Neutree API. The benchmark generates traffic
 against the live Endpoint.
 
-Progress logs are written to stderr; the results directory is printed to stdout.
-SIGINT and SIGTERM stop the current remote benchmark. If its exit cannot be
-confirmed, its remote directory is retained for inspection.`,
+Progress logs and the live benchmark log are written to stderr and recorded in
+the results directory; the results directory is printed to stdout. The
+benchmark's own progress bar streams to stderr as requests complete. SIGINT and
+SIGTERM stop the current remote benchmark. The remote side also stops on its own
+when the CLI stops renewing its lease, so a killed CLI does not leave a
+benchmark running on the GPU.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

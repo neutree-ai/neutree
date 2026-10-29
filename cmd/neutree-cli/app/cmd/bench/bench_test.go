@@ -17,8 +17,10 @@ import (
 func TestNewBenchCmdRegistersFlags(t *testing.T) {
 	cmd := NewBenchCmd()
 	require.Equal(t, "bench ENDPOINT", cmd.Use)
-	require.Contains(t, cmd.Long, "Progress logs are written to stderr; the results directory is printed to stdout.")
-	require.Contains(t, cmd.Long, "SIGINT and SIGTERM stop the current remote benchmark.")
+	require.Contains(t, cmd.Long, "Progress logs and the live benchmark log are written to stderr")
+	require.Contains(t, cmd.Long, "progress bar streams to stderr as requests complete.")
+	require.Contains(t, cmd.Long, "SIGTERM stop the current remote benchmark.")
+	require.Contains(t, cmd.Long, "benchmark running on the GPU.")
 
 	for _, flag := range []string{
 		"workspace", "input-lens", "output-lens", "concurrencies",

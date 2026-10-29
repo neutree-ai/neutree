@@ -25,7 +25,7 @@ import (
 type kubernetesTarget struct {
 	PodName   string
 	Container string
-	Tokenizer string
+	Tokenizer tokenizerOptions
 }
 
 func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
@@ -65,9 +65,9 @@ func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
 	return kubernetesTarget{}, fmt.Errorf("no Running inference Pod found")
 }
 
-func vllmContainerAndTokenizer(containers []corev1.Container) (string, string, error) {
+func vllmContainerAndTokenizer(containers []corev1.Container) (string, tokenizerOptions, error) {
 	if len(containers) == 0 {
-		return "", "", fmt.Errorf("Pod has no regular containers")
+		return "", tokenizerOptions{}, fmt.Errorf("Pod has no regular containers")
 	}
 
 	selected := -1
@@ -81,34 +81,83 @@ func vllmContainerAndTokenizer(containers []corev1.Container) (string, string, e
 
 	if selected < 0 {
 		if len(containers) != 1 {
-			return "", "", fmt.Errorf("vllm container not found")
+			return "", tokenizerOptions{}, fmt.Errorf("vllm container not found")
 		}
 
 		selected = 0
 	}
 
-	tokenizer, err := tokenizerPathFromContainer(containers[selected])
+	tokenizer, err := tokenizerOptionsFromContainer(containers[selected])
 	if err != nil {
-		return "", "", err
+		return "", tokenizerOptions{}, err
 	}
 
 	return containers[selected].Name, tokenizer, nil
 }
 
-func tokenizerPathFromContainer(container corev1.Container) (string, error) {
+// tokenizerOptionsFromContainer reads the tokenizer flags from the rendered
+// `vllm serve` arguments so the benchmark tokenizes like the serving engine.
+func tokenizerOptionsFromContainer(container corev1.Container) (tokenizerOptions, error) {
 	args := make([]string, 0, len(container.Command)+len(container.Args))
 	args = append(args, container.Command...)
 	args = append(args, container.Args...)
+
+	modelIndex := -1
 
 	for index := 0; index+2 < len(args); index++ {
 		if strings.TrimSpace(args[index]) == "vllm" &&
 			strings.TrimSpace(args[index+1]) == "serve" &&
 			strings.TrimSpace(args[index+2]) != "" {
-			return args[index+2], nil
+			modelIndex = index + 2
+			break
 		}
 	}
 
-	return "", fmt.Errorf("tokenizer path is unavailable from vllm serve arguments")
+	if modelIndex < 0 {
+		return tokenizerOptions{}, fmt.Errorf("tokenizer path is unavailable from vllm serve arguments")
+	}
+
+	options := tokenizerOptions{Path: args[modelIndex]}
+
+	for index := modelIndex + 1; index < len(args); index++ {
+		name, value, hasValue := splitServeArgument(args[index])
+
+		switch name {
+		case "tokenizer":
+			if !hasValue && index+1 < len(args) {
+				index++
+				value = args[index]
+			}
+
+			if value != "" {
+				options.Path = value
+			}
+		case "tokenizer-mode":
+			if !hasValue && index+1 < len(args) {
+				index++
+				value = args[index]
+			}
+
+			options.Mode = value
+		case "trust-remote-code":
+			options.TrustRemoteCode = true
+		}
+	}
+
+	return options, nil
+}
+
+// splitServeArgument splits one engine argument into its flag name and value.
+// The serving template renders flags as separate `--flag value` pairs; the
+// `--flag=value` form is also accepted.
+func splitServeArgument(argument string) (string, string, bool) {
+	if !strings.HasPrefix(argument, "--") {
+		return "", "", false
+	}
+
+	name, value, found := strings.Cut(strings.TrimPrefix(argument, "--"), "=")
+
+	return name, value, found
 }
 
 func kubernetesRouterBaseURL(namespace, workspace, endpoint string) (string, error) {

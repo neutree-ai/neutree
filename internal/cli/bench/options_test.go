@@ -89,6 +89,13 @@ func TestOptionsValidate(t *testing.T) {
 			wantErr: "num-prompts",
 		},
 		{
+			name: "concurrency above prompt count",
+			mutate: func(o *Options) {
+				o.Concurrencies = []int{2, 32}
+			},
+			wantErr: "concurrency 32 exceeds num-prompts 20",
+		},
+		{
 			name: "non positive rate",
 			mutate: func(o *Options) {
 				o.RequestRate = "0"

@@ -44,7 +44,25 @@ func TestSelectKubernetesTargetSortsPodsAndFindsVLLMTokenizer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "endpoint-a", target.PodName)
 	require.Equal(t, "vllm", target.Container)
-	require.Equal(t, "/models/first", target.Tokenizer)
+	require.Equal(t, "/models/first", target.Tokenizer.Path)
+}
+
+func TestTokenizerOptionsFromContainerInheritsServeFlags(t *testing.T) {
+	options, err := tokenizerOptionsFromContainer(corev1.Container{
+		Name: "vllm",
+		Command: []string{
+			"vllm", "serve", "/models/chat",
+			"--tokenizer", "/models/custom-tokenizer",
+			"--tokenizer-mode", "slow",
+			"--trust-remote-code",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, tokenizerOptions{
+		Path:            "/models/custom-tokenizer",
+		Mode:            "slow",
+		TrustRemoteCode: true,
+	}, options)
 }
 
 func TestKubernetesRouterBaseURL(t *testing.T) {

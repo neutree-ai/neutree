@@ -71,19 +71,51 @@ func TestDockerContainerIDFromCgroup(t *testing.T) {
 }
 
 func TestStaticTargetHelpersUseDeployedModelPathAndServeRoute(t *testing.T) {
-	tokenizer, err := tokenizerPathFromRayApplication(dashboard.RayServeApplicationStatus{
+	tokenizer, err := tokenizerOptionsFromRayApplication(dashboard.RayServeApplicationStatus{
 		DeployedAppConfig: &dashboard.RayServeApplication{Args: map[string]interface{}{
 			"model": map[string]interface{}{"path": "/models/deployed"},
 		}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "/models/deployed", tokenizer)
+	require.Equal(t, tokenizerOptions{Path: "/models/deployed"}, tokenizer)
 
 	baseURL, err := staticServeBaseURL(&v1.Cluster{
 		Status: &v1.ClusterStatus{DashboardURL: "http://10.0.0.10:8265"},
 	}, &v1.Endpoint{Metadata: &v1.Metadata{Workspace: "default", Name: "chat"}})
 	require.NoError(t, err)
 	require.Equal(t, "http://10.0.0.10:8000/default/chat", baseURL)
+}
+
+func TestTokenizerOptionsFromRayApplicationInheritsEngineArgs(t *testing.T) {
+	options, err := tokenizerOptionsFromRayApplication(dashboard.RayServeApplicationStatus{
+		DeployedAppConfig: &dashboard.RayServeApplication{Args: map[string]interface{}{
+			"model":             map[string]interface{}{"path": "/models/deployed"},
+			"tokenizer":         "/models/custom-tokenizer",
+			"tokenizer_mode":    "slow",
+			"trust_remote_code": true,
+		}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, tokenizerOptions{
+		Path:            "/models/custom-tokenizer",
+		Mode:            "slow",
+		TrustRemoteCode: true,
+	}, options)
+}
+
+func TestSelectBackendReplicaPrefersRunningReplica(t *testing.T) {
+	deployments := map[string]dashboard.Deployment{
+		"Backend": {
+			Replicas: []dashboard.Replica{
+				{NodeID: "node-a", ReplicaID: "replica-a", ActorID: "actor-a", State: "STARTING"},
+				{NodeID: "node-b", ReplicaID: "replica-b", ActorID: "actor-b", State: "RUNNING"},
+			},
+		},
+	}
+
+	replica, err := selectBackendReplica(deployments)
+	require.NoError(t, err)
+	require.Equal(t, "actor-b", replica.ActorID)
 }
 
 func TestBackendNodeIDFallsBackToReplica(t *testing.T) {

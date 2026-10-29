@@ -118,7 +118,7 @@ func resolveStaticTarget(ctx context.Context, cluster, credentialCluster *v1.Clu
 		return BenchTarget{}, fmt.Errorf("Docker inspect returned an invalid container ID")
 	}
 
-	tokenizer, err := tokenizerPathFromRayApplication(application)
+	tokenizer, err := tokenizerOptionsFromRayApplication(application)
 	if err != nil {
 		_ = sshRunner.Close()
 		return BenchTarget{}, err
@@ -167,6 +167,11 @@ func selectBackendReplica(deployments map[string]dashboard.Deployment) (dashboar
 		return dashboard.Replica{}, fmt.Errorf("no Backend replica with an actor ID found")
 	}
 
+	candidates = preferRunningReplicas(candidates)
+	if len(candidates) == 0 {
+		return dashboard.Replica{}, fmt.Errorf("no RUNNING Backend replica found")
+	}
+
 	sort.Slice(candidates, func(left, right int) bool {
 		if candidates[left].NodeID != candidates[right].NodeID {
 			return candidates[left].NodeID < candidates[right].NodeID
@@ -180,6 +185,38 @@ func selectBackendReplica(deployments map[string]dashboard.Deployment) (dashboar
 	})
 
 	return candidates[0], nil
+}
+
+// preferRunningReplicas keeps only RUNNING replicas when Ray reports replica
+// states. Older Ray versions omit the state, so an unknown state keeps the
+// previous selection behaviour instead of rejecting every replica.
+func preferRunningReplicas(candidates []dashboard.Replica) []dashboard.Replica {
+	statesKnown := false
+
+	for _, replica := range candidates {
+		if replica.State != "" {
+			statesKnown = true
+			break
+		}
+	}
+
+	if !statesKnown {
+		return candidates
+	}
+
+	running := make([]dashboard.Replica, 0, len(candidates))
+
+	for _, replica := range candidates {
+		if strings.EqualFold(replica.State, dashboard.ApplicationStatusRunning) {
+			running = append(running, replica)
+		}
+	}
+
+	if len(running) == 0 {
+		return nil
+	}
+
+	return running
 }
 
 func dockerContainerIDFromCgroup(cgroup string) (string, error) {
@@ -260,22 +297,52 @@ func sshAuthForCluster(cluster *v1.Cluster) (v1.Auth, error) {
 	return cluster.Spec.Config.SSHConfig.Auth, nil
 }
 
-func tokenizerPathFromRayApplication(application dashboard.RayServeApplicationStatus) (string, error) {
+// tokenizerOptionsFromRayApplication reads the tokenizer path and the vLLM
+// tokenizer engine arguments the Ray Serve application was deployed with.
+func tokenizerOptionsFromRayApplication(application dashboard.RayServeApplicationStatus) (tokenizerOptions, error) {
 	if application.DeployedAppConfig == nil || application.DeployedAppConfig.Args == nil {
-		return "", fmt.Errorf("Ray Serve model arguments are unavailable")
+		return tokenizerOptions{}, fmt.Errorf("Ray Serve model arguments are unavailable")
 	}
 
 	model, ok := application.DeployedAppConfig.Args["model"].(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("Ray Serve model arguments are invalid")
+		return tokenizerOptions{}, fmt.Errorf("Ray Serve model arguments are invalid")
 	}
 
 	path, ok := model["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("Ray Serve tokenizer path is unavailable")
+		return tokenizerOptions{}, fmt.Errorf("Ray Serve tokenizer path is unavailable")
 	}
 
-	return path, nil
+	options := tokenizerOptions{Path: path}
+
+	if override, ok := application.DeployedAppConfig.Args["tokenizer"].(string); ok && strings.TrimSpace(override) != "" {
+		options.Path = override
+	}
+
+	if mode, ok := application.DeployedAppConfig.Args["tokenizer_mode"].(string); ok {
+		options.Mode = mode
+	}
+
+	if trust, ok := boolVariable(application.DeployedAppConfig.Args["trust_remote_code"]); ok {
+		options.TrustRemoteCode = trust
+	}
+
+	return options, nil
+}
+
+// boolVariable reads a boolean engine argument, which Endpoint variables may
+// carry either as a JSON boolean or as the string the Ray path does not coerce
+// before the benchmark reads the deployed config.
+func boolVariable(value interface{}) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true"), true
+	default:
+		return false, false
+	}
 }
 
 func staticServeBaseURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {

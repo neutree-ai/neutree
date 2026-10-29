@@ -156,7 +156,7 @@ esac
 	require.Equal(t, "ssh", target.Platform)
 	require.Equal(t, "docker/"+containerID+"@10.0.0.21", target.RuntimeID)
 	require.Equal(t, "http://10.0.0.10:8000/default/chat", target.BaseURL)
-	require.Equal(t, "/models/chat", target.Tokenizer)
+	require.Equal(t, "/models/chat", target.Tokenizer.Path)
 
 	output, err := runRemoteOutput(context.Background(), target.runner, "echo ignored")
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestResolveKubernetesTargetUsesRouterAndSelectedPod(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "kubernetes", target.Platform)
 	require.Equal(t, "pod/chat-a:vllm", target.RuntimeID)
-	require.Equal(t, "/models/chat", target.Tokenizer)
+	require.Equal(t, "/models/chat", target.Tokenizer.Path)
 	require.Equal(t, "http://router-service."+namespace+".svc.cluster.local:8000/default/chat", target.BaseURL)
 }
 

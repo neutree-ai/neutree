@@ -72,22 +72,3 @@ func TestReadBenchmarkResultSummary(t *testing.T) {
 		require.ErrorContains(t, err, "decode benchmark result")
 	})
 }
-
-func TestProgressBenchmarkCaseCommandRedactsSensitiveURLParts(t *testing.T) {
-	target := BenchTarget{
-		BaseURL:   "https://user:base-url-secret@router.example.test/endpoint?access_token=base-url-token#fragment",
-		Model:     "https://models.example.test/qwen?token=model-token",
-		Tokenizer: "/models/qwen?token=tokenizer-token",
-	}
-	options := Options{NumPrompts: 20, RequestRate: "inf"}
-	benchmarkCase := Case{InputLen: 16, OutputLen: 4, Concurrency: 2}
-
-	command := progressBenchmarkCaseCommand(target, options, benchmarkCase, "/tmp/neutree-bench-test")
-	require.Contains(t, command, "--base-url 'https://router.example.test/endpoint'")
-	require.Contains(t, command, "--model 'https://models.example.test/qwen'")
-	require.Contains(t, command, "--tokenizer '/models/qwen'")
-	require.NotContains(t, command, "base-url-secret")
-	require.NotContains(t, command, "base-url-token")
-	require.NotContains(t, command, "model-token")
-	require.NotContains(t, command, "tokenizer-token")
-}
