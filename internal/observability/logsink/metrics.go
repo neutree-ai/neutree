@@ -11,12 +11,38 @@ import (
 	"github.com/prometheus/common/expfmt"
 )
 
-// ComponentCounters is what Vector reports for one sink component.
+// ComponentCounters are cumulative Vector counters for one sink component.
 type ComponentCounters struct {
 	// Running is set when the component reports utilization, which only a
 	// running component does. Other series also appear for a component built
 	// during a reload that Vector then rejected, so they prove nothing.
 	Running bool
+
+	Sent float64
+	// Failed counts failed send attempts: component errors, HTTP client errors
+	// (e.g. connection refused, retried forever) and non-2xx responses.
+	Failed float64
+	// Dropped counts events that will never be delivered.
+	Dropped float64
+}
+
+// Sub returns the change since prev. A counter that went down means Vector
+// restarted or rebuilt the series, so the current value is the change.
+func (c ComponentCounters) Sub(prev ComponentCounters) ComponentCounters {
+	d := func(cur, old float64) float64 {
+		if cur < old {
+			return cur
+		}
+
+		return cur - old
+	}
+
+	return ComponentCounters{
+		Running: c.Running,
+		Sent:    d(c.Sent, prev.Sent),
+		Failed:  d(c.Failed, prev.Failed),
+		Dropped: d(c.Dropped, prev.Dropped),
+	}
 }
 
 // VectorMetrics is one scrape of Vector's prometheus_exporter.
@@ -93,8 +119,19 @@ func ParseMetrics(r io.Reader) (*VectorMetrics, error) {
 
 			c := m.Components[id]
 
-			if name == "vector_utilization" {
+			switch name {
+			case "vector_utilization":
 				c.Running = true
+			case "vector_component_sent_events_total":
+				c.Sent += value
+			case "vector_component_errors_total", "vector_http_client_errors_total":
+				c.Failed += value
+			case "vector_http_client_responses_total":
+				if !strings.HasPrefix(labels["status"], "2") {
+					c.Failed += value
+				}
+			case "vector_component_discarded_events_total", "vector_buffer_discarded_events_total":
+				c.Dropped += value
 			}
 
 			m.Components[id] = c

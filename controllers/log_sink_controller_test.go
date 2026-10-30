@@ -51,6 +51,8 @@ type logSinkHarness struct {
 	syncer  *fakeLogSinkSyncer
 	metrics *logsink.VectorMetrics
 	now     time.Time
+	tests   int
+	testErr error
 }
 
 func newLogSinkHarness(t *testing.T, sinks ...*v1.LogSink) *logSinkHarness {
@@ -104,6 +106,10 @@ func newLogSinkHarness(t *testing.T, sinks ...*v1.LogSink) *logSinkHarness {
 
 		return &cp, nil
 	}
+	c.testConnection = func(context.Context, *v1.LogSink) error {
+		h.tests++
+		return h.testErr
+	}
 	h.c = c
 
 	return h
@@ -139,6 +145,9 @@ func TestLogSinkController_Lifecycle(t *testing.T) {
 	assert.True(t, logsink.ValidComponentID(id))
 	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
 	assert.Contains(t, string(h.syncer.last.Content), id+":")
+	assert.True(t, h.status(1).LastConnectionTest.OK)
+	assert.Equal(t, logsink.SpecHash(h.db[1]), h.status(1).ObservedHash)
+	assert.Equal(t, 1, h.tests)
 
 	// Within the scrape interval nothing changes and nothing is written.
 	updates := h.updates
@@ -155,6 +164,40 @@ func TestLogSinkController_Lifecycle(t *testing.T) {
 	h.pass(30 * time.Second)
 	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 	assert.Empty(t, h.status(1).ErrorMessage)
+
+	// Events delivered: counters and last_sent_time follow.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 40}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+	assert.Equal(t, int64(40), h.status(1).SentEvents)
+	assert.NotEmpty(t, h.status(1).LastSentTime)
+
+	// Failures and drops in the last window: Degraded.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 50, Failed: 2, Dropped: 3}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "2 failed sends, 3 dropped events")
+	assert.Equal(t, int64(50), h.status(1).SentEvents)
+	assert.Equal(t, int64(3), h.status(1).DroppedEvents)
+
+	// Only failures, no successful send for 5 minutes: Failed.
+	failed := 2.0
+	for i := 0; i < 11; i++ {
+		failed++
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 50, Failed: failed, Dropped: 3}
+		h.pass(30 * time.Second)
+	}
+
+	assert.Equal(t, v1.LogSinkPhaseFAILED, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "no events delivered")
+
+	// One successful send recovers it.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 51, Failed: failed, Dropped: 3}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	// Same spec: the connection test is not repeated.
+	assert.Equal(t, 1, h.tests)
 }
 
 func TestLogSinkController_NotAppliedFails(t *testing.T) {
@@ -249,7 +292,7 @@ func TestLogSinkController_ComponentIDRotation(t *testing.T) {
 	require.True(t, logsink.ValidComponentID(id))
 	assert.Contains(t, string(h.syncer.last.Content), id+":")
 
-	h.metrics.Components[id] = logsink.ComponentCounters{Running: true}
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 5}
 	h.pass(30 * time.Second)
 	require.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 
@@ -309,7 +352,7 @@ func TestLogSinkController_ComponentIDNotSavedIsNotDelivered(t *testing.T) {
 	assert.NotContains(t, string(h.syncer.last.Content), "logsink_a")
 }
 
-func TestLogSinkController_SpecChangeRedelivers(t *testing.T) {
+func TestLogSinkController_SpecChangeRedeliversAndRetests(t *testing.T) {
 	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
 	h.pass(0)
 	h.metrics.Components[h.status(1).ComponentID] = logsink.ComponentCounters{Running: true}
@@ -317,9 +360,14 @@ func TestLogSinkController_SpecChangeRedelivers(t *testing.T) {
 	require.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
 
 	h.db[1].Spec.VictoriaLogs.Auth = &v1.LogSinkAuth{Type: v1.LogSinkAuthTypeBearer, Token: "new"}
+	h.testErr = assert.AnError
 	h.pass(10 * time.Second)
 
 	assert.Equal(t, 2, h.syncer.written)
+	assert.Equal(t, 2, h.tests)
+	assert.False(t, h.status(1).LastConnectionTest.OK)
+	assert.Equal(t, logsink.SpecHash(h.db[1]), h.status(1).ObservedHash)
+	// A failed test does not hold back delivery.
 	assert.Contains(t, string(h.syncer.last.Content), "SECRET[logsink.token.a]")
 	assert.Equal(t, v1.LogSinkPhasePENDING, h.status(1).Phase)
 }
@@ -346,6 +394,7 @@ func TestLogSinkController_DisabledInvalidAndNoTracePipeline(t *testing.T) {
 	assert.NotContains(t, content, "logsink_off")
 	assert.NotContains(t, content, "logsink_bad")
 	assert.Contains(t, content, "logsink_ok")
+	assert.Equal(t, 1, h.tests, "only the delivered sink is tested")
 
 	h.c.tracePipelineEnabled = false
 	h.pass(10 * time.Second)
