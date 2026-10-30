@@ -92,11 +92,29 @@ func ValidateSpec(spec *v1.LogSinkSpec) error {
 		return errors.New("spec is required")
 	}
 
-	if spec.Type != v1.LogSinkTypeVictoriaLogs {
-		return errors.Errorf("unsupported spec.type %q", spec.Type)
+	var err error
+
+	switch spec.Type {
+	case v1.LogSinkTypeVictoriaLogs:
+		err = validateVictoriaLogs(spec.VictoriaLogs)
+	case v1.LogSinkTypeS3:
+		err = validateS3(spec.S3)
+	default:
+		err = errors.Errorf("unsupported spec.type %q", spec.Type)
 	}
 
-	vl := spec.VictoriaLogs
+	if err != nil {
+		return err
+	}
+
+	if spec.Buffer.GetMaxSize() < v1.LogSinkBufferMinMaxSize {
+		return errors.Errorf("spec.buffer.max_size must be at least %d", v1.LogSinkBufferMinMaxSize)
+	}
+
+	return nil
+}
+
+func validateVictoriaLogs(vl *v1.VictoriaLogsSinkSpec) error {
 	if vl == nil {
 		return errors.New("spec.victorialogs is required")
 	}
@@ -151,11 +169,83 @@ func ValidateSpec(spec *v1.LogSinkSpec) error {
 		}
 	}
 
-	if spec.Buffer.GetMaxSize() < v1.LogSinkBufferMinMaxSize {
-		return errors.Errorf("spec.buffer.max_size must be at least %d", v1.LogSinkBufferMinMaxSize)
+	return nil
+}
+
+func validateS3(s3 *v1.S3SinkSpec) error {
+	if s3 == nil {
+		return errors.New("spec.s3 is required")
+	}
+
+	if s3.Endpoint != "" {
+		u, err := url.Parse(s3.Endpoint)
+		if err != nil {
+			return errors.Wrap(err, "spec.s3.endpoint is invalid")
+		}
+
+		if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("spec.s3.endpoint must be an http(s) URL with a host")
+		}
+
+		if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			return errors.New("spec.s3.endpoint must not contain credentials, a query or a fragment")
+		}
+	}
+
+	if strings.TrimSpace(s3.Region) == "" {
+		return errors.New("spec.s3.region is required")
+	}
+
+	if strings.TrimSpace(s3.Bucket) == "" {
+		return errors.New("spec.s3.bucket is required")
+	}
+
+	if err := validateKeyPrefix(s3.KeyPrefix); err != nil {
+		return err
+	}
+
+	switch s3.Compression {
+	case "", v1.LogSinkS3CompressionGzip, v1.LogSinkS3CompressionZstd, v1.LogSinkS3CompressionNone:
+	default:
+		return errors.Errorf("unsupported spec.s3.compression %q", s3.Compression)
+	}
+
+	if s3.FlushIntervalSeconds < 0 {
+		return errors.New("spec.s3.flush_interval_seconds must be positive")
+	}
+
+	if s3.Auth == nil || s3.Auth.AccessKeyID == "" || s3.Auth.SecretAccessKey == "" {
+		return errors.New("spec.s3.auth.access_key_id and spec.s3.auth.secret_access_key are required")
 	}
 
 	return nil
+}
+
+// validateKeyPrefix allows strftime placeholders but no Vector field
+// templates: the connection test writes under the prefix's static part.
+func validateKeyPrefix(prefix string) error {
+	switch {
+	case len(prefix) > 512:
+		return errors.New("spec.s3.key_prefix must be at most 512 characters")
+	case strings.HasPrefix(prefix, "/"):
+		return errors.New("spec.s3.key_prefix must not start with '/'")
+	case strings.Contains(prefix, "{{") || strings.Contains(prefix, "}}"):
+		return errors.New("spec.s3.key_prefix must not contain {{ }} templates")
+	case strings.ContainsFunc(prefix, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\\' }):
+		return errors.New("spec.s3.key_prefix must not contain control characters or '\\'")
+	}
+
+	return nil
+}
+
+// KeyPrefixStatic returns the part of the key prefix before the first
+// strftime placeholder.
+func KeyPrefixStatic(prefix string) string {
+	if i := strings.IndexByte(prefix, '%'); i >= 0 {
+		return prefix[:i]
+	}
+
+	return prefix
 }
 
 // SpecHash fingerprints everything a connection test depends on, secrets included.
@@ -292,9 +382,56 @@ func Render(sinks []*v1.LogSink) (*Rendered, error) {
 }
 
 func renderSink(s *v1.LogSink, secrets map[string][]byte) map[string]interface{} {
-	name := s.Metadata.Name
-	vl := s.Spec.VictoriaLogs
+	var sink map[string]interface{}
 
+	if s.Spec.Type == v1.LogSinkTypeS3 {
+		sink = renderS3(s.Metadata.Name, s.Spec.S3, secrets)
+	} else {
+		sink = renderVictoriaLogs(s.Metadata.Name, s.Spec.VictoriaLogs, secrets)
+	}
+
+	sink["inputs"] = []string{TraceInput}
+	sink["buffer"] = map[string]interface{}{
+		"type":      "disk",
+		"max_size":  s.Spec.Buffer.GetMaxSize() + diskBufferDataFileSize,
+		"when_full": "drop_newest",
+	}
+
+	return sink
+}
+
+// renderS3 writes NDJSON objects named <key_prefix><unix-seconds>-<uuid>.<ext>,
+// where Vector derives the extension from the compression (log.gz, log.zst, log).
+func renderS3(name string, s3 *v1.S3SinkSpec, secrets map[string][]byte) map[string]interface{} {
+	akKey := secretKey("access_key_id", name)
+	skKey := secretKey("secret_access_key", name)
+	secrets[akKey] = secretValue(s3.Auth.AccessKeyID)
+	secrets[skKey] = secretValue(s3.Auth.SecretAccessKey)
+
+	sink := map[string]interface{}{
+		"type":             "aws_s3",
+		"region":           escapeVars(s3.Region),
+		"bucket":           escapeVars(s3.Bucket),
+		"key_prefix":       escapeVars(s3.GetKeyPrefix()),
+		"force_path_style": s3.UsePathStyle(),
+		"compression":      s3.GetCompression(),
+		"encoding":         map[string]interface{}{"codec": "json"},
+		"framing":          map[string]interface{}{"method": "newline_delimited"},
+		"batch":            map[string]interface{}{"timeout_secs": s3.GetFlushIntervalSeconds()},
+		"auth": map[string]interface{}{
+			"access_key_id":     secretRef(akKey),
+			"secret_access_key": secretRef(skKey),
+		},
+	}
+
+	if s3.Endpoint != "" {
+		sink["endpoint"] = escapeVars(strings.TrimSuffix(s3.Endpoint, "/"))
+	}
+
+	return sink
+}
+
+func renderVictoriaLogs(name string, vl *v1.VictoriaLogsSinkSpec, secrets map[string][]byte) map[string]interface{} {
 	uri := strings.TrimSuffix(vl.URL, "/") + "/insert/jsonline?" + victoriaLogsInsertQuery
 
 	if len(vl.ExtraFields) > 0 {
@@ -322,7 +459,6 @@ func renderSink(s *v1.LogSink, secrets map[string][]byte) map[string]interface{}
 
 	sink := map[string]interface{}{
 		"type":        "http",
-		"inputs":      []string{TraceInput},
 		"uri":         escapeVars(uri),
 		"method":      "post",
 		"encoding":    map[string]interface{}{"codec": "json"},
@@ -330,11 +466,6 @@ func renderSink(s *v1.LogSink, secrets map[string][]byte) map[string]interface{}
 		"compression": "none",
 		"request":     request,
 		"batch":       map[string]interface{}{"max_events": 100, "timeout_secs": 1},
-		"buffer": map[string]interface{}{
-			"type":      "disk",
-			"max_size":  s.Spec.Buffer.GetMaxSize() + diskBufferDataFileSize,
-			"when_full": "drop_newest",
-		},
 	}
 
 	if vl.Auth != nil {
