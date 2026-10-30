@@ -15,6 +15,7 @@ import (
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/neutree-ai/neutree/internal/cluster/staticcluster"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/util"
@@ -214,12 +215,12 @@ func isLegacyToStaticNodeFlowUpgrade(c *v1.Cluster) bool {
 		return false
 	}
 
-	wasStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.Status.Version)
+	wasStaticNodeFlow, err := clusterversion.IsStaticNodeClusterFlowVersion(c.Status.Version)
 	if err != nil || wasStaticNodeFlow {
 		return false
 	}
 
-	useStaticNodeFlow, err := isStaticNodeClusterFlowVersion(c.GetVersion())
+	useStaticNodeFlow, err := clusterversion.IsStaticNodeClusterFlowVersion(c.GetVersion())
 	if err != nil {
 		return false
 	}

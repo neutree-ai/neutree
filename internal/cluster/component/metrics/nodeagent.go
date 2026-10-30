@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 // metricsNodeAgent is the single NodeAgent rendered for a cluster. Its runtime
@@ -47,14 +47,14 @@ func selectedMetricsNodeAgent(
 		}
 	}
 
-	selection, err := component.SelectNodeAgent(clusterVersion)
+	selection, err := clusterversion.SelectNodeAgent(clusterVersion)
 
 	if err != nil {
 		return metricsNodeAgent{}, err
 	}
 
 	nodeAgent.Image = selection.Image
-	nodeAgent.UseLegacyContract = selection.Contract == component.NodeAgentContractLegacy
+	nodeAgent.UseLegacyContract = selection.Contract == clusterversion.NodeAgentContractLegacy
 
 	if selectedPlan == nil || selectedTarget == nil {
 		return nodeAgent, nil

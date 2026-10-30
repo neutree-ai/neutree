@@ -7,7 +7,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster/staticcomponent"
-	"github.com/neutree-ai/neutree/internal/semver"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -17,8 +17,6 @@ const (
 	rayRuntimeWarmImageName = "ray-runtime"
 	rayDockerConfigHostDir  = "/etc/neutree/docker"
 	rayDockerConfigMountDir = "/root/.docker"
-	// Versions at or below this gate keep the legacy Ray startup arguments.
-	rayNodeIPAddressVersionGate = "v1.2.0"
 )
 
 func buildNodeComponents(
@@ -189,7 +187,7 @@ func supportsRayNodeIPAddress(cluster *v1.StaticNodeCluster) bool {
 		return false
 	}
 
-	supported, err := semver.LessThan(rayNodeIPAddressVersionGate, cluster.Spec.Version)
+	supported, err := clusterversion.SupportsRayNodeIPAddress(cluster.Spec.Version)
 
 	return err == nil && supported
 }

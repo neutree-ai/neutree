@@ -370,31 +370,3 @@ func TestCheckResourcesStatusDoesNotCheckExternalExporterDaemonSet(t *testing.T)
 	assert.False(t, status.AcceleratorExporterDaemonSetsReady)
 	assert.Empty(t, status.Errors)
 }
-
-func TestSupportsClusterVersionAtLeast(t *testing.T) {
-	tests := []struct {
-		name    string
-		version string
-		want    bool
-		wantErr bool
-	}{
-		{name: "empty", version: "", want: false},
-		{name: "before minimum", version: "v1.0.0", want: false},
-		{name: "minimum", version: "v1.1.0", want: true},
-		{name: "nightly minimum", version: "v1.1.0-nightly-20260603", want: true},
-		{name: "invalid", version: "invalid", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := supportsClusterVersionAtLeast(tt.version, MinKubeStateMetricsClusterVersion)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
