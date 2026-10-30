@@ -215,6 +215,7 @@ func (b *Builder) Build() (*App, error) {
 
 	// register static file serving middleware
 	b.config.GinEngine.Use(static.Serve("/", static.LocalFile(b.config.StaticConfig.Dir, true)))
+	b.config.GinEngine.NoRoute(spaFallback())
 
 	// register health check endpoint
 	b.config.GinEngine.GET("/health", func(c *gin.Context) {
