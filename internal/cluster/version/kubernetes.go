@@ -22,6 +22,9 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.30": "v1.30.14",
 	"1.31": "v1.31.14",
 	"1.32": "v1.32.13",
+	"1.33": "v1.33.13",
+	"1.34": "v1.34.12",
+	"1.35": "v1.35.9",
 }
 
 var DefaultKubeSchedulerVersion = KubeSchedulerVersionsByMinor[defaultKubeMinor]
@@ -38,16 +41,33 @@ const (
 	SchedulerVersionDefault SchedulerVersionSource = "default"
 )
 
-func KubeSchedulerVersion(serverVersion *kubeversion.Info) (schedulerVersion string, source SchedulerVersionSource) {
-	if schedulerVersion, ok := KubeSchedulerVersionsByMinor[KubernetesServerMajorMinor(serverVersion)]; ok {
-		return schedulerVersion, SchedulerVersionPinned
+func KubeSchedulerVersionForClusterVersion(clusterVersion string, serverVersion *kubeversion.Info) (schedulerVersion string, source SchedulerVersionSource) {
+	detectedVersion := KubernetesServerVersion(serverVersion)
+	if detectedVersion == "" {
+		return DefaultKubeSchedulerVersion, SchedulerVersionDefault
 	}
 
-	if detectedVersion := KubernetesServerVersion(serverVersion); detectedVersion != "" {
+	baseClusterVersion, err := semver.BaseVersion(strings.TrimSpace(clusterVersion))
+	if err != nil {
 		return detectedVersion, SchedulerVersionDetected
 	}
 
-	return DefaultKubeSchedulerVersion, SchedulerVersionDefault
+	legacyCluster, err := semver.LessThan(baseClusterVersion, v130ClusterVersionGate)
+	if err != nil {
+		return detectedVersion, SchedulerVersionDetected
+	}
+
+	minorVersion := KubernetesServerMajorMinor(serverVersion)
+	// Gate new scheduler pins by cluster version as well as Kubernetes minor;
+	// pre-v1.3.0 clusters must keep detected versions above Kubernetes 1.32.
+	newerKubernetes, err := semver.LessThan("v1.32.0", minorVersion)
+	if !legacyCluster || (err == nil && !newerKubernetes) {
+		if schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]; ok {
+			return schedulerVersion, SchedulerVersionPinned
+		}
+	}
+
+	return detectedVersion, SchedulerVersionDetected
 }
 
 func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {

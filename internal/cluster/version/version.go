@@ -11,6 +11,7 @@ import (
 const (
 	StaticNodeClusterFlowVersionGate    = "v1.0.1"
 	MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
+	v130ClusterVersionGate              = "v1.3.0"
 )
 
 func IsStaticNodeClusterFlowVersion(version string) (bool, error) {
