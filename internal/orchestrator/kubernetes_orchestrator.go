@@ -293,6 +293,10 @@ func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error 
 		return errors.Wrapf(err, "failed to build deployment for endpoint %s", ctx.Endpoint.Metadata.WorkspaceName())
 	}
 
+	if err := applyDeploymentOptions(deploymentObjects, ctx.Endpoint, namespace, ctx.Engine.Metadata.Name); err != nil {
+		return err
+	}
+
 	if err := k.configureEndpointCache(ctx, deploymentObjects); err != nil {
 		return err
 	}
