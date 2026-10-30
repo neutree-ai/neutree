@@ -1,8 +1,10 @@
 package version
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
@@ -25,4 +27,31 @@ func SupportsVirtualizationClusterVersion(version string) (bool, error) {
 	}
 
 	return !lessThanMinVersion, nil
+}
+
+func HAMiVersionForCluster(clusterVersion string) (string, error) {
+	supported, err := SupportsVirtualizationClusterVersion(clusterVersion)
+	if err != nil {
+		return "", err
+	}
+
+	if !supported {
+		return "", fmt.Errorf("spec.accelerator_virtualization requires cluster version >= %s", MinVirtualizationClusterVersion)
+	}
+
+	baseVersion, err := semver.BaseVersion(strings.TrimSpace(clusterVersion))
+	if err != nil {
+		return "", err
+	}
+
+	legacy, err := semver.LessThan(baseVersion, v130ClusterVersionGate)
+	if err != nil {
+		return "", err
+	}
+
+	if legacy {
+		return component.HAMi, nil
+	}
+
+	return component.V130HAMI, nil
 }

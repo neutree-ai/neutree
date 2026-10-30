@@ -4,7 +4,6 @@ import (
 	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/component"
 )
 
 const (
@@ -29,6 +28,7 @@ const (
 )
 
 type HAMiStatus struct {
+	Version                string
 	Ready                  bool
 	Reason                 string
 	Message                string
@@ -59,7 +59,7 @@ func (s HAMiStatus) ComponentStatus() *v1.ComponentStatus {
 	return &v1.ComponentStatus{
 		Phase:   phase,
 		Managed: true,
-		Version: component.HAMi,
+		Version: s.Version,
 		Reason:  s.Reason,
 		Message: s.Message,
 	}

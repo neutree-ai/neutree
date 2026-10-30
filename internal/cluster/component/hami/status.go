@@ -11,11 +11,17 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
 func (h *HAMiComponent) CheckResourcesStatus(ctx context.Context) (*HAMiStatus, error) {
-	status := &HAMiStatus{}
+	hamiVersion, err := clusterversion.HAMiVersionForCluster(h.cluster.GetVersion())
+	if err != nil {
+		return nil, err
+	}
+
+	status := &HAMiStatus{Version: hamiVersion}
 
 	nodeList := &corev1.NodeList{}
 	if err := h.ctrlClient.List(ctx, nodeList); err != nil {
