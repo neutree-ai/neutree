@@ -592,6 +592,38 @@ func previousNeutreeCoreReleaseVersion(t *testing.T) string {
 	return fmt.Sprintf("v%d.0.0", currentVersion.Major()-1)
 }
 
+// neutree-core reads LogSink health from this exporter and writes logsinks.yaml
+// into the mounted Vector config dir.
+func TestPrepareNeutreeCoreDeployConfig_VectorLogSinkWiring(t *testing.T) {
+	tempDir := t.TempDir()
+
+	options := neutreeCoreInstallOptions{
+		commonOptions: &commonOptions{
+			workDir:    tempDir,
+			nodeIP:     "192.168.1.1",
+			deployType: constants.DeployTypeLocal,
+			deployMode: constants.DeployModeSingle,
+		},
+		jwtSecret: "test-secret",
+		version:   "v1.0.0",
+	}
+
+	require.NoError(t, prepareNeutreeCoreDeployConfig(options))
+
+	vector, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "vector", "vector.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(vector), "type: prometheus_exporter")
+	assert.Contains(t, string(vector), "address: 0.0.0.0:9598")
+	assert.Contains(t, string(vector), "type: internal_metrics")
+
+	compose, err := os.ReadFile(filepath.Join(tempDir, "neutree-core", "docker-compose.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(compose), filepath.Join(tempDir, "neutree-core")+"/vector:/etc/neutree/vector")
+	assert.Contains(t, string(compose), "--vector-config-dir=/etc/neutree/vector")
+	assert.Contains(t, string(compose), "--vector-metrics-url=http://vector:9598/metrics")
+	assert.NotContains(t, string(compose), "9598:9598", "Vector metrics stay on the compose network")
+}
+
 func TestValidateNeutreeCoreVersionCompatibility(t *testing.T) {
 	policy := neutreeCoreCompatibilityPolicyForCurrentRelease
 	coreVersion := currentNeutreeCoreReleaseVersion()

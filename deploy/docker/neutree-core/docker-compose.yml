@@ -188,6 +188,8 @@ services:
       - --core-server-port=3001
       - --core-server-host=0.0.0.0
       - --auth-endpoint=http://auth:9999
+      - --vector-config-dir=/etc/neutree/vector
+      - --vector-metrics-url=http://vector:9598/metrics
 {{ if .BuiltinPublicModelRegistries }}
       - --enable-builtin-public-model-registries
       - --hugging-face-endpoint={{ .HuggingFaceEndpoint }}
@@ -195,6 +197,7 @@ services:
 {{ end }}
     volumes:
       - {{ .NeutreeCoreWorkDir }}/collect:/etc/neutree/collect
+      - {{ .NeutreeCoreWorkDir }}/vector:/etc/neutree/vector
     ports:
       - 3001:3001
     networks:
@@ -360,6 +363,8 @@ services:
     volumes:
       - {{ .NeutreeCoreWorkDir }}/vector:/etc/vector
       - {{ .NeutreeCoreWorkDir }}/vector-trace:/var/log/vector
+      # Log sink disk buffers; kept on the host so a recreate does not drop them.
+      - {{ .NeutreeCoreWorkDir }}/vector-data:/var/lib/vector
     restart: always
     networks:
       - neutree
