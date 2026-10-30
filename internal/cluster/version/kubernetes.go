@@ -9,7 +9,10 @@ import (
 	"github.com/neutree-ai/neutree/internal/semver"
 )
 
-const DefaultKubeSchedulerVersion = "v1.32.13"
+// defaultKubeMinor is the Kubernetes minor whose pinned scheduler image is
+// used when the server version cannot be detected. Deriving the default from
+// the pin table keeps the two from drifting apart.
+const defaultKubeMinor = "1.32"
 
 var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.26": "v1.26.15",
@@ -21,16 +24,30 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.32": "v1.32.13",
 }
 
-func KubeSchedulerVersion(serverVersion *kubeversion.Info) (schedulerVersion string, mapped bool) {
+var DefaultKubeSchedulerVersion = KubeSchedulerVersionsByMinor[defaultKubeMinor]
+
+// SchedulerVersionSource reports how a scheduler image version was chosen.
+type SchedulerVersionSource string
+
+const (
+	// SchedulerVersionPinned means the Kubernetes minor has a pinned image.
+	SchedulerVersionPinned SchedulerVersionSource = "pinned"
+	// SchedulerVersionDetected means the detected server version is used as-is.
+	SchedulerVersionDetected SchedulerVersionSource = "detected"
+	// SchedulerVersionDefault means detection was unusable, so the default is used.
+	SchedulerVersionDefault SchedulerVersionSource = "default"
+)
+
+func KubeSchedulerVersion(serverVersion *kubeversion.Info) (schedulerVersion string, source SchedulerVersionSource) {
 	if schedulerVersion, ok := KubeSchedulerVersionsByMinor[KubernetesServerMajorMinor(serverVersion)]; ok {
-		return schedulerVersion, true
+		return schedulerVersion, SchedulerVersionPinned
 	}
 
 	if detectedVersion := KubernetesServerVersion(serverVersion); detectedVersion != "" {
-		return detectedVersion, false
+		return detectedVersion, SchedulerVersionDetected
 	}
 
-	return DefaultKubeSchedulerVersion, false
+	return DefaultKubeSchedulerVersion, SchedulerVersionDefault
 }
 
 func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
@@ -45,19 +62,15 @@ func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.Kub
 func KubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
 	majorMinor, err := semver.MajorMinor(version)
 	if err != nil {
-		return chartutil.KubeVersion{
-			Version: version,
-			Major:   "1",
-			Minor:   "32",
-		}
+		majorMinor = defaultKubeMinor
 	}
 
-	parts := strings.SplitN(majorMinor, ".", 2)
+	major, minor, _ := strings.Cut(majorMinor, ".")
 
 	return chartutil.KubeVersion{
 		Version: version,
-		Major:   parts[0],
-		Minor:   parts[1],
+		Major:   major,
+		Minor:   minor,
 	}
 }
 

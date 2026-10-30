@@ -7,14 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSupportsVirtualizationClusterVersion(test *testing.T) {
-	cases := []struct {
+func TestSupportsVirtualizationClusterVersion(t *testing.T) {
+	tt := []struct {
 		name      string
 		version   string
 		supported bool
 		wantErr   bool
 	}{
 		{name: "empty version is unsupported"},
+		{name: "v1 shorthand is unsupported", version: "v1"},
 		{name: "older release is unsupported", version: "v1.0.1"},
 		{name: "minimum version is supported", version: "v1.1.0", supported: true},
 		{name: "nightly with minimum base version is supported", version: "v1.1.0-nightly-20260418", supported: true},
@@ -23,16 +24,16 @@ func TestSupportsVirtualizationClusterVersion(test *testing.T) {
 		{name: "invalid version returns error", version: "nightly", wantErr: true},
 	}
 
-	for _, testCase := range cases {
-		test.Run(testCase.name, func(test *testing.T) {
+	for _, testCase := range tt {
+		t.Run(testCase.name, func(t *testing.T) {
 			supported, err := SupportsVirtualizationClusterVersion(testCase.version)
 			if testCase.wantErr {
-				assert.Error(test, err)
+				assert.Error(t, err)
 				return
 			}
 
-			require.NoError(test, err)
-			assert.Equal(test, testCase.supported, supported)
+			require.NoError(t, err)
+			assert.Equal(t, testCase.supported, supported)
 		})
 	}
 }
