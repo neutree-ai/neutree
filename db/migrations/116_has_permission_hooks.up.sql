@@ -1,6 +1,5 @@
--- api.has_permission becomes an entry point that calls two hooks. The
--- enterprise edition replaces only the hook bodies (same signature and
--- attributes), so a hook signature change here must ship with its overrides.
+-- api.has_permission becomes an entry point that calls two hooks. A hook can
+-- be replaced with CREATE OR REPLACE, keeping its signature and attributes.
 -- The entry point keeps its signature and parameter names (PostgREST RPC
 -- contract) and is never dropped, because RLS policies depend on it.
 
@@ -29,10 +28,10 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 COMMENT ON FUNCTION api.check_role_binding(UUID, api.permission_action, TEXT) IS
-    'Extension point of api.has_permission (role binding). Community default; overridden by the enterprise edition.';
+    'Extension point of api.has_permission (role binding).';
 
 -- Default: API keys add no restriction.
--- SECURITY DEFINER: the enterprise override reads api.api_keys, which is under RLS.
+-- SECURITY DEFINER: a replacement may read tables under RLS that calls has_permission.
 CREATE OR REPLACE FUNCTION api.check_api_key_scope(
     required_permission api.permission_action,
     workspace TEXT DEFAULT NULL
@@ -44,7 +43,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 COMMENT ON FUNCTION api.check_api_key_scope(api.permission_action, TEXT) IS
-    'Extension point of api.has_permission (API key scope). Community default; overridden by the enterprise edition.';
+    'Extension point of api.has_permission (API key scope).';
 
 CREATE OR REPLACE FUNCTION api.has_permission(
     user_uuid UUID,

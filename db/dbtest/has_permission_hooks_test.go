@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The has_permission split into hooks must not change community behaviour.
+// The has_permission split into hooks must not change its behaviour.
 
 func TestHasPermissionHooksExist(t *testing.T) {
 	db := GetTestDB(t)
@@ -53,7 +53,7 @@ func TestHasPermissionHooksExist(t *testing.T) {
 	}
 }
 
-func TestHasPermissionCommunityBehaviour(t *testing.T) {
+func TestHasPermissionDefaultBehaviour(t *testing.T) {
 	db := GetTestDB(t)
 	ctx := context.Background()
 
@@ -64,8 +64,8 @@ func TestHasPermissionCommunityBehaviour(t *testing.T) {
 		globalUserID = createUserWithPermissions(t, tx, "hp-hooks-global", "hp-hooks-global@example.com",
 			[]string{"endpoint:read"})
 
-		// Workspace-scoped assignment, which community ignores. Community rejects
-		// it on write, but enterprise data may hold one, so bypass the trigger.
+		// Workspace-scoped assignment, which the default hook ignores. The write
+		// trigger rejects it, so bypass the trigger to seed one.
 		scopedUser = CreateTestUser(t, "hp-hooks-scoped", "hp-hooks-scoped@example.com", "password123").ID
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO api.roles (api_version, kind, metadata, spec)
@@ -158,7 +158,7 @@ func TestHasPermissionCommunityBehaviour(t *testing.T) {
 		check(t, withAPIKeyClaim(globalUserID), globalUserID, "endpoint:read", "default", true)
 		check(t, withAPIKeyClaim(globalUserID), globalUserID, "endpoint:read", "", true)
 	})
-	t.Run("hooks return community defaults", func(t *testing.T) {
+	t.Run("hooks return defaults", func(t *testing.T) {
 		var binding, scope bool
 		err := execWithContext(t, db, asAPIUser(globalUserID), func(tx *sql.Tx) error {
 			if err := tx.QueryRowContext(ctx, `
