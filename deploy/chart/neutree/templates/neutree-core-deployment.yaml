@@ -5,7 +5,13 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.core.replicaCount }}
+  # Surge before terminating so the old leader releases its Lease to a running standby.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-core
@@ -26,6 +32,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             {{- if .Values.nodePort.externalHost }}
             - name: NODEPORT_EXTERNAL_HOST
               value: {{ .Values.nodePort.externalHost | quote }}
@@ -34,6 +48,7 @@ spec:
             - --storage-access-url=http://{{ include "neutree.fullname" . }}-postgrest-service:6432
             - --storage-jwt-secret={{ include "neutree.jwtSecret" . }}
             - --controller-workers=5
+            - --leader-elect-lease-name={{ include "neutree.fullname" . }}-core-leader
             - --default-cluster-version=v1.0.0
             {{- $metricsRemoteWriteUrl := include "neutree.metricsRemoteWriteUrl" . }}
             {{- if $metricsRemoteWriteUrl }}

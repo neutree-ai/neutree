@@ -31,6 +31,7 @@ type NeutreeCoreOptions struct {
 	Auth          *AuthOptions
 	ModelRegistry *ModelRegistryOptions
 	LogSink       *LogSinkOptions
+	LeaderElect   *LeaderElectionOptions
 }
 
 func NewOptions() *NeutreeCoreOptions {
@@ -44,6 +45,7 @@ func NewOptions() *NeutreeCoreOptions {
 		Auth:          NewAuthOptions(),
 		ModelRegistry: NewModelRegistryOptions(),
 		LogSink:       NewLogSinkOptions(),
+		LeaderElect:   NewLeaderElectionOptions(),
 	}
 }
 
@@ -57,10 +59,15 @@ func (o *NeutreeCoreOptions) AddFlags(fs *pflag.FlagSet) {
 	o.Auth.AddFlags(fs)
 	o.ModelRegistry.AddFlags(fs)
 	o.LogSink.AddFlags(fs)
+	o.LeaderElect.AddFlags(fs)
 }
 
 func (o *NeutreeCoreOptions) Validate() error {
 	if err := o.Auth.Validate(); err != nil {
+		return err
+	}
+
+	if err := o.LeaderElect.Validate(); err != nil {
 		return err
 	}
 
@@ -149,12 +156,13 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 		return nil, errors.Wrapf(err, "failed to init gateway")
 	}
 
-	err = gw.Init()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init gateway")
-	}
-
+	// gw.Init runs in App.Run once this replica is the leader.
 	c.Gateway = gw
+
+	c.LeaderElector, err = o.LeaderElect.Elector(rest.InClusterConfig)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to init leader election")
+	}
 
 	obsCollectConfigManager, err := manager.NewObsCollectConfigManager(manager.ObsCollectConfigOptions{
 		LocalCollectConfigPath:                o.Observability.LocalCollectConfigPath,

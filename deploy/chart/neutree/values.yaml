@@ -173,6 +173,8 @@ postgresmeta:
     type: ClusterIP
 
 core:
+  # Replicas elect a leader through a Lease; only the leader runs controllers and crons.
+  replicaCount: 1
   image:
     registry: ""
     repository: neutree/neutree-core

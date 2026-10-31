@@ -12,6 +12,7 @@ import (
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
 	"github.com/neutree-ai/neutree/controllers"
 	"github.com/neutree-ai/neutree/internal/cron"
+	"github.com/neutree-ai/neutree/internal/leader"
 )
 
 const (
@@ -25,6 +26,11 @@ const (
 	// clients. Kept independent of the shutdown budget so that raising one
 	// never silently weakens the other.
 	readHeaderTimeout = 5 * time.Second
+
+	// leaseReleaseTimeout bounds how long Run waits for the elector to give
+	// up the lease on shutdown so a standby can take over without waiting
+	// for the lease to expire.
+	leaseReleaseTimeout = 5 * time.Second
 )
 
 // App represents the main application
@@ -41,23 +47,14 @@ func NewApp(c *config.CoreConfig, controllers map[string]controllers.Controller)
 	}
 }
 
-// Run starts the application
+// Run serves the core HTTP API on every replica and runs the background work
+// (gateway init, controllers, crons, collect config sync) only on the leader.
 func (a *App) Run(ctx context.Context) error {
 	klog.Infof("Starting Neutree Core Application")
 
-	go a.config.ObsCollectConfigManager.Start(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	go cron.StartCrons(ctx, a.config.Storage) //nolint:errcheck
-
-	// Start all controllers
-	for name, ctrl := range a.controllers {
-		go func(name string, ctrl controllers.Controller) {
-			klog.Infof("Starting controller: %s", name)
-			ctrl.Start(ctx)
-		}(name, ctrl)
-	}
-
-	// Start core server
 	coreServerListenAddr := fmt.Sprintf("%s:%d",
 		a.config.ServerConfig.Host,
 		a.config.ServerConfig.Port)
@@ -69,27 +66,102 @@ func (a *App) Run(ctx context.Context) error {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	errCh := make(chan error, 1)
+	serverErr := make(chan error, 1)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
+			serverErr <- err
 			return
 		}
 
-		errCh <- nil
+		serverErr <- nil
 	}()
+
+	leaderErr := make(chan error, 1)
+	electorDone := make(chan struct{})
+
+	go func() {
+		defer close(electorDone)
+
+		err := a.elector().Run(ctx, func(leaderCtx context.Context) {
+			if err := a.startLeaderWork(leaderCtx); err != nil {
+				trySend(leaderErr, err)
+			}
+		})
+		if err != nil {
+			trySend(leaderErr, fmt.Errorf("leader election: %w", err))
+		}
+	}()
+
+	var (
+		runErr        error
+		serverStopped bool
+	)
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
-		defer cancel()
+	case runErr = <-serverErr:
+		serverStopped = true
+	case runErr = <-leaderErr:
+	}
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown core server: %w", err)
+	// Cancelling lets the elector release the lease while the server drains.
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil && runErr == nil {
+		runErr = fmt.Errorf("shutdown core server: %w", err)
+	} else if !serverStopped {
+		if err := <-serverErr; err != nil && runErr == nil {
+			runErr = err
 		}
+	}
 
-		return <-errCh
-	case err := <-errCh:
-		return err
+	select {
+	case <-electorDone:
+	case <-time.After(leaseReleaseTimeout):
+		klog.Warningf("Leader election did not stop within %v", leaseReleaseTimeout)
+	}
+
+	return runErr
+}
+
+func (a *App) elector() leader.Elector {
+	if a.config.LeaderElector == nil {
+		return leader.AlwaysLeader{}
+	}
+
+	return a.config.LeaderElector
+}
+
+// startLeaderWork starts everything that must run on exactly one replica.
+func (a *App) startLeaderWork(ctx context.Context) error {
+	klog.Infof("Starting leader-only background work")
+
+	if a.config.Gateway != nil {
+		if err := a.config.Gateway.Init(); err != nil {
+			return fmt.Errorf("init gateway: %w", err)
+		}
+	}
+
+	go a.config.ObsCollectConfigManager.Start(ctx)
+
+	go cron.StartCrons(ctx, a.config.Storage) //nolint:errcheck
+
+	for name, ctrl := range a.controllers {
+		go func(name string, ctrl controllers.Controller) {
+			klog.Infof("Starting controller: %s", name)
+			ctrl.Start(ctx)
+		}(name, ctrl)
+	}
+
+	return nil
+}
+
+func trySend(ch chan<- error, err error) {
+	select {
+	case ch <- err:
+	default:
 	}
 }
