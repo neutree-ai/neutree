@@ -19,6 +19,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.kong) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
@@ -154,6 +157,9 @@ spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.kong) }}
+      {{- . | nindent 6 }}
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
@@ -354,6 +360,9 @@ spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.kong) }}
+      {{- . | nindent 6 }}
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
@@ -744,6 +753,9 @@ spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.kong) }}
+      {{- . | nindent 6 }}
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:

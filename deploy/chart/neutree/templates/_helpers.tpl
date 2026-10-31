@@ -336,3 +336,23 @@ Priority:
 {{- end -}}
 {{- $url -}}
 {{- end -}}
+
+{{/*
+Pod-level scheduling fields from a component values block that has
+nodeSelector / affinity / tolerations. Renders nothing when all are empty.
+*/}}
+{{- define "neutree.podScheduling" -}}
+{{- with .nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+

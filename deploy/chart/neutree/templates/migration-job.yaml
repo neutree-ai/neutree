@@ -17,6 +17,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with (include "neutree.podScheduling" .Values.migration) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
         - name: wait-postgresql
