@@ -83,9 +83,7 @@ func (a *App) Run(ctx context.Context) error {
 		defer close(electorDone)
 
 		err := a.elector().Run(ctx, func(leaderCtx context.Context) {
-			if err := a.startLeaderWork(leaderCtx); err != nil {
-				trySend(leaderErr, err)
-			}
+			a.startLeaderWork(leaderCtx)
 		})
 		if err != nil {
 			trySend(leaderErr, fmt.Errorf("leader election: %w", err))
@@ -141,7 +139,7 @@ var (
 )
 
 // startLeaderWork starts everything that must run on exactly one replica.
-func (a *App) startLeaderWork(ctx context.Context) error {
+func (a *App) startLeaderWork(ctx context.Context) {
 	klog.Infof("Starting leader-only background work")
 
 	if a.config.Gateway != nil {
@@ -160,8 +158,6 @@ func (a *App) startLeaderWork(ctx context.Context) error {
 			ctrl.Start(ctx)
 		}(name, ctrl)
 	}
-
-	return nil
 }
 
 func trySend(ch chan<- error, err error) {
