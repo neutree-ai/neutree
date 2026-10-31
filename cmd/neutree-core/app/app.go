@@ -135,14 +135,19 @@ func (a *App) elector() leader.Elector {
 	return a.config.LeaderElector
 }
 
+var (
+	gatewayInitBackoffMin = 2 * time.Second
+	gatewayInitBackoffMax = 30 * time.Second
+)
+
 // startLeaderWork starts everything that must run on exactly one replica.
 func (a *App) startLeaderWork(ctx context.Context) error {
 	klog.Infof("Starting leader-only background work")
 
 	if a.config.Gateway != nil {
-		if err := a.config.Gateway.Init(); err != nil {
-			return fmt.Errorf("init gateway: %w", err)
-		}
+		// A new leader often takes over while the gateway is also recovering;
+		// exiting here would hand the lease around without anyone making progress.
+		go a.initGatewayWithRetry(ctx)
 	}
 
 	go a.config.ObsCollectConfigManager.Start(ctx)
@@ -163,5 +168,29 @@ func trySend(ch chan<- error, err error) {
 	select {
 	case ch <- err:
 	default:
+	}
+}
+
+// initGatewayWithRetry keeps calling Gateway.Init until it succeeds or the
+// leader context ends. Init is idempotent (get-or-create).
+func (a *App) initGatewayWithRetry(ctx context.Context) {
+	backoff := gatewayInitBackoffMin
+
+	for {
+		err := a.config.Gateway.Init()
+		if err == nil {
+			klog.Infof("Gateway initialized")
+			return
+		}
+
+		klog.Warningf("Init gateway failed, retrying in %v: %v", backoff, err)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		backoff = min(backoff*2, gatewayInitBackoffMax)
 	}
 }
