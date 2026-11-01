@@ -158,6 +158,8 @@ func TestHAOverlayVictoriaMetrics(t *testing.T) {
 		var d appsv1.Deployment
 		renderedObject(t, resources, "Deployment", vmFullname+"-"+app, &d)
 		require.Equal(t, intstr.FromInt32(0), *d.Spec.Strategy.RollingUpdate.MaxSurge, app)
+		// Without a preStop pause the pod refuses connections before it leaves the Service.
+		require.Equal(t, int64(5), d.Spec.Template.Spec.Containers[0].Lifecycle.PreStop.Sleep.Seconds, app)
 	}
 
 	// vminsert and vmselect address all three storage nodes.

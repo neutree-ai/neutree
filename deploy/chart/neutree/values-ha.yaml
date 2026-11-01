@@ -17,6 +17,11 @@ grafanaDatabase:
 victoria-metrics-cluster:
   vminsert:
     replicaCount: 3
+    # Same as vmselect: vmagent retries, but no write should hit a closed port.
+    lifecycle:
+      preStop:
+        sleep:
+          seconds: 5
     extraArgs:
       # Every sample is stored on two vmstorage nodes, so one node can be
       # lost without losing data or query completeness.
@@ -40,6 +45,12 @@ victoria-metrics-cluster:
                 app.kubernetes.io/name: victoria-metrics-cluster
   vmselect:
     replicaCount: 3
+    # vmselect closes its port on SIGTERM; keep serving while the endpoints
+    # of a terminating pod are withdrawn so a rollout fails no query.
+    lifecycle:
+      preStop:
+        sleep:
+          seconds: 5
     extraArgs:
       # A response missing one vmstorage node is still complete (not partial).
       replicationFactor: 2
