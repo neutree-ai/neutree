@@ -39,6 +39,16 @@ func CreateProxyHandler(targetURL string, path string, modifyRequest func(*http.
 
 // CreateProxyHandlerWithTransport creates a reverse proxy handler with custom transport
 func CreateProxyHandlerWithTransport(targetURL string, path string, modifyRequest func(*http.Request), transport http.RoundTripper) gin.HandlerFunc {
+	return createProxyHandler(targetURL, path, modifyRequest, transport, nil)
+}
+
+// CreatePostgrestProxyHandler creates a reverse proxy handler for PostgREST.
+func CreatePostgrestProxyHandler(targetURL string, path string, modifyRequest func(*http.Request)) gin.HandlerFunc {
+	return createProxyHandler(targetURL, path, modifyRequest, nil, postgrestConnectionErrorAs503)
+}
+
+func createProxyHandler(targetURL string, path string, modifyRequest func(*http.Request), transport http.RoundTripper,
+	modifyResponse func(*http.Response) error) gin.HandlerFunc {
 	target, err := url.Parse(fmt.Sprintf("%s/%s", targetURL, path))
 	if err != nil {
 		klog.Errorf("Failed to parse target URL: %v", err)
@@ -51,6 +61,7 @@ func CreateProxyHandlerWithTransport(targetURL string, path string, modifyReques
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ModifyResponse = modifyResponse
 
 	// Set custom transport if provided
 	if transport != nil {
@@ -338,7 +349,7 @@ func handlePostgrestRPCProxy(deps *Dependencies) gin.HandlerFunc {
 
 		path = "rpc/" + path
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, path, CreatePostgrestAuthModifier(c))
+		proxyHandler := CreatePostgrestProxyHandler(deps.StorageAccessURL, path, CreatePostgrestAuthModifier(c))
 		proxyHandler(c)
 	}
 }
