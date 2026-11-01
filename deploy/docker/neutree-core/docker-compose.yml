@@ -14,7 +14,7 @@ services:
       restart_policy:
         condition: none
   postgres:
-    image: postgres:13
+    image: postgres:17
     container_name: postgres
     environment:
       POSTGRES_USER: postgres
@@ -24,7 +24,9 @@ services:
       copy-db-scripts:
         condition: service_completed_successfully
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # PostgreSQL 17. Releases before it used pg_data (PostgreSQL 13); neutree-cli
+      # copies that volume here when upgrading and leaves it for a rollback.
+      - pg17_data:/var/lib/postgresql/data
       - {{ .NeutreeCoreWorkDir }}/db/init-scripts:/docker-entrypoint-initdb.d
     networks:
       - neutree
@@ -99,7 +101,7 @@ services:
         condition: none
 
   post-migration-hook:
-    image: postgres:13
+    image: postgres:17
     container_name: post-migration-hook
     networks:
       - neutree
@@ -419,7 +421,7 @@ networks:
     driver: bridge
 
 volumes:
-  pg_data:
+  pg17_data:
   vl_data:
 {{ if .MetricsRemoteWriteURL }}
   vmagentdata:
