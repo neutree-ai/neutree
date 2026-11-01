@@ -119,3 +119,24 @@ func TestPreStopDelaysShutdown(t *testing.T) {
 	}, "neutree-api", "neutree-api")
 	require.Nil(t, c.Lifecycle)
 }
+
+func TestKongShutdownOutlastsDrain(t *testing.T) {
+	var d appsv1.Deployment
+	renderedObject(t, renderChart(t, map[string]interface{}{
+		"kong": map[string]interface{}{
+			"shutdown": map[string]interface{}{"waitSeconds": 10, "drainTimeoutSeconds": 300},
+		},
+	}), "Deployment", "neutree-kong", &d)
+
+	var proxy corev1.Container
+	for _, c := range d.Spec.Template.Spec.Containers {
+		if c.Name == "proxy" {
+			proxy = c
+		}
+	}
+
+	require.Equal(t, []string{"kong", "quit", "--wait=10", "--timeout=300"}, proxy.Lifecycle.PreStop.Exec.Command)
+	// The grace period must cover the wait plus the drain, or the kubelet
+	// kills Kong while streams are still being served.
+	require.Equal(t, int64(325), *d.Spec.Template.Spec.TerminationGracePeriodSeconds)
+}

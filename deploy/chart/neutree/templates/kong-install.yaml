@@ -636,7 +636,8 @@ spec:
               command:
               - kong
               - quit
-              - --wait=15
+              - --wait={{ int .Values.kong.shutdown.waitSeconds }}
+              - --timeout={{ int .Values.kong.shutdown.drainTimeoutSeconds }}
         ports:
         - name: admin
           containerPort: 8001
@@ -695,7 +696,7 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: {{ add .Values.kong.shutdown.waitSeconds .Values.kong.shutdown.drainTimeoutSeconds 15 }}
       volumes:
         - name: kong-kong-prefix-dir
           emptyDir:

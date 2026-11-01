@@ -338,6 +338,12 @@ kong:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # A terminating Kong keeps accepting requests for waitSeconds while its
+  # endpoints are withdrawn, then stops accepting and lets in-flight requests,
+  # including long streaming responses, finish for up to drainTimeoutSeconds.
+  shutdown:
+    waitSeconds: 15
+    drainTimeoutSeconds: 120
   proxyService:
     type: LoadBalancer
   # Optional Ingress for the inference gateway (Kong proxy at
