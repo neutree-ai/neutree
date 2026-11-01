@@ -58,6 +58,21 @@ There is currently no Kubernetes-native install path in `neutree-cli`; the Helm 
 
 Note: this is independent from the runtime cluster mode (K8s vs SSH) — the runtime mode controls how user `Endpoint` resources are scheduled (`Cluster.spec.config`), not how the CP itself is installed.
 
+### PostgreSQL 13 → 17 on upgrade
+
+The compose stack runs `postgres:17` on the volume `neutree-core_pg17_data`. Earlier releases used PostgreSQL 13 on `neutree-core_pg_data`. When `launch neutree-core` finds the running `postgres` container on the old volume, it copies the data before `docker compose up` (`pg_migration.go`):
+
+1. Pull missing images, refresh `db/` from the new `neutree-db-scripts`, start PostgreSQL 17 on the new volume as `neutree-pg-migration-target`.
+2. Stop the writers (`neutree-core`, `neutree-api`, `postgrest`, `auth`). Kong keeps routing from its cache; vector holds usage records and retries.
+3. Run `db-migration/pg-copy.sh copy` in a PostgreSQL 17 container: roles, `pg_dump`/`pg_restore`, scram passwords, then an inventory of both databases (objects, row counts, content checksums) that must match. The result is recorded in table `neutree_pg_migration` of the new server's `postgres` database.
+4. `docker compose up` replaces the `postgres` container. The old volume is not in the compose file and is never modified.
+
+If the copy fails, the writers are started again on the old database and `launch` exits non-zero. Running `launch` again is safe: an unfinished copy is discarded and redone.
+
+`pg-copy.sh` and `inventory.sql` live in `db/pg-migration/`, shared with the Helm chart's migration Job; vendir copies the directory into `deploy/docker/neutree-core/db-migration/` and `deploy/chart/neutree/db-migration/`.
+
+Rollback: run `launch neutree-core` of the earlier release (its CLI, its `--version`). Its compose file mounts `neutree-core_pg_data` again, which holds the data as it was when writes stopped; anything written after the upgrade, including login sessions, is not carried back. Upgrading again after a rollback is refused until `docker volume rm neutree-core_pg17_data` discards the earlier copy. `cleanup neutree-core --remove-data` also removes `neutree-core_pg_data`.
+
 ## Arbitrary Image Push
 
 `neutree-cli image push <image>` tags a local Docker image into the `ImageRegistry` resource
