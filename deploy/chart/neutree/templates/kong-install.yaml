@@ -636,22 +636,23 @@ spec:
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-access
           - name: neutree-ai-quota
             mountPath: /neutree-kong-plugin/kong/plugins/neutree-ai-quota
+        # TCP, not /status: /status (and /status/ready, /metrics) connect to
+        # PostgreSQL and hang while the primary's node is unreachable, which
+        # took every Kong out of the Service and then restarted it, although
+        # Kong serves inference from its cache. Kong only listens once it has
+        # started against the database.
         readinessProbe:
           failureThreshold: 3
-          httpGet:
-            path: /status
-            port: status
-            scheme: HTTP
+          tcpSocket:
+            port: proxy
           initialDelaySeconds: 5
           periodSeconds: 10
           successThreshold: 1
           timeoutSeconds: 5
         livenessProbe:
           failureThreshold: 3
-          httpGet:
-            path: /status
+          tcpSocket:
             port: status
-            scheme: HTTP
           initialDelaySeconds: 5
           periodSeconds: 10
           successThreshold: 1

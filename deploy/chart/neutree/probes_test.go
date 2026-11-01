@@ -152,3 +152,17 @@ func TestPostgrestStaysReadyThroughSwitchover(t *testing.T) {
 	// in the Service through it.
 	require.Greater(t, p.PeriodSeconds*p.FailureThreshold, int32(15))
 }
+
+func TestKongProbesDoNotNeedTheDatabase(t *testing.T) {
+	var d appsv1.Deployment
+	renderedObject(t, renderChart(t, nil), "Deployment", "neutree-kong", &d)
+
+	for _, c := range d.Spec.Template.Spec.Containers {
+		if c.Name != "proxy" {
+			continue
+		}
+
+		require.NotNil(t, c.ReadinessProbe.TCPSocket, "readiness")
+		require.NotNil(t, c.LivenessProbe.TCPSocket, "liveness")
+	}
+}
