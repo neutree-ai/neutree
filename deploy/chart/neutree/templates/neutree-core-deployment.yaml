@@ -5,13 +5,17 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.core.replicaCount }}
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.core) }}
+  {{- if include "neutree.ha.enabled" . }}
+  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- else }}
   # Surge before terminating so the old leader releases its Lease to a running standby.
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-core
@@ -87,15 +91,6 @@ spec:
             - containerPort: 3001
               name: server
               protocol: TCP
-      {{- with .Values.core.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.core.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.core.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.core "component" "neutree-core")) }}
+      {{- . | trim | nindent 6 }}
       {{- end }}

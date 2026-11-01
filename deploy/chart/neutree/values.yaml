@@ -23,6 +23,15 @@ jwtSecret: ""
 # It is recommended to change it quickly after installation.
 adminPassword: ""
 
+# High availability for the stateless components (api, auth, postgrest, kong,
+# vector, core). When enabled, each of them defaults to 3 replicas, spreads one
+# pod per node through a required pod anti-affinity (used only when the
+# component's own affinity is empty), rolls with maxSurge 0 / maxUnavailable 1,
+# and gets a PodDisruptionBudget with maxUnavailable 1. Needs at least as many
+# schedulable nodes as replicas. A component's explicit replicaCount always wins.
+ha:
+  enabled: false
+
 system:
   grafana:
     # User-facing Grafana URL returned by the Neutree API. When Grafana is
@@ -111,6 +120,7 @@ db:
   affinity: {}
 
 auth:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: supabase/gotrue
@@ -141,6 +151,7 @@ migration:
   affinity: {}
 
 postgrest:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: postgrest/postgrest
@@ -174,7 +185,7 @@ postgresmeta:
 
 core:
   # Replicas elect a leader through a Lease; only the leader runs controllers and crons.
-  replicaCount: 1
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: neutree/neutree-core
@@ -201,7 +212,7 @@ api:
     requests:
       cpu: 100m
       memory: 128Mi
-  replicaCount: 1
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -243,6 +254,7 @@ vmagent:
       - ReadWriteOnce
 
 kong:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   # One counter per (EE path, virtual model, upstream name, upstream model);
   # the numeric value is the current inflight request count, not request data.
   # Kong 3.9 measurements: 78-128-byte keys use ~256 B/entry (~40k in 10 MiB);
@@ -286,6 +298,7 @@ kong:
     tls: []
 
 vector:
+  # replicaCount: unset means 1, or 3 when ha.enabled.
   image:
     registry: ""
     repository: timberio/vector

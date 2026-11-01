@@ -5,7 +5,10 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.postgrest.replicaCount }}
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.postgrest) }}
+  {{- if include "neutree.ha.enabled" . }}
+  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-postgrest
@@ -50,15 +53,6 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- with .Values.postgrest.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.postgrest.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.postgrest.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.postgrest "component" "neutree-postgrest")) }}
+      {{- . | trim | nindent 6 }}
       {{- end }}

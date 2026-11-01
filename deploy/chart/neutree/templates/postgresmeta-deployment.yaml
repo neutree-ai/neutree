@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.postgresmeta.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-postgresmeta

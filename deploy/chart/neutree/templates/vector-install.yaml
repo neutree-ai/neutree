@@ -308,11 +308,15 @@ metadata:
   labels:
     {{ include "neutree.labels" . | nindent 4 }}
 spec:
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.vector) }}
+  {{- if include "neutree.ha.enabled" . }}
+  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- else }}
   # The disk buffers are locked by one Vector process and the volume may be
   # ReadWriteOnce, so the old pod must stop before the new one starts.
   strategy:
     type: Recreate
-  replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-vector
@@ -326,7 +330,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with (include "neutree.podScheduling" .Values.vector) }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.vector "component" "neutree-vector")) }}
       {{- . | nindent 6 }}
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
@@ -381,18 +385,6 @@ spec:
               mountPath: "/etc/vector/logsink-secrets/"
               readOnly: true
       terminationGracePeriodSeconds: 60
-      {{- with .Values.vector.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.vector.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.vector.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       volumes:
         - name: jwt-secret
           emptyDir: {}

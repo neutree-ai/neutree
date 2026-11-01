@@ -6,7 +6,10 @@ metadata:
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.auth.replicaCount }}
+  replicas: {{ include "neutree.replicaCount" (dict "root" $ "values" .Values.auth) }}
+  {{- if include "neutree.ha.enabled" . }}
+  {{- include "neutree.ha.strategy" . | nindent 2 }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: neutree-auth
@@ -80,16 +83,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- with .Values.auth.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.auth.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.auth.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
+      {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.auth "component" "neutree-auth")) }}
+      {{- . | trim | nindent 6 }}
       {{- end }}
 

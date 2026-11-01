@@ -356,3 +356,66 @@ tolerations:
 {{- end }}
 {{- end }}
 
+
+{{/*
+"true" when HA mode is on, empty otherwise. Tolerates values from releases
+installed before the ha block existed.
+*/}}
+{{- define "neutree.ha.enabled" -}}
+{{- if and .Values.ha .Values.ha.enabled -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Replica count for a component that can run several replicas.
+Usage: include "neutree.replicaCount" (dict "root" $ "values" .Values.api)
+An explicit replicaCount wins (0 included); otherwise 3 in HA mode, else 1.
+*/}}
+{{- define "neutree.replicaCount" -}}
+{{- if not (kindIs "invalid" .values.replicaCount) -}}
+{{- .values.replicaCount -}}
+{{- else if include "neutree.ha.enabled" .root -}}
+3
+{{- else -}}
+1
+{{- end -}}
+{{- end -}}
+
+{{/*
+Pod scheduling for a component that can run several replicas. In HA mode an
+empty affinity is replaced by a required one-pod-per-node anti-affinity on the
+component's selector label; an explicit affinity is used as given.
+Usage: include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.api "component" "neutree-api")
+*/}}
+{{- define "neutree.ha.podScheduling" -}}
+{{- $scheduling := dict "nodeSelector" .values.nodeSelector "affinity" .values.affinity "tolerations" .values.tolerations -}}
+{{- if and (include "neutree.ha.enabled" .root) (empty .values.affinity) -}}
+{{- $term := dict "labelSelector" (dict "matchLabels" (dict "app.kubernetes.io/component" .component)) "topologyKey" "kubernetes.io/hostname" -}}
+{{- $_ := set $scheduling "affinity" (dict "podAntiAffinity" (dict "requiredDuringSchedulingIgnoredDuringExecution" (list $term))) -}}
+{{- end -}}
+{{- include "neutree.podScheduling" $scheduling -}}
+{{- end -}}
+
+{{/*
+Rolling update strategy in HA mode. maxSurge stays 0 because the required
+anti-affinity leaves no node for a surge pod when replicas equal nodes.
+*/}}
+{{- define "neutree.ha.strategy" -}}
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+{{- end -}}
+
+{{/*
+Components that run several replicas in HA mode, keyed by values block, with
+the component label their Deployment selects on.
+*/}}
+{{- define "neutree.ha.components" -}}
+api: neutree-api
+auth: neutree-auth
+postgrest: neutree-postgrest
+core: neutree-core
+kong: {{ include "neutree.fullname" . }}-kong
+vector: neutree-vector
+{{- end -}}

@@ -1,0 +1,16 @@
+{{- if include "neutree.ha.enabled" . }}
+{{- range $key, $component := include "neutree.ha.components" . | fromYaml }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "neutree.fullname" $ }}-{{ $key }}
+  labels:
+    {{- include "neutree.labels" $ | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{ $component }}
+{{- end }}
+{{- end }}
