@@ -212,13 +212,16 @@ postgrest:
   # /ready fails while PostgREST has no usable database connection or schema
   # cache, taking the replica out of the Service. /live only reports that the
   # process is serving; set either to null to drop the probe.
+  # failureThreshold outlasts a planned primary switchover (up to ~15s): every
+  # replica loses the database then, and dropping them all from the Service
+  # only adds a probe period to the outage once the new primary is up.
   readinessProbe:
     httpGet:
       path: /ready
       port: admin
     periodSeconds: 5
     timeoutSeconds: 3
-    failureThreshold: 2
+    failureThreshold: 4
   livenessProbe:
     httpGet:
       path: /live

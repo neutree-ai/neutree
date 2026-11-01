@@ -144,3 +144,11 @@ func TestKongShutdownOutlastsDrain(t *testing.T) {
 	// kubelet kills Kong while streams are still being served.
 	require.Equal(t, int64(325), *d.Spec.Template.Spec.TerminationGracePeriodSeconds)
 }
+
+func TestPostgrestStaysReadyThroughSwitchover(t *testing.T) {
+	p := renderedContainer(t, nil, "neutree-postgrest", "postgrest").ReadinessProbe
+
+	// A planned primary switchover takes up to ~15s; every replica must stay
+	// in the Service through it.
+	require.Greater(t, p.PeriodSeconds*p.FailureThreshold, int32(15))
+}
