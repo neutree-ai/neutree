@@ -277,6 +277,11 @@ func podSpec(t *testing.T, resources *unstructured.UnstructuredList, kind, name 
 		renderedObject(t, resources, kind, name, &d)
 
 		return d.Spec.Template.Spec
+	case "StatefulSet":
+		var s appsv1.StatefulSet
+		renderedObject(t, resources, kind, name, &s)
+
+		return s.Spec.Template.Spec
 	case "Job":
 		var j batchv1.Job
 		renderedObject(t, resources, kind, name, &j)

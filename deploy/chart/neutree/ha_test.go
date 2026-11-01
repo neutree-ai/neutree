@@ -82,7 +82,8 @@ func TestHAModeDeployments(t *testing.T) {
 
 func TestHAModePodDisruptionBudgets(t *testing.T) {
 	resources := renderChart(t, haValues(nil))
-	require.Len(t, renderedPDBs(resources), len(haDeployments))
+	// One per stateless component plus vmagent (observability_ha_test.go).
+	require.Len(t, renderedPDBs(resources), len(haDeployments)+1)
 
 	for key, want := range haDeployments {
 		var pdb policyv1.PodDisruptionBudget

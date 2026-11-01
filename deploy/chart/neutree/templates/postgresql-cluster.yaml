@@ -54,6 +54,15 @@ spec:
       dataDurability: required
     {{- end }}
   {{- end }}
+  {{- if .Values.grafanaDatabase.enabled }}
+  managed:
+    roles:
+      - name: {{ .Values.grafanaDatabase.user }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ include "neutree.grafanaDatabase.secretName" . }}
+  {{- end }}
   bootstrap:
     initdb:
       database: {{ .Values.db.name }}

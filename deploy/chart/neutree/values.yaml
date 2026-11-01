@@ -326,6 +326,9 @@ api:
                          #     secretName: neutree-api-tls
 
 vmagent:
+  # replicaCount: unset means 1, or 2 when ha.enabled. In HA mode every
+  # replica scrapes every target and VictoriaMetrics deduplicates the samples
+  # (see values-ha.yaml), and the persistence block below is not used.
   image:
     registry: ""
     repository: victoriametrics/vmagent
@@ -513,6 +516,18 @@ victoria-metrics-cluster:
     replicaCount: 1
     persistentVolume:
       size: 40Gi
+
+# Keep Grafana's own state (users, sessions, dashboards saved in its UI) in a
+# database of the PostgreSQL Cluster instead of SQLite on a volume, so Grafana
+# can run several replicas. values-ha.yaml turns this on together with the
+# Grafana settings that read the login from the Secret
+# "<release>-grafana-db" (keys username, password, host).
+grafanaDatabase:
+  enabled: false
+  name: grafana
+  user: grafana
+  # Empty: generated on install and kept across upgrades.
+  password: ""
 
 grafana:
   enabled: true

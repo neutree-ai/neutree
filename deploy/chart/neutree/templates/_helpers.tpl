@@ -418,6 +418,23 @@ postgrest: neutree-postgrest
 core: neutree-core
 kong: {{ include "neutree.fullname" . }}-kong
 vector: neutree-vector
+{{- if or .Values.metrics.remoteWriteUrl (index .Values "victoria-metrics-cluster" "enabled") }}
+vmagent: neutree-vmagent
+{{- end }}
+{{- end -}}
+
+{{/*
+vmagent replicas: an explicit vmagent.replicaCount wins; otherwise 2 in HA
+mode (each replica scrapes every target, so a third only adds load), else 1.
+*/}}
+{{- define "neutree.vmagent.replicaCount" -}}
+{{- if not (kindIs "invalid" .Values.vmagent.replicaCount) -}}
+{{- .Values.vmagent.replicaCount -}}
+{{- else if include "neutree.ha.enabled" . -}}
+2
+{{- else -}}
+1
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -550,4 +567,13 @@ Number of PostgreSQL instances: db.instances when set, else 3 in HA mode, else 1
 {{- else -}}
 1
 {{- end -}}
+{{- end -}}
+
+{{/*
+Secret with Grafana's database login. Named after the release so that the
+Grafana subchart, which cannot call this chart's helpers, can refer to it
+from values as "{{ .Release.Name }}-grafana-db".
+*/}}
+{{- define "neutree.grafanaDatabase.secretName" -}}
+{{- printf "%s-grafana-db" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

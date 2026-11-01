@@ -1,0 +1,104 @@
+# High availability overlay. Install or upgrade with
+#   helm upgrade --install <release> . -f values-ha.yaml [-f your-values.yaml]
+# ha.enabled covers the components this chart renders itself; the settings
+# below cover the VictoriaMetrics and Grafana subcharts, whose values cannot
+# follow ha.enabled. Needs three schedulable nodes. Put your own values after
+# this file to override any of them.
+ha:
+  enabled: true
+
+grafanaDatabase:
+  enabled: true
+
+victoria-metrics-cluster:
+  vminsert:
+    replicaCount: 3
+    extraArgs:
+      # Every sample is stored on two vmstorage nodes, so one node can be
+      # lost without losing data or query completeness.
+      replicationFactor: 2
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vminsert
+                app.kubernetes.io/name: victoria-metrics-cluster
+  vmselect:
+    replicaCount: 3
+    extraArgs:
+      # A response missing one vmstorage node is still complete (not partial).
+      replicationFactor: 2
+      # Collapses the copies made by replication and by the vmagent replicas,
+      # which scrape the same targets; must equal the shortest scrape
+      # interval (the 5s Kong job) and match vmstorage.
+      dedup.minScrapeInterval: 5s
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vmselect
+                app.kubernetes.io/name: victoria-metrics-cluster
+  vmstorage:
+    replicaCount: 3
+    extraArgs:
+      dedup.minScrapeInterval: 5s
+    podDisruptionBudget:
+      enabled: true
+      maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: vmstorage
+                app.kubernetes.io/name: victoria-metrics-cluster
+
+grafana:
+  replicas: 2
+  # State lives in PostgreSQL (grafanaDatabase), not on a volume.
+  persistence:
+    enabled: false
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  podDisruptionBudget:
+    # The subchart falls back to policy/v1beta1 when rendering offline.
+    apiVersion: policy/v1
+    maxUnavailable: 1
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+  env:
+    GF_DATABASE_TYPE: postgres
+    GF_DATABASE_NAME: grafana
+    GF_DATABASE_SSL_MODE: require
+  envValueFrom:
+    GF_DATABASE_HOST:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: host
+    GF_DATABASE_USER:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: username
+    GF_DATABASE_PASSWORD:
+      secretKeyRef:
+        name: '{{ .Release.Name }}-grafana-db'
+        key: password

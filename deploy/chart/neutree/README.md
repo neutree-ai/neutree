@@ -47,6 +47,25 @@ primary. PostgREST and the seed Job add the TCP keepalive parameters in
 take them: the first two send unknown URL keys to the server, which rejects the
 connection; Kong has no such option and relies on `pg_timeout` (5s per query).
 
+## Observability in HA mode
+
+`ha.enabled` cannot reach the VictoriaMetrics and Grafana subcharts, so HA
+installs also pass the bundled overlay: `helm upgrade --install <release> .
+-f values-ha.yaml -f <your values>`.
+
+| Component | Single | HA (`values-ha.yaml`) |
+|---|---|---|
+| vmagent | 1 replica | 2 replicas, each scrapes every target; storage keeps one copy (`dedup.minScrapeInterval`) |
+| vminsert / vmselect | 1 replica | 3 replicas |
+| vmstorage | 1 node | 3 nodes, every sample on 2 (`replicationFactor: 2`); one node can be lost without gaps |
+| Grafana | 1 replica, SQLite on a volume | 2 replicas, state in the `grafana` database of the PostgreSQL Cluster |
+| VictoriaLogs | 1 replica | 1 replica |
+
+Switching to HA starts Grafana on an empty database: provisioned dashboards
+and data sources come back, while users and dashboards saved in its UI stay in
+the old SQLite volume, which is deleted. Existing metrics stay on the first
+vmstorage node only; replication applies to samples written afterwards.
+
 ## Upgrading from a release with the PostgreSQL Deployment
 
 Releases before 1.3 ran PostgreSQL 13 as the Deployment `<release>-postgresql`.
