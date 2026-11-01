@@ -46,6 +46,8 @@ SQL
 
 if [ -z "${LEGACY_DEPLOYMENT:-}" ]; then
   log "no PostgreSQL Deployment from an earlier release; nothing to migrate"
+  # Deployments wait for any row here before they connect.
+  tpsql -d postgres -qc "insert into neutree_pg_migration (source, details) values ('', 'nothing to migrate') on conflict do nothing"
   exit 0
 fi
 

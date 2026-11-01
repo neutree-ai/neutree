@@ -60,6 +60,8 @@ func TestDBClusterSingle(t *testing.T) {
 	require.Equal(t, "neutree-pg-superuser", spec["superuserSecret"].(map[string]interface{})["name"])
 	require.NotContains(t, spec, "postgresql", "a single instance has no synchronous replication")
 	require.Equal(t, false, spec["enablePDB"], "a lone instance must stay evictable")
+	require.EqualValues(t, 10, spec["smartShutdownTimeout"])
+	require.NotContains(t, spec, "primaryUpdateMethod")
 
 	initdb, _, err := unstructured.NestedMap(spec, "bootstrap", "initdb")
 	require.NoError(t, err)
@@ -78,6 +80,7 @@ func TestDBClusterHA(t *testing.T) {
 
 	require.EqualValues(t, 3, spec["instances"])
 	require.Equal(t, true, spec["enablePDB"])
+	require.Equal(t, "switchover", spec["primaryUpdateMethod"])
 
 	synchronous, _, err := unstructured.NestedMap(spec, "postgresql", "synchronous")
 	require.NoError(t, err)
@@ -171,23 +174,64 @@ func TestDBConnections(t *testing.T) {
 func TestDBClientsWaitForMigration(t *testing.T) {
 	resources := renderChart(t, nil)
 
-	for _, workload := range []string{
-		"Deployment/neutree-auth", "Deployment/neutree-postgrest", "Deployment/neutree-postgresmeta",
-		"Deployment/neutree-kong", "Job/neutree-migration-job-1", "Job/neutree-post-migration-hook-job-1",
-		"Job/neutree-kong-init-migrations-1", "Job/neutree-kong-pre-upgrade-migrations-1",
-		"Job/neutree-kong-post-upgrade-migrations-1",
-	} {
+	check := func(workload, initName string, args []string) {
+		t.Helper()
+
 		kind, name, _ := strings.Cut(workload, "/")
 		initContainers := podInitContainers(t, resources, kind, name)
 		require.NotEmpty(t, initContainers, workload)
-		require.Equal(t, "wait-pg-migration", initContainers[0].Name, workload)
-		require.Equal(t, []string{"job-wr", "neutree-pg-migration-1", "-n", "default"}, initContainers[0].Args, workload)
+		require.Equal(t, initName, initContainers[0].Name, workload)
+
+		if args != nil {
+			require.Equal(t, args, initContainers[0].Args, workload)
+		}
 
 		for _, c := range initContainers {
-			for _, arg := range c.Args {
+			for _, arg := range append(c.Args, c.Command...) {
 				require.NotContains(t, arg, "neutree-postgresql", "%s still waits for the old database pod", workload)
 			}
 		}
+	}
+
+	// Jobs are per revision anyway; they wait for this revision's migration Job.
+	for _, job := range []string{
+		"Job/neutree-migration-job-1", "Job/neutree-post-migration-hook-job-1",
+		"Job/neutree-kong-init-migrations-1", "Job/neutree-kong-pre-upgrade-migrations-1",
+		"Job/neutree-kong-post-upgrade-migrations-1",
+	} {
+		check(job, "wait-pg-migration", []string{"job-wr", "neutree-pg-migration-1", "-n", "default"})
+	}
+
+	// Deployments ask the database for the completion record.
+	for _, deployment := range []string{
+		"Deployment/neutree-auth", "Deployment/neutree-postgrest", "Deployment/neutree-postgresmeta", "Deployment/neutree-kong",
+	} {
+		check(deployment, "wait-pg-ready", nil)
+
+		kind, name, _ := strings.Cut(deployment, "/")
+		wait := podInitContainers(t, resources, kind, name)[0]
+		require.Contains(t, strings.Join(wait.Command, " "), "neutree_pg_migration", deployment)
+	}
+}
+
+// A helm upgrade that changes nothing must not restart the database clients.
+func TestDBDeploymentsStableAcrossRevisions(t *testing.T) {
+	render := func(revision int) *unstructured.UnstructuredList {
+		resources, err := renderChartForRelease(nil, chartutil.ReleaseOptions{
+			Name: "neutree", Namespace: "default", Revision: revision, IsUpgrade: revision > 1, IsInstall: revision == 1,
+		})
+		require.NoError(t, err)
+
+		return resources
+	}
+
+	first, second := render(1), render(2)
+
+	for _, name := range []string{"neutree-auth", "neutree-postgrest", "neutree-postgresmeta", "neutree-kong"} {
+		var a, b appsv1.Deployment
+		renderedObject(t, first, "Deployment", name, &a)
+		renderedObject(t, second, "Deployment", name, &b)
+		require.Equal(t, a.Spec.Template, b.Spec.Template, name)
 	}
 }
 

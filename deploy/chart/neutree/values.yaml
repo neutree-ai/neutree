@@ -127,6 +127,9 @@ db:
   persistence:
     size: 40Gi
     # storageClassName: ""
+  # Seconds a stopping instance waits for clients to disconnect before it
+  # closes their connections (CloudNativePG smartShutdownTimeout).
+  smartShutdownTimeoutSeconds: 10
   # Extra PostgreSQL parameters for the Cluster (postgresql.parameters).
   parameters: {}
   # nodeSelector / tolerations / affinity.nodeAffinity are passed to the

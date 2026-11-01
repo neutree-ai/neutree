@@ -28,6 +28,14 @@ spec:
   # The PDB of a lone instance forbids every eviction, so a node drain would
   # hang forever; the Deployment it replaces could always be evicted.
   enablePDB: {{ gt $instances 1 }}
+  # A smart shutdown waits for every client to leave (180s by default), and
+  # the pooled clients never do; meanwhile no new connection is accepted.
+  smartShutdownTimeout: {{ int .Values.db.smartShutdownTimeoutSeconds }}
+  {{- if gt $instances 1 }}
+  # Restart or update the primary by switching over to a standby first
+  # (seconds of unavailability) instead of restarting it in place.
+  primaryUpdateMethod: switchover
+  {{- end }}
   # Neutree components connect as the superuser.
   enableSuperuserAccess: true
   superuserSecret:

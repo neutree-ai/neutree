@@ -482,6 +482,34 @@ in place.
 {{- end -}}
 
 {{/*
+Init container for Deployments: holds the pod until the migration Job has
+recorded that the database is in place. It asks the database rather than
+waiting for the Job, whose name changes with every release revision and would
+restart these pods on each helm upgrade.
+*/}}
+{{- define "neutree.db.waitReadyContainer" -}}
+- name: wait-pg-ready
+  image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
+  imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+  command:
+    - sh
+    - -c
+    - until psql -XtAq -h "$PGHOST" -d postgres -c 'select 1 from neutree_pg_migration limit 1' 2>/dev/null | grep -q 1; do echo waiting for the database migration; sleep 2; done
+  env:
+    - name: PGHOST
+      value: {{ include "neutree.db.host" . }}
+    - name: PGUSER
+      value: postgres
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "neutree.db.superuserSecretName" . }}
+          key: password
+    - name: PGCONNECT_TIMEOUT
+      value: "3"
+{{- end -}}
+
+{{/*
 KONG_PG_* environment shared by the Kong Deployment and its migration Jobs.
 Kong's driver has no TCP keepalive option; its pg_timeout bounds every query
 on a dead connection instead.

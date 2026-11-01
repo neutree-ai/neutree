@@ -23,7 +23,7 @@ spec:
       {{- end }}
       serviceAccountName:  {{ include "neutree.fullname" . }}-sa
       initContainers:
-        {{- include "neutree.db.waitContainer" . | nindent 8 }}
+        {{- include "neutree.db.waitReadyContainer" . | nindent 8 }}
       containers:
         - name: postgrest
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.postgrest.image.registry "repository" .Values.postgrest.image.repository "tag" .Values.postgrest.image.tag "defaultTag" .Values.postgrest.image.tag) }}

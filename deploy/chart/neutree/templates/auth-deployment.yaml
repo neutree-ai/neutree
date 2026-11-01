@@ -24,7 +24,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        {{- include "neutree.db.waitContainer" . | nindent 8 }}
+        {{- include "neutree.db.waitReadyContainer" . | nindent 8 }}
       containers:
         - name: auth
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.auth.image.registry "repository" .Values.auth.image.repository "tag" .Values.auth.image.tag "defaultTag" .Values.auth.image.tag) }}

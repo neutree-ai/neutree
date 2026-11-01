@@ -337,7 +337,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-      {{- include "neutree.db.waitContainer" . | nindent 6 }}
+      {{- include "neutree.db.waitReadyContainer" . | nindent 6 }}
       - name: clear-stale-pid
         image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
