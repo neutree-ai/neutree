@@ -147,6 +147,16 @@ db:
 
 auth:
   # replicaCount: unset means 1, or 3 when ha.enabled.
+  db:
+    # A connection attempt that hangs fails after this many seconds instead
+    # of holding the request until the client gives up.
+    connectTimeoutSeconds: 3
+    # GoTrue keeps no idle connections by default and dials one per request;
+    # keeping a few open takes the dial off the request path. Idle ones are
+    # recycled so a connection to a vanished primary does not linger.
+    maxPoolSize: 10
+    maxIdlePoolSize: 5
+    connMaxIdleTime: 60s
   image:
     registry: ""
     repository: supabase/gotrue

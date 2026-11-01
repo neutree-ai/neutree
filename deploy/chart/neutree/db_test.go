@@ -134,8 +134,9 @@ func TestDBConnections(t *testing.T) {
 
 		require.Equal(t, "postgres://postgres:pgpassword@"+dbHost+":5432/neutree?"+keepaliveParams,
 			env("Deployment", "neutree-postgrest", "postgrest", "PGRST_DB_URI"))
-		require.Equal(t, "postgres://auth_admin:auth_admin_password@"+dbHost+":5432/neutree?sslmode=disable",
+		require.Equal(t, "postgres://auth_admin:auth_admin_password@"+dbHost+":5432/neutree?sslmode=disable&connect_timeout=3",
 			env("Deployment", "neutree-auth", "auth", "DATABASE_URL"))
+		require.Equal(t, "5", env("Deployment", "neutree-auth", "auth", "GOTRUE_DB_MAX_IDLE_POOL_SIZE"))
 		require.Equal(t, dbHost, env("Deployment", "neutree-postgresmeta", "neutree-postgresmeta", "PG_META_DB_HOST"))
 
 		kongWorkloads := map[string][]string{

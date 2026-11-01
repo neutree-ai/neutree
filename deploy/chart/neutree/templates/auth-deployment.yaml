@@ -59,7 +59,19 @@ spec:
             # pgx sends unknown URL keys to the server as settings, which rejects
             # libpq's keepalive keys; pgx's own dialer keepalive applies instead.
             - name: DATABASE_URL
-              value: {{ include "neutree.db.url" (dict "root" $ "user" "auth_admin" "password" "auth_admin_password" "params" "sslmode=disable") | quote }}
+              value: {{ include "neutree.db.url" (dict "root" $ "user" "auth_admin" "password" "auth_admin_password" "params" (printf "sslmode=disable&connect_timeout=%d" (int .Values.auth.db.connectTimeoutSeconds))) | quote }}
+            {{- with .Values.auth.db.maxPoolSize }}
+            - name: GOTRUE_DB_MAX_POOL_SIZE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.auth.db.maxIdlePoolSize }}
+            - name: GOTRUE_DB_MAX_IDLE_POOL_SIZE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.auth.db.connMaxIdleTime }}
+            - name: GOTRUE_DB_CONN_MAX_IDLE_TIME
+              value: {{ . | quote }}
+            {{- end }}
             - name: GOTRUE_COOKIE_KEY
               value: {{.Values.db.name }}
           {{- with .Values.auth.lifecycle }}
