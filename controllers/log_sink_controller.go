@@ -22,6 +22,8 @@ const (
 	logSinkScrapeInterval = 30 * time.Second
 	// How long a delivered sink may stay unconfirmed by Vector before it is Failed.
 	logSinkApplyTimeout = 3 * time.Minute
+	// How long a sink may fail every send without a single success before it is Failed.
+	logSinkFailingTimeout = 5 * time.Minute
 	// Vector does not retry a rejected reload, so an unconfirmed delivery is
 	// written again: soon after a rejection shows up, otherwise only after a
 	// ConfigMap has had time to propagate (up to about a minute). Doubles per
@@ -41,8 +43,9 @@ type LogSinkController struct {
 	syncer               logsink.Syncer
 	tracePipelineEnabled bool
 
-	scrape func(ctx context.Context) (*logsink.VectorMetrics, error)
-	now    func() time.Time
+	scrape         func(ctx context.Context) (*logsink.VectorMetrics, error)
+	testConnection func(ctx context.Context, sink *v1.LogSink) error
+	now            func() time.Time
 
 	lastScrapeAt time.Time
 	metrics      *logsink.VectorMetrics
@@ -66,6 +69,11 @@ type logSinkState struct {
 	rejectedBase float64
 	// applied is set once the delivered component ID runs in Vector.
 	applied bool
+
+	prev         *logsink.ComponentCounters
+	window       *logsink.ComponentCounters
+	windowAt     time.Time
+	failingSince time.Time
 }
 
 type LogSinkControllerOption struct {
@@ -94,8 +102,9 @@ func NewLogSinkController(option *LogSinkControllerOption) (*LogSinkController, 
 
 			return logsink.ScrapeMetrics(ctx, httpClient, metricsURL)
 		},
-		now:    time.Now,
-		states: map[string]*logSinkState{},
+		testConnection: logsink.TestConnection,
+		now:            time.Now,
+		states:         map[string]*logSinkState{},
 	}, nil
 }
 
@@ -165,14 +174,15 @@ func (c *LogSinkController) reconcile(ctx context.Context) error {
 		klog.Errorf("failed to deliver log sinks to Vector: %v", syncErr)
 	}
 
-	if scraped && c.scrapeErr == nil {
-		c.observe()
+	fresh := scraped && c.scrapeErr == nil
+	if fresh {
+		c.observe(now)
 	}
 
 	for i := range sinks {
 		s := &sinks[i]
 
-		if err := c.reconcileOne(s, excluded[s.GetName()], syncErr, now); err != nil {
+		if err := c.reconcileOne(ctx, s, excluded[s.GetName()], syncErr, fresh, now); err != nil {
 			klog.Errorf("failed to reconcile log sink %s: %v", s.GetName(), err)
 		}
 	}
@@ -269,6 +279,9 @@ func (c *LogSinkController) deliver(ctx context.Context, active []*v1.LogSink, n
 		}
 
 		next := &logSinkState{hash: hash, componentID: id, deliveredAt: now}
+		if st != nil && st.componentID == id {
+			next.prev, next.window, next.windowAt = st.prev, st.window, st.windowAt
+		}
 
 		// Nothing written means the config on disk already had this sink (e.g.
 		// after a core restart); rejections counted before say nothing about it.
@@ -320,19 +333,41 @@ func (c *LogSinkController) retryDue(now time.Time) bool {
 	return now.Sub(c.lastWriteAt) >= wait
 }
 
-// observe marks a delivered sink applied once a fresh scrape shows it running.
-// Only the component ID that was delivered counts: series of an earlier
+// observe folds a fresh scrape into every delivered sink's state. Only the
+// series of the component ID that was delivered count: series of an earlier
 // activation stay in the exporter.
-func (c *LogSinkController) observe() {
+func (c *LogSinkController) observe(now time.Time) {
 	for _, st := range c.states {
+		cur, present := c.metrics.Components[st.componentID]
+
+		if !present {
+			continue
+		}
+
 		// The ID is new for each activation, so only this delivery can make it run.
-		if c.metrics.Components[st.componentID].Running {
+		if cur.Running {
 			st.applied = true
 		}
+
+		if st.prev != nil {
+			delta := cur.Sub(*st.prev)
+			st.window = &delta
+			st.windowAt = now
+
+			switch {
+			case delta.Sent > 0:
+				st.failingSince = time.Time{}
+			case delta.Failed > 0 && st.failingSince.IsZero():
+				st.failingSince = now
+			}
+		}
+
+		st.prev = &cur
 	}
 }
 
-func (c *LogSinkController) reconcileOne(s *v1.LogSink, excludedErr, syncErr error, now time.Time) error {
+func (c *LogSinkController) reconcileOne(ctx context.Context, s *v1.LogSink, excludedErr, syncErr error,
+	scraped bool, now time.Time) error {
 	old := s.Status
 	if old == nil {
 		old = &v1.LogSinkStatus{}
@@ -382,6 +417,27 @@ func (c *LogSinkController) reconcileOne(s *v1.LogSink, excludedErr, syncErr err
 		status.ErrorMessage = ""
 	default:
 		status.Phase, status.ErrorMessage = c.derivePhase(st, now)
+
+		if scraped && st.window != nil && st.windowAt.Equal(now) {
+			status.SentEvents += int64(st.window.Sent)
+			status.DroppedEvents += int64(st.window.Dropped)
+
+			if st.window.Sent > 0 {
+				status.LastSentTime = now.UTC().Format(time.RFC3339Nano)
+			}
+		}
+	}
+
+	// A failed test is reported but does not hold back delivery.
+	if excludedErr == nil && old.ObservedHash != hash {
+		test := &v1.LogSinkConnectionTest{Time: now.UTC().Format(time.RFC3339Nano), OK: true}
+		if err := c.testConnection(ctx, s); err != nil {
+			test.OK = false
+			test.Message = err.Error()
+		}
+
+		status.LastConnectionTest = test
+		status.ObservedHash = hash
 	}
 
 	return c.writeStatus(s, old, &status, now)
@@ -409,6 +465,15 @@ func (c *LogSinkController) derivePhase(st *logSinkState, now time.Time) (v1.Log
 		}
 
 		return v1.LogSinkPhaseFAILED, msg
+	}
+
+	if !st.failingSince.IsZero() && now.Sub(st.failingSince) >= logSinkFailingTimeout {
+		return v1.LogSinkPhaseFAILED, fmt.Sprintf("no events delivered for %s; every send failed", logSinkFailingTimeout)
+	}
+
+	if w := st.window; w != nil && (w.Failed > 0 || w.Dropped > 0) {
+		return v1.LogSinkPhaseDEGRADED, fmt.Sprintf("in the last %s: %d failed sends, %d dropped events",
+			logSinkScrapeInterval, int64(w.Failed), int64(w.Dropped))
 	}
 
 	return v1.LogSinkPhaseRUNNING, ""

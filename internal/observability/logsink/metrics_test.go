@@ -38,11 +38,10 @@ func TestParseMetrics(t *testing.T) {
 	// Both a config that fails to load and a topology that fails to build are rejected reloads.
 	assert.Equal(t, float64(5), m.RejectedReloads)
 	assert.Equal(t, map[string]ComponentCounters{
-		// Series alone do not show a sink is running.
-		"logsink_ok":   {},
-		"logsink_deny": {},
-		"logsink_down": {},
-		// Only utilization does; an idle one still reports it.
+		"logsink_ok":   {Sent: 5},
+		"logsink_deny": {Failed: 2, Dropped: 5},
+		"logsink_down": {Failed: 7, Dropped: 3},
+		// Only utilization shows a sink is running; an idle one still reports it.
 		"logsink_idle": {Running: true},
 	}, m.Components)
 }
@@ -56,4 +55,11 @@ func TestRejectedSince(t *testing.T) {
 
 	m.RejectedReloads = 0
 	assert.False(t, m.RejectedSince(5), "an expired series is not a rejection")
+}
+
+func TestComponentCountersSub(t *testing.T) {
+	cur := ComponentCounters{Sent: 10, Failed: 2, Dropped: 1}
+	assert.Equal(t, ComponentCounters{Sent: 4, Failed: 1}, cur.Sub(ComponentCounters{Sent: 6, Failed: 1, Dropped: 1}))
+	// A counter that went backwards was reset: the current value is the change.
+	assert.Equal(t, ComponentCounters{Sent: 10, Failed: 2, Dropped: 1}, cur.Sub(ComponentCounters{Sent: 50, Failed: 9, Dropped: 3}))
 }

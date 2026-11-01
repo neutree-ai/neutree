@@ -83,7 +83,11 @@ func Validate(sink *v1.LogSink) error {
 		return errors.New("metadata.name is invalid")
 	}
 
-	spec := sink.Spec
+	return ValidateSpec(sink.Spec)
+}
+
+// ValidateSpec is Validate without the name check, for a spec not yet saved.
+func ValidateSpec(spec *v1.LogSinkSpec) error {
 	if spec == nil {
 		return errors.New("spec is required")
 	}
@@ -154,7 +158,7 @@ func Validate(sink *v1.LogSink) error {
 	return nil
 }
 
-// SpecHash fingerprints the whole spec, secrets included.
+// SpecHash fingerprints everything a connection test depends on, secrets included.
 func SpecHash(sink *v1.LogSink) string {
 	b, _ := json.Marshal(sink.Spec) //nolint:errcheck
 
