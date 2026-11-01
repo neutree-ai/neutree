@@ -9,6 +9,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/yaml"
 )
 
 const vmFullname = "neutree-victoria-metrics-cluster"
@@ -89,6 +90,31 @@ func TestVMAgentHAReplicaCountOverride(t *testing.T) {
 	var deployment appsv1.Deployment
 	renderedObject(t, resources, "Deployment", "neutree-vmagent", &deployment)
 	require.Equal(t, int32(3), *deployment.Spec.Replicas)
+}
+
+func TestVectorTraceHeartbeat(t *testing.T) {
+	render := func(values map[string]interface{}) (map[string]interface{}, []interface{}) {
+		var cm corev1.ConfigMap
+		renderedObject(t, renderChart(t, values), "ConfigMap", "neutree-vector", &cm)
+
+		var config struct {
+			Sources map[string]interface{}            `json:"sources"`
+			Sinks   map[string]map[string]interface{} `json:"sinks"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte(cm.Data["vector.yml"]), &config))
+
+		sink, ok := config.Sinks["ai_trace_victorialogs"]
+		require.True(t, ok, "trace sink rendered")
+		require.Equal(t, "disk", sink["buffer"].(map[string]interface{})["type"])
+
+		return config.Sources, sink["inputs"].([]interface{})
+	}
+
+	for name, values := range map[string]map[string]interface{}{"single": nil, "ha": haValues(nil)} {
+		sources, inputs := render(values)
+		require.Contains(t, sources, "trace_buffer_heartbeat", name)
+		require.Equal(t, []interface{}{"prepare_trace_payload", "prepare_trace_heartbeat"}, inputs, name)
+	}
 }
 
 func TestHAOverlayVictoriaMetrics(t *testing.T) {

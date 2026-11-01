@@ -1,4 +1,6 @@
 {{- $aiTraceStoreUrl := include "neutree.aiTraceStoreUrl" . -}}
+{{- /* The trace sink always uses a disk buffer, which needs the heartbeat. */ -}}
+{{- $traceHeartbeat := $aiTraceStoreUrl -}}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -21,6 +23,17 @@ data:
         encode: json
       vector_metrics:
         type: internal_metrics
+      {{- if $traceHeartbeat }}
+      # Vector's disk buffer sometimes misses the wakeup for a record and only
+      # reads it when the next one is written, so the last trace before an idle
+      # period could wait indefinitely. A periodic record bounds that delay.
+      trace_buffer_heartbeat:
+        type: demo_logs
+        format: shuffle
+        lines:
+          - heartbeat
+        interval: 10
+      {{- end }}
     transforms:
       parse_kong_logs:
         type: remap
@@ -97,6 +110,15 @@ data:
               "p_cost_usd": .extracted_data.cost_usd,
               "p_message_id": .extracted_data.message_id
           }
+      {{- if $traceHeartbeat }}
+      # record_type keeps it out of every trace query, like chunk records.
+      prepare_trace_heartbeat:
+        type: remap
+        inputs:
+          - trace_buffer_heartbeat
+        source: |
+          . = {"_msg": "heartbeat", "record_type": "heartbeat", "timestamp": to_unix_timestamp(now(), unit: "milliseconds")}
+      {{- end }}
       {{- if $aiTraceStoreUrl }}
       filter_trace_logs:
         type: filter
@@ -261,6 +283,9 @@ data:
         type: http
         inputs:
           - prepare_trace_payload
+          {{- if $traceHeartbeat }}
+          - prepare_trace_heartbeat
+          {{- end }}
         uri: {{ $aiTraceStoreUrl }}/insert/jsonline?_stream_fields=workspace,endpoint_type,endpoint_name&_time_field=timestamp
         method: post
         encoding:
