@@ -11,7 +11,6 @@ func TestPersistentVolumeClaimsKeepOnUninstall(t *testing.T) {
 
 	expectedPVCs := []string{
 		"neutree-grafana",
-		"neutree-postgresql-pvc",
 		"neutree-vector-pvc",
 		"neutree-victorialogs-pvc",
 		"neutree-vmagent-pvc",

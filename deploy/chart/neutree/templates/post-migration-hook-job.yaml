@@ -22,12 +22,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
         - name: wait-migration-job
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
@@ -54,7 +49,7 @@ spec:
             value: "-c neutree.admin_password={{ .Values.adminPassword }}"
         command: ["bash", "-c"]
         args:
-          - 'for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" .}}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable -f $$file || exit 1; done'
+          - 'for file in $$(find /seed -name "*.sql" | sort); do echo "Executing seed file:" $$file; psql "{{ include "neutree.db.url" (dict "root" $ "user" .Values.db.user "password" .Values.db.password "params" "sslmode=disable" "keepalive" true) }}" -f $$file || exit 1; done'
         volumeMounts:
           - name: seed
             mountPath: /seed

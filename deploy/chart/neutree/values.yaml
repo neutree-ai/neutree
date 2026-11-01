@@ -92,15 +92,31 @@ dbScripts:
     tag: ""
     pullPolicy: IfNotPresent
 
+# PostgreSQL runs as a CloudNativePG Cluster (<fullname>-pg). The operator is
+# a prerequisite: install it before this chart (see README.md). One instance by
+# default; with ha.enabled, three instances on separate nodes with synchronous
+# replication (a commit waits for one standby; writes block while no standby
+# is available).
 db:
+  # Fail rendering when the postgresql.cnpg.io/v1 API is missing. Set to false
+  # for offline rendering (helm template), which cannot see the cluster's APIs.
+  operatorCheck: true
+  # instances: unset means 1, or 3 when ha.enabled.
+  # CloudNativePG operand image (PostgreSQL 17). Also runs the migration Job.
   image:
-    registry: ""
-    repository: library/postgres
-    tag: "13"
+    registry: ghcr.io
+    repository: cloudnative-pg/postgresql
+    tag: "17.6"
     pullPolicy: IfNotPresent
   user: postgres
   password: pgpassword
   name: neutree
+  # libpq parameters appended to the connection URL of the clients that accept
+  # them. When the database node vanishes without closing its sockets, pooled
+  # and LISTEN connections would otherwise hang until the kernel gives up
+  # retransmitting (15+ minutes); these make them fail within seconds so the
+  # client reconnects to the new primary.
+  connectionParams: "keepalives=1&keepalives_idle=10&keepalives_interval=5&keepalives_count=3&tcp_user_timeout=10000"
   resources:
     requests:
       cpu: 100m
@@ -109,15 +125,25 @@ db:
       cpu: 2
       memory: 2Gi
   persistence:
-    enabled: true
     size: 40Gi
-    accessModes:
-      - ReadWriteOnce
-  service:
-    type: ClusterIP
+    # storageClassName: ""
+  # Extra PostgreSQL parameters for the Cluster (postgresql.parameters).
+  parameters: {}
+  # nodeSelector / tolerations / affinity.nodeAffinity are passed to the
+  # Cluster's affinity block. Instances always repel each other per node in HA
+  # mode.
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Moving from the PostgreSQL Deployment of earlier releases: the migration
+  # Job copies the old database into the Cluster during helm upgrade. See
+  # README.md for the rollback and cleanup steps.
+  migration:
+    backoffLimit: 3
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
 
 auth:
   # replicaCount: unset means 1, or 3 when ha.enabled.
@@ -167,12 +193,6 @@ postgrest:
     requests:
       cpu: 100m
       memory: 128Mi
-  # libpq parameters appended to the database URI. When the database node
-  # vanishes without closing its sockets, pooled connections would otherwise
-  # hang until the kernel gives up retransmitting (15+ minutes) while /ready
-  # keeps reporting 200; these make them fail within seconds so PostgREST
-  # reconnects through the Service.
-  dbConnectionParams: "keepalives=1&keepalives_idle=10&keepalives_interval=5&keepalives_count=3&tcp_user_timeout=10000"
   # /ready fails while PostgREST has no usable database connection or schema
   # cache, taking the replica out of the Service. /live only reports that the
   # process is serving; set either to null to drop the probe.

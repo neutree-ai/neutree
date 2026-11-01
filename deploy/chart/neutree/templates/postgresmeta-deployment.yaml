@@ -18,6 +18,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "neutree.fullname" . }}-sa
+      initContainers:
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
       containers:
         - name: neutree-postgresmeta
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.postgresmeta.image.registry "repository" .Values.postgresmeta.image.repository "tag" .Values.postgresmeta.image.tag "defaultTag" .Values.postgresmeta.image.tag) }}
@@ -28,9 +31,9 @@ spec:
             - name: PG_META_PORT
               value: "8080"
             - name: PG_META_DB_HOST
-              value: {{ include "neutree.fullname" . }}-postgresql-service
+              value: {{ include "neutree.db.host" . }}
             - name: PG_META_DB_PORT
-              value: "5432"
+              value: {{ include "neutree.db.port" . | quote }}
             - name: PG_META_DB_NAME
               value: {{.Values.db.name }}
             - name: PG_META_DB_USER

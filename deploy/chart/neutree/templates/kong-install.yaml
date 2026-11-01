@@ -24,12 +24,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
         - name: wait-migration-job
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
@@ -80,18 +75,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG
@@ -163,12 +147,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
         - name: wait-migration-job
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
@@ -219,18 +198,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG
@@ -369,6 +337,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
+      {{- include "neutree.db.waitContainer" . | nindent 6 }}
       - name: clear-stale-pid
         image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.kong.image.registry "repository" .Values.kong.image.repository "tag" .Values.kong.image.tag "defaultTag" .Values.kong.image.tag) }}
         imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
@@ -408,18 +377,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG
@@ -486,18 +444,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG
@@ -586,18 +533,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG
@@ -763,12 +699,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{.Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
         - name: wait-migration-job
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
           imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
@@ -812,18 +743,7 @@ spec:
           value: "/opt/?.lua;/opt/?/init.lua;;"
         - name: KONG_NGINX_WORKER_PROCESSES
           value: {{ include "neutree.kong.workerProcesses" . | quote }}
-        - name: KONG_PG_DATABASE
-          value: "neutree"
-        - name: KONG_PG_HOST
-          value: "{{ include "neutree.fullname" . }}-postgresql-service"
-        - name: KONG_PG_PASSWORD
-          value: "kong_admin_password"
-        - name: KONG_PG_PORT
-          value: "5432"
-        - name: KONG_PG_SCHEMA
-          value: "kong"
-        - name: KONG_PG_USER
-          value: "kong_admin"
+        {{- include "neutree.kong.pgEnv" . | nindent 8 }}
         - name: KONG_PORTAL_API_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_PORTAL_API_ERROR_LOG

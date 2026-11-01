@@ -1,0 +1,84 @@
+{{- include "neutree.db.requireOperator" . -}}
+{{- $instances := int (include "neutree.db.instances" .) -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "neutree.db.superuserSecretName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+type: kubernetes.io/basic-auth
+stringData:
+  username: postgres
+  password: {{ .Values.db.password | quote }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "neutree.db.clusterName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  instances: {{ $instances }}
+  imageName: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
+  imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  # Neutree components connect as the superuser.
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: {{ include "neutree.db.superuserSecretName" . }}
+  {{- if or .Values.db.parameters (gt $instances 1) }}
+  postgresql:
+    {{- with .Values.db.parameters }}
+    parameters:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if gt $instances 1 }}
+    # A commit returns once one standby has it, so a failover loses nothing.
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: required
+    {{- end }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.db.name }}
+      owner: {{ .Values.db.user }}
+      # Without this, CNPG generates an owner secret whose random password
+      # replaces the superuser password when the owner is postgres.
+      secret:
+        name: {{ include "neutree.db.superuserSecretName" . }}
+      localeCollate: en_US.utf8
+      localeCType: en_US.utf8
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: {{ include "neutree.fullname" . }}-postgresql-initdb
+            key: 000_init.sql
+  storage:
+    size: {{ .Values.db.persistence.size | quote }}
+    {{- with .Values.db.persistence.storageClassName }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- with .Values.db.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: {{ if include "neutree.ha.enabled" . }}required{{ else }}preferred{{ end }}
+    {{- with .Values.db.nodeSelector }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.db.tolerations }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with (dig "nodeAffinity" nil .Values.db.affinity) }}
+    nodeAffinity:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}

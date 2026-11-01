@@ -1,0 +1,101 @@
+# Neutree Helm chart
+
+## Prerequisites
+
+PostgreSQL runs as a [CloudNativePG](https://cloudnative-pg.io) `Cluster`. The
+chart renders only the `Cluster` resource; the operator must already be
+installed and must watch the release namespace. Install it once per Kubernetes
+cluster, for example:
+
+```bash
+helm repo add cnpg https://cloudnative-pg.github.io/charts
+helm upgrade --install cnpg cnpg/cloudnative-pg --version 0.29.1 \
+  -n cnpg-system --create-namespace
+```
+
+The operator chart installs cluster-wide objects (CRDs, admission webhooks,
+ClusterRoles), so only one copy can exist per Kubernetes cluster; every Neutree
+release shares it. To restrict it to some namespaces instead, set
+`config.clusterWide=false`, list the namespaces in the operator's
+`WATCH_NAMESPACE` environment variable (comma separated) and give its service
+account the operator Role in each of them.
+
+`helm install` / `helm upgrade` fail with a message pointing here when the
+`postgresql.cnpg.io/v1` API is missing. `helm template` cannot see the cluster's
+APIs; render with `--set db.operatorCheck=false` (or `--api-versions
+postgresql.cnpg.io/v1`).
+
+Images to mirror for offline installs: the operator image
+(`ghcr.io/cloudnative-pg/cloudnative-pg`) and the PostgreSQL image in
+`db.image` (`ghcr.io/cloudnative-pg/postgresql:17.6`).
+
+## Database layout
+
+| | `ha.enabled=false` | `ha.enabled=true` |
+|---|---|---|
+| Instances | 1 | 3, one per node (required anti-affinity) |
+| Replication | none | synchronous, `method: any, number: 1, dataDurability: required` |
+| Writes without a standby | n/a | blocked until a standby is back |
+
+`db.instances` overrides the count. Moving from one to the other needs only
+`ha.enabled`; the operator clones the new standbys online.
+
+All components connect through the `<release>-pg-rw` Service, which follows the
+primary. PostgREST and the seed Job add the TCP keepalive parameters in
+`db.connectionParams`. GoTrue (pgx), golang-migrate (lib/pq) and Kong cannot
+take them: the first two send unknown URL keys to the server, which rejects the
+connection; Kong has no such option and relies on `pg_timeout` (5s per query).
+
+## Upgrading from a release with the PostgreSQL Deployment
+
+Releases before 1.3 ran PostgreSQL 13 as the Deployment `<release>-postgresql`.
+A plain `helm upgrade` moves the data into the new Cluster:
+
+1. The chart keeps the old Deployment, Service and PVC exactly as they are (the
+   PVC gets `helm.sh/resource-policy: keep`) and creates the Cluster.
+2. The Job `<release>-pg-migration-<revision>` waits until the Cluster is
+   ready, then stops writes to the old database: it points the old Service at
+   no pod and closes the open connections. Writers get connection errors and
+   retry; the running Kong pods keep routing from their cache.
+3. It copies roles (`pg_dumpall --roles-only`) and the database
+   (`pg_dump` / `pg_restore`), resets the `auth_admin` and `kong_admin`
+   passwords (PostgreSQL 17 uses scram-sha-256), and compares the copy with the
+   source: roles, schemas, tables, columns, constraints, functions, triggers,
+   policies, sequences, and the row count and content checksum of every table.
+4. When they match, it records the migration in the `neutree_pg_migration` table
+   of the Cluster's `postgres` database and scales the old Deployment to 0.
+   Pods that use the database wait for this Job before they start.
+
+If any step fails, the Job puts the old Service back, so the pods that have not
+been replaced yet keep working on the old database, and the Job retries
+(`db.migration.backoffLimit`). Re-running is safe: each attempt restores into a
+freshly created database. Inspect a failure with
+`kubectl logs job/<release>-pg-migration-<revision>`.
+
+Writes are unavailable from step 2 until the new PostgREST and auth pods are
+ready, typically under a minute plus the copy time (about 10 s for 25 MB).
+
+### Rolling back
+
+Before the cleanup below, the old database is untouched:
+
+```bash
+helm rollback <release> <previous-revision>
+```
+
+This restores the old Deployment (1 replica), its Service selector and the old
+components, and deletes the Cluster. Data written after the upgrade is not
+carried back. Upgrading again repeats the migration from the old database.
+
+### Cleaning up
+
+Once the upgrade is confirmed, delete the old objects; the chart never deletes
+them on its own:
+
+```bash
+kubectl -n <namespace> delete deployment <release>-postgresql
+kubectl -n <namespace> delete service <release>-postgresql-service
+kubectl -n <namespace> delete pvc <release>-postgresql-pvc
+```
+
+After this, rolling back to a release before 1.3 is no longer possible.

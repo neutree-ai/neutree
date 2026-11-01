@@ -24,12 +24,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "neutree.fullname" . }}-sa
       initContainers:
-        - name: wait-postgresql
-          image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
-          imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
-          args:
-            - pod
-            - -lapp.kubernetes.io/component=neutree-postgresql
+        {{- include "neutree.db.waitContainer" . | nindent 8 }}
       containers:
         - name: auth
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.auth.image.registry "repository" .Values.auth.image.repository "tag" .Values.auth.image.tag "defaultTag" .Values.auth.image.tag) }}
@@ -61,8 +56,10 @@ spec:
               value: "true"
             - name: GOTRUE_LOG_LEVEL
               value: "INFO"
+            # pgx sends unknown URL keys to the server as settings, which rejects
+            # libpq's keepalive keys; pgx's own dialer keepalive applies instead.
             - name: DATABASE_URL
-              value: postgres://auth_admin:auth_admin_password@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable
+              value: {{ include "neutree.db.url" (dict "root" $ "user" "auth_admin" "password" "auth_admin_password" "params" "sslmode=disable") | quote }}
             - name: GOTRUE_COOKIE_KEY
               value: {{.Values.db.name }}
           {{- with .Values.auth.lifecycle }}

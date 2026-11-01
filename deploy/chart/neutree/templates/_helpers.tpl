@@ -419,3 +419,107 @@ core: neutree-core
 kong: {{ include "neutree.fullname" . }}-kong
 vector: neutree-vector
 {{- end -}}
+
+{{/*
+PostgreSQL runs as a CloudNativePG Cluster. Every component connects through
+the read-write Service, which follows the primary across failovers.
+*/}}
+{{- define "neutree.db.clusterName" -}}
+{{- printf "%s-pg" (include "neutree.fullname" .) -}}
+{{- end -}}
+
+{{- define "neutree.db.host" -}}
+{{- printf "%s-rw" (include "neutree.db.clusterName" .) -}}
+{{- end -}}
+
+{{- define "neutree.db.port" -}}
+5432
+{{- end -}}
+
+{{/*
+libpq-style connection parameters (TCP keepalive) for clients that understand
+them; empty when db.connectionParams is empty.
+*/}}
+{{- define "neutree.db.connectionParams" -}}
+{{- .Values.db.connectionParams | default "" -}}
+{{- end -}}
+
+{{/*
+Connection URL. Usage:
+  include "neutree.db.url" (dict "root" $ "user" "u" "password" "p" "params" "sslmode=disable" "keepalive" true)
+"params" is prepended to the shared keepalive parameters when "keepalive" is true.
+*/}}
+{{- define "neutree.db.url" -}}
+{{- $params := list -}}
+{{- with .params }}{{ $params = append $params . }}{{ end -}}
+{{- if .keepalive }}{{ with include "neutree.db.connectionParams" .root }}{{ $params = append $params . }}{{ end }}{{ end -}}
+{{- printf "postgres://%s:%s@%s:%s/%s" .user .password (include "neutree.db.host" .root) (include "neutree.db.port" .root) .root.Values.db.name -}}
+{{- with $params }}?{{ join "&" . }}{{ end -}}
+{{- end -}}
+
+{{- define "neutree.db.superuserSecretName" -}}
+{{- printf "%s-superuser" (include "neutree.db.clusterName" .) -}}
+{{- end -}}
+
+{{- define "neutree.db.migrationJobName" -}}
+{{- printf "%s-pg-migration-%d" (include "neutree.fullname" .) (int .Release.Revision) -}}
+{{- end -}}
+
+{{/*
+Init container that holds a pod until the database migration Job of this
+release has finished, so nothing touches the new database before its data is
+in place.
+*/}}
+{{- define "neutree.db.waitContainer" -}}
+- name: wait-pg-migration
+  image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.k8sWaitFor.image.registry "repository" .Values.k8sWaitFor.image.repository "tag" .Values.k8sWaitFor.image.tag "defaultTag" .Values.k8sWaitFor.image.tag) }}
+  imagePullPolicy: {{ .Values.k8sWaitFor.image.pullPolicy }}
+  args:
+    - job-wr
+    - {{ include "neutree.db.migrationJobName" . }}
+    - -n
+    - {{ .Release.Namespace }}
+{{- end -}}
+
+{{/*
+KONG_PG_* environment shared by the Kong Deployment and its migration Jobs.
+Kong's driver has no TCP keepalive option; its pg_timeout bounds every query
+on a dead connection instead.
+*/}}
+{{- define "neutree.kong.pgEnv" -}}
+- name: KONG_PG_DATABASE
+  value: {{ .Values.db.name | quote }}
+- name: KONG_PG_HOST
+  value: {{ include "neutree.db.host" . | quote }}
+- name: KONG_PG_PASSWORD
+  value: "kong_admin_password"
+- name: KONG_PG_PORT
+  value: {{ include "neutree.db.port" . | quote }}
+- name: KONG_PG_SCHEMA
+  value: "kong"
+- name: KONG_PG_USER
+  value: "kong_admin"
+{{- end -}}
+
+{{/*
+Fail early when the CloudNativePG CRDs are missing. Offline rendering (helm
+template) has no cluster to ask, so db.operatorCheck can turn this off.
+*/}}
+{{- define "neutree.db.requireOperator" -}}
+{{- if and .Values.db.operatorCheck (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
+{{- fail "PostgreSQL now runs on CloudNativePG, but the postgresql.cnpg.io/v1 API is not installed in this cluster. Install the CloudNativePG operator first (see deploy/chart/neutree/README.md, \"Prerequisites\"). For offline rendering with helm template, set db.operatorCheck=false." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Number of PostgreSQL instances: db.instances when set, else 3 in HA mode, else 1.
+*/}}
+{{- define "neutree.db.instances" -}}
+{{- if not (kindIs "invalid" .Values.db.instances) -}}
+{{- .Values.db.instances -}}
+{{- else if include "neutree.ha.enabled" . -}}
+3
+{{- else -}}
+1
+{{- end -}}
+{{- end -}}
