@@ -171,10 +171,6 @@ func TestAppRunServesRequestsBeforeCancel(t *testing.T) {
 	port := freePort(t)
 	addr := net.JoinHostPort(testHost, strconv.Itoa(port))
 	app := newTestCoreApp(t, port)
-	app.config.GinEngine.GET("/healthz", func(c *gin.Context) {
-		c.String(http.StatusOK, "ok")
-	})
-
 	cancel, done := startTestApp(t, app, addr)
 	defer cancel()
 

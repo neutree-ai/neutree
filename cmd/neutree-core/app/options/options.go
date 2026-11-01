@@ -79,7 +79,9 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	}
 
 	gin.SetMode(o.Server.GinMode)
-	e := gin.Default()
+	e := gin.New()
+	// Kubelet probes every few seconds on each replica; keep them out of the access log.
+	e.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{config.HealthzPath}}), gin.Recovery())
 	c.GinEngine = e
 
 	var err error

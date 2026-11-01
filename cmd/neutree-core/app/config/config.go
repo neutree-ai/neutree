@@ -17,6 +17,9 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
+// HealthzPath is served by every core replica for kubelet probes.
+const HealthzPath = "/healthz"
+
 type ControllerConfig struct {
 	Workers int
 }
