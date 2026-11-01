@@ -52,6 +52,7 @@ func TestVMAgentSingleModeUnchanged(t *testing.T) {
 	require.Equal(t, appsv1.RecreateDeploymentStrategyType, deployment.Spec.Strategy.Type)
 	require.True(t, hasObject(resources, "PersistentVolumeClaim", "neutree-vmagent-pvc"))
 	require.NotContains(t, containerArgs(t, resources, "Deployment", "neutree-vmagent"), "--promscrape.cluster.name=$(POD_NAME)")
+	require.Nil(t, podSpec(t, resources, "Deployment", "neutree-vmagent").Containers[0].ReadinessProbe)
 }
 
 func TestVMAgentHAMode(t *testing.T) {
@@ -67,6 +68,7 @@ func TestVMAgentHAMode(t *testing.T) {
 	args := containerArgs(t, resources, "Deployment", "neutree-vmagent")
 	require.Contains(t, args, "--promscrape.cluster.name=$(POD_NAME)")
 	require.Contains(t, args, "--remoteWrite.tmpDataPath=/vmagentdata")
+	require.Equal(t, "/health", deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.HTTPGet.Path)
 
 	// The RWO volume would pin both replicas to one node; it is not rendered.
 	require.False(t, hasObject(resources, "PersistentVolumeClaim", "neutree-vmagent-pvc"))
@@ -127,6 +129,13 @@ func TestHAOverlayVictoriaMetrics(t *testing.T) {
 		var pdb policyv1.PodDisruptionBudget
 		renderedObject(t, resources, "PodDisruptionBudget", name, &pdb)
 		require.Equal(t, intstr.FromInt32(1), *pdb.Spec.MaxUnavailable, name)
+	}
+
+	// Rolling must not surge: the anti-affinity leaves no node for a fourth pod.
+	for _, app := range []string{"vminsert", "vmselect"} {
+		var d appsv1.Deployment
+		renderedObject(t, resources, "Deployment", vmFullname+"-"+app, &d)
+		require.Equal(t, intstr.FromInt32(0), *d.Spec.Strategy.RollingUpdate.MaxSurge, app)
 	}
 
 	// vminsert and vmselect address all three storage nodes.

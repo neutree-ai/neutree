@@ -58,6 +58,10 @@ spec:
             - name: http
               containerPort: 8429
               protocol: TCP
+          {{- with (include "neutree.vmagent.readinessProbe" .) }}
+          readinessProbe:
+            {{- . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.vmagent.resources | nindent 12 }}
           volumeMounts:

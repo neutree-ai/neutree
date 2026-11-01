@@ -577,3 +577,20 @@ from values as "{{ .Release.Name }}-grafana-db".
 {{- define "neutree.grafanaDatabase.secretName" -}}
 {{- printf "%s-grafana-db" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+
+{{/*
+vmagent readiness: vmagent.readinessProbe when set; otherwise /health in HA
+mode (so a replica counts once it serves) and none in single mode.
+*/}}
+{{- define "neutree.vmagent.readinessProbe" -}}
+{{- if not (kindIs "invalid" .Values.vmagent.readinessProbe) -}}
+{{- with .Values.vmagent.readinessProbe }}{{ toYaml . }}{{ end -}}
+{{- else if include "neutree.ha.enabled" . -}}
+httpGet:
+  path: /health
+  port: http
+periodSeconds: 5
+timeoutSeconds: 3
+failureThreshold: 3
+{{- end -}}
+{{- end -}}

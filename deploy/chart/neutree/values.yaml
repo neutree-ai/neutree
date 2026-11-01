@@ -329,6 +329,7 @@ vmagent:
   # replicaCount: unset means 1, or 2 when ha.enabled. In HA mode every
   # replica scrapes every target and VictoriaMetrics deduplicates the samples
   # (see values-ha.yaml), and the persistence block below is not used.
+  # readinessProbe: unset means none in single mode and GET /health in HA mode.
   image:
     registry: ""
     repository: victoriametrics/vmagent

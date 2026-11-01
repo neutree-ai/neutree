@@ -17,6 +17,12 @@ victoria-metrics-cluster:
       # Every sample is stored on two vmstorage nodes, so one node can be
       # lost without losing data or query completeness.
       replicationFactor: 2
+    # The required anti-affinity leaves no node for a surge pod.
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
     podDisruptionBudget:
       enabled: true
       maxUnavailable: 1
@@ -37,6 +43,13 @@ victoria-metrics-cluster:
       # which scrape the same targets; must equal the shortest scrape
       # interval (the 5s Kong job) and match vmstorage.
       dedup.minScrapeInterval: 5s
+    deployment:
+      spec:
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 0
+            maxUnavailable: 1
     podDisruptionBudget:
       enabled: true
       maxUnavailable: 1
