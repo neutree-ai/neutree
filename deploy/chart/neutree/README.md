@@ -36,6 +36,7 @@ Images to mirror for offline installs: the operator image
 | Instances | 1 | 3, one per node (required anti-affinity) |
 | Replication | none | synchronous, `method: any, number: 1, dataDurability: required` |
 | Writes without a standby | n/a | blocked until a standby is back |
+| Node drain | evicts the instance; the database is down until it restarts elsewhere | the operator switches over first (PDB) |
 
 `db.instances` overrides the count. Moving from one to the other needs only
 `ha.enabled`; the operator clones the new standbys online.
