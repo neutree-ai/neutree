@@ -10,7 +10,6 @@ import (
 	"k8s.io/klog"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-core/app/config"
-	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/observability/logsink"
@@ -103,13 +102,6 @@ func (o *NeutreeCoreOptions) Config(scheme *scheme.Scheme) (*config.CoreConfig, 
 	}
 
 	klog.Infof("Transformed metrics remote write url: %s", o.Observability.MetricsRemoteWriteURL)
-
-	engineRegistry, err := engine.NewRegistry(e)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to init engine registry")
-	}
-
-	c.EngineRegistry = engineRegistry
 
 	s, err := storage.New(storage.Options{
 		AccessURL: o.Storage.AccessURL,

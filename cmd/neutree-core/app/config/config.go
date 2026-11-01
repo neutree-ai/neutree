@@ -5,7 +5,6 @@ import (
 
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/auth"
-	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/leader"
 	"github.com/neutree-ai/neutree/internal/model_registry"
@@ -54,7 +53,6 @@ type CoreConfig struct {
 	RepositoryService       registry.RepositoryService
 	Gateway                 gateway.Gateway
 	AcceleratorManager      accelerator.Manager
-	EngineRegistry          engine.Registry
 	ObsCollectConfigManager manager.ObsCollectConfigManager
 	GinEngine               *gin.Engine
 	AuthClient              auth.Client
