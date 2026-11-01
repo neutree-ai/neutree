@@ -34,6 +34,10 @@ deploy/chart/neutree/vmagent
 # postgresql init scripts
 deploy/chart/neutree/init-scripts
 
+# PostgreSQL 13 -> 17 migration tool (db/pg-migration)
+deploy/chart/neutree/db-migration
+deploy/docker/neutree-core/db-migration
+
 scripts/dashboard/ray-upstream
 scripts/dashboard/vllm-upstream
 scripts/dashboard/sglang-upstream

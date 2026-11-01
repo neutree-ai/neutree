@@ -47,7 +47,7 @@ spec:
         - name: migrate
           image: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
           imagePullPolicy: {{ .Values.db.image.pullPolicy }}
-          command: ["bash", "/scripts/migrate.sh"]
+          command: ["bash", "/scripts/migrate-k8s.sh"]
           env:
             - name: NAMESPACE
               value: {{ .Release.Namespace }}

@@ -258,8 +258,11 @@ func TestDBMigrationJob(t *testing.T) {
 
 	var scripts corev1.ConfigMap
 	renderedObject(t, resources, "ConfigMap", "neutree-pg-migration", &scripts)
-	require.Contains(t, scripts.Data, "migrate.sh")
-	require.Contains(t, scripts.Data, "inventory.sql")
+	for _, f := range []string{"migrate-k8s.sh", "pg-copy.sh", "inventory.sql"} {
+		require.Contains(t, scripts.Data, f)
+	}
+
+	require.Equal(t, []string{"bash", "/scripts/migrate-k8s.sh"}, spec.Containers[0].Command)
 
 	// Without a live cluster there is nothing to keep from an earlier release.
 	for _, r := range resources.Items {
