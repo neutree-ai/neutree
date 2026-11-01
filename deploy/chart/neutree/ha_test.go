@@ -136,6 +136,31 @@ func TestHAModeExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestKongCacheWarmupInHAMode(t *testing.T) {
+	warmup := func(values map[string]interface{}) (string, bool) {
+		for _, c := range podSpec(t, renderChart(t, values), "Deployment", "neutree-kong").Containers {
+			if c.Name != "proxy" {
+				continue
+			}
+
+			for _, e := range c.Env {
+				if e.Name == "KONG_DB_CACHE_WARMUP_ENTITIES" {
+					return e.Value, true
+				}
+			}
+		}
+
+		return "", false
+	}
+
+	_, ok := warmup(nil)
+	require.False(t, ok, "single mode keeps Kong's default warmup")
+
+	value, ok := warmup(haValues(nil))
+	require.True(t, ok)
+	require.Equal(t, "services,consumers,keyauth_credentials", value)
+}
+
 func TestSingleModeDefaults(t *testing.T) {
 	resources := renderChart(t, nil)
 	require.Empty(t, renderedPDBs(resources))
