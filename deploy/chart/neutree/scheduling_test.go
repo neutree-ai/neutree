@@ -10,7 +10,7 @@ import (
 
 // Components whose values block carries nodeSelector / affinity / tolerations.
 var schedulingComponents = []string{
-	"db", "auth", "postgrest", "postgresmeta", "api", "core",
+	"db", "auth", "postgrest", "api", "core",
 	"kong", "vector", "victorialogs", "vmagent", "migration",
 }
 

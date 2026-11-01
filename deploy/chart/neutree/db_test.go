@@ -142,7 +142,6 @@ func TestDBConnections(t *testing.T) {
 		require.Equal(t, "postgres://auth_admin:auth_admin_password@"+dbHost+":5432/neutree?sslmode=disable&connect_timeout=3",
 			env("Deployment", "neutree-auth", "auth", "DATABASE_URL"))
 		require.Equal(t, "5", env("Deployment", "neutree-auth", "auth", "GOTRUE_DB_MAX_IDLE_POOL_SIZE"))
-		require.Equal(t, dbHost, env("Deployment", "neutree-postgresmeta", "neutree-postgresmeta", "PG_META_DB_HOST"))
 
 		kongWorkloads := map[string][]string{
 			"Deployment/neutree-kong":                    {"clear-stale-pid", "wait-for-db", "proxy"},
@@ -204,7 +203,7 @@ func TestDBClientsWaitForMigration(t *testing.T) {
 
 	// Deployments ask the database for the completion record.
 	for _, deployment := range []string{
-		"Deployment/neutree-auth", "Deployment/neutree-postgrest", "Deployment/neutree-postgresmeta", "Deployment/neutree-kong",
+		"Deployment/neutree-auth", "Deployment/neutree-postgrest", "Deployment/neutree-kong",
 	} {
 		check(deployment, "wait-pg-ready", nil)
 
@@ -227,7 +226,7 @@ func TestDBDeploymentsStableAcrossRevisions(t *testing.T) {
 
 	first, second := render(1), render(2)
 
-	for _, name := range []string{"neutree-auth", "neutree-postgrest", "neutree-postgresmeta", "neutree-kong"} {
+	for _, name := range []string{"neutree-auth", "neutree-postgrest", "neutree-kong"} {
 		var a, b appsv1.Deployment
 		renderedObject(t, first, "Deployment", name, &a)
 		renderedObject(t, second, "Deployment", name, &b)

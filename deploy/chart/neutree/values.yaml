@@ -236,22 +236,6 @@ postgrest:
   service:
     type: ClusterIP
 
-postgresmeta:
-  image:
-    registry: ""
-    repository: supabase/postgres-meta
-    tag: "v0.86.0"
-    pullPolicy: IfNotPresent
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  service:
-    type: ClusterIP
-
 core:
   # Replicas elect a leader through a Lease; only the leader runs controllers and crons.
   # replicaCount: unset means 1, or 3 when ha.enabled.

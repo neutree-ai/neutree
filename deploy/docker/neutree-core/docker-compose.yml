@@ -141,28 +141,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  postgres-meta:
-    image: supabase/postgres-meta:v0.86.0
-    container_name: postgres-meta
-    environment:
-      PG_META_HOST: "0.0.0.0"
-      PG_META_PORT: 8080
-      PG_META_DB_HOST: "postgres"
-      PG_META_DB_NAME: "neutree"
-      PG_META_DB_USER: "postgres"
-      PG_META_DB_PORT: 5432
-      PG_META_DB_PASSWORD: "{{ .DbPassword }}"
-    networks:
-      - neutree
-    depends_on:
-      migration:
-        condition: service_completed_successfully
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   neutree-core:
     image: neutree/neutree-core:{{ .NeutreeVersion }}
     container_name: neutree-core

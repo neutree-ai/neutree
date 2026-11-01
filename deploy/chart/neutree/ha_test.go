@@ -73,11 +73,6 @@ func TestHAModeDeployments(t *testing.T) {
 
 		requireHostnameAntiAffinity(t, deployment.Spec.Template.Spec.Affinity, want.component, key)
 	}
-
-	var postgresmeta appsv1.Deployment
-	renderedObject(t, resources, "Deployment", "neutree-postgresmeta", &postgresmeta)
-	require.Equal(t, int32(1), *postgresmeta.Spec.Replicas)
-	require.Nil(t, postgresmeta.Spec.Template.Spec.Affinity)
 }
 
 func TestHAModePodDisruptionBudgets(t *testing.T) {
@@ -153,11 +148,6 @@ func TestSingleModeDefaults(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"neutree-postgresmeta"} {
-		var deployment appsv1.Deployment
-		renderedObject(t, resources, "Deployment", name, &deployment)
-		require.Equal(t, int32(1), *deployment.Spec.Replicas, name)
-	}
 }
 
 func TestSingleModeExplicitReplicaCount(t *testing.T) {
