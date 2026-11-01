@@ -28,7 +28,7 @@ spec:
           imagePullPolicy: {{ .Values.postgrest.image.pullPolicy }}
           env:
             - name: PGRST_DB_URI
-              value: postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" .}}-postgresql-service:5432/{{.Values.db.name }}
+              value: postgres://{{.Values.db.user }}:{{.Values.db.password }}@{{ include "neutree.fullname" .}}-postgresql-service:5432/{{.Values.db.name }}{{ with .Values.postgrest.dbConnectionParams }}?{{ . }}{{ end }}
             - name: PGRST_DB_SCHEMA
               value: api
             - name: PGRST_SERVER_HOST
@@ -45,10 +45,24 @@ spec:
               value: "1"
             - name: PGRST_DB_ANON_ROLE
               value: "anonymous"
+            # Serves /live and /ready for the probes, off the API port.
+            - name: PGRST_ADMIN_SERVER_PORT
+              value: "6433"
           ports:
             - name: http
               containerPort: 6432
               protocol: TCP
+            - name: admin
+              containerPort: 6433
+              protocol: TCP
+          {{- with .Values.postgrest.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.postgrest.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.postgrest.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

@@ -91,6 +91,14 @@ spec:
             - containerPort: 3001
               name: server
               protocol: TCP
+          {{- with .Values.core.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.core.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- with (include "neutree.ha.podScheduling" (dict "root" $ "values" .Values.core "component" "neutree-core")) }}
       {{- . | trim | nindent 6 }}
       {{- end }}

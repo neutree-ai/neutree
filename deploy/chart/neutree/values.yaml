@@ -161,6 +161,29 @@ postgrest:
     requests:
       cpu: 100m
       memory: 128Mi
+  # libpq parameters appended to the database URI. When the database node
+  # vanishes without closing its sockets, pooled connections would otherwise
+  # hang until the kernel gives up retransmitting (15+ minutes) while /ready
+  # keeps reporting 200; these make them fail within seconds so PostgREST
+  # reconnects through the Service.
+  dbConnectionParams: "keepalives=1&keepalives_idle=10&keepalives_interval=5&keepalives_count=3&tcp_user_timeout=10000"
+  # /ready fails while PostgREST has no usable database connection or schema
+  # cache, taking the replica out of the Service. /live only reports that the
+  # process is serving; set either to null to drop the probe.
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: admin
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+  livenessProbe:
+    httpGet:
+      path: /live
+      port: admin
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -195,6 +218,14 @@ core:
     requests:
       cpu: 100m
       memory: 128Mi
+  # /healthz answers on every replica, leader or standby; set to null to drop it.
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: server
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -213,6 +244,14 @@ api:
       cpu: 100m
       memory: 128Mi
   # replicaCount: unset means 1, or 3 when ha.enabled.
+  # /health does not touch any dependency; set to null to drop the probe.
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -307,6 +346,13 @@ vector:
     requests:
       cpu: 100m
       memory: 128Mi
+  # Ready once the Kong log intake port accepts connections; set to null to drop it.
+  readinessProbe:
+    tcpSocket:
+      port: aggregator-log
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
   nodeSelector: {}
   tolerations: []
   affinity: {}
