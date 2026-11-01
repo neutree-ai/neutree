@@ -135,8 +135,12 @@ func TestKongShutdownOutlastsDrain(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, []string{"kong", "quit", "--wait=10", "--timeout=300"}, proxy.Lifecycle.PreStop.Exec.Command)
-	// The grace period must cover the wait plus the drain, or the kubelet
-	// kills Kong while streams are still being served.
+	cmd := proxy.Lifecycle.PreStop.Exec.Command
+	require.Equal(t, []string{"/bin/bash", "-c"}, cmd[:2])
+	require.Contains(t, cmd[2], "sleep 10\n")
+	require.Contains(t, cmd[2], "deadline=$((SECONDS + 300))")
+	require.Contains(t, cmd[2], "exec kong quit --timeout=10")
+	// The grace period must cover the wait, the drain and the quit, or the
+	// kubelet kills Kong while streams are still being served.
 	require.Equal(t, int64(325), *d.Spec.Template.Spec.TerminationGracePeriodSeconds)
 }

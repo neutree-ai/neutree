@@ -576,11 +576,35 @@ spec:
         lifecycle:
           preStop:
             exec:
+              # Kong cannot send logs (usage records, traces) of requests that
+              # finish after SIGQUIT: its timers stop once the worker is exiting.
+              # So drain before quitting: wait for the endpoints to be withdrawn,
+              # then until no request is in flight (connections reading or
+              # writing, minus one events-broker connection per worker and this
+              # status request), give the log queues a moment, then quit.
               command:
-              - kong
-              - quit
-              - --wait={{ int .Values.kong.shutdown.waitSeconds }}
-              - --timeout={{ int .Values.kong.shutdown.drainTimeoutSeconds }}
+              - /bin/bash
+              - -c
+              - |
+                inflight() {
+                  local s r w n
+                  exec 3<>/dev/tcp/127.0.0.1/8100 || return 1
+                  printf 'GET /status HTTP/1.0\r\n\r\n' >&3
+                  s=$(cat <&3)
+                  exec 3<&-
+                  r=$(grep -o '"connections_reading":[0-9]*' <<<"$s" | cut -d: -f2)
+                  w=$(grep -o '"connections_writing":[0-9]*' <<<"$s" | cut -d: -f2)
+                  n=$(grep -l '^nginx: worker process' /proc/[0-9]*/cmdline 2>/dev/null | wc -l)
+                  echo $((r + w - n - 1))
+                }
+                sleep {{ int .Values.kong.shutdown.waitSeconds }}
+                deadline=$((SECONDS + {{ int .Values.kong.shutdown.drainTimeoutSeconds }}))
+                while [ "$SECONDS" -lt "$deadline" ]; do
+                  [ "$(inflight)" = 0 ] && break
+                  sleep 0.5
+                done
+                sleep 2
+                exec kong quit --timeout=10
         ports:
         - name: admin
           containerPort: 8001
