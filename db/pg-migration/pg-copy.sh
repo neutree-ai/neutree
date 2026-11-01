@@ -11,7 +11,9 @@
 #
 # Environment: SOURCE_ID, SOURCE_HOST, TARGET_HOST, DB_NAME, PGUSER, PGPASSWORD
 # (the same superuser on both servers), AUTH_ADMIN_PASSWORD, KONG_ADMIN_PASSWORD,
-# FROZEN_AT (unix time writes stopped, for the record), WORK (scratch dir).
+# FROZEN_AT (unix time writes stopped, for the record), WORK (scratch dir),
+# TARGET_ONLY_ROLES (optional, comma-separated roles the target server creates
+# itself; left out of the verification).
 
 PGM_SCRIPTS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export PGCONNECT_TIMEOUT=10
@@ -96,8 +98,8 @@ SQL
   tpsql -d "$DB_NAME" -qc 'analyze'
 
   log "verifying"
-  spsql -d "$DB_NAME" -qAt -f "$PGM_SCRIPTS/inventory.sql" >"$WORK/source.inv"
-  tpsql -d "$DB_NAME" -qAt -f "$PGM_SCRIPTS/inventory.sql" >"$WORK/target.inv"
+  spsql -d "$DB_NAME" -qAt -v skip_roles="${TARGET_ONLY_ROLES:-}" -f "$PGM_SCRIPTS/inventory.sql" >"$WORK/source.inv"
+  tpsql -d "$DB_NAME" -qAt -v skip_roles="${TARGET_ONLY_ROLES:-}" -f "$PGM_SCRIPTS/inventory.sql" >"$WORK/target.inv"
   local f
   for f in source target; do
     tail -1 "$WORK/$f.inv" | grep -qx END || { log "$f inventory is incomplete"; return 1; }

@@ -57,6 +57,10 @@ spec:
               value: {{ include "neutree.db.host" . }}
             - name: DB_NAME
               value: {{ .Values.db.name | quote }}
+            {{- if .Values.grafanaDatabase.enabled }}
+            - name: TARGET_ONLY_ROLES
+              value: {{ .Values.grafanaDatabase.user | quote }}
+            {{- end }}
             - name: PGUSER
               value: postgres
             - name: PGPASSWORD

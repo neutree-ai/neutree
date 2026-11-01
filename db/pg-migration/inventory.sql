@@ -2,6 +2,12 @@
 -- and its PostgreSQL 17 copy produce identical output. Password hashes are
 -- left out: the migration re-hashes them for scram-sha-256.
 \pset pager off
+-- skip_roles: comma-separated roles the target creates on its own (e.g. a
+-- Grafana login the chart's Cluster manages); they have no source counterpart.
+\if :{?skip_roles}
+\else
+\set skip_roles ''
+\endif
 create temp table _inv(line text);
 create function pg_temp.acl(a aclitem[], owner name, deflt text) returns text language sql as $$
   -- PG17 adds the MAINTAIN privilege (m) to owners; an explicit ACL equal to
@@ -11,13 +17,16 @@ create function pg_temp.acl(a aclitem[], owner name, deflt text) returns text la
     replace(deflt, '%', owner)), '')
 $$;
 insert into _inv select concat_ws('|', 'role', rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls, rolconnlimit, rolpassword is not null)
-  from pg_authid where rolname !~ '^(pg_|cnpg_)' and rolname not in ('streaming_replica', 'postgres', 'app');
+  from pg_authid where rolname !~ '^(pg_|cnpg_)' and rolname not in ('streaming_replica', 'postgres', 'app')
+  and rolname <> all(string_to_array(:'skip_roles', ','));
 insert into _inv select concat_ws('|', 'rolesetting', coalesce(d.datname, '*'), r.rolname, s.setconfig::text)
   from pg_db_role_setting s left join pg_database d on d.oid = s.setdatabase join pg_roles r on r.oid = s.setrole
-  where r.rolname !~ '^(pg_|cnpg_)' and r.rolname not in ('streaming_replica', 'postgres');
+  where r.rolname !~ '^(pg_|cnpg_)' and r.rolname not in ('streaming_replica', 'postgres')
+  and r.rolname <> all(string_to_array(:'skip_roles', ','));
 insert into _inv select concat_ws('|', 'member', r.rolname, m.rolname, a.admin_option)
   from pg_auth_members a join pg_roles r on r.oid = a.roleid join pg_roles m on m.oid = a.member
-  where m.rolname !~ '^(pg_|cnpg_)' and m.rolname not in ('streaming_replica', 'postgres');
+  where m.rolname !~ '^(pg_|cnpg_)' and m.rolname not in ('streaming_replica', 'postgres')
+  and m.rolname <> all(string_to_array(:'skip_roles', ','));
 insert into _inv select concat_ws('|', 'database', datname, pg_get_userbyid(datdba), pg_encoding_to_char(encoding), datcollate, datctype)
   from pg_database where datname = current_database();
 insert into _inv select concat_ws('|', 'extension', extname, extversion, extnamespace::regnamespace) from pg_extension;
