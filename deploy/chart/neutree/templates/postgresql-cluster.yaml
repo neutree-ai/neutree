@@ -25,6 +25,9 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  # The PDB of a lone instance forbids every eviction, so a node drain would
+  # hang forever; the Deployment it replaces could always be evicted.
+  enablePDB: {{ gt $instances 1 }}
   # Neutree components connect as the superuser.
   enableSuperuserAccess: true
   superuserSecret:

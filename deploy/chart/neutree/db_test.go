@@ -59,6 +59,7 @@ func TestDBClusterSingle(t *testing.T) {
 	require.Equal(t, true, spec["enableSuperuserAccess"])
 	require.Equal(t, "neutree-pg-superuser", spec["superuserSecret"].(map[string]interface{})["name"])
 	require.NotContains(t, spec, "postgresql", "a single instance has no synchronous replication")
+	require.Equal(t, false, spec["enablePDB"], "a lone instance must stay evictable")
 
 	initdb, _, err := unstructured.NestedMap(spec, "bootstrap", "initdb")
 	require.NoError(t, err)
@@ -76,6 +77,7 @@ func TestDBClusterHA(t *testing.T) {
 	spec := renderedCluster(t, renderChart(t, haValues(nil)))
 
 	require.EqualValues(t, 3, spec["instances"])
+	require.Equal(t, true, spec["enablePDB"])
 
 	synchronous, _, err := unstructured.NestedMap(spec, "postgresql", "synchronous")
 	require.NoError(t, err)
