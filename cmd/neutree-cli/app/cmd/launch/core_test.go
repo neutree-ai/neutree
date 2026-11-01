@@ -858,6 +858,7 @@ func TestInstallNeutreeCoreSingleNodeByDocker(t *testing.T) {
 			},
 			setupMock: func(m *mocks.MockExecutor) {
 				expectNoPostgres(m)
+				expectNoRetiredContainers(m)
 				m.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
 					return args[0] == "compose" && args[1] == "-p"
 				})).Return([]byte("success"), nil)
@@ -929,6 +930,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerAllowsCurrentReleaseVersion(t *test
 
 	mockExecutor := &mocks.MockExecutor{}
 	expectNoPostgres(mockExecutor)
+	expectNoRetiredContainers(mockExecutor)
 	mockExecutor.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
 		return args[0] == "compose" && args[1] == "-p"
 	})).Return([]byte("success"), nil)
@@ -968,6 +970,7 @@ func TestInstallNeutreeCoreSingleNodeByDockerUsesStopTimeout(t *testing.T) {
 
 	mockExecutor := &mocks.MockExecutor{}
 	expectNoPostgres(mockExecutor)
+	expectNoRetiredContainers(mockExecutor)
 	mockExecutor.On("Execute", mock.Anything, "docker", mock.MatchedBy(func(args []string) bool {
 		return args[0] == "compose"
 	})).

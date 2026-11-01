@@ -219,7 +219,7 @@ func installNeutreeCoreSingleNodeByDocker(exector command.Executor, options neut
 		return errors.Wrapf(err, "error when executing docker compose up, failed msg %s", string(output))
 	}
 
-	return nil
+	return removeRetiredCoreServices(exector, os.Stdout)
 }
 
 func prepareNeutreeCoreDeployConfig(options neutreeCoreInstallOptions) error {
