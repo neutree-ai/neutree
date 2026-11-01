@@ -55,6 +55,10 @@ spec:
             - name: admin
               containerPort: 6433
               protocol: TCP
+          {{- with .Values.postgrest.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.postgrest.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}

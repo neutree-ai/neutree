@@ -130,6 +130,12 @@ auth:
     requests:
       cpu: 100m
       memory: 128Mi
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -184,6 +190,13 @@ postgrest:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 6
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn. The image has no shell, so this uses the built-in sleep action
+  # (Kubernetes 1.30+; dropped by older API servers). Set to null to drop.
+  lifecycle:
+    preStop:
+      sleep:
+        seconds: 5
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -252,6 +265,12 @@ api:
     periodSeconds: 5
     timeoutSeconds: 3
     failureThreshold: 3
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -353,6 +372,12 @@ vector:
     periodSeconds: 5
     timeoutSeconds: 3
     failureThreshold: 3
+  # Keep serving while the Service endpoints of a terminating pod are being
+  # withdrawn, so callers are not sent to a closed port. Set to null to drop.
+  lifecycle:
+    preStop:
+      exec:
+        command: ["sleep", "5"]
   nodeSelector: {}
   tolerations: []
   affinity: {}

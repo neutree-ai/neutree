@@ -65,6 +65,10 @@ spec:
               value: postgres://auth_admin:auth_admin_password@{{ include "neutree.fullname" . }}-postgresql-service:5432/{{.Values.db.name }}?sslmode=disable
             - name: GOTRUE_COOKIE_KEY
               value: {{.Values.db.name }}
+          {{- with .Values.auth.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             exec:
               command:

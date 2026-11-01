@@ -64,6 +64,10 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          {{- with .Values.api.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.api.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}

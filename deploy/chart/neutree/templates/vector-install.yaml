@@ -369,6 +369,10 @@ spec:
             - name: metrics
               containerPort: 9598
               protocol: TCP
+          {{- with .Values.vector.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with .Values.vector.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}

@@ -98,3 +98,24 @@ func requireNamedPort(t *testing.T, c corev1.Container, name string) int32 {
 
 	return 0
 }
+
+func TestPreStopDelaysShutdown(t *testing.T) {
+	for _, tc := range []struct{ deployment, container string }{
+		{"neutree-api", "neutree-api"},
+		{"neutree-auth", "auth"},
+		{"neutree-vector", "vector"},
+	} {
+		c := renderedContainer(t, nil, tc.deployment, tc.container)
+		require.NotNil(t, c.Lifecycle, tc.deployment)
+		require.Equal(t, []string{"sleep", "5"}, c.Lifecycle.PreStop.Exec.Command, tc.deployment)
+	}
+
+	// The PostgREST image has no shell.
+	c := renderedContainer(t, nil, "neutree-postgrest", "postgrest")
+	require.Equal(t, int64(5), c.Lifecycle.PreStop.Sleep.Seconds)
+
+	c = renderedContainer(t, map[string]interface{}{
+		"api": map[string]interface{}{"lifecycle": nil},
+	}, "neutree-api", "neutree-api")
+	require.Nil(t, c.Lifecycle)
+}
