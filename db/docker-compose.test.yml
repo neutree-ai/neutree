@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15
+    image: postgres:17
     container_name: neutree-db-test
     environment:
       POSTGRES_USER: postgres
@@ -56,7 +56,7 @@ services:
     restart: "no"
 
   seed:
-    image: postgres:15
+    image: postgres:17
     container_name: neutree-seed-test
     depends_on:
       migration:
