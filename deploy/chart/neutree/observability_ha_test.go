@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"helm.sh/helm/v3/pkg/chartutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -18,10 +17,7 @@ const vmFullname = "neutree-victoria-metrics-cluster"
 func haOverlay(t *testing.T) map[string]interface{} {
 	t.Helper()
 
-	values, err := chartutil.ReadValuesFile("values-ha.yaml")
-	require.NoError(t, err)
-
-	return values.AsMap()
+	return haValues(nil)
 }
 
 func hasObject(resources *unstructured.UnstructuredList, kind, name string) bool {
@@ -227,4 +223,37 @@ func TestSingleModeObservabilityUnchanged(t *testing.T) {
 		renderedObject(t, resources, "Deployment", vmFullname+"-"+app, &deployment)
 		require.Equal(t, int32(1), *deployment.Spec.Replicas, app)
 	}
+}
+
+func TestHAWithoutOverlayFails(t *testing.T) {
+	_, err := renderChartWithError(map[string]interface{}{"ha": map[string]interface{}{"enabled": true}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "victoria-metrics-cluster.vmstorage.replicaCount < 2")
+	require.Contains(t, err.Error(), "grafana.replicas < 2")
+	require.Contains(t, err.Error(), "-f <chart>/values-ha.yaml")
+
+	// Subcharts turned off need nothing from the overlay.
+	_, err = renderChartWithError(map[string]interface{}{
+		"ha":                       map[string]interface{}{"enabled": true},
+		"victoria-metrics-cluster": map[string]interface{}{"enabled": false},
+		"grafana":                  map[string]interface{}{"enabled": false},
+	})
+	require.NoError(t, err)
+}
+
+func TestHAOverlayGrafanaMustUsePostgres(t *testing.T) {
+	_, err := renderChartWithError(haValues(map[string]interface{}{
+		"grafanaDatabase": map[string]interface{}{"enabled": false},
+	}))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Grafana does not use the PostgreSQL database")
+}
+
+func TestOverlayWithHADisabledFails(t *testing.T) {
+	values := haValues(nil)
+	values["ha"] = map[string]interface{}{"enabled": false, "overlay": true}
+
+	_, err := renderChartWithError(values)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "values-ha.yaml is for ha.enabled=true")
 }

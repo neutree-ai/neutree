@@ -594,3 +594,39 @@ timeoutSeconds: 3
 failureThreshold: 3
 {{- end -}}
 {{- end -}}
+
+{{/*
+ha.enabled reaches only this chart's own templates. The VictoriaMetrics and
+Grafana subcharts need values-ha.yaml; fail when HA mode is rendered without
+it, and when the overlay is used with HA mode turned off.
+*/}}
+{{- define "neutree.ha.validateOverlay" -}}
+{{- $hint := "pass the chart's values-ha.yaml: helm upgrade --install <release> <chart> -f <chart>/values-ha.yaml [-f your-values.yaml]" -}}
+{{- if include "neutree.ha.enabled" . -}}
+{{- $issues := list -}}
+{{- $vm := index .Values "victoria-metrics-cluster" -}}
+{{- if $vm.enabled -}}
+{{- range $c := list "vminsert" "vmselect" "vmstorage" -}}
+{{- if lt (int (index $vm $c "replicaCount")) 2 -}}
+{{- $issues = append $issues (printf "victoria-metrics-cluster.%s.replicaCount < 2" $c) -}}
+{{- end -}}
+{{- end -}}
+{{- if lt (int (dig "extraArgs" "replicationFactor" 1 $vm.vminsert)) 2 -}}
+{{- $issues = append $issues "victoria-metrics-cluster.vminsert.extraArgs.replicationFactor < 2" -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.grafana.enabled -}}
+{{- if lt (int .Values.grafana.replicas) 2 -}}
+{{- $issues = append $issues "grafana.replicas < 2" -}}
+{{- end -}}
+{{- if or (not .Values.grafanaDatabase.enabled) (ne (toString (dig "env" "GF_DATABASE_TYPE" "" .Values.grafana)) "postgres") -}}
+{{- $issues = append $issues "Grafana does not use the PostgreSQL database (grafanaDatabase.enabled, grafana.env.GF_DATABASE_TYPE)" -}}
+{{- end -}}
+{{- end -}}
+{{- if $issues -}}
+{{- fail (printf "ha.enabled=true but the subcharts are still single-instance (%s); %s" (join "; " $issues) $hint) -}}
+{{- end -}}
+{{- else if and .Values.ha .Values.ha.overlay -}}
+{{- fail "values-ha.yaml is for ha.enabled=true but ha.enabled is false; drop values-ha.yaml or set ha.enabled=true" -}}
+{{- end -}}
+{{- end -}}

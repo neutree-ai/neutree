@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"helm.sh/helm/v3/pkg/chartutil"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -22,8 +23,14 @@ var haDeployments = map[string]struct{ deployment, component string }{
 	"vector":    {"neutree-vector", "neutree-vector"},
 }
 
+// haValues is values-ha.yaml with extra top-level blocks replacing its own.
 func haValues(extra map[string]interface{}) map[string]interface{} {
-	values := map[string]interface{}{"ha": map[string]interface{}{"enabled": true}}
+	overlay, err := chartutil.ReadValuesFile("values-ha.yaml")
+	if err != nil {
+		panic(err)
+	}
+
+	values := overlay.AsMap()
 	for k, v := range extra {
 		values[k] = v
 	}
@@ -77,8 +84,9 @@ func TestHAModeDeployments(t *testing.T) {
 
 func TestHAModePodDisruptionBudgets(t *testing.T) {
 	resources := renderChart(t, haValues(nil))
-	// One per stateless component plus vmagent (observability_ha_test.go).
-	require.Len(t, renderedPDBs(resources), len(haDeployments)+1)
+	// One per stateless component, plus vmagent and the subcharts' vminsert,
+	// vmselect, vmstorage and grafana (observability_ha_test.go).
+	require.Len(t, renderedPDBs(resources), len(haDeployments)+5)
 
 	for key, want := range haDeployments {
 		var pdb policyv1.PodDisruptionBudget

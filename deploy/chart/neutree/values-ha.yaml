@@ -1,11 +1,15 @@
-# High availability overlay. Install or upgrade with
+# High availability. Install or upgrade with this file instead of setting
+# ha.enabled yourself:
 #   helm upgrade --install <release> . -f values-ha.yaml [-f your-values.yaml]
 # ha.enabled covers the components this chart renders itself; the settings
 # below cover the VictoriaMetrics and Grafana subcharts, whose values cannot
-# follow ha.enabled. Needs three schedulable nodes. Put your own values after
-# this file to override any of them.
+# follow ha.enabled. Rendering fails when one is used without the other.
+# Needs three schedulable nodes. Put your own values after this file to
+# override any of them.
 ha:
   enabled: true
+  # Marks this overlay; rendering fails if it is used with ha.enabled=false.
+  overlay: true
 
 grafanaDatabase:
   enabled: true

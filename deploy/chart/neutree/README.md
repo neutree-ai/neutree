@@ -49,9 +49,18 @@ connection; Kong has no such option and relies on `pg_timeout` (5s per query).
 
 ## Observability in HA mode
 
-`ha.enabled` cannot reach the VictoriaMetrics and Grafana subcharts, so HA
-installs also pass the bundled overlay: `helm upgrade --install <release> .
--f values-ha.yaml -f <your values>`.
+Install or upgrade in HA mode with the bundled overlay, which sets
+`ha.enabled` together with the VictoriaMetrics and Grafana subchart settings
+that `ha.enabled` cannot reach:
+
+```bash
+helm upgrade --install <release> <chart> -n <namespace> \
+  -f <chart>/values-ha.yaml -f <your values>
+```
+
+Rendering fails when `ha.enabled=true` is set without the overlay (the
+message lists what is missing), and when the overlay is used with
+`ha.enabled=false`.
 
 | Component | Single | HA (`values-ha.yaml`) |
 |---|---|---|

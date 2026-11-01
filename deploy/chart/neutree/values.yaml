@@ -29,6 +29,9 @@ adminPassword: ""
 # component's own affinity is empty), rolls with maxSurge 0 / maxUnavailable 1,
 # and gets a PodDisruptionBudget with maxUnavailable 1. Needs at least as many
 # schedulable nodes as replicas. A component's explicit replicaCount always wins.
+# Turn it on by passing values-ha.yaml, which also carries the settings of the
+# VictoriaMetrics and Grafana subcharts; ha.enabled=true without them fails
+# to render.
 ha:
   enabled: false
 
