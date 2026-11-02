@@ -43,7 +43,8 @@ All `cnpg.*` values are passed to that chart.
   image. Mirror `ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1` and the
   PostgreSQL image in `db.image` (`ghcr.io/cloudnative-pg/postgresql:17.6`),
   then set `cnpg.image.repository=<registry>/cloudnative-pg/cloudnative-pg`
-  (and `cnpg.imagePullSecrets` if the registry needs them).
+  (and `cnpg.imagePullSecrets` if the registry needs them). Rendering fails
+  when `global.image.registry` is set and `cnpg.image.repository` is not.
 
 ### Using an existing operator
 

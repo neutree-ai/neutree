@@ -108,7 +108,8 @@ cnpg:
   nameOverride: cloudnative-pg
   # Offline installs: the chart's global.image.registry does not apply here.
   # Point this at the mirrored operator image, e.g.
-  # <registry>/cloudnative-pg/cloudnative-pg (tag 1.30.1).
+  # <registry>/cloudnative-pg/cloudnative-pg (tag 1.30.1). Rendering fails
+  # when global.image.registry is set and this is left at its default.
   image:
     repository: ghcr.io/cloudnative-pg/cloudnative-pg
   # imagePullSecrets: []

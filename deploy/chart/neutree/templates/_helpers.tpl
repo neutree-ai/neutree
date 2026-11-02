@@ -547,14 +547,18 @@ on a dead connection instead.
 {{- end -}}
 
 {{/*
-Fail early when the operator setup cannot work: with cnpg.enabled=false, the
-CloudNativePG CRDs are missing (offline rendering with helm template has no
-cluster to ask, so db.operatorCheck can turn this off); with cnpg.enabled,
-another operator already owns the cluster-wide webhook configuration, whose
-name is fixed.
+Fail early when the operator setup cannot work: with cnpg.enabled, the
+operator image is not mirrored along with global.image.registry, or another
+operator already owns the cluster-wide webhook configuration, whose name is
+fixed; with cnpg.enabled=false, the CloudNativePG CRDs are missing (offline
+rendering with helm template has no cluster to ask, so db.operatorCheck can
+turn this off).
 */}}
 {{- define "neutree.db.requireOperator" -}}
 {{- if .Values.cnpg.enabled -}}
+{{- if and .Values.global.image.registry (eq (dig "image" "repository" "" .Values.cnpg) "ghcr.io/cloudnative-pg/cloudnative-pg") -}}
+{{- fail (printf "global.image.registry does not apply to the CloudNativePG operator image. Set cnpg.image.repository=%s/cloudnative-pg/cloudnative-pg (see deploy/chart/neutree/README.md, \"CloudNativePG operator\")." .Values.global.image.registry) -}}
+{{- end -}}
 {{- with lookup "admissionregistration.k8s.io/v1" "MutatingWebhookConfiguration" "" "cnpg-mutating-webhook-configuration" -}}
 {{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . -}}
 {{- $name := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . -}}

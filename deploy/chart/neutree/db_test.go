@@ -145,6 +145,26 @@ func TestCNPGOperatorSubchart(t *testing.T) {
 	require.Equal(t, "mirror.example/cloudnative-pg/cloudnative-pg:1.30.1", deployment.Spec.Template.Spec.Containers[0].Image)
 }
 
+func TestCNPGOperatorImageFollowsMirror(t *testing.T) {
+	mirror := map[string]interface{}{"image": map[string]interface{}{"registry": "mirror.example"}}
+
+	_, err := renderChartWithError(map[string]interface{}{"global": mirror})
+	require.ErrorContains(t, err, "cnpg.image.repository=mirror.example/cloudnative-pg/cloudnative-pg")
+
+	_, err = renderChartWithError(map[string]interface{}{
+		"global": mirror,
+		"cnpg":   map[string]interface{}{"image": map[string]interface{}{"repository": "mirror.example/cloudnative-pg/cloudnative-pg"}},
+	})
+	require.NoError(t, err)
+
+	// An operator installed separately is not this chart's concern.
+	_, err = renderChartWithError(map[string]interface{}{
+		"global": mirror,
+		"cnpg":   map[string]interface{}{"enabled": false},
+	})
+	require.NoError(t, err)
+}
+
 // Without a live Cluster (first install, or the first upgrade from the
 // PostgreSQL Deployment), helm cannot create the Cluster next to the operator
 // it installs; the migration Job does.
