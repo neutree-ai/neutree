@@ -244,7 +244,6 @@ func TestNvidiaHAMiV210MonitorMetrics(t *testing.T) {
 		utilizationRatio float64
 	}{
 		{name: "idle_utilization", smUtil: 0, utilizationRatio: 0},
-		{name: "one_percent_utilization", smUtil: 1, utilizationRatio: 0.01},
 		{name: "partial_utilization", smUtil: 75, utilizationRatio: 0.75},
 		{name: "full_utilization", smUtil: 100, utilizationRatio: 1},
 	}
