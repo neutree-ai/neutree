@@ -81,9 +81,9 @@ func TestEndpointDirectAddressesAgree(t *testing.T) {
 				}
 				assert.Equal(t, http.MethodPost, r.Method)
 				assert.Equal(t, "/services", r.URL.Path)
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&pushed))
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&pushed))
 				w.WriteHeader(http.StatusCreated)
-				require.NoError(t, json.NewEncoder(w).Encode(pushed))
+				assert.NoError(t, json.NewEncoder(w).Encode(pushed))
 			}))
 			defer server.Close()
 			client, err := kong.NewClient(&server.URL, server.Client())
