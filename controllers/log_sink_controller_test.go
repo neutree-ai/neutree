@@ -456,3 +456,56 @@ func failingUpdateStorage(t *testing.T, h *logSinkHarness) storage.Storage {
 
 	return st
 }
+
+func TestLogSinkStallGrace(t *testing.T) {
+	vl := newTestLogSink(1, "a").Spec
+	assert.Equal(t, 2*time.Minute, logSinkStallGrace(vl))
+
+	vl.VictoriaLogs.TimeoutSeconds = 300
+	assert.Equal(t, 6*time.Minute, logSinkStallGrace(vl))
+}
+
+// An unreachable or timing-out store makes Vector retry forever without an
+// error metric: only the buffer grows while nothing is sent.
+func TestLogSinkController_Stalled(t *testing.T) {
+	h := newLogSinkHarness(t, newTestLogSink(1, "a"))
+
+	h.pass(0)
+	id := h.status(1).ComponentID
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+
+	// Events pile up, nothing is sent: Running for the 2m grace.
+	buffered := 0.0
+	step := func() {
+		buffered += 5
+		h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10, Buffered: buffered}
+		h.pass(30 * time.Second)
+	}
+
+	for i := 0; i < 4; i++ {
+		step()
+		assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase, "pass %d", i)
+	}
+
+	step()
+	assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase)
+	assert.Equal(t, "25 events buffered, none delivered for 2m; the store may be unreachable or too slow", h.status(1).ErrorMessage)
+
+	// Five more minutes: Failed.
+	for i := 0; i < 9; i++ {
+		step()
+		assert.Equal(t, v1.LogSinkPhaseDEGRADED, h.status(1).Phase, "pass %d", i)
+	}
+
+	step()
+	assert.Equal(t, v1.LogSinkPhaseFAILED, h.status(1).Phase)
+	assert.Contains(t, h.status(1).ErrorMessage, "none delivered for 7m")
+
+	// The store is back: the backlog drains and the sink recovers at once.
+	h.metrics.Components[id] = logsink.ComponentCounters{Running: true, Sent: 10 + buffered, Buffered: 3}
+	h.pass(30 * time.Second)
+	assert.Equal(t, v1.LogSinkPhaseRUNNING, h.status(1).Phase)
+	assert.Empty(t, h.status(1).ErrorMessage)
+}
