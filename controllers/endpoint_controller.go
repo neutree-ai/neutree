@@ -223,11 +223,11 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 			status.ServiceURL = serviceURL
 		}
 
-		// The names are read on every Running reconcile, because the status
-		// cannot tell an instance already serving the current spec from one
-		// still serving a previous one. Probing less often would mean recording
-		// names the instance no longer answers to; skipping the request when the
-		// applied spec is unchanged is a later optimization.
+		// The names are read on every Running reconcile, because the phase comes
+		// from the workload and cannot tell an instance already serving the current
+		// spec from one still serving a previous one.
+		//
+		// Optimization: skip the read when the applied spec is unchanged.
 		models, err := c.getServedModels(obj)
 		if err != nil {
 			klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)

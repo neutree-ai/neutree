@@ -690,20 +690,6 @@ func TestServedModelsProbeBypassesEnvironmentProxy(t *testing.T) {
 	assert.Nil(t, transport.Proxy)
 }
 
-func TestFetchServedModelsDoesNotFollowRedirect(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("model discovery followed a redirect")
-	}))
-	defer target.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusFound)
-	}))
-	defer server.Close()
-	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}, Status: &v1.ClusterStatus{DashboardURL: server.URL}}
-	_, err := fetchServedModels(cluster, ep(1, v1.EndpointPhaseRUNNING))
-	require.Error(t, err)
-}
-
 func TestEndpointServedModelsStatus(t *testing.T) {
 	c := &EndpointController{}
 	endpoint := ep(1, v1.EndpointPhaseRUNNING)

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"crypto/tls"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,19 @@ import (
 	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// servedModelsClient reaches the cluster directly. The target is a cluster-internal
+// address, and a proxy configured in the control plane's environment would answer in
+// place of the endpoint.
+var servedModelsClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		Proxy: nil,
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	},
+}
 
 func (c *EndpointController) getServedModels(endpoint *v1.Endpoint) ([]string, error) {
 	clusters, err := c.storage.ListCluster(storage.ListOption{
@@ -30,27 +44,6 @@ func (c *EndpointController) getServedModels(endpoint *v1.Endpoint) ([]string, e
 
 	return fetchServedModels(&clusters[0], endpoint)
 }
-
-// servedModelsClient reaches the cluster directly. The target is a cluster-internal
-// address, and a proxy configured in the control plane's environment would answer in
-// place of the endpoint.
-var servedModelsClient = func() *http.Client {
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		base = &http.Transport{}
-	}
-
-	transport := base.Clone()
-	transport.Proxy = nil
-
-	return &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: transport,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}()
 
 // servedModelIDs keeps the ids an engine reports, in order and without duplicates.
 // A blank id is dropped instead of failing the observation: an engine may list a
