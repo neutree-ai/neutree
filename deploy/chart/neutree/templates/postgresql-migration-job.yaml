@@ -57,6 +57,8 @@ spec:
               value: {{ include "neutree.db.host" . }}
             - name: DB_NAME
               value: {{ .Values.db.name | quote }}
+            - name: DATA_DURABILITY
+              value: {{ ternary "required" "" (gt (int (include "neutree.db.instances" .)) 1) | quote }}
             {{- if .Values.grafanaDatabase.enabled }}
             - name: TARGET_ONLY_ROLES
               value: {{ .Values.grafanaDatabase.user | quote }}

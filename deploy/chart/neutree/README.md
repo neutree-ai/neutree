@@ -38,8 +38,12 @@ Images to mirror for offline installs: the operator image
 | Writes without a standby | n/a | blocked until a standby is back |
 | Node drain | evicts the instance; the database is down until it restarts elsewhere | the operator switches over first (PDB) |
 
-`db.instances` overrides the count. Moving from one to the other needs only
-`ha.enabled`; the operator clones the new standbys online.
+`db.instances` overrides the count. Moving from single to HA needs only
+`ha.enabled` (through `values-ha.yaml`); the operator clones the new standbys
+online. Until every standby is ready the Cluster runs with
+`dataDurability: preferred`, so writes do not wait for the copy; the migration
+Job then sets `required`. Writes pause once, for the switchover that applies
+the HA pod settings to the primary (about 10 seconds).
 
 All components connect through the `<release>-pg-rw` Service, which follows the
 primary. PostgREST and the seed Job add the TCP keepalive parameters in

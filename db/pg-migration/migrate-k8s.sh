@@ -6,7 +6,8 @@
 #
 # Environment: NAMESPACE, CLUSTER, TARGET_HOST, DB_NAME, PGUSER, PGPASSWORD,
 # LEGACY_DEPLOYMENT and LEGACY_SERVICE (empty when there is nothing to move),
-# AUTH_ADMIN_PASSWORD, KONG_ADMIN_PASSWORD.
+# AUTH_ADMIN_PASSWORD, KONG_ADMIN_PASSWORD; DATA_DURABILITY (the synchronous
+# replication durability the Cluster must end with, empty for one instance).
 set -euo pipefail
 
 export PATH=/tools:$PATH HOME=${WORK:-/work}
@@ -28,6 +29,16 @@ until kubectl -n "$NAMESPACE" wait "clusters.postgresql.cnpg.io/$CLUSTER" --for=
   log "Cluster $CLUSTER not ready yet"
 done
 pgm_wait_target
+
+# The chart renders "preferred" while a single instance grows to HA.
+if [ -n "${DATA_DURABILITY:-}" ]; then
+  current=$(kubectl -n "$NAMESPACE" get "clusters.postgresql.cnpg.io/$CLUSTER" -o jsonpath='{.spec.postgresql.synchronous.dataDurability}')
+  if [ "$current" != "$DATA_DURABILITY" ]; then
+    log "every instance is ready; synchronous replication dataDurability $current -> $DATA_DURABILITY"
+    kubectl -n "$NAMESPACE" patch "clusters.postgresql.cnpg.io/$CLUSTER" --type merge \
+      -p "{\"spec\":{\"postgresql\":{\"synchronous\":{\"dataDurability\":\"$DATA_DURABILITY\"}}}}"
+  fi
+fi
 
 if [ -z "$SOURCE_ID" ]; then
   log "no PostgreSQL Deployment from an earlier release; nothing to migrate"

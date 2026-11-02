@@ -34,6 +34,12 @@ rules:
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["get","list","watch"]
+  # The migration Job raises synchronous replication to required after a
+  # single instance has grown to HA.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: [{{ include "neutree.db.clusterName" . | quote }}]
+    verbs: ["patch"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get","create","update"]

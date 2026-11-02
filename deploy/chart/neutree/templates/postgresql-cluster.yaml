@@ -1,5 +1,6 @@
 {{- include "neutree.db.requireOperator" . -}}
 {{- $instances := int (include "neutree.db.instances" .) -}}
+{{- $live := lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (include "neutree.db.clusterName" .) -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -51,7 +52,14 @@ spec:
     synchronous:
       method: any
       number: 1
+      {{- if and $live (not (dig "spec" "postgresql" "synchronous" "" $live)) }}
+      # Growing a single instance: "required" would stall every commit until
+      # the first standby has copied the whole database. The migration Job
+      # raises it to required once every instance is ready.
+      dataDurability: preferred
+      {{- else }}
       dataDurability: required
+      {{- end }}
     {{- end }}
   {{- end }}
   {{- if .Values.grafanaDatabase.enabled }}
