@@ -78,8 +78,9 @@ const (
 type EndpointStatus struct {
 	// ServedModels preserves the order reported by the inference instance's /v1/models API.
 	ServedModels []string `json:"served_models,omitempty"`
-	// ObservedSpecHash identifies the endpoint spec ServedModels was discovered for.
-	// While it matches the current spec, discovery is skipped and the recorded names are reused.
+	// ObservedSpecHash identifies the endpoint spec the derived parts of this
+	// status, such as the discovered served models, belong to. It advances only
+	// once the status has been derived from the current spec.
 	ObservedSpecHash   string                 `json:"observed_spec_hash,omitempty"`
 	KVCache            *EndpointKVCacheStatus `json:"kv_cache,omitempty"`
 	Phase              EndpointPhase          `json:"phase,omitempty"`

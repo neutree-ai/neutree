@@ -214,6 +214,13 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		return nil, errors.Wrapf(err, "failed to get endpoint status from orchestrator for endpoint %s", obj.Metadata.WorkspaceName())
 	}
 
+	// The fingerprint names the spec the derived parts of the status belong to.
+	// It is only advanced below, once this status actually reflects the current
+	// spec, so stale data is never mistaken for a fresh observation.
+	if obj.Status != nil {
+		status.ObservedSpecHash = obj.Status.ObservedSpecHash
+	}
+
 	// Get service URL for running endpoints
 	if status.Phase == v1.EndpointPhaseRUNNING {
 		serviceURL, err := c.gw.GetEndpointServeUrl(obj)
@@ -223,7 +230,12 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 			status.ServiceURL = serviceURL
 		}
 
-		status.ServedModels, status.ObservedSpecHash = c.servedModelsForStatus(obj)
+		specHash := endpointSpecHash(obj)
+
+		if models, observed := c.servedModelsForStatus(obj, specHash); observed {
+			status.ServedModels = models
+			status.ObservedSpecHash = specHash
+		}
 	}
 
 	return status, nil
@@ -319,9 +331,11 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
-	if status.ServedModels == nil && obj.Status != nil {
+	// The names are only meaningful together with the spec they were discovered
+	// for, so they are carried over only while the fingerprint still points there.
+	if status.ServedModels == nil && obj.Status != nil &&
+		obj.Status.ObservedSpecHash == status.ObservedSpecHash {
 		status.ServedModels = obj.Status.ServedModels
-		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	c.preserveResources(obj, status)

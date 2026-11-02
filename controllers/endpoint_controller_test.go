@@ -730,10 +730,17 @@ func TestEndpointObservedSpecHash(t *testing.T) {
 	endpoint.Status.ServedModels = []string{"first"}
 	endpoint.Status.ObservedSpecHash = "recorded"
 
-	// The hash travels with the names when discovery did not run.
-	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+	// A status derived for a different spec does not inherit the names: they
+	// belong to the recorded spec.
+	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "other"}
 	c.prepareStatusForUpdate(endpoint, status)
-	assert.Equal(t, "recorded", status.ObservedSpecHash)
+	assert.Nil(t, status.ServedModels)
+
+	// While the fingerprint still points at the recorded spec, the names it
+	// describes are carried over.
+	status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "recorded"}
+	c.prepareStatusForUpdate(endpoint, status)
+	assert.Equal(t, []string{"first"}, status.ServedModels)
 
 	// A new hash alone is enough to persist the status.
 	assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{

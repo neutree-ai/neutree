@@ -17,28 +17,23 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// servedModelsForStatus keeps the probing of the inference instance tied to spec
-// changes: the recorded names are reused while the hash still matches the spec,
-// and a failed probe leaves both the names and the hash untouched so the next
-// reconcile tries again without churning the status.
-func (c *EndpointController) servedModelsForStatus(endpoint *v1.Endpoint) ([]string, string) {
-	specHash := endpointSpecHash(endpoint)
+// servedModelsForStatus reports the names the inference instance serves and
+// whether they were derived from specHash. The probe is skipped while the
+// recorded observation already belongs to that spec, and a failed probe reports
+// no observation so the status keeps what it has and the next reconcile retries.
+func (c *EndpointController) servedModelsForStatus(endpoint *v1.Endpoint, specHash string) ([]string, bool) {
 	if specHash != "" && endpoint.Status != nil && endpoint.Status.ObservedSpecHash == specHash {
-		return endpoint.Status.ServedModels, specHash
+		return endpoint.Status.ServedModels, true
 	}
 
 	models, err := c.getServedModels(endpoint)
 	if err != nil {
 		klog.Warningf("failed to get endpoint %s served models: %v", endpoint.Metadata.WorkspaceName(), err)
 
-		if endpoint.Status != nil {
-			return endpoint.Status.ServedModels, endpoint.Status.ObservedSpecHash
-		}
-
-		return nil, ""
+		return nil, false
 	}
 
-	return models, specHash
+	return models, true
 }
 
 // endpointSpecHash is deterministic for equal specs: encoding/json sorts map keys
