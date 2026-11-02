@@ -724,20 +724,56 @@ func TestEndpointServedModelsStatus(t *testing.T) {
 	assert.False(t, c.shouldUpdateStatus(ep(1, v1.EndpointPhaseRUNNING), &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{}}))
 }
 
+func TestEndpointObservedSpecHash(t *testing.T) {
+	c := &EndpointController{}
+	endpoint := ep(1, v1.EndpointPhaseRUNNING)
+	endpoint.Status.ServedModels = []string{"first"}
+	endpoint.Status.ObservedSpecHash = "recorded"
+
+	// The hash travels with the names when discovery did not run.
+	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING}
+	c.prepareStatusForUpdate(endpoint, status)
+	assert.Equal(t, "recorded", status.ObservedSpecHash)
+
+	// A new hash alone is enough to persist the status.
+	assert.True(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{
+		Phase:            v1.EndpointPhaseRUNNING,
+		ServedModels:     []string{"first"},
+		ObservedSpecHash: "new",
+	}))
+
+	// Same names and same hash are not a change.
+	assert.False(t, c.shouldUpdateStatus(endpoint, &v1.EndpointStatus{
+		Phase:            v1.EndpointPhaseRUNNING,
+		ServedModels:     []string{"first"},
+		ObservedSpecHash: "recorded",
+	}))
+}
+
 func TestEndpointControllerObservesServedModels(t *testing.T) {
 	original := orchestrator.NewOrchestrator
 	t.Cleanup(func() { orchestrator.NewOrchestrator = original })
 	cases := []struct {
-		name     string
-		phase    v1.EndpointPhase
-		body     string
-		want     []string
-		requests int
+		name string
+		// recordedHash selects what the endpoint status carries before the call:
+		// empty, the current spec hash, or a hash of a different spec.
+		recordedHash string
+		phase        v1.EndpointPhase
+		body         string
+		want         []string
+		// wantHashEmpty asserts the observed hash is left unset.
+		wantHashEmpty bool
+		// keepRecordedHash asserts a failed probe leaves the recorded hash as is.
+		keepRecordedHash bool
+		requests         int
 	}{
 		{name: "refresh running", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
-		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
+		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, wantHashEmpty: true, requests: 1},
 		{name: "successful empty clears observation", phase: v1.EndpointPhaseRUNNING, body: `{"data":[]}`, want: []string{}, requests: 1},
-		{name: "paused does not probe", phase: v1.EndpointPhasePAUSED, want: []string{"previous"}},
+		{name: "paused does not probe", phase: v1.EndpointPhasePAUSED, want: []string{"previous"}, wantHashEmpty: true},
+		{name: "unchanged spec reuses observation", recordedHash: "current", phase: v1.EndpointPhaseRUNNING, want: []string{"previous"}},
+		{name: "changed spec probes again", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
+		{name: "changed spec keeps recorded hash when probe fails", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, keepRecordedHash: true, requests: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -755,11 +791,29 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 			c := newTestEndpointController(store, o)
 			endpoint := ep(1, v1.EndpointPhaseRUNNING)
 			endpoint.Status.ServedModels = []string{"previous"}
+			recordedHash := ""
+			switch tc.recordedHash {
+			case "current":
+				recordedHash = endpointSpecHash(endpoint)
+			case "stale":
+				recordedHash = "hash-of-a-different-spec"
+			}
+			endpoint.Status.ObservedSpecHash = recordedHash
+
 			status, err := c.getActualStatus(endpoint)
 			require.NoError(t, err)
 			c.prepareStatusForUpdate(endpoint, status)
 			assert.Equal(t, tc.phase, status.Phase)
 			assert.Equal(t, tc.want, status.ServedModels)
+			if tc.wantHashEmpty {
+				assert.Empty(t, status.ObservedSpecHash)
+			} else {
+				wantHash := endpointSpecHash(endpoint)
+				if tc.keepRecordedHash {
+					wantHash = recordedHash
+				}
+				assert.Equal(t, wantHash, status.ObservedSpecHash)
+			}
 			assert.Equal(t, tc.requests, requests)
 			store.AssertExpectations(t)
 			o.AssertExpectations(t)

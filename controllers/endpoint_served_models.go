@@ -1,17 +1,58 @@
 package controllers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/pkg/errors"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
+
+// servedModelsForStatus keeps the probing of the inference instance tied to spec
+// changes: the recorded names are reused while the hash still matches the spec,
+// and a failed probe leaves both the names and the hash untouched so the next
+// reconcile tries again without churning the status.
+func (c *EndpointController) servedModelsForStatus(endpoint *v1.Endpoint) ([]string, string) {
+	specHash := endpointSpecHash(endpoint)
+	if specHash != "" && endpoint.Status != nil && endpoint.Status.ObservedSpecHash == specHash {
+		return endpoint.Status.ServedModels, specHash
+	}
+
+	models, err := c.getServedModels(endpoint)
+	if err != nil {
+		klog.Warningf("failed to get endpoint %s served models: %v", endpoint.Metadata.WorkspaceName(), err)
+
+		if endpoint.Status != nil {
+			return endpoint.Status.ServedModels, endpoint.Status.ObservedSpecHash
+		}
+
+		return nil, ""
+	}
+
+	return models, specHash
+}
+
+// endpointSpecHash is deterministic for equal specs: encoding/json sorts map keys
+// and EndpointSpec holds only JSON-representable values.
+func endpointSpecHash(endpoint *v1.Endpoint) string {
+	data, err := json.Marshal(endpoint.Spec)
+	if err != nil {
+		return ""
+	}
+
+	sum := sha256.Sum256(data)
+
+	return hex.EncodeToString(sum[:])
+}
 
 func (c *EndpointController) getServedModels(endpoint *v1.Endpoint) ([]string, error) {
 	clusters, err := c.storage.ListCluster(storage.ListOption{

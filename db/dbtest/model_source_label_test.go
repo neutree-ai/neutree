@@ -377,13 +377,19 @@ func TestEndpointServedModelsRoundTrip(t *testing.T) {
 	id := insertServedModelsEndpoint(t, db, "served-model-roundtrip", "default", `{"phase":"Running"}`, false)
 
 	require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
-		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{"z-first-alias", "a-second-alias"}},
+		Status: &v1.EndpointStatus{
+			Phase:            v1.EndpointPhaseRUNNING,
+			ServedModels:     []string{"z-first-alias", "a-second-alias"},
+			ObservedSpecHash: "spec-hash",
+		},
 	}))
 	got, err := s.GetEndpoint(strconv.Itoa(id))
 	require.NoError(t, err)
 	require.NotNil(t, got.Status)
 	assert.Equal(t, []string{"z-first-alias", "a-second-alias"}, got.Status.ServedModels,
 		"PostgREST must preserve the order reported by the engine")
+	assert.Equal(t, "spec-hash", got.Status.ObservedSpecHash,
+		"the spec fingerprint must survive the round trip so discovery can be skipped")
 
 	// An empty observation carries no candidates, exactly like an endpoint that
 	// has never been probed, so the field is omitted rather than stored as [].

@@ -223,12 +223,7 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 			status.ServiceURL = serviceURL
 		}
 
-		models, err := c.getServedModels(obj)
-		if err != nil {
-			klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)
-		} else {
-			status.ServedModels = models
-		}
+		status.ServedModels, status.ObservedSpecHash = c.servedModelsForStatus(obj)
 	}
 
 	return status, nil
@@ -258,7 +253,8 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
-	if !slices.Equal(obj.Status.ServedModels, normalizedStatus.ServedModels) {
+	if !slices.Equal(obj.Status.ServedModels, normalizedStatus.ServedModels) ||
+		obj.Status.ObservedSpecHash != normalizedStatus.ObservedSpecHash {
 		return true
 	}
 
@@ -325,6 +321,7 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 
 	if status.ServedModels == nil && obj.Status != nil {
 		status.ServedModels = obj.Status.ServedModels
+		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	c.preserveResources(obj, status)
