@@ -33,12 +33,16 @@ def _native_error_response(exc: Exception, payload, where: str) -> Tuple[Dict[st
             # headers set by the engine are not reproduced at the Controller.
             return {"detail": exc.detail}, exc.status_code
         try:
-            if "messages" in payload:
-                body = CreateChatCompletionRequest(**payload)
-            elif "prompt" in payload:
-                body = CreateCompletionRequest(**payload)
+            # Request parsing accepts lax stream spellings, including null, that
+            # the native request models reject. The formatter only needs the
+            # request shape, so rebuild without stream to keep native statuses.
+            body_payload = {key: value for key, value in payload.items() if key != "stream"}
+            if "messages" in body_payload:
+                body = CreateChatCompletionRequest(**body_payload)
+            elif "prompt" in body_payload:
+                body = CreateCompletionRequest(**body_payload)
             else:
-                body = CreateEmbeddingRequest(**payload)
+                body = CreateEmbeddingRequest(**body_payload)
         except Exception:
             body = None
         endpoint = create_chat_completion if isinstance(body, CreateChatCompletionRequest) else create_completion

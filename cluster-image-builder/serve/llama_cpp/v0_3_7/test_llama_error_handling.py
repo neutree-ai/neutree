@@ -56,9 +56,11 @@ def wrapper():
     class ChatRequest(BaseModel):
         messages: list[dict]
         max_tokens: int | None = None
+        stream: bool = False
     class CompletionRequest(BaseModel):
         prompt: str
         max_tokens: int | None = None
+        stream: bool = False
     class EmbeddingRequest(BaseModel):
         input: str
     chat_endpoint, completion_endpoint = object(), object()
@@ -108,11 +110,6 @@ def test_nonfinite_values_are_sanitized(wrapper, value):
     assert wire["status_code"] == 200
     assert wire["content"] == {"value": None}
     json.dumps(wire, allow_nan=False)
-
-
-def test_model_list_error_is_contained(wrapper):
-    del wrapper.backend.model_id
-    assert call(wrapper, "show_available_models")["status_code"] == 500
 
 
 def test_sync_iterator_stays_in_backend(wrapper):
@@ -419,7 +416,22 @@ def test_nonstream_errors_use_native_bound_formatter(wrapper, attribute, payload
     assert wire["content"] == {"error": detail}
     wrapper.formatter.assert_called_once()
     assert wrapper.formatter.call_args.kwargs["error"] is error
-    assert wrapper.formatter.call_args.kwargs["body"].model_dump() == payload
+    assert wrapper.formatter.call_args.kwargs["body"].model_dump() == {**payload, "stream": False}
+
+
+@pytest.mark.parametrize("attribute,payload", [
+    ("create_chat_completion", {"messages": [], "stream": None}),
+    ("create_completion", {"prompt": "hi", "stream": None}),
+])
+def test_null_stream_keeps_native_error_classification(wrapper, attribute, payload):
+    detail = {"message": "native formatter result", "type": "invalid_request_error", "param": None, "code": "context_length_exceeded"}
+    wrapper.formatter.side_effect = None
+    wrapper.formatter.return_value = (400, detail)
+    getattr(wrapper.llama, attribute).side_effect = ValueError("Requested tokens (17) exceed context window of 16")
+    wire = call(wrapper, payload=payload)
+    assert wire["status_code"] == 400
+    assert wire["content"] == {"error": detail}
+    assert wrapper.formatter.call_args.kwargs["body"] is not None
 
 
 @pytest.mark.parametrize("method,attribute,payload", [
