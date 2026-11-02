@@ -12,6 +12,7 @@ import (
 const sampleMetrics = `# TYPE vector_component_sent_events_total counter
 vector_component_sent_events_total{component_id="logsink_ok",component_kind="sink",component_type="http"} 5 1792233729442
 vector_component_sent_events_total{component_id="ai_trace_victorialogs",component_kind="sink",component_type="http"} 9 1792233729442
+vector_component_sent_events_total{component_id="logsink_s3",component_kind="sink",component_type="aws_s3"} 30 1792487595762
 # TYPE vector_component_errors_total counter
 vector_component_errors_total{component_id="logsink_deny",component_kind="sink",component_type="http",error_type="request_failed",stage="sending"} 1 1792233729442
 vector_component_errors_total{error_code="config_load",error_type="configuration_failed",stage="processing"} 2 1792233729442
@@ -25,6 +26,8 @@ vector_http_client_errors_total{component_id="logsink_down",component_kind="sink
 # TYPE vector_http_client_responses_total counter
 vector_http_client_responses_total{component_id="logsink_ok",component_kind="sink",component_type="http",status="200"} 1 1792233729442
 vector_http_client_responses_total{component_id="logsink_deny",component_kind="sink",component_type="http",status="401"} 1 1792233729442
+# TYPE vector_buffer_events gauge
+vector_buffer_events{buffer_type="disk",component_id="logsink_s3",component_kind="sink",component_type="aws_s3",stage="0"} 19 1792487595762
 # TYPE vector_utilization gauge
 vector_utilization{component_id="logsink_idle",component_kind="sink",component_type="http"} 0.002 1792233729442
 # TYPE vector_reloaded_total counter
@@ -43,6 +46,8 @@ func TestParseMetrics(t *testing.T) {
 		"logsink_down": {Failed: 7, Dropped: 3},
 		// Only utilization shows a sink is running; an idle one still reports it.
 		"logsink_idle": {Running: true},
+		// Measured on aws_s3: events waiting in an unflushed batch count as buffered.
+		"logsink_s3": {Sent: 30, Buffered: 19},
 	}, m.Components)
 }
 
@@ -58,8 +63,9 @@ func TestRejectedSince(t *testing.T) {
 }
 
 func TestComponentCountersSub(t *testing.T) {
-	cur := ComponentCounters{Sent: 10, Failed: 2, Dropped: 1}
-	assert.Equal(t, ComponentCounters{Sent: 4, Failed: 1}, cur.Sub(ComponentCounters{Sent: 6, Failed: 1, Dropped: 1}))
+	cur := ComponentCounters{Sent: 10, Failed: 2, Dropped: 1, Buffered: 3}
+	// Buffered is a gauge, so it is the current value.
+	assert.Equal(t, ComponentCounters{Sent: 4, Failed: 1, Buffered: 3}, cur.Sub(ComponentCounters{Sent: 6, Failed: 1, Dropped: 1, Buffered: 7}))
 	// A counter that went backwards was reset: the current value is the change.
-	assert.Equal(t, ComponentCounters{Sent: 10, Failed: 2, Dropped: 1}, cur.Sub(ComponentCounters{Sent: 50, Failed: 9, Dropped: 3}))
+	assert.Equal(t, ComponentCounters{Sent: 10, Failed: 2, Dropped: 1, Buffered: 3}, cur.Sub(ComponentCounters{Sent: 50, Failed: 9, Dropped: 3}))
 }
