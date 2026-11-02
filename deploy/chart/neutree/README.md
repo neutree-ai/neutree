@@ -87,7 +87,8 @@ A plain `helm upgrade` moves the data into the new Cluster:
 1. The chart keeps the old Deployment, Service and PVC exactly as they are (the
    PVC gets `helm.sh/resource-policy: keep`) and creates the Cluster.
 2. The Job `<release>-pg-migration-<revision>` waits until the Cluster is
-   ready, then stops writes to the old database: it points the old Service at
+   ready (in HA mode the Cluster is created with `dataDurability: preferred`
+   and the Job sets `required` at this point), then stops writes to the old database: it points the old Service at
    no pod and closes the open connections. Writers get connection errors and
    retry; the running Kong pods keep routing from their cache.
 3. It copies roles (`pg_dumpall --roles-only`) and the database

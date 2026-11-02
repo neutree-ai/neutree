@@ -1,6 +1,15 @@
 {{- include "neutree.db.requireOperator" . -}}
 {{- $instances := int (include "neutree.db.instances" .) -}}
 {{- $live := lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (include "neutree.db.clusterName" .) -}}
+{{- /* The Cluster is growing to HA: from one instance, or created next to the
+PostgreSQL Deployment of an earlier release. */ -}}
+{{- $growing := false -}}
+{{- if $live -}}
+{{- $sync := dig "spec" "postgresql" "synchronous" dict $live -}}
+{{- $growing = or (not $sync) (eq (dig "dataDurability" "" $sync) "preferred") -}}
+{{- else -}}
+{{- $growing = not (empty (lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" (include "neutree.fullname" .)))) -}}
+{{- end -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -52,10 +61,10 @@ spec:
     synchronous:
       method: any
       number: 1
-      {{- if and $live (not (dig "spec" "postgresql" "synchronous" "" $live)) }}
-      # Growing a single instance: "required" would stall every commit until
-      # the first standby has copied the whole database. The migration Job
-      # raises it to required once every instance is ready.
+      {{- if $growing }}
+      # "required" would stall every commit until the first standby has copied
+      # the whole database. The migration Job raises it to required once every
+      # instance is ready.
       dataDurability: preferred
       {{- else }}
       dataDurability: required
