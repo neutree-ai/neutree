@@ -89,22 +89,6 @@ Neither behavior needs a local patch in 2.10.0. Keep that profile's upstream
 device-config defaults, including the new MIG profile allowlist and NUMA
 topology setting; do not apply them to the legacy chart.
 
-## DRA and Webhook Configuration
-
-The legacy 2.9.0 profile keeps `dra.enabled: false`; user `config_patch` cannot
-enable it. Its optional DRA dependency need not be vendored for in-process
-chart loading. HAMi 2.10.0 removes DRA from its main chart, so that
-archive has no DRA dependency and the new profile does not set the obsolete
-`dra.enabled` value. Neither profile installs HAMi-DRA or ascend-dra-driver;
-user `config_patch` cannot enable DRA.
-
-Neutree enforces `scheduler.admissionWebhook.enabled: true` and
-`scheduler.admissionWebhook.manageNamespaceSelector: true`, supplies its own
-TLS secret and CA bundle, and disables chart-managed certificate jobs. The
-upstream webhook `failurePolicy: Ignore` and namespace selector remain intact;
-namespaces labeled `hami.io/webhook: ignore` are excluded, but admission is not
-restricted to the owning Neutree cluster namespace.
-
 ## Kubernetes Scheduler Images
 
 Both profiles retain the existing Kubernetes 1.26–1.32 scheduler image pins
