@@ -242,6 +242,23 @@ def test_other_first_frames_are_not_rewritten(frame):
     assert errors.stream_error_response(frame) is None
 
 
+def test_first_frame_wire_envelope_restores_explicit_status():
+    wire = errors.wire_response({"detail": "busy"}, 503)
+    response = errors.stream_error_response("data: " + json.dumps(wire))
+    assert response.status_code == 503
+    assert json.loads(response.body) == {"detail": "busy"}
+
+
+@pytest.mark.parametrize("wire", [
+    {errors.WIRE_RESPONSE_MARKER: True},
+    {errors.WIRE_RESPONSE_MARKER: True, "content": {}, "status_code": "not-a-status"},
+])
+def test_first_frame_malformed_wire_envelope_fails_closed(wire):
+    response = errors.stream_error_response("data: " + json.dumps(wire))
+    assert response.status_code == 500
+    assert json.loads(response.body)["error"]["type"] == "InternalServerError"
+
+
 def test_wire_response_envelope_is_json_safe():
     wire = errors.wire_response({"value": float("inf")}, 503)
     assert wire == {

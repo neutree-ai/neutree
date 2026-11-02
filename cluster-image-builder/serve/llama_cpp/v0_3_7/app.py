@@ -218,9 +218,11 @@ class Backend:
                 return _stream_chunks(response, payload, "generate")
             return _to_wire_response(response)
         except Exception as exc:
-            if stream:
-                return error_stream(_native_error_response(exc, payload, "generate")[0])
             content, status_code = _native_error_response(exc, payload, "generate")
+            if stream:
+                # HTTPException bodies carry no status field, so send both
+                # explicitly for the Controller's first-frame check.
+                return error_stream(_to_wire_response(content, status_code))
             return _to_wire_response(content, status_code)
 
     async def generate_embeddings(self, payload: Any):

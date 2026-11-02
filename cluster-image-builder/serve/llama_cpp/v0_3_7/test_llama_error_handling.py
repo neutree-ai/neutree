@@ -130,8 +130,12 @@ def test_iteration_errors_use_native_before_first_and_neutral_midstream(wrapper,
         raise RuntimeError("iteration failed")
     wrapper.llama.create_chat_completion.return_value = chunks()
     frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    error = json.loads(frames[-2][6:])
+    if before_first:
+        assert error["status_code"] == 500
+        error = error["content"]
     expected_type = "internal_server_error" if before_first else "InternalServerError"
-    assert json.loads(frames[-2][6:])["error"]["type"] == expected_type
+    assert error["error"]["type"] == expected_type
     assert frames.count("data: [DONE]\n\n") == 1
 
 
@@ -245,7 +249,9 @@ def test_stream_nonfinite_values_are_sanitized(wrapper, value):
 def test_failure_before_stream_iteration_uses_native_classification(wrapper):
     wrapper.load.side_effect = RuntimeError("load failed")
     frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    assert json.loads(frames[0][6:])["error"]["message"] == "load failed"
+    envelope = json.loads(frames[0][6:])
+    assert envelope["status_code"] == 500
+    assert envelope["content"]["error"]["message"] == "load failed"
     assert frames[-1] == "data: [DONE]\n\n"
 
 
@@ -299,7 +305,11 @@ def test_escaped_errors_keep_native_classification_before_first_chunk(wrapper, a
     with patch.object(builtins, "__import__", side_effect=forbid_native) as importer:
         result = call(wrapper, payload={**payload, "stream": True})
         frames = asyncio.run(collect(result))
-        assert json.loads(frames[-2].removeprefix("data:")) == (expected_neutral if mode == "midstream" else expected_native)
+        error = json.loads(frames[-2].removeprefix("data:"))
+        if mode == "before":
+            assert error["status_code"] == 500
+            error = error["content"]
+        assert error == (expected_neutral if mode == "midstream" else expected_native)
         assert frames.count("data: [DONE]\n\n") == 1
         if mode == "midstream":
             assert json.loads(frames[0].removeprefix("data:")) == {"choices": []}
@@ -308,6 +318,43 @@ def test_escaped_errors_keep_native_classification_before_first_chunk(wrapper, a
     else:
         wrapper.formatter.assert_called_once()
     assert not any(call.args[0].startswith("llama_cpp") for call in importer.call_args_list)
+
+
+@pytest.mark.parametrize("stage", ["setup", "first-read"])
+def test_http_exception_before_first_stream_error_keeps_native_status(wrapper, stage):
+    if stage == "setup":
+        wrapper.llama.create_chat_completion.side_effect = HTTPException(503, "busy")
+    else:
+        def chunks():
+            raise HTTPException(503, "busy")
+            yield
+        wrapper.llama.create_chat_completion.return_value = chunks()
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    async def stream():
+        for frame in frames:
+            yield frame
+    http, _ = client(wrapper, stream=stream())
+    response = http.post("/v1/chat/completions", json={"stream": True})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "busy"}
+
+
+def test_http_exception_after_first_stream_frame_stays_in_band(wrapper):
+    def chunks():
+        yield {"choices": []}
+        raise HTTPException(503, "busy")
+    wrapper.llama.create_chat_completion.return_value = chunks()
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
+    assert json.loads(frames[-2][6:]) == {"error": {
+        "message": "Internal server error", "type": "InternalServerError", "param": None, "code": 500,
+    }}
+    async def stream():
+        for frame in frames:
+            yield frame
+    http, _ = client(wrapper, stream=stream())
+    response = http.post("/v1/chat/completions", json={"stream": True})
+    assert response.status_code == 200
+    assert response.text == "".join(frames)
 
 
 @pytest.mark.parametrize("status,code", [(400, "context_length_exceeded"), (429, "rate_limit_exceeded")])

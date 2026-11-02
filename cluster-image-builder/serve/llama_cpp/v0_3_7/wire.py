@@ -63,9 +63,14 @@ async def _stream_chunks(chunks, payload, where: str):
             yield frame
         yield "data: [DONE]\n\n"
     except Exception as exc:
-        # Native classification restores 4xx statuses for errors raised before
-        # the first token; mid-stream failures stay neutral.
-        error = _native_error_response(exc, payload, where)[0] if first else backend_error(exc, "stream interrupted")
+        # A native HTTPException body is only {"detail": ...}, so its status
+        # cannot be recovered from the error payload. Pre-first failures carry
+        # the status explicitly; mid-stream failures stay neutral in-band.
+        if first:
+            content, status_code = _native_error_response(exc, payload, where)
+            error = wire_response(content, status_code)
+        else:
+            error = backend_error(exc, "stream interrupted")
         async for frame in error_stream(error):
             yield frame
 

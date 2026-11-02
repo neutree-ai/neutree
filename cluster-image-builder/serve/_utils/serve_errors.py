@@ -236,6 +236,11 @@ def stream_error_response(first_chunk: Any) -> JSONResponse | None:
         return None
     if not isinstance(data, dict):
         return None
+    if data.get(WIRE_RESPONSE_MARKER) is True:
+        # Pre-first-frame failures can carry an explicit status. A native
+        # HTTPException body is only {"detail": ...}, so the status cannot be
+        # recovered from the error payload itself.
+        return wire_http_response(data)
     if data.get("object") == "error":
         return JSONResponse(content=json_safe(data), status_code=stream_error_status(data))
     if "error" not in data:
