@@ -1,10 +1,9 @@
 import os
 import enum
-import json
 import time
 import inspect
 import fnmatch
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, Optional
 
 import ray
 from ray import serve
@@ -12,12 +11,10 @@ from ray.serve import Application
 from ray.serve.config import RequestRouterConfig
 from ray.serve.handle import DeploymentHandle, DeploymentResponseGenerator
 from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse, StreamingResponse
 import llama_cpp
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.server.settings import ModelSettings
 from llama_cpp.server.model import LlamaProxy
-from llama_cpp.server.app import create_chat_completion, create_completion
 
 from fastapi.middleware.cors import CORSMiddleware
 from starlette_context.plugins import RequestIdPlugin
@@ -26,6 +23,22 @@ from starlette_context.middleware import RawContextMiddleware
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.serve_errors import (
+    RequestInputError,
+    backend_error,
+    error_stream,
+    input_error_handler,
+    is_streaming,
+    open_stream,
+    read_json_object,
+    wire_http_response,
+)
+from serve.llama_cpp.v0_3_7.wire import (
+    _native_error_response,
+    _stream_chunks,
+    _to_wire_response,
+)
+
 
 class SchedulerType(str, enum.Enum):
     POW2 = "pow2"
@@ -186,34 +199,49 @@ class Backend:
         LlamaProxy.load_llama_from_model_settings(self.model_settings)
 
     async def generate(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        if "messages" in payload:
-            # Chat completion
-            response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
-            return response
-        else:
-            # Regular completion
-            response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
-            return response
+        stream = False
+        try:
+            stream = is_streaming(payload)
+            llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            if "messages" in payload:
+                response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
+            else:
+                response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
+            if stream:
+                return _stream_chunks(response, payload, "generate")
+            return _to_wire_response(response)
+        except Exception as exc:
+            if stream:
+                return error_stream(_native_error_response(exc, payload, "generate")[0])
+            content, status_code = _native_error_response(exc, payload, "generate")
+            return _to_wire_response(content, status_code)
 
     async def generate_embeddings(self, payload: Any):
-        llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
-        response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
-        return response
+        try:
+            llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
+            return _to_wire_response(response)
+        except Exception as exc:
+            content, status_code = _native_error_response(exc, payload, "generate_embeddings")
+            return _to_wire_response(content, status_code)
 
     async def show_available_models(self) -> Dict[str, Any]:
-        """Return a list of available models"""
-        return {
-            "object": "list",
-            "data": [{
-                "id": self.model_id,
-                "object": "model",
-                "permissions": [],
-                "owned_by": "local",
-            }]
-        }
+        try:
+            return _to_wire_response({
+                "object": "list",
+                "data": [{
+                    "id": self.model_id,
+                    "object": "model",
+                    "permissions": [],
+                    "owned_by": "local",
+                }]
+            })
+        except Exception as exc:
+            return _to_wire_response(backend_error(exc, "show_available_models"))
+
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -239,26 +267,18 @@ class Controller:
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         """Chat completions endpoint"""
-        req_obj = await request.json()
-        stream = req_obj.get("stream", False)
+        req_obj = await read_json_object(request)
+        if is_streaming(req_obj):
+            # A factory keeps RPC construction inside open_stream's first-frame guard.
+            def start() -> DeploymentResponseGenerator:
+                return self.backend.options(stream=True).generate.remote(req_obj)
 
-        if stream:
-            # Get the streaming generator from the backend
-            r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
-
-            async def event_generator():
-                async for chunk in r:
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                yield "data: [DONE]\n\n"
-
-            return StreamingResponse(
-                content=event_generator(),
-                media_type="text/event-stream"
+            return await open_stream(
+                start,
+                message="Failed to initialize completion stream",
             )
-        else:
-            # Handle non-streaming response
-            result = await self.backend.options(stream=False).generate.remote(req_obj)
-            return JSONResponse(content=result)
+        result = await self.backend.options(stream=False).generate.remote(req_obj)
+        return wire_http_response(result)
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
@@ -270,14 +290,14 @@ class Controller:
     async def models(self, request: Request):
         """Available models endpoint"""
         result = await self.backend.show_available_models.remote()
-        return JSONResponse(content=result)
+        return wire_http_response(result)
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint"""
-        req_obj = await request.json()
+        req_obj = await read_json_object(request)
         result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
-        return JSONResponse(content=result)
+        return wire_http_response(result)
 
     @app.get("/health")
     async def health(self):

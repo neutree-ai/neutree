@@ -1,0 +1,7 @@
+-r neutree/downloader/requirements.txt
+pytest
+pytest-cov
+pydantic>=2,<3
+starlette<1
+fastapi
+httpx
