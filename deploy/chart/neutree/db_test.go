@@ -18,37 +18,180 @@ const (
 	keepaliveParams = "keepalives=1&keepalives_idle=10&keepalives_interval=5&keepalives_count=3&tcp_user_timeout=10000"
 )
 
-func renderedCluster(t *testing.T, resources *unstructured.UnstructuredList) map[string]interface{} {
+// dbResources returns the CloudNativePG objects the chart defines, as stored
+// in the resources ConfigMap. When helm also renders them directly, the two
+// must be identical.
+func dbResources(t *testing.T, resources *unstructured.UnstructuredList) []unstructured.Unstructured {
 	t.Helper()
 
-	for _, r := range resources.Items {
-		if r.GetKind() == "Cluster" && r.GetAPIVersion() == "postgresql.cnpg.io/v1" {
-			require.Equal(t, "neutree-pg", r.GetName())
+	var configMap corev1.ConfigMap
+	renderedObject(t, resources, "ConfigMap", "neutree-pg-resources", &configMap)
 
-			spec, _, err := unstructured.NestedMap(r.Object, "spec")
-			require.NoError(t, err)
+	var out []unstructured.Unstructured
 
-			return spec
+	for key, manifest := range configMap.Data {
+		data, err := yaml.YAMLToJSON([]byte(manifest))
+		require.NoError(t, err, key)
+
+		var object unstructured.Unstructured
+		require.NoError(t, object.UnmarshalJSON(data), key)
+
+		for _, r := range resources.Items {
+			if r.GetKind() == object.GetKind() && r.GetName() == object.GetName() {
+				require.Equal(t, object.Object, r.Object, key)
+			}
+		}
+
+		out = append(out, object)
+	}
+
+	return out
+}
+
+func dbResource(t *testing.T, resources *unstructured.UnstructuredList, kind string) (unstructured.Unstructured, bool) {
+	t.Helper()
+
+	for _, r := range dbResources(t, resources) {
+		if r.GetKind() == kind {
+			return r, true
 		}
 	}
 
-	t.Fatal("no CloudNativePG Cluster rendered")
+	return unstructured.Unstructured{}, false
+}
 
-	return nil
+func renderedCluster(t *testing.T, resources *unstructured.UnstructuredList) map[string]interface{} {
+	t.Helper()
+
+	cluster, found := dbResource(t, resources, "Cluster")
+	require.True(t, found, "no CloudNativePG Cluster rendered")
+	require.Equal(t, "postgresql.cnpg.io/v1", cluster.GetAPIVersion())
+	require.Equal(t, "neutree-pg", cluster.GetName())
+
+	spec, _, err := unstructured.NestedMap(cluster.Object, "spec")
+	require.NoError(t, err)
+
+	return spec
 }
 
 func TestDBRequiresCloudNativePG(t *testing.T) {
 	release := chartutil.ReleaseOptions{Name: "neutree", Namespace: "default", Revision: 1, IsInstall: true}
+	external := map[string]interface{}{"cnpg": map[string]interface{}{"enabled": false}}
 
+	// The bundled operator brings the API with it.
 	_, err := renderChartWithAPIs(nil, release, false)
+	require.NoError(t, err)
+
+	_, err = renderChartWithAPIs(external, release, false)
 	require.ErrorContains(t, err, "postgresql.cnpg.io/v1")
 	require.ErrorContains(t, err, "db.operatorCheck=false")
 
 	resources, err := renderChartWithAPIs(map[string]interface{}{
-		"db": map[string]interface{}{"operatorCheck": false},
+		"cnpg": map[string]interface{}{"enabled": false},
+		"db":   map[string]interface{}{"operatorCheck": false},
 	}, release, false)
 	require.NoError(t, err)
 	renderedCluster(t, resources)
+}
+
+func migrationEnv(t *testing.T, resources *unstructured.UnstructuredList) map[string]string {
+	t.Helper()
+
+	var job batchv1.Job
+	renderedObject(t, resources, "Job", "neutree-pg-migration-1", &job)
+
+	env := map[string]string{}
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		env[e.Name] = e.Value
+	}
+
+	return env
+}
+
+func TestCNPGOperatorSubchart(t *testing.T) {
+	resources := renderChart(t, nil)
+
+	var deployment appsv1.Deployment
+	renderedObject(t, resources, "Deployment", "neutree-cloudnative-pg", &deployment)
+
+	require.Equal(t, "cloudnative-pg", deployment.Labels["app.kubernetes.io/name"],
+		"the operator finds its own Deployment by this label")
+
+	container := deployment.Spec.Template.Spec.Containers[0]
+	require.Equal(t, "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1", container.Image)
+
+	env := map[string]string{}
+	for _, e := range container.Env {
+		env[e.Name] = e.Value
+	}
+
+	require.Equal(t, "default", env["WATCH_NAMESPACE"], "the operator watches the release namespace only")
+	require.Equal(t, container.Image, env["OPERATOR_IMAGE_NAME"])
+
+	var config corev1.ConfigMap
+	renderedObject(t, resources, "ConfigMap", "cnpg-controller-manager-config", &config)
+	require.Equal(t, "default", config.Data["WATCH_NAMESPACE"])
+	require.Equal(t, "true", config.Data["ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES"])
+
+	require.True(t, hasObject(resources, "Role", "neutree-cloudnative-pg"))
+	require.True(t, hasObject(resources, "CustomResourceDefinition", "clusters.postgresql.cnpg.io"))
+	require.True(t, hasObject(resources, "MutatingWebhookConfiguration", "cnpg-mutating-webhook-configuration"))
+
+	// Offline installs point the operator image at the mirror.
+	resources = renderChart(t, map[string]interface{}{
+		"cnpg": map[string]interface{}{"image": map[string]interface{}{"repository": "mirror.example/cloudnative-pg/cloudnative-pg"}},
+	})
+	renderedObject(t, resources, "Deployment", "neutree-cloudnative-pg", &deployment)
+	require.Equal(t, "mirror.example/cloudnative-pg/cloudnative-pg:1.30.1", deployment.Spec.Template.Spec.Containers[0].Image)
+}
+
+// Without a live Cluster (first install, or the first upgrade from the
+// PostgreSQL Deployment), helm cannot create the Cluster next to the operator
+// it installs; the migration Job does.
+func TestDBResourcesDeferredWithBundledOperator(t *testing.T) {
+	resources := renderChart(t, haValues(nil))
+
+	require.False(t, hasObject(resources, "Cluster", "neutree-pg"))
+	require.Len(t, dbResources(t, resources), 1)
+	require.Equal(t, "true", migrationEnv(t, resources)["CREATE_RESOURCES"])
+	require.Equal(t, "neutree-pg-resources", migrationEnv(t, resources)["RESOURCES_CONFIGMAP"])
+
+	var job batchv1.Job
+	renderedObject(t, resources, "Job", "neutree-pg-migration-1", &job)
+
+	mounted := false
+
+	for _, v := range job.Spec.Template.Spec.Volumes {
+		if v.ConfigMap != nil && v.ConfigMap.Name == "neutree-pg-resources" {
+			mounted = true
+		}
+	}
+
+	require.True(t, mounted, "the Job reads the manifests from the resources ConfigMap")
+}
+
+func TestDBResourcesWithExternalOperator(t *testing.T) {
+	resources := renderChart(t, haValues(map[string]interface{}{
+		"cnpg": map[string]interface{}{"enabled": false},
+	}))
+
+	require.True(t, hasObject(resources, "Cluster", "neutree-pg"))
+	require.Len(t, dbResources(t, resources), 1)
+	require.Equal(t, "", migrationEnv(t, resources)["CREATE_RESOURCES"])
+	require.False(t, hasObject(resources, "Deployment", "neutree-cloudnative-pg"))
+	require.False(t, hasObject(resources, "CustomResourceDefinition", "clusters.postgresql.cnpg.io"))
+}
+
+// helm must never delete the Cluster itself (a rollback to the revision that
+// deferred it would); the resources ConfigMap owns it.
+func TestDBResourcesAnnotations(t *testing.T) {
+	for _, object := range dbResources(t, renderChart(t, haValues(nil))) {
+		require.Equal(t, map[string]string{
+			"helm.sh/resource-policy":        "keep",
+			"meta.helm.sh/release-name":      "neutree",
+			"meta.helm.sh/release-namespace": "default",
+		}, object.GetAnnotations(), object.GetKind())
+	}
 }
 
 func TestDBClusterSingle(t *testing.T) {

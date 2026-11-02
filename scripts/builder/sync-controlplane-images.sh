@@ -39,9 +39,6 @@ cd "$ROOT"
 
 OUTPUT="scripts/builder/image-lists/controlplane/images.txt"
 COMPOSE_FILE="deploy/docker/neutree-core/docker-compose.yml"
-# The chart expects a preinstalled CloudNativePG operator; keep in step with
-# the operator chart version in deploy/chart/neutree/README.md.
-CNPG_OPERATOR_IMAGE="ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1"
 
 require_command() {
     local command_name="$1"
@@ -80,7 +77,6 @@ collect_helm_images() {
         --set api.image.tag=latest \
         --set core.image.tag=latest \
         --set dbScripts.image.tag=latest \
-        --set db.operatorCheck=false \
         | extract_images
 }
 
@@ -91,7 +87,7 @@ collect_compose_images() {
 }
 
 generate_images() {
-    { collect_helm_images; collect_compose_images; echo "$CNPG_OPERATOR_IMAGE"; } | while IFS= read -r image; do
+    { collect_helm_images; collect_compose_images; } | while IFS= read -r image; do
         if [[ "$image" == *"{{"* || "$image" == *"}}"* ]]; then
             echo "ERROR: unresolved image template placeholder: $image" >&2
             exit 1

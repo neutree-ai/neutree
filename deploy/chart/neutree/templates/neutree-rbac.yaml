@@ -31,11 +31,13 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
     verbs: ["get","patch","update"]
+  # The migration Job creates the Cluster when helm cannot (see
+  # neutree.db.deferred), and sets its owner.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
-    verbs: ["get","list","watch"]
-  # The migration Job raises synchronous replication to required after a
-  # single instance has grown to HA.
+    verbs: ["get","list","watch","create"]
+  # It also raises synchronous replication to required after a single instance
+  # has grown to HA.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     resourceNames: [{{ include "neutree.db.clusterName" . | quote }}]

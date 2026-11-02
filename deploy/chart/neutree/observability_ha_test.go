@@ -205,19 +205,13 @@ func TestHAOverlayGrafanaDatabase(t *testing.T) {
 	var pdb policyv1.PodDisruptionBudget
 	renderedObject(t, resources, "PodDisruptionBudget", "neutree-grafana", &pdb)
 
-	var database struct {
-		Spec struct {
-			Name    string `json:"name"`
-			Owner   string `json:"owner"`
-			Cluster struct {
-				Name string `json:"name"`
-			} `json:"cluster"`
-		} `json:"spec"`
-	}
-	renderedObject(t, resources, "Database", "neutree-grafana", &database)
-	require.Equal(t, "grafana", database.Spec.Name)
-	require.Equal(t, "grafana", database.Spec.Owner)
-	require.Equal(t, "neutree-pg", database.Spec.Cluster.Name)
+	// The migration Job creates the database: a CloudNativePG Database would
+	// hang helm uninstall on its finalizer once the operator is gone.
+	require.False(t, hasObject(resources, "Database", "neutree-grafana"))
+	require.Len(t, dbResources(t, resources), 1)
+	jobEnv := migrationEnv(t, resources)
+	require.Equal(t, "grafana", jobEnv["GRAFANA_DATABASE"])
+	require.Equal(t, "grafana", jobEnv["GRAFANA_USER"])
 
 	roles, _, err := unstructured.NestedSlice(renderedCluster(t, resources), "managed", "roles")
 	require.NoError(t, err)
@@ -239,7 +233,7 @@ func TestSingleModeObservabilityUnchanged(t *testing.T) {
 	resources := renderChart(t, nil)
 
 	require.False(t, hasObject(resources, "Secret", "neutree-grafana-db"))
-	require.False(t, hasObject(resources, "Database", "neutree-grafana"))
+	require.NotContains(t, migrationEnv(t, resources), "GRAFANA_DATABASE")
 	require.True(t, hasObject(resources, "PersistentVolumeClaim", "neutree-grafana"))
 
 	_, found, err := unstructured.NestedSlice(renderedCluster(t, resources), "managed", "roles")

@@ -1,15 +1,4 @@
 {{- include "neutree.db.requireOperator" . -}}
-{{- $instances := int (include "neutree.db.instances" .) -}}
-{{- $live := lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (include "neutree.db.clusterName" .) -}}
-{{- /* The Cluster is growing to HA: from one instance, or created next to the
-PostgreSQL Deployment of an earlier release. */ -}}
-{{- $growing := false -}}
-{{- if $live -}}
-{{- $sync := dig "spec" "postgresql" "synchronous" dict $live -}}
-{{- $growing = or (not $sync) (eq (dig "dataDurability" "" $sync) "preferred") -}}
-{{- else -}}
-{{- $growing = not (empty (lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" (include "neutree.fullname" .)))) -}}
-{{- end -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -21,12 +10,43 @@ stringData:
   username: postgres
   password: {{ .Values.db.password | quote }}
 ---
+# Owns the Cluster (the migration Job sets the ownerReference). helm keeps the
+# Cluster (resource-policy keep), so a rollback to a revision that lacks it
+# never deletes the database; it goes when this ConfigMap goes: on helm
+# uninstall, or on a rollback to a chart without it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "neutree.db.resourcesConfigMapName" . }}
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+data:
+  cluster.yaml: |
+    {{- include "neutree.db.cluster" . | nindent 4 }}
+{{- if not (include "neutree.db.deferred" .) }}
+---
+{{ include "neutree.db.cluster" . }}
+{{- end }}
+
+{{- define "neutree.db.cluster" -}}
+{{- $instances := int (include "neutree.db.instances" .) -}}
+{{- $live := include "neutree.db.liveCluster" . | fromYaml -}}
+{{- /* The Cluster is growing to HA: from one instance, or created next to the
+PostgreSQL Deployment of an earlier release. */ -}}
+{{- $growing := false -}}
+{{- if $live -}}
+{{- $sync := dig "spec" "postgresql" "synchronous" dict $live -}}
+{{- $growing = or (not $sync) (eq (dig "dataDurability" "" $sync) "preferred") -}}
+{{- else -}}
+{{- $growing = not (empty (lookup "apps/v1" "Deployment" .Release.Namespace (printf "%s-postgresql" (include "neutree.fullname" .)))) -}}
+{{- end -}}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: {{ include "neutree.db.clusterName" . }}
   labels:
     {{- include "neutree.labels" . | nindent 4 }}
+  {{- include "neutree.db.resourceAnnotations" . | nindent 2 }}
 spec:
   instances: {{ $instances }}
   imageName: {{ include "neutree.image" (dict "global" .Values.global "componentRegistry" .Values.db.image.registry "repository" .Values.db.image.repository "tag" .Values.db.image.tag "defaultTag" .Values.db.image.tag) }}
@@ -119,3 +139,4 @@ spec:
     nodeAffinity:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+{{- end -}}

@@ -64,7 +64,9 @@ func parentWorkloads(resources *unstructured.UnstructuredList) []unstructured.Un
 			continue
 		}
 
-		if strings.Contains(r.GetName(), "grafana") || strings.Contains(r.GetName(), "victoria-metrics-cluster") {
+		// Subcharts take their own scheduling values.
+		if strings.Contains(r.GetName(), "grafana") || strings.Contains(r.GetName(), "victoria-metrics-cluster") ||
+			r.GetName() == "neutree-cloudnative-pg" {
 			continue
 		}
 

@@ -547,13 +547,66 @@ on a dead connection instead.
 {{- end -}}
 
 {{/*
-Fail early when the CloudNativePG CRDs are missing. Offline rendering (helm
-template) has no cluster to ask, so db.operatorCheck can turn this off.
+Fail early when the operator setup cannot work: with cnpg.enabled=false, the
+CloudNativePG CRDs are missing (offline rendering with helm template has no
+cluster to ask, so db.operatorCheck can turn this off); with cnpg.enabled,
+another operator already owns the cluster-wide webhook configuration, whose
+name is fixed.
 */}}
 {{- define "neutree.db.requireOperator" -}}
-{{- if and .Values.db.operatorCheck (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
-{{- fail "PostgreSQL now runs on CloudNativePG, but the postgresql.cnpg.io/v1 API is not installed in this cluster. Install the CloudNativePG operator first (see deploy/chart/neutree/README.md, \"Prerequisites\"). For offline rendering with helm template, set db.operatorCheck=false." -}}
+{{- if .Values.cnpg.enabled -}}
+{{- with lookup "admissionregistration.k8s.io/v1" "MutatingWebhookConfiguration" "" "cnpg-mutating-webhook-configuration" -}}
+{{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . -}}
+{{- $name := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . -}}
+{{- if or (ne $owner $.Release.Namespace) (ne $name $.Release.Name) -}}
+{{- fail (printf "A CloudNativePG operator is already installed in this Kubernetes cluster (helm release %q in namespace %q), and only one can exist. Set cnpg.enabled=false to use it; it must watch namespace %s (see deploy/chart/neutree/README.md, \"CloudNativePG operator\")." (default "none" $name) (default "none" $owner) $.Release.Namespace) -}}
 {{- end -}}
+{{- end -}}
+{{- else if and .Values.db.operatorCheck (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
+{{- fail "cnpg.enabled is false, but the postgresql.cnpg.io/v1 API is not installed in this cluster. Install the CloudNativePG operator first, or set cnpg.enabled=true (see deploy/chart/neutree/README.md, \"CloudNativePG operator\"). For offline rendering with helm template, set db.operatorCheck=false." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The live CloudNativePG Cluster as YAML, empty when it does not exist or the
+API is not installed (lookup fails on an unknown API).
+*/}}
+{{- define "neutree.db.liveCluster" -}}
+{{- if .Capabilities.APIVersions.Has "postgresql.cnpg.io/v1" -}}
+{{- with lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (include "neutree.db.clusterName" .) -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Non-empty when helm cannot create the Cluster itself: the operator ships
+with this release and the Cluster does not exist yet. On a first install the CRDs are not registered when helm maps the
+release resources, and the operator's admission webhook (failurePolicy Fail)
+rejects every Cluster until the operator pod is ready. The migration Job then
+creates it from the resources ConfigMap once the webhook accepts it, and the
+next helm upgrade adopts it.
+*/}}
+{{- define "neutree.db.deferred" -}}
+{{- if and .Values.cnpg.enabled (not (include "neutree.db.liveCluster" .)) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- define "neutree.db.resourcesConfigMapName" -}}
+{{- printf "%s-pg-resources" (include "neutree.fullname" .) -}}
+{{- end -}}
+
+{{/*
+Annotations of the Cluster: the release annotations let helm adopt the
+Cluster the migration Job created; keep, see the resources ConfigMap in
+postgresql-cluster.yaml.
+*/}}
+{{- define "neutree.db.resourceAnnotations" -}}
+annotations:
+  helm.sh/resource-policy: keep
+  meta.helm.sh/release-name: {{ .Release.Name }}
+  meta.helm.sh/release-namespace: {{ .Release.Namespace }}
 {{- end -}}
 
 {{/*

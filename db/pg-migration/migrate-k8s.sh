@@ -4,7 +4,10 @@
 # re-run: it exits early once the copy is complete, and a failed attempt is
 # redone from scratch.
 #
-# Environment: NAMESPACE, CLUSTER, TARGET_HOST, DB_NAME, PGUSER, PGPASSWORD,
+# Environment: NAMESPACE, CLUSTER, RESOURCES_CONFIGMAP and CREATE_RESOURCES
+# (the manifest of the Cluster is in /resources; "true" when helm does not
+# create the Cluster), GRAFANA_DATABASE and
+# GRAFANA_USER (empty without the Grafana database), TARGET_HOST, DB_NAME, PGUSER, PGPASSWORD,
 # LEGACY_DEPLOYMENT and LEGACY_SERVICE (empty when there is nothing to move),
 # AUTH_ADMIN_PASSWORD, KONG_ADMIN_PASSWORD; DATA_DURABILITY (the synchronous
 # replication durability the Cluster must end with, empty for one instance).
@@ -24,11 +27,67 @@ while kubectl -n "$NAMESPACE" get pods -l app.kubernetes.io/component=neutree-pg
   log "waiting for another migration pod to finish"; sleep 5
 done
 
+# Applies manifest $1 in full. helm patches custom resources with the
+# difference between its previous and new manifests, so a Cluster it adopts
+# (created by this Job, or kept by a rollback to a revision without it) would
+# keep stale values. The operator's webhook rejects every change until the
+# operator is ready, so retry.
+apply_resource() {
+  until kubectl -n "$NAMESPACE" apply --server-side --force-conflicts \
+      --field-manager=neutree-pg-migration -f "$1"; do
+    log "cannot apply $(basename "$1") yet"; sleep 5
+  done
+}
+
+# Makes the resources ConfigMap an owner of object $1 (see the ConfigMap in
+# postgresql-cluster.yaml).
+own_resource() {
+  local uid refs ref patch
+  uid=$(kubectl -n "$NAMESPACE" get "configmap/$RESOURCES_CONFIGMAP" -o jsonpath='{.metadata.uid}')
+  refs=$(kubectl -n "$NAMESPACE" get "$1" -o jsonpath='{.metadata.ownerReferences[*].uid}')
+  case " $refs " in *" $uid "*) return ;; esac
+  ref="{\"apiVersion\":\"v1\",\"kind\":\"ConfigMap\",\"name\":\"$RESOURCES_CONFIGMAP\",\"uid\":\"$uid\"}"
+  if [ -z "$refs" ]; then
+    patch="[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences\",\"value\":[$ref]}]"
+  else
+    patch="[{\"op\":\"add\",\"path\":\"/metadata/ownerReferences/-\",\"value\":$ref}]"
+  fi
+  # Goes through the operator's webhook too.
+  until kubectl -n "$NAMESPACE" patch "$1" --type json -p "$patch"; do
+    log "cannot set the owner of $1 yet"; sleep 5
+  done
+}
+
+for manifest in /resources/*.yaml; do
+  [ -e "$manifest" ] || continue
+  # Otherwise helm creates it; do not race it.
+  if [ "${CREATE_RESOURCES:-}" != true ]; then
+    until kubectl -n "$NAMESPACE" get -f "$manifest" -o name >/dev/null 2>&1; do
+      log "waiting for $(basename "$manifest" .yaml) to exist"; sleep 5
+    done
+  fi
+  apply_resource "$manifest"
+  object=$(kubectl -n "$NAMESPACE" get -f "$manifest" -o name)
+  own_resource "$object"
+done
+
 log "waiting for Cluster $CLUSTER to be ready"
 until kubectl -n "$NAMESPACE" wait "clusters.postgresql.cnpg.io/$CLUSTER" --for=condition=Ready --timeout=60s; do
   log "Cluster $CLUSTER not ready yet"
 done
 pgm_wait_target
+
+# Created here rather than with a CloudNativePG Database: its finalizer needs
+# the operator, which helm uninstall removes at the same time.
+if [ -n "${GRAFANA_DATABASE:-}" ]; then
+  until [ "$(tpsql -d postgres -qAtc "select 1 from pg_roles where rolname = '$GRAFANA_USER'")" = 1 ]; do
+    log "waiting for the role $GRAFANA_USER"; sleep 5
+  done
+  if [ "$(tpsql -d postgres -qAtc "select 1 from pg_database where datname = '$GRAFANA_DATABASE'")" != 1 ]; then
+    tpsql -d postgres -qc "create database \"$GRAFANA_DATABASE\" owner \"$GRAFANA_USER\""
+    log "created database $GRAFANA_DATABASE"
+  fi
+fi
 
 # The chart renders "preferred" while a single instance grows to HA.
 if [ -n "${DATA_DURABILITY:-}" ]; then

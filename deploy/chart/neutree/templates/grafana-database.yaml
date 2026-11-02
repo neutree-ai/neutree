@@ -19,16 +19,4 @@ stringData:
   username: {{ .Values.grafanaDatabase.user | quote }}
   password: {{ $password | default (randAlphaNum 32) | quote }}
   host: {{ printf "%s:%s" (include "neutree.db.host" .) (include "neutree.db.port" .) | quote }}
----
-apiVersion: postgresql.cnpg.io/v1
-kind: Database
-metadata:
-  name: {{ include "neutree.fullname" . }}-grafana
-  labels:
-    {{- include "neutree.labels" . | nindent 4 }}
-spec:
-  name: {{ .Values.grafanaDatabase.name }}
-  owner: {{ .Values.grafanaDatabase.user }}
-  cluster:
-    name: {{ include "neutree.db.clusterName" . }}
 {{- end }}

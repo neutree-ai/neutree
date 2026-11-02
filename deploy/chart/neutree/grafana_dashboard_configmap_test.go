@@ -82,6 +82,11 @@ func renderChartWithAPIs(overrides map[string]interface{}, release chartutil.Rel
 		return nil, err
 	}
 
+	// As helm install does: drop disabled subcharts and apply aliases.
+	if err := chartutil.ProcessDependenciesWithMerge(chart, valuesOverrides); err != nil {
+		return nil, err
+	}
+
 	capabilities := chartutil.DefaultCapabilities.Copy()
 	if withCNPG {
 		capabilities.APIVersions = append(capabilities.APIVersions, "postgresql.cnpg.io/v1")

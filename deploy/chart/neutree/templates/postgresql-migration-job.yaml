@@ -53,6 +53,10 @@ spec:
               value: {{ .Release.Namespace }}
             - name: CLUSTER
               value: {{ include "neutree.db.clusterName" . }}
+            - name: RESOURCES_CONFIGMAP
+              value: {{ include "neutree.db.resourcesConfigMapName" . }}
+            - name: CREATE_RESOURCES
+              value: {{ include "neutree.db.deferred" . | quote }}
             - name: TARGET_HOST
               value: {{ include "neutree.db.host" . }}
             - name: DB_NAME
@@ -61,6 +65,10 @@ spec:
               value: {{ ternary "required" "" (gt (int (include "neutree.db.instances" .)) 1) | quote }}
             {{- if .Values.grafanaDatabase.enabled }}
             - name: TARGET_ONLY_ROLES
+              value: {{ .Values.grafanaDatabase.user | quote }}
+            - name: GRAFANA_DATABASE
+              value: {{ .Values.grafanaDatabase.name | quote }}
+            - name: GRAFANA_USER
               value: {{ .Values.grafanaDatabase.user | quote }}
             {{- end }}
             - name: PGUSER
@@ -86,6 +94,8 @@ spec:
               mountPath: /scripts
             - name: work
               mountPath: /work
+            - name: resources
+              mountPath: /resources
       volumes:
         - name: tools
           emptyDir: {}
@@ -94,3 +104,6 @@ spec:
             name: {{ $fullname }}-pg-migration
         - name: work
           emptyDir: {}
+        - name: resources
+          configMap:
+            name: {{ include "neutree.db.resourcesConfigMapName" . }}
