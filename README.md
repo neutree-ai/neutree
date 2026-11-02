@@ -31,6 +31,7 @@ Technical design documents for contributors are available in the [`docs/`](docs/
 - [User Management](docs/user-management.md)
 - [RBAC and Workspace](docs/rbac.md)
 - [Cluster Monitoring](docs/cluster-monitoring.md)
+- [High Availability](docs/high-availability.md)
 
 ### Contributing
 

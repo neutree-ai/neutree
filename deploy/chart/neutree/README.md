@@ -31,53 +31,36 @@ Images to mirror for offline installs: the operator image
 
 ## Database layout
 
-| | `ha.enabled=false` | `ha.enabled=true` |
-|---|---|---|
-| Instances | 1 | 3, one per node (required anti-affinity) |
-| Replication | none | synchronous, `method: any, number: 1, dataDurability: required` |
-| Writes without a standby | n/a | blocked until a standby is back |
-| Node drain | evicts the instance; the database is down until it restarts elsewhere | the operator switches over first (PDB) |
-
-`db.instances` overrides the count. Moving from single to HA needs only
-`ha.enabled` (through `values-ha.yaml`); the operator clones the new standbys
-online. Until every standby is ready the Cluster runs with
-`dataDurability: preferred`, so writes do not wait for the copy; the migration
-Job then sets `required`. Writes pause once, for the switchover that applies
-the HA pod settings to the primary (about 10 seconds).
-
-All components connect through the `<release>-pg-rw` Service, which follows the
-primary. PostgREST and the seed Job add the TCP keepalive parameters in
+PostgreSQL runs as one instance, or as three instances in HA mode (see
+below). All components connect through the `<release>-pg-rw` Service, which
+follows the primary. PostgREST and the seed Job add the TCP keepalive parameters in
 `db.connectionParams`. GoTrue (pgx), golang-migrate (lib/pq) and Kong cannot
 take them: the first two send unknown URL keys to the server, which rejects the
 connection; Kong has no such option and relies on `pg_timeout` (5s per query).
 
-## Observability in HA mode
+## High availability
 
-Install or upgrade in HA mode with the bundled overlay, which sets
-`ha.enabled` together with the VictoriaMetrics and Grafana subchart settings
-that `ha.enabled` cannot reach:
+Install or upgrade in HA mode with the bundled overlay:
 
 ```bash
 helm upgrade --install <release> <chart> -n <namespace> \
   -f <chart>/values-ha.yaml -f <your values>
 ```
 
-Rendering fails when `ha.enabled=true` is set without the overlay (the
-message lists what is missing), and when the overlay is used with
-`ha.enabled=false`.
+See [High Availability](../../../docs/high-availability.md) for the
+architecture, requirements, switching from single mode, and the behavior
+under failures.
 
-| Component | Single | HA (`values-ha.yaml`) |
+| Parameter | Default | HA mode (`values-ha.yaml`) |
 |---|---|---|
-| vmagent | 1 replica | 2 replicas, each scrapes every target; storage keeps one copy (`dedup.minScrapeInterval`) |
-| vminsert / vmselect | 1 replica | 3 replicas |
-| vmstorage | 1 node | 3 nodes, every sample on 2 (`replicationFactor: 2`); one node can be lost without gaps |
-| Grafana | 1 replica, SQLite on a volume | 2 replicas, state in the `grafana` database of the PostgreSQL Cluster |
-| VictoriaLogs | 1 replica | 1 replica |
-
-Switching to HA starts Grafana on an empty database: provisioned dashboards
-and data sources come back, while users and dashboards saved in its UI stay in
-the old SQLite volume, which is deleted. Existing metrics stay on the first
-vmstorage node only; replication applies to samples written afterwards.
+| `ha.enabled` | `false` | `true`. Set it only through `values-ha.yaml`: rendering fails when `ha.enabled=true` is set without the overlay, and when the overlay is used with `ha.enabled=false` |
+| `<component>.replicaCount` (`api`, `auth`, `postgrest`, `core`, `kong`, `vector`) | unset: 1 | unset: 3. An explicit value always wins |
+| `<component>.affinity` | `{}` | When empty, a required one-pod-per-node anti-affinity. An explicit value is used as given |
+| `db.instances` | unset: 1 | unset: 3, synchronous replication (`method: any, number: 1, dataDurability: required`), one instance per node |
+| `vmagent.replicaCount` | unset: 1 | unset: 2 |
+| `vector.persistence` | one PVC for the Vector Deployment (`Recreate`) | Vector runs as a StatefulSet; each pod gets its own PVC of the same size and storage class |
+| `victoria-metrics-cluster.*` | 1 vminsert, vmselect, vmstorage | 3 each, `replicationFactor: 2`, `dedup.minScrapeInterval: 5s` |
+| `grafana.replicas`, `grafanaDatabase.enabled` | 1, `false` (SQLite on a volume) | 2, `true` (the `grafana` database of the PostgreSQL Cluster) |
 
 ## Upgrading from a release with the PostgreSQL Deployment
 
