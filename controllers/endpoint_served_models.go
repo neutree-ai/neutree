@@ -16,16 +16,17 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// needsServedModelDiscovery reports whether the recorded status still has to be
-// renewed for specHash. The fingerprint alone decides: it advances with the spec
-// regardless of discovery, so a probe is due whenever it no longer matches, and
-// while no observation has been recorded at all.
+// needsServedModelDiscovery reports whether the recorded status was derived from a
+// different spec. The fingerprint alone decides: it advances with the spec whether or
+// not discovery succeeds, so a probe is due exactly while it no longer matches. An
+// observation of no models is stored as no names, so nothing else can mark it as
+// already taken.
 func needsServedModelDiscovery(status *v1.EndpointStatus, specHash string) bool {
 	if status == nil {
 		return true
 	}
 
-	return status.ObservedSpecHash != specHash || status.ServedModels == nil
+	return status.ObservedSpecHash != specHash
 }
 
 // endpointSpecHash is deterministic for equal specs: encoding/json sorts map keys

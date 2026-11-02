@@ -234,8 +234,8 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		status.ObservedSpecHash = specHash
 
 		// Discovery follows the fingerprint: the names are renewed when the
-		// recorded spec differs from the current one, and while nothing has been
-		// observed yet. A failed discovery keeps the previous names.
+		// recorded spec differs from the current one. A failed discovery keeps the
+		// previous names.
 		if needsServedModelDiscovery(obj.Status, specHash) {
 			models, err := c.getServedModels(obj)
 			if err != nil {

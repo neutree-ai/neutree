@@ -778,7 +778,9 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 		{name: "unchanged spec reuses observation", recordedHash: "current", phase: v1.EndpointPhaseRUNNING, want: []string{"previous"}},
 		{name: "changed spec probes again", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
 		{name: "changed spec advances hash when probe fails", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
-		{name: "unrecorded names probe again", recordedHash: "current", noRecordedNames: true, phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
+		// An observation of no models is persisted as no names, so the unchanged
+		// spec must not read it as a missing observation and probe every reconcile.
+		{name: "empty observation is not probed again", recordedHash: "current", noRecordedNames: true, phase: v1.EndpointPhaseRUNNING, want: nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
