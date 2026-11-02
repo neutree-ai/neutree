@@ -90,7 +90,8 @@ func TestLogSinkCredentialsRequirePermission(t *testing.T) {
 				forwarded = true
 				assert.Equal(t, "/log_sinks", r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`[{"spec":{"victorialogs":{"auth":{"type":"bearer","token":"secret"}}}}]`))
+				_, _ = w.Write([]byte(`[{"spec":{"victorialogs":{"auth":{"type":"bearer","token":"secret"}}}},` +
+					`{"spec":{"s3":{"auth":{"access_key_id":"ak","secret_access_key":"sk"}}}}]`))
 			}))
 			defer upstream.Close()
 
@@ -118,6 +119,7 @@ func TestLogSinkCredentialsRequirePermission(t *testing.T) {
 			assert.Equal(t, tt.wantForwarding, forwarded)
 			if tt.wantForwarding {
 				assert.Contains(t, w.Body.String(), `"token":"secret"`)
+				assert.Contains(t, w.Body.String(), `"access_key_id":"ak","secret_access_key":"sk"`)
 			}
 		})
 	}
