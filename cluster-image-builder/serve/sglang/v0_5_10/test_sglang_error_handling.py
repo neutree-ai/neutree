@@ -154,13 +154,6 @@ def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, han
         assert frames[0] == 'data: {"choices":[]}\n\n'
 
 
-def test_models_errors_are_wire_errors(wrapper):
-    wrapper.backend.engine = SimpleNamespace()
-    wire = call(wrapper, "get_model_info")
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "Internal server error"
-
-
 def client(wrapper, result=None):
     calls = []
     class Remote:

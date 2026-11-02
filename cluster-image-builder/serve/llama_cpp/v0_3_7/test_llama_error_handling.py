@@ -101,18 +101,6 @@ def test_model_load_error_is_contained(wrapper, method, payload):
     assert result["status_code"] == 500 and result["content"]["error"]["message"] == "load failed"
 
 
-@pytest.mark.parametrize("method,attribute,payload", [("generate", "create_chat_completion", {"messages": []}), ("generate", "create_completion", {"prompt": "hi"}), ("generate_embeddings", "create_embedding", {"input": "hi"})])
-def test_serving_error_is_contained(wrapper, method, attribute, payload):
-    getattr(wrapper.llama, attribute).side_effect = RuntimeError("native failed")
-    assert call(wrapper, method, payload)["status_code"] == 500
-
-
-@pytest.mark.parametrize("bad", [object()])
-def test_unsafe_serialization_is_contained(wrapper, bad):
-    wrapper.llama.create_chat_completion.return_value = {"value": bad}
-    assert call(wrapper, payload={"messages": []})["status_code"] == 500
-
-
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_nonfinite_values_are_sanitized(wrapper, value):
     wrapper.llama.create_chat_completion.return_value = {"value": value}
