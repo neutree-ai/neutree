@@ -36,7 +36,6 @@ AS $$
 $$;
 
 ALTER TYPE api.endpoint_status
-    DROP ATTRIBUTE observed_spec_hash,
     DROP ATTRIBUTE served_models;
 
 COMMIT;

@@ -1,9 +1,6 @@
 package controllers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,30 +12,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
-
-// needsServedModelDiscovery reports whether the names recorded in the status were
-// read for a different spec. The fingerprint is written only after a successful
-// read, so a failed read leaves it behind and is retried.
-func needsServedModelDiscovery(status *v1.EndpointStatus, specHash string) bool {
-	if status == nil {
-		return true
-	}
-
-	return status.ObservedSpecHash != specHash
-}
-
-// endpointSpecHash is deterministic for equal specs: encoding/json sorts map keys
-// and EndpointSpec holds only JSON-representable values.
-func endpointSpecHash(endpoint *v1.Endpoint) string {
-	data, err := json.Marshal(endpoint.Spec)
-	if err != nil {
-		return ""
-	}
-
-	sum := sha256.Sum256(data)
-
-	return hex.EncodeToString(sum[:])
-}
 
 func (c *EndpointController) getServedModels(endpoint *v1.Endpoint) ([]string, error) {
 	clusters, err := c.storage.ListCluster(storage.ListOption{

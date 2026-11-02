@@ -1,11 +1,8 @@
 -- Observed serving names, in the order returned by the inference instance.
 BEGIN;
 
--- The hash records which endpoint spec the names were discovered for, so the
--- instance is only probed again when that spec changes.
 ALTER TYPE api.endpoint_status
-    ADD ATTRIBUTE served_models TEXT[],
-    ADD ATTRIBUTE observed_spec_hash TEXT;
+    ADD ATTRIBUTE served_models TEXT[];
 
 -- API-key candidates use the first observed name rather than the deployment name.
 CREATE OR REPLACE FUNCTION api.get_workspace_models(p_workspace TEXT)
