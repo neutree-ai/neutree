@@ -79,6 +79,28 @@ var servedModelsClient = func() *http.Client {
 	}
 }()
 
+// servedModelIDs keeps the ids an engine reports, in order and without duplicates.
+// A blank id is dropped instead of failing the observation: an engine may list a
+// placeholder entry, and rejecting the response over it would leave the endpoint
+// with no names at all.
+func servedModelIDs(ids []string) []string {
+	models := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+
+		if !seen[id] {
+			models = append(models, id)
+			seen[id] = true
+		}
+	}
+
+	return models
+}
+
 func fetchServedModels(cluster *v1.Cluster, endpoint *v1.Endpoint) ([]string, error) {
 	serviceURL, err := utils.FormatServiceURL(cluster, endpoint)
 	if err != nil {
@@ -98,19 +120,5 @@ func fetchServedModels(cluster *v1.Cluster, endpoint *v1.Endpoint) ([]string, er
 		return nil, errors.Wrap(err, "failed to fetch served models")
 	}
 
-	models := make([]string, 0, len(ids))
-	seen := make(map[string]bool, len(ids))
-
-	for _, id := range ids {
-		if strings.TrimSpace(id) == "" {
-			return nil, errors.New("served models response contains an empty model id")
-		}
-
-		if !seen[id] {
-			models = append(models, id)
-			seen[id] = true
-		}
-	}
-
-	return models, nil
+	return servedModelIDs(ids), nil
 }

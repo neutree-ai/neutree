@@ -656,8 +656,8 @@ func TestFetchServedModels(t *testing.T) {
 		{name: "ordered unique models", body: `{"data":[{"id":"alias-b"},{"id":"alias-a"},{"id":"alias-b"}]}`, want: []string{"alias-b", "alias-a"}},
 		{name: "empty list", body: `{"data":[]}`, want: []string{}},
 		{name: "keeps exact model identity", body: `{"data":[{"id":" model "}]}`, want: []string{" model "}},
-		{name: "empty id", body: `{"data":[{"id":""}]}`, wantErr: true},
-		{name: "whitespace id", body: `{"data":[{"id":"  "}]}`, wantErr: true},
+		{name: "blank ids are skipped", body: `{"data":[{"id":""},{"id":"alias-a"},{"id":" "}]}`, want: []string{"alias-a"}},
+		{name: "only blank ids", body: `{"data":[{"id":""}]}`, want: []string{}},
 		{name: "server failure", status: http.StatusServiceUnavailable, body: `{"data":[]}`, wantErr: true},
 	}
 	for _, tc := range cases {
