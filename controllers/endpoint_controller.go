@@ -352,9 +352,14 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 	}
 
 	// The last observation is retained until a newer one replaces it, so a status
-	// that carries no names does not erase what discovery already found.
+	// that carries no names does not erase what discovery already found. The
+	// fingerprint that produced those names is retained with them.
 	if status.ServedModels == nil && obj.Status != nil {
 		status.ServedModels = obj.Status.ServedModels
+	}
+
+	if status.ObservedSpecHash == "" && obj.Status != nil {
+		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	c.preserveResources(obj, status)
