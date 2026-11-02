@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -162,7 +163,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 		Spec: &v1.EndpointSpec{
 			Cluster: "cluster-a",
 			Engine:  &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM},
-			Model:   &v1.ModelSpec{Task: v1.TextGenerationModelTask},
+			Model:   &v1.ModelSpec{Task: v1.TextGenerationModelTask, Name: "router-model"},
 		},
 		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
 	}
@@ -197,7 +198,7 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 				Platform:  "kubernetes",
 				RuntimeID: "pod/chat-a:vllm",
 				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
-				Tokenizer: tokenizerOptions{Path: "/models/chat"},
+				Tokenizer: "/models/chat",
 				runner:    runner,
 			}, nil
 		},
@@ -281,6 +282,13 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, progressOutput, "completed=20 failed=0 duration_s=1.50 request_per_s=2.50 output_tokens_per_s=10.50 p50_ttft_ms=12.50 p99_ttft_ms=25.50")
 	require.Contains(t, progressOutput, "benchmark completed: cases=1 result_dir="+output)
 	require.NotContains(t, progressOutput, "secret-kubeconfig")
+
+	// The tokenizer is the model path inside the inference container, not
+	// whatever the target resolver happened to carry.
+	benchmarkCommand := findBenchCommand(runner.snapshot(), func(command string) bool {
+		return strings.Contains(command, " --tokenizer ")
+	})
+	require.Contains(t, benchmarkCommand, `--tokenizer '"'"'router-model'"'"'`)
 }
 
 func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
@@ -302,7 +310,7 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 				Platform:  "kubernetes",
 				RuntimeID: "pod/chat-a:vllm",
 				BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
-				Tokenizer: tokenizerOptions{Path: "/models/chat"},
+				Tokenizer: "/models/chat",
 				runner:    runner,
 			}, nil
 		},
@@ -473,7 +481,7 @@ func TestRuntimeFileHelpersHandleFailures(t *testing.T) {
 
 func TestRunCaseRejectsEmptyCopiedResult(t *testing.T) {
 	runner := &emptyResultRunner{}
-	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: tokenizerOptions{Path: "/models/chat"}}, Options{
+	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: "/models/chat"}, Options{
 		NumPrompts:  1,
 		RequestRate: "inf",
 	}, Case{InputLen: 1, OutputLen: 1, Concurrency: 1}, t.TempDir(), "/tmp/neutree-bench-test")
@@ -515,6 +523,54 @@ func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.
 	default:
 		return fmt.Errorf("case failed")
 	}
+}
+
+func TestBenchmarkCaseErrorStatusMarksDeadlinesCanceled(t *testing.T) {
+	require.Equal(t, benchmarkCanceledStatus, benchmarkCaseErrorStatus(context.DeadlineExceeded))
+	require.Equal(t, benchmarkFailedStatus, benchmarkCaseErrorStatus(errors.New("benchmark failed")))
+}
+
+func TestResolveTokenizerPathUsesTheClusterMountRoot(t *testing.T) {
+	resources := fakeResourceGetter{resources: map[string]json.RawMessage{
+		resourceKey("ModelRegistry", "default", "hub"): mustJSON(t, v1.ModelRegistry{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "hub"},
+			Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
+		}),
+	}}
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Model: &v1.ModelSpec{Name: "Qwen/Qwen3", Version: "v2", Registry: "hub"},
+	}}
+
+	for _, tc := range []struct {
+		name    string
+		cluster *v1.Cluster
+		want    string
+	}{
+		{
+			name:    "kubernetes",
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			want:    "/models-cache/default/Qwen/Qwen3/v2",
+		},
+		{
+			name:    "ssh",
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}},
+			want:    "/home/ray/.neutree/models-cache/default/Qwen/Qwen3/v2",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := resolveTokenizerPath(context.Background(), resources, "default", endpoint, tc.cluster)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, path)
+		})
+	}
+}
+
+func TestResolveTokenizerPathWithoutARegistryUsesTheModelName(t *testing.T) {
+	path, err := resolveTokenizerPath(context.Background(), fakeResourceGetter{}, "default",
+		&v1.Endpoint{Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "router-model"}}},
+		&v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}})
+	require.NoError(t, err)
+	require.Equal(t, "router-model", path)
 }
 
 func benchmarkFixtures() (v1.Endpoint, v1.Cluster, v1.Cluster) {

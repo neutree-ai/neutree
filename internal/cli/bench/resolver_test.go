@@ -156,7 +156,6 @@ esac
 	require.Equal(t, "ssh", target.Platform)
 	require.Equal(t, "docker/"+containerID+"@10.0.0.21", target.RuntimeID)
 	require.Equal(t, "http://10.0.0.10:8000/default/chat", target.BaseURL)
-	require.Equal(t, "/models/chat", target.Tokenizer.Path)
 
 	output, err := runRemoteOutput(context.Background(), target.runner, "echo ignored")
 	require.NoError(t, err)
@@ -173,30 +172,49 @@ func TestResolveKubernetesTargetUsesRouterAndSelectedPod(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		require.Equal(t, http.MethodGet, request.Method)
+		writer.Header().Set("Content-Type", "application/json")
+
+		// The pod listing goes through the controller-runtime client, which
+		// discovers the core group before it lists resources.
+		if request.URL.Path == "/api/v1" {
+			require.NoError(t, json.NewEncoder(writer).Encode(&metav1.APIResourceList{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{{
+					Name:       "pods",
+					Namespaced: true,
+					Kind:       "Pod",
+					Verbs:      []string{"get", "list"},
+				}},
+			}))
+
+			return
+		}
+
 		require.Equal(t, "/api/v1/namespaces/"+namespace+"/pods", request.URL.Path)
-		require.Equal(t, "app=inference,endpoint=chat", request.URL.Query().Get("labelSelector"))
+		require.Equal(t, "app=inference,endpoint=chat,workspace=default", request.URL.Query().Get("labelSelector"))
 		writer.Header().Set("Content-Type", "application/json")
 		pods := corev1.PodList{Items: []corev1.Pod{{
 			ObjectMeta: metav1.ObjectMeta{Name: "chat-a"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Name:    "vllm",
-				Command: []string{"vllm", "serve", "/models/chat"},
-			}}},
+			Status: corev1.PodStatus{
+				Phase:      corev1.PodRunning,
+				Conditions: readyConditions(),
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
 		}}}
 		require.NoError(t, json.NewEncoder(writer).Encode(pods))
 	}))
 	t.Cleanup(server.Close)
 
-	credentialCluster := &v1.Cluster{Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
-		KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: encodedKubeconfig(server.URL)},
-	}}}
+	credentialCluster := &v1.Cluster{
+		Metadata: &v1.Metadata{Workspace: "default", Name: "cluster-a"},
+		Spec: &v1.ClusterSpec{Config: &v1.ClusterConfig{
+			KubernetesConfig: &v1.KubernetesClusterConfig{Kubeconfig: encodedKubeconfig(server.URL)},
+		}}}
 
 	target, err := resolveKubernetesTarget(context.Background(), cluster, credentialCluster, endpoint)
 	require.NoError(t, err)
 	require.Equal(t, "kubernetes", target.Platform)
 	require.Equal(t, "pod/chat-a:vllm", target.RuntimeID)
-	require.Equal(t, "/models/chat", target.Tokenizer.Path)
 	require.Equal(t, "http://router-service."+namespace+".svc.cluster.local:8000/default/chat", target.BaseURL)
 }
 

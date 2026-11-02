@@ -14,6 +14,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/modelpath"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
 
@@ -65,14 +66,12 @@ type manifestEndpoint struct {
 }
 
 type manifestTarget struct {
-	Platform        string `json:"platform"`
-	RuntimeID       string `json:"runtime_id"`
-	BaseURL         string `json:"base_url"`
-	Model           string `json:"model,omitempty"`
-	Tokenizer       string `json:"tokenizer"`
-	TokenizerMode   string `json:"tokenizer_mode,omitempty"`
-	TrustRemoteCode bool   `json:"trust_remote_code,omitempty"`
-	ModelSelection  string `json:"model_selection"`
+	Platform       string `json:"platform"`
+	RuntimeID      string `json:"runtime_id"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model,omitempty"`
+	Tokenizer      string `json:"tokenizer"`
+	ModelSelection string `json:"model_selection"`
 }
 
 type manifestCase struct {
@@ -152,13 +151,11 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			Cluster:   endpoint.Spec.Cluster,
 		},
 		Target: manifestTarget{
-			Platform:        target.Platform,
-			RuntimeID:       target.RuntimeID,
-			BaseURL:         target.BaseURL,
-			Tokenizer:       target.Tokenizer.Path,
-			TokenizerMode:   target.Tokenizer.Mode,
-			TrustRemoteCode: target.Tokenizer.TrustRemoteCode,
-			ModelSelection:  "first-v1-model",
+			Platform:       target.Platform,
+			RuntimeID:      target.RuntimeID,
+			BaseURL:        target.BaseURL,
+			Tokenizer:      target.Tokenizer,
+			ModelSelection: "first-v1-model",
 		},
 		Cases: make([]manifestCase, 0, len(benchmarkCases)),
 	}
@@ -331,10 +328,17 @@ func resolveRunTarget(ctx context.Context, deps dependencies, options Options) (
 
 	klog.Info("benchmark target resolving")
 
+	tokenizer, err := resolveTokenizerPath(ctx, deps.resources, options.Workspace, endpoint, cluster)
+	if err := contextOrError(ctx, err); err != nil {
+		return nil, BenchTarget{}, err
+	}
+
 	target, err := deps.resolveTarget(ctx, endpoint, cluster, credentialCluster)
 	if err != nil {
 		return nil, BenchTarget{}, contextOrError(ctx, err)
 	}
+
+	target.Tokenizer = tokenizer
 
 	if err := ctx.Err(); err != nil {
 		_ = target.Close()
@@ -377,6 +381,49 @@ func loadCluster(ctx context.Context, resources resourceGetter, workspace, name 
 	}
 
 	return cluster, nil
+}
+
+// resolveTokenizerPath computes the path the engine reads its model from inside
+// its own container. The benchmark runs in that container and passes the path to
+// the tokenizer, so prompt lengths are tokenized with the files the server
+// actually serves.
+func resolveTokenizerPath(ctx context.Context, resources resourceGetter, workspace string, endpoint *v1.Endpoint, cluster *v1.Cluster) (string, error) {
+	mountRoot := v1.DefaultK8sClusterModelCacheMountPath
+	if cluster.Spec.Type == v1.SSHClusterType {
+		mountRoot = v1.DefaultSSHClusterModelCacheMountPath
+	}
+
+	modelRegistry, err := loadEndpointModelRegistry(ctx, resources, workspace, endpoint)
+	if err != nil {
+		return "", err
+	}
+
+	modelPath, err := modelpath.Path(cluster, endpoint, modelRegistry, mountRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve model path: %w", err)
+	}
+
+	return modelPath, nil
+}
+
+// loadEndpointModelRegistry returns the registry the Endpoint deploys from, or
+// nil when it deploys from none.
+func loadEndpointModelRegistry(ctx context.Context, resources resourceGetter, workspace string, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
+	if endpoint.Spec.Model == nil || endpoint.Spec.Model.Registry == "" {
+		return nil, nil
+	}
+
+	raw, err := resources.GetContext(ctx, "ModelRegistry", workspace, endpoint.Spec.Model.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("get ModelRegistry %q: %w", endpoint.Spec.Model.Registry, err)
+	}
+
+	modelRegistry := &v1.ModelRegistry{}
+	if err := json.Unmarshal(raw, modelRegistry); err != nil {
+		return nil, fmt.Errorf("decode ModelRegistry %q: %w", endpoint.Spec.Model.Registry, err)
+	}
+
+	return modelRegistry, nil
 }
 
 func validateEndpoint(endpoint *v1.Endpoint) error {
@@ -482,7 +529,9 @@ func contextOrError(ctx context.Context, err error) error {
 }
 
 func benchmarkCaseErrorStatus(err error) string {
-	if errors.Is(err, context.Canceled) {
+	// A benchmark stopped by the run deadline was stopped on purpose, exactly
+	// like one stopped by Ctrl-C.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return benchmarkCanceledStatus
 	}
 

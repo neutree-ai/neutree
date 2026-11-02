@@ -121,5 +121,16 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 }
 
 func benchmarkContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+
+	// Stop intercepting signals as soon as the first one arrives. Teardown can
+	// take a while (the CLI waits for the remote monitor to confirm), and a
+	// second Ctrl-C must terminate the CLI instead of being swallowed by the
+	// notifier. Calling stop twice is safe.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	return ctx, stop
 }

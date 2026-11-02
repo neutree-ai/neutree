@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -25,14 +23,13 @@ import (
 type kubernetesTarget struct {
 	PodName   string
 	Container string
-	Tokenizer tokenizerOptions
 }
 
 func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
 	candidates := make([]corev1.Pod, 0, len(pods))
 
 	for _, pod := range pods {
-		if pod.Status.Phase == corev1.PodRunning {
+		if pod.Status.Phase == corev1.PodRunning && podReady(pod) {
 			candidates = append(candidates, pod)
 		}
 	}
@@ -44,12 +41,11 @@ func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
 	var firstErr error
 
 	for _, pod := range candidates {
-		container, tokenizer, err := vllmContainerAndTokenizer(pod.Spec.Containers)
+		container, err := vllmContainer(pod.Spec.Containers)
 		if err == nil {
 			return kubernetesTarget{
 				PodName:   pod.Name,
 				Container: container,
-				Tokenizer: tokenizer,
 			}, nil
 		}
 
@@ -62,102 +58,38 @@ func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
 		return kubernetesTarget{}, firstErr
 	}
 
-	return kubernetesTarget{}, fmt.Errorf("no Running inference Pod found")
+	return kubernetesTarget{}, fmt.Errorf("no Ready inference Pod found")
 }
 
-func vllmContainerAndTokenizer(containers []corev1.Container) (string, tokenizerOptions, error) {
+func vllmContainer(containers []corev1.Container) (string, error) {
 	if len(containers) == 0 {
-		return "", tokenizerOptions{}, fmt.Errorf("Pod has no regular containers")
+		return "", fmt.Errorf("Pod has no regular containers")
 	}
 
-	selected := -1
-
-	for index, container := range containers {
+	for _, container := range containers {
 		if container.Name == "vllm" {
-			selected = index
-			break
+			return container.Name, nil
 		}
 	}
 
-	if selected < 0 {
-		if len(containers) != 1 {
-			return "", tokenizerOptions{}, fmt.Errorf("vllm container not found")
-		}
-
-		selected = 0
+	if len(containers) != 1 {
+		return "", fmt.Errorf("vllm container not found")
 	}
 
-	tokenizer, err := tokenizerOptionsFromContainer(containers[selected])
-	if err != nil {
-		return "", tokenizerOptions{}, err
-	}
-
-	return containers[selected].Name, tokenizer, nil
+	return containers[0].Name, nil
 }
 
-// tokenizerOptionsFromContainer reads the tokenizer flags from the rendered
-// `vllm serve` arguments so the benchmark tokenizes like the serving engine.
-func tokenizerOptionsFromContainer(container corev1.Container) (tokenizerOptions, error) {
-	args := make([]string, 0, len(container.Command)+len(container.Args))
-	args = append(args, container.Command...)
-	args = append(args, container.Args...)
-
-	modelIndex := -1
-
-	for index := 0; index+2 < len(args); index++ {
-		if strings.TrimSpace(args[index]) == "vllm" &&
-			strings.TrimSpace(args[index+1]) == "serve" &&
-			strings.TrimSpace(args[index+2]) != "" {
-			modelIndex = index + 2
-			break
+// podReady reports whether Kubernetes considers the Pod ready. A container that
+// is starting or crash-looping keeps the Pod phase Running while the Readiness
+// condition is false, and exec into such a Pod fails the run before any case.
+func podReady(pod corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
 		}
 	}
 
-	if modelIndex < 0 {
-		return tokenizerOptions{}, fmt.Errorf("tokenizer path is unavailable from vllm serve arguments")
-	}
-
-	options := tokenizerOptions{Path: args[modelIndex]}
-
-	for index := modelIndex + 1; index < len(args); index++ {
-		name, value, hasValue := splitServeArgument(args[index])
-
-		switch name {
-		case "tokenizer":
-			if !hasValue && index+1 < len(args) {
-				index++
-				value = args[index]
-			}
-
-			if value != "" {
-				options.Path = value
-			}
-		case "tokenizer-mode":
-			if !hasValue && index+1 < len(args) {
-				index++
-				value = args[index]
-			}
-
-			options.Mode = value
-		case "trust-remote-code":
-			options.TrustRemoteCode = true
-		}
-	}
-
-	return options, nil
-}
-
-// splitServeArgument splits one engine argument into its flag name and value.
-// The serving template renders flags as separate `--flag value` pairs; the
-// `--flag=value` form is also accepted.
-func splitServeArgument(argument string) (string, string, bool) {
-	if !strings.HasPrefix(argument, "--") {
-		return "", "", false
-	}
-
-	name, value, found := strings.Cut(strings.TrimPrefix(argument, "--"), "=")
-
-	return name, value, found
+	return false
 }
 
 func kubernetesRouterBaseURL(namespace, workspace, endpoint string) (string, error) {
@@ -176,7 +108,7 @@ func kubernetesRouterBaseURL(namespace, workspace, endpoint string) (string, err
 	}).String(), nil
 }
 
-func resolveKubernetesTarget(ctx context.Context, cluster, credentialCluster *v1.Cluster, endpoint *v1.Endpoint) (BenchTarget, error) {
+func resolveKubernetesTarget(ctx context.Context, _ *v1.Cluster, credentialCluster *v1.Cluster, endpoint *v1.Endpoint) (BenchTarget, error) {
 	if credentialCluster == nil {
 		return BenchTarget{}, fmt.Errorf("Kubernetes cluster credentials are unavailable")
 	}
@@ -196,18 +128,16 @@ func resolveKubernetesTarget(ctx context.Context, cluster, credentialCluster *v1
 		return BenchTarget{}, fmt.Errorf("create Kubernetes client: %w", err)
 	}
 
-	namespace := internalutil.ClusterNamespace(cluster)
-	selector := labels.Set(map[string]string{
-		"app":      "inference",
-		"endpoint": endpoint.Metadata.Name,
-	}).String()
+	// Pod listing and exec must agree on the namespace, and the credentials
+	// response carries the same Cluster record the listing resolves.
+	namespace := internalutil.ClusterNamespace(credentialCluster)
 
-	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	pods, err := internalutil.GetEndpointPods(ctx, credentialCluster, endpoint)
 	if err != nil {
 		return BenchTarget{}, fmt.Errorf("list inference Pods: %w", err)
 	}
 
-	selected, err := selectKubernetesTarget(pods.Items)
+	selected, err := selectKubernetesTarget(pods)
 	if err != nil {
 		return BenchTarget{}, err
 	}
@@ -221,7 +151,6 @@ func resolveKubernetesTarget(ctx context.Context, cluster, credentialCluster *v1
 		Platform:  "kubernetes",
 		RuntimeID: "pod/" + selected.PodName + ":" + selected.Container,
 		BaseURL:   baseURL,
-		Tokenizer: selected.Tokenizer,
 		runner: &kubernetesRemoteRunner{
 			restConfig: restConfig,
 			clientset:  clientset,

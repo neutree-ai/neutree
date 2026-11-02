@@ -18,6 +18,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/cluster"
+	"github.com/neutree-ai/neutree/internal/modelpath"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
@@ -403,16 +404,16 @@ func (k *kubernetesOrchestrator) setModelArgs(data *DeploymentManifestVariables,
 // setModelRegistryVariables adapts model registry specific settings
 func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManifestVariables, endpoint *v1.Endpoint,
 	deployedCluster *v1.Cluster, modelRegistry *v1.ModelRegistry) error {
-	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
+	// The engine reads the model from the cluster model cache. Placement is
+	// shared with the SSH path and with the benchmark, which has to tokenize
+	// from the same files the engine serves.
+	if endpoint.Spec.Model != nil {
+		modelPath, err := modelpath.Path(deployedCluster, endpoint, modelRegistry, v1.DefaultK8sClusterModelCacheMountPath)
+		if err != nil {
+			return errors.Wrap(err, "failed to resolve model path")
+		}
 
-	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get model caches")
-	}
-
-	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
-	if len(modelCaches) > 0 {
-		modelCacheRelativePath = modelCaches[0].Name
+		data.ModelArgs["path"] = modelPath
 	}
 
 	// With no registry there is nothing to place from: the model args keep the
@@ -431,7 +432,6 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 
 			data.Volumes = append(data.Volumes, corev1.Volume{
 				Name: "bentoml-model-registry",
@@ -462,7 +462,6 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 
 	case v1.ModelScopeModelRegistryType:
 		data.Env[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -477,7 +476,6 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 
 		data.ModelArgs["version"] = modelRealVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
-		data.ModelArgs["path"] = filepath.Join(v1.DefaultK8sClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 	}
 
 	return nil

@@ -16,6 +16,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/internal/modelpath"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	resourceview "github.com/neutree-ai/neutree/internal/resource"
 	"github.com/neutree-ai/neutree/internal/semver"
@@ -961,16 +962,21 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
 	}
 
-	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
+	// The engine reads the model from the cluster model cache. Placement is
+	// shared with the Kubernetes path and with the benchmark, which has to
+	// tokenize from the same files the engine serves.
+	if endpoint.Spec.Model != nil {
+		modelPath, err := modelpath.Path(deployedCluster, endpoint, modelRegistry, v1.DefaultSSHClusterModelCacheMountPath)
+		if err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrap(err, "failed to resolve model path")
+		}
+
+		modelArgs["path"] = modelPath
+	}
 
 	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
 	if err != nil {
 		return dashboard.RayServeApplication{}, errors.Wrap(err, "failed to get cluster model cache")
-	}
-
-	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
-	if len(modelCaches) > 0 {
-		modelCacheRelativePath = modelCaches[0].Name
 	}
 
 	// With no registry there is nothing to place from: modelArgs keeps the bare
@@ -990,7 +996,6 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 		}
 	case string(v1.HuggingFaceModelRegistryType):
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -1005,7 +1010,6 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 		modelArgs["version"] = modelRealVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
-		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 	case v1.ModelScopeModelRegistryType:
 		applicationEnv[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
@@ -1019,7 +1023,6 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 		modelArgs["version"] = modelRealVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
-		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
 	}
 
 	app.Args["model"] = modelArgs

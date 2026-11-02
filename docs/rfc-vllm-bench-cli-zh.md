@@ -190,12 +190,16 @@ CLI 先读取 Endpoint 和它引用的 Cluster，并通过
 
 | Cluster 类型 | client 运行位置选择 | 请求 route | 命令传输 |
 |---|---|---|---|
-| Kubernetes | 按名称排序后的首个可用 Running inference Pod；优先 `vllm` 容器，否则唯一常规容器 | `router-service.<namespace>.svc.cluster.local:8000/<workspace>/<endpoint>` | Kubernetes Pod exec |
+| Kubernetes | 按名称排序后的首个 Ready 的 Running inference Pod；优先 `vllm` 容器，否则唯一常规容器 | `router-service.<namespace>.svc.cluster.local:8000/<workspace>/<endpoint>` | Kubernetes Pod exec |
 | 静态 SSH | 按 Node、Replica、Actor 标识排序后的首个 Ray Serve `Backend`；由 Actor PID 映射到唯一 Docker 容器 | `<cluster-dashboard-host>:8000/<workspace>/<endpoint>` | SSH + `docker exec` |
 
-Kubernetes 的 tokenizer 路径从容器 `vllm serve <model-path>` 启动参数获取；
-静态集群从已部署 Ray Serve 应用的 `model.path` 获取。无法确定 tokenizer 时，
-case 在执行前失败。
+tokenizer 即 engine 在容器内读取模型的路径。CLI 根据 Endpoint 模型、Cluster
+model cache 和 Model Registry，复用 orchestrator 部署模型时的同一套路径计算逻辑
+得出该路径，使 benchmark 与 serving 进程使用同一份文件分词。未落入集群 model
+cache 的 registry 直接返回模型名。无法解析时，case 在执行前失败。
+
+engine 自身的 `tokenizer_mode` 和 `trust_remote_code` 不在继承范围内；benchmark
+只按 model path 选择 tokenizer。
 
 选定副本只承载 benchmark client。请求仍可能被 Router 或 Ray Serve 调度到
 其他健康副本，这正是 Endpoint route 测量语义的一部分。
@@ -221,8 +225,7 @@ vllm bench serve \
   --result-filename result.json \
   --metric-percentiles 50,90,95,99 \
   --percentile-metrics ttft,tpot,itl,e2el \
-  --tokenizer <容器内已挂载 tokenizer 路径> \
-  --disable-tqdm
+  --tokenizer <容器内 model path>
 ```
 
 在执行 case 前，CLI 从选定运行时访问 `<Endpoint route>/v1/models`，按
@@ -230,8 +233,8 @@ vllm bench serve \
 兼容只返回 `name` 的 router，并避免 vLLM 自动模型发现时无法保存
 `result.json`。
 
-`--tokenizer` 不是模型权重复制或下载。它是容器已挂载的 tokenizer 路径，供
-vLLM bench 按真实模型 token 语义生成指定长度的 random prompt。
+`--tokenizer` 不是模型权重复制或下载。它是 engine 在容器内读取模型目录的路径，
+供 vLLM bench 按真实模型 token 语义生成指定长度的 random prompt。
 
 ## 结果与文件契约
 
@@ -245,14 +248,14 @@ neutree-bench-<random>/
   input-<input>-output-<output>-concurrency-<concurrency>/
     command.sh
     stdout.log
-    stderr.log
     result.json
 ```
 
 新创建的 run/case 目录权限为 `0700`，文件权限为 `0600`。目标容器使用
-`/tmp/neutree-bench-*` 临时目录；CLI 通过 Pod exec 或 SSH/Docker exec 流式
-收集 stdout、stderr 和 `cat result.json`，内部不使用 `scp`。传输后远端临时
-目录会尽力清理。
+`/tmp/neutree-bench-*` 临时目录；vLLM bench 的 stdout 与 stderr 由监控进程合并为
+一路输出，CLI 通过 Pod exec 或 SSH/Docker exec 流式收集为 `stdout.log`，并流式
+读取 `cat result.json`，内部不使用 `scp`。成功传输后远端临时目录会尽力清理；失败
+或取消的 case 保留远端目录。
 
 | 文件 | 写入方与时机 | 内容 |
 |---|---|---|
@@ -260,8 +263,7 @@ neutree-bench-<random>/
 | `preflight.stdout.log` | 目标容器；每次调用一次 | `vllm bench serve --help` 输出、原始 `/v1/models` 响应以及最终选中的模型名。 |
 | `preflight.stderr.log` | 目标容器；每次调用一次 | preflight 和模型发现的标准错误输出。 |
 | `command.sh` | CLI；每个 case 执行前 | 当前 case 的完整 POSIX shell quote 后的远端 `vllm bench serve` 命令，包含容器临时结果目录；不包含 API key、kubeconfig 或 SSH 私钥。 |
-| `stdout.log` | vLLM bench；每个 case 一次 | vLLM 原始标准输出，包括有效参数、运行状态、写入 stdout 的 warning，以及成功完成时的 benchmark 汇总。 |
-| `stderr.log` | vLLM bench；每个 case 一次 | vLLM 原始标准错误输出，包括诊断信息与失败时的 traceback。 |
+| `stdout.log` | vLLM bench；每个 case 一次 | vLLM 原始标准输出并合并标准错误：有效参数、运行状态、warning、失败时的 traceback，以及成功完成时的 benchmark 汇总。 |
 | `result.json` | vLLM bench 生成，CLI 流式回写；每个成功 case 一次 | 未修改的 `--save-result --save-detailed` JSON：配置与模型标识、完成/失败请求数、token 总数和吞吐、TTFT/TPOT/ITL/E2EL 聚合与百分位指标，以及逐请求长度、时延、生成文本和错误数组。 |
 | `result.json.partial` | CLI；结果回传未完成时 | 已回传的部分数据，不作为完整结果；完整远端目录保留待检查。 |
 

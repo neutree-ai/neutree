@@ -64,6 +64,22 @@ func TestReadBenchmarkResultSummary(t *testing.T) {
 		require.Equal(t, "completed=20 p99_ttft_ms=25.50", summary.String())
 	})
 
+	t.Run("tolerates non-finite metrics", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), benchmarkResultFileName)
+		require.NoError(t, os.WriteFile(path, []byte(`{
+  "completed": 20,
+  "duration": NaN,
+  "output_throughput": Infinity,
+  "p50_ttft_ms": -Infinity,
+  "p99_ttft_ms": 25.5,
+  "note": "NaN and Infinity stay text inside strings"
+}`), 0600))
+
+		summary, err := readBenchmarkResultSummary(path)
+		require.NoError(t, err)
+		require.Equal(t, "completed=20 p99_ttft_ms=25.50", summary.String())
+	})
+
 	t.Run("rejects malformed JSON", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), benchmarkResultFileName)
 		require.NoError(t, os.WriteFile(path, []byte(`{`), 0600))

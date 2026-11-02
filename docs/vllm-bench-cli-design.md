@@ -85,13 +85,18 @@ Existing credentials API authorization is the permission boundary.
 
 | Cluster type | Client runtime selection | Traffic route | Command transport |
 |---|---|---|---|
-| Kubernetes | First usable Running inference Pod by name; `vllm` container or the only container | `router-service.<namespace>.svc.cluster.local:8000/<workspace>/<endpoint>` | Kubernetes Pod exec |
+| Kubernetes | First usable Ready Running inference Pod by name; `vllm` container or the only container | `router-service.<namespace>.svc.cluster.local:8000/<workspace>/<endpoint>` | Kubernetes Pod exec |
 | Static SSH | First Ray Serve `Backend` replica by node, replica, and Actor identity; map Actor PID to one Docker container | `<cluster-dashboard-host>:8000/<workspace>/<endpoint>` | SSH plus `docker exec` |
 
-The Kubernetes tokenizer path comes from `vllm serve <model-path>` container
-arguments. The static tokenizer path comes from the deployed Ray Serve
-`model.path`. If either path cannot be determined, the command fails before
-starting a case.
+The tokenizer is the path the engine itself reads its model from inside the
+container. The CLI computes it from the Endpoint model, the Cluster model cache,
+and the Model Registry using the same helper the orchestrators use to place the
+model, so the benchmark tokenizes prompts with the files the server serves. A
+registry whose model is not placed in the cluster cache leaves the bare model
+name. The command fails before starting a case when the path cannot be resolved.
+
+The engine's own `tokenizer_mode` and `trust_remote_code` settings are not
+inherited; the benchmark tokenizes with the model path only.
 
 ### vLLM Translation
 
@@ -114,8 +119,7 @@ vllm bench serve \
   --result-filename result.json \
   --metric-percentiles 50,90,95,99 \
   --percentile-metrics ttft,tpot,itl,e2el \
-  --tokenizer <mounted tokenizer path> \
-  --disable-tqdm
+  --tokenizer <model path inside the runtime>
 ```
 
 Before cases start, the CLI runs a `vllm bench serve --help` preflight and
@@ -140,16 +144,17 @@ neutree-bench-<random>/
   input-<input>-output-<output>-concurrency-<concurrency>/
     command.sh
     stdout.log
-    stderr.log
     result.json
 ```
 
-The target runtime uses a temporary `/tmp/neutree-bench-*` directory. The CLI
-streams stdout and stderr through Pod exec or SSH/Docker exec. It then streams
-`cat result.json` into the CLI-host artifact directory; it does not use `scp`
-internally. Remote temporary directories are removed after transfer on a
-best-effort basis. New run and case directories use mode `0700`; artifact files
-use mode `0600`.
+The target runtime uses a temporary `/tmp/neutree-bench-*` directory. vLLM
+bench writes both streams through a monitor that merges standard error into
+standard output, so the CLI streams one log per case through Pod exec or
+SSH/Docker exec. It then streams `cat result.json` into the CLI-host artifact
+directory; it does not use `scp` internally. Remote temporary directories are
+removed after transfer on a best-effort basis; a failed or canceled case keeps
+its remote directory. New run and case directories use mode `0700`; artifact
+files use mode `0600`.
 
 | File | Writer and timing | Contents |
 |---|---|---|
@@ -157,8 +162,7 @@ use mode `0600`.
 | `preflight.stdout.log` | Selected runtime; once per invocation | `vllm bench serve --help` output, raw `<route>/v1/models` response, and the selected model line. |
 | `preflight.stderr.log` | Selected runtime; once per invocation | Standard error from preflight and model discovery. |
 | `command.sh` | CLI; once per case before execution | The exact POSIX-shell-quoted remote `vllm bench serve` command for the case, including its temporary result directory. It contains no API key, kubeconfig, or SSH private key. |
-| `stdout.log` | vLLM bench; once per case | Raw standard output from vLLM, including its effective arguments, progress/status messages, warnings emitted to stdout, and final serving benchmark summary when the command completes. |
-| `stderr.log` | vLLM bench; once per case | Raw standard error from vLLM, including diagnostics and tracebacks when a case fails. |
+| `stdout.log` | vLLM bench; once per case | Raw standard output with standard error merged in, including its effective arguments, progress/status messages, warnings, tracebacks when a case fails, and the final serving benchmark summary. |
 | `result.json` | vLLM bench, then streamed by the CLI; once per successful case | The unmodified `--save-result --save-detailed` JSON: benchmark identity and configuration, completed/failed counts, token totals and throughput, TTFT/TPOT/ITL/E2EL aggregate and percentile metrics, plus detailed per-request arrays such as lengths, timings, generated texts, and errors. |
 
 `manifest.json` and logs remain available when a case fails. `result.json` is

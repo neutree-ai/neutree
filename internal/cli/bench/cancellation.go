@@ -43,16 +43,15 @@ var errRemoteTerminationUnconfirmed = errors.New("remote benchmark termination n
 const benchmarkMonitorScript = `# neutree-bench-monitor
 import os
 import select
-import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
 
-renew, cancel, log, result_dir = sys.argv[1:5]
-lease = float(sys.argv[5])
-command = sys.argv[6]
+renew, cancel, log = sys.argv[1:4]
+lease = float(sys.argv[4])
+command = sys.argv[5]
 
 if os.path.exists(cancel):
     sys.exit(130)
@@ -138,12 +137,12 @@ def finish(code):
             time.sleep(0.02)
     sys.exit(code)
 
-expired = False
+# The remote directory is never removed here: the CLI keeps a stopped case
+# inspectable, and deleting it from the monitor would contradict that.
 while child.poll() is None:
     if os.path.exists(cancel):
         break
     if time.time() - os.stat(renew).st_mtime > lease:
-        expired = True
         break
     time.sleep(0.2)
 
@@ -152,8 +151,6 @@ if child.poll() is None:
         sys.stderr.write("neutree-bench: benchmark process group did not stop\n")
         sys.stderr.flush()
         finish(137)
-    if expired and not os.path.exists(os.path.join(result_dir, "result.json")):
-        shutil.rmtree(result_dir, ignore_errors=True)
     finish(130)
 
 kill_group(signal.SIGKILL)
@@ -256,8 +253,12 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 		done <- runner.Run(runCtx, benchmarkMonitorCommand(remoteDir, command, remoteLeaseTimeout), output, output)
 	}()
 
+	finished := false
+
 	select {
 	case runErr := <-done:
+		finished = true
+
 		if ctx.Err() == nil {
 			return runErr
 		}
@@ -268,10 +269,15 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 		klog.Warningf("%v; the remote lease stops the benchmark within %s", err, remoteLeaseTimeout)
 	}
 
-	select {
-	case <-done:
-	case <-time.After(remoteStopGrace):
-		return fmt.Errorf("%w: %w", errRemoteTerminationUnconfirmed, ctx.Err())
+	// A stream that already returned has nothing left to confirm; waiting on
+	// done again would stall for the full grace period and report a failure
+	// that did not happen.
+	if !finished {
+		select {
+		case <-done:
+		case <-time.After(remoteStopGrace):
+			return fmt.Errorf("%w: %w", errRemoteTerminationUnconfirmed, ctx.Err())
+		}
 	}
 
 	return ctx.Err()

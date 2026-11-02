@@ -3083,8 +3083,10 @@ func TestKubernetesOrchestrator_setModelRegistryVariables_BentoML(t *testing.T) 
 			},
 			cluster: &v1.Cluster{},
 			expected: &DeploymentManifestVariables{
-				ModelArgs: map[string]interface{}{},
-				Env:       map[string]string{},
+				ModelArgs: map[string]interface{}{
+					"path": "test-model",
+				},
+				Env: map[string]string{},
 			},
 			expectError: false,
 		},

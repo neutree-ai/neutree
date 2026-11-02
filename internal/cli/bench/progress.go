@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,12 +30,110 @@ func readBenchmarkResultSummary(path string) (benchmarkResultSummary, error) {
 	}
 	defer file.Close() //nolint:errcheck
 
-	summary, err := decodeBenchmarkResultSummary(json.NewDecoder(file))
+	summary, err := decodeBenchmarkResultSummary(json.NewDecoder(newNaNTolerantReader(file)))
 	if err != nil {
 		return benchmarkResultSummary{}, fmt.Errorf("decode benchmark result: %w", err)
 	}
 
 	return summary, nil
+}
+
+// newNaNTolerantReader turns the non-finite float literals Python's json.dump
+// writes (NaN, Infinity, -Infinity) into null. vLLM reports a metric that
+// collected no samples that way, and encoding/json refuses the whole document
+// over a value the summary may not even read. Text inside strings is left
+// untouched.
+func newNaNTolerantReader(source io.Reader) io.Reader {
+	return &nanTolerantReader{reader: bufio.NewReader(source)}
+}
+
+type nanTolerantReader struct {
+	reader   *bufio.Reader
+	pending  []byte
+	inString bool
+	escaped  bool
+}
+
+func (r *nanTolerantReader) Read(p []byte) (int, error) {
+	n := 0
+
+	for n < len(p) {
+		if len(r.pending) > 0 {
+			copied := copy(p[n:], r.pending)
+			n += copied
+			r.pending = r.pending[copied:]
+
+			continue
+		}
+
+		value, err := r.reader.ReadByte()
+		if err != nil {
+			if n > 0 {
+				return n, nil
+			}
+
+			return 0, err
+		}
+
+		if r.inString {
+			p[n] = value
+			n++
+
+			switch {
+			case r.escaped:
+				r.escaped = false
+			case value == '\\':
+				r.escaped = true
+			case value == '"':
+				r.inString = false
+			}
+
+			continue
+		}
+
+		if remaining, ok := r.consumeNonFiniteLiteral(value); ok {
+			if _, err := r.reader.Discard(remaining); err != nil {
+				return n, err
+			}
+
+			r.pending = append(r.pending, "null"...)
+
+			continue
+		}
+
+		if value == '"' {
+			r.inString = true
+		}
+
+		p[n] = value
+		n++
+	}
+
+	return n, nil
+}
+
+// consumeNonFiniteLiteral reports how many bytes after value belong to a
+// non-finite literal the reader has just started.
+func (r *nanTolerantReader) consumeNonFiniteLiteral(value byte) (int, bool) {
+	var literal string
+
+	switch value {
+	case 'N':
+		literal = "NaN"
+	case 'I':
+		literal = "Infinity"
+	case '-':
+		literal = "-Infinity"
+	default:
+		return 0, false
+	}
+
+	peeked, _ := r.reader.Peek(len(literal) - 1)
+	if string(peeked) != literal[1:] {
+		return 0, false
+	}
+
+	return len(literal) - 1, true
 }
 
 func decodeBenchmarkResultSummary(decoder *json.Decoder) (benchmarkResultSummary, error) {

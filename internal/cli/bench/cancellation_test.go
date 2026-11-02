@@ -179,7 +179,9 @@ time.sleep(30)
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		require.NoDirExists(t, remoteDir)
+		// The CLI keeps a stopped case inspectable, and the monitor must not
+		// delete what the CLI reports as retained.
+		require.DirExists(t, remoteDir)
 	case <-time.After(12 * time.Second):
 		t.Fatal("monitor did not stop the benchmark after the lease expired")
 	}

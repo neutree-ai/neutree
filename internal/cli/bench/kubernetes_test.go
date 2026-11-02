@@ -14,28 +14,21 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestSelectKubernetesTargetSortsPodsAndFindsVLLMTokenizer(t *testing.T) {
+func TestSelectKubernetesTargetSortsPodsAndFindsVLLMContainer(t *testing.T) {
 	pods := []corev1.Pod{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-b"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Name:    "vllm",
-				Command: []string{"vllm"},
-				Args:    []string{"serve", "/models/second"},
-			}}},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-a"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Name:    "vllm",
-				Command: []string{"vllm", "serve", "/models/first"},
-			}}},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-pending"},
-			Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			Status:     corev1.PodStatus{Phase: corev1.PodPending, Conditions: readyConditions()},
 			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
 		},
 	}
@@ -44,25 +37,35 @@ func TestSelectKubernetesTargetSortsPodsAndFindsVLLMTokenizer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "endpoint-a", target.PodName)
 	require.Equal(t, "vllm", target.Container)
-	require.Equal(t, "/models/first", target.Tokenizer.Path)
 }
 
-func TestTokenizerOptionsFromContainerInheritsServeFlags(t *testing.T) {
-	options, err := tokenizerOptionsFromContainer(corev1.Container{
-		Name: "vllm",
-		Command: []string{
-			"vllm", "serve", "/models/chat",
-			"--tokenizer", "/models/custom-tokenizer",
-			"--tokenizer-mode", "slow",
-			"--trust-remote-code",
+// A Pod stays in the Running phase while its container is starting or
+// crash-looping. Exec into it fails before any case runs, so selection has to
+// look at the Readiness condition too.
+func TestSelectKubernetesTargetSkipsRunningButNotReadyPods(t *testing.T) {
+	pods := []corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-a"},
+			Status: corev1.PodStatus{
+				Phase:      corev1.PodRunning,
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
 		},
-	})
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-b"},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
+		},
+	}
+
+	target, err := selectKubernetesTarget(pods)
 	require.NoError(t, err)
-	require.Equal(t, tokenizerOptions{
-		Path:            "/models/custom-tokenizer",
-		Mode:            "slow",
-		TrustRemoteCode: true,
-	}, options)
+	require.Equal(t, "endpoint-b", target.PodName)
+}
+
+func readyConditions() []corev1.PodCondition {
+	return []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
 }
 
 func TestKubernetesRouterBaseURL(t *testing.T) {

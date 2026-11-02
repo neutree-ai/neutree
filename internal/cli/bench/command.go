@@ -14,14 +14,6 @@ const (
 	benchmarkPercentileMetrics = "ttft,tpot,itl,e2el"
 )
 
-// tokenizerOptions carries the tokenizer settings the serving engine runs
-// with. vllm bench reuses them so prompt token lengths match the server.
-type tokenizerOptions struct {
-	Path            string
-	Mode            string
-	TrustRemoteCode bool
-}
-
 // BenchTarget contains the target-specific information shared by every case.
 // runner and cleanup are intentionally private so they cannot enter the local
 // JSON manifest.
@@ -30,7 +22,10 @@ type BenchTarget struct {
 	RuntimeID string
 	BaseURL   string
 	Model     string
-	Tokenizer tokenizerOptions
+	// Tokenizer is the model path the engine reads inside its own container.
+	// vllm bench runs there too, so it tokenizes prompt lengths with the same
+	// files the server serves.
+	Tokenizer string
 
 	runner  remoteRunner
 	cleanup func() error
@@ -62,15 +57,7 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 		"--save-detailed",
 		"--metric-percentiles", shellQuote(benchmarkPercentiles),
 		"--percentile-metrics", shellQuote(benchmarkPercentileMetrics),
-		"--tokenizer", shellQuote(target.Tokenizer.Path),
-	}
-
-	if target.Tokenizer.Mode != "" {
-		args = append(args, "--tokenizer-mode", shellQuote(target.Tokenizer.Mode))
-	}
-
-	if target.Tokenizer.TrustRemoteCode {
-		args = append(args, "--trust-remote-code")
+		"--tokenizer", shellQuote(target.Tokenizer),
 	}
 
 	// `exec` replaces the shell with the benchmark, so the monitor is the
@@ -98,7 +85,6 @@ func benchmarkMonitorCommand(remoteDir, command string, lease time.Duration) str
 		shellQuote(benchmarkRenewPath(remoteDir)),
 		shellQuote(benchmarkCancelPath(remoteDir)),
 		shellQuote(benchmarkLogPath(remoteDir)),
-		shellQuote(remoteDir),
 		strconv.Itoa(int(lease / time.Second)),
 		shellQuote(command),
 	}

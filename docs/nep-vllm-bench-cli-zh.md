@@ -75,15 +75,17 @@ engine 返回 unsupported-engine 错误。后续新增 engine 时保持 CLI 参�
 ### 当前行为与证据
 
 在该能力之前，操作者需要手工定位 inference Pod 或 Ray Backend、取得 kubeconfig
-或 SSH 信息、推导服务 URL 和 tokenizer 路径、拼接 vLLM 命令并拷贝结果。Kubernetes
+或 SSH 信息、推导服务 URL 和容器内 model path、拼接 vLLM 命令并拷贝结果。Kubernetes
 和 static Ray Cluster 的步骤不同，难以保证参数、路由和产物一致。
 
 现有实现参考已将职责拆分到：
 
 - `cmd/neutree-cli/app/cmd/bench/bench.go`：命令、flag 和输入校验。
 - `internal/cli/bench/options.go`：正整数列表解析、去重排序和矩阵展开。
-- `internal/cli/bench/kubernetes.go`：Pod、容器、tokenizer 和 Router 解析。
+- `internal/cli/bench/kubernetes.go`：Pod（Running+Ready）、容器和 Router 解析。
 - `internal/cli/bench/static.go`：Ray Backend/Actor/Node/Docker 解析。
+- `internal/modelpath`：由 Endpoint、Cluster model cache 和 Model Registry 计算
+  容器内 model path，编排器与 bench 共用。
 - `internal/cli/bench/run.go`：case 生命周期、manifest、日志和结果回传。
 - `pkg/client/cluster.go`：只读取目标 Cluster 凭据。
 
@@ -94,7 +96,7 @@ engine 返回 unsupported-engine 错误。后续新增 engine 时保持 CLI 参�
 | 快速启动一次 Endpoint benchmark | 一条 CLI 命令可以解析目标并启动 case | CLI 单测、目标环境手工/E2E |
 | 参数可重复 | input/output/concurrency 矩阵按稳定顺序执行，参数映射到 vLLM | `options_test.go`、`command_test.go` |
 | 不增加 runtime 依赖 | 不创建 benchmark image、sidecar、Job 或包安装流程；直接使用副本容器内已有 `vllm` | 镜像 preflight、部署验证 |
-| 结果可审计 | 每个 run 有 manifest、命令、stdout、stderr 和 vLLM result | `run_test.go`、真实矩阵验证 |
+| 结果可审计 | 每个 run 有 manifest、命令、合并日志 `stdout.log` 和 vLLM result | `run_test.go`、真实矩阵验证 |
 | 不泄露凭据 | API key、kubeconfig、SSH key 不进入命令、日志、manifest 或 result | 产物断言、代码审查 |
 
 ### 非目标
@@ -191,9 +193,11 @@ benchmark image、Python 包、sidecar、Job、PVC 或权限对象。代价是�
 #### Kubernetes
 
 1. 解码目标 Cluster kubeconfig。
-2. 在 Cluster namespace 中按 `app=inference,endpoint=<endpoint>` 列出 Running Pod。
+2. 在 Cluster namespace 中按 `app=inference,workspace=<workspace>,endpoint=<endpoint>`
+   列出 Pod，只保留 Running 且 Ready 的 Pod。
 3. 按名称选择首个可用 Pod；优先 `vllm` 容器，否则仅一个常规容器时使用该容器。
-4. 从 `vllm serve <model-path>` 参数取得 tokenizer。
+4. 由 Endpoint 模型、Cluster model cache 和 Model Registry 计算 engine 在容器内的
+   model path，作为 tokenizer。
 5. 通过 Kubernetes exec 执行命令，请求走：
    `http://router-service.<namespace>.svc.cluster.local:8000/<workspace>/<endpoint>`。
 
@@ -203,8 +207,8 @@ benchmark image、Python 包、sidecar、Job、PVC 或权限对象。代价是�
 2. 按 Node、Replica、Actor 标识排序选择首个 replica。
 3. 通过 Ray Actor State 获取 PID/Node，读取 `/proc/<pid>/cgroup` 并解析唯一 Docker ID。
 4. `docker inspect` 校验 ID，再通过 SSH + `docker exec` 执行。
-5. 从 Ray Serve `model.path` 获取 tokenizer；请求走
-   `<cluster-dashboard-host>:8000/<workspace>/<endpoint>`。
+5. model path 的推导与 Kubernetes 相同（见上文），不再读取 Ray Serve `model.path`；
+   请求走 `<cluster-dashboard-host>:8000/<workspace>/<endpoint>`。
 
 ### API、数据模型与配置
 
@@ -236,8 +240,8 @@ benchmark image、Python 包、sidecar、Job、PVC 或权限对象。代价是�
 | Preflight 与 `/v1/models` | 写入 preflight logs 和 manifest | 目标容器 + CLI | 失败不运行 case，保留日志 |
 | Case 启动 | manifest 增加进行中 case | CLI + runtime | 每个 case 串行；无自动重试，避免改变负载语义 |
 | Case 成功 | 本地写入 `result.json`，manifest 标记 `Succeeded` | vLLM + CLI | 结果必须非空；否则视为失败 |
-| Case 取消 | `SIGINT`/`SIGTERM` 时 manifest 标记 `Canceled`，保留 stdout/stderr | CLI + runtime | 独立 exec 请求监督进程终止该 case 的进程组；确认后再清理，未确认则保留目录并告警 |
-| Case 失败 | manifest 标记 `Failed`，保留 stdout/stderr | CLI | 停止后续 case；结果回传未完成时保留远端目录和本地 `.partial` 文件 |
+| Case 取消 | `SIGINT`/`SIGTERM` 时 manifest 标记 `Canceled`，保留合并日志 `stdout.log` | CLI + runtime | 独立 exec 请求监督进程终止该 case 的进程组；确认后再清理，未确认则保留目录并告警 |
+| Case 失败 | manifest 标记 `Failed`，保留合并日志 `stdout.log` | CLI | 停止后续 case；结果回传未完成时保留远端目录和本地 `.partial` 文件 |
 | CLI 正常退出 | 删除远端临时目录 | CLI | cleanup best effort；本地结果保留 |
 
 ### 运行依赖与支持环境
@@ -279,8 +283,8 @@ GPU Endpoint；当前环境缺少统一自动化 profile，因此真实路径使
 - `cmd/neutree-cli/app/cmd/bench/bench_test.go`：flags、engine 和早期校验。
 - `internal/cli/bench/options_test.go`：正整数解析、去重、矩阵顺序和非法输入。
 - `command_test.go` / `model_test.go`：vLLM 命令 quote、模型字段兼容。
-- `kubernetes_test.go` / `static_test.go` / `resolver_test.go`：Pod、容器、Ray、Actor、
-  Node、cgroup Docker ID 和 tokenizer 解析。
+- `kubernetes_test.go` / `static_test.go` / `resolver_test.go`：Pod（Running+Ready 选择）、
+  容器、Ray、Actor、Node、cgroup Docker ID 和 model path 解析。
 - `run_test.go` / `runner_test.go`：manifest、日志、结果流、失败和 cleanup。
 - `pkg/client/cluster_test.go`：单 Cluster credentials 查询和 Authorization header。
 
@@ -379,7 +383,7 @@ suite；如进入发布阶段，应将上述两条路径纳入自动化环境。
 
 | 问题 | 结论 | 证据或验证计划 | 责任方 |
 |---|---|---|---|
-| 如何确认使用与正常？ | CLI 输出实时阶段日志、case 参数/命令/结果目录；查看 manifest case 状态、stdout/stderr 和 result。 | `run.go`、文件契约 | 运行操作者（待指定） |
+| 如何确认使用与正常？ | CLI 输出实时阶段日志、case 参数/命令/结果目录；查看 manifest case 状态、`stdout.log` 和 result。 | `run.go`、文件契约 | 运行操作者（待指定） |
 | SLI/SLO 和告警 | 首期不新增平台 SLI/SLO 或告警；benchmark 指标只属于单次结果。 | 无 metrics 变更；需在推广前评审 | 运维负责人（待指定） |
 | 使用哪些日志/指标？ | CLI 标准错误输出的 klog 阶段日志与 case 摘要；本地 preflight/case logs、vLLM result JSON；无集中采集。 | `run.go`、文件表 | CLI 维护者（待指定） |
 | 缺失观测能力 | 无集中 dashboard/alert，无法跨 run 聚合；推广前需决定是否增加结果上传或报告层。 | 开放决策 | 产品/运维评审（待指定） |
@@ -410,7 +414,7 @@ suite；如进入发布阶段，应将上述两条路径纳入自动化环境。
 |---|---|---|---|
 | API/Cluster 故障 | 先看 CLI error；检查 Endpoint/Cluster 状态和凭据权限，不修改资源。 | `manifest`/error handling | 运行操作者（待指定） |
 | runtime 选择失败 | 查看 preflight 前的 CLI error；K8s 检查 Pod/container args，static 检查 Ray Actor/PID/cgroup/Docker。 | resolver 日志和单测 | runtime 维护者（待指定） |
-| vLLM case 失败 | 查看 case `stdout.log`、`stderr.log`、`command.sh` 和 manifest error；确认资源竞争与模型 route。 | 文件契约 | 运行操作者（待指定） |
+| vLLM case 失败 | 查看 case `stdout.log`（含合并的 stderr）、`command.sh` 和 manifest error；确认资源竞争与模型 route。 | 文件契约 | 运行操作者（待指定） |
 | result 缺失 | 检查 vLLM 是否退出成功、容器临时目录和 exec 连接；失败时重新启动新 run。 | `runCase` 非空检查 | CLI 维护者（待指定） |
 | 不满足预期延迟 | 先比较 `result.json` 的 completed/failed、TTFT/TPOT/ITL/E2E 和 concurrency，再停止 live traffic；不把 route 结果当单副本结论。 | result schema | 运行操作者（待指定） |
 
