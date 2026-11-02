@@ -49,7 +49,6 @@ from serve.sglang.v0_5_10.wire import (
     _flatten_http_error,
     _handle_request,
     _input_error_handler,
-    _normalize_stream_error,
 )
 
 logger = logging.getLogger("ray.serve")
@@ -120,12 +119,17 @@ async def _iter_response_body(result) -> AsyncGenerator[str, None]:
         yield frame
 
 
-def _to_json_response(result) -> JSONResponse:
-    return wire_http_response(
-        result,
-        error_builder=_error_response,
-        content_transform=_flatten_http_error,
+def _flat_error_response(response: JSONResponse) -> JSONResponse:
+    """Render SGLang's flat HTTP error body for Controller-owned responses."""
+    return JSONResponse(
+        content=_flatten_http_error(json.loads(response.body)),
+        status_code=response.status_code,
     )
+
+
+def _to_json_response(result) -> JSONResponse:
+    response = wire_http_response(result, error_builder=_error_response)
+    return _flat_error_response(response) if response.status_code >= 400 else response
 
 
 @serve.deployment(
@@ -397,12 +401,12 @@ class Controller:
         def start() -> DeploymentResponseGenerator:
             return getattr(self.backend.options(stream=True), method).remote(payload)
 
-        return await open_stream(
+        response = await open_stream(
             start,
             message="Failed to initialize completion stream",
             error_builder=_error_response,
-            normalize_error=_normalize_stream_error,
         )
+        return _flat_error_response(response) if isinstance(response, JSONResponse) else response
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
@@ -426,9 +430,10 @@ class Controller:
     @app.get("/v1/models")
     async def models(self, request: Request):
         result = await self.backend.get_model_info.remote()
-        if result["status_code"] >= 400:
-            return _to_json_response(result)
-        info = result["content"]
+        response = _to_json_response(result)
+        if response.status_code >= 400:
+            return response
+        info = json.loads(response.body)
         return JSONResponse(content={
             "object": "list",
             "data": [{

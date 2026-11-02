@@ -64,8 +64,10 @@ wrapper runs in the image.
 
 ### Adding tests
 
-- Place `test_<module>.py` beside the source file. Add or update tests when changing
-  a Python module; files under the two collection roots are discovered automatically.
+- Place tests beside the source file. Name single-module suites `test_<module>.py`;
+  an engine-wrapper suite that exercises `app.py` and `wire.py` together may use
+  `test_<engine>_error_handling.py`. Add or update tests when changing a Python
+  module; files under the two collection roots are discovered automatically.
 - Use `test_` function names and `pytest.mark.parametrize` for input variations.
   Cover expected behavior, invalid inputs, and relevant failure paths.
 - Keep unit tests independent of GPUs, inference engine installations, model

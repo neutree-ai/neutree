@@ -37,10 +37,17 @@ def _error_content(
     error_type: str | None = None,
     param: str | None = None,
 ) -> Dict[str, Any]:
+    if not isinstance(error_type, str) or not error_type:
+        # HTTPStatus only knows registered codes; engines may report
+        # non-standard ones such as 529.
+        try:
+            error_type = HTTPStatus(status_code).phrase
+        except ValueError:
+            error_type = "InternalServerError" if status_code >= 500 else "BadRequestError"
     return {
         "object": "error",
         "message": message,
-        "type": error_type or HTTPStatus(status_code).phrase,
+        "type": error_type,
         "param": param,
         "code": status_code,
     }
@@ -69,7 +76,11 @@ def _flatten_http_error(content: Any) -> Any:
         error = content.get("error")
         if isinstance(error, dict):
             status = error.get("code")
-            if not isinstance(status, int) or isinstance(status, bool):
+            if (
+                not isinstance(status, int)
+                or isinstance(status, bool)
+                or not 400 <= status <= 599
+            ):
                 status = stream_error_status(error)
             return _error_content(
                 error.get("message", "Internal server error"),
@@ -78,11 +89,6 @@ def _flatten_http_error(content: Any) -> Any:
                 error.get("param"),
             )
     return content
-
-
-def _normalize_stream_error(response: JSONResponse) -> JSONResponse:
-    content = json.loads(response.body)
-    return JSONResponse(content=_flatten_http_error(content), status_code=response.status_code)
 
 
 async def _handle_request(get_handler, request_type, payload):
@@ -118,6 +124,5 @@ def _extract_serializable(result) -> Dict[str, Any]:
             status = stream_error_status(content)
         elif "error" in content:
             status = stream_error_status(content["error"])
-    content = json_safe(content)
-    json.dumps(content, allow_nan=False)
-    return wire_response(content, status)
+    content = json_safe(content, strict=True)
+    return wire_response(content, status, sanitized=True)

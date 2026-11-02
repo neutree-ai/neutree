@@ -87,8 +87,7 @@ def _to_wire_response(result: Any, status_code: int | None = None) -> Dict[str, 
                 status_code = stream_error_status(content["error"])
         else:
             content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
-        content = json_safe(content)
-        json.dumps(content, allow_nan=False)
+        content = json_safe(content, strict=True)
     except Exception as exc:
-        content, status_code = backend_error(exc, "response serialization"), 500
-    return wire_response(content, status_code)
+        return wire_response(backend_error(exc, "response serialization"), 500)
+    return wire_response(content, status_code, sanitized=True)

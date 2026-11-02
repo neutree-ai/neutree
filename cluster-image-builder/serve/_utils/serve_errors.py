@@ -113,26 +113,38 @@ def backend_error(exc: Exception, where: str) -> dict:
     return build_error("Internal server error", 500, "InternalServerError")
 
 
-def json_safe(value: Any) -> Any:
-    """Replace non-finite floats, which JSON encoders reject."""
+def json_safe(value: Any, *, strict: bool = False) -> Any:
+    """Replace non-finite floats, which JSON encoders reject.
+
+    ``strict`` also rejects values the JSON encoder cannot represent, so a
+    Backend can validate its response without a second encoding pass.
+    """
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, dict):
-        return {key: json_safe(item) for key, item in value.items()}
+        if strict:
+            for key in value:
+                if not isinstance(key, str):
+                    raise TypeError(f"JSON object key must be str, got {type(key).__name__}")
+        return {key: json_safe(item, strict=strict) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [json_safe(item) for item in value]
+        return [json_safe(item, strict=strict) for item in value]
+    if strict and value is not None and not isinstance(value, (str, int, bool)):
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
     return value
 
 
-def wire_response(content: Any, status_code: int = 200) -> dict:
+def wire_response(content: Any, status_code: int = 200, *, sanitized: bool = False) -> dict:
     """Envelope a Backend result for the Ray actor boundary.
 
     Only the body and status code travel; HTTP headers set by the engine cannot
-    cross the actor boundary and are not reproduced at the Controller.
+    cross the actor boundary and are not reproduced at the Controller. Set
+    ``sanitized`` when the caller already ran ``json_safe`` and validated the
+    body, so the same object graph is not walked twice.
     """
     return {
         WIRE_RESPONSE_MARKER: True,
-        "content": json_safe(content),
+        "content": content if sanitized else json_safe(content),
         "status_code": status_code,
     }
 
@@ -140,15 +152,12 @@ def wire_response(content: Any, status_code: int = 200) -> dict:
 def wire_http_response(
     result: Any,
     error_builder: Callable[..., JSONResponse] = error_response,
-    content_transform: Callable[[Any], Any] | None = None,
 ) -> JSONResponse:
     """Render a Backend wire envelope, failing closed on a malformed one."""
     if isinstance(result, dict) and result.get(WIRE_RESPONSE_MARKER) is True:
         try:
             content = result["content"]
             status_code = int(result["status_code"])
-            if content_transform is not None:
-                content = content_transform(content)
             return JSONResponse(content=content, status_code=status_code)
         except Exception:
             logging.exception("Backend wire response could not be rendered")
@@ -162,7 +171,6 @@ async def open_stream(
     *,
     message: str,
     error_builder: Callable[..., JSONResponse] = error_response,
-    normalize_error: Callable[[JSONResponse], JSONResponse] | None = None,
 ) -> Any:
     """Commit to an SSE response only after the Backend's first frame is known.
 
@@ -182,7 +190,7 @@ async def open_stream(
         return error_builder(message, 500)
     failure = stream_error_response(first)
     if failure is not None:
-        return normalize_error(failure) if normalize_error is not None else failure
+        return failure
 
     async def replay():
         yield first
@@ -215,7 +223,10 @@ def stream_error_status(error: Any) -> int:
                 return status_code
             if code in _SYMBOLIC_ERROR_CODES:
                 return _SYMBOLIC_ERROR_CODES[code]
-        return _CLIENT_ERROR_TYPES.get(error.get("type"), 500)
+        error_type = error.get("type")
+        if not isinstance(error_type, str):
+            return 500
+        return _CLIENT_ERROR_TYPES.get(error_type, 500)
     return 500
 
 

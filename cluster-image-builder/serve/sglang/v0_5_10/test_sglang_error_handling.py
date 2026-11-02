@@ -51,7 +51,7 @@ def wrapper(monkeypatch):
     for node in ast.parse(wire_path.read_text()).body:
         if isinstance(node, ast.ImportFrom) and node.module.startswith("serve._utils."):
             wire_body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_FakeRawRequest", "_handle_request", "_extract_serializable", "_error_content", "_error_response", "_input_error_handler", "_flatten_http_error", "_normalize_stream_error"}:
+        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_FakeRawRequest", "_handle_request", "_extract_serializable", "_error_content", "_error_response", "_input_error_handler", "_flatten_http_error"}:
             wire_body.append(copy.deepcopy(node))
     body = []
     for node in tree.body:
@@ -65,7 +65,7 @@ def wrapper(monkeypatch):
                 if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     method.decorator_list = []
             body.append(cls)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response", "_handle_request"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response", "_flat_error_response", "_handle_request"}:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id == "app" for n in node.targets):
             body.append(copy.deepcopy(node))
@@ -218,6 +218,14 @@ def test_models_error_is_not_model_info(wrapper):
     assert response.json() == wire["content"]
 
 
+def test_models_malformed_wire_fails_closed(wrapper):
+    http, _ = client(wrapper, {"status_code": 200})
+    response = http.get("/models")
+    assert response.status_code == 500
+    assert response.json()["object"] == "error"
+    assert response.json()["code"] == 500
+
+
 def test_controller_flattens_nested_error_body(wrapper):
     wire = {"__neutree_wire_response__": True, "status_code": 500, "content": {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
@@ -274,6 +282,27 @@ def test_stream_first_frame_is_replayed(wrapper, route):
     assert response.status_code == 200
     assert response.text == 'data: {"choices":[]}\n\ndata: [DONE]\n\n'
     assert calls == [{"stream": True}]
+
+
+@pytest.mark.parametrize("code,error_type,expected_status,expected_type", [
+    (529, None, 529, "InternalServerError"),
+    (0, None, 500, "Internal Server Error"),
+    (None, ["BadRequestError"], 500, "Internal Server Error"),
+])
+@pytest.mark.parametrize("route", ["/chat", "/completion"])
+def test_first_stream_error_with_nonstandard_code_stays_json(
+    wrapper, route, code, error_type, expected_status, expected_type,
+):
+    native = {"object": "error", "code": code, "message": "busy", "type": error_type, "param": None}
+    async def chunks():
+        yield f'data: {json.dumps({"error": native})}\n\n'
+        yield 'data: [DONE]\n\n'
+    http, _ = stream_client(wrapper, chunks())
+    response = http.post(route, json={"stream": True})
+    assert response.status_code == expected_status
+    assert response.json() == {
+        "object": "error", "message": "busy", "type": expected_type, "param": None, "code": expected_status,
+    }
 
 
 @pytest.mark.parametrize("route", ["/chat", "/completion"])

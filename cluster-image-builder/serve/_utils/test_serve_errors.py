@@ -172,6 +172,19 @@ def test_json_safe_replaces_non_finite_floats_recursively(value):
     }
 
 
+def test_json_safe_strict_accepts_json_values():
+    assert errors.json_safe(
+        {"value": float("inf"), "items": [1, True, None, "x"]}, strict=True,
+    ) == {"value": None, "items": [1, True, None, "x"]}
+
+
+def test_json_safe_strict_rejects_unserializable_objects():
+    with pytest.raises(TypeError):
+        errors.json_safe({"value": object()}, strict=True)
+    with pytest.raises(TypeError):
+        errors.json_safe({1: "value"}, strict=True)
+
+
 @pytest.mark.parametrize("code,expected", [
     (400, 400), (503, 503), ("503", 503), (True, 500), (200, 500), (600, 500), ("oops", 500), ("200", 500), (None, 500),
 ])
@@ -197,6 +210,11 @@ def test_symbolic_client_error_codes_map_to_client_status(code, expected):
 ])
 def test_client_error_types_map_to_client_status(error_type, expected):
     assert errors.stream_error_status({"type": error_type}) == expected
+
+
+@pytest.mark.parametrize("error_type", [["BadRequestError"], {"BadRequestError": 400}, 400, None])
+def test_non_string_error_type_is_server_error(error_type):
+    assert errors.stream_error_status({"type": error_type}) == 500
 
 
 @pytest.mark.parametrize("code", [None, "engine_failure"])
@@ -268,6 +286,12 @@ def test_wire_response_envelope_is_json_safe():
     }
 
 
+def test_wire_response_skips_already_sanitized_content():
+    content = {"value": float("inf")}
+    wire = errors.wire_response(content, 503, sanitized=True)
+    assert wire["content"] is content
+
+
 def test_wire_http_response_renders_envelope():
     response = errors.wire_http_response(errors.wire_response({"ok": True}, 201))
     assert response.status_code == 201
@@ -284,14 +308,6 @@ def test_wire_http_response_fails_closed_without_envelope(result):
     response = errors.wire_http_response(result)
     assert response.status_code == 500
     assert json.loads(response.body)["error"]["type"] == "InternalServerError"
-
-
-def test_wire_http_response_applies_content_transform():
-    response = errors.wire_http_response(
-        errors.wire_response({"value": 1}),
-        content_transform=lambda content: {"value": content["value"] + 1},
-    )
-    assert json.loads(response.body) == {"value": 2}
 
 
 def stream_of(*frames):
@@ -337,16 +353,3 @@ def test_open_stream_start_failure_is_server_error():
     assert json.loads(response.body) == {"error": {
         "message": "Failed to initialize stream", "type": "InternalServerError", "code": 500, "param": None,
     }}
-
-
-def test_open_stream_normalizes_first_error_frame():
-    frame = "data: " + json.dumps({"error": {"object": "error", "message": "busy", "code": 503}}) + "\n\n"
-    response = run(errors.open_stream(
-        lambda: stream_of(frame),
-        message="Failed",
-        normalize_error=lambda failure: JSONResponse(
-            content=json.loads(failure.body)["error"], status_code=failure.status_code,
-        ),
-    ))
-    assert response.status_code == 503
-    assert json.loads(response.body)["object"] == "error"

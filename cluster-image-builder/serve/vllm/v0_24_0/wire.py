@@ -65,13 +65,11 @@ def _to_wire_response(result: Any) -> Dict[str, Any]:
             content = result
         if status_code == 200 and isinstance(content, dict) and "error" in content:
             status_code = stream_error_status(content["error"])
-        content = json_safe(content)
         # Fail inside the Backend guard rather than sending engine objects to Controller.
-        json.dumps(content, allow_nan=False)
+        content = json_safe(content, strict=True)
     except Exception as exc:
-        content = backend_error(exc, "response serialization")
-        status_code = 500
-    return wire_response(content, status_code)
+        return wire_response(backend_error(exc, "response serialization"), 500)
+    return wire_response(content, status_code, sanitized=True)
 
 async def _to_wire_stream(chunks):
     try:
