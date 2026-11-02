@@ -1452,7 +1452,7 @@ func TestHAMiClusterVersionCompatibility(test *testing.T) {
 			getKubernetesServerVersion = func(*v1.Cluster) (*kubeversion.Info, error) {
 				return serverVersion, nil
 			}
-			schedulerVersion, _ := clusterversion.KubeSchedulerVersionForClusterVersion(testCase.clusterVersion, serverVersion)
+			schedulerVersion, _, _ := clusterversion.KubeSchedulerVersionForClusterVersion(testCase.clusterVersion, serverVersion)
 			assert.Equal(test, testCase.schedulerVersion, schedulerVersion)
 			cluster := newTestCluster()
 			cluster.Spec.Version = testCase.clusterVersion

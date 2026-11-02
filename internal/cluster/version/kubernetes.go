@@ -1,6 +1,7 @@
 package version
 
 import (
+	"fmt"
 	"strings"
 
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -41,33 +42,38 @@ const (
 	SchedulerVersionDefault SchedulerVersionSource = "default"
 )
 
-func KubeSchedulerVersionForClusterVersion(clusterVersion string, serverVersion *kubeversion.Info) (schedulerVersion string, source SchedulerVersionSource) {
+// KubeSchedulerVersionForClusterVersion selects the kube-scheduler image version
+// for a cluster. A Kubernetes minor without a pin falls back to the detected
+// server version, and an unusable detection falls back to the default. The
+// returned error reports a cluster version that could not be evaluated; the
+// caller keeps the fallback version but should surface why it was used.
+func KubeSchedulerVersionForClusterVersion(clusterVersion string, serverVersion *kubeversion.Info) (string, SchedulerVersionSource, error) {
 	detectedVersion := KubernetesServerVersion(serverVersion)
 	if detectedVersion == "" {
-		return DefaultKubeSchedulerVersion, SchedulerVersionDefault
+		return DefaultKubeSchedulerVersion, SchedulerVersionDefault, nil
 	}
 
 	baseClusterVersion, err := semver.BaseVersion(strings.TrimSpace(clusterVersion))
 	if err != nil {
-		return detectedVersion, SchedulerVersionDetected
+		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("parse cluster version %q: %w", clusterVersion, err)
 	}
 
 	legacyCluster, err := semver.LessThan(baseClusterVersion, v130ClusterVersionGate)
 	if err != nil {
-		return detectedVersion, SchedulerVersionDetected
+		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("compare cluster version %q: %w", clusterVersion, err)
 	}
 
 	minorVersion := KubernetesServerMajorMinor(serverVersion)
 	// Gate new scheduler pins by cluster version as well as Kubernetes minor;
 	// pre-v1.3.0 clusters must keep detected versions above Kubernetes 1.32.
 	newerKubernetes, err := semver.LessThan("v1.32.0", minorVersion)
-	if !legacyCluster || (err == nil && !newerKubernetes) {
-		if schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]; ok {
-			return schedulerVersion, SchedulerVersionPinned
+	if err == nil && (!legacyCluster || !newerKubernetes) {
+		if pinnedVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]; ok {
+			return pinnedVersion, SchedulerVersionPinned, nil
 		}
 	}
 
-	return detectedVersion, SchedulerVersionDetected
+	return detectedVersion, SchedulerVersionDetected, nil
 }
 
 func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {

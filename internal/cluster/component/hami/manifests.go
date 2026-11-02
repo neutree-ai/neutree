@@ -220,24 +220,26 @@ func (h *HAMiComponent) normalizedImagePrefix() string {
 func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 	serverVersion, err := getKubernetesServerVersion(h.cluster)
 	if err != nil {
-		h.logger.Info("Failed to detect Kubernetes server version for HAMi scheduler image, using default",
-			"error", err,
-			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
+		klog.Warningf("Failed to detect Kubernetes server version for cluster %s, using default HAMi scheduler image %s: %v",
+			h.cluster.Metadata.WorkspaceName(), clusterversion.DefaultKubeSchedulerVersion, err)
 
 		return clusterversion.DefaultKubeSchedulerVersion
 	}
 
-	schedulerVersion, source := clusterversion.KubeSchedulerVersionForClusterVersion(h.cluster.GetVersion(), serverVersion)
+	schedulerVersion, source, fallbackErr := clusterversion.KubeSchedulerVersionForClusterVersion(h.cluster.GetVersion(), serverVersion)
 
 	switch source {
 	case clusterversion.SchedulerVersionDetected:
-		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
-			"kubernetesVersion", serverVersion.GitVersion,
-			"detectedVersion", schedulerVersion)
+		if fallbackErr != nil {
+			klog.Warningf("Failed to resolve HAMi scheduler image version for cluster %s, using detected version %s: %v",
+				h.cluster.Metadata.WorkspaceName(), schedulerVersion, fallbackErr)
+		} else {
+			klog.Warningf("No pinned HAMi scheduler image for Kubernetes %s on cluster %s, using detected version %s",
+				serverVersion.GitVersion, h.cluster.Metadata.WorkspaceName(), schedulerVersion)
+		}
 	case clusterversion.SchedulerVersionDefault:
-		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
-			"kubernetesVersion", clusterversion.KubernetesServerVersion(serverVersion),
-			"defaultVersion", schedulerVersion)
+		klog.Warningf("Kubernetes server version of cluster %s is unusable for HAMi scheduler image selection, using default %s",
+			h.cluster.Metadata.WorkspaceName(), schedulerVersion)
 	}
 
 	h.logger.V(4).Info("Resolved HAMi Kubernetes scheduler image version",

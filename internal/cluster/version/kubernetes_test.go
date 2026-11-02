@@ -17,6 +17,7 @@ func TestKubeSchedulerVersionForClusterVersion(test *testing.T) {
 		serverVersion  *kubeversion.Info
 		want           string
 		wantSource     SchedulerVersionSource
+		wantErr        bool
 	}{
 		{
 			name:           "legacy cluster keeps the pin at the Kubernetes 1.32 boundary",
@@ -60,15 +61,31 @@ func TestKubeSchedulerVersionForClusterVersion(test *testing.T) {
 			want:           "v1.36.0",
 			wantSource:     SchedulerVersionDetected,
 		},
+		{
+			name:           "unparsable cluster version keeps the detected version and reports the error",
+			clusterVersion: "nightly",
+			serverVersion:  &kubeversion.Info{GitVersion: "v1.33.1"},
+			want:           "v1.33.1",
+			wantSource:     SchedulerVersionDetected,
+			wantErr:        true,
+		},
 	}
 
 	for _, testCase := range cases {
 		test.Run(testCase.name, func(test *testing.T) {
-			schedulerVersion, source := KubeSchedulerVersionForClusterVersion(
+			schedulerVersion, source, err := KubeSchedulerVersionForClusterVersion(
 				testCase.clusterVersion, testCase.serverVersion)
 
 			assert.Equal(test, testCase.want, schedulerVersion)
 			assert.Equal(test, testCase.wantSource, source)
+
+			if testCase.wantErr {
+				assert.Error(test, err)
+
+				return
+			}
+
+			require.NoError(test, err)
 		})
 	}
 }
