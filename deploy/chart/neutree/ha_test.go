@@ -199,3 +199,22 @@ func TestSingleModeExplicitReplicaCount(t *testing.T) {
 		require.Nil(t, deployment.Spec.Template.Spec.Affinity, key)
 	}
 }
+
+func TestHAModeOperatorReplicas(t *testing.T) {
+	var deployment appsv1.Deployment
+	renderedObject(t, renderChart(t, haValues(nil)), "Deployment", "neutree-cloudnative-pg", &deployment)
+
+	require.Equal(t, int32(2), *deployment.Spec.Replicas)
+	require.Contains(t, deployment.Spec.Template.Spec.Containers[0].Args, "--leader-elect")
+
+	terms := deployment.Spec.Template.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	require.Len(t, terms, 1)
+	require.Equal(t, "kubernetes.io/hostname", terms[0].TopologyKey)
+	// Must select the operator pods themselves.
+	require.Equal(t, terms[0].LabelSelector.MatchLabels["app.kubernetes.io/name"],
+		deployment.Spec.Template.Labels["app.kubernetes.io/name"])
+
+	renderedObject(t, renderChart(t, nil), "Deployment", "neutree-cloudnative-pg", &deployment)
+	require.Equal(t, int32(1), *deployment.Spec.Replicas)
+	require.Nil(t, deployment.Spec.Template.Spec.Affinity)
+}

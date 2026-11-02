@@ -14,6 +14,19 @@ ha:
 grafanaDatabase:
   enabled: true
 
+# A standby operator (the chart always runs it with --leader-elect) takes over
+# within seconds when the node of the active one fails; otherwise failover of
+# the PostgreSQL primary waits until the operator pod is rescheduled.
+cnpg:
+  replicaCount: 2
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+
 victoria-metrics-cluster:
   vminsert:
     replicaCount: 3
