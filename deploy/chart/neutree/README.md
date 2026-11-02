@@ -65,7 +65,7 @@ cannot see the cluster's APIs; render with `--set db.operatorCheck=false` (or
 
 A release that used an operator installed by its own `helm install` can switch
 to the bundled one. The database keeps running throughout, but nothing
-handles a failover between steps 1 and 3:
+handles a failover between steps 1 and 4:
 
 1. Uninstall the separate operator release. Its CRDs stay
    (`helm.sh/resource-policy: keep`).
@@ -76,7 +76,15 @@ handles a failover between steps 1 and 3:
      meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<namespace>
    ```
 
-3. `helm upgrade` the Neutree release with `cnpg.enabled=true` (the default).
+3. Delete the `cnpg-default-monitoring` ConfigMap that the separate operator
+   created in the release namespace. The bundled operator ships its own copy,
+   and Helm refuses to adopt one it does not own:
+
+   ```bash
+   kubectl -n <namespace> delete configmap cnpg-default-monitoring
+   ```
+
+4. `helm upgrade` the Neutree release with `cnpg.enabled=true` (the default).
 
 ## Database layout
 
