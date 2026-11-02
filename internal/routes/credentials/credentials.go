@@ -53,7 +53,7 @@ func RegisterCredentialsRoutes(group *gin.RouterGroup, middlewares []gin.Handler
 		}),
 		handleResourceCredentials(proxyDeps, "model_registries"))
 
-	// Log sink credentials (auth password / token)
+	// Log sink credentials (auth password / token, S3 access keys)
 	credGroup.GET("/log_sinks",
 		middleware.RequirePermission("log_sink:read-credentials", middleware.PermissionDependencies{
 			Storage: deps.Storage,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,3 +271,119 @@ func TestLogSinkTestConnection(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// newS3Stub accepts requests signed with access key "good-ak" and rejects the
+// rest as a wrong secret key would be.
+func newS3Stub(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Authorization"), "Credential=good-ak/") {
+			w.WriteHeader(http.StatusForbidden)
+			if r.Method != http.MethodHead {
+				_, _ = w.Write([]byte(`<Error><Code>SignatureDoesNotMatch</Code></Error>`))
+			}
+
+			return
+		}
+
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func s3Spec(endpoint string, auth *v1.S3SinkAuth) *v1.LogSinkSpec {
+	return &v1.LogSinkSpec{
+		Type: v1.LogSinkTypeS3,
+		S3:   &v1.S3SinkSpec{Endpoint: endpoint, Region: "us-east-1", Bucket: "traces", Auth: auth},
+	}
+}
+
+func TestLogSinkTestConnection_S3(t *testing.T) {
+	s3 := newS3Stub(t)
+	vl := newVLStub(t)
+	id := 7
+
+	stored := &v1.LogSink{ID: id, Spec: s3Spec(s3.URL, &v1.S3SinkAuth{AccessKeyID: "good-ak", SecretAccessKey: "good-sk"})}
+
+	tests := []struct {
+		name       string
+		body       logSinkTestConnectionRequest
+		permission string
+		stored     *v1.LogSink
+		wantCode   int
+		wantOK     bool
+		wantMsg    string
+	}{
+		{
+			name:       "spec only",
+			body:       logSinkTestConnectionRequest{Spec: s3Spec(s3.URL, &v1.S3SinkAuth{AccessKeyID: "good-ak", SecretAccessKey: "x"})},
+			permission: "log_sink:create",
+			wantCode:   http.StatusOK, wantOK: true,
+		},
+		{
+			name:       "spec only with wrong keys",
+			body:       logSinkTestConnectionRequest{Spec: s3Spec(s3.URL, &v1.S3SinkAuth{AccessKeyID: "bad", SecretAccessKey: "x"})},
+			permission: "log_sink:create",
+			wantCode:   http.StatusOK, wantMsg: "secret_access_key does not match",
+		},
+		{
+			name:       "id only",
+			body:       logSinkTestConnectionRequest{ID: &id},
+			permission: "log_sink:read", stored: stored,
+			wantCode: http.StatusOK, wantOK: true,
+		},
+		{
+			name:       "id and spec backfills blank keys",
+			body:       logSinkTestConnectionRequest{ID: &id, Spec: s3Spec(s3.URL, nil)},
+			permission: "log_sink:update", stored: stored,
+			wantCode: http.StatusOK, wantOK: true,
+		},
+		{
+			name:       "id and spec keeps a supplied access key",
+			body:       logSinkTestConnectionRequest{ID: &id, Spec: s3Spec(s3.URL, &v1.S3SinkAuth{AccessKeyID: "bad"})},
+			permission: "log_sink:update", stored: stored,
+			wantCode: http.StatusOK, wantMsg: "secret_access_key does not match",
+		},
+		{
+			name:       "id and spec does not backfill across types",
+			body:       logSinkTestConnectionRequest{ID: &id, Spec: vlSpec(vl.URL, nil)},
+			permission: "log_sink:update", stored: stored,
+			wantCode: http.StatusOK, wantMsg: "status 401",
+		},
+		{
+			name: "id and spec of another type gets no s3 keys",
+			body: logSinkTestConnectionRequest{ID: &id, Spec: s3Spec(s3.URL, nil)},
+			stored: &v1.LogSink{ID: id, Spec: vlSpec(vl.URL,
+				&v1.LogSinkAuth{Type: v1.LogSinkAuthTypeBearer, Token: "good-token"})},
+			permission: "log_sink:update",
+			wantCode:   http.StatusBadRequest, wantMsg: "spec.s3.auth.access_key_id and spec.s3.auth.secret_access_key are required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := storageMocks.NewMockStorage(t)
+			expectPermission(s, tt.permission, true)
+
+			if tt.stored != nil {
+				s.On("GetLogSink", "7").Return(tt.stored, nil).Once()
+			}
+
+			code, out := callLogSinkTestConnection(t, s, "user-1", tt.body)
+			require.Equal(t, tt.wantCode, code, out)
+
+			if code != http.StatusOK {
+				assert.Contains(t, out["error"], tt.wantMsg)
+				return
+			}
+
+			assert.Equal(t, tt.wantOK, out["ok"], out)
+			assert.Contains(t, out["message"], tt.wantMsg)
+		})
+	}
+}
