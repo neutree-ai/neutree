@@ -343,9 +343,10 @@ def test_returned_engine_error_dict_keeps_symbolic_code(wrapper):
     assert wire["content"] == content
 
 
+@pytest.mark.parametrize("code", ["context_length_exceeded", "model_not_found"])
 @pytest.mark.parametrize("midstream", [False, True])
-def test_returned_stream_error_keeps_native_fields(wrapper, midstream):
-    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}}
+def test_returned_stream_error_keeps_native_fields(wrapper, midstream, code):
+    content = {"error": {"message": "native rejection", "type": "invalid_request_error", "param": "messages", "code": code}}
     chunks = [{"choices": []}, content] if midstream else [content]
     wrapper.llama.create_chat_completion.return_value = iter(chunks)
     frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))

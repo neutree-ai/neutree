@@ -184,7 +184,7 @@ def test_non_mapping_error_status_is_server_error():
 
 
 @pytest.mark.parametrize("code,expected", [
-    ("context_length_exceeded", 400), ("model_not_found", 404), ("rate_limit_exceeded", 429),
+    ("context_length_exceeded", 400), ("model_not_found", 400), ("rate_limit_exceeded", 429),
 ])
 def test_symbolic_client_error_codes_map_to_client_status(code, expected):
     assert errors.stream_error_status({"code": code}) == expected
@@ -205,8 +205,17 @@ def test_symbolic_native_error_codes_preserve_server_status(code, error_type):
     assert errors.stream_error_status({"code": code, "type": error_type}) == 500
 
 
-def test_llama_context_error_keeps_symbolic_code_and_bad_request_status():
-    payload = {"error": {"type": "invalid_request_error", "code": "context_length_exceeded"}}
+@pytest.mark.parametrize("payload", [
+    {"error": {
+        "message": "This model's maximum context length is 16 tokens.",
+        "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded",
+    }},
+    {"error": {
+        "message": "The model `missing` does not exist",
+        "type": "invalid_request_error", "param": None, "code": "model_not_found",
+    }},
+])
+def test_llama_native_business_errors_keep_bad_request_status(payload):
     response = errors.stream_error_response("data: " + json.dumps(payload))
     assert response.status_code == 400
     assert json.loads(response.body) == payload

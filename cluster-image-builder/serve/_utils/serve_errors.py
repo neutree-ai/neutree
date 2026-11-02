@@ -25,9 +25,12 @@ _CLIENT_ERROR_TYPES = {
     "permission_error": 403,
 }
 
+# llama.cpp's native formatter classifies model-not-found as
+# invalid_request_error (HTTP 400), not OpenAI's 404. A first-frame stream error
+# must restore the engine's native status, so the symbolic code follows it.
 _SYMBOLIC_ERROR_CODES = {
     "context_length_exceeded": 400,
-    "model_not_found": 404,
+    "model_not_found": 400,
     "rate_limit_exceeded": 429,
 }
 
