@@ -214,9 +214,9 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		return nil, errors.Wrapf(err, "failed to get endpoint status from orchestrator for endpoint %s", obj.Metadata.WorkspaceName())
 	}
 
-	// The fingerprint names the spec the derived parts of the status belong to.
-	// It is only advanced below, once this status actually reflects the current
-	// spec, so stale data is never mistaken for a fresh observation.
+	// The fingerprint names the spec this status was derived from. It is
+	// recorded independently of model discovery, so a failed discovery never
+	// holds it back.
 	if obj.Status != nil {
 		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
@@ -231,10 +231,18 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		}
 
 		specHash := endpointSpecHash(obj)
+		status.ObservedSpecHash = specHash
 
-		if models, observed := c.servedModelsForStatus(obj, specHash); observed {
-			status.ServedModels = models
-			status.ObservedSpecHash = specHash
+		// Discovery follows the fingerprint: the names are renewed when the
+		// recorded spec differs from the current one, and while nothing has been
+		// observed yet. A failed discovery keeps the previous names.
+		if needsServedModelDiscovery(obj.Status, specHash) {
+			models, err := c.getServedModels(obj)
+			if err != nil {
+				klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)
+			} else {
+				status.ServedModels = models
+			}
 		}
 	}
 
@@ -331,10 +339,9 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 		status.ServiceURL = obj.Status.ServiceURL
 	}
 
-	// The names are only meaningful together with the spec they were discovered
-	// for, so they are carried over only while the fingerprint still points there.
-	if status.ServedModels == nil && obj.Status != nil &&
-		obj.Status.ObservedSpecHash == status.ObservedSpecHash {
+	// The last observation is retained until a newer one replaces it, so a status
+	// that carries no names does not erase what discovery already found.
+	if status.ServedModels == nil && obj.Status != nil {
 		status.ServedModels = obj.Status.ServedModels
 	}
 

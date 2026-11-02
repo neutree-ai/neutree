@@ -150,6 +150,9 @@ func TestEndpointController_Sync_CreateUpdate(t *testing.T) {
 				s.On("ListCluster", mock.Anything).Return([]v1.Cluster{cluster}, nil).Maybe()
 				o.On("CreateEndpoint", mock.Anything).Return(nil)
 				o.On("GetEndpointStatus", mock.Anything).Return(okStatus, nil)
+				// The spec fingerprint is recorded even though discovery has no
+				// route to the endpoint.
+				s.On("UpdateEndpoint", strconv.Itoa(id), mock.Anything).Return(nil)
 			},
 			wantErr: false,
 		},
@@ -730,15 +733,9 @@ func TestEndpointObservedSpecHash(t *testing.T) {
 	endpoint.Status.ServedModels = []string{"first"}
 	endpoint.Status.ObservedSpecHash = "recorded"
 
-	// A status derived for a different spec does not inherit the names: they
-	// belong to the recorded spec.
+	// The fingerprint does not gate the last observation: a status that carries
+	// no names keeps what discovery found, whichever spec it was derived for.
 	status := &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "other"}
-	c.prepareStatusForUpdate(endpoint, status)
-	assert.Nil(t, status.ServedModels)
-
-	// While the fingerprint still points at the recorded spec, the names it
-	// describes are carried over.
-	status = &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ObservedSpecHash: "recorded"}
 	c.prepareStatusForUpdate(endpoint, status)
 	assert.Equal(t, []string{"first"}, status.ServedModels)
 
@@ -768,19 +765,20 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 		phase        v1.EndpointPhase
 		body         string
 		want         []string
+		// noRecordedNames drops the previous observation from the status.
+		noRecordedNames bool
 		// wantHashEmpty asserts the observed hash is left unset.
 		wantHashEmpty bool
-		// keepRecordedHash asserts a failed probe leaves the recorded hash as is.
-		keepRecordedHash bool
-		requests         int
+		requests      int
 	}{
 		{name: "refresh running", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
-		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, wantHashEmpty: true, requests: 1},
+		{name: "failed refresh retains observation", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
 		{name: "successful empty clears observation", phase: v1.EndpointPhaseRUNNING, body: `{"data":[]}`, want: []string{}, requests: 1},
 		{name: "paused does not probe", phase: v1.EndpointPhasePAUSED, want: []string{"previous"}, wantHashEmpty: true},
 		{name: "unchanged spec reuses observation", recordedHash: "current", phase: v1.EndpointPhaseRUNNING, want: []string{"previous"}},
 		{name: "changed spec probes again", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
-		{name: "changed spec keeps recorded hash when probe fails", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, keepRecordedHash: true, requests: 1},
+		{name: "changed spec advances hash when probe fails", recordedHash: "stale", phase: v1.EndpointPhaseRUNNING, body: `{`, want: []string{"previous"}, requests: 1},
+		{name: "unrecorded names probe again", recordedHash: "current", noRecordedNames: true, phase: v1.EndpointPhaseRUNNING, body: `{"data":[{"id":"runtime-alias"}]}`, want: []string{"runtime-alias"}, requests: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -797,7 +795,9 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 			o.On("GetEndpointStatus", mock.Anything).Return(&v1.EndpointStatus{Phase: tc.phase}, nil)
 			c := newTestEndpointController(store, o)
 			endpoint := ep(1, v1.EndpointPhaseRUNNING)
-			endpoint.Status.ServedModels = []string{"previous"}
+			if !tc.noRecordedNames {
+				endpoint.Status.ServedModels = []string{"previous"}
+			}
 			recordedHash := ""
 			switch tc.recordedHash {
 			case "current":
@@ -815,11 +815,7 @@ func TestEndpointControllerObservesServedModels(t *testing.T) {
 			if tc.wantHashEmpty {
 				assert.Empty(t, status.ObservedSpecHash)
 			} else {
-				wantHash := endpointSpecHash(endpoint)
-				if tc.keepRecordedHash {
-					wantHash = recordedHash
-				}
-				assert.Equal(t, wantHash, status.ObservedSpecHash)
+				assert.Equal(t, endpointSpecHash(endpoint), status.ObservedSpecHash)
 			}
 			assert.Equal(t, tc.requests, requests)
 			store.AssertExpectations(t)

@@ -10,30 +10,22 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// servedModelsForStatus reports the names the inference instance serves and
-// whether they were derived from specHash. The probe is skipped while the
-// recorded observation already belongs to that spec, and a failed probe reports
-// no observation so the status keeps what it has and the next reconcile retries.
-func (c *EndpointController) servedModelsForStatus(endpoint *v1.Endpoint, specHash string) ([]string, bool) {
-	if specHash != "" && endpoint.Status != nil && endpoint.Status.ObservedSpecHash == specHash {
-		return endpoint.Status.ServedModels, true
+// needsServedModelDiscovery reports whether the recorded status still has to be
+// renewed for specHash. The fingerprint alone decides: it advances with the spec
+// regardless of discovery, so a probe is due whenever it no longer matches, and
+// while no observation has been recorded at all.
+func needsServedModelDiscovery(status *v1.EndpointStatus, specHash string) bool {
+	if status == nil {
+		return true
 	}
 
-	models, err := c.getServedModels(endpoint)
-	if err != nil {
-		klog.Warningf("failed to get endpoint %s served models: %v", endpoint.Metadata.WorkspaceName(), err)
-
-		return nil, false
-	}
-
-	return models, true
+	return status.ObservedSpecHash != specHash || status.ServedModels == nil
 }
 
 // endpointSpecHash is deterministic for equal specs: encoding/json sorts map keys
