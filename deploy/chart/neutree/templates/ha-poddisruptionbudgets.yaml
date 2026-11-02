@@ -13,4 +13,20 @@ spec:
     matchLabels:
       app.kubernetes.io/component: {{ $component }}
 {{- end }}
+{{- if .Values.cnpg.enabled }}
+---
+# The bundled operator chart has no PodDisruptionBudget of its own.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "neutree.fullname" . }}-cnpg-operator
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudnative-pg
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
 {{- end }}

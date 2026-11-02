@@ -84,9 +84,10 @@ func TestHAModeDeployments(t *testing.T) {
 
 func TestHAModePodDisruptionBudgets(t *testing.T) {
 	resources := renderChart(t, haValues(nil))
-	// One per stateless component, plus vmagent and the subcharts' vminsert,
-	// vmselect, vmstorage and grafana (observability_ha_test.go).
-	require.Len(t, renderedPDBs(resources), len(haDeployments)+5)
+	// One per stateless component, plus vmagent, the subcharts' vminsert,
+	// vmselect, vmstorage and grafana (observability_ha_test.go), and the
+	// CloudNativePG operator (TestHAModeOperatorReplicas).
+	require.Len(t, renderedPDBs(resources), len(haDeployments)+6)
 
 	for key, want := range haDeployments {
 		var pdb policyv1.PodDisruptionBudget
@@ -213,6 +214,13 @@ func TestHAModeOperatorReplicas(t *testing.T) {
 	// Must select the operator pods themselves.
 	require.Equal(t, terms[0].LabelSelector.MatchLabels["app.kubernetes.io/name"],
 		deployment.Spec.Template.Labels["app.kubernetes.io/name"])
+
+	var pdb policyv1.PodDisruptionBudget
+	renderedObject(t, renderChart(t, haValues(nil)), "PodDisruptionBudget", "neutree-cnpg-operator", &pdb)
+	require.Equal(t, 1, pdb.Spec.MaxUnavailable.IntValue())
+	for k, v := range pdb.Spec.Selector.MatchLabels {
+		require.Equal(t, v, deployment.Spec.Template.Labels[k], "PDB selector must match the operator pods")
+	}
 
 	renderedObject(t, renderChart(t, nil), "Deployment", "neutree-cloudnative-pg", &deployment)
 	require.Equal(t, int32(1), *deployment.Spec.Replicas)
