@@ -16,11 +16,9 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// needsServedModelDiscovery reports whether the recorded status was derived from a
-// different spec. The fingerprint alone decides: it advances with the spec whether or
-// not discovery succeeds, so a probe is due exactly while it no longer matches. An
-// observation of no models is stored as no names, so nothing else can mark it as
-// already taken.
+// needsServedModelDiscovery reports whether the names recorded in the status were
+// read for a different spec. The fingerprint is written only after a successful
+// read, so a failed read leaves it behind and is retried.
 func needsServedModelDiscovery(status *v1.EndpointStatus, specHash string) bool {
 	if status == nil {
 		return true

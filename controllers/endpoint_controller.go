@@ -214,35 +214,47 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		return nil, errors.Wrapf(err, "failed to get endpoint status from orchestrator for endpoint %s", obj.Metadata.WorkspaceName())
 	}
 
-	// The fingerprint names the spec this status was derived from. It is
-	// recorded independently of model discovery, so a failed discovery never
-	// holds it back.
+	// The fingerprint names the spec the recorded status was derived from. It is
+	// kept as it was until discovery replaces it, so a status computed without a
+	// probe does not drop it.
 	if obj.Status != nil {
 		status.ObservedSpecHash = obj.Status.ObservedSpecHash
 	}
 
 	// Get service URL for running endpoints
 	if status.Phase == v1.EndpointPhaseRUNNING {
+		// The fingerprint records the spec every observation in this status was
+		// taken from, so it only advances once the observations completed without
+		// errors. A failed observation leaves it behind and the next reconcile
+		// retries.
+		hasErrors := false
+
 		serviceURL, err := c.gw.GetEndpointServeUrl(obj)
 		if err != nil {
+			hasErrors = true
+
 			klog.Warningf("failed to get endpoint %s service url: %v", obj.Metadata.WorkspaceName(), err)
 		} else {
 			status.ServiceURL = serviceURL
 		}
 
 		specHash := endpointSpecHash(obj)
-		status.ObservedSpecHash = specHash
 
 		// Discovery follows the fingerprint: the names are renewed when the
-		// recorded spec differs from the current one. A failed discovery keeps the
-		// previous names.
+		// recorded spec differs from the current one.
 		if needsServedModelDiscovery(obj.Status, specHash) {
 			models, err := c.getServedModels(obj)
 			if err != nil {
+				hasErrors = true
+
 				klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)
 			} else {
 				status.ServedModels = models
 			}
+		}
+
+		if !hasErrors {
+			status.ObservedSpecHash = specHash
 		}
 	}
 
