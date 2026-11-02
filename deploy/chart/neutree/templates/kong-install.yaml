@@ -532,9 +532,10 @@ spec:
         {{- if include "neutree.ha.enabled" . }}
         # A Kong pod started during a rollout must authenticate keys without
         # PostgreSQL: rolling the database switches the primary, and a cold
-        # cache turns that window into 500s on the new pod.
+        # cache turns that window into 500s on the new pod. acls also fills
+        # the per-consumer group cache the acl plugin reads.
         - name: KONG_DB_CACHE_WARMUP_ENTITIES
-          value: "services,consumers,keyauth_credentials"
+          value: "services,consumers,keyauth_credentials,acls"
         {{- end }}
         - name: KONG_LUA_PACKAGE_PATH
           value: "/opt/?.lua;/opt/?/init.lua;;"

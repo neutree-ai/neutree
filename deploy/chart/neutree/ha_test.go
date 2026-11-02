@@ -158,7 +158,7 @@ func TestKongCacheWarmupInHAMode(t *testing.T) {
 
 	value, ok := warmup(haValues(nil))
 	require.True(t, ok)
-	require.Equal(t, "services,consumers,keyauth_credentials", value)
+	require.Equal(t, "services,consumers,keyauth_credentials,acls", value)
 }
 
 func TestSingleModeDefaults(t *testing.T) {
