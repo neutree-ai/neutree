@@ -27,8 +27,9 @@ const (
 	// A sink holding buffered events without delivering any is stalled: Vector
 	// retries an unreachable or timing-out store forever without counting an
 	// error. Normal operation explains a pause of one request timeout (Vector's
-	// default, 60s) plus this margin. Past that the sink is Degraded, and Failed
-	// logSinkFailingTimeout later.
+	// default, 60s), plus for S3 the flush interval (buffered events include
+	// those waiting in a batch), plus this margin. Past that the sink is
+	// Degraded, and Failed logSinkFailingTimeout later.
 	logSinkStallMargin          = time.Minute
 	logSinkVectorRequestTimeout = 60 * time.Second
 	// Vector does not retry a rejected reload, so an unconfirmed delivery is
@@ -530,7 +531,10 @@ func formatMinutes(d time.Duration) string {
 func logSinkStallGrace(spec *v1.LogSinkSpec) time.Duration {
 	grace := logSinkStallMargin + logSinkVectorRequestTimeout
 
-	if spec.VictoriaLogs != nil && spec.VictoriaLogs.TimeoutSeconds > 0 {
+	switch {
+	case spec.Type == v1.LogSinkTypeS3 && spec.S3 != nil:
+		grace += time.Duration(spec.S3.GetFlushIntervalSeconds()) * time.Second
+	case spec.VictoriaLogs != nil && spec.VictoriaLogs.TimeoutSeconds > 0:
 		grace += time.Duration(spec.VictoriaLogs.TimeoutSeconds)*time.Second - logSinkVectorRequestTimeout
 	}
 
