@@ -196,6 +196,23 @@ def test_lax_stream_values_dispatch_as_streaming(wrapper, route, stream):
     calls.assert_called_once_with({"stream": stream})
 
 
+@pytest.mark.parametrize("field,attribute", [("messages", "create_chat_completion"), ("prompt", "create_completion")])
+@pytest.mark.parametrize("stream", [None, 0, 0.0, "false", "no", "off", "0"])
+def test_false_like_stream_values_reach_the_engine_as_non_streaming(wrapper, field, attribute, stream):
+    payload = {"messages": [], "stream": stream} if field == "messages" else {"prompt": "hi", "stream": stream}
+    wire = call(wrapper, payload=payload)
+    assert wire["status_code"] == 200
+    assert getattr(wrapper.llama, attribute).call_args.kwargs["stream"] is False
+
+
+@pytest.mark.parametrize("stream", [True, 1, 1.0, "true", "yes", "on", "1"])
+def test_true_like_stream_values_reach_the_engine_as_streaming(wrapper, stream):
+    wrapper.llama.create_chat_completion.return_value = iter([{"choices": []}])
+    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": stream})))
+    assert frames.count("data: [DONE]\n\n") == 1
+    assert wrapper.llama.create_chat_completion.call_args.kwargs["stream"] is True
+
+
 @pytest.mark.parametrize("route", ["chat/completions", "completions", "embeddings"])
 def test_empty_object_reaches_business(wrapper, route):
     http, calls = client(wrapper, result=wire_response({"value": "ok"}))

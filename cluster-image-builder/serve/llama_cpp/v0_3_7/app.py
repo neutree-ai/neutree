@@ -203,10 +203,17 @@ class Backend:
         try:
             stream = is_streaming(payload)
             llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            # The Controller accepts the engine's lax boolean spellings; hand the
+            # engine the normalized decision so a false-like spelling cannot start
+            # a stream while the Controller renders a non-stream response.
             if "messages" in payload:
-                response = llama.create_chat_completion(**_filter_supported(payload, _CHAT_PARAMS))
+                params = _filter_supported(payload, _CHAT_PARAMS)
+                params["stream"] = stream
+                response = llama.create_chat_completion(**params)
             else:
-                response = llama.create_completion(**_filter_supported(payload, _COMPLETION_PARAMS))
+                params = _filter_supported(payload, _COMPLETION_PARAMS)
+                params["stream"] = stream
+                response = llama.create_completion(**params)
             if stream:
                 return _stream_chunks(response, payload, "generate")
             return _to_wire_response(response)
