@@ -58,6 +58,27 @@ func (c *EndpointController) getServedModels(endpoint *v1.Endpoint) ([]string, e
 	return fetchServedModels(&clusters[0], endpoint)
 }
 
+// servedModelsClient reaches the cluster directly. The target is a cluster-internal
+// address, and a proxy configured in the control plane's environment would answer in
+// place of the endpoint.
+var servedModelsClient = func() *http.Client {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+
+	transport := base.Clone()
+	transport.Proxy = nil
+
+	return &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}()
+
 func fetchServedModels(cluster *v1.Cluster, endpoint *v1.Endpoint) ([]string, error) {
 	serviceURL, err := utils.FormatServiceURL(cluster, endpoint)
 	if err != nil {
@@ -72,14 +93,7 @@ func fetchServedModels(cluster *v1.Cluster, endpoint *v1.Endpoint) ([]string, er
 		return nil, err
 	}
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	ids, err := utils.FetchModelIDs(client, req)
+	ids, err := utils.FetchModelIDs(servedModelsClient, req)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch served models")
 	}

@@ -684,6 +684,12 @@ func TestFetchServedModels(t *testing.T) {
 	}
 }
 
+func TestServedModelsProbeBypassesEnvironmentProxy(t *testing.T) {
+	transport, ok := servedModelsClient.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Nil(t, transport.Proxy)
+}
+
 func TestFetchServedModelsDoesNotFollowRedirect(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("model discovery followed a redirect")
@@ -749,6 +755,13 @@ func TestEndpointObservedSpecHash(t *testing.T) {
 		ServedModels:     []string{"first"},
 		ObservedSpecHash: "recorded",
 	}))
+
+	// A status written without discovery keeps the fingerprint behind the names
+	// it kept.
+	failed := c.formatStatus(v1.EndpointPhaseFAILED, assert.AnError)
+	c.prepareStatusForUpdate(endpoint, failed)
+	assert.Equal(t, []string{"first"}, failed.ServedModels)
+	assert.Equal(t, "recorded", failed.ObservedSpecHash)
 }
 
 func TestEndpointControllerHoldsHashWhenObservationFails(t *testing.T) {
