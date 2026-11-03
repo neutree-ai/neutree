@@ -111,25 +111,50 @@ def relay():
 relay_thread = threading.Thread(target=relay, daemon=True)
 relay_thread.start()
 
-def kill_group(sig):
+# A group id stays in use while any member of the group is alive, so an id this
+# monitor cannot signal has already been recycled by another process: nothing of
+# ours is left to stop. macOS reports that as EPERM rather than ESRCH.
+def signal_group(sig):
     try:
         os.killpg(child.pid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return False
     return True
 
-def stop():
-    if not kill_group(signal.SIGTERM):
-        return child.poll() is not None
-    deadline = time.monotonic() + 2
-    while child.poll() is None and time.monotonic() < deadline:
+def reap():
+    # Descendants re-parent to this monitor as subreaper. A reaped leader or
+    # descendant stops counting as a member of the group.
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+def group_alive():
+    return signal_group(0)
+
+def wait_for_group(seconds):
+    deadline = time.monotonic() + seconds
+    while True:
+        reap()
+        if not group_alive():
+            return True
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.05)
-    if child.poll() is None:
-        kill_group(signal.SIGKILL)
-        deadline = time.monotonic() + 2
-        while child.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.05)
-    return child.poll() is not None
+
+def stop():
+    if not signal_group(signal.SIGTERM):
+        return True
+    # The benchmark itself can exit while a descendant that ignored SIGTERM
+    # keeps the group alive, so the group rather than the direct child decides
+    # whether stopping succeeded.
+    if wait_for_group(2):
+        return True
+    signal_group(signal.SIGKILL)
+    return wait_for_group(2)
 
 def finish(code):
     relay_thread.join(2)
@@ -165,7 +190,10 @@ if child.poll() is None:
         shutil.rmtree(result_dir, ignore_errors=True)
     finish(130)
 
-kill_group(signal.SIGKILL)
+# The benchmark exited on its own; any descendant still holding the group is
+# leftover work that must not outlive the case the monitor reports on.
+signal_group(signal.SIGKILL)
+wait_for_group(2)
 code = child.returncode
 finish(code if code >= 0 else 128 - code)
 `

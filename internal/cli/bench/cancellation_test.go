@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -101,10 +102,10 @@ func TestControlledBenchmarkCancellationStopsOnlyItsProcessGroup(t *testing.T) {
 	childReady := filepath.Join(root, "child-ready")
 	survived := filepath.Join(root, "benchmark-survived")
 	script := `import os, subprocess, sys, time
-child = '''import signal, sys, time
+child = '''import os, signal, sys, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 with open(sys.argv[1], "w") as f:
-    f.write("ready")
+    f.write(str(os.getpid()))
 time.sleep(4)
 with open(sys.argv[2], "w") as f:
     f.write("still running")
@@ -133,6 +134,7 @@ time.sleep(15)
 	})
 
 	pid := waitForPID(t, ready)
+	descendantPID := waitForPID(t, childReady)
 
 	cancel()
 	select {
@@ -144,6 +146,12 @@ time.sleep(15)
 	}
 
 	require.ErrorIs(t, syscall.Kill(pid, 0), syscall.ESRCH)
+	// The descendant ignores SIGTERM. It stays in the benchmark's process
+	// group after the leader exits, so the monitor has to escalate to SIGKILL
+	// for the group rather than report success once the leader is gone.
+	require.Eventually(t, func() bool {
+		return errors.Is(syscall.Kill(descendantPID, 0), syscall.ESRCH)
+	}, 5*time.Second, 50*time.Millisecond, "descendant process group member survived cancellation")
 	require.NoError(t, unrelated.Process.Signal(syscall.Signal(0)))
 	time.Sleep(2500 * time.Millisecond)
 	require.NoFileExists(t, survived)
@@ -221,13 +229,13 @@ func TestControlledBenchmarkStopsDescendantWhenLeaderExits(t *testing.T) {
 	runner := localCommandRunner{}
 	require.NoError(t, prepareBenchmarkControl(context.Background(), runner, remoteDir))
 
-	ready := filepath.Join(root, "descendant-ready")
+	ready := filepath.Join(root, "descendant-pid")
 	survived := filepath.Join(root, "descendant-survived")
 	script := `import os, subprocess, sys, time
-child = '''import signal, sys, time
+child = '''import os, signal, sys, time
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 with open(sys.argv[1], "w") as f:
-    f.write("ready")
+    f.write(str(os.getpid()))
 time.sleep(4)
 with open(sys.argv[2], "w") as f:
     f.write("still running")
@@ -238,6 +246,11 @@ while not os.path.exists(sys.argv[1]):
 `
 	command := "exec python3 -c " + shellQuote(script) + " " + shellQuote(ready) + " " + shellQuote(survived)
 	require.NoError(t, runControlledBenchmark(context.Background(), runner, remoteDir, command, io.Discard))
+
+	descendantPID := waitForPID(t, ready)
+	require.Eventually(t, func() bool {
+		return errors.Is(syscall.Kill(descendantPID, 0), syscall.ESRCH)
+	}, 5*time.Second, 50*time.Millisecond, "descendant process group member outlived the benchmark")
 	time.Sleep(2500 * time.Millisecond)
 	require.NoFileExists(t, survived)
 }
