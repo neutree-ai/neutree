@@ -14,54 +14,52 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestSelectKubernetesTargetSortsPodsAndFindsVLLMContainer(t *testing.T) {
-	pods := []corev1.Pod{
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-b"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-a"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-pending"},
-			Status:     corev1.PodStatus{Phase: corev1.PodPending, Conditions: readyConditions()},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
-		},
-	}
-
-	target, err := selectKubernetesTarget(pods)
-	require.NoError(t, err)
-	require.Equal(t, "endpoint-a", target.PodName)
-	require.Equal(t, "vllm", target.Container)
-}
-
 // A Pod stays in the Running phase while its container is starting or
 // crash-looping. Exec into it fails before any case runs, so selection has to
 // look at the Readiness condition too.
-func TestSelectKubernetesTargetSkipsRunningButNotReadyPods(t *testing.T) {
-	pods := []corev1.Pod{
+func TestSelectKubernetesTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pods []corev1.Pod
+		want kubernetesTarget
+	}{
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-a"},
-			Status: corev1.PodStatus{
-				Phase:      corev1.PodRunning,
-				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}},
+			name: "sorts ready pods by name",
+			pods: []corev1.Pod{
+				endpointPod("endpoint-b", corev1.PodRunning, true),
+				endpointPod("endpoint-a", corev1.PodRunning, true),
+				endpointPod("endpoint-pending", corev1.PodPending, true),
 			},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
+			want: kubernetesTarget{PodName: "endpoint-a", Container: "vllm"},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{Name: "endpoint-b"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: readyConditions()},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
+			name: "skips running pods that are not ready",
+			pods: []corev1.Pod{
+				endpointPod("endpoint-a", corev1.PodRunning, false),
+				endpointPod("endpoint-b", corev1.PodRunning, true),
+			},
+			want: kubernetesTarget{PodName: "endpoint-b", Container: "vllm"},
 		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := selectKubernetesTarget(tc.pods)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, target)
+		})
+	}
+}
+
+func endpointPod(name string, phase corev1.PodPhase, ready bool) corev1.Pod {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status:     corev1.PodStatus{Phase: phase},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "vllm"}}},
+	}
+	if ready {
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
 	}
 
-	target, err := selectKubernetesTarget(pods)
-	require.NoError(t, err)
-	require.Equal(t, "endpoint-b", target.PodName)
+	return pod
 }
 
 func readyConditions() []corev1.PodCondition {

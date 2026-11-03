@@ -141,9 +141,3 @@ func TestExpandCasesUsesStableCartesianProduct(t *testing.T) {
 	}, cases)
 	require.Equal(t, "input-4-output-16-concurrency-1", cases[0].Name())
 }
-
-func TestParsePositiveIntegerListExported(t *testing.T) {
-	values, err := ParsePositiveIntegerList([]string{"3,1"}, "concurrencies")
-	require.NoError(t, err)
-	require.Equal(t, []int{1, 3}, values)
-}

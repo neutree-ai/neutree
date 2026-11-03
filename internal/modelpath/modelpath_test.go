@@ -37,30 +37,39 @@ func TestPathFallsBackToTheModelNameWhenNothingIsPlaced(t *testing.T) {
 	}
 }
 
-func TestPathUsesTheFirstClusterModelCache(t *testing.T) {
-	cluster := &v1.Cluster{
-		Spec: &v1.ClusterSpec{
-			Config: &v1.ClusterConfig{
-				ModelCaches: []v1.ModelCache{{Name: "cache-a"}, {Name: "cache-b"}},
-			},
-		},
+func TestPathUsesTheClusterModelCache(t *testing.T) {
+	registry := &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
 	}
 
-	path, err := Path(cluster, endpointWithModel("Qwen/Qwen3", "v1.2.3"), &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
-	}, testMountRoot)
-
-	require.NoError(t, err)
-	require.Equal(t, "/models-cache/cache-a/Qwen/Qwen3/v1.2.3", path)
-}
-
-func TestPathUsesTheDefaultModelCacheWhenTheClusterHasNone(t *testing.T) {
-	path, err := Path(&v1.Cluster{}, endpointWithModel("Qwen/Qwen3", "v1.2.3"), &v1.ModelRegistry{
-		Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
-	}, testMountRoot)
-
-	require.NoError(t, err)
-	require.Equal(t, "/models-cache/default/Qwen/Qwen3/v1.2.3", path)
+	for _, tc := range []struct {
+		name    string
+		cluster *v1.Cluster
+		want    string
+	}{
+		{
+			name: "first configured cache",
+			cluster: &v1.Cluster{
+				Spec: &v1.ClusterSpec{
+					Config: &v1.ClusterConfig{
+						ModelCaches: []v1.ModelCache{{Name: "cache-a"}, {Name: "cache-b"}},
+					},
+				},
+			},
+			want: "/models-cache/cache-a/Qwen/Qwen3/v1.2.3",
+		},
+		{
+			name:    "default cache when none is configured",
+			cluster: &v1.Cluster{},
+			want:    "/models-cache/default/Qwen/Qwen3/v1.2.3",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := Path(tc.cluster, endpointWithModel("Qwen/Qwen3", "v1.2.3"), registry, testMountRoot)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, path)
+		})
+	}
 }
 
 // A hub registry has no stored artifact to look up, so an empty or "latest"

@@ -530,47 +530,51 @@ func TestBenchmarkCaseErrorStatusMarksDeadlinesCanceled(t *testing.T) {
 	require.Equal(t, benchmarkFailedStatus, benchmarkCaseErrorStatus(errors.New("benchmark failed")))
 }
 
-func TestResolveTokenizerPathUsesTheClusterMountRoot(t *testing.T) {
+func TestResolveTokenizerPath(t *testing.T) {
 	resources := fakeResourceGetter{resources: map[string]json.RawMessage{
 		resourceKey("ModelRegistry", "default", "hub"): mustJSON(t, v1.ModelRegistry{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "hub"},
 			Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
 		}),
 	}}
-	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
-		Model: &v1.ModelSpec{Name: "Qwen/Qwen3", Version: "v2", Registry: "hub"},
-	}}
 
 	for _, tc := range []struct {
-		name    string
-		cluster *v1.Cluster
-		want    string
+		name     string
+		endpoint *v1.Endpoint
+		cluster  *v1.Cluster
+		want     string
 	}{
 		{
-			name:    "kubernetes",
+			name: "kubernetes mount root",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "Qwen/Qwen3", Version: "v2", Registry: "hub"},
+			}},
 			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
 			want:    "/models-cache/default/Qwen/Qwen3/v2",
 		},
 		{
-			name:    "ssh",
+			name: "ssh mount root",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "Qwen/Qwen3", Version: "v2", Registry: "hub"},
+			}},
 			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.SSHClusterType}},
 			want:    "/home/ray/.neutree/models-cache/default/Qwen/Qwen3/v2",
 		},
+		{
+			name: "no registry uses the model name",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "router-model"},
+			}},
+			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			want:    "router-model",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path, err := resolveTokenizerPath(context.Background(), resources, "default", endpoint, tc.cluster)
+			path, err := resolveTokenizerPath(context.Background(), resources, "default", tc.endpoint, tc.cluster)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, path)
 		})
 	}
-}
-
-func TestResolveTokenizerPathWithoutARegistryUsesTheModelName(t *testing.T) {
-	path, err := resolveTokenizerPath(context.Background(), fakeResourceGetter{}, "default",
-		&v1.Endpoint{Spec: &v1.EndpointSpec{Model: &v1.ModelSpec{Name: "router-model"}}},
-		&v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}})
-	require.NoError(t, err)
-	require.Equal(t, "router-model", path)
 }
 
 func benchmarkFixtures() (v1.Endpoint, v1.Cluster, v1.Cluster) {
