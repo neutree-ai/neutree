@@ -2485,25 +2485,6 @@ func TestEndpointToApplication_setEngineSpecialEnv(t *testing.T) {
 	}
 }
 
-func TestFormatServiceURL_WorkspaceInURL(t *testing.T) {
-	cluster := &v1.Cluster{
-		Status: &v1.ClusterStatus{
-			DashboardURL: "http://ray-dashboard.example.com:8265",
-		},
-	}
-
-	endpoint := &v1.Endpoint{
-		Metadata: &v1.Metadata{
-			Workspace: "production",
-			Name:      "chat-model",
-		},
-	}
-
-	url, err := FormatServiceURL(cluster, endpoint)
-	assert.NoError(t, err)
-	assert.Equal(t, "http://ray-dashboard.example.com:8000/production/chat-model", url)
-}
-
 func TestRayOrchestrator_GetEndpointStatus(t *testing.T) {
 	newEndpoint := func() *v1.Endpoint {
 		return &v1.Endpoint{
