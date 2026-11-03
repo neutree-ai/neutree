@@ -70,3 +70,17 @@ jobs:
       - uses: actions/checkout@v2
       - name: Run the Kong plugin Lua unit tests
         run: make gateway-lua-test
+
+  vllm-adapter-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install lightweight adapter test dependencies
+        run: pip install "fastapi>=0.115.0" "starlette<1.0.0" httpx python-multipart pytest
+      - name: Test vLLM adapter without Ray, vLLM or models
+        env:
+          PYTHONPATH: cluster-image-builder
+        run: python -m pytest -q cluster-image-builder/serve/_utils cluster-image-builder/serve/vllm
