@@ -295,10 +295,10 @@ vector:
   nodeSelector: {}
   tolerations: []
   affinity: {}
-  # Holds the log sink disk buffers. Size it to at least the sum of every
-  # sink's spec.buffer.max_size plus 128Mi per sink; Vector does not check
-  # free space, so a full volume fails writes. Without persistence the
-  # buffers are lost whenever the pod is recreated.
+  # Holds Vector's disk buffers: 1.5Gi for the built-in usage and trace
+  # sinks, plus each log sink's spec.buffer.max_size and 128Mi. Vector does
+  # not check free space, so a full volume fails writes. Without persistence
+  # the buffers are lost whenever the pod is recreated.
   persistence:
     enabled: true
     size: 10Gi
