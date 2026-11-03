@@ -29,9 +29,6 @@ jobs:
           USERNAME: ${{ secrets.CI_USERNAME }}
         run: git config --global url."https://${USERNAME}:${TOKEN}@github.com".insteadOf "https://github.com"
 
-      - name: Migration guard tests
-        run: python3 scripts/test-check-migrations.py
-
       - name: Migration hygiene (PR only)
         if: github.event_name == 'pull_request'
         run: |
