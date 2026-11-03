@@ -66,7 +66,7 @@ func KubeSchedulerVersionForClusterVersion(clusterVersion string, serverVersion 
 		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("parse cluster version %q: %w", clusterVersion, err)
 	}
 
-	legacyCluster, err := semver.LessThan(baseClusterVersion, v130ClusterVersionGate)
+	legacyCluster, err := semver.LessThan(baseClusterVersion, HAMiV210UpgradeGate)
 	if err != nil {
 		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("compare cluster version %q: %w", clusterVersion, err)
 	}

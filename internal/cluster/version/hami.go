@@ -29,6 +29,8 @@ func SupportsVirtualizationClusterVersion(version string) (bool, error) {
 	return !lessThanMinVersion, nil
 }
 
+// HAMiVersionForCluster selects the HAMi release for a cluster. Clusters below
+// HAMiV210UpgradeGate keep HAMi v2.9.0; clusters at or above it use HAMi v2.10.0.
 func HAMiVersionForCluster(clusterVersion string) (string, error) {
 	supported, err := SupportsVirtualizationClusterVersion(clusterVersion)
 	if err != nil {
@@ -44,7 +46,7 @@ func HAMiVersionForCluster(clusterVersion string) (string, error) {
 		return "", err
 	}
 
-	legacy, err := semver.LessThan(baseVersion, v130ClusterVersionGate)
+	legacy, err := semver.LessThan(baseVersion, HAMiV210UpgradeGate)
 	if err != nil {
 		return "", err
 	}
