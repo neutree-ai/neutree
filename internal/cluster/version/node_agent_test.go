@@ -9,9 +9,10 @@ import (
 
 func TestSelectNodeAgent(t *testing.T) {
 	const (
-		legacyImage  = "neutree/neutree-node-agent:v1.1.0-rc.1"
-		pinnedImage  = "neutree/neutree-node-agent:v1.2.0-rc.1"
-		currentImage = "neutree/neutree-node-agent:v1.2.1-rc.1"
+		legacyImage       = "neutree/neutree-node-agent:v1.1.0-rc.1"
+		pinnedImage       = "neutree/neutree-node-agent:v1.2.0-rc.1"
+		intermediateImage = "neutree/neutree-node-agent:v1.2.1-rc.1"
+		currentImage      = "neutree/neutree-node-agent:v1.3.0-alpha.1"
 	)
 
 	tests := []struct {
@@ -57,8 +58,38 @@ func TestSelectNodeAgent(t *testing.T) {
 			image:    pinnedImage,
 		},
 		{
-			name:     "first version on the current image",
+			name:     "first intermediate version",
 			version:  "v1.2.1",
+			contract: NodeAgentContractProfile,
+			image:    intermediateImage,
+		},
+		{
+			name:     "intermediate prerelease",
+			version:  "v1.2.1-rc.1",
+			contract: NodeAgentContractProfile,
+			image:    intermediateImage,
+		},
+		{
+			name:     "later intermediate patch",
+			version:  "v1.2.99",
+			contract: NodeAgentContractProfile,
+			image:    intermediateImage,
+		},
+		{
+			name:     "current alpha",
+			version:  "v1.3.0-alpha.1",
+			contract: NodeAgentContractProfile,
+			image:    currentImage,
+		},
+		{
+			name:     "current nightly",
+			version:  "v1.3.0-nightly-20261103",
+			contract: NodeAgentContractProfile,
+			image:    currentImage,
+		},
+		{
+			name:     "current release",
+			version:  "v1.3.0",
 			contract: NodeAgentContractProfile,
 			image:    currentImage,
 		},
