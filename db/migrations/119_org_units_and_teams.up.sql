@@ -1,40 +1,24 @@
 -- ----------------------
--- Organization model (NEU-836): OrgUnit, Team and their members
+-- Organization model: OrgUnit, Team and their members
 -- ----------------------
--- OrgUnit (a department) and Team (a flat group) are global resources:
--- metadata.workspace is always NULL, and reads need org_unit:read / team:read
--- with a NULL workspace.
+-- OrgUnit (a department) and Team (a flat group) are global resources
+-- (metadata.workspace is always NULL) written only by directory sync as
+-- service_role. service_role bypasses RLS, so the tables have read policies
+-- and no write policies: no user can create, change or delete them. Only a
+-- local account's OrgUnit membership can be assigned by hand.
 --
--- Both come only from directory sync (neutree-core, NEU-837), which writes as
--- service_role. service_role has BYPASSRLS, so the tables have read policies
--- only: no user can create, change or delete an OrgUnit or a Team.
+-- (spec.identity_source, spec.external_id) and metadata.name never change; a
+-- directory rename changes metadata.display_name only. An object gone from
+-- the directory is not deleted: sync sets status.phase to Inactive.
 --
--- Identity. spec.identity_source is the metadata.name of the IdentitySource the
--- object was synced from (the name alone: an IdentitySource name is unique
--- across types, and other resources also refer to each other by name).
--- spec.external_id is the directory's stable ID of the department or group.
--- (identity_source, external_id) is unique and, like metadata.name, cannot
--- change, so a rename in the directory only changes metadata.display_name.
+-- PostgREST replaces spec and status whole on PATCH. Sync always writes all
+-- of spec, so a spec without parent moves the node to the root. A status
+-- without phase keeps the stored phase.
 --
--- Removal. An object that is gone from the directory is not deleted: sync sets
--- status.phase to Inactive. Authorization built on it (NEU-839) must treat an
--- Inactive object as granting nothing. Sync can set it back to Active.
---
--- Tree. spec.parent is the metadata.name of the parent OrgUnit (empty for a
--- root). The path column is a materialized path of ids, '/<root id>/.../<id>/'.
--- It is maintained by the triggers below and nobody else: a written value is
--- always replaced. When a node's path changes (its parent changed, or an
--- ancestor's did), its children are re-pathed, which recurses down the
--- subtree. The column uses the "C" collation so the plain btree index serves
--- prefix (LIKE '/1/2/%') and range queries; see api.org_unit_subtree.
---
--- Spec and status are composites that PostgREST replaces as a whole on PATCH.
--- Sync owns both and always writes all of spec; a spec without parent moves the
--- node to the root. A status written without phase keeps the stored phase.
---
--- Members. api.org_unit_members gives each user at most one OrgUnit (the
--- primary department); api.team_members lets a user be in any number of Teams.
--- They are plain tables keyed by api.user_profiles(id).
+-- path is a materialized path of ids, '/<root id>/.../<id>/', owned by the
+-- triggers below (a written value is replaced). It uses the "C" collation, in
+-- which '/' and digits sort below ':', so a subtree is exactly the range
+-- [root.path, root.path || ':') and the plain btree index serves it.
 
 CREATE TYPE api.org_unit_spec AS (
     identity_source TEXT,
@@ -42,10 +26,10 @@ CREATE TYPE api.org_unit_spec AS (
     parent TEXT
 );
 
-CREATE TYPE api.org_unit_status AS (
+-- The status of an OrgUnit and of a Team.
+CREATE TYPE api.org_status AS (
     phase TEXT,
-    last_transition_time TIMESTAMPTZ,
-    error_message TEXT
+    last_transition_time TIMESTAMPTZ
 );
 
 CREATE TABLE api.org_units (
@@ -54,7 +38,7 @@ CREATE TABLE api.org_units (
     kind TEXT NOT NULL,
     metadata api.metadata,
     spec api.org_unit_spec,
-    status api.org_unit_status,
+    status api.org_status,
     path TEXT COLLATE "C" NOT NULL CHECK (path ~ '^(/[0-9]+)+/$')
 );
 
@@ -68,19 +52,13 @@ CREATE TYPE api.team_spec AS (
     external_id TEXT
 );
 
-CREATE TYPE api.team_status AS (
-    phase TEXT,
-    last_transition_time TIMESTAMPTZ,
-    error_message TEXT
-);
-
 CREATE TABLE api.teams (
     id SERIAL PRIMARY KEY,
     api_version TEXT NOT NULL,
     kind TEXT NOT NULL,
     metadata api.metadata,
     spec api.team_spec,
-    status api.team_status
+    status api.org_status
 );
 
 CREATE UNIQUE INDEX teams_name_unique_idx ON api.teams (((metadata).name));
@@ -116,11 +94,10 @@ CREATE INDEX team_members_user_id_idx ON api.team_members (user_id);
 -- INSERT.
 CREATE OR REPLACE FUNCTION api.org_object_check_identity(
     p_kind TEXT,
-    p_is_insert BOOLEAN,
     p_meta api.metadata,
-    p_old_name TEXT,
     p_identity_source TEXT,
     p_external_id TEXT,
+    p_old_name TEXT,
     p_old_identity_source TEXT,
     p_old_external_id TEXT
 )
@@ -150,7 +127,7 @@ BEGIN
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
-    IF p_is_insert THEN
+    IF p_old_name IS NULL THEN
         IF NOT EXISTS (SELECT 1 FROM api.identity_sources i WHERE (i.metadata).name = p_identity_source) THEN
             RAISE sqlstate 'PGRST'
                 USING message = '{"code": "10272","message": "spec.identity_source does not name an identity source","hint": "Use the metadata.name of an IdentitySource, without a type prefix"}',
@@ -168,24 +145,33 @@ BEGIN
 END;
 $$;
 
--- Returns the phase to store: the written one, else the stored one, else
--- Active.
-CREATE OR REPLACE FUNCTION api.org_object_phase(p_new TEXT, p_old TEXT)
-RETURNS TEXT
+-- Returns the status to store. The phase is the written one, else the stored
+-- one, else Active; last_transition_time moves only when the phase changes.
+-- p_old is NULL on INSERT.
+CREATE OR REPLACE FUNCTION api.org_object_status(p_new api.org_status, p_old api.org_status)
+RETURNS api.org_status
 LANGUAGE plpgsql
-IMMUTABLE
+STABLE
 SET search_path = pg_catalog
 AS $$
 DECLARE
-    v_phase TEXT := COALESCE(NULLIF(p_new, ''), NULLIF(p_old, ''), 'Active');
+    v_status api.org_status := p_new;
 BEGIN
-    IF v_phase NOT IN ('Active', 'Inactive') THEN
+    v_status.phase := COALESCE(NULLIF(p_new.phase, ''), NULLIF(p_old.phase, ''), 'Active');
+
+    IF v_status.phase NOT IN ('Active', 'Inactive') THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10274","message": "status.phase must be Active or Inactive","hint": "Set Inactive when the object is gone from the directory"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
     END IF;
 
-    RETURN v_phase;
+    IF v_status.phase IS DISTINCT FROM p_old.phase THEN
+        v_status.last_transition_time := CURRENT_TIMESTAMP;
+    ELSIF v_status.last_transition_time IS NULL THEN
+        v_status.last_transition_time := p_old.last_transition_time;
+    END IF;
+
+    RETURN v_status;
 END;
 $$;
 
@@ -200,10 +186,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
 DECLARE
-    v_insert BOOLEAN := TG_OP = 'INSERT';
     v_spec api.org_unit_spec := NEW.spec;
-    v_status api.org_unit_status := NEW.status;
-    v_old_phase TEXT;
     v_parent_path TEXT;
     v_parent_source TEXT;
 BEGIN
@@ -213,13 +196,10 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('api.org_units.path'));
 
     NEW.metadata := api.org_object_check_identity(
-        'OrgUnit', v_insert, NEW.metadata,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.metadata).name END,
-        v_spec.identity_source, v_spec.external_id,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.spec).identity_source END,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.spec).external_id END);
+        'OrgUnit', NEW.metadata, v_spec.identity_source, v_spec.external_id,
+        (OLD.metadata).name, (OLD.spec).identity_source, (OLD.spec).external_id);
 
-    IF NOT v_insert AND NEW.id IS DISTINCT FROM OLD.id THEN
+    IF NEW.id IS DISTINCT FROM OLD.id AND OLD.id IS NOT NULL THEN
         RAISE sqlstate 'PGRST'
             USING message = '{"code": "10273","message": "id of an OrgUnit cannot be changed","hint": "The id is part of the materialized path"}',
             detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
@@ -258,19 +238,7 @@ BEGIN
         NEW.path := v_parent_path || NEW.id || '/';
     END IF;
 
-    IF NOT v_insert THEN
-        v_old_phase := (OLD.status).phase;
-    END IF;
-
-    v_status.phase := api.org_object_phase(v_status.phase, v_old_phase);
-
-    IF v_status.phase IS DISTINCT FROM v_old_phase THEN
-        v_status.last_transition_time := CURRENT_TIMESTAMP;
-    ELSIF v_status.last_transition_time IS NULL AND NOT v_insert THEN
-        v_status.last_transition_time := (OLD.status).last_transition_time;
-    END IF;
-
-    NEW.status := v_status;
+    NEW.status := api.org_object_status(NEW.status, OLD.status);
 
     RETURN NEW;
 END;
@@ -354,31 +322,12 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-DECLARE
-    v_insert BOOLEAN := TG_OP = 'INSERT';
-    v_status api.team_status := NEW.status;
-    v_old_phase TEXT;
 BEGIN
     NEW.metadata := api.org_object_check_identity(
-        'Team', v_insert, NEW.metadata,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.metadata).name END,
-        (NEW.spec).identity_source, (NEW.spec).external_id,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.spec).identity_source END,
-        CASE WHEN v_insert THEN NULL ELSE (OLD.spec).external_id END);
+        'Team', NEW.metadata, (NEW.spec).identity_source, (NEW.spec).external_id,
+        (OLD.metadata).name, (OLD.spec).identity_source, (OLD.spec).external_id);
 
-    IF NOT v_insert THEN
-        v_old_phase := (OLD.status).phase;
-    END IF;
-
-    v_status.phase := api.org_object_phase(v_status.phase, v_old_phase);
-
-    IF v_status.phase IS DISTINCT FROM v_old_phase THEN
-        v_status.last_transition_time := CURRENT_TIMESTAMP;
-    ELSIF v_status.last_transition_time IS NULL AND NOT v_insert THEN
-        v_status.last_transition_time := (OLD.status).last_transition_time;
-    END IF;
-
-    NEW.status := v_status;
+    NEW.status := api.org_object_status(NEW.status, OLD.status);
 
     RETURN NEW;
 END;
@@ -463,15 +412,15 @@ ALTER TABLE api.team_members ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "org_unit read policy" ON api.org_units
     FOR SELECT
-    USING (api.has_permission(auth.uid(), 'org_unit:read', NULL));
+    USING ((SELECT api.has_permission(auth.uid(), 'org_unit:read', NULL)));
 
 CREATE POLICY "team read policy" ON api.teams
     FOR SELECT
-    USING (api.has_permission(auth.uid(), 'team:read', NULL));
+    USING ((SELECT api.has_permission(auth.uid(), 'team:read', NULL)));
 
 CREATE POLICY "org_unit_member read policy" ON api.org_unit_members
     FOR SELECT
-    USING (api.has_permission(auth.uid(), 'org_unit:read', NULL));
+    USING ((SELECT api.has_permission(auth.uid(), 'org_unit:read', NULL)));
 
 -- Hand assignment: rows without an identity_source only, so a user never
 -- overrides what sync wrote. Writing through PostgREST also needs the read
@@ -480,40 +429,37 @@ CREATE POLICY "org_unit_member create policy" ON api.org_unit_members
     FOR INSERT
     WITH CHECK (
         identity_source IS NULL
-        AND api.has_permission(auth.uid(), 'org_unit:assign-member', NULL)
+        AND (SELECT api.has_permission(auth.uid(), 'org_unit:assign-member', NULL))
     );
 
 CREATE POLICY "org_unit_member update policy" ON api.org_unit_members
     FOR UPDATE
     USING (
         identity_source IS NULL
-        AND api.has_permission(auth.uid(), 'org_unit:assign-member', NULL)
+        AND (SELECT api.has_permission(auth.uid(), 'org_unit:assign-member', NULL))
     )
     WITH CHECK (
         identity_source IS NULL
-        AND api.has_permission(auth.uid(), 'org_unit:assign-member', NULL)
+        AND (SELECT api.has_permission(auth.uid(), 'org_unit:assign-member', NULL))
     );
 
 CREATE POLICY "org_unit_member delete policy" ON api.org_unit_members
     FOR DELETE
     USING (
         identity_source IS NULL
-        AND api.has_permission(auth.uid(), 'org_unit:assign-member', NULL)
+        AND (SELECT api.has_permission(auth.uid(), 'org_unit:assign-member', NULL))
     );
 
 CREATE POLICY "team_member read policy" ON api.team_members
     FOR SELECT
-    USING (api.has_permission(auth.uid(), 'team:read', NULL));
+    USING ((SELECT api.has_permission(auth.uid(), 'team:read', NULL)));
 
 -- ----------------------
 -- Subtree queries
 -- ----------------------
 -- Both run as the caller (RLS applies) and are plain SQL so the planner can
--- inline them. A subtree is every path in [root.path, root.path || ':'): a
--- path holds only '/' and digits, which sort below ':' in the "C" collation,
--- so the range is exactly the paths that start with root.path. The bounds are
--- scalar subqueries (run once, as parameters) so the btree index on path
--- serves the range whatever the table statistics say.
+-- inline them. The range bounds are scalar subqueries (run once, as
+-- parameters) so the path index serves the range whatever the statistics say.
 
 CREATE OR REPLACE FUNCTION api.org_unit_subtree(p_org_unit_id INTEGER)
 RETURNS SETOF api.org_units
@@ -532,16 +478,14 @@ LANGUAGE sql
 STABLE
 AS $$
     SELECT m.*
-    FROM api.org_units u
-    JOIN api.org_unit_members m ON m.org_unit_id = u.id
-    WHERE u.path >= (SELECT r.path FROM api.org_units r WHERE r.id = p_org_unit_id)
-      AND u.path < (SELECT r.path || ':' FROM api.org_units r WHERE r.id = p_org_unit_id);
+    FROM api.org_unit_subtree(p_org_unit_id) u
+    JOIN api.org_unit_members m ON m.org_unit_id = u.id;
 $$;
 
 -- Trigger functions and internal helpers are not meant to be called; keep them
 -- off the RPC surface.
-REVOKE ALL ON FUNCTION api.org_object_check_identity(TEXT, BOOLEAN, api.metadata, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION api.org_object_phase(TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION api.org_object_check_identity(TEXT, api.metadata, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION api.org_object_status(api.org_status, api.org_status) FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.org_units_before_write() FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.org_units_after_path_change() FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.org_units_before_delete() FROM PUBLIC;

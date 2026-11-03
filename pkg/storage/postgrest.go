@@ -1294,39 +1294,11 @@ func (s *postgrestStorage) UpdateOrgUnit(id string, data *v1.OrgUnit) error {
 	return err
 }
 
-func (s *postgrestStorage) GetOrgUnit(id string) (*v1.OrgUnit, error) {
-	var response []v1.OrgUnit
-
-	responseContent, _, err := s.postgrestClient.From(ORG_UNIT_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
-	if err != nil {
-		return nil, err
-	}
-
-	if err = parseResponse(&response, responseContent); err != nil {
-		return nil, err
-	}
-
-	if len(response) == 0 {
-		return nil, ErrResourceNotFound
-	}
-
-	return &response[0], nil
-}
-
 func (s *postgrestStorage) ListOrgUnit(option ListOption) ([]v1.OrgUnit, error) {
 	var response []v1.OrgUnit
 	err := s.genericList(ORG_UNIT_TABLE, &response, option)
 
 	return response, err
-}
-
-func (s *postgrestStorage) ListOrgUnitSubtree(orgUnitID int) ([]v1.OrgUnit, error) {
-	response := []v1.OrgUnit{}
-	if err := s.CallDatabaseFunction("org_unit_subtree", map[string]interface{}{"p_org_unit_id": orgUnitID}, &response); err != nil {
-		return nil, err
-	}
-
-	return response, nil
 }
 
 func (s *postgrestStorage) SetOrgUnitMember(data *OrgUnitMember) error {
@@ -1348,15 +1320,6 @@ func (s *postgrestStorage) ListOrgUnitMember(option ListOption) ([]OrgUnitMember
 	return response, err
 }
 
-func (s *postgrestStorage) ListOrgUnitSubtreeMembers(orgUnitID int) ([]OrgUnitMember, error) {
-	response := []OrgUnitMember{}
-	if err := s.CallDatabaseFunction("org_unit_subtree_members", map[string]interface{}{"p_org_unit_id": orgUnitID}, &response); err != nil {
-		return nil, err
-	}
-
-	return response, nil
-}
-
 func (s *postgrestStorage) CreateTeam(data *v1.Team) error {
 	_, _, err := s.postgrestClient.From(TEAM_TABLE).Insert(data, false, "", "minimal", "").Execute()
 
@@ -1367,25 +1330,6 @@ func (s *postgrestStorage) UpdateTeam(id string, data *v1.Team) error {
 	_, _, err := s.postgrestClient.From(TEAM_TABLE).Update(data, "minimal", "").Filter("id", "eq", id).Execute()
 
 	return err
-}
-
-func (s *postgrestStorage) GetTeam(id string) (*v1.Team, error) {
-	var response []v1.Team
-
-	responseContent, _, err := s.postgrestClient.From(TEAM_TABLE).Select("*", "", false).Filter("id", "eq", id).Execute()
-	if err != nil {
-		return nil, err
-	}
-
-	if err = parseResponse(&response, responseContent); err != nil {
-		return nil, err
-	}
-
-	if len(response) == 0 {
-		return nil, ErrResourceNotFound
-	}
-
-	return &response[0], nil
 }
 
 func (s *postgrestStorage) ListTeam(option ListOption) ([]v1.Team, error) {

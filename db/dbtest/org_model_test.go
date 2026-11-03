@@ -149,22 +149,51 @@ func assertErrCode(t *testing.T, what string, err error, code string) {
 	}
 }
 
-func subtreeIDs(t *testing.T, st storage.Storage, rootID int) []int {
+func subtreeIDs(t *testing.T, rootID int) []int {
 	t.Helper()
 
-	units, err := st.ListOrgUnitSubtree(rootID)
+	rows, err := GetTestDB(t).Query(`SELECT id FROM api.org_unit_subtree($1) ORDER BY id`, rootID)
 	if err != nil {
-		t.Fatalf("ListOrgUnitSubtree(%d) failed: %v", rootID, err)
+		t.Fatalf("org_unit_subtree(%d) failed: %v", rootID, err)
 	}
+	defer rows.Close()
 
-	ids := make([]int, 0, len(units))
-	for _, u := range units {
-		ids = append(ids, u.ID)
+	ids := []int{}
+
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		ids = append(ids, id)
 	}
-
-	sort.Ints(ids)
 
 	return ids
+}
+
+// subtreeMembers returns the user IDs of api.org_unit_subtree_members, sorted.
+func subtreeMembers(t *testing.T, rootID int) []string {
+	t.Helper()
+
+	rows, err := GetTestDB(t).Query(`SELECT user_id FROM api.org_unit_subtree_members($1) ORDER BY user_id`, rootID)
+	if err != nil {
+		t.Fatalf("org_unit_subtree_members(%d) failed: %v", rootID, err)
+	}
+	defer rows.Close()
+
+	users := []string{}
+
+	for rows.Next() {
+		var user string
+		if err := rows.Scan(&user); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+
+		users = append(users, user)
+	}
+
+	return users
 }
 
 func sortedInts(ids ...int) []int {
@@ -201,11 +230,11 @@ func TestOrgUnit_TreeAndMove(t *testing.T) {
 	})
 
 	t.Run("subtree query", func(t *testing.T) {
-		if got, want := subtreeIDs(t, f.st, a.ID), sortedInts(a.ID, b.ID, c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
+		if got, want := subtreeIDs(t, a.ID), sortedInts(a.ID, b.ID, c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("subtree(a) = %v, want %v", got, want)
 		}
 
-		if got, want := subtreeIDs(t, f.st, c.ID), sortedInts(c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
+		if got, want := subtreeIDs(t, c.ID), sortedInts(c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("subtree(c) = %v, want %v", got, want)
 		}
 	})
@@ -228,11 +257,11 @@ func TestOrgUnit_TreeAndMove(t *testing.T) {
 			}
 		}
 
-		if got, want := subtreeIDs(t, f.st, a.ID), []int{a.ID}; fmt.Sprint(got) != fmt.Sprint(want) {
+		if got, want := subtreeIDs(t, a.ID), []int{a.ID}; fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("subtree(a) after the move = %v, want %v", got, want)
 		}
 
-		if got, want := subtreeIDs(t, f.st, e.ID), sortedInts(e.ID, b.ID, c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
+		if got, want := subtreeIDs(t, e.ID), sortedInts(e.ID, b.ID, c.ID, d.ID); fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("subtree(e) after the move = %v, want %v", got, want)
 		}
 	})
@@ -363,7 +392,7 @@ func TestOrgUnit_Inactive(t *testing.T) {
 	f := newOrgFixture(t)
 	a := f.createOrgUnit("")
 
-	if err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgUnitStatus{Phase: v1.OrgPhaseInactive}}); err != nil {
+	if err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgStatus{Phase: v1.OrgPhaseInactive}}); err != nil {
 		t.Fatalf("deactivating failed: %v", err)
 	}
 
@@ -373,7 +402,7 @@ func TestOrgUnit_Inactive(t *testing.T) {
 	}
 
 	t.Run("a status without phase keeps the phase", func(t *testing.T) {
-		if err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgUnitStatus{ErrorMessage: "x"}}); err != nil {
+		if err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgStatus{}}); err != nil {
 			t.Fatalf("status update failed: %v", err)
 		}
 
@@ -383,7 +412,7 @@ func TestOrgUnit_Inactive(t *testing.T) {
 	})
 
 	t.Run("unknown phases are rejected", func(t *testing.T) {
-		err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgUnitStatus{Phase: "Deleted"}})
+		err := f.st.UpdateOrgUnit(a.GetID(), &v1.OrgUnit{Status: &v1.OrgStatus{Phase: "Deleted"}})
 		assertErrCode(t, "setting phase Deleted", err, "10274")
 	})
 
@@ -397,13 +426,13 @@ func TestOrgUnit_Inactive(t *testing.T) {
 		team := f.createTeam()
 
 		for _, phase := range []v1.OrgPhase{v1.OrgPhaseInactive, v1.OrgPhaseActive} {
-			if err := f.st.UpdateTeam(team.GetID(), &v1.Team{Status: &v1.TeamStatus{Phase: phase}}); err != nil {
+			if err := f.st.UpdateTeam(team.GetID(), &v1.Team{Status: &v1.OrgStatus{Phase: phase}}); err != nil {
 				t.Fatalf("setting Team phase %s failed: %v", phase, err)
 			}
 
-			got, err := f.st.GetTeam(team.GetID())
-			if err != nil || got.Status.Phase != phase {
-				t.Fatalf("Team after setting %s: %+v, %v", phase, got, err)
+			var got string
+			if err := GetTestDB(t).QueryRow(`SELECT (status).phase FROM api.teams WHERE id = $1`, team.ID).Scan(&got); err != nil || got != string(phase) {
+				t.Fatalf("Team phase after setting %s: %q, %v", phase, got, err)
 			}
 		}
 	})
@@ -503,28 +532,15 @@ func TestOrgUnit_Members(t *testing.T) {
 	t.Run("subtree members", func(t *testing.T) {
 		set(u2.ID, b)
 
-		got, err := f.st.ListOrgUnitSubtreeMembers(a.ID)
-		if err != nil {
-			t.Fatalf("ListOrgUnitSubtreeMembers failed: %v", err)
-		}
-
-		users := []string{}
-		for _, m := range got {
-			users = append(users, m.UserID)
-		}
-
-		sort.Strings(users)
-
 		want := []string{u1.ID, u2.ID}
 		sort.Strings(want)
 
-		if fmt.Sprint(users) != fmt.Sprint(want) {
+		if users := subtreeMembers(t, a.ID); fmt.Sprint(users) != fmt.Sprint(want) {
 			t.Errorf("subtree members of a = %v, want %v", users, want)
 		}
 
-		got, err = f.st.ListOrgUnitSubtreeMembers(c.ID)
-		if err != nil || len(got) != 1 || got[0].UserID != u1.ID {
-			t.Errorf("subtree members of c = %+v, %v; want only u1", got, err)
+		if got := subtreeMembers(t, c.ID); fmt.Sprint(got) != fmt.Sprint([]string{u1.ID}) {
+			t.Errorf("subtree members of c = %v, want only u1", got)
 		}
 	})
 
@@ -533,9 +549,8 @@ func TestOrgUnit_Members(t *testing.T) {
 			t.Fatalf("move c to the root failed: %v", err)
 		}
 
-		got, err := f.st.ListOrgUnitSubtreeMembers(a.ID)
-		if err != nil || len(got) != 1 || got[0].UserID != u2.ID {
-			t.Errorf("subtree members of a after moving c out = %+v, %v; want only u2", got, err)
+		if got := subtreeMembers(t, a.ID); fmt.Sprint(got) != fmt.Sprint([]string{u2.ID}) {
+			t.Errorf("subtree members of a after moving c out = %v, want only u2", got)
 		}
 	})
 

@@ -10,11 +10,11 @@ import (
 
 func TestOrgUnit_IsActive(t *testing.T) {
 	assert.True(t, (&OrgUnit{}).IsActive(), "no status yet")
-	assert.True(t, (&OrgUnit{Status: &OrgUnitStatus{Phase: OrgPhaseActive}}).IsActive())
-	assert.False(t, (&OrgUnit{Status: &OrgUnitStatus{Phase: OrgPhaseInactive}}).IsActive())
+	assert.True(t, (&OrgUnit{Status: &OrgStatus{Phase: OrgPhaseActive}}).IsActive())
+	assert.False(t, (&OrgUnit{Status: &OrgStatus{Phase: OrgPhaseInactive}}).IsActive())
 
 	assert.True(t, (&Team{}).IsActive(), "no status yet")
-	assert.False(t, (&Team{Status: &TeamStatus{Phase: OrgPhaseInactive}}).IsActive())
+	assert.False(t, (&Team{Status: &OrgStatus{Phase: OrgPhaseInactive}}).IsActive())
 }
 
 func TestOrgUnit_JSON(t *testing.T) {

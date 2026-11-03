@@ -6,8 +6,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
-// OrgPhase tells whether an OrgUnit or a Team still exists in its
-// directory. Sync sets Inactive instead of deleting the object.
+// OrgPhase tells whether an OrgUnit or a Team still exists in its directory.
 type OrgPhase string
 
 const (
@@ -15,27 +14,27 @@ const (
 	OrgPhaseInactive OrgPhase = "Inactive"
 )
 
-// OrgUnit is a department synced from an identity source. It is a global
-// resource (metadata.workspace is always empty) and is written only by
-// directory sync: users can read it but not create, change or delete it.
-//
-// metadata.name, spec.identity_source and spec.external_id never change; a
-// rename in the directory changes metadata.display_name only. A department
-// that is gone from the directory keeps its row with status.phase Inactive.
+// OrgStatus is the status of an OrgUnit or a Team, written by sync. A status
+// without Phase keeps the stored phase; a new object starts Active.
+type OrgStatus struct {
+	Phase              OrgPhase `json:"phase,omitempty"`
+	LastTransitionTime string   `json:"last_transition_time,omitempty"`
+}
+
+// OrgUnit is a global, sync-written department; see the org_units_and_teams
+// migration for the model.
 type OrgUnit struct {
-	ID         int            `json:"id,omitempty"`
-	APIVersion string         `json:"api_version,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
-	Metadata   *Metadata      `json:"metadata,omitempty"`
-	Spec       *OrgUnitSpec   `json:"spec,omitempty"`
-	Status     *OrgUnitStatus `json:"status,omitempty"`
-	// Path is the materialized path of ids from the root, "/<root id>/.../<id>/".
-	// The database computes it from spec.parent; a written value is ignored.
+	ID         int          `json:"id,omitempty"`
+	APIVersion string       `json:"api_version,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   *Metadata    `json:"metadata,omitempty"`
+	Spec       *OrgUnitSpec `json:"spec,omitempty"`
+	Status     *OrgStatus   `json:"status,omitempty"`
+	// Path is "/<root id>/.../<id>/", computed by the database from spec.parent.
 	Path string `json:"path,omitempty"`
 }
 
-// OrgUnitSpec is written whole by sync: the database replaces the composite on
-// every write, so a spec without Parent moves the OrgUnit to the root.
+// OrgUnitSpec is written whole: a spec without Parent moves the OrgUnit to the root.
 type OrgUnitSpec struct {
 	// IdentitySource is the metadata.name of the IdentitySource the OrgUnit
 	// was synced from.
@@ -45,14 +44,6 @@ type OrgUnitSpec struct {
 	// Parent is the metadata.name of the parent OrgUnit, from the same
 	// identity source; empty for a root.
 	Parent string `json:"parent,omitempty"`
-}
-
-// OrgUnitStatus is written by sync. A status without Phase keeps the stored
-// phase; a new OrgUnit starts Active.
-type OrgUnitStatus struct {
-	Phase              OrgPhase `json:"phase,omitempty"`
-	LastTransitionTime string   `json:"last_transition_time,omitempty"`
-	ErrorMessage       string   `json:"error_message,omitempty"`
 }
 
 // IsActive reports whether the OrgUnit still exists in its directory.

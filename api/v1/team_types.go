@@ -6,19 +6,15 @@ import (
 	"github.com/neutree-ai/neutree/pkg/scheme"
 )
 
-// Team is a flat group synced from an identity source. Teams do not nest:
-// sync expands nested directory groups into direct members. Like OrgUnit, it
-// is a global resource written only by directory sync, its identity
-// (metadata.name, spec.identity_source, spec.external_id) never changes, and a
-// group that is gone from the directory keeps its row with status.phase
-// Inactive.
+// Team is a global, sync-written flat group; nested directory groups are
+// expanded into direct members.
 type Team struct {
-	ID         int         `json:"id,omitempty"`
-	APIVersion string      `json:"api_version,omitempty"`
-	Kind       string      `json:"kind,omitempty"`
-	Metadata   *Metadata   `json:"metadata,omitempty"`
-	Spec       *TeamSpec   `json:"spec,omitempty"`
-	Status     *TeamStatus `json:"status,omitempty"`
+	ID         int        `json:"id,omitempty"`
+	APIVersion string     `json:"api_version,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   *Metadata  `json:"metadata,omitempty"`
+	Spec       *TeamSpec  `json:"spec,omitempty"`
+	Status     *OrgStatus `json:"status,omitempty"`
 }
 
 type TeamSpec struct {
@@ -27,14 +23,6 @@ type TeamSpec struct {
 	IdentitySource string `json:"identity_source"`
 	// ExternalID is the directory's stable ID of the group, never a name.
 	ExternalID string `json:"external_id"`
-}
-
-// TeamStatus is written by sync. A status without Phase keeps the stored
-// phase; a new Team starts Active.
-type TeamStatus struct {
-	Phase              OrgPhase `json:"phase,omitempty"`
-	LastTransitionTime string   `json:"last_transition_time,omitempty"`
-	ErrorMessage       string   `json:"error_message,omitempty"`
 }
 
 // IsActive reports whether the Team still exists in its directory.

@@ -7,8 +7,7 @@ import (
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
-// RegisterOrgUnitRoutes registers OrgUnit routes. OrgUnits are written by
-// directory sync only.
+// RegisterOrgUnitRoutes registers OrgUnit routes (read-only; sync writes them).
 //
 // Allowed methods: GET
 func RegisterOrgUnitRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -18,8 +17,7 @@ func RegisterOrgUnitRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup.GET("", CreateStructProxyHandler[v1.OrgUnit](deps, storage.ORG_UNIT_TABLE))
 }
 
-// RegisterTeamRoutes registers Team routes. Teams are written by directory
-// sync only.
+// RegisterTeamRoutes registers Team routes (read-only; sync writes them).
 //
 // Allowed methods: GET
 func RegisterTeamRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
@@ -39,9 +37,8 @@ func RegisterTeamMemberRoutes(group *gin.RouterGroup, middlewares []gin.HandlerF
 	proxyGroup.GET("", CreateStructProxyHandler[storage.TeamMember](deps, storage.TEAM_MEMBER_TABLE))
 }
 
-// RegisterOrgUnitMemberRoutes registers OrgUnit membership routes. Writes
-// assign a local account to its primary OrgUnit by hand; the database decides
-// who may write which row. A membership is a plain row, so DELETE removes it.
+// RegisterOrgUnitMemberRoutes registers OrgUnit membership routes; writes
+// assign a local account by hand, and RLS decides who may write which row.
 //
 // Allowed methods: GET, POST, PATCH, DELETE
 func RegisterOrgUnitMemberRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {

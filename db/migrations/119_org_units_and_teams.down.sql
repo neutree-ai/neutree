@@ -27,10 +27,9 @@ DROP FUNCTION IF EXISTS api.teams_before_write();
 DROP FUNCTION IF EXISTS api.org_units_before_delete();
 DROP FUNCTION IF EXISTS api.org_units_after_path_change();
 DROP FUNCTION IF EXISTS api.org_units_before_write();
-DROP FUNCTION IF EXISTS api.org_object_phase(TEXT, TEXT);
-DROP FUNCTION IF EXISTS api.org_object_check_identity(TEXT, BOOLEAN, api.metadata, TEXT, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.org_object_status(api.org_status, api.org_status);
+DROP FUNCTION IF EXISTS api.org_object_check_identity(TEXT, api.metadata, TEXT, TEXT, TEXT, TEXT, TEXT);
 
-DROP TYPE IF EXISTS api.team_status;
 DROP TYPE IF EXISTS api.team_spec;
-DROP TYPE IF EXISTS api.org_unit_status;
+DROP TYPE IF EXISTS api.org_status;
 DROP TYPE IF EXISTS api.org_unit_spec;

@@ -301,8 +301,7 @@ type IdentitySourceStorage interface {
 	GetIdentitySourceSecrets(name string) (*IdentitySourceSecrets, error)
 }
 
-// OrgUnitMember puts a user into an OrgUnit, the user's primary department.
-// A user has at most one. It is a plain table row, not an API resource.
+// OrgUnitMember puts a user into their one primary OrgUnit.
 type OrgUnitMember struct {
 	UserID    string `json:"user_id"`
 	OrgUnitID int    `json:"org_unit_id"`
@@ -320,22 +319,14 @@ type TeamMember struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-// OrgUnitStorage reads and writes OrgUnits and their members. OrgUnits are
-// written by directory sync only and are never deleted: a removed department
-// gets status.phase Inactive.
+// OrgUnitStorage reads and writes OrgUnits and their members (sync only).
 type OrgUnitStorage interface {
 	// CreateOrgUnit creates an OrgUnit. The database computes its path.
 	CreateOrgUnit(data *v1.OrgUnit) error
-	// UpdateOrgUnit updates an OrgUnit. A changed spec.parent moves its
-	// subtree; the database re-paths every descendant.
+	// UpdateOrgUnit updates an OrgUnit; a new spec.parent re-paths its subtree.
 	UpdateOrgUnit(id string, data *v1.OrgUnit) error
-	// GetOrgUnit retrieves an OrgUnit by its ID.
-	GetOrgUnit(id string) (*v1.OrgUnit, error)
 	// ListOrgUnit retrieves OrgUnits with optional filters.
 	ListOrgUnit(option ListOption) ([]v1.OrgUnit, error)
-	// ListOrgUnitSubtree returns the OrgUnit with the given ID and all its
-	// descendants, Inactive ones included.
-	ListOrgUnitSubtree(orgUnitID int) ([]v1.OrgUnit, error)
 
 	// SetOrgUnitMember puts a user into an OrgUnit, replacing the user's
 	// previous one.
@@ -344,21 +335,14 @@ type OrgUnitStorage interface {
 	DeleteOrgUnitMember(userID string) error
 	// ListOrgUnitMember retrieves OrgUnit memberships with optional filters.
 	ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error)
-	// ListOrgUnitSubtreeMembers returns the members of the OrgUnit with the
-	// given ID and of all its descendants.
-	ListOrgUnitSubtreeMembers(orgUnitID int) ([]OrgUnitMember, error)
 }
 
-// TeamStorage reads and writes Teams and their members. Teams are written by
-// directory sync only and are never deleted: a removed group gets
-// status.phase Inactive.
+// TeamStorage reads and writes Teams and their members (sync only).
 type TeamStorage interface {
 	// CreateTeam creates a Team.
 	CreateTeam(data *v1.Team) error
 	// UpdateTeam updates a Team.
 	UpdateTeam(id string, data *v1.Team) error
-	// GetTeam retrieves a Team by its ID.
-	GetTeam(id string) (*v1.Team, error)
 	// ListTeam retrieves Teams with optional filters.
 	ListTeam(option ListOption) ([]v1.Team, error)
 
