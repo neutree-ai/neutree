@@ -333,12 +333,19 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 }
 
 // remoteExitCode returns the exit status a failed remote command reported, when
-// the runner preserved it.
+// the runner preserved it. A Kubernetes exec stream reports it as ExitStatus,
+// and an SSH command reports the remote status through the local ssh process.
 func remoteExitCode(err error) (int, bool) {
-	var exitErr interface{ ExitStatus() int }
+	var execErr interface{ ExitStatus() int }
+
+	if errors.As(err, &execErr) {
+		return execErr.ExitStatus(), true
+	}
+
+	var exitErr interface{ ExitCode() int }
 
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitStatus(), true
+		return exitErr.ExitCode(), true
 	}
 
 	return 0, false

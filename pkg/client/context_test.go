@@ -32,6 +32,14 @@ func TestReadRequestsRespectContextCancellation(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "model version",
+			path: "/api/v1/workspaces/default/model_registries/hub/models/Qwen/Qwen3",
+			read: func(ctx context.Context, client *Client) error {
+				_, err := client.Models.GetContext(ctx, "default", "hub", "Qwen/Qwen3", "latest")
+				return err
+			},
+		},
 	}
 
 	stages := []struct {

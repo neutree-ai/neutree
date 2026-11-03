@@ -537,6 +537,29 @@ func (e exitStatusError) Error() string { return fmt.Sprintf("exit status %d", e
 
 func (e exitStatusError) ExitStatus() int { return e.code }
 
+func TestRemoteExitCode(t *testing.T) {
+	exitError := exec.Command("sh", "-c", "exit 137").Run()
+	require.Error(t, exitError)
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "kubernetes exec status", err: fmt.Errorf("wrap: %w", exitStatusError{code: 137}), want: 137},
+		{name: "process exit error", err: fmt.Errorf("run SSH command: %w", exitError), want: 137},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := remoteExitCode(tc.err)
+			require.True(t, ok)
+			require.Equal(t, tc.want, code)
+		})
+	}
+
+	_, ok := remoteExitCode(errors.New("no exit status"))
+	require.False(t, ok)
+}
+
 // A monitor that could not stop the benchmark exits 137. That is the only sign
 // the process may still hold the GPU, so a cancellation must not report a plain
 // "context canceled" over it.

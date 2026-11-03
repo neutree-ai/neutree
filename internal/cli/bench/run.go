@@ -43,7 +43,7 @@ type clusterCredentialsGetter interface {
 // modelVersionGetter resolves a registry version reference through the control
 // plane, which reads the registry from its own mount.
 type modelVersionGetter interface {
-	Get(workspace, registry, modelName, version string) (*client.ModelDetail, error)
+	GetContext(ctx context.Context, workspace, registry, modelName, version string) (*client.ModelDetail, error)
 }
 
 type targetResolver func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error)
@@ -407,7 +407,7 @@ func resolveTokenizerPath(ctx context.Context, deps dependencies, workspace stri
 		return "", err
 	}
 
-	modelVersion, err := resolveModelVersion(deps.modelVersions, workspace, endpoint, modelRegistry)
+	modelVersion, err := resolveModelVersion(ctx, deps.modelVersions, workspace, endpoint, modelRegistry)
 	if err != nil {
 		return "", err
 	}
@@ -422,14 +422,26 @@ func resolveTokenizerPath(ctx context.Context, deps dependencies, workspace stri
 
 // resolveModelVersion returns the version the model is placed under. A BentoML
 // registry resolves "latest" by reading the registry's storage, which only the
-// control plane mounts; everyone else takes the reference from the spec.
-func resolveModelVersion(modelVersions modelVersionGetter, workspace string, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) (string, error) {
+// control plane mounts; everyone else takes the reference from the spec after
+// the same normalization the deploy path applies.
+func resolveModelVersion(
+	ctx context.Context,
+	modelVersions modelVersionGetter,
+	workspace string,
+	endpoint *v1.Endpoint,
+	modelRegistry *v1.ModelRegistry,
+) (string, error) {
 	if endpoint.Spec.Model == nil {
 		return "", nil
 	}
 
 	version := endpoint.Spec.Model.Version
 	if !modelpath.RealVersionNeedsStorage(modelRegistry, version) {
+		version, err := modelpath.NormalizeVersion(modelRegistry, endpoint.Spec.Model.Name, version)
+		if err != nil {
+			return "", fmt.Errorf("normalize version of model %q: %w", endpoint.Spec.Model.Name, err)
+		}
+
 		return version, nil
 	}
 
@@ -437,7 +449,7 @@ func resolveModelVersion(modelVersions modelVersionGetter, workspace string, end
 		return "", fmt.Errorf("resolve version of model %q: Neutree API client is required", endpoint.Spec.Model.Name)
 	}
 
-	detail, err := modelVersions.Get(workspace, endpoint.Spec.Model.Registry, endpoint.Spec.Model.Name, version)
+	detail, err := modelVersions.GetContext(ctx, workspace, endpoint.Spec.Model.Registry, endpoint.Spec.Model.Name, version)
 	if err != nil {
 		return "", fmt.Errorf("resolve version of model %q: %w", endpoint.Spec.Model.Name, err)
 	}

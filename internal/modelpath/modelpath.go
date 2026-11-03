@@ -77,6 +77,20 @@ func PathWithVersion(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *
 	return filepath.Join(mountRoot, modelCacheRelativePath, modelName, modelVersion), nil
 }
 
+// NormalizeVersion returns the version the deployment places the model under,
+// without reading registry storage. It applies the same normalization as the
+// deploy path, so a caller that builds the model path itself does not spell a
+// version reference differently from the engine. A reference that needs
+// storage reports itself through RealVersionNeedsStorage and has to be
+// resolved before calling this.
+func NormalizeVersion(modelRegistry *v1.ModelRegistry, modelName, modelVersion string) (string, error) {
+	if !placedIntoModelCache(modelRegistry) {
+		return modelVersion, nil
+	}
+
+	return RealVersion(modelRegistry, modelName, modelVersion)
+}
+
 func clusterModelCacheRelativePath(cluster *v1.Cluster) (string, error) {
 	modelCaches, err := util.GetClusterModelCache(*cluster)
 	if err != nil {

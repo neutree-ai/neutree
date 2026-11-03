@@ -524,13 +524,27 @@ type fakeModelVersions struct {
 	calls   []string
 }
 
-func (f *fakeModelVersions) Get(workspace, registry, modelName, version string) (*client.ModelDetail, error) {
+func (f *fakeModelVersions) GetContext(_ context.Context, workspace, registry, modelName, version string) (*client.ModelDetail, error) {
 	f.calls = append(f.calls, workspace+"/"+registry+"/"+modelName+"/"+version)
 	if f.err != nil {
 		return nil, f.err
 	}
 
 	return &client.ModelDetail{Version: &v1.ModelVersion{Name: f.version}}, nil
+}
+
+// blockedModelVersions holds the lookup until its context ends, the way a slow
+// control plane does, and reports when the lookup did not get the caller's
+// context at all.
+type blockedModelVersions struct{}
+
+func (blockedModelVersions) GetContext(ctx context.Context, _, _, _, _ string) (*client.ModelDetail, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(2 * time.Second):
+		return nil, errors.New("model version lookup did not receive the caller context")
+	}
 }
 
 func TestResolveTokenizerPath(t *testing.T) {
@@ -545,6 +559,10 @@ func TestResolveTokenizerPath(t *testing.T) {
 				Type: v1.BentoMLModelRegistryType,
 				Url:  "nfs://bentoml.example/models",
 			},
+		}),
+		resourceKey("ModelRegistry", "default", "scope"): mustJSON(t, v1.ModelRegistry{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "scope"},
+			Spec:     &v1.ModelRegistrySpec{Type: v1.ModelScopeModelRegistryType},
 		}),
 	}}
 
@@ -592,6 +610,17 @@ func TestResolveTokenizerPath(t *testing.T) {
 			want:          "/models-cache/default/iris/v3",
 		},
 		{
+			// Serving normalizes ModelScope's "latest" to the default branch,
+			// so the path must not carry a literal "latest" directory.
+			name: "modelscope latest uses the default revision",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "Qwen/Qwen3", Version: v1.LatestVersion, Registry: "scope"},
+			}},
+			cluster:       &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			modelVersions: &fakeModelVersions{version: "unused"},
+			want:          "/models-cache/default/Qwen/Qwen3",
+		},
+		{
 			name: "bentoml latest resolved through the control plane",
 			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
 				Model: &v1.ModelSpec{Name: "iris", Version: v1.LatestVersion, Registry: "bento"},
@@ -623,6 +652,29 @@ func TestResolveTokenizerPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveTokenizerPathHonorsContext(t *testing.T) {
+	resources := fakeResourceGetter{resources: map[string]json.RawMessage{
+		resourceKey("ModelRegistry", "default", "bento"): mustJSON(t, v1.ModelRegistry{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "bento"},
+			Spec: &v1.ModelRegistrySpec{
+				Type: v1.BentoMLModelRegistryType,
+				Url:  "nfs://bentoml.example/models",
+			},
+		}),
+	}}
+	deps := dependencies{resources: resources, modelVersions: blockedModelVersions{}}
+	endpoint := &v1.Endpoint{Spec: &v1.EndpointSpec{
+		Model: &v1.ModelSpec{Name: "iris", Version: v1.LatestVersion, Registry: "bento"},
+	}}
+	cluster := &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := resolveTokenizerPath(ctx, deps, "default", endpoint, cluster)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func benchmarkFixtures() (v1.Endpoint, v1.Cluster, v1.Cluster) {
