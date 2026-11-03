@@ -312,14 +312,14 @@
       },
       "targets": [
         {
-          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_cache\"}[$__rate_interval])) or (0 * sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])))) and (sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])) > 0))",
+          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_cache_hit\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))))) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_cache\"}[$__rate_interval])) or (0 * sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])))))",
           "refId": "A",
           "legendFormat": "L0 local cache",
           "instant": false,
           "range": true
         },
         {
-          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])))) and (sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval])) > 0)) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_compute\"}[$__rate_interval])) or (0 * sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])))) and (sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])) > 0))",
+          "expr": "((sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=\"local_compute\"}[$__rate_interval])) or (0 * sum(rate(vllm:prompt_tokens_by_source_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",source=~\"local_cache_hit|external_kv_transfer|local_compute\"}[$__rate_interval]))))) or ((sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=\"prefill_compute\"}[$__rate_interval])) or (0 * sum(rate(sglang:realtime_tokens_total{workspace=\"$Workspace\",neutree_cluster=\"$Cluster\",application=\"$Endpoint\",replica=~\"${Replica:regex}\",mode=~\"prefill_cache|prefill_compute\"}[$__rate_interval])))))",
           "refId": "C",
           "legendFormat": "Miss",
           "instant": false,
@@ -450,7 +450,7 @@
             "lineWidth": 1,
             "fillOpacity": 65,
             "showPoints": "never",
-            "spanNulls": false,
+            "spanNulls": 900000,
             "stacking": {
               "mode": "normal",
               "group": "A"
