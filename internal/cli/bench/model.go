@@ -1,55 +1,19 @@
 package bench
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func modelDiscoveryCommand(baseURL string) string {
-	const script = `import sys
-from urllib.request import urlopen
-
-url = sys.argv[1].rstrip("/") + "/v1/models"
-with urlopen(url, timeout=30) as response:
-    sys.stdout.write(response.read().decode("utf-8"))
-`
-
-	return "python3 -c " + shellQuote(script) + " " + shellQuote(baseURL)
-}
-
-func firstModelName(payload []byte) (string, error) {
-	var response struct {
-		Data json.RawMessage `json:"data"`
+// firstServedModel returns the first serving name the endpoint controller
+// recorded from the inference instance's /v1/models response. The benchmark
+// sends that name in each request, so the route resolves it exactly as a
+// client would.
+func firstServedModel(endpoint *v1.Endpoint) (string, error) {
+	if len(endpoint.Status.ServedModels) == 0 {
+		return "", fmt.Errorf("Endpoint %q reports no served models", endpoint.Metadata.Name)
 	}
 
-	if err := json.Unmarshal(payload, &response); err != nil {
-		return "", fmt.Errorf("decode /v1/models response: %w", err)
-	}
-
-	if len(response.Data) == 0 {
-		return "", fmt.Errorf("/v1/models response has no data array")
-	}
-
-	var models []map[string]json.RawMessage
-	if err := json.Unmarshal(response.Data, &models); err != nil {
-		return "", fmt.Errorf("decode /v1/models data: %w", err)
-	}
-
-	if len(models) == 0 {
-		return "", fmt.Errorf("/v1/models response has an empty data array")
-	}
-
-	for _, field := range []string{"id", "name", "model"} {
-		var value string
-		if err := json.Unmarshal(models[0][field], &value); err != nil {
-			continue
-		}
-
-		if value = strings.TrimSpace(value); value != "" {
-			return value, nil
-		}
-	}
-
-	return "", fmt.Errorf("first /v1/models entry has no id, name, or model")
+	return endpoint.Status.ServedModels[0], nil
 }

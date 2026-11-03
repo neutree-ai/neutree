@@ -1,7 +1,6 @@
 package bench
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -154,8 +153,9 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 			Platform:       target.Platform,
 			RuntimeID:      target.RuntimeID,
 			BaseURL:        target.BaseURL,
+			Model:          target.Model,
 			Tokenizer:      target.Tokenizer,
-			ModelSelection: "first-v1-model",
+			ModelSelection: "first-served-model",
 		},
 		Cases: make([]manifestCase, 0, len(benchmarkCases)),
 	}
@@ -163,9 +163,9 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return output, err
 	}
 
-	klog.Info("benchmark preflight started: checking vllm bench and discovering model")
+	klog.Info("benchmark preflight started: checking vllm bench")
 
-	model, err := runPreflight(runCtx, target.runner, target.BaseURL, output)
+	err = runPreflight(runCtx, target.runner, output)
 	if err != nil {
 		result.Error = err.Error()
 		_ = writeManifest(output, result)
@@ -175,14 +175,7 @@ func run(ctx context.Context, deps dependencies, options Options) (string, error
 		return output, err
 	}
 
-	klog.Infof("benchmark preflight completed: model=%s", model)
-
-	target.Model = model
-	result.Target.Model = model
-
-	if err := writeManifest(output, result); err != nil {
-		return output, err
-	}
+	klog.Info("benchmark preflight completed")
 
 	remoteRoot := filepath.ToSlash(filepath.Join("/tmp", "neutree-bench-"+filepath.Base(output)))
 	if err := prepareRemoteRoot(runCtx, target.runner, remoteRoot); err != nil {
@@ -300,6 +293,11 @@ func resolveRunTarget(ctx context.Context, deps dependencies, options Options) (
 		return nil, BenchTarget{}, err
 	}
 
+	model, err := firstServedModel(endpoint)
+	if err != nil {
+		return nil, BenchTarget{}, err
+	}
+
 	klog.Infof("benchmark endpoint resolved: cluster=%s", endpoint.Spec.Cluster)
 	klog.Infof("benchmark cluster resolving: cluster=%s", endpoint.Spec.Cluster)
 
@@ -339,6 +337,9 @@ func resolveRunTarget(ctx context.Context, deps dependencies, options Options) (
 	}
 
 	target.Tokenizer = tokenizer
+	target.Model = model
+
+	klog.Infof("benchmark model resolved: model=%s", model)
 
 	if err := ctx.Err(); err != nil {
 		_ = target.Close()
@@ -538,38 +539,24 @@ func benchmarkCaseErrorStatus(err error) string {
 	return benchmarkFailedStatus
 }
 
-func runPreflight(ctx context.Context, runner remoteRunner, baseURL, output string) (string, error) {
+func runPreflight(ctx context.Context, runner remoteRunner, output string) error {
 	stdout, err := createOutputFile(filepath.Join(output, preflightStdoutFileName))
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer stdout.Close() //nolint:errcheck
 
 	stderr, err := createOutputFile(filepath.Join(output, preflightStderrFileName))
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer stderr.Close() //nolint:errcheck
 
 	if err := runner.Run(ctx, benchmarkPreflightCommand(), stdout, stderr); err != nil {
-		return "", fmt.Errorf("vllm benchmark preflight failed: %w", err)
+		return fmt.Errorf("vllm benchmark preflight failed: %w", err)
 	}
 
-	var response bytes.Buffer
-	if err := runner.Run(ctx, modelDiscoveryCommand(baseURL), io.MultiWriter(stdout, &response), stderr); err != nil {
-		return "", fmt.Errorf("discover benchmark model: %w", err)
-	}
-
-	model, err := firstModelName(response.Bytes())
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := fmt.Fprintf(stdout, "\nselected model: %s\n", model); err != nil {
-		return "", fmt.Errorf("record benchmark model: %w", err)
-	}
-
-	return model, nil
+	return nil
 }
 
 // runCase runs one benchmark case. It removes the remote case directory only

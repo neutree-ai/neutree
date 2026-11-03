@@ -49,7 +49,6 @@ func (f fakeClusterCredentials) GetClusterCredentialsContext(_ context.Context, 
 type fakeBenchRunner struct {
 	mu       sync.Mutex
 	commands []string
-	model    string
 	result   string
 }
 
@@ -133,13 +132,6 @@ func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr 
 		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
 		return nil
-	case strings.HasPrefix(command, "python3 -c "):
-		model := r.model
-		if model == "" {
-			model = "router-model"
-		}
-
-		_, _ = fmt.Fprintf(stdout, `{"data":[{"name":%q}]}`, model)
 	case strings.HasPrefix(command, "cat -- "):
 		result := r.result
 		if result == "" {
@@ -165,7 +157,10 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 			Engine:  &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM},
 			Model:   &v1.ModelSpec{Task: v1.TextGenerationModelTask, Name: "router-model"},
 		},
-		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+		Status: &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ServedModels: []string{"router-model"},
+		},
 	}
 	cluster := v1.Cluster{
 		Metadata: &v1.Metadata{Workspace: "default", Name: "cluster-a"},
@@ -237,13 +232,12 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	manifest, err := os.ReadFile(filepath.Join(output, "manifest.json"))
 	require.NoError(t, err)
 	require.Contains(t, string(manifest), `"measurement_scope": "endpoint-route"`)
-	require.Contains(t, string(manifest), `"model_selection": "first-v1-model"`)
+	require.Contains(t, string(manifest), `"model_selection": "first-served-model"`)
 	require.Contains(t, string(manifest), `"model": "router-model"`)
 	require.Contains(t, string(manifest), `"status": "Succeeded"`)
 	require.NotContains(t, string(manifest), "secret-kubeconfig")
 
 	require.Equal(t, benchmarkPreflightCommand(), runner.commands[0])
-	require.Contains(t, runner.commands[1], "/v1/models")
 	require.Contains(t, string(command), "--model 'router-model'")
 
 	monitor := findBenchCommand(runner.commands, func(value string) bool {
@@ -274,7 +268,8 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 	require.Contains(t, progressOutput, "benchmark target resolved: platform=kubernetes runtime=pod/chat-a:vllm")
 	require.Contains(t, progressOutput, "benchmark artifacts: "+output)
 	require.Contains(t, progressOutput, "benchmark preflight started")
-	require.Contains(t, progressOutput, "benchmark preflight completed: model=router-model")
+	require.Contains(t, progressOutput, "benchmark preflight completed")
+	require.Contains(t, progressOutput, "benchmark model resolved: model=router-model")
 	require.Contains(t, progressOutput, "benchmark case 1/1 started: input_len=16 output_len=4 concurrency=2 num_prompts=20 request_rate=inf")
 	require.Contains(t, progressOutput, "benchmark case 1/1 command: exec vllm bench serve")
 	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+strings.TrimSpace(string(command)))
@@ -294,7 +289,6 @@ func TestRunCollectsLocalCaseArtifactsWithoutCredentials(t *testing.T) {
 func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 	endpoint, cluster, credentialCluster := benchmarkFixtures()
 	runner := &fakeBenchRunner{
-		model:  "https://model-user:model-secret@models.example.test/qwen?token=model-token#fragment",
 		result: `{"future_result_schema":true}`,
 	}
 	progress := captureBenchmarkProgress(t)
@@ -328,7 +322,7 @@ func TestRunKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
 	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
 	require.Contains(t, progress.String(), "benchmark case 1/1 completed: result=")
 	require.Contains(t, progress.String(), "summary=unavailable")
-	require.Contains(t, progress.String(), "benchmark preflight completed: model="+runner.model)
+	require.Contains(t, progress.String(), "benchmark preflight completed")
 }
 
 func TestRunUsesConfiguredAPIClient(t *testing.T) {
@@ -469,7 +463,7 @@ func TestRuntimeFileHelpersHandleFailures(t *testing.T) {
 	cancel()
 
 	output := t.TempDir()
-	_, err = runPreflight(context.Background(), outputRunner{err: fmt.Errorf("unavailable")}, "http://router-service.ns.svc.cluster.local:8000/default/chat", output)
+	err = runPreflight(context.Background(), outputRunner{err: fmt.Errorf("unavailable")}, output)
 	require.ErrorContains(t, err, "preflight")
 
 	err = runCase(context.Background(), outputRunner{err: fmt.Errorf("run failed")}, BenchTarget{}, Options{
@@ -513,12 +507,6 @@ func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.
 		strings.HasPrefix(command, "rm -rf -- "),
 		strings.HasPrefix(command, "touch -- "),
 		strings.HasPrefix(command, ": > "):
-		return nil
-	case strings.Contains(command, "# neutree-bench-monitor"):
-		return fmt.Errorf("case failed")
-	case strings.HasPrefix(command, "python3 -c "):
-		_, _ = io.WriteString(stdout, `{"data":[{"id":"router-model"}]}`)
-
 		return nil
 	default:
 		return fmt.Errorf("case failed")
@@ -585,7 +573,10 @@ func benchmarkFixtures() (v1.Endpoint, v1.Cluster, v1.Cluster) {
 			Engine:  &v1.EndpointEngineSpec{Engine: v1.EngineNameVLLM},
 			Model:   &v1.ModelSpec{Task: v1.TextGenerationModelTask},
 		},
-		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING},
+		Status: &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ServedModels: []string{"router-model"},
+		},
 	}
 	cluster := v1.Cluster{
 		Metadata: &v1.Metadata{Workspace: "default", Name: "cluster-a"},
