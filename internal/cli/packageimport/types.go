@@ -95,6 +95,9 @@ type ImportOptions struct {
 	// SkipImageLoad skips loading images from files
 	SkipImageLoad bool
 
+	// SkipImageCleanup retains local image references after a successful remote push.
+	SkipImageCleanup bool
+
 	// Force forces the import even if the engine version already exists
 	Force bool
 

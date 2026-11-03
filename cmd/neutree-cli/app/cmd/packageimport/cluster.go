@@ -71,8 +71,9 @@ func runClusterImport(opts *ClusterImportOptions) error {
 
 	// Prepare import options
 	importOpts := &packageimport.ImportOptions{
-		PackagePath: opts.packagePath,
-		ExtractPath: opts.extractPath,
+		PackagePath:      opts.packagePath,
+		ExtractPath:      opts.extractPath,
+		SkipImageCleanup: noCleanupImage,
 	}
 
 	// if not importLocal, set registry info

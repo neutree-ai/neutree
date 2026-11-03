@@ -9,6 +9,7 @@ var (
 	registryUsername string
 	registryPassword string
 	workspace        string
+	noCleanupImage   bool
 )
 
 func NewImportCmd() *cobra.Command {
@@ -35,6 +36,8 @@ Use the appropriate subcommand based on the package type you want to import.
 	importCmd.PersistentFlags().StringVar(&registryProject, "registry-project", "", "Project/namespace in the registry to push images to (e.g., 'neutree-ai')")
 	importCmd.PersistentFlags().StringVar(&registryUsername, "registry-username", "", "Username for the container image registry (if required)")
 	importCmd.PersistentFlags().StringVar(&registryPassword, "registry-password", "", "Password for the container image registry (if required)")
+	importCmd.PersistentFlags().BoolVar(&noCleanupImage, "no-cleanup-image", false,
+		"Keep locally loaded image references after a successful registry push")
 
 	importCmd.AddCommand(NewClusterImportCmd())
 	importCmd.AddCommand(NewEngineImportCmd())

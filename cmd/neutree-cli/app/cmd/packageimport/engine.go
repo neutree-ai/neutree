@@ -94,6 +94,7 @@ func runEngineImport(opts *EngineImportOptions) error {
 		Workspace:        workspace,
 		SkipImagePush:    opts.skipImagePush,
 		SkipImageLoad:    opts.skipImagePush,
+		SkipImageCleanup: noCleanupImage,
 		Force:            opts.force,
 		ExtractPath:      opts.extractPath,
 	}
