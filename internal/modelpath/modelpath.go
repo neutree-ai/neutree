@@ -56,7 +56,7 @@ func Path(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelReg
 // into the cluster model cache. A BentoML registry is only mounted from NFS;
 // the other BentoML forms keep the model where the registry serves it.
 func placedIntoModelCache(modelRegistry *v1.ModelRegistry) bool {
-	switch registryType(modelRegistry) {
+	switch RegistryType(modelRegistry) {
 	case v1.BentoMLModelRegistryType:
 		registryURL, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 
@@ -68,7 +68,9 @@ func placedIntoModelCache(modelRegistry *v1.ModelRegistry) bool {
 	}
 }
 
-func registryType(modelRegistry *v1.ModelRegistry) v1.ModelRegistryType {
+// RegistryType returns the registry type, or "" when the endpoint deploys
+// without a registry.
+func RegistryType(modelRegistry *v1.ModelRegistry) v1.ModelRegistryType {
 	if modelRegistry == nil || modelRegistry.Spec == nil {
 		return ""
 	}

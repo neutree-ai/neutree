@@ -422,7 +422,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 	case string(v1.BentoMLModelRegistryType):
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+			modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 			if err != nil {
 				return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 			}
@@ -455,7 +455,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 		}
@@ -469,7 +469,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			data.Env[v1.ModelScopeTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 		}

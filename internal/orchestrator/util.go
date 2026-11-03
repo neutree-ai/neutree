@@ -161,11 +161,7 @@ func resolveEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1
 // empty when the endpoint names no registry. The templates branch on this value,
 // so an absent registry has to read as "none" rather than crash the render.
 func endpointModelRegistryType(modelRegistry *v1.ModelRegistry) string {
-	if modelRegistry == nil || modelRegistry.Spec == nil {
-		return ""
-	}
-
-	return string(modelRegistry.Spec.Type)
+	return string(modelpath.RegistryType(modelRegistry))
 }
 
 func getEndpointModelRegistry(s storage.Storage, endpoint *v1.Endpoint) (*v1.ModelRegistry, error) {
@@ -440,10 +436,6 @@ func convertCPUToKubernetes(spec *v1.ResourceSpec) *v1.KubernetesResourceSpec {
 	}
 
 	return res
-}
-
-func getDeployedModelRealVersion(modelRegistry *v1.ModelRegistry, modelName, modelVersion string) (string, error) {
-	return modelpath.RealVersion(modelRegistry, modelName, modelVersion)
 }
 
 func IsEndpointPaused(endpoint *v1.Endpoint) bool {

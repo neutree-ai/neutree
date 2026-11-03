@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	acceleratormocks "github.com/neutree-ai/neutree/internal/accelerator/mocks"
-	"github.com/neutree-ai/neutree/internal/model_registry"
-	modelregistrymocks "github.com/neutree-ai/neutree/internal/model_registry/mocks"
 	storagemocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
@@ -305,112 +303,12 @@ func TestNoConverterFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "no converter found")
 }
 
-func TestGetDeployedModelRealVersion_BentoML(t *testing.T) {
-	tests := []struct {
-		name         string
-		setupMocks   func(modelregistry *modelregistrymocks.MockModelRegistry)
-		inputVersion string
-		expected     string
-		wantErr      bool
-	}{
-		{
-			name: "bentoml registry model found with real version",
-			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("GetModelVersion", "test", "latest").Return(&v1.ModelVersion{
-					Name: "v1.0.0",
-				}, nil)
-			},
-			inputVersion: "latest",
-			expected:     "v1.0.0",
-		},
-		{
-			name: "bentoml registry model found with real version with empty version",
-			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("GetModelVersion", "test", "").Return(&v1.ModelVersion{
-					Name: "v1.0.0",
-				}, nil)
-			},
-			inputVersion: "",
-			expected:     "v1.0.0",
-		},
-		{
-			name: "bentoml registry model not found error",
-			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				modelregistry.On("GetModelVersion", "test", "latest").Return(nil, assert.AnError)
-			},
-			inputVersion: "latest",
-			wantErr:      true,
-		},
-		{
-			name: "bentoml registry model found with specific version",
-			setupMocks: func(modelregistry *modelregistrymocks.MockModelRegistry) {
-				// No calls expected since specific version is provided
-			},
-			inputVersion: "v2.0.0",
-			expected:     "v2.0.0",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockModelRegistry := &modelregistrymocks.MockModelRegistry{}
-			tt.setupMocks(mockModelRegistry)
-			model_registry.NewModelRegistry = func(registry *v1.ModelRegistry) (model_registry.ModelRegistry, error) {
-				return mockModelRegistry, nil
-			}
-
-			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
-				Spec: &v1.ModelRegistrySpec{
-					Type: v1.BentoMLModelRegistryType,
-				},
-			}, "test", tt.inputVersion)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
-			}
-
-			mockModelRegistry.AssertExpectations(t)
-		})
-	}
-}
-
-func TestGetDeployedModelRealVersion_Huggingface(t *testing.T) {
-	tests := []struct {
-		name         string
-		inputVersion string
-		expected     string
-		wantErr      bool
-	}{
-		{
-			name:         "huggingface registry model with real version",
-			inputVersion: "latest",
-			expected:     "latest",
-		},
-		{
-			name:         "huggingface registry model with empty version",
-			inputVersion: "",
-			expected:     "", // Empty version is passed to HuggingFace Hub to use default branch
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
-				Spec: &v1.ModelRegistrySpec{
-					Type: v1.HuggingFaceModelRegistryType,
-				},
-			}, "test", tt.inputVersion)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expected, result)
-			}
-		})
-	}
-}
+// ModelScope's "version" is a git revision, so there is nothing to look up —
+// but unlike Hugging Face, "latest" cannot be passed through. The hub's default
+// branch is "master", and it does not refuse a wrong revision: it answers HTTP
+// 200 with an empty file list, which a downloader would otherwise be free to
+// read as "this model has no files". Normalising to "" makes the downloader omit
+// the Revision parameter entirely and let the hub resolve its own default.
 
 // ModelScope's "version" is a git revision, so there is nothing to look up —
 // but unlike Hugging Face, "latest" cannot be passed through. The hub's default
@@ -418,47 +316,6 @@ func TestGetDeployedModelRealVersion_Huggingface(t *testing.T) {
 // 200 with an empty file list, which a downloader would otherwise be free to
 // read as "this model has no files". Normalising to "" makes the downloader omit
 // the Revision parameter entirely and let the hub resolve its own default.
-func TestGetDeployedModelRealVersion_ModelScope(t *testing.T) {
-	tests := []struct {
-		name         string
-		inputVersion string
-		expected     string
-	}{
-		{
-			name:         "latest is normalised away rather than sent as a branch name",
-			inputVersion: "latest",
-			expected:     "",
-		},
-		{
-			name:         "empty version already means the repository default",
-			inputVersion: "",
-			expected:     "",
-		},
-		{
-			name:         "an explicit revision is passed through untouched",
-			inputVersion: "v1.0.0",
-			expected:     "v1.0.0",
-		},
-		{
-			name:         "master is passed through; it is not special-cased here",
-			inputVersion: "master",
-			expected:     "master",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := getDeployedModelRealVersion(&v1.ModelRegistry{
-				Spec: &v1.ModelRegistrySpec{
-					Type: v1.ModelScopeModelRegistryType,
-				},
-			}, "Qwen/Qwen3-8B", tt.inputVersion)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
 
 // The served model id is what a client puts in an OpenAI request. On a hub the
 // "version" is a git revision, so appending it would publish the model under a
@@ -491,46 +348,6 @@ func TestEndpointModelServeName_HubRegistriesDoNotAppendTheRevision(t *testing.T
 	// artifact, so it belongs in the served name.
 	assert.Equal(t, "Qwen/Qwen3-8B:v3",
 		endpointModelServeName(endpoint("v3"), registry(v1.BentoMLModelRegistryType)))
-}
-
-func TestGetDeployedModelRealVersion_ModelRegistry(t *testing.T) {
-	test := []struct {
-		name          string
-		modelRegistry *v1.ModelRegistry
-		expectedErr   string
-	}{
-		{
-			name: "unsupported model registry type",
-			modelRegistry: &v1.ModelRegistry{
-				Spec: &v1.ModelRegistrySpec{
-					Type: "unsupported_type",
-				},
-			},
-			expectedErr: "unsupported model registry type: unsupported_type",
-		},
-		{
-			name:          "nil model registry",
-			modelRegistry: nil,
-			expectedErr:   "model registry cannot be nil",
-		},
-		{
-			name: "nil model registry spec",
-			modelRegistry: &v1.ModelRegistry{
-				Spec: nil,
-			},
-			expectedErr: "model registry spec cannot be nil",
-		},
-	}
-
-	for _, tt := range test {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := getDeployedModelRealVersion(tt.modelRegistry, "test", "latest")
-			if err == nil {
-				t.Fatalf("expected error but got nil")
-			}
-			assert.Contains(t, err.Error(), tt.expectedErr)
-		})
-	}
 }
 
 // A nil model registry is a normal state, not a lookup failure, so every

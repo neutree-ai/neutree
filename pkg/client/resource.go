@@ -25,6 +25,16 @@ func newResourceService(client *Client, endpoint, resourceName string) *resource
 	}
 }
 
+// newCredentialsService reads a resource through the privileged credentials
+// endpoint, which returns the record with its secrets included.
+func newCredentialsService(client *Client, endpoint, resourceName string) *resourceService {
+	return &resourceService{
+		client:       client,
+		baseUrl:      fmt.Sprintf("%s/api/v1/credentials/%s", client.baseURL, endpoint),
+		resourceName: resourceName,
+	}
+}
+
 // ListOptions defines common options for listing resources
 type ListOptions struct {
 	Workspace string

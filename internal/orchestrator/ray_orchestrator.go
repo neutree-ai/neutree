@@ -985,7 +985,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	case string(v1.BentoMLModelRegistryType):
 		registryURL, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if registryURL != nil && registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+			modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 			if err != nil {
 				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get real model version for model %s", endpoint.Spec.Model.Name)
 			}
@@ -1003,7 +1003,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 		}
@@ -1016,7 +1016,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv[v1.ModelScopeTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := getDeployedModelRealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
+		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
 		}
