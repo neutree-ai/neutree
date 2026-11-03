@@ -197,10 +197,19 @@ async def open_stream(
         return failure
 
     async def replay():
-        """Replay the already-read first frame, then forward the remainder."""
+        """Replay the already-read first frame, then forward the remainder.
+
+        A Backend that dies after the first frame cannot change the HTTP status,
+        so its failure becomes an in-band error frame plus the terminator rather
+        than a stream that just stops without saying why.
+        """
         yield first
-        async for chunk in chunks:
-            yield chunk
+        try:
+            async for chunk in chunks:
+                yield chunk
+        except Exception as exc:
+            async for frame in error_stream(backend_error(exc, "backend stream")):
+                yield frame
 
     return StreamingResponse(content=replay(), media_type="text/event-stream")
 

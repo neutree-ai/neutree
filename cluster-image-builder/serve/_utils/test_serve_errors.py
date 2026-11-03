@@ -344,6 +344,22 @@ def test_open_stream_empty_stream_has_empty_body():
     assert run(collect_body(response)) == ""
 
 
+def test_open_stream_failure_after_first_frame_becomes_in_band_error():
+    async def failing():
+        yield "data: first\n\n"
+        raise RuntimeError("replica died")
+
+    async def scenario():
+        response = await errors.open_stream(lambda: failing(), message="Failed")
+        assert response.status_code == 200
+        return await collect_body(response)
+
+    body = run(scenario())
+    assert body.startswith("data: first\n\n")
+    assert '"message": "Internal server error"' in body
+    assert body.endswith("data: [DONE]\n\n")
+
+
 def test_open_stream_start_failure_is_server_error():
     def start():
         raise RuntimeError("private details")
