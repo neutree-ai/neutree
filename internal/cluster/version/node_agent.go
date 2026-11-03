@@ -44,8 +44,8 @@ type nodeAgentTier struct {
 // first tier it does not exceed, so the cluster version alone decides both the
 // CLI contract and the image; an accelerator profile has no say.
 //
-// The last tier is open ended, so shipping a new image is a one line change to
-// NeutreeNodeAgent in internal/component/version.go and nothing here moves.
+// Add a tier and a versioned image pin for each new cluster release cycle.
+// Released pins stay immutable; only the active cycle's pin can change.
 var nodeAgentTiers = []nodeAgentTier{
 	{
 		maxVersion: "v1.1.1",
@@ -58,8 +58,14 @@ var nodeAgentTiers = []nodeAgentTier{
 		image:      nodeAgentImage(component.NeutreeNodeAgentV120),
 	},
 	{
+		// Base versions have no prerelease suffix, so this pins all v1.2.x.
+		maxVersion: "v1.3.0-0",
+		contract:   NodeAgentContractProfile,
+		image:      nodeAgentImage(component.NeutreeNodeAgentV121),
+	},
+	{
 		contract: NodeAgentContractProfile,
-		image:    nodeAgentImage(component.NeutreeNodeAgent),
+		image:    nodeAgentImage(component.NeutreeNodeAgentV130),
 	},
 }
 
