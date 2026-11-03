@@ -23,5 +23,5 @@ func RegisterEngineRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	// Only register allowed methods
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
-	proxyGroup.PATCH("", handler)
+	proxyGroup.PATCH("", validateEngineRequest(deps.Storage), handler)
 }
