@@ -368,6 +368,18 @@ spec:
               mountPath: "/etc/vector/logsink-secrets/"
               readOnly: true
       terminationGracePeriodSeconds: 60
+      {{- with .Values.vector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vector.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: jwt-secret
           emptyDir: {}
