@@ -185,42 +185,30 @@ def test_json_safe_strict_rejects_unserializable_objects():
         errors.json_safe({1: "value"}, strict=True)
 
 
-@pytest.mark.parametrize("code,expected", [
-    (400, 400), (503, 503), ("503", 503), (True, 500), (200, 500), (600, 500), ("oops", 500), ("200", 500), (None, 500),
+@pytest.mark.parametrize("payload,expected", [
+    # Explicit integer codes: only the 4xx/5xx range is a usable status.
+    ({"code": 400}, 400), ({"code": 503}, 503), ({"code": "503"}, 503),
+    ({"code": True}, 500), ({"code": 200}, 500), ({"code": 600}, 500),
+    ({"code": "oops"}, 500), ({"code": "200"}, 500), ({"code": None}, 500),
+    (None, 500),
+    # Symbolic client-error codes and exception types recover their class.
+    ({"code": "context_length_exceeded"}, 400), ({"code": "model_not_found"}, 400),
+    ({"code": "rate_limit_exceeded"}, 429),
+    ({"type": "BadRequestError"}, 400), ({"type": "NotFoundError"}, 404),
+    ({"type": "UnprocessableEntityError"}, 422), ({"type": "RateLimitError"}, 429),
+    ({"type": "invalid_request_error"}, 400), ({"type": "not_found_error"}, 404),
+    ({"type": "unknown_engine_error"}, 500),
+    # A non-string type cannot name a client-error class.
+    ({"type": ["BadRequestError"]}, 500), ({"type": {"BadRequestError": 400}}, 500),
+    ({"type": 400}, 500), ({"type": None}, 500),
+    # A server-class type never downgrades to a client status through its code.
+    ({"code": None, "type": "internal_server_error"}, 500),
+    ({"code": None, "type": "InternalServerError"}, 500),
+    ({"code": "engine_failure", "type": "internal_server_error"}, 500),
+    ({"code": "engine_failure", "type": "InternalServerError"}, 500),
 ])
-def test_stream_status_checks_code_range(code, expected):
-    assert errors.stream_error_status({"code": code}) == expected
-
-
-def test_non_mapping_error_status_is_server_error():
-    assert errors.stream_error_status(None) == 500
-
-
-@pytest.mark.parametrize("code,expected", [
-    ("context_length_exceeded", 400), ("model_not_found", 400), ("rate_limit_exceeded", 429),
-])
-def test_symbolic_client_error_codes_map_to_client_status(code, expected):
-    assert errors.stream_error_status({"code": code}) == expected
-
-
-@pytest.mark.parametrize("error_type,expected", [
-    ("BadRequestError", 400), ("NotFoundError", 404), ("UnprocessableEntityError", 422),
-    ("RateLimitError", 429), ("invalid_request_error", 400), ("not_found_error", 404),
-    ("unknown_engine_error", 500),
-])
-def test_client_error_types_map_to_client_status(error_type, expected):
-    assert errors.stream_error_status({"type": error_type}) == expected
-
-
-@pytest.mark.parametrize("error_type", [["BadRequestError"], {"BadRequestError": 400}, 400, None])
-def test_non_string_error_type_is_server_error(error_type):
-    assert errors.stream_error_status({"type": error_type}) == 500
-
-
-@pytest.mark.parametrize("code", [None, "engine_failure"])
-@pytest.mark.parametrize("error_type", ["internal_server_error", "InternalServerError"])
-def test_symbolic_native_error_codes_preserve_server_status(code, error_type):
-    assert errors.stream_error_status({"code": code, "type": error_type}) == 500
+def test_stream_error_status_matrix(payload, expected):
+    assert errors.stream_error_status(payload) == expected
 
 
 @pytest.mark.parametrize("payload", [

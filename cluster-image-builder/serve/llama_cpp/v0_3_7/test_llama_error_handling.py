@@ -172,39 +172,36 @@ def test_invalid_body_never_dispatches(wrapper, route, body):
 
 
 @pytest.mark.parametrize("route", ["chat/completions", "completions"])
-@pytest.mark.parametrize("stream", [[], {}, "maybe", 2])
-def test_non_boolean_stream_never_dispatches(wrapper, route, stream):
-    http, calls = client(wrapper)
-    assert http.post("/v1/" + route, json={"stream": stream}).status_code == 400
-    calls.assert_not_called()
-
-
-@pytest.mark.parametrize("route", ["chat/completions", "completions"])
-@pytest.mark.parametrize("stream", [True, 1, 1.0, "true", "yes"])
-def test_lax_stream_values_dispatch_as_streaming(wrapper, route, stream):
+@pytest.mark.parametrize("stream,status", [
+    ([], 400), ({}, 400), ("maybe", 400), (2, 400),
+    (True, 200), (1, 200), (1.0, 200), ("true", 200), ("yes", 200),
+])
+def test_only_valid_stream_values_dispatch(wrapper, route, stream, status):
     async def frames():
         yield 'data: {"choices":[]}\n\n'
     http, calls = client(wrapper, stream=frames())
-    response = http.post("/v1/" + route, json={"stream": stream})
-    assert response.status_code == 200
-    calls.assert_called_once_with({"stream": stream})
+    assert http.post("/v1/" + route, json={"stream": stream}).status_code == status
+    if status == 400:
+        calls.assert_not_called()
+    else:
+        calls.assert_called_once_with({"stream": stream})
 
 
 @pytest.mark.parametrize("field,attribute", [("messages", "create_chat_completion"), ("prompt", "create_completion")])
-@pytest.mark.parametrize("stream", [None, 0, 0.0, "false", "no", "off", "0"])
-def test_false_like_stream_values_reach_the_engine_as_non_streaming(wrapper, field, attribute, stream):
+@pytest.mark.parametrize("stream,streaming", [
+    (None, False), (0, False), (0.0, False), ("false", False), ("no", False), ("off", False), ("0", False),
+    (True, True), (1, True), (1.0, True), ("true", True), ("yes", True), ("on", True), ("1", True),
+])
+def test_stream_spellings_are_normalized_before_the_engine(wrapper, field, attribute, stream, streaming):
     payload = {"messages": [], "stream": stream} if field == "messages" else {"prompt": "hi", "stream": stream}
-    wire = call(wrapper, payload=payload)
-    assert wire["status_code"] == 200
-    assert getattr(wrapper.llama, attribute).call_args.kwargs["stream"] is False
-
-
-@pytest.mark.parametrize("stream", [True, 1, 1.0, "true", "yes", "on", "1"])
-def test_true_like_stream_values_reach_the_engine_as_streaming(wrapper, stream):
-    wrapper.llama.create_chat_completion.return_value = iter([{"choices": []}])
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": stream})))
-    assert frames.count("data: [DONE]\n\n") == 1
-    assert wrapper.llama.create_chat_completion.call_args.kwargs["stream"] is True
+    target = getattr(wrapper.llama, attribute)
+    if streaming:
+        target.return_value = iter([{"choices": []}])
+        frames = asyncio.run(collect(call(wrapper, payload=payload)))
+        assert frames.count("data: [DONE]\n\n") == 1
+    else:
+        assert call(wrapper, payload=payload)["status_code"] == 200
+    assert target.call_args.kwargs["stream"] is streaming
 
 
 @pytest.mark.parametrize("route", ["chat/completions", "completions", "embeddings"])
@@ -322,12 +319,14 @@ def test_escaped_errors_keep_native_classification_before_first_chunk(wrapper, a
     assert not any(call.args[0].startswith("llama_cpp") for call in importer.call_args_list)
 
 
-@pytest.mark.parametrize("stage", ["setup", "first-read"])
-def test_http_exception_before_first_stream_error_keeps_native_status(wrapper, stage):
+@pytest.mark.parametrize("stage", ["setup", "first-read", "midstream"])
+def test_http_exception_keeps_native_status_only_before_first_frame(wrapper, stage):
     if stage == "setup":
         wrapper.llama.create_chat_completion.side_effect = HTTPException(503, "busy")
     else:
         def chunks():
+            if stage == "midstream":
+                yield {"choices": []}
             raise HTTPException(503, "busy")
             yield
         wrapper.llama.create_chat_completion.return_value = chunks()
@@ -337,26 +336,15 @@ def test_http_exception_before_first_stream_error_keeps_native_status(wrapper, s
             yield frame
     http, _ = client(wrapper, stream=stream())
     response = http.post("/v1/chat/completions", json={"stream": True})
-    assert response.status_code == 503
-    assert response.json() == {"detail": "busy"}
-
-
-def test_http_exception_after_first_stream_frame_stays_in_band(wrapper):
-    def chunks():
-        yield {"choices": []}
-        raise HTTPException(503, "busy")
-    wrapper.llama.create_chat_completion.return_value = chunks()
-    frames = asyncio.run(collect(call(wrapper, payload={"messages": [], "stream": True})))
-    assert json.loads(frames[-2][6:]) == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "param": None, "code": 500,
-    }}
-    async def stream():
-        for frame in frames:
-            yield frame
-    http, _ = client(wrapper, stream=stream())
-    response = http.post("/v1/chat/completions", json={"stream": True})
-    assert response.status_code == 200
-    assert response.text == "".join(frames)
+    if stage == "midstream":
+        assert response.status_code == 200
+        assert response.text == "".join(frames)
+        assert json.loads(frames[-2][6:]) == {"error": {
+            "message": "Internal server error", "type": "InternalServerError", "param": None, "code": 500,
+        }}
+    else:
+        assert response.status_code == 503
+        assert response.json() == {"detail": "busy"}
 
 
 @pytest.mark.parametrize("status,code", [(400, "context_length_exceeded"), (429, "rate_limit_exceeded")])
@@ -402,15 +390,19 @@ def test_returned_stream_error_keeps_native_fields(wrapper, midstream, code):
         assert response.json() == content
 
 
-@pytest.mark.parametrize("attribute,payload", [
-    ("create_chat_completion", {"messages": [], "max_tokens": 16}),
-    ("create_completion", {"prompt": "hi", "max_tokens": 16}),
+@pytest.mark.parametrize("attribute,payload,expected_body", [
+    ("create_chat_completion", {"messages": [], "max_tokens": 16}, {"messages": [], "max_tokens": 16, "stream": False}),
+    ("create_completion", {"prompt": "hi", "max_tokens": 16}, {"prompt": "hi", "max_tokens": 16, "stream": False}),
+    # A null stream still parses into the native request model, so the formatter
+    # can classify the error instead of receiving no body at all.
+    ("create_chat_completion", {"messages": [], "stream": None}, {"messages": [], "max_tokens": None, "stream": False}),
+    ("create_completion", {"prompt": "hi", "stream": None}, {"prompt": "hi", "max_tokens": None, "stream": False}),
 ])
 @pytest.mark.parametrize("message,code", [
     ("Requested tokens (17) exceed context window of 16", "context_length_exceeded"),
     ("Model path does not exist: private.gguf", "model_not_found"),
 ])
-def test_nonstream_errors_use_native_bound_formatter(wrapper, attribute, payload, message, code):
+def test_nonstream_errors_use_native_bound_formatter(wrapper, attribute, payload, expected_body, message, code):
     error = ValueError(message)
     detail = {"message": "native formatter result", "type": "invalid_request_error", "param": "messages", "code": code}
     wrapper.formatter.side_effect = None
@@ -421,22 +413,7 @@ def test_nonstream_errors_use_native_bound_formatter(wrapper, attribute, payload
     assert wire["content"] == {"error": detail}
     wrapper.formatter.assert_called_once()
     assert wrapper.formatter.call_args.kwargs["error"] is error
-    assert wrapper.formatter.call_args.kwargs["body"].model_dump() == {**payload, "stream": False}
-
-
-@pytest.mark.parametrize("attribute,payload", [
-    ("create_chat_completion", {"messages": [], "stream": None}),
-    ("create_completion", {"prompt": "hi", "stream": None}),
-])
-def test_null_stream_keeps_native_error_classification(wrapper, attribute, payload):
-    detail = {"message": "native formatter result", "type": "invalid_request_error", "param": None, "code": "context_length_exceeded"}
-    wrapper.formatter.side_effect = None
-    wrapper.formatter.return_value = (400, detail)
-    getattr(wrapper.llama, attribute).side_effect = ValueError("Requested tokens (17) exceed context window of 16")
-    wire = call(wrapper, payload=payload)
-    assert wire["status_code"] == 400
-    assert wire["content"] == {"error": detail}
-    assert wrapper.formatter.call_args.kwargs["body"] is not None
+    assert wrapper.formatter.call_args.kwargs["body"].model_dump() == expected_body
 
 
 @pytest.mark.parametrize("method,attribute,payload", [

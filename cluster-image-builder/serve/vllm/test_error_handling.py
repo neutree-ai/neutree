@@ -406,25 +406,29 @@ def test_controller_empty_object_reaches_business_validation(wrapper, path):
     assert handle.calls == [{}]
 
 
-@pytest.mark.parametrize("stream", ([], {}))
-def test_controller_rejects_non_bool_stream_before_rpc(wrapper, stream):
-    handle = Handle()
-    with client_for(wrapper, handle) as client:
-        response = client.post("/v1/chat/completions", json={"stream": stream})
-    assert response.status_code == 400, response.text
-    assert not handle.calls
-
-
-@pytest.mark.parametrize("stream", (True, 1, 1.0, "true", "yes"))
-def test_controller_accepts_lax_streaming_values(wrapper, stream):
+@pytest.mark.parametrize("payload,status,streaming", [
+    ({"stream": []}, 400, None),
+    ({"stream": {}}, 400, None),
+    ({"stream": True}, 200, True),
+    ({"stream": 1}, 200, True),
+    ({"stream": 1.0}, 200, True),
+    ({"stream": "true"}, 200, True),
+    ({"stream": "yes"}, 200, True),
+    ({}, 200, False),
+    ({"stream": False}, 200, False),
+])
+def test_controller_dispatches_only_valid_stream_values(wrapper, payload, status, streaming):
     async def stream_body():
         yield "data: first\n\n"
-    handle = Handle(stream_body())
+    handle = Handle(stream_body() if streaming else None)
     with client_for(wrapper, handle) as client:
-        response = client.post("/v1/chat/completions", json={"stream": stream})
-    assert response.status_code == 200
-    assert handle.calls == [{"stream": stream}]
-    assert handle.stream is True
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == status, response.text
+    if status == 400:
+        assert not handle.calls
+        return
+    assert handle.calls == [payload]
+    assert handle.stream is streaming
 
 
 def test_controller_rejects_malformed_wire_response(wrapper):
@@ -454,16 +458,6 @@ def test_controller_replays_first_success_chunk(wrapper):
         response = client.post("/v1/chat/completions", json={"stream": True})
     assert response.status_code == 200
     assert response.text == "data: first\n\ndata: [DONE]\n\n"
-
-
-@pytest.mark.parametrize("stream_value", ({}, {"stream": False}))
-def test_controller_accepts_non_streaming_bool(wrapper, stream_value):
-    handle = Handle()
-    with client_for(wrapper, handle) as client:
-        response = client.post("/v1/chat/completions", json=stream_value)
-    assert response.status_code == 200
-    assert handle.calls == [stream_value]
-    assert handle.stream is False
 
 
 @pytest.mark.parametrize("stage", ("options", "remote", "first_chunk"))

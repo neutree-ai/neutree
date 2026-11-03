@@ -100,15 +100,21 @@ def test_success_is_plain_wire(wrapper, method):
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-@pytest.mark.parametrize("stage", ["init", "serving", "serialization"])
-def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage):
+@pytest.mark.parametrize("stage,exc", [
+    ("init", RuntimeError("init failed")),
+    ("serving", ValueError("too long")),
+    ("serving", HTTPException(400, "private HTTP failure")),
+    ("serving", HTTPException(503, "private server failure")),
+    ("serialization", None),
+])
+def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage, exc):
     ensure, payload = getattr(wrapper.backend, "_ensure_" + handler), {}
     if stage == "init":
-        ensure.side_effect = RuntimeError("init failed")
-    elif stage == "serving":
-        ensure.return_value.handle_request.side_effect = ValueError("too long")
-    else:
+        ensure.side_effect = exc
+    elif stage == "serialization":
         ensure.return_value.handle_request.return_value = {"value": object()}
+    else:
+        ensure.return_value.handle_request.side_effect = exc
     wire = call(wrapper, method, payload)
     assert wire["status_code"] == 500
     assert wire["content"]["error"] == {"message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None}
@@ -187,21 +193,16 @@ def test_invalid_http_body_never_calls_rpc(wrapper, route, body):
 
 
 @pytest.mark.parametrize("route", ["/chat", "/completion"])
-@pytest.mark.parametrize("stream", [[], {}, "maybe", 2])
-def test_invalid_stream_never_calls_rpc(wrapper, route, stream):
-    http, calls = client(wrapper)
-    assert http.post(route, json={"stream": stream}).status_code == 400
-    assert calls == []
-
-
-@pytest.mark.parametrize("route", ["/chat", "/completion"])
-@pytest.mark.parametrize("stream", [True, 1, 1.0, "true", "yes"])
-def test_lax_stream_values_reach_business(wrapper, route, stream):
+@pytest.mark.parametrize("stream,status", [
+    ([], 400), ({}, 400), ("maybe", 400), (2, 400),
+    (True, 200), (1, 200), (1.0, 200), ("true", 200), ("yes", 200),
+])
+def test_only_valid_stream_values_dispatch(wrapper, route, stream, status):
     async def chunks():
         yield 'data: {"choices":[]}\n\n'
     http, calls = stream_client(wrapper, chunks())
-    assert http.post(route, json={"stream": stream}).status_code == 200
-    assert calls == [{"stream": stream}]
+    assert http.post(route, json={"stream": stream}).status_code == status
+    assert calls == ([] if status == 400 else [{"stream": stream}])
 
 
 def test_empty_object_reaches_business(wrapper):
@@ -328,15 +329,19 @@ def test_stream_rpc_failure_is_json_500(wrapper, route):
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-@pytest.mark.parametrize("stage", ["init", "serving"])
-def test_stream_start_is_contained_before_iterator(wrapper, method, handler, stage):
-    payload = {"stream": True}
+@pytest.mark.parametrize("stage,exc", [
+    ("init", RuntimeError("init failed")),
+    ("serving", ValueError("too long")),
+    ("serving", HTTPException(400, "private HTTP failure")),
+    ("serving", HTTPException(503, "private server failure")),
+])
+def test_stream_start_failures_are_contained_before_iterator(wrapper, method, handler, stage, exc):
     ensure = getattr(wrapper.backend, "_ensure_" + handler)
     if stage == "init":
-        ensure.side_effect = RuntimeError("init failed")
+        ensure.side_effect = exc
     else:
-        ensure.return_value.handle_request.side_effect = ValueError("too long")
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)(payload)))
+        ensure.return_value.handle_request.side_effect = exc
+    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
     assert json.loads(frames[0].removeprefix("data:")) == {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
     }}
@@ -399,28 +404,6 @@ def test_model_dump_failure_is_server_error(wrapper, method, handler, exc):
 def test_response_http_status_is_authoritative(wrapper):
     wire = wrapper.namespace["_extract_serializable"](JSONResponse({"object": "error", "code": 400}, status_code=429))
     assert wire["status_code"] == 429
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-@pytest.mark.parametrize("exc", [ValueError("private validation failure"), HTTPException(400, "private HTTP failure"), HTTPException(503, "private server failure")])
-def test_escaped_serving_errors_use_neutral_boundary(wrapper, method, handler, exc):
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.side_effect = exc
-    wire = call(wrapper, method)
-    assert wire["status_code"] == 500
-    assert wire["content"] == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
-
-
-@pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
-@pytest.mark.parametrize("exc", [HTTPException(400, "private HTTP failure"), HTTPException(503, "private server failure")])
-def test_escaped_stream_setup_errors_use_neutral_boundary(wrapper, method, handler, exc):
-    getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.side_effect = exc
-    frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[0].removeprefix("data:")) == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
-    assert frames[-1] == "data: [DONE]\n\n"
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
