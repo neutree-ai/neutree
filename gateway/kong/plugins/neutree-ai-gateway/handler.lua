@@ -1176,10 +1176,10 @@ local function handle_anthropic_stream_body()
         if data_line == "[DONE]" then
             -- By the time [DONE] arrives the trailing usage-only chunk has
             -- already been processed, so finish_stream sees the final usage.
+            -- [DONE] is OpenAI-only; the Anthropic stream just ends at
+            -- message_stop, so it must not be forwarded (NEU-875).
             ctx.saw_event = true
             finish_stream(map_finish_reason(ctx.finish_reason))
-            output_parts[#output_parts + 1] = "data: [DONE]\n\n"
-            ctx.done_emitted = true
             goto continue
         end
 
@@ -1283,10 +1283,6 @@ local function handle_anthropic_stream_body()
 
     if is_last then
         finish_stream(map_finish_reason(ctx.finish_reason))
-        if not ctx.done_emitted then
-            output_parts[#output_parts + 1] = "data: [DONE]\n\n"
-            ctx.done_emitted = true
-        end
     end
 
     ngx.arg[1] = table.concat(output_parts)
@@ -1415,7 +1411,6 @@ function AIGatewayHandler:access(conf)
             kong.ctx.plugin.usage_seen = false
             kong.ctx.plugin.saw_event = false
             kong.ctx.plugin.finish_events_sent = false
-            kong.ctx.plugin.done_emitted = false
             -- Streaming never returns usage until the trailing chunk, so the
             -- message_start input_tokens can only be a best-effort estimate
             -- (Anthropic emits input_tokens up front; we approximate it here).
@@ -1682,6 +1677,7 @@ AIGatewayHandler._TEST = {
     convert_response = convert_response,
     make_message_start = make_message_start,
     anthropic_usage_from_openai = anthropic_usage_from_openai,
+    handle_anthropic_stream_body = handle_anthropic_stream_body,
 }
 
 return AIGatewayHandler

@@ -75,6 +75,25 @@ show_migration() {
   fi
 }
 
+if [ -n "$BASE" ]; then
+  BASE_TREE=$(git ls-tree -r --name-only "$BASE" -- db/migrations/)
+else
+  BASE_TREE=$(git ls-tree -r --name-only HEAD -- db/migrations/)
+fi
+
+# True when the migration at $1 shares its version with another migration on
+# the base branch.
+is_base_duplicate() {
+  [[ "$1" =~ $MIGRATION_FILE_RE ]] || return 1
+  local name version count
+  name=$(echo "$1" | migration_names)
+  version=$((10#${name%%_*}))
+  count=$(echo "$BASE_TREE" | migration_names | while read -r n; do
+    [ "$((10#${n%%_*}))" = "$version" ] && echo "$n"
+  done | wc -l)
+  [ "$count" -gt 1 ]
+}
+
 # ── Gate 1: historical migrations are immutable ──
 while IFS=$'\t' read -r status source target; do
   [ -z "$status" ] && continue
@@ -99,6 +118,11 @@ while IFS=$'\t' read -r status source target; do
       fi
       ;;
     R*)
+      # Renaming one of two migrations that share a version on the base branch
+      # is the only way to repair the collision, so allow an exact rename.
+      if [ "$status" = "R100" ] && is_base_duplicate "$source"; then
+        continue
+      fi
       if [[ "$source" =~ $MIGRATION_FILE_RE ]] || [[ "$target" =~ $MIGRATION_FILE_RE ]]; then
         echo "❌ Historical migration file cannot be renamed: $source -> $target"
         echo "   ✅ FIX: keep released migration files unchanged and add a new migration instead"

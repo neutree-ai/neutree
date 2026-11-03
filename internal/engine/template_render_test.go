@@ -23,11 +23,6 @@ func TestVLLMTemplateTaskTranslation(t *testing.T) {
 		template string
 	}{
 		{
-			name:     "vllm v0.17.1",
-			version:  "v0.17.1",
-			template: vllmV0_17_1DeployTemplate,
-		},
-		{
 			name:     "vllm v0.24.0",
 			version:  "v0.24.0",
 			template: vllmV0_24_0DeployTemplate,
@@ -134,10 +129,6 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 		template string
 	}{
 		{
-			name:     "vllm v0.17.1",
-			template: vllmV0_17_1DeployTemplate,
-		},
-		{
 			name:     "vllm v0.24.0",
 			template: vllmV0_24_0DeployTemplate,
 		},
@@ -157,7 +148,7 @@ func TestBuiltInKubernetesTemplatesPreserveNumericEndpointName(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			vars := newTestVLLMVars("v0.17.1", "text-generation")
+			vars := newTestVLLMVars("v0.24.0-p2", "text-generation")
 			vars["EndpointName"] = "4096"
 
 			objs, err := util.RenderKubernetesManifest(tc.template, vars)
@@ -178,10 +169,6 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 		template string
 	}{
 		{
-			name:     "vllm v0.17.1",
-			template: vllmV0_17_1DeployTemplate,
-		},
-		{
 			name:     "vllm v0.24.0",
 			template: vllmV0_24_0DeployTemplate,
 		},
@@ -201,7 +188,7 @@ func TestBuiltInKubernetesTemplatesPreserveNumericClusterMetadata(t *testing.T) 
 
 	for _, tc := range templates {
 		t.Run(tc.name, func(t *testing.T) {
-			vars := newTestVLLMVars("v0.17.1", "text-generation")
+			vars := newTestVLLMVars("v0.24.0-p2", "text-generation")
 			vars["ClusterName"] = "123"
 			vars["Workspace"] = "456"
 

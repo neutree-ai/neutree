@@ -26,10 +26,13 @@ type ResourceNode struct {
 }
 
 type EndpointInstanceResource struct {
-	InstanceID string
-	ReplicaID  string
-	NodeID     string
-	Devices    []v1.DeviceAllocation
+	InstanceID         string
+	ReplicaID          string
+	NodeID             string
+	ContainerID        string
+	ModelWeightsMiB    *float64
+	KVCacheCapacityMiB *float64
+	Devices            []v1.DeviceAllocation
 }
 
 func resourceNodeFromStatus(nodeID string, status *v1.ResourceStatus) ResourceNode {
@@ -224,11 +227,11 @@ func mergeAcceleratorMetadata(target, source map[v1.AcceleratorType]*v1.Accelera
 				continue
 			}
 
-			if _, exists := targetMetadata.Products[product]; !exists {
-				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{
-					MemoryTotalMiB: sourceProduct.MemoryTotalMiB,
-				}
+			if targetMetadata.Products[product] == nil {
+				targetMetadata.Products[product] = &v1.AcceleratorProductMetadata{}
 			}
+
+			targetMetadata.Products[product].Merge(sourceProduct)
 		}
 	}
 }

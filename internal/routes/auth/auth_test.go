@@ -281,3 +281,26 @@ func TestResolveEmailByUsername_EmailInputAlsoResolved(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "user@new-domain.com", resultBody["email"])
 }
+
+// The name of an external user is not resolved to its profile email (the
+// directory email), which a local user may own: the login then fails as for an
+// unknown name.
+func TestResolveEmailByUsername_ExternalUserNotResolved(t *testing.T) {
+	mockStorage := storagemocks.NewMockStorage(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"email":    "alice",
+		"password": "secret",
+	})
+
+	mockStorage.On("ListUserProfile", mock.Anything).Return([]v1.UserProfile{
+		{
+			Metadata: &v1.Metadata{Name: "alice", Labels: map[string]string{"neutree.ai/identity-source": "ldap"}},
+			Spec:     &v1.UserProfileSpec{Email: "alice@example.org"},
+		},
+	}, nil)
+
+	result := resolveEmailByUsername(mockStorage, body)
+
+	assert.Equal(t, body, result)
+}

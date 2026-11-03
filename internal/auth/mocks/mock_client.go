@@ -124,6 +124,64 @@ func (_c *MockClient_AdminDeleteUser_Call) RunAndReturn(run func(types.AdminDele
 	return _c
 }
 
+// AdminGetUser provides a mock function with given fields: req
+func (_m *MockClient) AdminGetUser(req types.AdminGetUserRequest) (*types.AdminGetUserResponse, error) {
+	ret := _m.Called(req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AdminGetUser")
+	}
+
+	var r0 *types.AdminGetUserResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(types.AdminGetUserRequest) (*types.AdminGetUserResponse, error)); ok {
+		return rf(req)
+	}
+	if rf, ok := ret.Get(0).(func(types.AdminGetUserRequest) *types.AdminGetUserResponse); ok {
+		r0 = rf(req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.AdminGetUserResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(types.AdminGetUserRequest) error); ok {
+		r1 = rf(req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClient_AdminGetUser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdminGetUser'
+type MockClient_AdminGetUser_Call struct {
+	*mock.Call
+}
+
+// AdminGetUser is a helper method to define mock.On call
+//   - req types.AdminGetUserRequest
+func (_e *MockClient_Expecter) AdminGetUser(req interface{}) *MockClient_AdminGetUser_Call {
+	return &MockClient_AdminGetUser_Call{Call: _e.mock.On("AdminGetUser", req)}
+}
+
+func (_c *MockClient_AdminGetUser_Call) Run(run func(req types.AdminGetUserRequest)) *MockClient_AdminGetUser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(types.AdminGetUserRequest))
+	})
+	return _c
+}
+
+func (_c *MockClient_AdminGetUser_Call) Return(_a0 *types.AdminGetUserResponse, _a1 error) *MockClient_AdminGetUser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClient_AdminGetUser_Call) RunAndReturn(run func(types.AdminGetUserRequest) (*types.AdminGetUserResponse, error)) *MockClient_AdminGetUser_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AdminUpdateUser provides a mock function with given fields: req
 func (_m *MockClient) AdminUpdateUser(req types.AdminUpdateUserRequest) (*types.AdminUpdateUserResponse, error) {
 	ret := _m.Called(req)

@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/neutree-ai/neutree/api/v1"
-	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
-	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+
+	v1 "github.com/neutree-ai/neutree/api/v1"
+	commandmocks "github.com/neutree-ai/neutree/pkg/command/mocks"
+	"github.com/neutree-ai/neutree/pkg/command_runner"
 )
 
 var (
@@ -361,6 +362,7 @@ func TestGPUAcceleratorPlugin_GetAcceleratorProfile(t *testing.T) {
 	assert.Equal(t, nvidiaDCGMExporterCollectorsPath, profile.MetricsExporter.ConfigFiles[0].Path)
 	collectors := profile.MetricsExporter.ConfigFiles[0].Content
 	for _, metric := range []string{
+		"DCGM_EXP_GPU_HEALTH_STATUS",
 		"DCGM_FI_DEV_GPU_UTIL",
 		"DCGM_FI_DEV_NVML_INDEX",
 		"DCGM_FI_DEV_FB_USED",

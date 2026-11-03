@@ -33,6 +33,13 @@ type Provider interface {
 	Delete(context.Context, *Context) error
 }
 
+// MetricsProvider optionally supplies rendered Prometheus scrape_configs entries.
+// The provider owns service discovery and labels; the metrics component embeds
+// these trusted entries without interpreting provider-specific configuration.
+type MetricsProvider interface {
+	MetricsScrapeConfig(cluster *v1.Cluster, namespace string) string
+}
+
 // Providers is an instance-owned registry. Its zero value is ready for registration.
 // Pass it by pointer; registration must not copy the mutex or expose the map.
 type Providers struct {

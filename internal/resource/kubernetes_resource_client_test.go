@@ -2,7 +2,11 @@ package resource
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
@@ -338,78 +342,141 @@ func TestK8sResourceClientListEndpointInstancesWithMultipleNeutreeAllocations(t 
 }
 
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAnnotations(t *testing.T) {
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "gpu-node",
-			Labels: map[string]string{
-				plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
-				plugin.NvidiaGPUCountResource:             "2",
-			},
-			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorDevicesAnnotation: `[
-					{"uuid":"GPU-1","product_model":"Annotation-T4","memory_mib":15360,"healthy":true,"minor_number":3},
-					{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":true,"minor_number":0}
-				]`,
-			},
+	cases := []struct {
+		name                  string
+		healthy               bool
+		allocation            string
+		wantAvailable         v1.DeviceResourcePool
+		wantAvailableQuantity float64
+	}{
+		{
+			name:                  "healthy allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
 		},
-		Status: corev1.NodeStatus{
-			Allocatable: corev1.ResourceList{
-				corev1.ResourceCPU:                 k8sresource.MustParse("8"),
-				corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
-				plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
-			},
+		{
+			name:                  "unhealthy allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}]`,
+			wantAvailable:         v1.DeviceResourcePool{},
+			wantAvailableQuantity: 1,
+		},
+		{
+			name:                  "healthy idle",
+			healthy:               true,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "unhealthy idle",
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100},
+			wantAvailableQuantity: 2,
+		},
+		{
+			name:                  "healthy partially allocated",
+			healthy:               true,
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
+		},
+		{
+			name:                  "unhealthy partially allocated",
+			allocation:            `[{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":4096,"core_units":25}]`,
+			wantAvailable:         v1.DeviceResourcePool{MemoryMiB: 11264, CoreUnits: 75},
+			wantAvailableQuantity: 1 + float64(11264)/15360,
 		},
 	}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "infer-1",
-			Namespace: "default",
-			Annotations: map[string]string{
-				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
-					{"uuid":"GPU-1","product":"Tesla-T4","memory_mib":15360,"core_units":100}
-				]`,
-			},
-		},
-		Spec: corev1.PodSpec{
-			NodeName: "gpu-node",
-		},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
-		},
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, corev1.AddToScheme(scheme))
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "gpu-node",
+					Labels: map[string]string{
+						plugin.NvidiaGPUKubernetesNodeSelectorKey: "Tesla-T4",
+						plugin.NvidiaGPUCountResource:             "2",
+					},
+					Annotations: map[string]string{
+						resourceparser.NeutreeAcceleratorDevicesAnnotation: fmt.Sprintf(`[
+							{"uuid":"GPU-1","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":3},
+							{"uuid":"GPU-2","product_model":"Annotation-T4","memory_mib":15360,"healthy":%t,"minor_number":0}
+						]`, testCase.healthy, testCase.healthy),
+					},
+				},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{
+						corev1.ResourceCPU:                 k8sresource.MustParse("8"),
+						corev1.ResourceMemory:              k8sresource.MustParse("32Gi"),
+						plugin.NvidiaGPUKubernetesResource: k8sresource.MustParse("200"),
+					},
+				},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "infer-1",
+					Namespace: "default",
+					Annotations: map[string]string{
+						resourceparser.NeutreeAcceleratorAllocationsAnnotation: testCase.allocation,
+					},
+				},
+				Spec:   corev1.PodSpec{NodeName: "gpu-node"},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}
+
+			ctrClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, pod).Build()
+			client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
+				string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
+			})
+
+			nodes, err := client.ListNodes(context.Background(), nil)
+
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			require.Len(t, nodes[0].Status.Devices, 2)
+			device := nodes[0].Status.Devices[0]
+			assert.Equal(t, "GPU-1", device.UUID)
+			assert.Equal(t, "Tesla-T4", device.Product)
+			assert.Equal(t, testCase.healthy, device.Health)
+			assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, device.Allocatable)
+			assert.Equal(t, &testCase.wantAvailable, device.Available)
+			assert.Equal(t, "GPU-2", nodes[0].Status.Devices[1].UUID)
+			assert.Equal(t, "Tesla-T4", nodes[0].Status.Devices[1].Product)
+			assert.Equal(t, testCase.healthy, nodes[0].Status.Devices[1].Health)
+			assert.Equal(t, &v1.DeviceResourcePool{MemoryMiB: 15360, CoreUnits: 100}, nodes[0].Status.Devices[1].Available)
+			require.NotNil(t, device.Order)
+			assert.Equal(t, 1, *device.Order)
+			require.NotNil(t, nodes[0].Status.Devices[1].Order)
+			assert.Equal(t, 0, *nodes[0].Status.Devices[1].Order)
+
+			for index, info := range []*v1.ResourceInfo{nodes[0].Status.Allocatable, nodes[0].Status.Available} {
+				wantQuantity := float64(2)
+				wantVirtualization := &v1.AcceleratorVirtualizationResource{MemoryMiB: 30720, CoreUnits: 200}
+				if index == 1 {
+					wantQuantity = testCase.wantAvailableQuantity
+					wantVirtualization = &v1.AcceleratorVirtualizationResource{
+						MemoryMiB: 15360 + float64(testCase.wantAvailable.MemoryMiB),
+						CoreUnits: 100 + float64(testCase.wantAvailable.CoreUnits),
+					}
+				}
+				group := info.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
+				require.NotNil(t, group)
+				assert.Equal(t, wantQuantity, group.Quantity)
+				assert.Equal(t, wantQuantity, group.ProductGroups["Tesla-T4"])
+				product := group.Products["Tesla-T4"]
+				require.NotNil(t, product)
+				assert.Equal(t, wantQuantity, product.Quantity)
+				assert.Equal(t, wantVirtualization, product.Virtualization)
+			}
+			metadata := nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU]
+			require.NotNil(t, metadata)
+			require.NotNil(t, metadata.Products["Tesla-T4"])
+			assert.Equal(t, float64(15360), metadata.Products["Tesla-T4"].MemoryTotalMiB)
+		})
 	}
-
-	ctrClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(node, pod).
-		Build()
-	client := NewK8sResourceClient(ctrClient, map[string]resourceparser.ResourceParser{
-		string(v1.AcceleratorTypeNVIDIAGPU): &plugin.GPUResourceParser{},
-	})
-
-	nodes, err := client.ListNodes(context.Background(), nil)
-
-	require.NoError(t, err)
-	require.Len(t, nodes, 1)
-	require.Len(t, nodes[0].Status.Devices, 2)
-	require.Equal(t, "Tesla-T4", nodes[0].Status.Devices[0].Product)
-	require.Equal(t, "Tesla-T4", nodes[0].Status.Devices[1].Product)
-	require.Equal(t, int64(0), nodes[0].Status.Devices[0].Available.MemoryMiB)
-	require.Equal(t, int64(15360), nodes[0].Status.Devices[1].Available.MemoryMiB)
-	require.NotNil(t, nodes[0].Status.Devices[0].Order)
-	require.Equal(t, 1, *nodes[0].Status.Devices[0].Order)
-	require.NotNil(t, nodes[0].Status.Devices[1].Order)
-	require.Equal(t, 0, *nodes[0].Status.Devices[1].Order)
-	allocatable := nodes[0].Status.Allocatable.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(2), allocatable.Quantity)
-	require.Equal(t, float64(30720), allocatable.Products["Tesla-T4"].Virtualization.MemoryMiB)
-	available := nodes[0].Status.Available.AcceleratorGroups[v1.AcceleratorTypeNVIDIAGPU]
-	require.Equal(t, float64(1), available.Quantity)
-	require.Equal(t, float64(1), available.ProductGroups["Tesla-T4"])
-	require.Equal(t, float64(1), available.Products["Tesla-T4"].Quantity)
-	require.Equal(t, float64(15360), available.Products["Tesla-T4"].Virtualization.MemoryMiB)
 }
 
 func TestK8sResourceClientListNodesUsesNeutreeDeviceAvailabilityForAvailableGPUQuantity(t *testing.T) {
@@ -924,4 +991,210 @@ func TestK8sResourceClientListNodesFallsBackToBaseResourcesWhenNeutreeDeviceAnno
 	require.Equal(t, float64(2), allocatable.ProductGroups["NVIDIA_A100"])
 	require.Equal(t, float64(81920),
 		nodes[0].AcceleratorMetadata[v1.AcceleratorTypeNVIDIAGPU].Products["NVIDIA_A100"].MemoryTotalMiB)
+}
+
+type fakePodLogClient struct {
+	calls   int
+	logs    string
+	getLogs func(context.Context) (io.ReadCloser, error)
+}
+
+func (f *fakePodLogClient) GetPod(context.Context, *v1.Cluster, string, string) (*corev1.Pod, error) {
+	return nil, nil
+}
+
+func (f *fakePodLogClient) GetPodLogs(ctx context.Context, _ *v1.Cluster, _, _ string, opts *corev1.PodLogOptions) (io.ReadCloser, error) {
+	f.calls++
+	if f.getLogs != nil {
+		return f.getLogs(ctx)
+	}
+	return io.NopCloser(strings.NewReader(f.logs)), nil
+}
+
+func TestK8sResourceClientParsesAndCachesVLLMStartupMemory(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat-abc",
+			Namespace: k8sClusterNamespaceForTest(),
+			Labels: map[string]string{
+				"app":      "inference",
+				"endpoint": "chat",
+			},
+			Annotations: map[string]string{
+				resourceparser.NeutreeAcceleratorAllocationsAnnotation: `[
+					{"uuid":"GPU-1","product":"NVIDIA-L20","memory_mib":46080,"core_units":100}
+				]`,
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node-1",
+			Containers: []corev1.Container{
+				{Name: "vllm"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name:        "vllm",
+					Ready:       true,
+					ContainerID: "containerd://cid-1",
+				},
+			},
+		},
+	}
+
+	ctrClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+	logClient := &fakePodLogClient{
+		logs: "INFO 10-22 10:00:00 [gpu_model_runner.py:123] Model loading took 14.5000 GiB and 3.21 seconds\n" +
+			"INFO 10-22 10:00:02 [gpu_worker.py:234] Available KV cache memory: 23.25 GiB\n",
+	}
+	resClient := NewK8sResourceClient(ctrClient, nil)
+	resClient.podLogClient = logClient
+	builder := NewResourceViewBuilder(resClient)
+
+	endpoint := endpointForTestWithProduct("chat", "NVIDIA-L20")
+	endpoint.Spec.Engine = &v1.EndpointEngineSpec{Engine: "vllm"}
+	status, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Len(t, status.Replicas, 1)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, "containerd://cid-1", status.Replicas[0].ContainerID)
+	require.NotNil(t, status.Replicas[0].ModelWeightsMiB)
+	require.InDelta(t, 14848.0, *status.Replicas[0].ModelWeightsMiB, 0.01)
+	require.NotNil(t, status.Replicas[0].KVCacheCapacityMiB)
+	require.InDelta(t, 23808.0, *status.Replicas[0].KVCacheCapacityMiB, 0.01)
+
+	// Subsequent reconcile with the same containerID reuses cached values without calling GetPodLogs.
+	endpoint.Status = &v1.EndpointStatus{Resources: status}
+	status2, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, 1, logClient.calls)
+	require.Equal(t, status.Replicas[0].ModelWeightsMiB, status2.Replicas[0].ModelWeightsMiB)
+	require.Equal(t, status.Replicas[0].KVCacheCapacityMiB, status2.Replicas[0].KVCacheCapacityMiB)
+
+	for _, key := range []string{"num_gpu_blocks_override", "num-gpu-blocks-override"} {
+		endpoint.Spec.Variables = map[string]interface{}{"engine_args": map[string]interface{}{key: 128}}
+		for _, cached := range []bool{true, false} {
+			endpoint.Status.Resources = status
+			if !cached {
+				endpoint.Status.Resources = nil
+			}
+			got, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+			require.NoError(t, err)
+			require.NotNil(t, got.Replicas[0].ModelWeightsMiB)
+			require.Nil(t, got.Replicas[0].KVCacheCapacityMiB, key)
+		}
+	}
+	endpoint.Spec.Variables = nil
+	// A successful read with no matching startup lines is cached for this container.
+	endpoint.Status.Resources = nil
+	logClient.logs = "starting up\n"
+	calls := logClient.calls
+	empty, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.Equal(t, "containerd://cid-1", empty.Replicas[0].ContainerID)
+	endpoint.Status.Resources = empty
+	logClient.logs = "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes))
+	stillEmpty, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.Nil(t, stillEmpty.Replicas[0].ModelWeightsMiB)
+	require.Nil(t, stillEmpty.Replicas[0].KVCacheCapacityMiB)
+
+	// A new container must be read even when the previous container had no data.
+	pod.Status.ContainerStatuses[0].ContainerID = "containerd://cid-2"
+	require.NoError(t, ctrClient.Status().Update(context.Background(), pod))
+	filled, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+2, logClient.calls)
+	require.Equal(t, "containerd://cid-2", filled.Replicas[0].ContainerID)
+	require.InDelta(t, 6144.0, *filled.Replicas[0].ModelWeightsMiB, 0.01)
+	require.InDelta(t, 8192.0, *filled.Replicas[0].KVCacheCapacityMiB, 0.01)
+	endpoint.Status.Resources = nil
+	logClient.getLogs = func(ctx context.Context) (io.ReadCloser, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), startupLogTimeout)
+		return &blockedLogReader{ctx: ctx}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	got, err := builder.BuildEndpointResources(ctx, k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Nil(t, got.Replicas[0].ModelWeightsMiB)
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	require.Empty(t, got.Replicas[0].ContainerID)
+
+	// Request failures also leave collection incomplete.
+	endpoint.Status.Resources = got
+	logClient.getLogs = func(context.Context) (io.ReadCloser, error) {
+		return nil, context.Canceled
+	}
+	failed, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Empty(t, failed.Replicas[0].ContainerID)
+
+	// Failed reads are retried, rather than cached as a successful empty result.
+	endpoint.Status.Resources = failed
+	logClient.getLogs = nil
+	calls = logClient.calls
+	retried, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+	require.NoError(t, err)
+	require.Equal(t, calls+1, logClient.calls)
+	require.NotNil(t, retried.Replicas[0].ModelWeightsMiB)
+
+	for _, engine := range []string{"sglang", "llama-cpp", "custom"} {
+		endpoint.Spec.Engine.Engine = engine
+		endpoint.Status.Resources = nil
+		calls = logClient.calls
+		result, err := builder.BuildEndpointResources(context.Background(), k8sClusterForTest(), endpoint)
+		require.NoError(t, err)
+		require.Equal(t, calls, logClient.calls, engine)
+		require.Empty(t, result.Replicas[0].ContainerID)
+		require.Nil(t, result.Replicas[0].ModelWeightsMiB)
+	}
+
+}
+
+type blockedLogReader struct{ ctx context.Context }
+
+func (r *blockedLogReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+func (r *blockedLogReader) Close() error { return nil }
+
+func TestVLLMStartupMemory(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		logs        string
+		weights, kv float64
+	}{
+		{"plain", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n", 6, 8},
+		{"mixed prefixes and different budgets", "Model loading took 6 GiB\nAvailable KV cache memory: 12.10 GiB\n(Worker_TP1 pid=11) Model loading took 7 GiB\n(Worker_TP1 pid=11) Available KV cache memory: 12.35 GiB\n", 7, 12.10},
+		{"shared nested prefix", "(outer) (EngineCore pid=1) Model loading took 7 GiB\n(outer) (EngineCore pid=1) Model loading took 6 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 9 GiB\n(outer) (EngineCore pid=1) Available KV cache memory: 8 GiB\n", 7, 8},
+		{"weights only", "Model loading took 6 GiB\n", 6, 0},
+		{"no positive values", "Model loading took 0 GiB\nAvailable KV cache memory: 0 GiB\n", 0, 0},
+		{"empty", "", 0, 0},
+		{"long running log", "Model loading took 6 GiB\nAvailable KV cache memory: 8 GiB\n" + strings.Repeat("x", int(startupLogLimitBytes)), 6, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			weights, kv := parseVLLMStartupMemoryMiB(tc.logs)
+			for i, got := range []*float64{weights, kv} {
+				want := []float64{tc.weights, tc.kv}[i]
+				if want == 0 {
+					require.Nil(t, got)
+				} else {
+					require.NotNil(t, got)
+					require.InDelta(t, want*1024, *got, 0.01)
+				}
+			}
+		})
+	}
 }

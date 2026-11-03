@@ -11,8 +11,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
-	"github.com/neutree-ai/neutree/internal/semver"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/command_runner"
 	"github.com/neutree-ai/neutree/pkg/storage"
@@ -330,7 +330,7 @@ func (c *sshRayClusterReconciler) generateRayClusterConfig(reconcileContext *Rec
 	rayClusterConfig.Docker.PullBeforeRun = true
 	// Determine cluster generation: > v1.0.0 uses DOOD engine isolation,
 	// <= v1.0.0 mounts NFS inside ray_container and needs elevated privileges.
-	isNewCluster, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	isNewCluster, err := clusterversion.SupportsEngineIsolation(cluster.Spec.Version)
 	if err != nil {
 		klog.Warningf("Failed to parse cluster version %s, assuming new version: %v", cluster.Spec.Version, err)
 

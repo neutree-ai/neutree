@@ -10,7 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	clustervalidation "github.com/neutree-ai/neutree/internal/cluster/validation"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 )
 
 const (
@@ -79,7 +79,9 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			component := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 			Expect(component.Phase).To(Equal(v1.ComponentPhaseReady))
 			Expect(component.Managed).To(BeTrue())
-			Expect(component.Version).NotTo(BeEmpty())
+			expectedHAMiVersion, err := clusterversion.HAMiVersionForCluster(cluster.GetVersion())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(component.Version).To(Equal(expectedHAMiVersion))
 
 			productName = expectNVIDIAVirtualizedClusterResources(cluster)
 		})
@@ -182,7 +184,7 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 func requireAcceleratorVirtualizationProfile() {
 	requireImageRegistryProfile()
 
-	supported, err := clustervalidation.SupportsVirtualizationClusterVersion(profileClusterVersion())
+	supported, err := clusterversion.SupportsVirtualizationClusterVersion(profileClusterVersion())
 	if err != nil {
 		Skip(fmt.Sprintf("Cluster version %q is invalid for accelerator virtualization: %v",
 			profileClusterVersion(), err))

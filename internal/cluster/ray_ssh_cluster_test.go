@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"strings"
 	"testing"
 	"time"
@@ -1024,6 +1025,7 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 				}, nil).Once()
 			},
 			expectedResources: v1.ClusterResources{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
 						CPU:    8,
@@ -1182,6 +1184,7 @@ func TestSSHRayCluster_CalculateResource(t *testing.T) {
 				}, nil).Once()
 			},
 			expectedResources: v1.ClusterResources{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_L20": {PeakFP16TFLOPS: ptr.To(119.5)}}}},
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
 						CPU:    8,

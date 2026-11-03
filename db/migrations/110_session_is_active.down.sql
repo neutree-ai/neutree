@@ -1,0 +1,5 @@
+BEGIN;
+
+DROP FUNCTION IF EXISTS api.session_is_active(UUID, UUID);
+
+COMMIT;

@@ -53,6 +53,15 @@ func renderChart(t *testing.T, overrides map[string]interface{}) *unstructured.U
 }
 
 func renderChartWithError(overrides map[string]interface{}) (*unstructured.UnstructuredList, error) {
+	return renderChartForRelease(overrides, chartutil.ReleaseOptions{
+		Name:      "neutree",
+		Namespace: "default",
+		Revision:  1,
+		IsInstall: true,
+	})
+}
+
+func renderChartForRelease(overrides map[string]interface{}, release chartutil.ReleaseOptions) (*unstructured.UnstructuredList, error) {
 	valuesOverrides := map[string]interface{}{
 		"jwtSecret":     "render-test-secret",
 		"adminPassword": "render-test-password",
@@ -69,12 +78,7 @@ func renderChartWithError(overrides map[string]interface{}) (*unstructured.Unstr
 	values, err := chartutil.ToRenderValuesWithSchemaValidation(
 		chart,
 		valuesOverrides,
-		chartutil.ReleaseOptions{
-			Name:      "neutree",
-			Namespace: "default",
-			Revision:  1,
-			IsInstall: true,
-		},
+		release,
 		chartutil.DefaultCapabilities.Copy(),
 		true,
 	)

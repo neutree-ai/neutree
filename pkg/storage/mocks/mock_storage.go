@@ -357,6 +357,52 @@ func (_c *MockStorage_CreateExternalEndpoint_Call) RunAndReturn(run func(*v1.Ext
 	return _c
 }
 
+// CreateExternalIdentity provides a mock function with given fields: data
+func (_m *MockStorage) CreateExternalIdentity(data *storage.ExternalIdentity) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateExternalIdentity")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*storage.ExternalIdentity) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateExternalIdentity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateExternalIdentity'
+type MockStorage_CreateExternalIdentity_Call struct {
+	*mock.Call
+}
+
+// CreateExternalIdentity is a helper method to define mock.On call
+//   - data *storage.ExternalIdentity
+func (_e *MockStorage_Expecter) CreateExternalIdentity(data interface{}) *MockStorage_CreateExternalIdentity_Call {
+	return &MockStorage_CreateExternalIdentity_Call{Call: _e.mock.On("CreateExternalIdentity", data)}
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) Run(run func(data *storage.ExternalIdentity)) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*storage.ExternalIdentity))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) Return(_a0 error) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateExternalIdentity_Call) RunAndReturn(run func(*storage.ExternalIdentity) error) *MockStorage_CreateExternalIdentity_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateIdentitySource provides a mock function with given fields: data
 func (_m *MockStorage) CreateIdentitySource(data *v1.IdentitySource) error {
 	ret := _m.Called(data)
@@ -445,6 +491,52 @@ func (_c *MockStorage_CreateImageRegistry_Call) Return(_a0 error) *MockStorage_C
 }
 
 func (_c *MockStorage_CreateImageRegistry_Call) RunAndReturn(run func(*v1.ImageRegistry) error) *MockStorage_CreateImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CreateLogSink provides a mock function with given fields: data
+func (_m *MockStorage) CreateLogSink(data *v1.LogSink) error {
+	ret := _m.Called(data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateLogSink")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.LogSink) error); ok {
+		r0 = rf(data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_CreateLogSink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateLogSink'
+type MockStorage_CreateLogSink_Call struct {
+	*mock.Call
+}
+
+// CreateLogSink is a helper method to define mock.On call
+//   - data *v1.LogSink
+func (_e *MockStorage_Expecter) CreateLogSink(data interface{}) *MockStorage_CreateLogSink_Call {
+	return &MockStorage_CreateLogSink_Call{Call: _e.mock.On("CreateLogSink", data)}
+}
+
+func (_c *MockStorage_CreateLogSink_Call) Run(run func(data *v1.LogSink)) *MockStorage_CreateLogSink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*v1.LogSink))
+	})
+	return _c
+}
+
+func (_c *MockStorage_CreateLogSink_Call) Return(_a0 error) *MockStorage_CreateLogSink_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_CreateLogSink_Call) RunAndReturn(run func(*v1.LogSink) error) *MockStorage_CreateLogSink_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1181,6 +1273,52 @@ func (_c *MockStorage_DeleteImageRegistry_Call) Return(_a0 error) *MockStorage_D
 }
 
 func (_c *MockStorage_DeleteImageRegistry_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteLogSink provides a mock function with given fields: id
+func (_m *MockStorage) DeleteLogSink(id string) error {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteLogSink")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(id)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_DeleteLogSink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteLogSink'
+type MockStorage_DeleteLogSink_Call struct {
+	*mock.Call
+}
+
+// DeleteLogSink is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) DeleteLogSink(id interface{}) *MockStorage_DeleteLogSink_Call {
+	return &MockStorage_DeleteLogSink_Call{Call: _e.mock.On("DeleteLogSink", id)}
+}
+
+func (_c *MockStorage_DeleteLogSink_Call) Run(run func(id string)) *MockStorage_DeleteLogSink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_DeleteLogSink_Call) Return(_a0 error) *MockStorage_DeleteLogSink_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_DeleteLogSink_Call) RunAndReturn(run func(string) error) *MockStorage_DeleteLogSink_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1938,6 +2076,65 @@ func (_c *MockStorage_GetExternalEndpoint_Call) RunAndReturn(run func(string) (*
 	return _c
 }
 
+// GetExternalIdentity provides a mock function with given fields: source, externalID
+func (_m *MockStorage) GetExternalIdentity(source string, externalID string) (*storage.ExternalIdentity, error) {
+	ret := _m.Called(source, externalID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetExternalIdentity")
+	}
+
+	var r0 *storage.ExternalIdentity
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (*storage.ExternalIdentity, error)); ok {
+		return rf(source, externalID)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) *storage.ExternalIdentity); ok {
+		r0 = rf(source, externalID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*storage.ExternalIdentity)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(source, externalID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetExternalIdentity_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExternalIdentity'
+type MockStorage_GetExternalIdentity_Call struct {
+	*mock.Call
+}
+
+// GetExternalIdentity is a helper method to define mock.On call
+//   - source string
+//   - externalID string
+func (_e *MockStorage_Expecter) GetExternalIdentity(source interface{}, externalID interface{}) *MockStorage_GetExternalIdentity_Call {
+	return &MockStorage_GetExternalIdentity_Call{Call: _e.mock.On("GetExternalIdentity", source, externalID)}
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) Run(run func(source string, externalID string)) *MockStorage_GetExternalIdentity_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) Return(_a0 *storage.ExternalIdentity, _a1 error) *MockStorage_GetExternalIdentity_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetExternalIdentity_Call) RunAndReturn(run func(string, string) (*storage.ExternalIdentity, error)) *MockStorage_GetExternalIdentity_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetIdentitySource provides a mock function with given fields: id
 func (_m *MockStorage) GetIdentitySource(id string) (*v1.IdentitySource, error) {
 	ret := _m.Called(id)
@@ -2108,6 +2305,64 @@ func (_c *MockStorage_GetImageRegistry_Call) Return(_a0 *v1.ImageRegistry, _a1 e
 }
 
 func (_c *MockStorage_GetImageRegistry_Call) RunAndReturn(run func(string) (*v1.ImageRegistry, error)) *MockStorage_GetImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetLogSink provides a mock function with given fields: id
+func (_m *MockStorage) GetLogSink(id string) (*v1.LogSink, error) {
+	ret := _m.Called(id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLogSink")
+	}
+
+	var r0 *v1.LogSink
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*v1.LogSink, error)); ok {
+		return rf(id)
+	}
+	if rf, ok := ret.Get(0).(func(string) *v1.LogSink); ok {
+		r0 = rf(id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.LogSink)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(id)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_GetLogSink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLogSink'
+type MockStorage_GetLogSink_Call struct {
+	*mock.Call
+}
+
+// GetLogSink is a helper method to define mock.On call
+//   - id string
+func (_e *MockStorage_Expecter) GetLogSink(id interface{}) *MockStorage_GetLogSink_Call {
+	return &MockStorage_GetLogSink_Call{Call: _e.mock.On("GetLogSink", id)}
+}
+
+func (_c *MockStorage_GetLogSink_Call) Run(run func(id string)) *MockStorage_GetLogSink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_GetLogSink_Call) Return(_a0 *v1.LogSink, _a1 error) *MockStorage_GetLogSink_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_GetLogSink_Call) RunAndReturn(run func(string) (*v1.LogSink, error)) *MockStorage_GetLogSink_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2518,6 +2773,63 @@ func (_c *MockStorage_GetWorkspace_Call) RunAndReturn(run func(string) (*v1.Work
 	return _c
 }
 
+// IsSessionActive provides a mock function with given fields: sessionID, userID
+func (_m *MockStorage) IsSessionActive(sessionID string, userID string) (bool, error) {
+	ret := _m.Called(sessionID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsSessionActive")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string) (bool, error)); ok {
+		return rf(sessionID, userID)
+	}
+	if rf, ok := ret.Get(0).(func(string, string) bool); ok {
+		r0 = rf(sessionID, userID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(sessionID, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_IsSessionActive_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsSessionActive'
+type MockStorage_IsSessionActive_Call struct {
+	*mock.Call
+}
+
+// IsSessionActive is a helper method to define mock.On call
+//   - sessionID string
+//   - userID string
+func (_e *MockStorage_Expecter) IsSessionActive(sessionID interface{}, userID interface{}) *MockStorage_IsSessionActive_Call {
+	return &MockStorage_IsSessionActive_Call{Call: _e.mock.On("IsSessionActive", sessionID, userID)}
+}
+
+func (_c *MockStorage_IsSessionActive_Call) Run(run func(sessionID string, userID string)) *MockStorage_IsSessionActive_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStorage_IsSessionActive_Call) Return(_a0 bool, _a1 error) *MockStorage_IsSessionActive_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_IsSessionActive_Call) RunAndReturn(run func(string, string) (bool, error)) *MockStorage_IsSessionActive_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListApiKey provides a mock function with given fields: option
 func (_m *MockStorage) ListApiKey(option storage.ListOption) ([]v1.ApiKey, error) {
 	ret := _m.Called(option)
@@ -2920,6 +3232,64 @@ func (_c *MockStorage_ListImageRegistry_Call) Return(_a0 []v1.ImageRegistry, _a1
 }
 
 func (_c *MockStorage_ListImageRegistry_Call) RunAndReturn(run func(storage.ListOption) ([]v1.ImageRegistry, error)) *MockStorage_ListImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListLogSink provides a mock function with given fields: option
+func (_m *MockStorage) ListLogSink(option storage.ListOption) ([]v1.LogSink, error) {
+	ret := _m.Called(option)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLogSink")
+	}
+
+	var r0 []v1.LogSink
+	var r1 error
+	if rf, ok := ret.Get(0).(func(storage.ListOption) ([]v1.LogSink, error)); ok {
+		return rf(option)
+	}
+	if rf, ok := ret.Get(0).(func(storage.ListOption) []v1.LogSink); ok {
+		r0 = rf(option)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]v1.LogSink)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(storage.ListOption) error); ok {
+		r1 = rf(option)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStorage_ListLogSink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLogSink'
+type MockStorage_ListLogSink_Call struct {
+	*mock.Call
+}
+
+// ListLogSink is a helper method to define mock.On call
+//   - option storage.ListOption
+func (_e *MockStorage_Expecter) ListLogSink(option interface{}) *MockStorage_ListLogSink_Call {
+	return &MockStorage_ListLogSink_Call{Call: _e.mock.On("ListLogSink", option)}
+}
+
+func (_c *MockStorage_ListLogSink_Call) Run(run func(option storage.ListOption)) *MockStorage_ListLogSink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.ListOption))
+	})
+	return _c
+}
+
+func (_c *MockStorage_ListLogSink_Call) Return(_a0 []v1.LogSink, _a1 error) *MockStorage_ListLogSink_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStorage_ListLogSink_Call) RunAndReturn(run func(storage.ListOption) ([]v1.LogSink, error)) *MockStorage_ListLogSink_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3828,6 +4198,53 @@ func (_c *MockStorage_UpdateImageRegistry_Call) Return(_a0 error) *MockStorage_U
 }
 
 func (_c *MockStorage_UpdateImageRegistry_Call) RunAndReturn(run func(string, *v1.ImageRegistry) error) *MockStorage_UpdateImageRegistry_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateLogSink provides a mock function with given fields: id, data
+func (_m *MockStorage) UpdateLogSink(id string, data *v1.LogSink) error {
+	ret := _m.Called(id, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateLogSink")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.LogSink) error); ok {
+		r0 = rf(id, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStorage_UpdateLogSink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateLogSink'
+type MockStorage_UpdateLogSink_Call struct {
+	*mock.Call
+}
+
+// UpdateLogSink is a helper method to define mock.On call
+//   - id string
+//   - data *v1.LogSink
+func (_e *MockStorage_Expecter) UpdateLogSink(id interface{}, data interface{}) *MockStorage_UpdateLogSink_Call {
+	return &MockStorage_UpdateLogSink_Call{Call: _e.mock.On("UpdateLogSink", id, data)}
+}
+
+func (_c *MockStorage_UpdateLogSink_Call) Run(run func(id string, data *v1.LogSink)) *MockStorage_UpdateLogSink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(*v1.LogSink))
+	})
+	return _c
+}
+
+func (_c *MockStorage_UpdateLogSink_Call) Return(_a0 error) *MockStorage_UpdateLogSink_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStorage_UpdateLogSink_Call) RunAndReturn(run func(string, *v1.LogSink) error) *MockStorage_UpdateLogSink_Call {
 	_c.Call.Return(run)
 	return _c
 }

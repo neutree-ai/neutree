@@ -67,6 +67,7 @@ DCGM_FI_PROF_PCIE_RX_BYTES, gauge, The rate of data received over the PCIe bus i
 DCGM_FI_PROF_NVLINK_RX_BYTES, counter, Total number of bytes received through NVLink.
 DCGM_FI_PROF_NVLINK_TX_BYTES, counter, Total number of bytes transmitted through NVLink.
 DCGM_FI_DEV_XID_ERRORS, gauge, Value of the last XID error encountered.
+DCGM_EXP_GPU_HEALTH_STATUS, gauge, GPU health status (0 = PASS; 10 = WARN; 20 = FAIL).
 DCGM_FI_DEV_ECC_SBE_VOL_TOTAL, counter, Volatile single-bit ECC errors.
 DCGM_FI_DEV_ECC_DBE_VOL_TOTAL, counter, Volatile double-bit ECC errors.
 DCGM_FI_DEV_ECC_DBE_AGG_TOTAL, counter, Aggregate double-bit ECC errors.

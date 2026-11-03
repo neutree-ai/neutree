@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -113,12 +114,6 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		minClusterVersion, err := semver.NewVersion(v1.MinimumSelectableClusterVersionGate)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("invalid minimum cluster version: %v", err)})
-			return
-		}
-
 		// Fetch labels concurrently for all tags
 		type tagResult struct {
 			version *semver.Version
@@ -158,7 +153,8 @@ func getAvailableClusterVersions(deps *Dependencies) gin.HandlerFunc {
 					return
 				}
 
-				if !minClusterVersion.LessThan(v) {
+				selectable, selectErr := clusterversion.IsSelectableClusterVersion(versionStr)
+				if selectErr != nil || !selectable {
 					return
 				}
 

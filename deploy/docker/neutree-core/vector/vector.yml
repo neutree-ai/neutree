@@ -3,6 +3,8 @@ sources:
     type: http_server
     address: 0.0.0.0:30122
     encode: json
+  vector_metrics:
+    type: internal_metrics
 transforms:
   parse_kong_logs:
     type: remap
@@ -207,6 +209,11 @@ transforms:
           . = events
       }
 sinks:
+  vector_metrics_exporter:
+    type: prometheus_exporter
+    inputs:
+      - vector_metrics
+    address: 0.0.0.0:9598
   postgrest_rpc:
     type: http
     inputs:

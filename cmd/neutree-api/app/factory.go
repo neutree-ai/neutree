@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"github.com/supabase-community/gotrue-go"
 
 	"github.com/neutree-ai/neutree/cmd/neutree-api/app/config"
+	internalauth "github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/registry"
@@ -53,6 +56,7 @@ func ProxiesRouteFactory(register ProxyRegisterFunc) RouteFactory {
 	return func(deps *RouteOptions) error {
 		register(deps.Group, deps.Middlewares, &proxies.Dependencies{
 			ClusterCacheProviders: deps.Config.ClusterCacheProviders,
+			KVCacheProviders:      deps.Config.KVCacheProviders,
 			Storage:               deps.Config.Storage,
 			StorageAccessURL:      deps.Config.StorageAccessURL,
 			AuthEndpoint:          deps.Config.AuthEndpoint,
@@ -90,12 +94,22 @@ func AuthRouteFactory(register AuthRegisterFunc) RouteFactory {
 
 		authClient := gotrue.New("", "").WithCustomGoTrueURL(deps.Config.AuthEndpoint).WithToken(*jwtToken)
 
-		register(deps.Group, deps.Middlewares, &auth.Dependencies{
+		authDeps := &auth.Dependencies{
 			AuthEndpoint: deps.Config.AuthEndpoint,
 			AuthConfig:   deps.Config.AuthConfig,
 			Storage:      deps.Config.Storage,
 			AuthClient:   authClient,
-		})
+		}
+
+		// LDAP and OIDC logins read their identity sources from the database.
+		authDeps.Sources, err = auth.NewLoginSources(deps.Config.Storage, deps.Config.AuthConfig.JwtSecret)
+		if err != nil {
+			return fmt.Errorf("init identity source logins: %w", err)
+		}
+
+		authDeps.Sessions = internalauth.NewSessionIssuer(deps.Config.AuthEndpoint, *jwtToken)
+
+		register(deps.Group, deps.Middlewares, authDeps)
 
 		return nil
 	}

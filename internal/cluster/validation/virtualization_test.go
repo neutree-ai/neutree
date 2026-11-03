@@ -9,7 +9,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
-func TestSupportsVirtualizationClusterVersion(t *testing.T) {
+func TestValidateVirtualizationClusterVersions(t *testing.T) {
 	tests := []struct {
 		name      string
 		version   string
@@ -55,13 +55,22 @@ func TestSupportsVirtualizationClusterVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			supported, err := SupportsVirtualizationClusterVersion(tt.version)
-			if tt.wantErr {
-				assert.Error(t, err)
+			err := ValidateAcceleratorVirtualizationClusterSupport(v1.KubernetesClusterType, tt.version)
+			if tt.supported {
+				require.NoError(t, err)
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.supported, supported)
+
+			var validationErr *AcceleratorVirtualizationError
+			require.ErrorAs(t, err, &validationErr)
+			if tt.wantErr {
+				assert.Equal(t, AcceleratorVirtualizationInvalidVersionReason, validationErr.Reason)
+				assert.Error(t, validationErr.Unwrap())
+				return
+			}
+
+			assert.Equal(t, AcceleratorVirtualizationUnsupportedVersionReason, validationErr.Reason)
+			assert.Nil(t, validationErr.Unwrap())
 		})
 	}
 }

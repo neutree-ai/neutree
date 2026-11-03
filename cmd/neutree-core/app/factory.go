@@ -84,9 +84,10 @@ func NewEngineControllerFactory() ControllerFactory {
 func NewEndpointControllerFactory() ControllerFactory {
 	return func(opts *ControllerOptions) (controllers.Controller, error) {
 		endpointController, err := controllers.NewEndpointController(&controllers.EndpointControllerOption{
-			Storage:        opts.config.Storage,
-			Gw:             opts.config.Gateway,
-			AcceleratorMgr: opts.config.AcceleratorManager,
+			KVCacheProviders: opts.config.KVCacheProviders,
+			Storage:          opts.config.Storage,
+			Gw:               opts.config.Gateway,
+			AcceleratorMgr:   opts.config.AcceleratorManager,
 		})
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create endpoint controller")
@@ -406,6 +407,29 @@ func NewIdentitySourceControllerFactory() ControllerFactory {
 			controllers.WithScheme(opts.scheme),
 			controllers.WithStorage(opts.storage),
 		)
+
+		return ctrl, nil
+	}
+}
+
+// NewLogSinkControllerFactory builds the log sink controller, which runs its
+// own aggregate loop rather than the per-object base controller.
+func NewLogSinkControllerFactory() ControllerFactory {
+	return func(opts *ControllerOptions) (controllers.Controller, error) {
+		cfg := opts.config.LogSinkConfig
+		if cfg == nil {
+			return nil, errors.New("log sink config is required")
+		}
+
+		ctrl, err := controllers.NewLogSinkController(&controllers.LogSinkControllerOption{
+			Storage:              opts.config.Storage,
+			Syncer:               cfg.Syncer,
+			MetricsURL:           cfg.MetricsURL,
+			TracePipelineEnabled: cfg.TracePipelineEnabled,
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create log sink controller")
+		}
 
 		return ctrl, nil
 	}

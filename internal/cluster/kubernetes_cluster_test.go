@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -117,6 +118,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 				}, corev1.PodRunning),
 			},
 			expectedResources: v1.ClusterResources{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_A100": {PeakFP16TFLOPS: ptr.To(312.0)}}}},
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
@@ -194,6 +196,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 				}, corev1.PodSucceeded), // Succeeded pod should not count against used resources
 			},
 			expectedResources: v1.ClusterResources{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"NVIDIA_A100": {PeakFP16TFLOPS: ptr.To(312.0)}}}},
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{
@@ -323,6 +326,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 						Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{
 							"Tesla-T4": {
 								MemoryTotalMiB: 15360,
+								PeakFP16TFLOPS: ptr.To(65.0),
 							},
 						},
 					},
@@ -463,6 +467,7 @@ func TestNativeKubernetesCluster_CalculateResource(t *testing.T) {
 				}),
 			},
 			expectedResources: v1.ClusterResources{
+				AcceleratorMetadata: map[v1.AcceleratorType]*v1.AcceleratorMetadata{v1.AcceleratorTypeNVIDIAGPU: {Products: map[v1.AcceleratorProduct]*v1.AcceleratorProductMetadata{"Tesla-T4": {PeakFP16TFLOPS: ptr.To(65.0)}}}},
 				ResourceStatus: v1.ResourceStatus{
 					Allocatable: &v1.ResourceInfo{
 						AcceleratorGroups: map[v1.AcceleratorType]*v1.AcceleratorGroup{

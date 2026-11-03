@@ -8,9 +8,11 @@ import (
 	"github.com/neutree-ai/neutree/internal/engine"
 	"github.com/neutree-ai/neutree/internal/gateway"
 	"github.com/neutree-ai/neutree/internal/model_registry"
+	"github.com/neutree-ai/neutree/internal/observability/logsink"
 	"github.com/neutree-ai/neutree/internal/observability/manager"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 	"github.com/neutree-ai/neutree/pkg/scheme"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -30,6 +32,13 @@ type ModelRegistryConfig struct {
 	Builtin model_registry.BuiltinConfig
 }
 
+// LogSinkConfig is how LogSinks reach and are observed in Vector.
+type LogSinkConfig struct {
+	Syncer               logsink.Syncer
+	MetricsURL           string
+	TracePipelineEnabled bool
+}
+
 type ServerConfig struct {
 	Port int
 	Host string
@@ -37,6 +46,7 @@ type ServerConfig struct {
 
 type CoreConfig struct {
 	ClusterCacheProviders   *clustercache.Providers
+	KVCacheProviders        kvcache.Providers
 	ObjectStorage           storage.ObjectStorage
 	Storage                 storage.Storage
 	ImageService            registry.ImageService
@@ -59,6 +69,9 @@ type CoreConfig struct {
 
 	// model registry provisioning config
 	ModelRegistryConfig *ModelRegistryConfig
+
+	// log sink delivery config
+	LogSinkConfig *LogSinkConfig
 
 	Scheme *scheme.Scheme
 }

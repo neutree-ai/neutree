@@ -22,7 +22,7 @@
 >
 > **Historical exception**: migrations `001_rbac`, `002_user-extend`, `003_resources`, and `005_kong` are bootstrap SQL without rollback files. These pre-date the rule and are grandfathered in; the hook ignores them.
 
-> ⚠️ **Unique version rule**: two migrations may not share a number. Git will not catch it — `085_a.up.sql` and `085_b.up.sql` are two unrelated new files, so two PRs claiming the same number both merge green, and it is golang-migrate that rejects the duplicate source when the deploy runs the migrations. `scripts/check-migrations.sh` enforces this in the pre-commit hook and in CI. If your branch has been open a while, rebase before merging: someone else may have taken your number.
+> ⚠️ **Unique version rule**: two migrations may not share a number. Git will not catch it — `085_a.up.sql` and `085_b.up.sql` are two unrelated new files, so two PRs claiming the same number both merge green, and it is golang-migrate that rejects the duplicate source when the deploy runs the migrations. `scripts/check-migrations.sh` enforces this in the pre-commit hook and in CI. If your branch has been open a while, rebase before merging: someone else may have taken your number. The check runs against the base at CI time, so two PRs that are green on their own can still collide once both merge. To repair a collision that reached the base branch, rename the later-merged migration to the next free number without changing its content; this exact rename is the one exception to the immutability rule that the check allows.
 
 ### Migration skeleton
 

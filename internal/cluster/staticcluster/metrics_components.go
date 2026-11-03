@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
@@ -189,7 +190,7 @@ func buildNodeAgentComponent(
 	node *v1.StaticNode,
 	profile *v1.AcceleratorProfile,
 ) (v1.NodeComponentSpec, error) {
-	selection, err := component.SelectNodeAgent(cluster.Spec.Version)
+	selection, err := clusterversion.SelectNodeAgent(cluster.Spec.Version)
 	if err != nil {
 		return v1.NodeComponentSpec{}, err
 	}
@@ -225,13 +226,13 @@ func buildNodeAgentComponent(
 func nodeAgentComponentArgs(
 	cluster *v1.StaticNodeCluster,
 	profile *v1.AcceleratorProfile,
-	contract component.NodeAgentContract,
+	contract clusterversion.NodeAgentContract,
 ) []string {
 	args := []string{
 		fmt.Sprintf("--listen-address=:%d", defaultNodeAgentPort),
 	}
 
-	if contract == component.NodeAgentContractLegacy {
+	if contract == clusterversion.NodeAgentContractLegacy {
 		args = append(args,
 			"--cluster-type=ray",
 			"--metrics-mode="+string(acceleratorExporterMode(cluster)),
@@ -272,7 +273,7 @@ func nodeAgentProfileTargetArgs(profile *v1.AcceleratorProfile) []string {
 }
 
 func defaultNodeAgentImage(cluster *v1.StaticNodeCluster) string {
-	selection, err := component.SelectNodeAgent(cluster.Spec.Version)
+	selection, err := clusterversion.SelectNodeAgent(cluster.Spec.Version)
 	if err != nil || selection.Image == "" {
 		return "neutree/neutree-node-agent:" + component.LegacyNeutreeNodeAgent
 	}

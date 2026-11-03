@@ -666,6 +666,7 @@ func TestEndpointAcceleratorValidation(t *testing.T) {
 					ROW(1)::api.replica_spec,
 					NULL,
 					NULL,
+					NULL,
 					NULL
 				)::api.endpoint_spec,
 				ROW('test-ep-accel', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
@@ -818,6 +819,7 @@ func TestEndpointModelRegistryOptional(t *testing.T) {
 					ROW(1)::api.replica_spec,
 					NULL,
 					NULL,
+					NULL,
 					NULL
 				)::api.endpoint_spec,
 				ROW('test-ep-%s', NULL, 'test-workspace', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}'::json, '{}'::json)::api.metadata
@@ -872,6 +874,7 @@ func TestEndpointModelNameAndVersionOptional(t *testing.T) {
 					ROW('flex', 'v1')::api.endpoint_engine_spec,
 					ROW('4', '2', NULL, '16')::api.resource_spec,
 					ROW(1)::api.replica_spec,
+					NULL,
 					NULL,
 					NULL,
 					NULL

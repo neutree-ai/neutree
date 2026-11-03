@@ -2,7 +2,10 @@ package controllers
 
 import (
 	"reflect"
+	"slices"
 	"strconv"
+
+	"github.com/neutree-ai/neutree/pkg/kvcache"
 
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -15,15 +18,17 @@ import (
 )
 
 type EndpointController struct {
-	storage     storage.Storage
-	syncHandler func(endpoint *v1.Endpoint) error // Added syncHandler field
+	kvCacheProviders kvcache.Providers
+	storage          storage.Storage
+	syncHandler      func(endpoint *v1.Endpoint) error // Added syncHandler field
 
 	gw             gateway.Gateway
 	acceleratorMgr accelerator.Manager
 }
 
 type EndpointControllerOption struct {
-	Storage storage.Storage
+	KVCacheProviders kvcache.Providers
+	Storage          storage.Storage
 
 	Gw             gateway.Gateway
 	AcceleratorMgr accelerator.Manager
@@ -31,9 +36,10 @@ type EndpointControllerOption struct {
 
 func NewEndpointController(option *EndpointControllerOption) (*EndpointController, error) {
 	c := &EndpointController{
-		storage:        option.Storage,
-		gw:             option.Gw,
-		acceleratorMgr: option.AcceleratorMgr,
+		storage:          option.Storage,
+		kvCacheProviders: option.KVCacheProviders,
+		gw:               option.Gw,
+		acceleratorMgr:   option.AcceleratorMgr,
 	}
 
 	c.syncHandler = c.sync
@@ -216,6 +222,18 @@ func (c *EndpointController) getActualStatus(obj *v1.Endpoint) (*v1.EndpointStat
 		} else {
 			status.ServiceURL = serviceURL
 		}
+
+		// The names are read on every Running reconcile, because the phase comes
+		// from the workload and cannot tell an instance already serving the current
+		// spec from one still serving a previous one.
+		//
+		// Optimization: skip the read when the applied spec is unchanged.
+		models, err := c.getServedModels(obj)
+		if err != nil {
+			klog.Warningf("failed to get endpoint %s served models: %v", obj.Metadata.WorkspaceName(), err)
+		} else {
+			status.ServedModels = models
+		}
 	}
 
 	return status, nil
@@ -245,6 +263,10 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 		return true
 	}
 
+	if !slices.Equal(obj.Status.ServedModels, normalizedStatus.ServedModels) {
+		return true
+	}
+
 	// Update if error message changed
 	if obj.Status.ErrorMessage != normalizedStatus.ErrorMessage {
 		return true
@@ -252,6 +274,10 @@ func (c *EndpointController) shouldUpdateStatus(obj *v1.Endpoint, newStatus *v1.
 
 	// Update if Ray model download completion metadata changed.
 	if !sameOptionalString(obj.Status.ModelDownloadCompletedHash, normalizedStatus.ModelDownloadCompletedHash) {
+		return true
+	}
+
+	if !reflect.DeepEqual(obj.Status.KVCache, normalizedStatus.KVCache) {
 		return true
 	}
 
@@ -300,6 +326,12 @@ func (c *EndpointController) prepareStatusForUpdate(obj *v1.Endpoint, status *v1
 	// If the new service URL is empty, use the old service URL to avoid it being set to empty.
 	if status.ServiceURL == "" && obj.Status != nil && obj.Status.ServiceURL != "" {
 		status.ServiceURL = obj.Status.ServiceURL
+	}
+
+	// The last observation is retained until a newer one replaces it, so a status
+	// that carries no names does not erase what discovery already found.
+	if status.ServedModels == nil && obj.Status != nil {
+		status.ServedModels = obj.Status.ServedModels
 	}
 
 	c.preserveResources(obj, status)
@@ -364,9 +396,10 @@ func (c *EndpointController) getOrchestrator(obj *v1.Endpoint) (orchestrator.Orc
 	}
 
 	orchestrator, err := orchestrator.NewOrchestrator(orchestrator.Options{
-		Cluster:        &cluster[0],
-		Storage:        c.storage,
-		AcceleratorMgr: c.acceleratorMgr,
+		Cluster:          &cluster[0],
+		KVCacheProviders: c.kvCacheProviders,
+		Storage:          c.storage,
+		AcceleratorMgr:   c.acceleratorMgr,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create orchestrator for cluster %s", cluster[0].Metadata.WorkspaceName())

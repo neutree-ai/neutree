@@ -30,8 +30,43 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 6,
         "x": 0,
+        "y": 0
+      },
+      "id": 7,
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vllm:request_success_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:num_requests_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Request rate (QPS)",
+      "type": "stat",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
         "y": 0
       },
       "id": 1,
@@ -64,8 +99,8 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "id": 2,
@@ -98,8 +133,8 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
       "id": 3,
@@ -116,7 +151,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total tokens/s",
+      "title": "Total tokens/s (TPS)",
       "type": "stat",
       "fieldConfig": {
         "defaults": {
@@ -132,7 +167,7 @@
       "datasource": "${datasource}",
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 8,
         "x": 0,
         "y": 4
       },
@@ -142,69 +177,74 @@
           "expr": "sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "prompt tokens/s"
+        }
+      ],
+      "title": "Prompt token throughput trend",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#0080FF"
+          }
         },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 4
+      },
+      "id": 8,
+      "targets": [
         {
           "expr": "sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"})",
-          "refId": "B",
+          "refId": "A",
           "legendFormat": "generation tokens/s"
+        }
+      ],
+      "title": "Generation token throughput trend",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#00BA5D"
+          }
         },
+        "overrides": []
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      },
+      "id": 9,
+      "targets": [
         {
           "expr": "(sum(rate(vllm:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:prompt_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) + (sum(rate(vllm:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(rate(sglang:generation_tokens_total{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])) or sum(sglang:gen_throughput{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}))",
-          "refId": "C",
+          "refId": "A",
           "legendFormat": "total tokens/s"
         }
       ],
-      "title": "Token throughput trend",
+      "title": "Total token throughput trend",
       "type": "timeseries",
       "fieldConfig": {
-        "defaults": {},
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "prompt tokens/s"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#0080FF"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "generation tokens/s"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#00BA5D"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "total tokens/s"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#FEA008"
-                }
-              }
-            ]
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#FEA008"
           }
-        ]
+        },
+        "overrides": []
       }
     },
     {

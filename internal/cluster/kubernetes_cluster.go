@@ -250,7 +250,8 @@ func (c *NativeKubernetesClusterReconciler) ComputeAdditionalComponents(reconcil
 	metricsComp := metrics.NewMetricsComponent(reconcileCtx.Cluster,
 		reconcileCtx.clusterNamespace, imagePrefix, ImagePullSecretName,
 		c.metricsRemoteWriteURL, *reconcileCtx.kubernetesClusterConfig, reconcileCtx.ctrClient, c.acceleratorMgr).
-		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster))
+		WithInferenceScrapeRules(c.inferenceScrapeRules(reconcileCtx.Cluster)).
+		WithCacheProviders(c.cacheProviders)
 	reconcileComps = append(reconcileComps, metricsComp)
 
 	hamiComp := hami.NewHAMiComponent(reconcileCtx.Cluster,

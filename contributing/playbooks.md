@@ -41,7 +41,7 @@ The two trees use different conventions. Mismatching them produces a build that 
 
 7. **Register in builtins:** `internal/engine/builtin.go` + `builtin_test.go`
    - Append a `*v1.EngineVersion` entry under the existing engine's `Spec.Versions`.
-   - **Images map — `ssh_<accelerator>` is optional.** `GetImageForSSHAccelerator` (see `api/v1/engine_types.go`) first looks for `ssh_<accelerator>` and falls back to the plain `<accelerator>` key. Only add an `ssh_<accelerator>` entry when SSH mode needs a different image than K8s (historically: K8s used the upstream `vllm/vllm-openai` while SSH needed a Ray-bundled `neutree/engine-vllm`). If a single image works for both modes — as in `vllm v0.17.1` — register the plain accelerator key only.
+   - **Images map — `ssh_<accelerator>` is optional.** `GetImageForSSHAccelerator` (see `api/v1/engine_types.go`) first looks for `ssh_<accelerator>` and falls back to the plain `<accelerator>` key. Only add an `ssh_<accelerator>` entry when SSH mode needs a different image than K8s (historically: K8s used the upstream `vllm/vllm-openai` while SSH needed a Ray-bundled `neutree/engine-vllm`). If a single image works for both modes — as in `vllm v0.24.0` — register the plain accelerator key only.
    - `DeployTemplate` map for `kubernetes/default` must reference the getter from step 6.
    - Update `builtin_test.go` to assert the new version is reachable via `GetEngineSchema("<engine>-<version>")` and `GetDeployTemplate("<engine>-<version>")` — this is what catches map-vs-getter drift from steps 5/6.
 

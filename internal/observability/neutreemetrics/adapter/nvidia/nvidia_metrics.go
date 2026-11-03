@@ -103,6 +103,12 @@ func nvidiaNormalizeAcceleratorSamples(labels adapter.CanonicalLabels, raw strin
 				Labels: metricLabels,
 				Value:  promtext.Value(sample) * 1024 * 1024,
 			})
+		case "DCGM_FI_DEV_POWER_USAGE":
+			result = append(result, adapter.Sample{
+				Name:   "neutree_accelerator_power_usage_watts",
+				Labels: metricLabels,
+				Value:  promtext.Value(sample),
+			})
 		case "DCGM_FI_DEV_GPU_TEMP":
 			result = append(result, adapter.Sample{
 				Name:   "neutree_accelerator_temperature_celsius",

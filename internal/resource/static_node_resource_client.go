@@ -220,6 +220,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		return ResourceNode{}, false
 	}
 
+	// The control-plane parser owns model specifications; old agent snapshots need not repeat them.
+	mergeAcceleratorMetadata(metadata, base.AcceleratorMetadata)
+
 	for _, device := range node.Status.Accelerator.Devices {
 		if device.UUID == "" {
 			continue
@@ -228,11 +231,6 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 		allocation := allocationsByUUID[device.UUID]
 		allocatablePool := staticNodeDeviceAllocatablePool(device)
 		availablePool := staticNodeDeviceAvailablePool(device, allocation)
-
-		if !device.Healthy {
-			allocatablePool = &v1.DeviceResourcePool{}
-			availablePool = &v1.DeviceResourcePool{}
-		}
 
 		nodeStatus.Devices = append(nodeStatus.Devices, &v1.DeviceResource{
 			UUID:        device.UUID,
@@ -246,11 +244,9 @@ func resourceNodeFromStaticNodeDeviceSnapshot(node *v1.StaticNode, base *Resourc
 
 		addStaticNodeAcceleratorMetadata(metadata, acceleratorType, baseProduct, device.MemoryMiB)
 
-		if device.Healthy {
-			addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
-		}
+		addStaticNodeAcceleratorResource(nodeStatus.Allocatable, acceleratorType, baseProduct, 1, allocatablePool)
 
-		if device.Healthy && hasDeviceAvailableCapacity(availablePool) {
+		if hasDeviceAvailableCapacity(availablePool) {
 			addStaticNodeAcceleratorResource(nodeStatus.Available, acceleratorType, baseProduct, 1, availablePool)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
 	"github.com/neutree-ai/neutree/internal/model_registry"
 	"github.com/neutree-ai/neutree/internal/modelpath"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
@@ -33,7 +34,7 @@ func isNewClusterVersion(cluster *v1.Cluster) (bool, error) {
 		return false, nil
 	}
 
-	isNew, err := semver.LessThan("v1.0.0", cluster.Spec.Version)
+	isNew, err := clusterversion.SupportsEngineIsolation(cluster.Spec.Version)
 	if err != nil {
 		return false, errors.Errorf("failed to parse cluster version %q: %v", cluster.Spec.Version, err)
 	}
@@ -1284,26 +1285,12 @@ func setEngineSpecialEnv(endpoint *v1.Endpoint, deployedCluster *v1.Cluster, app
 	// New clusters (> v1.0.0) use RAY_process_group_cleanup_enabled which doesn't have this issue.
 	if endpoint.Spec != nil && endpoint.Spec.Engine != nil && endpoint.Spec.Engine.Engine == v1.EngineNameVLLM {
 		if deployedCluster.Spec != nil && deployedCluster.Spec.Version != "" {
-			isNew, err := semver.LessThan("v1.0.0", deployedCluster.Spec.Version)
+			isNew, err := clusterversion.SupportsEngineIsolation(deployedCluster.Spec.Version)
 			if err == nil && !isNew {
 				applicationEnv["VLLM_SKIP_P2P_CHECK"] = "1"
 			}
 		}
 	}
-}
-
-// formatServiceURL constructs the service URL for an endpoint.
-func FormatServiceURL(cluster *v1.Cluster, endpoint *v1.Endpoint) (string, error) {
-	if cluster.Status == nil || cluster.Status.DashboardURL == "" {
-		return "", errors.New("cluster dashboard URL is not available")
-	}
-
-	dashboardURL, err := url.Parse(cluster.Status.DashboardURL)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to parse cluster dashboard URL")
-	}
-	// Ray serve applications are typically exposed on port 8000 by default
-	return fmt.Sprintf("%s://%s:8000/%s/%s", dashboardURL.Scheme, dashboardURL.Hostname(), endpoint.Metadata.Workspace, endpoint.Metadata.Name), nil
 }
 
 func EndpointToServeApplicationName(endpoint *v1.Endpoint) string {

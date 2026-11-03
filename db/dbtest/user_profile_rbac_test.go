@@ -182,8 +182,8 @@ func TestUserProfileRBAC_CannotModifyOwnUsername(t *testing.T) {
 			t.Fatalf("expected error when modifying username, got nil")
 		}
 
-		if !strings.Contains(err.Error(), "Cannot modify username") {
-			t.Fatalf("expected 'Cannot modify username' error, got: %v", err)
+		if !strings.Contains(err.Error(), "10265") {
+			t.Fatalf("expected code 10265 (name cannot be changed), got: %v", err)
 		}
 
 		return nil

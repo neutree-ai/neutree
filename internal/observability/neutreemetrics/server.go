@@ -309,6 +309,8 @@ func (s *Server) acceleratorSamples(
 		return []metricsnormalizer.Sample{}
 	}
 
+	hardware = s.evaluateAdapterHardwareHealth(accel, hardware, acceleratorExporter)
+
 	result, err := s.adapterMetricResult(
 		ctx,
 		accel,
@@ -349,6 +351,25 @@ func (s *Server) discoverAdapterHardware(
 	defer cancel()
 
 	return accel.DiscoverHardware(hardwareCtx)
+}
+
+func (s *Server) evaluateAdapterHardwareHealth(
+	accelerator adapter.Accelerator,
+	hardware adapter.HardwareSnapshot,
+	exporter *model.ScrapeResult,
+) adapter.HardwareSnapshot {
+	provider, ok := accelerator.(adapter.HardwareHealthProvider)
+	if !ok {
+		return hardware
+	}
+
+	evidence := adapter.CommonEvidence{Labels: s.config.Labels}
+	if exporter != nil {
+		evidence.ExporterText = exporter.Body
+		evidence.ExporterUp = exporter.Up
+	}
+
+	return provider.EvaluateHardwareHealth(hardware, evidence)
 }
 
 // adapterMetricResult converts common host facts into the public adapter
@@ -544,7 +565,10 @@ func (s *Server) nodeDeviceSnapshot(r *http.Request) *v1.NodeDeviceSnapshot {
 			return &v1.NodeDeviceSnapshot{Accelerator: v1.CPUStaticNodeAcceleratorStatus()}
 		}
 
-		result, err := s.adapterMetricResult(ctx, accel, hardware, s.scrapeAcceleratorExporters(ctx))
+		exporter := s.scrapeAcceleratorExporters(ctx)
+		hardware = s.evaluateAdapterHardwareHealth(accel, hardware, exporter)
+
+		result, err := s.adapterMetricResult(ctx, accel, hardware, exporter)
 		if err != nil {
 			klog.V(2).InfoS("Accelerator adapter failed to build device snapshot allocations", "accelerator_type", s.config.AcceleratorType, "error", err)
 		}

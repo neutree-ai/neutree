@@ -10,7 +10,8 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	ntsemver "github.com/neutree-ai/neutree/internal/semver"
+	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	componentversion "github.com/neutree-ai/neutree/internal/component"
 	"github.com/neutree-ai/neutree/internal/util"
 )
 
@@ -18,10 +19,7 @@ const defaultChartValuesYAML = `
 fullnameOverride: hami
 global:
   imageRegistry: ""
-  imageTag: v2.9.0
 schedulerName: hami-scheduler
-dra:
-  enabled: false
 mockDevicePlugin:
   enabled: false
 prometheus:
@@ -47,28 +45,24 @@ scheduler:
     image:
       repository: projecthami/hami
       pullPolicy: IfNotPresent
-      tag: v2.9.0
 devicePlugin:
   enabled: false
   image:
     repository: projecthami/hami
     pullPolicy: IfNotPresent
-    tag: v2.9.0
   monitor:
     image:
       repository: projecthami/hami
       pullPolicy: IfNotPresent
-      tag: v2.9.0
   service:
     type: ClusterIP
 `
 
 const protectedChartValuesYAML = `
-dra:
-  enabled: false
 scheduler:
   admissionWebhook:
     enabled: true
+    manageNamespaceSelector: true
   patch:
     enabled: false
   certManager:
@@ -89,8 +83,8 @@ var getKubernetesServerVersion = func(cluster *v1.Cluster) (*kubeversion.Info, e
 	return clientSet.Discovery().ServerVersion()
 }
 
-func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]interface{} {
-	values := defaultChartValues(h.normalizedImagePrefix())
+func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan, hamiVersion string) map[string]interface{} {
+	values := defaultChartValues(h.normalizedImagePrefix(), hamiVersion)
 	// Merge order is intentional: chart defaults < plugin discovery patch <
 	// supported user config_patch < Neutree protected values. Protected values
 	// keep shared lifecycle, TLS, service, and image settings under Neutree control.
@@ -108,7 +102,7 @@ func (h *HAMiComponent) buildChartValues(scopePlan NodeScopePlan) map[string]int
 		values = mergeChartValues(values, userVirtualizationConfigPatch(configPatch))
 	}
 
-	return mergeChartValues(values, h.protectedChartValues())
+	return mergeChartValues(values, h.protectedChartValues(hamiVersion))
 }
 
 func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[string]interface{} {
@@ -123,11 +117,11 @@ func userVirtualizationConfigPatch(configPatch map[string]interface{}) map[strin
 	return sanitized
 }
 
-func defaultChartValues(imageRegistry string) map[string]interface{} {
+func defaultChartValues(imageRegistry, hamiVersion string) map[string]interface{} {
 	return mergeChartValues(chartValuesFromYAML(defaultChartValuesYAML), map[string]interface{}{
 		"global": map[string]interface{}{
 			"imageRegistry": imageRegistry,
-			"imageTag":      Version,
+			"imageTag":      hamiVersion,
 		},
 	})
 }
@@ -166,23 +160,29 @@ func chartValuesFromYAML(valuesYAML string) map[string]interface{} {
 	return values
 }
 
-func (h *HAMiComponent) protectedChartValues() map[string]interface{} {
+func (h *HAMiComponent) protectedChartValues(hamiVersion string) map[string]interface{} {
 	values := mergeChartValues(chartValuesFromYAML(protectedChartValuesYAML), map[string]interface{}{
 		"scheduler": map[string]interface{}{
 			"kubeScheduler": map[string]interface{}{
 				"image": chartImageValues(KubeSchedulerImageRegistry, KubeSchedulerImageRepository, h.resolveKubeSchedulerVersion()),
 			},
 			"extender": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
 			},
 		},
 		"devicePlugin": map[string]interface{}{
-			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+			"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
 			"monitor": map[string]interface{}{
-				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, Version),
+				"image": chartImageValues(HAMiImageRegistry, HAMiImageRepository, hamiVersion),
 			},
 		},
 	})
+
+	if hamiVersion == componentversion.HAMi {
+		values = mergeChartValues(values, map[string]interface{}{
+			"dra": map[string]interface{}{"enabled": false},
+		})
+	}
 
 	if h.imagePullSecret != "" {
 		values = mergeChartValues(values, map[string]interface{}{
@@ -217,51 +217,35 @@ func (h *HAMiComponent) normalizedImagePrefix() string {
 	return imagePrefix
 }
 
-// DefaultKubeSchedulerVersion is used when the target cluster version cannot be
-// detected or parsed.
-func DefaultKubeSchedulerVersion() string {
-	return KubeSchedulerVersionsByMinor["1.32"]
-}
-
 func (h *HAMiComponent) resolveKubeSchedulerVersion() string {
 	serverVersion, err := getKubernetesServerVersion(h.cluster)
 	if err != nil {
-		h.logger.Info("Failed to detect Kubernetes server version for HAMi scheduler image, using default",
-			"error", err,
-			"defaultVersion", DefaultKubeSchedulerVersion())
+		klog.Warningf("Failed to detect Kubernetes server version for cluster %s, using default HAMi scheduler image %s: %v",
+			h.cluster.Metadata.WorkspaceName(), clusterversion.DefaultKubeSchedulerVersion, err)
 
-		return DefaultKubeSchedulerVersion()
+		return clusterversion.DefaultKubeSchedulerVersion
 	}
 
-	minorVersion := kubeServerMajorMinor(serverVersion)
+	schedulerVersion, source, fallbackErr := clusterversion.KubeSchedulerVersionForClusterVersion(h.cluster.GetVersion(), serverVersion)
 
-	schedulerVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]
-	if !ok {
-		// For an unmapped Kubernetes minor, use the exact detected scheduler
-		// version and rely on the customer's offline image package to provide it.
-		detectedVersion := kubeSchedulerVersionFromServerVersion(serverVersion)
-		if detectedVersion != "" {
-			h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image, using detected version",
-				"kubernetesVersion", serverVersion.GitVersion,
-				"minorVersion", minorVersion,
-				"detectedVersion", detectedVersion)
-
-			return detectedVersion
+	switch source {
+	case clusterversion.SchedulerVersionDetected:
+		if fallbackErr != nil {
+			klog.Warningf("Failed to resolve HAMi scheduler image version for cluster %s, using detected version %s: %v",
+				h.cluster.Metadata.WorkspaceName(), schedulerVersion, fallbackErr)
+		} else {
+			klog.Warningf("No pinned HAMi scheduler image for Kubernetes %s on cluster %s, using detected version %s",
+				serverVersion.GitVersion, h.cluster.Metadata.WorkspaceName(), schedulerVersion)
 		}
-
-		h.logger.Info("Kubernetes minor version is not mapped for HAMi scheduler image and detected version is invalid, using default",
-			"kubernetesVersion", serverVersion.GitVersion,
-			"minorVersion", minorVersion,
-			"defaultVersion", DefaultKubeSchedulerVersion())
-
-		return DefaultKubeSchedulerVersion()
+	case clusterversion.SchedulerVersionDefault:
+		klog.Warningf("Kubernetes server version of cluster %s is unusable for HAMi scheduler image selection, using default %s",
+			h.cluster.Metadata.WorkspaceName(), schedulerVersion)
 	}
+
+	h.logger.V(4).Info("Resolved HAMi Kubernetes scheduler image version",
+		"schedulerVersion", schedulerVersion)
 
 	return schedulerVersion
-}
-
-func kubeSchedulerVersionFromServerVersion(serverVersion *kubeversion.Info) string {
-	return kubeServerSemver(serverVersion)
 }
 
 func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
@@ -269,91 +253,21 @@ func (h *HAMiComponent) resolveChartKubeVersion() chartutil.KubeVersion {
 	if err != nil {
 		h.logger.Info("Failed to detect Kubernetes server version for HAMi chart render, using default",
 			"error", err,
-			"defaultVersion", DefaultKubeSchedulerVersion())
+			"defaultVersion", clusterversion.DefaultKubeSchedulerVersion)
 
-		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
+		return clusterversion.KubeVersionFromBaseVersion(clusterversion.DefaultKubeSchedulerVersion)
 	}
 
-	return kubeVersionFromServerVersion(serverVersion)
-}
-
-func kubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {
-	version := kubeServerSemver(serverVersion)
-	if version == "" {
-		return kubeVersionFromBaseVersion(DefaultKubeSchedulerVersion())
-	}
-
-	return kubeVersionFromBaseVersion(version)
-}
-
-func kubeVersionFromBaseVersion(version string) chartutil.KubeVersion {
-	majorMinor, err := ntsemver.MajorMinor(version)
-	if err != nil {
-		return chartutil.KubeVersion{
-			Version: version,
-			Major:   "1",
-			Minor:   "32",
-		}
-	}
-
-	parts := strings.SplitN(majorMinor, ".", 2)
-
-	return chartutil.KubeVersion{
-		Version: version,
-		Major:   parts[0],
-		Minor:   parts[1],
-	}
-}
-
-func kubeServerSemver(serverVersion *kubeversion.Info) string {
-	if serverVersion == nil {
-		return ""
-	}
-
-	if version, err := ntsemver.BaseVersion(serverVersion.GitVersion); err == nil && version != "" {
-		return version
-	}
-
-	return kubeServerSemverFromMajorMinor(serverVersion.Major, serverVersion.Minor)
-}
-
-func kubeServerMajorMinor(serverVersion *kubeversion.Info) string {
-	version := kubeServerSemver(serverVersion)
-	if version == "" {
-		return ""
-	}
-
-	majorMinor, err := ntsemver.MajorMinor(version)
-	if err != nil {
-		return ""
-	}
-
-	return majorMinor
-}
-
-func kubeServerSemverFromMajorMinor(major, minor string) string {
-	major = kubeVersionNumericPrefix(strings.TrimPrefix(major, "v"))
-	minor = kubeVersionNumericPrefix(minor)
-
-	if major == "" || minor == "" {
-		return ""
-	}
-
-	return "v" + major + "." + minor + ".0"
-}
-
-func kubeVersionNumericPrefix(value string) string {
-	for i, r := range value {
-		if r < '0' || r > '9' {
-			return value[:i]
-		}
-	}
-
-	return value
+	return clusterversion.KubeVersionFromServerVersion(serverVersion)
 }
 
 func (h *HAMiComponent) renderResources(scopePlan NodeScopePlan) (*unstructured.UnstructuredList, error) {
-	resources, err := renderEmbeddedHAMiChart(h.buildChartValues(scopePlan), h.namespace, h.resolveChartKubeVersion())
+	hamiVersion, err := clusterversion.HAMiVersionForCluster(h.cluster.GetVersion())
+	if err != nil {
+		return nil, err
+	}
+
+	resources, err := renderEmbeddedHAMiChart(hamiVersion, h.buildChartValues(scopePlan, hamiVersion), h.namespace, h.resolveChartKubeVersion())
 	if err != nil {
 		return resources, err
 	}

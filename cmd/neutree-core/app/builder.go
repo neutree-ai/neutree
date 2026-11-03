@@ -49,6 +49,7 @@ func NewBuilder() *Builder {
 		"user-profile":        NewUserProfileControllerFactory(),
 		"external-endpoint":   NewExternalEndpointControllerFactory(),
 		"identity-source":     NewIdentitySourceControllerFactory(),
+		"log-sink":            NewLogSinkControllerFactory(),
 	}
 
 	for name, factory := range defaultControllers {

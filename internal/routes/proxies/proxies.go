@@ -10,18 +10,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/neutree-ai/neutree/pkg/kvcache"
+
 	"github.com/gin-gonic/gin"
 	"k8s.io/klog/v2"
 
 	"github.com/neutree-ai/neutree/internal/middleware"
 	"github.com/neutree-ai/neutree/internal/registry"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
 type Dependencies struct {
 	ClusterCacheProviders *clustercache.Providers
+	KVCacheProviders      kvcache.Providers
 	Storage               storage.Storage
 	StorageAccessURL      string
 	AuthEndpoint          string
@@ -185,7 +189,7 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+		serviceURL, err := utils.FormatServiceURL(&clusters[0], &endpoints[0])
 		if err != nil {
 			errS := fmt.Sprintf("Failed to get cluster serve address: %v", err)
 			klog.Errorf(errS)
@@ -195,8 +199,6 @@ func handleServeProxy(deps *Dependencies) gin.HandlerFunc {
 
 			return
 		}
-
-		serviceURL := fmt.Sprintf("%s://%s:%d/%s/%s", scheme, host, port, workspace, endpoints[0].Metadata.Name)
 
 		path := c.Param("path")
 		if path != "" && path[0] == '/' {

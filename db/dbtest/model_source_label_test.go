@@ -9,6 +9,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/storage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestModelSource covers the NEU-782 model source.
@@ -53,7 +55,7 @@ func TestModelSource(t *testing.T) {
 	})
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO api.endpoints (api_version, kind, spec, metadata)
+		INSERT INTO api.endpoints (api_version, kind, spec, metadata, status)
 		VALUES (
 			'v1',
 			'Endpoint',
@@ -63,9 +65,11 @@ func TestModelSource(t *testing.T) {
 				ROW('vllm', 'v0.11.2')::api.endpoint_engine_spec,
 				ROW('4', '2', NULL, '16')::api.resource_spec,
 				ROW(1)::api.replica_spec,
-				NULL, NULL, NULL
+				NULL, NULL, NULL,
+				NULL
 			)::api.endpoint_spec,
-			ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata
+			ROW($1::text, NULL, $2::text, NULL, now(), now(), '{}'::json, '{}'::json)::api.metadata,
+			jsonb_populate_record(NULL::api.endpoint_status, jsonb_build_object('served_models', jsonb_build_array($3::text)))
 		)`, ieName, ws, ieModel); err != nil {
 		t.Fatalf("insert internal endpoint: %v", err)
 	}
@@ -339,4 +343,94 @@ func TestModelSource(t *testing.T) {
 			}
 		}
 	})
+}
+
+func insertServedModelsEndpoint(t *testing.T, db *sql.DB, name, workspace, status string, deleted bool) int {
+	t.Helper()
+
+	var id int
+	require.NoError(t, db.QueryRow(`
+		INSERT INTO api.endpoints (api_version, kind, metadata, spec, status)
+		VALUES ('v1', 'Endpoint',
+			jsonb_populate_record(NULL::api.metadata, jsonb_build_object(
+				'name', $1::text, 'workspace', $2::text,
+				'deletion_timestamp', CASE WHEN $4 THEN now() ELSE NULL END)),
+			jsonb_populate_record(NULL::api.endpoint_spec, '{
+				"cluster":"served-model-cluster",
+				"model":{"registry":"served-registry","name":"deployment-model","version":"v1"},
+				"engine":{"engine":"vllm","version":"v0.11.2"},
+				"resources":{"cpu":"1","memory":"1"},
+				"replicas":{"num":1}
+			}'::jsonb),
+			jsonb_populate_record(NULL::api.endpoint_status, $3::jsonb))
+		RETURNING id`, name, workspace, status, deleted).Scan(&id))
+	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM api.endpoints WHERE id = $1", id)
+	})
+
+	return id
+}
+
+func TestEndpointServedModelsRoundTrip(t *testing.T) {
+	db := GetTestDB(t)
+	s := NewTestStorage(t)
+	id := insertServedModelsEndpoint(t, db, "served-model-roundtrip", "default", `{"phase":"Running"}`, false)
+
+	require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
+		Status: &v1.EndpointStatus{
+			Phase:        v1.EndpointPhaseRUNNING,
+			ServedModels: []string{"z-first-alias", "a-second-alias"},
+		},
+	}))
+	got, err := s.GetEndpoint(strconv.Itoa(id))
+	require.NoError(t, err)
+	require.NotNil(t, got.Status)
+	assert.Equal(t, []string{"z-first-alias", "a-second-alias"}, got.Status.ServedModels,
+		"PostgREST must preserve the order reported by the engine")
+
+	// An empty observation carries no candidates, exactly like an endpoint that
+	// has never been probed, so the field is omitted rather than stored as [].
+	require.NoError(t, s.UpdateEndpoint(strconv.Itoa(id), &v1.Endpoint{
+		Status: &v1.EndpointStatus{Phase: v1.EndpointPhaseRUNNING, ServedModels: []string{}},
+	}))
+	got, err = s.GetEndpoint(strconv.Itoa(id))
+	require.NoError(t, err)
+	require.NotNil(t, got.Status)
+	assert.Empty(t, got.Status.ServedModels)
+}
+
+func TestWorkspaceModelsUsesFirstServedModel(t *testing.T) {
+	db := GetTestDB(t)
+	const workspace = "served-model-options"
+
+	cases := []struct {
+		name      string
+		workspace string
+		status    string
+		deleted   bool
+	}{
+		{"aliases", workspace, `{"served_models":["z-client-name","a-alias"]}`, false},
+		{"not-observed", workspace, `{}`, false},
+		{"empty", workspace, `{"served_models":[]}`, false},
+		{"other-workspace", "served-model-other", `{"served_models":["other"]}`, false},
+		{"deleted", workspace, `{"served_models":["deleted"]}`, true},
+	}
+	for _, tc := range cases {
+		insertServedModelsEndpoint(t, db, tc.name, tc.workspace, tc.status, tc.deleted)
+	}
+
+	rows, err := db.Query(`SELECT model, source, endpoint_name, source_label FROM api.get_workspace_models($1)`, workspace)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	got := map[string]string{}
+	for rows.Next() {
+		var model, source, endpoint, label string
+		require.NoError(t, rows.Scan(&model, &source, &endpoint, &label))
+		assert.Equal(t, "endpoint", source)
+		assert.Equal(t, "self-hosted", label)
+		got[endpoint] = model
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, map[string]string{"aliases": "z-client-name"}, got)
 }

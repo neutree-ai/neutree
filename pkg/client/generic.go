@@ -29,7 +29,17 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &nfe)
 }
 
-const kindWorkspace = "Workspace"
+// globalKinds do not belong to a workspace, so workspace filters never apply to them.
+var globalKinds = map[string]struct{}{
+	"Workspace": {},
+	"LogSink":   {},
+}
+
+// IsGlobalKind reports whether resources of the given kind are workspace-less.
+func IsGlobalKind(kind string) bool {
+	_, ok := globalKinds[kind]
+	return ok
+}
 
 // GenericService provides kind-based generic CRUD operations for apply workflows.
 type GenericService struct {
@@ -71,7 +81,7 @@ type ExistsResult struct {
 }
 
 // Exists checks whether a resource of the given kind with the specified workspace+name already exists.
-// For Workspace kind, only name is used for lookup.
+// For global kinds, only name is used for lookup.
 func (s *GenericService) Exists(kind, workspace, name string) (*ExistsResult, error) {
 	ep, err := s.endpointForKind(kind)
 	if err != nil {
@@ -83,7 +93,7 @@ func (s *GenericService) Exists(kind, workspace, name string) (*ExistsResult, er
 	params := url.Values{}
 	params.Add("metadata->>name", "eq."+name)
 
-	if kind != kindWorkspace && workspace != "" {
+	if !IsGlobalKind(kind) && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 
@@ -223,7 +233,7 @@ func (s *GenericService) List(kind, workspace string) ([]json.RawMessage, error)
 	rs := newResourceService(s.client, ep, kind)
 
 	params := url.Values{}
-	if kind != kindWorkspace && workspace != "" {
+	if !IsGlobalKind(kind) && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 
@@ -252,7 +262,7 @@ func (s *GenericService) GetContext(ctx context.Context, kind, workspace, name s
 	params := url.Values{}
 	params.Add("metadata->>name", "eq."+name)
 
-	if kind != kindWorkspace && workspace != "" {
+	if !IsGlobalKind(kind) && workspace != "" {
 		params.Add("metadata->>workspace", "eq."+workspace)
 	}
 

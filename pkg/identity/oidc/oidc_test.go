@@ -53,10 +53,11 @@ func login(t *testing.T, idp *oidctest.Provider, rp *oidc.RelyingParty, nonce st
 
 func TestConfigValidate(t *testing.T) {
 	valid := oidc.Config{
-		Issuer:      "https://idp.example.org/realms/neutree",
-		ClientID:    testClientID,
-		RedirectURL: testRedirectURL,
-		Scopes:      []string{"openid"},
+		Issuer:       "https://idp.example.org/realms/neutree",
+		ClientID:     testClientID,
+		ClientSecret: testClientSecret,
+		RedirectURL:  testRedirectURL,
+		Scopes:       []string{"openid"},
 	}
 	require.NoError(t, valid.Validate())
 
@@ -64,6 +65,8 @@ func TestConfigValidate(t *testing.T) {
 		"issuer not a URL":      func(c *oidc.Config) { c.Issuer = "idp.example.org" },
 		"redirect URL missing":  func(c *oidc.Config) { c.RedirectURL = "" },
 		"client ID missing":     func(c *oidc.Config) { c.ClientID = "" },
+		"client secret missing": func(c *oidc.Config) { c.ClientSecret = "" },
+		"client secret blank":   func(c *oidc.Config) { c.ClientSecret = "  " },
 		"no openid scope":       func(c *oidc.Config) { c.Scopes = []string{"profile"} },
 		"negative timeout":      func(c *oidc.Config) { c.Timeout = -time.Second },
 		"root CAs hold no cert": func(c *oidc.Config) { c.RootCAs = []byte("not pem") },
@@ -173,10 +176,11 @@ func TestDiscovery_UntrustedCertificate(t *testing.T) {
 	idp := oidctest.New(t, testClientID, testClientSecret)
 
 	rp, err := oidc.New(oidc.Config{
-		Issuer:      idp.Issuer(),
-		ClientID:    testClientID,
-		RedirectURL: testRedirectURL,
-		Scopes:      []string{"openid"},
+		Issuer:       idp.Issuer(),
+		ClientID:     testClientID,
+		ClientSecret: testClientSecret,
+		RedirectURL:  testRedirectURL,
+		Scopes:       []string{"openid"},
 	})
 	require.NoError(t, err)
 
@@ -196,10 +200,11 @@ func TestPing(t *testing.T) {
 		idp := oidctest.New(t, testClientID, testClientSecret)
 
 		rp, err := oidc.New(oidc.Config{
-			Issuer:      idp.Issuer(),
-			ClientID:    testClientID,
-			RedirectURL: testRedirectURL,
-			Scopes:      []string{"openid"},
+			Issuer:       idp.Issuer(),
+			ClientID:     testClientID,
+			ClientSecret: testClientSecret,
+			RedirectURL:  testRedirectURL,
+			Scopes:       []string{"openid"},
 		})
 		require.NoError(t, err)
 
@@ -210,11 +215,12 @@ func TestPing(t *testing.T) {
 		idp := oidctest.New(t, testClientID, testClientSecret)
 
 		rp, err := oidc.New(oidc.Config{
-			Issuer:      idp.Issuer() + "/realms/other",
-			ClientID:    testClientID,
-			RedirectURL: testRedirectURL,
-			Scopes:      []string{"openid"},
-			RootCAs:     idp.CAPEM(),
+			Issuer:       idp.Issuer() + "/realms/other",
+			ClientID:     testClientID,
+			ClientSecret: testClientSecret,
+			RedirectURL:  testRedirectURL,
+			Scopes:       []string{"openid"},
+			RootCAs:      idp.CAPEM(),
 		})
 		require.NoError(t, err)
 

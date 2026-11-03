@@ -6,7 +6,6 @@ import unittest
 
 
 VLLM_APP_FILES = (
-    pathlib.Path("v0_17_1/app.py"),
     pathlib.Path("v0_24_0/app.py"),
     pathlib.Path("v0_31_0/app.py"),
 )

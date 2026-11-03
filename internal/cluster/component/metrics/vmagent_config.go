@@ -118,6 +118,9 @@ scrape_configs:
   - source_labels: [__meta_kubernetes_pod_label_endpoint]
     action: replace
     target_label: application
+  - source_labels: [__meta_kubernetes_pod_label_endpoint]
+    action: replace
+    target_label: endpoint
   # Add fixed labels to all scraped metrics
   - target_label: deployment
     replacement: Backend
@@ -135,6 +138,7 @@ scrape_configs:
     regex: 'sglang[:_](.+)'
     target_label: __name__
     replacement: 'sglang:$1'
+{{ .CacheScrapeConfig }}
 {{ if .EnableNodeExporter }}
 # Scrape node-exporter metrics from all nodes (HTTP - without kube-rbac-proxy)
 - job_name: 'node-exporter-http'

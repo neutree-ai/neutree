@@ -569,6 +569,168 @@
           }
         ]
       }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or histogram_quantile(0.5, sum by (le) (rate(sglang:queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "A",
+          "legendFormat": "Queue"
+        },
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_prefill_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "B",
+          "legendFormat": "Prefill"
+        },
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_decode_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "C",
+          "legendFormat": "Decode"
+        }
+      ],
+      "title": "Request phase latency (P50)",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FEA008"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "datasource": "${datasource}",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval]))) or histogram_quantile(0.95, sum by (le) (rate(sglang:queue_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "A",
+          "legendFormat": "Queue"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_prefill_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "B",
+          "legendFormat": "Prefill"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:request_decode_time_seconds_bucket{neutree_cluster=~\"$Cluster\",application=\"$Endpoint\"}[$__rate_interval])))",
+          "refId": "C",
+          "legendFormat": "Decode"
+        }
+      ],
+      "title": "Request phase latency (P95)",
+      "type": "timeseries",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#FEA008"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0080FF"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00BA5D"
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "refresh": "10s",

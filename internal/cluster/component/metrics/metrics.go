@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/pkg/clustercache"
 )
 
 type MetricsComponent struct {
@@ -25,6 +26,7 @@ type MetricsComponent struct {
 	logger     klog.Logger
 
 	inferenceScrapeRules InferenceScrapeRules
+	cacheProviders       *clustercache.Providers
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -34,6 +36,12 @@ type MetricsComponent struct {
 func (m *MetricsComponent) WithInferenceScrapeRules(rules InferenceScrapeRules) *MetricsComponent {
 	m.inferenceScrapeRules = rules
 
+	return m
+}
+
+// WithCacheProviders supplies distribution-owned cache metrics discovery.
+func (m *MetricsComponent) WithCacheProviders(providers *clustercache.Providers) *MetricsComponent {
+	m.cacheProviders = providers
 	return m
 }
 
