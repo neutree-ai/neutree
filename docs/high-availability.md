@@ -46,7 +46,7 @@ All components reach PostgreSQL through the `<release>-pg-rw` Service. This Serv
 - **At least 3 schedulable nodes.** The required anti-affinity places one replica per node. With fewer nodes, some pods stay Pending.
 - **Nodes on different physical hosts.** Put each of the 3 nodes on its own physical host (for example, with a VM anti-affinity placement group). If two nodes share a host, one host failure takes down two nodes. HA mode does not cover that case.
 - **Low network latency between nodes.** Login runs many sequential database queries. When 200 ms was added between the applications and PostgreSQL, login p99 reached about 4.8 seconds. Do not spread the nodes across distant data centers.
-- **CloudNativePG operator.** The chart installs it (subchart `cnpg`), in single and HA mode alike. It creates cluster-wide objects with fixed names, so only one release per Kubernetes cluster can bundle it. See [CloudNativePG operator](../deploy/chart/neutree/README.md#cloudnativepg-operator) in the chart README.
+- **CloudNativePG operator.** The chart installs it (subchart `cnpg`), in single and HA mode alike. It is always installed with the chart. It creates cluster-wide objects with fixed names, so a Kubernetes cluster can hold one Neutree release and no other CloudNativePG installation; installing into a cluster that already has CloudNativePG fails at render time. See [CloudNativePG operator](../deploy/chart/neutree/README.md#cloudnativepg-operator) in the chart README.
 - **Storage.** A StorageClass that provisions ReadWriteOnce volumes. In HA mode the chart creates:
   - one PostgreSQL volume per instance (`db.persistence.size`, 40Gi by default), 3 in total;
   - one volume per vmstorage node, 3 in total;

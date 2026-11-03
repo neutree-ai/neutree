@@ -74,22 +74,42 @@ func renderedCluster(t *testing.T, resources *unstructured.UnstructuredList) map
 	return spec
 }
 
+// externalOperator turns the bundled operator off, which only the internal
+// testing switch allows.
+func externalOperator(extra map[string]interface{}) map[string]interface{} {
+	values := map[string]interface{}{
+		"cnpg":   map[string]interface{}{"enabled": false},
+		"unsafe": map[string]interface{}{"externalCnpgOperator": true},
+	}
+	for k, v := range extra {
+		values[k] = v
+	}
+
+	return values
+}
+
+func TestDBRejectsExternalOperator(t *testing.T) {
+	_, err := renderChartWithError(map[string]interface{}{"cnpg": map[string]interface{}{"enabled": false}})
+	require.ErrorContains(t, err, "cnpg.enabled=false is not supported")
+
+	_, err = renderChartWithError(haValues(map[string]interface{}{"cnpg": map[string]interface{}{"enabled": false}}))
+	require.ErrorContains(t, err, "cnpg.enabled=false is not supported")
+}
+
 func TestDBRequiresCloudNativePG(t *testing.T) {
 	release := chartutil.ReleaseOptions{Name: "neutree", Namespace: "default", Revision: 1, IsInstall: true}
-	external := map[string]interface{}{"cnpg": map[string]interface{}{"enabled": false}}
 
 	// The bundled operator brings the API with it.
 	_, err := renderChartWithAPIs(nil, release, false)
 	require.NoError(t, err)
 
-	_, err = renderChartWithAPIs(external, release, false)
+	_, err = renderChartWithAPIs(externalOperator(nil), release, false)
 	require.ErrorContains(t, err, "postgresql.cnpg.io/v1")
 	require.ErrorContains(t, err, "db.operatorCheck=false")
 
-	resources, err := renderChartWithAPIs(map[string]interface{}{
-		"cnpg": map[string]interface{}{"enabled": false},
-		"db":   map[string]interface{}{"operatorCheck": false},
-	}, release, false)
+	resources, err := renderChartWithAPIs(externalOperator(map[string]interface{}{
+		"db": map[string]interface{}{"operatorCheck": false},
+	}), release, false)
 	require.NoError(t, err)
 	renderedCluster(t, resources)
 }
@@ -158,10 +178,7 @@ func TestCNPGOperatorImageFollowsMirror(t *testing.T) {
 	require.NoError(t, err)
 
 	// An operator installed separately is not this chart's concern.
-	_, err = renderChartWithError(map[string]interface{}{
-		"global": mirror,
-		"cnpg":   map[string]interface{}{"enabled": false},
-	})
+	_, err = renderChartWithError(externalOperator(map[string]interface{}{"global": mirror}))
 	require.NoError(t, err)
 }
 
@@ -191,9 +208,7 @@ func TestDBResourcesDeferredWithBundledOperator(t *testing.T) {
 }
 
 func TestDBResourcesWithExternalOperator(t *testing.T) {
-	resources := renderChart(t, haValues(map[string]interface{}{
-		"cnpg": map[string]interface{}{"enabled": false},
-	}))
+	resources := renderChart(t, haValues(externalOperator(nil)))
 
 	require.True(t, hasObject(resources, "Cluster", "neutree-pg"))
 	require.Len(t, dbResources(t, resources), 1)

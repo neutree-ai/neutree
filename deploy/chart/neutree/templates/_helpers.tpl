@@ -547,12 +547,13 @@ on a dead connection instead.
 {{- end -}}
 
 {{/*
-Fail early when the operator setup cannot work: with cnpg.enabled, the
-operator image is not mirrored along with global.image.registry, or another
-operator already owns the cluster-wide webhook configuration, whose name is
-fixed; with cnpg.enabled=false, the CloudNativePG CRDs are missing (offline
-rendering with helm template has no cluster to ask, so db.operatorCheck can
-turn this off).
+Fail early when the operator setup cannot work: the operator image is not
+mirrored along with global.image.registry, or another operator already owns the
+cluster-wide webhook configuration, whose name is fixed. Neutree always runs
+its own operator. unsafe.externalCnpgOperator (internal testing only, not
+documented) lets cnpg.enabled=false use an operator installed elsewhere; then
+the CloudNativePG CRDs must exist (db.operatorCheck=false skips that check for
+offline rendering).
 */}}
 {{- define "neutree.db.requireOperator" -}}
 {{- if .Values.cnpg.enabled -}}
@@ -563,11 +564,13 @@ turn this off).
 {{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . -}}
 {{- $name := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . -}}
 {{- if or (ne $owner $.Release.Namespace) (ne $name $.Release.Name) -}}
-{{- fail (printf "A CloudNativePG operator is already installed in this Kubernetes cluster (helm release %q in namespace %q), and only one can exist. Set cnpg.enabled=false to use it; it must watch namespace %s (see deploy/chart/neutree/README.md, \"CloudNativePG operator\")." (default "none" $name) (default "none" $owner) $.Release.Namespace) -}}
+{{- fail (printf "A CloudNativePG operator is already installed in this Kubernetes cluster (helm release %q in namespace %q). Neutree installs its own operator, and only one can exist per Kubernetes cluster: install Neutree into a Kubernetes cluster without CloudNativePG (see deploy/chart/neutree/README.md, \"CloudNativePG operator\")." (default "none" $name) (default "none" $owner)) -}}
 {{- end -}}
 {{- end -}}
-{{- else if and .Values.db.operatorCheck (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
-{{- fail "cnpg.enabled is false, but the postgresql.cnpg.io/v1 API is not installed in this cluster. Install the CloudNativePG operator first, or set cnpg.enabled=true (see deploy/chart/neutree/README.md, \"CloudNativePG operator\"). For offline rendering with helm template, set db.operatorCheck=false." -}}
+{{- else if not (dig "externalCnpgOperator" false (.Values.unsafe | default dict)) -}}
+{{- fail "cnpg.enabled=false is not supported: Neutree always installs its own CloudNativePG operator. Remove cnpg.enabled from your values." -}}
+{{- else if and (dig "operatorCheck" true .Values.db) (not (.Capabilities.APIVersions.Has "postgresql.cnpg.io/v1")) -}}
+{{- fail "cnpg.enabled is false, but the postgresql.cnpg.io/v1 API is not installed in this cluster. For offline rendering with helm template, set db.operatorCheck=false." -}}
 {{- end -}}
 {{- end -}}
 

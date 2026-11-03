@@ -3,7 +3,7 @@
 ## CloudNativePG operator
 
 PostgreSQL runs as a [CloudNativePG](https://cloudnative-pg.io) `Cluster`. The
-chart installs the operator itself, as the subchart `cnpg` (the official
+chart always installs the operator itself, as the subchart `cnpg` (the official
 `cloudnative-pg` chart 0.29.1, operator 1.30.1): one `helm install` sets up
 everything, in both single and HA mode. The operator runs in the release
 namespace and watches only that namespace (`cnpg.config.clusterWide=false`).
@@ -14,9 +14,9 @@ All `cnpg.*` values are passed to that chart.
   and `cnpg-validating-webhook-configuration`, and the ClusterRoles
   `<release>-cloudnative-pg`, `<release>-cloudnative-pg-view`,
   `<release>-cloudnative-pg-edit` with a ClusterRoleBinding. Installing the
-  chart therefore needs cluster-admin rights. The webhook names are fixed, so **only one release per Kubernetes
-  cluster can set `cnpg.enabled=true`**; rendering fails when another release
-  or another installation owns them.
+  chart therefore needs cluster-admin rights. The webhook names are fixed, so **a Kubernetes cluster can hold one
+  Neutree release and no other CloudNativePG installation**. Installing into a
+  cluster that already has CloudNativePG fails at render time.
 - **Operator upgrades** come with chart upgrades. In-place updates of the
   instance manager are on (`ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES`), so an
   operator upgrade neither restarts the PostgreSQL pods nor switches over.
@@ -33,8 +33,12 @@ All `cnpg.*` values are passed to that chart.
   CNPG `Cluster` in the Kubernetes cluster). Delete them only when no other
   `Cluster` exists: deleting a CRD deletes every object of that kind. A new
   install under another release name or namespace must first take the CRDs
-  over (step 2 of [Switching from a separately installed
-  operator](#switching-from-a-separately-installed-operator)).
+  over:
+
+  ```bash
+  kubectl annotate --overwrite $(kubectl get crd -o name | grep '\.postgresql\.cnpg\.io$') \
+    meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<namespace>
+  ```
 - **Rollback.** helm never deletes the `Cluster` itself
   (`helm.sh/resource-policy: keep`); it is owned by the ConfigMap
   `<release>-pg-resources`, so it goes with that ConfigMap: on uninstall, or
@@ -45,46 +49,6 @@ All `cnpg.*` values are passed to that chart.
   then set `cnpg.image.repository=<registry>/cloudnative-pg/cloudnative-pg`
   (and `cnpg.imagePullSecrets` if the registry needs them). Rendering fails
   when `global.image.registry` is set and `cnpg.image.repository` is not.
-
-### Using an existing operator
-
-When the Kubernetes cluster already runs CloudNativePG, or when a second
-Neutree release is installed into the same Kubernetes cluster, set
-`cnpg.enabled=false`. The operator must be 1.30 or later and must watch the
-release namespace: a cluster-wide operator, or a namespace-scoped one that
-lists this namespace. The operator bundled by another Neutree release watches
-only its own namespace; install that release with
-`cnpg.config.clusterWide=true` to let it serve other namespaces.
-
-With `cnpg.enabled=false`, `helm install` / `helm upgrade` fail with a message
-pointing here when the `postgresql.cnpg.io/v1` API is missing. `helm template`
-cannot see the cluster's APIs; render with `--set db.operatorCheck=false` (or
-`--api-versions postgresql.cnpg.io/v1`).
-
-### Switching from a separately installed operator
-
-A release that used an operator installed by its own `helm install` can switch
-to the bundled one. The database keeps running throughout, but nothing
-handles a failover between steps 1 and 4:
-
-1. Uninstall the separate operator release. Its CRDs stay
-   (`helm.sh/resource-policy: keep`).
-2. Hand the CRDs over to the Neutree release:
-
-   ```bash
-   kubectl annotate --overwrite $(kubectl get crd -o name | grep '\.postgresql\.cnpg\.io$') \
-     meta.helm.sh/release-name=<release> meta.helm.sh/release-namespace=<namespace>
-   ```
-
-3. Delete the `cnpg-default-monitoring` ConfigMap that the separate operator
-   created in the release namespace. The bundled operator ships its own copy,
-   and Helm refuses to adopt one it does not own:
-
-   ```bash
-   kubectl -n <namespace> delete configmap cnpg-default-monitoring
-   ```
-
-4. `helm upgrade` the Neutree release with `cnpg.enabled=true` (the default).
 
 ## Database layout
 
