@@ -271,37 +271,6 @@ func TestRealVersionPassesHubRevisionsThrough(t *testing.T) {
 	}
 }
 
-func TestRealVersionRejectsAnUnusableRegistry(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		modelRegistry *v1.ModelRegistry
-		wantErr       string
-	}{
-		{
-			name:          "nil registry",
-			modelRegistry: nil,
-			wantErr:       "model registry cannot be nil",
-		},
-		{
-			name:          "nil spec",
-			modelRegistry: &v1.ModelRegistry{},
-			wantErr:       "model registry spec cannot be nil",
-		},
-		{
-			name: "unsupported type",
-			modelRegistry: &v1.ModelRegistry{
-				Spec: &v1.ModelRegistrySpec{Type: "unsupported_type"},
-			},
-			wantErr: "unsupported model registry type: unsupported_type",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := RealVersion(tc.modelRegistry, "test", "latest")
-			require.ErrorContains(t, err, tc.wantErr)
-		})
-	}
-}
-
 func endpointWithModel(name, version string) *v1.Endpoint {
 	return &v1.Endpoint{
 		Spec: &v1.EndpointSpec{

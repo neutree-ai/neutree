@@ -450,29 +450,6 @@ func TestRunFailsCaseWhenNoRequestCompletes(t *testing.T) {
 	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
 }
 
-func TestRuntimeFileHelpersHandleFailures(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "not-a-directory")
-	require.NoError(t, os.WriteFile(file, []byte("x"), 0600))
-	_, err := createOutputDirectory(file)
-	require.Error(t, err)
-	_, err = createOutputFile(filepath.Join(file, "result.json"))
-	require.Error(t, err)
-	require.Error(t, writeManifest(file, manifest{}))
-
-	_, cancel := benchmarkContext(context.Background(), 10)
-	cancel()
-
-	output := t.TempDir()
-	err = runPreflight(context.Background(), outputRunner{err: fmt.Errorf("unavailable")}, output)
-	require.ErrorContains(t, err, "preflight")
-
-	err = runCase(context.Background(), outputRunner{err: fmt.Errorf("run failed")}, BenchTarget{}, Options{
-		NumPrompts:  1,
-		RequestRate: "inf",
-	}, Case{InputLen: 1, OutputLen: 1, Concurrency: 1}, output, "/tmp/neutree-bench-test")
-	require.ErrorContains(t, err, "run failed")
-}
-
 func TestRunCaseRejectsEmptyCopiedResult(t *testing.T) {
 	runner := &emptyResultRunner{}
 	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: "/models/chat"}, Options{

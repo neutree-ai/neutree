@@ -303,20 +303,6 @@ func TestNoConverterFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "no converter found")
 }
 
-// ModelScope's "version" is a git revision, so there is nothing to look up —
-// but unlike Hugging Face, "latest" cannot be passed through. The hub's default
-// branch is "master", and it does not refuse a wrong revision: it answers HTTP
-// 200 with an empty file list, which a downloader would otherwise be free to
-// read as "this model has no files". Normalising to "" makes the downloader omit
-// the Revision parameter entirely and let the hub resolve its own default.
-
-// ModelScope's "version" is a git revision, so there is nothing to look up —
-// but unlike Hugging Face, "latest" cannot be passed through. The hub's default
-// branch is "master", and it does not refuse a wrong revision: it answers HTTP
-// 200 with an empty file list, which a downloader would otherwise be free to
-// read as "this model has no files". Normalising to "" makes the downloader omit
-// the Revision parameter entirely and let the hub resolve its own default.
-
 // The served model id is what a client puts in an OpenAI request. On a hub the
 // "version" is a git revision, so appending it would publish the model under a
 // name nobody would ask for, and under a different name than the identical model

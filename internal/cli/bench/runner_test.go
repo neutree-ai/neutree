@@ -102,14 +102,16 @@ printf '%s\n' "$last"
 	require.ErrorContains(t, (dockerRemoteRunner{}).Run(context.Background(), "echo hello", nil, nil), "SSH runner")
 }
 
-func TestRunRemoteOutputAndSSHHelpers(t *testing.T) {
+func TestRunRemoteOutput(t *testing.T) {
 	output, err := runRemoteOutput(context.Background(), outputRunner{stdout: "ok\n"}, "ignored")
 	require.NoError(t, err)
 	require.Equal(t, "ok\n", output)
 
 	_, err = runRemoteOutput(context.Background(), outputRunner{stderr: "details", err: errors.New("boom")}, "ignored")
 	require.ErrorContains(t, err, "boom: details")
+}
 
+func TestSSHHelpersRejectUnsafeUserAndHost(t *testing.T) {
 	require.True(t, safeSSHUser("root"))
 	require.False(t, safeSSHUser("root@example"))
 	require.True(t, safeSSHHost("10.0.0.1"))

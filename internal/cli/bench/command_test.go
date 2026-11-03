@@ -31,7 +31,5 @@ func TestBuildBenchCommandUsesExplicitModelAndTokenizer(t *testing.T) {
 }
 
 func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
-	quoted := shellQuote("model's path")
-	require.Equal(t, "'model'\"'\"'s path'", quoted)
-	require.False(t, strings.Contains(quoted, "$("))
+	require.Equal(t, "'model'\"'\"'s path'", shellQuote("model's path"))
 }

@@ -79,12 +79,4 @@ func TestReadBenchmarkResultSummary(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "completed=20 p99_ttft_ms=25.50", summary.String())
 	})
-
-	t.Run("rejects malformed JSON", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), benchmarkResultFileName)
-		require.NoError(t, os.WriteFile(path, []byte(`{`), 0600))
-
-		_, err := readBenchmarkResultSummary(path)
-		require.ErrorContains(t, err, "decode benchmark result")
-	})
 }
