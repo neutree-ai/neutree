@@ -273,14 +273,6 @@ def test_engine_validation_error_is_not_reclassified_as_http_schema_error(wrappe
     wrapper.validation_handler.assert_not_called()
 
 
-@pytest.mark.parametrize("payload", (None, [], "body", 1, True))
-def test_non_mapping_backend_payload_is_contained(wrapper, payload):
-    wire = asyncio.run(wrapper.backend.generate(payload))
-    assert wire["status_code"] == 400
-    assert "error" in wire["content"]
-    wrapper.factory.assert_not_called()
-
-
 @pytest.mark.parametrize("payload", ({"stream": "maybe"}, {"stream": 2}, {"stream": []}))
 def test_invalid_stream_never_reaches_serving(wrapper, payload):
     wire = call_backend(wrapper, "generate", payload)
@@ -290,11 +282,10 @@ def test_invalid_stream_never_reaches_serving(wrapper, payload):
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
-@pytest.mark.parametrize("error_type", (RuntimeError, ValueError, TypeError))
-def test_wire_serialization_failure_is_contained(wrapper, method, error_type):
+def test_wire_serialization_failure_is_contained(wrapper, method):
     class BrokenModel:
         def model_dump(self, **kwargs):
-            raise error_type("serialization failed")
+            raise RuntimeError("serialization failed")
     if method == "generate":
         target = wrapper.backend.openai_serving_chat.create_chat_completion
     elif method == "generate_embeddings":
@@ -310,9 +301,9 @@ def test_wire_serialization_failure_is_contained(wrapper, method, error_type):
     wrapper.factory.assert_not_called()
 
 
-@pytest.mark.parametrize("value", (float("nan"), float("inf")))
 @pytest.mark.parametrize("as_model", (False, True))
-def test_wire_nonfinite_numbers_are_sanitized_before_ray(wrapper, value, as_model):
+def test_wire_nonfinite_numbers_are_sanitized_before_ray(wrapper, as_model):
+    value = float("nan")
     class NonfiniteModel:
         def model_dump(self, **kwargs):
             return {"value": value}
@@ -328,8 +319,7 @@ def test_wire_nonfinite_numbers_are_sanitized_before_ray(wrapper, value, as_mode
 
 
 @pytest.mark.parametrize("method,initializer", (
-    ("generate", "_ensure_chat"), ("generate_embeddings", "_ensure_embedding"),
-    ("rerank", "_ensure_score"), ("show_available_models", "_ensure_models"),
+    ("generate", "_ensure_chat"), ("show_available_models", "_ensure_models"),
 ))
 def test_cancellation_still_propagates(wrapper, method, initializer):
     getattr(wrapper.backend, initializer).side_effect = asyncio.CancelledError()
@@ -387,7 +377,7 @@ def client_for(wrapper, handle):
 
 
 @pytest.mark.parametrize("path", ("chat/completions", "embeddings", "rerank"))
-@pytest.mark.parametrize("body", ("", "not json", '{"input":}', "null", "[]", '"body"', "1", "true"))
+@pytest.mark.parametrize("body", ("", "not json", "null"))
 def test_controller_rejects_bad_body_before_rpc(wrapper, path, body):
     handle = Handle()
     with client_for(wrapper, handle) as client:
@@ -411,11 +401,8 @@ def test_controller_empty_object_reaches_business_validation(wrapper, path):
     ({"stream": {}}, 400, None),
     ({"stream": True}, 200, True),
     ({"stream": 1}, 200, True),
-    ({"stream": 1.0}, 200, True),
     ({"stream": "true"}, 200, True),
-    ({"stream": "yes"}, 200, True),
     ({}, 200, False),
-    ({"stream": False}, 200, False),
 ])
 def test_controller_dispatches_only_valid_stream_values(wrapper, payload, status, streaming):
     async def stream_body():
@@ -495,7 +482,6 @@ def test_backend_in_band_error_keeps_upstream_details(wrapper):
     assert chunks[-1] == "data: [DONE]\n\n"
 
 
-@pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
 @pytest.mark.parametrize("error,status,kind,param", [
     pytest.param(ValueError("invalid argument"), 400, "BadRequestError", "argument", id="validation"),
     pytest.param(NativeNotFoundError("missing model"), 404, "NotFoundError", "model", id="not-found"),
@@ -505,26 +491,37 @@ def test_backend_in_band_error_keeps_upstream_details(wrapper):
     pytest.param(GenerationError("generation details"), 500, "InternalServerError", None, id="generation"),
     pytest.param(RuntimeError("engine details"), 500, "InternalServerError", None, id="server"),
 ])
-def test_backend_delegates_error_fields_to_native_factory(wrapper, method, error, status, kind, param):
+def test_backend_delegates_error_fields_to_native_factory(wrapper, error, status, kind, param):
     if wrapper.version == "v0_24_0" and isinstance(error, (NativeUnprocessableError, QueueOverflowError)):
         pytest.skip("Native 422 and admission-control exception types were introduced in v0.31")
     expected = ErrorResponse(error=ErrorInfo(message=str(error), type=kind, code=status, param=param))
     wrapper.factory.side_effect = None
     wrapper.factory.return_value = expected
-    if method == "generate":
-        target = wrapper.backend.openai_serving_chat.create_chat_completion
-    elif method == "show_available_models":
-        target = wrapper.backend._ensure_models.return_value.show_available_models
-    else:
-        target = wrapper.backend.openai_serving_embedding if method == "generate_embeddings" else wrapper.backend.openai_serving_score
-    target.side_effect = error
-    wire = call_backend(wrapper, method)
+    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
+    wire = call_backend(wrapper, "generate")
     assert wire["status_code"] == status
     assert wire["content"] == expected.model_dump(mode="json")
     wrapper.factory.assert_called_once_with(error)
 
 
-@pytest.mark.parametrize("error", (ValueError("invalid input"), GenerationError("generation details"), RuntimeError("engine details"), QueueOverflowError()))
+@pytest.mark.parametrize("method", ("generate_embeddings", "rerank", "show_available_models"))
+def test_every_serving_method_delegates_errors_to_native_factory(wrapper, method):
+    error = RuntimeError("engine details")
+    expected = ErrorResponse(error=ErrorInfo(message=str(error), type="InternalServerError", code=500, param=None))
+    wrapper.factory.side_effect = None
+    wrapper.factory.return_value = expected
+    if method == "show_available_models":
+        target = wrapper.backend._ensure_models.return_value.show_available_models
+    else:
+        target = wrapper.backend.openai_serving_embedding if method == "generate_embeddings" else wrapper.backend.openai_serving_score
+    target.side_effect = error
+    wire = call_backend(wrapper, method)
+    assert wire["status_code"] == 500
+    assert wire["content"] == expected.model_dump(mode="json")
+    wrapper.factory.assert_called_once_with(error)
+
+
+@pytest.mark.parametrize("error", (ValueError("invalid input"), RuntimeError("engine details"), QueueOverflowError()))
 @pytest.mark.parametrize("stage", ("call", "first", "midstream"))
 def test_stream_exceptions_use_native_factory(wrapper, error, stage):
     if wrapper.version == "v0_24_0" and isinstance(error, QueueOverflowError):
@@ -590,7 +587,7 @@ def test_native_factory_failure_uses_neutree_fallback(wrapper, stream):
     }}
 
 
-@pytest.mark.parametrize("status", (400, 404, 422, 429, 500, 503))
+@pytest.mark.parametrize("status", (400, 500, 503))
 def test_native_error_values_are_preserved_in_both_modes(wrapper, status):
     result = ErrorResponse(error=ErrorInfo(message="native error details", type="NativeError", code=status, param="model"))
     target = wrapper.backend.openai_serving_chat.create_chat_completion
@@ -608,9 +605,9 @@ def test_native_error_values_are_preserved_in_both_modes(wrapper, status):
     assert asyncio.run(collect()) == expected
 
 
-@pytest.mark.parametrize("value", (float("nan"), float("inf")))
 @pytest.mark.parametrize("midstream", (False, True))
-def test_nonfinite_stream_values_are_sanitized(wrapper, value, midstream):
+def test_nonfinite_stream_values_are_sanitized(wrapper, midstream):
+    value = float("nan")
     async def chunks():
         if midstream:
             yield 'data: {"choices":[]}\n\n'

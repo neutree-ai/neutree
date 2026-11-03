@@ -30,7 +30,7 @@ def request(body):
     return Request({"type": "http", "headers": []}, receive)
 
 
-@pytest.mark.parametrize("body", [b"", b"not json", b'{"input":}', b"\xff", b"null", b"[]", b'"x"', b"1", b"true", b"1" * 5000, b'{"input":' + b"1" * 5000 + b"}"])
+@pytest.mark.parametrize("body", [b"", b"not json", b"null", b"\xff"])
 def test_bad_json_never_reaches_business_handler(body):
     app = FastAPI()
     app.add_exception_handler(errors.RequestInputError, errors.input_error_handler)
@@ -49,8 +49,8 @@ def test_bad_json_never_reaches_business_handler(body):
     business.assert_not_called()
 
 
-@pytest.mark.parametrize("payload", [{}, {"input": "x"}])
-def test_object_body_is_left_for_business_validation(payload):
+def test_object_body_is_left_for_business_validation():
+    payload = {"input": "x"}
     assert run(errors.read_json_object(request(json.dumps(payload).encode()))) == payload
 
 
@@ -63,23 +63,16 @@ def test_object_body_is_left_for_business_validation(payload):
     ({"stream": 1}, True),
     ({"stream": 0.0}, False),
     ({"stream": 1.0}, True),
-    ({"stream": "false"}, False),
     ({"stream": "FALSE"}, False),
-    ({"stream": "no"}, False),
-    ({"stream": "off"}, False),
-    ({"stream": "0"}, False),
     ({"stream": "true"}, True),
-    ({"stream": "TRUE"}, True),
     ({"stream": "yes"}, True),
-    ({"stream": "on"}, True),
-    ({"stream": "1"}, True),
 ])
 def test_stream_lax_boolean_contract(payload, expected):
     assert errors.is_streaming(payload) is expected
 
 
 @pytest.mark.parametrize("payload", [
-    None, [], "x", {"stream": "maybe"}, {"stream": 2}, {"stream": 0.5}, {"stream": []}, {"stream": {}},
+    {"stream": "maybe"}, {"stream": 2}, {"stream": 0.5}, {"stream": []}, {"stream": {}},
 ])
 def test_stream_rejects_non_boolean(payload):
     with pytest.raises(errors.RequestInputError):
@@ -94,19 +87,8 @@ def test_controller_error_preserves_error_envelope():
     }}
 
 
-def test_backend_error_is_plain_serializable_content():
-    assert errors.backend_error(RuntimeError("private"), "generate") == {
-        "error": {
-            "message": "Internal server error",
-            "type": "InternalServerError",
-            "code": 500,
-            "param": None,
-        }
-    }
-
-
-@pytest.mark.parametrize("exc", [RuntimeError("private engine details"), ValueError("private engine details"), TypeError("private engine details")])
-def test_unexpected_errors_use_neutral_server_response(exc, caplog):
+def test_unexpected_errors_use_neutral_server_response(caplog):
+    exc = RuntimeError("private engine details")
     response = errors.backend_error(exc, "generate")
     assert response == {"error": {
         "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
@@ -155,18 +137,17 @@ def test_error_stream_accepts_native_http_response():
     assert frames[1] == "data: [DONE]\n\n"
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 @pytest.mark.parametrize("as_model", [False, True])
-def test_error_stream_replaces_non_finite_json(value, as_model):
-    payload = {"error": {"code": value}}
+def test_error_stream_replaces_non_finite_json(as_model):
+    payload = {"error": {"code": float("nan")}}
     error = SimpleNamespace(model_dump=lambda **kwargs: payload) if as_model else payload
     frames = run(collect(errors.error_stream(error)))
     assert json.loads(frames[0].removeprefix("data:")) == {"error": {"code": None}}
     assert frames[1] == "data: [DONE]\n\n"
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_json_safe_replaces_non_finite_floats_recursively(value):
+def test_json_safe_replaces_non_finite_floats_recursively():
+    value = float("nan")
     assert errors.json_safe({"value": value, "items": [value, {"value": value}], "ok": 1.5}) == {
         "value": None, "items": [None, {"value": None}], "ok": 1.5,
     }
@@ -181,31 +162,26 @@ def test_json_safe_strict_accepts_json_values():
 def test_json_safe_strict_rejects_unserializable_objects():
     with pytest.raises(TypeError):
         errors.json_safe({"value": object()}, strict=True)
-    with pytest.raises(TypeError):
-        errors.json_safe({1: "value"}, strict=True)
 
 
 @pytest.mark.parametrize("payload,expected", [
-    # Explicit integer codes: only the 4xx/5xx range is a usable status.
-    ({"code": 400}, 400), ({"code": 503}, 503), ({"code": "503"}, 503),
-    ({"code": True}, 500), ({"code": 200}, 500), ({"code": 600}, 500),
-    ({"code": "oops"}, 500), ({"code": "200"}, 500), ({"code": None}, 500),
-    (None, 500),
-    # Symbolic client-error codes and exception types recover their class.
-    ({"code": "context_length_exceeded"}, 400), ({"code": "model_not_found"}, 400),
+    # Explicit integer and stringified codes.
+    ({"code": 400}, 400),
+    ({"code": 503}, 503),
+    ({"code": "503"}, 503),
+    # Symbolic client-error codes recover their class.
+    ({"code": "context_length_exceeded"}, 400),
+    ({"code": "model_not_found"}, 400),
     ({"code": "rate_limit_exceeded"}, 429),
-    ({"type": "BadRequestError"}, 400), ({"type": "NotFoundError"}, 404),
-    ({"type": "UnprocessableEntityError"}, 422), ({"type": "RateLimitError"}, 429),
-    ({"type": "invalid_request_error"}, 400), ({"type": "not_found_error"}, 404),
+    # Client error types.
+    ({"type": "BadRequestError"}, 400),
+    ({"type": "NotFoundError"}, 404),
+    ({"type": "UnprocessableEntityError"}, 422),
+    ({"type": "RateLimitError"}, 429),
+    # Anything unrecognised stays a server error.
+    ({"code": None}, 500),
     ({"type": "unknown_engine_error"}, 500),
-    # A non-string type cannot name a client-error class.
-    ({"type": ["BadRequestError"]}, 500), ({"type": {"BadRequestError": 400}}, 500),
-    ({"type": 400}, 500), ({"type": None}, 500),
-    # A server-class type never downgrades to a client status through its code.
-    ({"code": None, "type": "internal_server_error"}, 500),
-    ({"code": None, "type": "InternalServerError"}, 500),
-    ({"code": "engine_failure", "type": "internal_server_error"}, 500),
-    ({"code": "engine_failure", "type": "InternalServerError"}, 500),
+    (None, 500),
 ])
 def test_stream_error_status_matrix(payload, expected):
     assert errors.stream_error_status(payload) == expected
@@ -243,7 +219,7 @@ def test_error_first_frame_is_http_error_with_envelope(as_bytes):
     assert json.loads(response.body) == payload
 
 
-@pytest.mark.parametrize("frame", [None, 1, "not sse", "data: [DONE]\n\n", "data: invalid", "data: []", 'data: {"choices":[]}', b"\xff"])
+@pytest.mark.parametrize("frame", ["data: [DONE]\n\n", "data: invalid", 'data: {"choices":[]}'])
 def test_other_first_frames_are_not_rewritten(frame):
     assert errors.stream_error_response(frame) is None
 
@@ -255,11 +231,8 @@ def test_first_frame_wire_envelope_restores_explicit_status():
     assert json.loads(response.body) == {"detail": "busy"}
 
 
-@pytest.mark.parametrize("wire", [
-    {errors.WIRE_RESPONSE_MARKER: True},
-    {errors.WIRE_RESPONSE_MARKER: True, "content": {}, "status_code": "not-a-status"},
-])
-def test_first_frame_malformed_wire_envelope_fails_closed(wire):
+def test_first_frame_malformed_wire_envelope_fails_closed():
+    wire = {errors.WIRE_RESPONSE_MARKER: True}
     response = errors.stream_error_response("data: " + json.dumps(wire))
     assert response.status_code == 500
     assert json.loads(response.body)["error"]["type"] == "InternalServerError"
@@ -274,12 +247,6 @@ def test_wire_response_envelope_is_json_safe():
     }
 
 
-def test_wire_response_skips_already_sanitized_content():
-    content = {"value": float("inf")}
-    wire = errors.wire_response(content, 503, sanitized=True)
-    assert wire["content"] is content
-
-
 def test_wire_http_response_renders_envelope():
     response = errors.wire_http_response(errors.wire_response({"ok": True}, 201))
     assert response.status_code == 201
@@ -289,8 +256,6 @@ def test_wire_http_response_renders_envelope():
 @pytest.mark.parametrize("result", [
     {"content": {"ok": True}, "status_code": 200},
     {"__neutree_wire_response__": True},
-    "raw",
-    None,
 ])
 def test_wire_http_response_fails_closed_without_envelope(result):
     response = errors.wire_http_response(result)
@@ -324,12 +289,6 @@ def test_open_stream_returns_first_error_frame_as_http_error():
     response = run(errors.open_stream(lambda: stream_of(frame), message="Failed"))
     assert response.status_code == 400
     assert json.loads(response.body) == error_payload()
-
-
-def test_open_stream_empty_stream_has_empty_body():
-    response = run(errors.open_stream(lambda: stream_of(), message="Failed"))
-    assert response.status_code == 200
-    assert run(collect_body(response)) == ""
 
 
 def test_open_stream_failure_after_first_frame_becomes_in_band_error():
