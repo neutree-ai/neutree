@@ -79,7 +79,9 @@ var _ = Describe("K8s Accelerator Virtualization", Ordered,
 			component := cluster.Status.ComponentStatus[v1.ComponentStatusAcceleratorVirtualizationKey]
 			Expect(component.Phase).To(Equal(v1.ComponentPhaseReady))
 			Expect(component.Managed).To(BeTrue())
-			Expect(component.Version).NotTo(BeEmpty())
+			expectedHAMiVersion, err := clusterversion.HAMiVersionForCluster(cluster.GetVersion())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(component.Version).To(Equal(expectedHAMiVersion))
 
 			productName = expectNVIDIAVirtualizedClusterResources(cluster)
 		})

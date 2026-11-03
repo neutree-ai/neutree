@@ -1,7 +1,6 @@
-// Package component defines release pins for bundled infrastructure components.
+// Package component defines release versions for bundled
+// infrastructure components shared by deployment and cluster renderers.
 package component
-
-const HAMi = "v2.9.0"
 
 // VictoriaMetrics image versions.
 const (
@@ -36,3 +35,8 @@ const Vector = "0.47.0-debian"
 
 // Kong image version.
 const Kong = "3.9"
+
+const (
+	HAMi     = "v2.9.0"
+	V130HAMI = "v2.10.0"
+)

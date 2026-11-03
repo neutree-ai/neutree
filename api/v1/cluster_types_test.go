@@ -26,7 +26,7 @@ func TestClusterAcceleratorVirtualizationSerialization(t *testing.T) {
 				ComponentStatusAcceleratorVirtualizationKey: {
 					Phase:   ComponentPhaseReady,
 					Managed: true,
-					Version: "v2.9.0",
+					Version: "v2.10.0",
 				},
 			},
 		},
@@ -45,7 +45,7 @@ func TestClusterAcceleratorVirtualizationSerialization(t *testing.T) {
 
 	require.NotNil(t, got.Status.ComponentStatus[ComponentStatusAcceleratorVirtualizationKey])
 	assert.Equal(t, ComponentPhaseReady, got.Status.ComponentStatus[ComponentStatusAcceleratorVirtualizationKey].Phase)
-	assert.Equal(t, "v2.9.0", got.Status.ComponentStatus[ComponentStatusAcceleratorVirtualizationKey].Version)
+	assert.Equal(t, "v2.10.0", got.Status.ComponentStatus[ComponentStatusAcceleratorVirtualizationKey].Version)
 }
 
 func TestClusterAcceleratorVirtualizationDisabledWhenMissing(t *testing.T) {

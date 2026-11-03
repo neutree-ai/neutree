@@ -9,6 +9,72 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
+func TestValidateVirtualizationClusterVersions(t *testing.T) {
+	tests := []struct {
+		name      string
+		version   string
+		supported bool
+		wantErr   bool
+	}{
+		{
+			name:      "empty version is unsupported",
+			version:   "",
+			supported: false,
+		},
+		{
+			name:      "v1 shorthand is unsupported",
+			version:   "v1",
+			supported: false,
+		},
+		{
+			name:      "older patch is unsupported",
+			version:   "v1.0.9",
+			supported: false,
+		},
+		{
+			name:      "minimum version is supported",
+			version:   "v1.1.0",
+			supported: true,
+		},
+		{
+			name:      "nightly with minimum base version is supported",
+			version:   "v1.1.0-nightly-20260603",
+			supported: true,
+		},
+		{
+			name:      "newer version is supported",
+			version:   "v1.2.0",
+			supported: true,
+		},
+		{
+			name:    "invalid version returns error",
+			version: "nightly",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAcceleratorVirtualizationClusterSupport(v1.KubernetesClusterType, tt.version)
+			if tt.supported {
+				require.NoError(t, err)
+				return
+			}
+
+			var validationErr *AcceleratorVirtualizationError
+			require.ErrorAs(t, err, &validationErr)
+			if tt.wantErr {
+				assert.Equal(t, AcceleratorVirtualizationInvalidVersionReason, validationErr.Reason)
+				assert.Error(t, validationErr.Unwrap())
+				return
+			}
+
+			assert.Equal(t, AcceleratorVirtualizationUnsupportedVersionReason, validationErr.Reason)
+			assert.Nil(t, validationErr.Unwrap())
+		})
+	}
+}
+
 func TestValidateAcceleratorVirtualizationClusterSupport(t *testing.T) {
 	tests := []struct {
 		name    string
