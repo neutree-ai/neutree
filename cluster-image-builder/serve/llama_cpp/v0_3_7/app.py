@@ -25,6 +25,7 @@ from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_errors import (
     RequestInputError,
+    backend_error,
     error_stream,
     input_error_handler,
     is_streaming,
@@ -237,15 +238,20 @@ class Backend:
 
     async def show_available_models(self) -> Dict[str, Any]:
         """Return a list of available models"""
-        return _to_wire_response({
-            "object": "list",
-            "data": [{
-                "id": self.model_id,
-                "object": "model",
-                "permissions": [],
-                "owned_by": "local",
-            }]
-        })
+        # Model metadata comes from the loaded engine; a failure here must stay a
+        # rendered 500 rather than escaping the actor as a RayTaskError.
+        try:
+            return _to_wire_response({
+                "object": "list",
+                "data": [{
+                    "id": self.model_id,
+                    "object": "model",
+                    "permissions": [],
+                    "owned_by": "local",
+                }]
+            })
+        except Exception as exc:
+            return _to_wire_response(backend_error(exc, "show_available_models"))
 
 
 app = FastAPI()

@@ -103,6 +103,11 @@ def test_model_load_error_is_contained(wrapper, method, payload):
     assert result["status_code"] == 500 and result["content"]["error"]["message"] == "load failed"
 
 
+def test_model_list_error_is_contained(wrapper):
+    del wrapper.backend.model_id
+    assert call(wrapper, "show_available_models")["status_code"] == 500
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_nonfinite_values_are_sanitized(wrapper, value):
     wrapper.llama.create_chat_completion.return_value = {"value": value}
