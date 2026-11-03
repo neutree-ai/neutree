@@ -179,9 +179,10 @@ time.sleep(30)
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		// The CLI keeps a stopped case inspectable, and the monitor must not
-		// delete what the CLI reports as retained.
-		require.DirExists(t, remoteDir)
+		// The lease only expires when the CLI is gone, so nothing will ever
+		// collect the case directory; the monitor removes it instead of leaking
+		// another result per interrupted run.
+		require.NoDirExists(t, remoteDir)
 	case <-time.After(12 * time.Second):
 		t.Fatal("monitor did not stop the benchmark after the lease expired")
 	}
@@ -448,7 +449,7 @@ func (r *cancelLifecycleRunner) record(event string) {
 	r.events = append(r.events, event)
 }
 
-func (r *cancelLifecycleRunner) Run(ctx context.Context, command string, stdout, _ io.Writer) error {
+func (r *cancelLifecycleRunner) Run(ctx context.Context, command string, _, _ io.Writer) error {
 	switch {
 	case command == benchmarkPreflightCommand():
 		return nil
@@ -476,10 +477,6 @@ func (r *cancelLifecycleRunner) Run(ctx context.Context, command string, stdout,
 
 		return nil
 	case strings.HasPrefix(command, "touch -- "):
-		return nil
-	case strings.HasPrefix(command, "python3 -c "):
-		_, _ = io.WriteString(stdout, `{"data":[{"name":"router-model"}]}`)
-
 		return nil
 	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
 		r.record("prepare")
@@ -519,6 +516,59 @@ func TestControlledBenchmarkStopsOnDeadline(t *testing.T) {
 	}
 
 	require.Contains(t, runner.events, "stop")
+}
+
+type exitStatusError struct{ code int }
+
+func (e exitStatusError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+
+func (e exitStatusError) ExitStatus() int { return e.code }
+
+// A monitor that could not stop the benchmark exits 137. That is the only sign
+// the process may still hold the GPU, so a cancellation must not report a plain
+// "context canceled" over it.
+type monitorStopFailureRunner struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (r *monitorStopFailureRunner) Run(_ context.Context, command string, _, _ io.Writer) error {
+	switch {
+	case strings.Contains(command, "# neutree-bench-monitor"):
+		close(r.started)
+		<-r.stopped
+
+		return exitStatusError{code: benchmarkMonitorStopFailureExitCode}
+	case strings.HasPrefix(command, ": > "):
+		close(r.stopped)
+
+		return nil
+	default:
+		return nil
+	}
+}
+
+func TestControlledBenchmarkReportsAProcessGroupThatDoesNotStop(t *testing.T) {
+	runner := &monitorStopFailureRunner{started: make(chan struct{}), stopped: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- runControlledBenchmark(ctx, runner, "/tmp/bench-case", "benchmark", io.Discard)
+	}()
+
+	<-runner.started
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorContains(t, err, "process group did not stop")
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled benchmark did not return")
+	}
 }
 
 type stalledExecutionRunner struct {

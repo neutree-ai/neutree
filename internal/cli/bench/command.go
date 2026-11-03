@@ -23,8 +23,9 @@ type BenchTarget struct {
 	BaseURL   string
 	Model     string
 	// Tokenizer is the model path the engine reads inside its own container.
-	// vllm bench runs there too, so it tokenizes prompt lengths with the same
-	// files the server serves.
+	// vllm bench runs there too, so it tokenizes prompt lengths from the same
+	// files the server serves. It does not forward the engine's tokenizer
+	// overrides (--tokenizer-mode, --trust-remote-code).
 	Tokenizer string
 
 	runner  remoteRunner
@@ -85,6 +86,7 @@ func benchmarkMonitorCommand(remoteDir, command string, lease time.Duration) str
 		shellQuote(benchmarkRenewPath(remoteDir)),
 		shellQuote(benchmarkCancelPath(remoteDir)),
 		shellQuote(benchmarkLogPath(remoteDir)),
+		shellQuote(remoteDir),
 		strconv.Itoa(int(lease / time.Second)),
 		shellQuote(command),
 	}

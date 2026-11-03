@@ -107,6 +107,74 @@ func TestPathUsesAPinnedBentoMLVersion(t *testing.T) {
 	require.Equal(t, "/models-cache/default/iris/v3", path)
 }
 
+// The deploy variables carry both path and version, so Resolve hands back the
+// version it placed rather than making the caller look it up a second time.
+func TestResolveReturnsTheVersionItPlaced(t *testing.T) {
+	mockRegistry := &modelregistrymocks.MockModelRegistry{}
+	mockRegistry.On("GetModelVersion", "iris", "latest").Return(&v1.ModelVersion{Name: "v1.0.0"}, nil)
+
+	previous := model_registry.NewModelRegistry
+	model_registry.NewModelRegistry = func(*v1.ModelRegistry) (model_registry.ModelRegistry, error) {
+		return mockRegistry, nil
+	}
+	t.Cleanup(func() { model_registry.NewModelRegistry = previous })
+
+	path, version, err := Resolve(&v1.Cluster{}, endpointWithModel("iris", "latest"), &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType, Url: "nfs://bentoml.example/models"},
+	}, testMountRoot)
+
+	require.NoError(t, err)
+	require.Equal(t, "/models-cache/default/iris/v1.0.0", path)
+	require.Equal(t, "v1.0.0", version)
+}
+
+// A caller that resolved the version through the control plane has no registry
+// mount to read, so PathWithVersion must place the model without touching it.
+func TestPathWithVersionUsesTheGivenVersion(t *testing.T) {
+	path, err := PathWithVersion(&v1.Cluster{}, endpointWithModel("iris", "latest"), &v1.ModelRegistry{
+		Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType, Url: "nfs://bentoml.example/models"},
+	}, testMountRoot, "v2.0.0")
+
+	require.NoError(t, err)
+	require.Equal(t, "/models-cache/default/iris/v2.0.0", path)
+}
+
+func TestRealVersionNeedsStorage(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		modelRegistry *v1.ModelRegistry
+		version       string
+		want          bool
+	}{
+		{
+			name:          "bentoml latest",
+			modelRegistry: &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType}},
+			version:       v1.LatestVersion,
+			want:          true,
+		},
+		{
+			name:          "bentoml empty version",
+			modelRegistry: &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType}},
+			want:          true,
+		},
+		{
+			name:          "bentoml pinned version",
+			modelRegistry: &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: v1.BentoMLModelRegistryType}},
+			version:       "v1.0.0",
+		},
+		{
+			name:          "hub registry",
+			modelRegistry: &v1.ModelRegistry{Spec: &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType}},
+			version:       v1.LatestVersion,
+		},
+		{name: "no registry", version: v1.LatestVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, RealVersionNeedsStorage(tc.modelRegistry, tc.version))
+		})
+	}
+}
+
 func TestRealVersionResolvesABentoMLArtifact(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

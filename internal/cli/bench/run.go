@@ -40,11 +40,18 @@ type clusterCredentialsGetter interface {
 	GetClusterCredentialsContext(ctx context.Context, workspace, name string) (*v1.Cluster, error)
 }
 
+// modelVersionGetter resolves a registry version reference through the control
+// plane, which reads the registry from its own mount.
+type modelVersionGetter interface {
+	Get(workspace, registry, modelName, version string) (*client.ModelDetail, error)
+}
+
 type targetResolver func(context.Context, *v1.Endpoint, *v1.Cluster, *v1.Cluster) (BenchTarget, error)
 
 type dependencies struct {
 	resources          resourceGetter
 	clusterCredentials clusterCredentialsGetter
+	modelVersions      modelVersionGetter
 	resolveTarget      targetResolver
 }
 
@@ -92,6 +99,7 @@ func Run(ctx context.Context, api *client.Client, options Options) (string, erro
 	return run(ctx, dependencies{
 		resources:          api.Generic,
 		clusterCredentials: api,
+		modelVersions:      api.Models,
 		resolveTarget:      resolveTarget,
 	}, options)
 }
@@ -326,7 +334,7 @@ func resolveRunTarget(ctx context.Context, deps dependencies, options Options) (
 
 	klog.Info("benchmark target resolving")
 
-	tokenizer, err := resolveTokenizerPath(ctx, deps.resources, options.Workspace, endpoint, cluster)
+	tokenizer, err := resolveTokenizerPath(ctx, deps, options.Workspace, endpoint, cluster)
 	if err := contextOrError(ctx, err); err != nil {
 		return nil, BenchTarget{}, err
 	}
@@ -388,23 +396,57 @@ func loadCluster(ctx context.Context, resources resourceGetter, workspace, name 
 // its own container. The benchmark runs in that container and passes the path to
 // the tokenizer, so prompt lengths are tokenized with the files the server
 // actually serves.
-func resolveTokenizerPath(ctx context.Context, resources resourceGetter, workspace string, endpoint *v1.Endpoint, cluster *v1.Cluster) (string, error) {
+func resolveTokenizerPath(ctx context.Context, deps dependencies, workspace string, endpoint *v1.Endpoint, cluster *v1.Cluster) (string, error) {
 	mountRoot := v1.DefaultK8sClusterModelCacheMountPath
 	if cluster.Spec.Type == v1.SSHClusterType {
 		mountRoot = v1.DefaultSSHClusterModelCacheMountPath
 	}
 
-	modelRegistry, err := loadEndpointModelRegistry(ctx, resources, workspace, endpoint)
+	modelRegistry, err := loadEndpointModelRegistry(ctx, deps.resources, workspace, endpoint)
 	if err != nil {
 		return "", err
 	}
 
-	modelPath, err := modelpath.Path(cluster, endpoint, modelRegistry, mountRoot)
+	modelVersion, err := resolveModelVersion(deps.modelVersions, workspace, endpoint, modelRegistry)
+	if err != nil {
+		return "", err
+	}
+
+	modelPath, err := modelpath.PathWithVersion(cluster, endpoint, modelRegistry, mountRoot, modelVersion)
 	if err != nil {
 		return "", fmt.Errorf("resolve model path: %w", err)
 	}
 
 	return modelPath, nil
+}
+
+// resolveModelVersion returns the version the model is placed under. A BentoML
+// registry resolves "latest" by reading the registry's storage, which only the
+// control plane mounts; everyone else takes the reference from the spec.
+func resolveModelVersion(modelVersions modelVersionGetter, workspace string, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry) (string, error) {
+	if endpoint.Spec.Model == nil {
+		return "", nil
+	}
+
+	version := endpoint.Spec.Model.Version
+	if !modelpath.RealVersionNeedsStorage(modelRegistry, version) {
+		return version, nil
+	}
+
+	if modelVersions == nil {
+		return "", fmt.Errorf("resolve version of model %q: Neutree API client is required", endpoint.Spec.Model.Name)
+	}
+
+	detail, err := modelVersions.Get(workspace, endpoint.Spec.Model.Registry, endpoint.Spec.Model.Name, version)
+	if err != nil {
+		return "", fmt.Errorf("resolve version of model %q: %w", endpoint.Spec.Model.Name, err)
+	}
+
+	if detail == nil || detail.Version == nil || detail.Version.Name == "" {
+		return "", fmt.Errorf("resolve version of model %q: control plane reported no version", endpoint.Spec.Model.Name)
+	}
+
+	return detail.Version.Name, nil
 }
 
 // loadEndpointModelRegistry returns the registry the Endpoint deploys from, or

@@ -29,7 +29,10 @@ func selectKubernetesTarget(pods []corev1.Pod) (kubernetesTarget, error) {
 	candidates := make([]corev1.Pod, 0, len(pods))
 
 	for _, pod := range pods {
-		if pod.Status.Phase == corev1.PodRunning && podReady(pod) {
+		// A terminating Pod keeps its Running phase and Ready condition until
+		// SIGTERM, so only the deletion timestamp tells it apart from a target
+		// that stays up for the whole benchmark.
+		if pod.Status.Phase == corev1.PodRunning && podReady(pod) && pod.DeletionTimestamp == nil {
 			candidates = append(candidates, pod)
 		}
 	}

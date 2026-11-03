@@ -22,6 +22,43 @@ import (
 // A registry the orchestrator does not place from leaves the model at the bare
 // name the endpoint spec carries.
 func Path(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, mountRoot string) (string, error) {
+	path, _, err := Resolve(cluster, endpoint, modelRegistry, mountRoot)
+	return path, err
+}
+
+// Resolve returns the container path and the model version that path was built
+// from. Callers that also need the version -- the deploy variables carry both
+// path and version -- resolve it once here instead of reading the registry
+// again.
+func Resolve(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, mountRoot string) (string, string, error) {
+	if cluster == nil || endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Model == nil {
+		return "", "", fmt.Errorf("cluster, endpoint, and endpoint model are required")
+	}
+
+	modelVersion := endpoint.Spec.Model.Version
+
+	if placedIntoModelCache(modelRegistry) {
+		var err error
+
+		modelVersion, err = RealVersion(modelRegistry, endpoint.Spec.Model.Name, modelVersion)
+		if err != nil {
+			return "", "", fmt.Errorf("get deployed model real version for model %s: %w", endpoint.Spec.Model.Name, err)
+		}
+	}
+
+	path, err := PathWithVersion(cluster, endpoint, modelRegistry, mountRoot, modelVersion)
+	if err != nil {
+		return "", "", err
+	}
+
+	return path, modelVersion, nil
+}
+
+// PathWithVersion returns the container path for a model version the caller
+// already resolved. The control plane reads a registry's version reference
+// from its own mount; a caller without that mount has to ask the control plane
+// and place the model here.
+func PathWithVersion(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelRegistry, mountRoot, modelVersion string) (string, error) {
 	if cluster == nil || endpoint == nil || endpoint.Spec == nil || endpoint.Spec.Model == nil {
 		return "", fmt.Errorf("cluster, endpoint, and endpoint model are required")
 	}
@@ -32,8 +69,15 @@ func Path(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelReg
 		return modelName, nil
 	}
 
-	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
+	modelCacheRelativePath, err := clusterModelCacheRelativePath(cluster)
+	if err != nil {
+		return "", err
+	}
 
+	return filepath.Join(mountRoot, modelCacheRelativePath, modelName, modelVersion), nil
+}
+
+func clusterModelCacheRelativePath(cluster *v1.Cluster) (string, error) {
 	modelCaches, err := util.GetClusterModelCache(*cluster)
 	if err != nil {
 		return "", fmt.Errorf("get cluster model cache: %w", err)
@@ -41,15 +85,18 @@ func Path(cluster *v1.Cluster, endpoint *v1.Endpoint, modelRegistry *v1.ModelReg
 
 	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
 	if len(modelCaches) > 0 {
-		modelCacheRelativePath = modelCaches[0].Name
+		return modelCaches[0].Name, nil
 	}
 
-	modelVersion, err := RealVersion(modelRegistry, modelName, endpoint.Spec.Model.Version)
-	if err != nil {
-		return "", fmt.Errorf("get deployed model real version for model %s: %w", modelName, err)
-	}
+	return v1.DefaultModelCacheRelativePath, nil
+}
 
-	return filepath.Join(mountRoot, modelCacheRelativePath, modelName, modelVersion), nil
+// RealVersionNeedsStorage reports whether RealVersion reads the registry's
+// storage to resolve a version reference. A caller whose host does not mount
+// the registry cannot answer that lookup and has to ask the control plane.
+func RealVersionNeedsStorage(modelRegistry *v1.ModelRegistry, version string) bool {
+	return RegistryType(modelRegistry) == v1.BentoMLModelRegistryType &&
+		(version == "" || version == v1.LatestVersion)
 }
 
 // placedIntoModelCache reports whether the orchestrator downloads the model

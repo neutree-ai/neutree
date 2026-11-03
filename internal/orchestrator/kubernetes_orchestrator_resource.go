@@ -407,13 +407,16 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 	// The engine reads the model from the cluster model cache. Placement is
 	// shared with the SSH path and with the benchmark, which has to tokenize
 	// from the same files the engine serves.
+	var modelVersion string
+
 	if endpoint.Spec.Model != nil {
-		modelPath, err := modelpath.Path(deployedCluster, endpoint, modelRegistry, v1.DefaultK8sClusterModelCacheMountPath)
+		modelPath, version, err := modelpath.Resolve(deployedCluster, endpoint, modelRegistry, v1.DefaultK8sClusterModelCacheMountPath)
 		if err != nil {
 			return errors.Wrap(err, "failed to resolve model path")
 		}
 
 		data.ModelArgs["path"] = modelPath
+		modelVersion = version
 	}
 
 	// With no registry there is nothing to place from: the model args keep the
@@ -422,16 +425,11 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 	case string(v1.BentoMLModelRegistryType):
 		url, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if url != nil && url.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-			if err != nil {
-				return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
-			}
-
-			data.ModelArgs["version"] = modelRealVersion
+			data.ModelArgs["version"] = modelVersion
 			mountPath := filepath.Join("/mnt", "bentoml")
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
-			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
+			data.ModelArgs["registry_path"] = filepath.Join(mountPath, "models", endpoint.Spec.Model.Name, modelVersion)
 
 			data.Volumes = append(data.Volumes, corev1.Volume{
 				Name: "bentoml-model-registry",
@@ -455,12 +453,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			data.Env[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-		if err != nil {
-			return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
-		}
-
-		data.ModelArgs["version"] = modelRealVersion
+		data.ModelArgs["version"] = modelVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
 
 	case v1.ModelScopeModelRegistryType:
@@ -469,12 +462,7 @@ func (k *kubernetesOrchestrator) setModelRegistryVariables(data *DeploymentManif
 			data.Env[v1.ModelScopeTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-		if err != nil {
-			return errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
-		}
-
-		data.ModelArgs["version"] = modelRealVersion
+		data.ModelArgs["version"] = modelVersion
 		data.ModelArgs["registry_path"] = endpoint.Spec.Model.Name
 	}
 

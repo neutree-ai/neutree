@@ -40,6 +40,14 @@ func TestSelectKubernetesTarget(t *testing.T) {
 			},
 			want: kubernetesTarget{PodName: "endpoint-b", Container: "vllm"},
 		},
+		{
+			name: "skips terminating pods",
+			pods: []corev1.Pod{
+				terminatingPod("endpoint-a"),
+				endpointPod("endpoint-b", corev1.PodRunning, true),
+			},
+			want: kubernetesTarget{PodName: "endpoint-b", Container: "vllm"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target, err := selectKubernetesTarget(tc.pods)
@@ -58,6 +66,14 @@ func endpointPod(name string, phase corev1.PodPhase, ready bool) corev1.Pod {
 	if ready {
 		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
 	}
+
+	return pod
+}
+
+func terminatingPod(name string) corev1.Pod {
+	pod := endpointPod(name, corev1.PodRunning, true)
+	now := metav1.Now()
+	pod.DeletionTimestamp = &now
 
 	return pod
 }

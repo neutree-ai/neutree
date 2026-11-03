@@ -518,19 +518,43 @@ func TestBenchmarkCaseErrorStatusMarksDeadlinesCanceled(t *testing.T) {
 	require.Equal(t, benchmarkFailedStatus, benchmarkCaseErrorStatus(errors.New("benchmark failed")))
 }
 
+type fakeModelVersions struct {
+	version string
+	err     error
+	calls   []string
+}
+
+func (f *fakeModelVersions) Get(workspace, registry, modelName, version string) (*client.ModelDetail, error) {
+	f.calls = append(f.calls, workspace+"/"+registry+"/"+modelName+"/"+version)
+	if f.err != nil {
+		return nil, f.err
+	}
+
+	return &client.ModelDetail{Version: &v1.ModelVersion{Name: f.version}}, nil
+}
+
 func TestResolveTokenizerPath(t *testing.T) {
 	resources := fakeResourceGetter{resources: map[string]json.RawMessage{
 		resourceKey("ModelRegistry", "default", "hub"): mustJSON(t, v1.ModelRegistry{
 			Metadata: &v1.Metadata{Workspace: "default", Name: "hub"},
 			Spec:     &v1.ModelRegistrySpec{Type: v1.HuggingFaceModelRegistryType},
 		}),
+		resourceKey("ModelRegistry", "default", "bento"): mustJSON(t, v1.ModelRegistry{
+			Metadata: &v1.Metadata{Workspace: "default", Name: "bento"},
+			Spec: &v1.ModelRegistrySpec{
+				Type: v1.BentoMLModelRegistryType,
+				Url:  "nfs://bentoml.example/models",
+			},
+		}),
 	}}
 
 	for _, tc := range []struct {
-		name     string
-		endpoint *v1.Endpoint
-		cluster  *v1.Cluster
-		want     string
+		name          string
+		endpoint      *v1.Endpoint
+		cluster       *v1.Cluster
+		modelVersions *fakeModelVersions
+		want          string
+		wantLookup    bool
 	}{
 		{
 			name: "kubernetes mount root",
@@ -556,11 +580,47 @@ func TestResolveTokenizerPath(t *testing.T) {
 			cluster: &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
 			want:    "router-model",
 		},
+		{
+			// A pinned version needs no registry read, so it is taken from the
+			// spec even though a CLI host has no BentoML mount.
+			name: "pinned bentoml version",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "iris", Version: "v3", Registry: "bento"},
+			}},
+			cluster:       &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			modelVersions: &fakeModelVersions{version: "unused"},
+			want:          "/models-cache/default/iris/v3",
+		},
+		{
+			name: "bentoml latest resolved through the control plane",
+			endpoint: &v1.Endpoint{Spec: &v1.EndpointSpec{
+				Model: &v1.ModelSpec{Name: "iris", Version: v1.LatestVersion, Registry: "bento"},
+			}},
+			cluster:       &v1.Cluster{Spec: &v1.ClusterSpec{Type: v1.KubernetesClusterType}},
+			modelVersions: &fakeModelVersions{version: "v1.0.0"},
+			want:          "/models-cache/default/iris/v1.0.0",
+			wantLookup:    true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path, err := resolveTokenizerPath(context.Background(), resources, "default", tc.endpoint, tc.cluster)
+			deps := dependencies{resources: resources}
+			if tc.modelVersions != nil {
+				deps.modelVersions = tc.modelVersions
+			}
+
+			path, err := resolveTokenizerPath(context.Background(), deps, "default", tc.endpoint, tc.cluster)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, path)
+
+			if tc.modelVersions == nil {
+				return
+			}
+
+			if tc.wantLookup {
+				require.Equal(t, []string{"default/bento/iris/latest"}, tc.modelVersions.calls)
+			} else {
+				require.Empty(t, tc.modelVersions.calls)
+			}
 		})
 	}
 }

@@ -22,6 +22,11 @@ const (
 	remoteLeaseTimeout  = 60 * time.Second
 	remoteRenewInterval = 10 * time.Second
 	remoteRenewTimeout  = 5 * time.Second
+
+	// benchmarkMonitorStopFailureExitCode is how the monitor reports a process
+	// group that survived SIGKILL escalation. A canceled run exits 130, which is
+	// the expected outcome of a cancellation.
+	benchmarkMonitorStopFailureExitCode = 137
 )
 
 // remoteStopGrace bounds how long the CLI waits for the monitor to confirm it
@@ -43,15 +48,16 @@ var errRemoteTerminationUnconfirmed = errors.New("remote benchmark termination n
 const benchmarkMonitorScript = `# neutree-bench-monitor
 import os
 import select
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
 
-renew, cancel, log = sys.argv[1:4]
-lease = float(sys.argv[4])
-command = sys.argv[5]
+renew, cancel, log, result_dir = sys.argv[1:5]
+lease = float(sys.argv[5])
+command = sys.argv[6]
 
 if os.path.exists(cancel):
     sys.exit(130)
@@ -137,12 +143,16 @@ def finish(code):
             time.sleep(0.02)
     sys.exit(code)
 
-# The remote directory is never removed here: the CLI keeps a stopped case
-# inspectable, and deleting it from the monitor would contradict that.
+# A canceled case is retained for the CLI to inspect. A case stopped by the
+# lease is not: the lease only expires when the CLI is gone, so nothing will
+# ever collect the directory, and leaving it behind would leak another
+# multi-megabyte result per interrupted run.
+expired = False
 while child.poll() is None:
     if os.path.exists(cancel):
         break
     if time.time() - os.stat(renew).st_mtime > lease:
+        expired = True
         break
     time.sleep(0.2)
 
@@ -151,6 +161,8 @@ if child.poll() is None:
         sys.stderr.write("neutree-bench: benchmark process group did not stop\n")
         sys.stderr.flush()
         finish(137)
+    if expired and not os.path.exists(os.path.join(result_dir, "result.json")):
+        shutil.rmtree(result_dir, ignore_errors=True)
     finish(130)
 
 kill_group(signal.SIGKILL)
@@ -255,12 +267,14 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 
 	finished := false
 
+	var monitorErr error
+
 	select {
-	case runErr := <-done:
+	case monitorErr = <-done:
 		finished = true
 
 		if ctx.Err() == nil {
-			return runErr
+			return monitorErr
 		}
 	case <-ctx.Done():
 	}
@@ -274,11 +288,30 @@ func runControlledBenchmark(ctx context.Context, runner remoteRunner, remoteDir,
 	// that did not happen.
 	if !finished {
 		select {
-		case <-done:
+		case monitorErr = <-done:
 		case <-time.After(remoteStopGrace):
 			return fmt.Errorf("%w: %w", errRemoteTerminationUnconfirmed, ctx.Err())
 		}
 	}
 
+	// A normal cancellation ends with the monitor's 130. Any other exit means
+	// the benchmark may still be running on the GPU, and the user has to know
+	// that instead of reading a plain "canceled".
+	if code, ok := remoteExitCode(monitorErr); ok && code == benchmarkMonitorStopFailureExitCode {
+		return fmt.Errorf("%w; the remote benchmark process group did not stop", ctx.Err())
+	}
+
 	return ctx.Err()
+}
+
+// remoteExitCode returns the exit status a failed remote command reported, when
+// the runner preserved it.
+func remoteExitCode(err error) (int, bool) {
+	var exitErr interface{ ExitStatus() int }
+
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitStatus(), true
+	}
+
+	return 0, false
 }

@@ -43,6 +43,10 @@ func readBenchmarkResultSummary(path string) (benchmarkResultSummary, error) {
 // collected no samples that way, and encoding/json refuses the whole document
 // over a value the summary may not even read. Text inside strings is left
 // untouched.
+//
+// It looks ahead with Peek, so the source must be able to deliver its bytes
+// without waiting on a live stream: it is meant for the result file, not for
+// exec output.
 func newNaNTolerantReader(source io.Reader) io.Reader {
 	return &nanTolerantReader{reader: bufio.NewReader(source)}
 }

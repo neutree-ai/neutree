@@ -966,13 +966,16 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	// The engine reads the model from the cluster model cache. Placement is
 	// shared with the Kubernetes path and with the benchmark, which has to
 	// tokenize from the same files the engine serves.
+	var modelVersion string
+
 	if endpoint.Spec.Model != nil {
-		modelPath, err := modelpath.Path(deployedCluster, endpoint, modelRegistry, v1.DefaultSSHClusterModelCacheMountPath)
+		modelPath, version, err := modelpath.Resolve(deployedCluster, endpoint, modelRegistry, v1.DefaultSSHClusterModelCacheMountPath)
 		if err != nil {
 			return dashboard.RayServeApplication{}, errors.Wrap(err, "failed to resolve model path")
 		}
 
 		modelArgs["path"] = modelPath
+		modelVersion = version
 	}
 
 	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
@@ -986,17 +989,12 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 	case string(v1.BentoMLModelRegistryType):
 		registryURL, _ := url.Parse(modelRegistry.Spec.Url) // nolint: errcheck
 		if registryURL != nil && registryURL.Scheme == v1.BentoMLModelRegistryConnectTypeNFS {
-			modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-			if err != nil {
-				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get real model version for model %s", endpoint.Spec.Model.Name)
-			}
-
 			nfsMountPath := filepath.Join("/mnt", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 
-			modelArgs["version"] = modelRealVersion
+			modelArgs["version"] = modelVersion
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
-			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
+			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelVersion)
 		}
 	case string(v1.HuggingFaceModelRegistryType):
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -1004,12 +1002,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv[v1.HFTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-		if err != nil {
-			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
-		}
-
-		modelArgs["version"] = modelRealVersion
+		modelArgs["version"] = modelVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
 	case v1.ModelScopeModelRegistryType:
 		applicationEnv[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -1017,12 +1010,7 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			applicationEnv[v1.ModelScopeTokenEnv] = modelRegistry.Spec.Credentials
 		}
 
-		modelRealVersion, err := modelpath.RealVersion(modelRegistry, endpoint.Spec.Model.Name, endpoint.Spec.Model.Version)
-		if err != nil {
-			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get deployed model real version for model %s", endpoint.Spec.Model.Name)
-		}
-
-		modelArgs["version"] = modelRealVersion
+		modelArgs["version"] = modelVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
 	}
 
