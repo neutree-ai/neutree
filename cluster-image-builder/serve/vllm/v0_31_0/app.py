@@ -429,12 +429,14 @@ class Controller:
         if is_streaming(req_obj):
             # A factory keeps RPC construction inside open_stream's first-frame guard.
             def start() -> DeploymentResponseGenerator:
+                """Build the Backend stream when open_stream starts it."""
                 return self.backend.options(stream=True).generate.remote(req_obj)
 
             return await open_stream(
                 start,
                 message="Failed to initialize chat completion stream",
             )
+        # Non-streaming responses are rendered from the Backend's wire envelope.
         result = await self.backend.options(stream=False).generate.remote(req_obj)
         return wire_http_response(result)
 

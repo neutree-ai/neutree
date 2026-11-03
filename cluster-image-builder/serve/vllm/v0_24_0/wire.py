@@ -30,6 +30,7 @@ from serve._utils.serve_errors import (
 
 
 def _backend_error(exc: Exception, where: str) -> Any:
+    """Map an exception to the native factory, logging only unexpected failures."""
     if isinstance(exc, RequestInputError):
         return backend_error(exc, where)
     if not isinstance(exc, GenerationError):
@@ -44,6 +45,7 @@ def _backend_error(exc: Exception, where: str) -> Any:
 
 
 async def _parse_request(request_type, payload):
+    """Validate with the native request model and return native validation errors."""
     try:
         return request_type(**payload)
     except ValidationError as exc:
@@ -54,6 +56,7 @@ async def _parse_request(request_type, payload):
 
 
 def _to_wire_response(result: Any) -> Dict[str, Any]:
+    """Convert a native result into the JSON-safe wire envelope."""
     try:
         status_code = result.error.code if isinstance(result, ErrorResponse) else 200
         if isinstance(result, JSONResponse):
@@ -72,6 +75,7 @@ def _to_wire_response(result: Any) -> Dict[str, Any]:
     return wire_response(content, status_code, sanitized=True)
 
 async def _to_wire_stream(chunks):
+    """Frame native chunks as SSE and contain iteration errors in the Backend."""
     try:
         async for chunk in chunks:
             if isinstance(chunk, (str, bytes)):

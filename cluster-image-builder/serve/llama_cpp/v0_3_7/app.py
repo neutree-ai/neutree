@@ -206,10 +206,12 @@ class Backend:
             # engine the normalized decision so a false-like spelling cannot start
             # a stream while the Controller renders a non-stream response.
             if "messages" in payload:
+                # Chat completion
                 params = _filter_supported(payload, _CHAT_PARAMS)
                 params["stream"] = stream
                 response = llama.create_chat_completion(**params)
             else:
+                # Regular completion
                 params = _filter_supported(payload, _COMPLETION_PARAMS)
                 params["stream"] = stream
                 response = llama.create_completion(**params)
@@ -234,6 +236,7 @@ class Backend:
             return _to_wire_response(content, status_code)
 
     async def show_available_models(self) -> Dict[str, Any]:
+        """Return a list of available models"""
         return _to_wire_response({
             "object": "list",
             "data": [{
@@ -276,12 +279,14 @@ class Controller:
         if is_streaming(req_obj):
             # A factory keeps RPC construction inside open_stream's first-frame guard.
             def start() -> DeploymentResponseGenerator:
+                """Build the Backend stream when open_stream starts it."""
                 return self.backend.options(stream=True).generate.remote(req_obj)
 
             return await open_stream(
                 start,
                 message="Failed to initialize completion stream",
             )
+        # Non-streaming responses are rendered from the Backend's wire envelope.
         result = await self.backend.options(stream=False).generate.remote(req_obj)
         return wire_http_response(result)
 

@@ -102,6 +102,10 @@ def _build_request_router_config(scheduler_config: Dict[str, Any]) -> Optional[R
 
 
 async def _iter_response_body(result) -> AsyncGenerator[str, None]:
+    """Yield SSE chunks (as strings) from a serving-handler StreamingResponse.
+
+    A non-streaming error result becomes one error frame followed by ``[DONE]``.
+    """
     if isinstance(result, StreamingResponse):
         async for chunk in result.body_iterator:
             if isinstance(chunk, bytes):
@@ -128,6 +132,7 @@ def _flat_error_response(response: JSONResponse) -> JSONResponse:
 
 
 def _to_json_response(result) -> JSONResponse:
+    """Wrap a backend-returned serialisable value in a JSONResponse."""
     response = wire_http_response(result, error_builder=_error_response)
     return _flat_error_response(response) if response.status_code >= 400 else response
 
@@ -397,8 +402,10 @@ class Controller:
         logger.info("[Controller] Initialized with backend handle")
 
     async def _stream(self, method: str, payload: Dict[str, Any]):
+        """Run a streaming Backend method behind the first-frame status guard."""
         # A factory keeps RPC construction inside open_stream's first-frame guard.
         def start() -> DeploymentResponseGenerator:
+            """Build the Backend stream when open_stream starts it."""
             return getattr(self.backend.options(stream=True), method).remote(payload)
 
         response = await open_stream(

@@ -28,6 +28,7 @@ class _FakeRawRequest:
     headers: Dict[str, str] = {}
 
     async def is_disconnected(self) -> bool:
+        """Report a live client; the Controller owns the real connection."""
         return False
 
 
@@ -37,6 +38,7 @@ def _error_content(
     error_type: str | None = None,
     param: str | None = None,
 ) -> Dict[str, Any]:
+    """Build SGLang's flat error body."""
     if not isinstance(error_type, str) or not error_type:
         # HTTPStatus only knows registered codes; engines may report
         # non-standard ones such as 529.
@@ -67,6 +69,7 @@ def _error_response(
 
 
 def _input_error_handler(request, exc) -> JSONResponse:
+    """Render a pre-dispatch input error in SGLang's flat shape."""
     return _error_response(str(exc))
 
 
@@ -92,6 +95,7 @@ def _flatten_http_error(content: Any) -> Any:
 
 
 async def _handle_request(get_handler, request_type, payload):
+    """Validate the payload as SGLang would, then invoke its serving handler."""
     try:
         request = request_type(**payload)
     except ValidationError as exc:
@@ -121,6 +125,7 @@ def _extract_serializable(result) -> Dict[str, Any]:
         content = result
     if not isinstance(result, JSONResponse) and isinstance(content, dict):
         if content.get("object") == "error":
+            # SGLang error payloads use object='error' and include an HTTP code.
             status = stream_error_status(content)
         elif "error" in content:
             status = stream_error_status(content["error"])

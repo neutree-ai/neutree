@@ -25,6 +25,7 @@ from serve._utils.serve_errors import (
 
 
 def _native_error_response(exc: Exception, payload, where: str) -> Tuple[Dict[str, Any], int]:
+    """Map a Backend exception to the native router formatter's body and status."""
     if isinstance(exc, RequestInputError):
         return backend_error(exc, where), 400
     try:
@@ -54,6 +55,7 @@ def _native_error_response(exc: Exception, payload, where: str) -> Tuple[Dict[st
 
 
 async def _stream_chunks(chunks, payload, where: str):
+    """Iterate native chunks as SSE, containing iteration errors in the Backend."""
     first = True
     try:
         async for chunk in iterate_in_threadpool(chunks):
@@ -80,6 +82,7 @@ async def _stream_chunks(chunks, payload, where: str):
 
 
 def _to_wire_response(result: Any, status_code: int | None = None) -> Dict[str, Any]:
+    """Convert a native result into the JSON-safe wire envelope."""
     try:
         if status_code is None:
             status_code = 200

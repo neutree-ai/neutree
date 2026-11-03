@@ -40,6 +40,7 @@ class RequestInputError(ValueError):
 
 
 async def read_json_object(request) -> dict:
+    """Read the request body as a JSON object, rejecting other JSON values."""
     try:
         payload = await request.json()
     except ValueError as exc:
@@ -79,6 +80,7 @@ def build_error(
     error_type: str = "BadRequestError",
     param: str | None = None,
 ) -> dict:
+    """Build the Neutree error body used by Controller-owned responses."""
     return {"error": {
             "message": message,
             "type": error_type,
@@ -103,10 +105,12 @@ def error_response(
 
 
 async def input_error_handler(request, exc: RequestInputError) -> JSONResponse:
+    """Render a pre-dispatch request error as HTTP 400."""
     return error_response(str(exc))
 
 
 def backend_error(exc: Exception, where: str) -> dict:
+    """Turn a wrapper failure into a neutral error body and log its cause."""
     logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
     if isinstance(exc, RequestInputError):
         return build_error(str(exc))
@@ -193,6 +197,7 @@ async def open_stream(
         return failure
 
     async def replay():
+        """Replay the already-read first frame, then forward the remainder."""
         yield first
         async for chunk in chunks:
             yield chunk
@@ -201,6 +206,7 @@ async def open_stream(
 
 
 async def error_stream(error: Any) -> AsyncGenerator[str, None]:
+    """Render one error frame followed by the SSE terminator."""
     if isinstance(error, JSONResponse):
         error = json.loads(error.body)
     elif hasattr(error, "model_dump"):
@@ -210,6 +216,7 @@ async def error_stream(error: Any) -> AsyncGenerator[str, None]:
 
 
 def stream_error_status(error: Any) -> int:
+    """Recover an HTTP status from a native error body without inventing one."""
     if isinstance(error, dict):
         code = error.get("code")
         if isinstance(code, int) and not isinstance(code, bool) and 400 <= code <= 599:
@@ -231,6 +238,7 @@ def stream_error_status(error: Any) -> int:
 
 
 def stream_error_response(first_chunk: Any) -> JSONResponse | None:
+    """Turn a first error frame into JSON, or return None to replay it as SSE."""
     if isinstance(first_chunk, bytes):
         try:
             first_chunk = first_chunk.decode("utf-8")
