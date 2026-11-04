@@ -90,6 +90,38 @@ describe("passive target failover", function()
         assert.are.equal(2, cooldowns[first.health.key])
     end)
 
+    it("counts a deferred transition once after contention clears", function()
+        local failed = start()
+        local lock = "health\0lock\0" .. failed.health.key
+        dict:safe_add(lock, true, 5)
+        complete(failed, "failure")
+        assert.is_nil(cooldowns[failed.health.key])
+        dict:delete(lock)
+        for _, callback in ipairs(timers) do callback(false) end
+        assert.are.equal(1, cooldowns[failed.health.key])
+        local fallback, selected = start(); assert.are.equal("B", selected)
+        complete(fallback, "success")
+    end)
+
+    it("does not count a failed state write and isolates metric failures from failover", function()
+        local failed = start()
+        local set = dict.safe_set
+        dict.safe_set = function(self, key, ...)
+            if key == "health\0state\0" .. failed.health.key then return nil, "no memory" end
+            return set(self, key, ...)
+        end
+        kong.log.err = function() end
+        complete(failed, "failure")
+        assert.is_nil(cooldowns[failed.health.key])
+        dict.safe_set = set
+        package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"].cooldown = function()
+            error("metrics unavailable")
+        end
+        complete(start(), "failure")
+        local fallback, selected = start(); assert.are.equal("B", selected)
+        complete(fallback, "success")
+    end)
+
     it("preserves single-target routing when there is no alternate destination", function()
         conf.model_routes[1].targets[2] = nil
         complete(start(), "failure")
