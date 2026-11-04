@@ -100,7 +100,7 @@ local function run(conf, fields)
     request.method = fields.method or "POST"
     request.path = fields.path
     request.body = fields.body
-    request.consumer = { custom_id = "key-1" }
+    request.consumer = fields.consumer or { custom_id = "key-1" }
 
     kong.ctx.plugin = {}
     kong.ctx.shared = {
@@ -126,7 +126,7 @@ local function filter_response(conf, fields, chunks)
     request.method = fields.method or "GET"
     request.path = fields.path
     request.body = nil
-    request.consumer = { custom_id = "key-1" }
+    request.consumer = fields.consumer or { custom_id = "key-1" }
 
     kong.ctx.plugin = {}
     kong.ctx.shared = {
@@ -434,5 +434,74 @@ describe("neutree-ai-access model allowlist: model-list responses", function()
         assert.are.equal(original, filter_response(CHAT_ALLOWLIST, {
             path = WORKSPACE_PREFIX .. "/v1/models",
         }, { original }))
+    end)
+end)
+
+-- The global fallback instance runs only for a consumer whose own instance Kong
+-- has not loaded yet. A consumer created with the rules tag must have its own
+-- instance, so the fallback rejects it; an untagged (older) consumer passes.
+describe("neutree-ai-access fallback instance", function()
+    local FALLBACK = { fallback = true }
+    local NEW_KEY = { custom_id = "key-1", tags = { "other", "neutree-access-rules" } }
+    local OLD_KEY = { custom_id = "key-1" }
+    local INFERENCE = {
+        path = WORKSPACE_PREFIX .. "/v1/chat/completions",
+        model = "llama-3-8b",
+        body = [[{"model":"llama-3-8b"}]],
+    }
+
+    local function with_consumer(fields, consumer)
+        local out = { consumer = consumer }
+        for k, v in pairs(fields) do
+            out[k] = v
+        end
+        return out
+    end
+
+    it("rejects inference for a tagged consumer whose rules are not loaded", function()
+        local res = run(FALLBACK, with_consumer(INFERENCE, NEW_KEY))
+        assert_denied(res, "access_rules_not_ready")
+        assert.are.equal("not_permitted", res.body.error.type)
+    end)
+
+    it("rejects a model-list request for a tagged consumer", function()
+        assert_denied(run(FALLBACK, with_consumer({
+            method = "GET",
+            path = WORKSPACE_PREFIX .. "/v1/models",
+        }, NEW_KEY)), "access_rules_not_ready")
+    end)
+
+    it("replaces a synthesized external model list for a tagged consumer", function()
+        local body, headers, status = filter_response(FALLBACK, {
+            path = "/workspace/ws/external-endpoint/provider-a/v1/models",
+            endpoint_type = "external",
+            endpoint_name = "provider-a",
+            consumer = NEW_KEY,
+        }, { [[{"object":"list","data":[{"id":"any-model"}]}]] })
+
+        local decoded = assert(cjson.decode(body))
+        assert.are.equal(403, status)
+        assert.are.equal(true, headers["Content-Length"])
+        assert.are.equal("access_rules_not_ready", decoded.error.code)
+    end)
+
+    it("lets an untagged consumer through", function()
+        assert.is_nil(run(FALLBACK, with_consumer(INFERENCE, OLD_KEY)))
+        local original = [[{"object":"list","data":[{"id":"any-model"}]}]]
+        assert.are.equal(original, filter_response(FALLBACK, {
+            path = WORKSPACE_PREFIX .. "/v1/models",
+            consumer = OLD_KEY,
+        }, { original }))
+    end)
+
+    it("does not reject a tagged consumer through its own unrestricted instance", function()
+        assert.is_nil(run(conf_with(nil), with_consumer(INFERENCE, NEW_KEY)))
+    end)
+
+    it("still applies a tagged consumer's own allowlist", function()
+        assert_denied(run(CHAT_ALLOWLIST, with_consumer({
+            path = WORKSPACE_PREFIX .. "/v1/chat/completions",
+            model = "other-model",
+        }, NEW_KEY)), "model_not_permitted")
     end)
 end)
