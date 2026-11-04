@@ -3,14 +3,21 @@ package bench
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/pkg/client"
@@ -407,4 +414,293 @@ func validOptions(outputDir string) Options {
 		RequestRate:   "inf",
 		OutputDir:     outputDir,
 	}
+}
+
+type fakeBenchRunner struct {
+	mu       sync.Mutex
+	commands []string
+	result   string
+}
+
+func (r *fakeBenchRunner) record(command string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.commands = append(r.commands, command)
+}
+
+func (r *fakeBenchRunner) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return append([]string(nil), r.commands...)
+}
+
+func (r *fakeBenchRunner) Run(_ context.Context, command string, stdout, stderr io.Writer) error {
+	r.record(command)
+
+	switch {
+	case command == benchmarkPreflightCommand():
+		_, _ = io.WriteString(stdout, "usage\n")
+	case strings.HasPrefix(command, "umask 077 && mkdir -- "):
+		return nil
+	case strings.HasPrefix(command, "cat -- "):
+		result := r.result
+		if result == "" {
+			result = `{"completed":20,"failed":0,"duration":1.5,"request_throughput":2.5,"output_throughput":10.5,"p50_ttft_ms":12.5,"p99_ttft_ms":25.5}`
+		}
+
+		_, _ = io.WriteString(stdout, result)
+	case strings.HasPrefix(command, "rm -rf -- "):
+		return nil
+	default:
+		_, _ = io.WriteString(stdout, "benchmark output\n")
+		_, _ = io.WriteString(stderr, "benchmark diagnostics\n")
+	}
+
+	return nil
+}
+
+func findBenchCommand(commands []string, match func(string) bool) string {
+	for _, command := range commands {
+		if match(command) {
+			return command
+		}
+	}
+
+	return ""
+}
+
+func countBenchCommands(commands []string, match func(string) bool) int {
+	count := 0
+
+	for _, command := range commands {
+		if match(command) {
+			count++
+		}
+	}
+
+	return count
+}
+
+type outputRunner struct {
+	stdout string
+	stderr string
+	err    error
+}
+
+func (r outputRunner) Run(_ context.Context, _ string, stdout, stderr io.Writer) error {
+	_, _ = io.WriteString(stdout, r.stdout)
+	_, _ = io.WriteString(stderr, r.stderr)
+
+	return r.err
+}
+
+type caseFailureRunner struct{}
+
+func (r *caseFailureRunner) Run(_ context.Context, command string, stdout, _ io.Writer) error {
+	switch {
+	case command == benchmarkPreflightCommand(),
+		strings.HasPrefix(command, "umask 077 && mkdir -- "),
+		strings.HasPrefix(command, "rm -rf -- "):
+		return nil
+	default:
+		_, _ = io.WriteString(stdout, "benchmark output\n")
+
+		return fmt.Errorf("case failed")
+	}
+}
+
+type emptyResultRunner struct{}
+
+func (r *emptyResultRunner) Run(_ context.Context, command string, stdout, _ io.Writer) error {
+	if strings.HasPrefix(command, "cat -- ") {
+		return nil
+	}
+
+	if strings.HasPrefix(command, "rm -rf -- ") {
+		return nil
+	}
+
+	_, _ = io.WriteString(stdout, "benchmark output")
+
+	return nil
+}
+
+func captureBenchmarkProgress(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	state := klog.CaptureState()
+	t.Cleanup(state.Restore)
+
+	output := &bytes.Buffer{}
+	klog.LogToStderr(false)
+	klog.SetOutput(output)
+
+	return output
+}
+
+// resolvedTarget returns the Endpoint and BenchTarget runBenchmark receives
+// after resolution.
+func resolvedTarget(runner remoteRunner) (v1.Endpoint, BenchTarget) {
+	endpoint, _, _ := benchmarkFixtures()
+	endpoint.Spec.Model.Name = "router-model"
+
+	return endpoint, BenchTarget{
+		Platform:  "kubernetes",
+		RuntimeID: "pod/chat-a:vllm",
+		BaseURL:   "http://router-service.ns.svc.cluster.local:8000/default/chat",
+		Model:     "router-model",
+		Tokenizer: "router-model",
+		runner:    runner,
+	}
+}
+
+func runResolvedBenchmark(t *testing.T, options Options, target BenchTarget) (string, error) {
+	t.Helper()
+
+	endpoint, _ := resolvedTarget(target.runner)
+	output, err := createOutputDirectory(options.OutputDir)
+	require.NoError(t, err)
+
+	err = runBenchmark(
+		context.Background(),
+		&endpoint,
+		target,
+		options,
+		expandCases(options.InputLens, options.OutputLens, options.Concurrencies),
+		output,
+	)
+
+	return output, err
+}
+
+func TestRunBenchmarkCollectsCaseArtifacts(t *testing.T) {
+	runner := &fakeBenchRunner{}
+	progress := captureBenchmarkProgress(t)
+
+	_, target := resolvedTarget(runner)
+	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	require.NoError(t, err)
+	require.DirExists(t, output)
+
+	caseDir := filepath.Join(output, "input-16-output-4-concurrency-2")
+	result, err := os.ReadFile(filepath.Join(caseDir, "result.json"))
+	require.NoError(t, err)
+	require.JSONEq(
+		t,
+		`{"completed":20,"failed":0,"duration":1.5,"request_throughput":2.5,"output_throughput":10.5,"p50_ttft_ms":12.5,"p99_ttft_ms":25.5}`,
+		string(result),
+	)
+
+	stdout, err := os.ReadFile(filepath.Join(caseDir, "stdout.log"))
+	require.NoError(t, err)
+	require.Contains(t, string(stdout), "benchmark output")
+
+	command, err := os.ReadFile(filepath.Join(caseDir, benchmarkCommandFileName))
+	require.NoError(t, err)
+	require.Contains(t, string(command), "vllm bench serve")
+	require.Contains(t, string(command), "--model 'router-model'")
+	require.Contains(t, string(command), "--tokenizer 'router-model'")
+
+	manifest, err := os.ReadFile(filepath.Join(output, manifestFileName))
+	require.NoError(t, err)
+	require.Contains(t, string(manifest), `"measurement_scope": "endpoint-route"`)
+	require.Contains(t, string(manifest), `"model_selection": "first-served-model"`)
+	require.Contains(t, string(manifest), `"model": "router-model"`)
+	require.Contains(t, string(manifest), `"status": "Succeeded"`)
+
+	require.Equal(t, benchmarkPreflightCommand(), runner.commands[0])
+
+	require.Equal(t, 2, countBenchCommands(runner.snapshot(), func(value string) bool {
+		return strings.HasPrefix(value, "rm -rf -- ")
+	}), "the case directory and the run root are removed on success")
+
+	progressOutput := progress.String()
+	for _, line := range strings.Split(strings.TrimSpace(progressOutput), "\n") {
+		require.Regexp(t, `^I[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}\s+[0-9]+ run\.go:[0-9]+\] `, line)
+	}
+
+	require.Contains(t, progressOutput, "benchmark preflight started")
+	require.Contains(t, progressOutput, "benchmark preflight completed")
+	require.Contains(t, progressOutput, "benchmark case 1/1 started: input_len=16 output_len=4 concurrency=2 num_prompts=20 request_rate=inf")
+	require.Contains(t, progressOutput, "benchmark case 1/1 command: "+strings.TrimSpace(string(command)))
+	require.Contains(t, progressOutput, "benchmark case 1/1 completed: result=")
+	require.Contains(t, progressOutput, "completed=20 failed=0 duration_s=1.50 request_per_s=2.50 output_tokens_per_s=10.50 p50_ttft_ms=12.50 p99_ttft_ms=25.50")
+	require.Contains(t, progressOutput, "benchmark completed: cases=1 result_dir="+output)
+}
+
+func TestRunBenchmarkKeepsSuccessfulCaseWhenResultSummaryIsUnavailable(t *testing.T) {
+	runner := &fakeBenchRunner{
+		result: `{"future_result_schema":true}`,
+	}
+	progress := captureBenchmarkProgress(t)
+
+	_, target := resolvedTarget(runner)
+	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
+	require.Contains(t, progress.String(), "benchmark case 1/1 completed: result=")
+	require.Contains(t, progress.String(), "summary=unavailable")
+	require.Contains(t, progress.String(), "benchmark preflight completed")
+}
+
+func TestRunBenchmarkRecordsPreflightAndCaseFailures(t *testing.T) {
+	t.Run("preflight", func(t *testing.T) {
+		progress := captureBenchmarkProgress(t)
+
+		_, target := resolvedTarget(outputRunner{err: fmt.Errorf("preflight failed")})
+		output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+		require.ErrorContains(t, err, "preflight")
+		require.Contains(t, progress.String(), "benchmark preflight failed: vllm benchmark preflight failed: preflight failed")
+		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark preflight failed:`, progress.String())
+
+		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
+		require.NoError(t, readErr)
+		require.Contains(t, string(manifest), "preflight failed")
+	})
+
+	t.Run("case", func(t *testing.T) {
+		progress := captureBenchmarkProgress(t)
+
+		_, target := resolvedTarget(&caseFailureRunner{})
+		output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+		require.ErrorContains(t, err, "benchmark case")
+		require.Contains(t, progress.String(), "benchmark case 1/1 failed: case failed")
+		require.Regexp(t, `(?m)^E[0-9]{4} .*benchmark case 1/1 failed:`, progress.String())
+
+		manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
+		require.NoError(t, readErr)
+		require.Contains(t, string(manifest), `"status": "Failed"`)
+		require.Contains(t, string(manifest), "case failed")
+	})
+}
+
+func TestRunBenchmarkFailsCaseWhenNoRequestCompletes(t *testing.T) {
+	runner := &fakeBenchRunner{result: `{"completed":0,"failed":20,"duration":1.5}`}
+	progress := captureBenchmarkProgress(t)
+
+	_, target := resolvedTarget(runner)
+	output, err := runResolvedBenchmark(t, validOptions(t.TempDir()), target)
+	require.ErrorContains(t, err, "benchmark completed 0 requests")
+	require.Contains(t, progress.String(), "benchmark case 1/1 failed: benchmark completed 0 requests")
+
+	manifest, readErr := os.ReadFile(filepath.Join(output, manifestFileName))
+	require.NoError(t, readErr)
+	require.Contains(t, string(manifest), `"status": "Failed"`)
+	require.FileExists(t, filepath.Join(output, "input-16-output-4-concurrency-2", benchmarkResultFileName))
+}
+
+func TestRunCaseRejectsEmptyCopiedResult(t *testing.T) {
+	runner := &emptyResultRunner{}
+	err := runCase(context.Background(), runner, BenchTarget{Model: "router-model", Tokenizer: "/models/chat"}, Options{
+		NumPrompts:  1,
+		RequestRate: "inf",
+	}, Case{InputLen: 1, OutputLen: 1, Concurrency: 1}, t.TempDir(), "/tmp/neutree-bench-test")
+	require.ErrorContains(t, err, "result is empty")
+}
+
+func TestBenchmarkCaseErrorStatusMarksDeadlinesCanceled(t *testing.T) {
+	require.Equal(t, benchmarkCanceledStatus, benchmarkCaseErrorStatus(context.DeadlineExceeded))
+	require.Equal(t, benchmarkFailedStatus, benchmarkCaseErrorStatus(errors.New("benchmark failed")))
 }
