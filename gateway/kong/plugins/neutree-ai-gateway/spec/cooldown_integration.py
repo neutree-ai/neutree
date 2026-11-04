@@ -66,8 +66,13 @@ def main():
             sock.bind(("127.0.0.1", 0))
             return sock.getsockname()[1]
 
-    a = ThreadingHTTPServer(("127.0.0.1", 0), Backend)
-    b = ThreadingHTTPServer(("127.0.0.1", 0), Backend)
+    class ModelServer(ThreadingHTTPServer):
+        # The 24-request burst must not overflow Python's default backlog of 5
+        # and create accidental connection failures on the healthy backup.
+        request_queue_size = 128
+
+    a = ModelServer(("127.0.0.1", 0), Backend)
+    b = ModelServer(("127.0.0.1", 0), Backend)
     a.role, b.role = "primary", "backup"
     for server in (a, b):
         threading.Thread(target=server.serve_forever, daemon=True).start()
