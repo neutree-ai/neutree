@@ -34,11 +34,15 @@ from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_response import (
+    RequestInputError,
     backend_error,
     backend_response,
     error_stream,
+    input_error_handler,
+    is_streaming,
     json_safe,
     open_stream,
+    read_json_object,
     to_wire_response,
 )
 from serve.sglang.v0_5_10.wire import _handle_request
@@ -362,6 +366,7 @@ class Backend:
 
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(),))
 app.add_middleware(
     CORSMiddleware,
@@ -393,21 +398,21 @@ class Controller:
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
-        payload = await request.json()
-        if payload.get("stream", False):
+        payload = await read_json_object(request)
+        if is_streaming(payload):
             return await self._stream("chat_completion_stream", payload)
         return await backend_response(lambda: self.backend.options(stream=False).chat_completion.remote(payload), "chat")
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
-        payload = await request.json()
-        if payload.get("stream", False):
+        payload = await read_json_object(request)
+        if is_streaming(payload):
             return await self._stream("completion_stream", payload)
         return await backend_response(lambda: self.backend.options(stream=False).completion.remote(payload), "completions")
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
-        payload = await request.json()
+        payload = await read_json_object(request)
         return await backend_response(lambda: self.backend.options(stream=False).embedding.remote(payload), "embeddings")
 
     @app.get("/v1/models")

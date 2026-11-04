@@ -84,6 +84,8 @@ def wrapper(request):
             for method in cls.body:
                 method.decorator_list = []
             body.append(cls)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
+            body.append(copy.deepcopy(node))
     namespace = dict(
         Any=Any, Dict=Dict, Optional=Optional, Request=Request, Response=Response, FastAPI=FastAPI,
         JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, DeploymentHandle=object,
@@ -93,10 +95,14 @@ def wrapper(request):
         HTTPException=HTTPException, ValidationError=ValidationError,
         # The module under test, not a stand-in: the wrappers now use the shared
         # boundary directly, so the tests exercise the real implementation.
+        RequestInputError=serve_response.RequestInputError,
         backend_error=serve_response.backend_error,
         backend_response=serve_response.backend_response,
         error_stream=serve_response.error_stream,
+        input_error_handler=serve_response.input_error_handler,
+        is_streaming=serve_response.is_streaming,
         open_stream=serve_response.open_stream,
+        read_json_object=serve_response.read_json_object,
         to_wire_response=serve_response.to_wire_response,
         to_wire_stream=serve_response.to_wire_stream,
         # No vLLM in this environment, so the classifier is a stand-in.
@@ -154,6 +160,16 @@ def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, s
     else:
         assert result["status_code"] == 500
         assert result["content"] == expected
+
+
+@pytest.mark.parametrize("spelling", ("true", "yes", 1))
+def test_generate_follows_the_controller_stream_spelling(wrapper, spelling):
+    async def chunks():
+        yield "data: first\n\n"
+
+    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": spelling})))
+    assert frames == ["data: first\n\n"]
 
 
 @pytest.mark.parametrize("method,attribute", (
@@ -331,12 +347,15 @@ def client_for(wrapper, handle):
 @pytest.mark.parametrize("payload,streaming", [
     ({"stream": True}, True),
     ({"stream": 1}, True),
-    ({"stream": "false"}, True),
+    ({"stream": "yes"}, True),
+    ({"stream": "false"}, False),
     ({"stream": 0}, False),
     ({"stream": None}, False),
     ({}, False),
 ])
-def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming):
+def test_controller_dispatches_on_engine_boolean_semantics(wrapper, payload, streaming):
+    # The Controller must make the same stream decision the engine's request
+    # model would make for the same spelling.
     async def stream_body():
         yield "data: first\n\n"
     handle = Handle(stream_body() if streaming else None)
@@ -345,6 +364,30 @@ def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming)
     assert response.status_code == 200, response.text
     assert handle.calls == [payload]
     assert handle.stream is streaming
+
+
+@pytest.mark.parametrize("body,message", [
+    (b"[1, 2]", "Request body must be a JSON object"),
+    (b'"text"', "Request body must be a JSON object"),
+    (b"{not json", "Request body must be valid JSON"),
+])
+def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        response = client.post("/v1/chat/completions", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+    assert handle.calls == []
+
+
+@pytest.mark.parametrize("payload", [{"stream": 2}, {"stream": "maybe"}])
+def test_controller_rejects_uninterpretable_stream_values(wrapper, payload):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "stream must be a boolean"
+    assert handle.calls == []
 
 
 def test_controller_rejects_malformed_wire_response(wrapper):

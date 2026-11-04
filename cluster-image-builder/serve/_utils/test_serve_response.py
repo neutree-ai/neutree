@@ -67,6 +67,77 @@ def error_payload():
     return {"error": {"message": "too long", "type": "BadRequestError", "code": 400, "param": "input_tokens"}}
 
 
+class FakeRequest:
+    """Minimal Request stand-in for the pre-dispatch body reader."""
+
+    def __init__(self, body=None, error=None):
+        self.body, self.error = body, error
+
+    async def json(self):
+        if self.error is not None:
+            raise self.error
+        return self.body
+
+
+@pytest.mark.parametrize("body,expected", [
+    ({"messages": []}, {"messages": []}),
+    ({"stream": "false"}, {"stream": "false"}),
+])
+def test_read_json_object_returns_the_body(body, expected):
+    assert run(responses.read_json_object(FakeRequest(body))) == expected
+
+
+@pytest.mark.parametrize("request_obj,message", [
+    (FakeRequest([1, 2]), "Request body must be a JSON object"),
+    (FakeRequest("text"), "Request body must be a JSON object"),
+    (FakeRequest(None), "Request body must be a JSON object"),
+    (FakeRequest(error=ValueError("bad")), "Request body must be valid JSON"),
+])
+def test_read_json_object_rejects_non_objects(request_obj, message):
+    with pytest.raises(responses.RequestInputError, match=message):
+        run(responses.read_json_object(request_obj))
+
+
+@pytest.mark.parametrize("payload,expected", [
+    ({"stream": True}, True),
+    ({"stream": False}, False),
+    ({"stream": 1}, True),
+    ({"stream": 0}, False),
+    ({"stream": 1.0}, True),
+    ({"stream": 0.0}, False),
+    ({"stream": "TRUE"}, True),
+    ({"stream": "yes"}, True),
+    ({"stream": "off"}, False),
+    ({"stream": "false"}, False),
+    ({"stream": None}, False),
+    ({}, False),
+])
+def test_is_streaming_accepts_the_engine_boolean_spellings(payload, expected):
+    assert responses.is_streaming(payload) is expected
+
+
+@pytest.mark.parametrize("payload", [{"stream": 2}, {"stream": "maybe"}, {"stream": []}, [1]])
+def test_is_streaming_rejects_other_values(payload):
+    with pytest.raises(responses.RequestInputError):
+        responses.is_streaming(payload)
+
+
+def test_input_error_handler_renders_a_neutral_400():
+    response = run(responses.input_error_handler(FakeRequest({}), responses.RequestInputError("stream must be a boolean")))
+    assert response.status_code == 400
+    assert json.loads(response.body) == {"error": {
+        "message": "stream must be a boolean", "type": "BadRequestError", "code": 400, "param": None,
+    }}
+
+
+def test_request_input_error_is_a_client_error_in_the_backend(caplog):
+    body = responses.backend_error(responses.RequestInputError("stream must be a boolean"), "chat")
+    assert body == {"error": {
+        "message": "stream must be a boolean", "type": "BadRequestError", "code": 400, "param": None,
+    }}
+    assert "stream must be a boolean" in caplog.text
+
+
 @pytest.mark.parametrize("as_model", [False, True])
 def test_error_stream_preserves_all_upstream_fields(as_model):
     payload = error_payload()
