@@ -305,3 +305,31 @@ func vectorDataVolume(t *testing.T, spec corev1.PodSpec) corev1.Volume {
 
 	return corev1.Volume{}
 }
+
+func TestKongGlobalRateLimit(t *testing.T) {
+	env := func(values map[string]interface{}) map[string]string {
+		out := map[string]string{}
+
+		for _, c := range podSpec(t, renderChart(t, values), "Deployment", "neutree-kong").Containers {
+			if c.Name == "proxy" {
+				for _, e := range c.Env {
+					out[e.Name] = e.Value
+				}
+			}
+		}
+
+		return out
+	}
+
+	off := env(nil)
+	require.NotContains(t, off, "NEUTREE_GLOBAL_RATE_LIMIT")
+	require.NotContains(t, off, "KONG_NGINX_MAIN_ENV")
+
+	on := env(map[string]interface{}{"kong": map[string]interface{}{
+		"globalRateLimit": map[string]interface{}{"enabled": true, "timeoutMs": 200, "cooldownSeconds": 5},
+	}})
+	require.Equal(t, "on", on["NEUTREE_GLOBAL_RATE_LIMIT"])
+	require.Equal(t, "200", on["NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS"])
+	require.Equal(t, "5", on["NEUTREE_GLOBAL_RATE_LIMIT_COOLDOWN_SECONDS"])
+	require.Contains(t, on["KONG_NGINX_MAIN_ENV"], "env NEUTREE_GLOBAL_RATE_LIMIT_TIMEOUT_MS")
+}

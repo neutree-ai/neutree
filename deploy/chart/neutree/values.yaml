@@ -395,6 +395,14 @@ kong:
     drainTimeoutSeconds: 120
   proxyService:
     type: LoadBalancer
+  # Count API key rps/rpm limits in PostgreSQL so all Kong replicas share one
+  # counter; off, each replica counts on its own. A database error or a query
+  # slower than timeoutMs falls back to per-replica counting for
+  # cooldownSeconds.
+  globalRateLimit:
+    enabled: false
+    timeoutMs: 150
+    cooldownSeconds: 10
   # Optional Ingress for the inference gateway (Kong proxy at
   # `<fullname>-kong-proxy:80`). When enabled, neutree-core uses this public
   # URL as --gateway-proxy-url; tls: [] -> http://host, tls configured ->
