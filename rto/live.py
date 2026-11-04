@@ -30,7 +30,11 @@ def create(name,timeout,real=False):
     spec={'upstreams':upstreams,'model_routes':routes}
     if timeout:spec['timeout']=timeout
     if rows:
-        assert rows[0]['spec']['model_routes']==routes,'Existing routes differ; preserve '+name
+        def without_nulls(value):
+            if isinstance(value,dict):return {k:without_nulls(v) for k,v in value.items() if v is not None}
+            if isinstance(value,list):return [without_nulls(v) for v in value]
+            return value
+        assert without_nulls(rows[0]['spec']['model_routes'])==routes,'Existing routes differ; preserve '+name
     else:
         api('external_endpoints',{'api_version':'v1','kind':'ExternalEndpoint','metadata':{'name':name,'workspace':'default'},'spec':spec},TOKEN)
     for _ in range(90):
