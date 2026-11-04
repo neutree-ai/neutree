@@ -51,23 +51,12 @@ To run one test file directly, set the same import paths:
 PYTHONPATH=python:cluster-image-builder python3.12 -m pytest path/to/test_module.py -q
 ```
 
-### Engine wrapper tests
-
-The Serve wrappers under `cluster-image-builder/serve/` run inside an engine
-image, against the exact engine version that image pins. The unit harness does
-not install those engines: it extracts the wrapper functions from the source
-with `ast` and stubs the engine modules they import. A passing unit test
-therefore pins the wrapper's own logic, not its compatibility with the pinned
-engine version. Engine image startup and the E2E suites cover that: import
-errors, signature changes, and behavior differences only surface when the
-wrapper runs in the image.
-
 ### Adding tests
 
-- Place tests beside the source file. Name single-module suites `test_<module>.py`;
-  an engine-wrapper suite that exercises `app.py` and `wire.py` together may use
-  `test_<engine>_error_handling.py`. Add or update tests when changing a Python
-  module; files under the two collection roots are discovered automatically.
+- Place tests beside the source file and name them `test_<module>.py`; a suite
+  that exercises several related modules together may use a descriptive
+  `test_<suite>.py` name. Add or update tests when changing a Python module;
+  files under the two collection roots are discovered automatically.
 - Use `test_` function names and `pytest.mark.parametrize` for input variations.
   Cover expected behavior, invalid inputs, and relevant failure paths.
 - Keep unit tests independent of GPUs, inference engine installations, model
