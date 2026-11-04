@@ -456,6 +456,8 @@ spec:
           seccompProfile:
             type: RuntimeDefault
         env:
+        - name: KONG_NGINX_HTTP_LUA_SHARED_DICT
+          value: {{ printf "neutree_ai_gateway_inflight %s" .Values.kong.inflightSharedDictSize | quote }}
         - name: KONG_ADMIN_ACCESS_LOG
           value: "/dev/stdout"
         - name: KONG_ADMIN_ERROR_LOG
