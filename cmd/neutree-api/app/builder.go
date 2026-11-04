@@ -86,6 +86,10 @@ func NewBuilder() *Builder {
 		"rest/external-endpoints":   ProxiesRouteFactory(proxies.RegisterExternalEndpointRoutes),
 		"rest/identity-sources":     ProxiesRouteFactory(proxies.RegisterIdentitySourceRoutes),
 		"rest/log-sinks":            ProxiesRouteFactory(proxies.RegisterLogSinkRoutes),
+		"rest/org-units":            ProxiesRouteFactory(proxies.RegisterOrgUnitRoutes),
+		"rest/org-unit-members":     ProxiesRouteFactory(proxies.RegisterOrgUnitMemberRoutes),
+		"rest/teams":                ProxiesRouteFactory(proxies.RegisterTeamRoutes),
+		"rest/team-members":         ProxiesRouteFactory(proxies.RegisterTeamMemberRoutes),
 	}
 
 	for name, routeInit := range defaultRouteInits {
@@ -132,6 +136,10 @@ func NewBuilder() *Builder {
 		"rest/external-endpoints":   {"auth"},
 		"rest/identity-sources":     {"auth"},
 		"rest/log-sinks":            {"auth"},
+		"rest/org-units":            {"auth"},
+		"rest/org-unit-members":     {"auth"},
+		"rest/teams":                {"auth"},
+		"rest/team-members":         {"auth"},
 		"credentials":               {"auth"},
 	}
 
