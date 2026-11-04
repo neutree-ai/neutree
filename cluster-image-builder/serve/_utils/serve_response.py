@@ -10,7 +10,9 @@ Two paths exist here and nowhere else:
   carries its message.
 
 This module stays engine-neutral: it never maps per-version exception classes
-itself, so a new pinned engine version needs no new error table here.
+itself, so a new pinned engine version needs no new error table here. Request
+bodies are rejected before dispatch, which is our own Controller->Backend
+concern and never an engine error.
 """
 
 import json
@@ -27,6 +29,52 @@ from starlette.responses import JSONResponse, StreamingResponse
 # bare body could not be told apart from an envelope. Both sides import this
 # module from the same engine image, so the key stays consistent per deployment.
 WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
+
+_TRUE_STRINGS = frozenset({"1", "on", "t", "true", "y", "yes"})
+_FALSE_STRINGS = frozenset({"0", "off", "f", "false", "n", "no"})
+
+
+class RequestInputError(ValueError):
+    """A request rejected before dispatch to the Backend."""
+
+
+async def read_json_object(request) -> dict:
+    """Read the request body as a JSON object, rejecting other JSON values."""
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise RequestInputError("Request body must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RequestInputError("Request body must be a JSON object")
+    return payload
+
+
+def is_streaming(payload: Any) -> bool:
+    """Read `stream` with the engine's own lax boolean semantics.
+
+    The dispatch decision and the request the engine receives must agree, so the
+    spellings a pydantic request model accepts here are accepted too.
+    """
+    if not isinstance(payload, dict):
+        raise RequestInputError("Request body must be a JSON object")
+    stream = payload.get("stream")
+    if stream is None:
+        return False
+    if isinstance(stream, bool):
+        return stream
+    if isinstance(stream, int):
+        if stream in (0, 1):
+            return bool(stream)
+    elif isinstance(stream, float):
+        if stream in (0.0, 1.0):
+            return bool(stream)
+    elif isinstance(stream, str):
+        value = stream.casefold()
+        if value in _TRUE_STRINGS:
+            return True
+        if value in _FALSE_STRINGS:
+            return False
+    raise RequestInputError("stream must be a boolean")
 
 
 def build_error(
@@ -68,11 +116,21 @@ def backend_error(exc: Exception, where: str) -> dict:
     ``ValidationError`` is the one exception, because every engine ships a
     schema and a schema failure is always a client error.
     """
+    if isinstance(exc, RequestInputError):
+        # Raised by our own pre-dispatch checks when a Backend is called
+        # directly; it is a client error, not an engine failure.
+        logging.warning("%s rejected: %s", where, exc)
+        return build_error(str(exc))
     if isinstance(exc, ValidationError):
         logging.warning("%s rejected: %s", where, exc)
         return build_error(str(exc), 400, type(exc).__name__)
     logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
     return build_error(str(exc), 500, type(exc).__name__)
+
+
+async def input_error_handler(request, exc: RequestInputError) -> JSONResponse:
+    """Render a request rejected before dispatch as HTTP 400."""
+    return error_response(str(exc))
 
 
 def json_safe(value: Any, *, strict: bool = False) -> Any:

@@ -76,9 +76,13 @@ def wrapper(monkeypatch):
         backend_error=serve_response.backend_error,
         backend_response=serve_response.backend_response,
         error_stream=serve_response.error_stream,
+        input_error_handler=serve_response.input_error_handler,
+        is_streaming=serve_response.is_streaming,
         json_safe=serve_response.json_safe,
         open_stream=serve_response.open_stream,
+        read_json_object=serve_response.read_json_object,
         to_wire_response=serve_response.to_wire_response,
+        RequestInputError=serve_response.RequestInputError,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(wire_path), "exec"), namespace)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
@@ -182,6 +186,35 @@ def client(wrapper, result=None):
         app.post(route)(getattr(controller, name))
     app.get("/models")(controller.models)
     return TestClient(app), calls
+
+
+@pytest.mark.parametrize("body,message", [
+    (b"[1, 2]", "Request body must be a JSON object"),
+    (b"{not json", "Request body must be valid JSON"),
+])
+def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+    http, calls = client(wrapper)
+    response = http.post("/chat", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+    assert calls == []
+
+
+@pytest.mark.parametrize("stream", ["false", "no", 0, None])
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper, stream):
+    http, calls = client(wrapper)
+    response = http.post("/chat", json={"stream": stream})
+    assert response.status_code == 200
+    assert calls == [{"stream": stream}]
+
+
+@pytest.mark.parametrize("stream", [2, "maybe"])
+def test_controller_rejects_uninterpretable_stream_values(wrapper, stream):
+    http, calls = client(wrapper)
+    response = http.post("/chat", json={"stream": stream})
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "stream must be a boolean"
+    assert calls == []
 
 
 def test_models_error_is_not_model_info(wrapper):

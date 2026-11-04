@@ -41,6 +41,8 @@ def wrapper():
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "app" for t in node.targets):
             body.append(copy.deepcopy(node))
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
+            body.append(copy.deepcopy(node))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_filter_supported":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
@@ -68,6 +70,8 @@ def wrapper():
               LlamaProxy=SimpleNamespace(load_llama_from_model_settings=load), _CHAT_PARAMS={"messages", "model", "stream"}, _COMPLETION_PARAMS={"prompt", "model", "stream"}, _EMBEDDING_PARAMS={"input", "model"},
               backend_error=serve_response.backend_error, backend_response=serve_response.backend_response,
               error_stream=serve_response.error_stream, open_stream=serve_response.open_stream,
+              RequestInputError=serve_response.RequestInputError, input_error_handler=serve_response.input_error_handler,
+              is_streaming=serve_response.is_streaming, read_json_object=serve_response.read_json_object,
               to_wire_response=serve_response.to_wire_response)
     exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(WIRE_PATH), "exec"), ns)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(APP_PATH), "exec"), ns)
@@ -89,6 +93,23 @@ def test_success_is_plain_wire(wrapper, method, payload):
     result = call(wrapper, method, payload)
     assert result["status_code"] == 200
     json.dumps(result)
+
+
+@pytest.mark.parametrize("spelling,streaming", [
+    ("false", False), ("no", False), (0, False), (None, False),
+    ("yes", True), (1, True), (True, True),
+])
+def test_generate_hands_llama_the_dispatch_decision(wrapper, spelling, streaming):
+    # llama_cpp tests `stream` for truthiness, so the Backend must pass the
+    # boolean the Controller dispatched on, not the client's spelling.
+    if streaming:
+        wrapper.llama.create_chat_completion.return_value = iter([{"choices": []}])
+    result = call(wrapper, payload={"messages": [], "stream": spelling})
+    if streaming:
+        assert json.loads(asyncio.run(collect(result))[0][6:]) == {"choices": []}
+    else:
+        assert result["status_code"] == 200
+    assert wrapper.llama.create_chat_completion.call_args.kwargs["stream"] is streaming
 
 
 @pytest.mark.parametrize("method,payload", [("generate", {"messages": []}), ("generate_embeddings", {"input": "hi"})])
@@ -214,6 +235,38 @@ def client(wrapper, handle):
     app.post("/v1/embeddings")(controller.embeddings)
     app.get("/v1/models")(controller.models)
     return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("body,message", [
+    (b"[1, 2]", "Request body must be a JSON object"),
+    (b"{not json", "Request body must be valid JSON"),
+])
+def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        response = http.post("/v1/chat/completions", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+    assert handle.calls == []
+
+
+@pytest.mark.parametrize("stream", ["false", "no", 0, None])
+def test_controller_treats_false_like_spellings_as_non_streaming(wrapper, stream):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        response = http.post("/v1/chat/completions", json={"messages": [], "stream": stream})
+    assert response.status_code == 200
+    assert handle.streaming is False
+
+
+@pytest.mark.parametrize("stream", [2, "maybe"])
+def test_controller_rejects_uninterpretable_stream_values(wrapper, stream):
+    handle = Handle()
+    with client(wrapper, handle) as http:
+        response = http.post("/v1/chat/completions", json={"messages": [], "stream": stream})
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "stream must be a boolean"
+    assert handle.calls == []
 
 
 def test_first_error_restores_http_status(wrapper):

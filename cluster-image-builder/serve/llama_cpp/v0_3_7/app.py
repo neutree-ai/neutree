@@ -24,10 +24,14 @@ from downloader import get_downloader, build_request_from_model_args, download_w
 from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_response import (
+    RequestInputError,
     backend_error,
     backend_response,
     error_stream,
+    input_error_handler,
+    is_streaming,
     open_stream,
+    read_json_object,
     to_wire_response,
 )
 from serve.llama_cpp.v0_3_7.wire import _stream_chunks
@@ -194,15 +198,20 @@ class Backend:
     async def generate(self, payload: Any):
         stream = False
         try:
-            stream = payload.get("stream") is True
+            stream = is_streaming(payload)
             llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
+            # llama_cpp tests `stream` for truthiness, so a client spelling such
+            # as "false" would otherwise stream while the Controller renders a
+            # non-stream response. Pass the decision the Controller already made.
             if "messages" in payload:
                 # Chat completion
                 params = _filter_supported(payload, _CHAT_PARAMS)
+                params["stream"] = stream
                 response = llama.create_chat_completion(**params)
             else:
                 # Regular completion
                 params = _filter_supported(payload, _COMPLETION_PARAMS)
+                params["stream"] = stream
                 response = llama.create_completion(**params)
             if stream:
                 return _stream_chunks(response)
@@ -240,6 +249,7 @@ class Backend:
 
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -265,8 +275,8 @@ class Controller:
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         """Chat completions endpoint"""
-        req_obj = await request.json()
-        if req_obj.get("stream", False):
+        req_obj = await read_json_object(request)
+        if is_streaming(req_obj):
             # A factory keeps RPC construction inside open_stream's first-frame guard.
             def start() -> DeploymentResponseGenerator:
                 """Build the Backend stream when open_stream starts it."""
@@ -293,7 +303,7 @@ class Controller:
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint"""
-        req_obj = await request.json()
+        req_obj = await read_json_object(request)
         return await backend_response(lambda: self.backend.options(stream=False).generate_embeddings.remote(req_obj), "embeddings")
 
     @app.get("/health")
