@@ -27,14 +27,26 @@ def test_controller_error_preserves_error_envelope():
     }}
 
 
-def test_unexpected_errors_use_neutral_server_response(caplog):
-    exc = RuntimeError("private engine details")
-    response = errors.backend_error(exc, "generate")
-    assert response == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
+def test_raised_errors_name_the_exception_and_keep_their_message(caplog):
+    exc = RuntimeError("engine details")
+    body = errors.backend_error(exc, "generate")
+    assert body == {"error": {
+        "message": "engine details", "type": "RuntimeError", "code": 500, "param": None,
     }}
-    assert "private engine details" in caplog.text
-    assert "private engine details" not in json.dumps(response)
+    assert any(record.exc_info and record.exc_info[1] is exc for record in caplog.records)
+
+
+def test_schema_errors_are_client_errors():
+    from pydantic import BaseModel
+
+    class Request(BaseModel):
+        count: int
+
+    with pytest.raises(Exception) as raised:
+        Request(count="not a number")
+    body = errors.backend_error(raised.value, "generate")
+    assert body["error"]["code"] == 400
+    assert body["error"]["type"] == "ValidationError"
 
 
 def test_controller_import_does_not_import_engine_runtimes():
@@ -99,42 +111,71 @@ def test_json_safe_strict_rejects_unserializable_objects():
 
 
 @pytest.mark.parametrize("payload,expected", [
-    # Explicit integer and stringified codes.
+    # Only a numeric HTTP code is read from an engine body.
     ({"code": 400}, 400),
     ({"code": 503}, 503),
     ({"code": "503"}, 503),
-    # Symbolic client-error codes recover their class.
-    ({"code": "context_length_exceeded"}, 400),
-    ({"code": "model_not_found"}, 400),
-    ({"code": "rate_limit_exceeded"}, 429),
-    # Client error types.
-    ({"type": "BadRequestError"}, 400),
-    ({"type": "NotFoundError"}, 404),
-    ({"type": "UnprocessableEntityError"}, 422),
-    ({"type": "RateLimitError"}, 429),
-    # Anything unrecognised stays a server error.
+    # Symbolic codes and type names are not mapped: body shapes differ per
+    # engine and per version, so mapping them would reintroduce a version table.
+    ({"code": "context_length_exceeded"}, 500),
+    ({"type": "RateLimitError"}, 500),
+    ({"code": 200}, 500),
+    ({"code": True}, 500),
     ({"code": None}, 500),
-    ({"type": "unknown_engine_error"}, 500),
     (None, 500),
 ])
-def test_stream_error_status_matrix(payload, expected):
+def test_stream_error_status_reads_only_numeric_codes(payload, expected):
     assert errors.stream_error_status(payload) == expected
 
 
-@pytest.mark.parametrize("payload", [
-    {"error": {
-        "message": "This model's maximum context length is 16 tokens.",
-        "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded",
-    }},
-    {"error": {
-        "message": "The model `missing` does not exist",
-        "type": "invalid_request_error", "param": None, "code": "model_not_found",
-    }},
+@pytest.mark.parametrize("content,expected", [
+    ({"object": "error", "code": 503}, 503),
+    ({"error": {"code": 400}}, 400),
+    ({"error": {"code": "context_length_exceeded"}}, 500),
+    ({"error": "not a body"}, 200),
+    ({"choices": []}, 200),
 ])
-def test_llama_native_business_errors_keep_bad_request_status(payload):
-    response = errors.stream_error_response("data: " + json.dumps(payload))
-    assert response.status_code == 400
-    assert json.loads(response.body) == payload
+def test_returned_error_status(content, expected):
+    assert errors.returned_error_status(content) == expected
+
+
+def test_to_wire_response_dumps_models_and_keeps_http_status():
+    from pydantic import BaseModel
+    from starlette.responses import JSONResponse
+
+    class Model(BaseModel):
+        value: str = "ok"
+
+    assert errors.to_wire_response(Model()) == errors.wire_response({"value": "ok"})
+    rendered = errors.to_wire_response(JSONResponse({"detail": "busy"}, status_code=503))
+    assert rendered["status_code"] == 503
+    assert rendered["content"] == {"detail": "busy"}
+
+
+def test_to_wire_response_keeps_a_returned_error_body_and_status():
+    body = error_payload()
+    wire = errors.to_wire_response(body)
+    assert wire["status_code"] == 400
+    assert wire["content"] == body
+
+
+def test_to_wire_response_sanitizes_non_finite_values():
+    wire = errors.to_wire_response({"value": float("nan")})
+    assert wire["status_code"] == 200
+    assert wire["content"] == {"value": None}
+    json.dumps(wire, allow_nan=False)
+
+
+def test_to_wire_response_contains_serialization_failures():
+    class Broken:
+        def model_dump(self, **kwargs):
+            raise RuntimeError("serializer details")
+
+    wire = errors.to_wire_response(Broken())
+    assert wire["status_code"] == 500
+    assert wire["content"] == {"error": {
+        "message": "serializer details", "type": "RuntimeError", "code": 500, "param": None,
+    }}
 
 
 def test_flat_sglang_error_first_frame_preserves_native_payload():
@@ -197,6 +238,65 @@ def test_wire_http_response_fails_closed_without_envelope(result):
     assert json.loads(response.body)["error"]["type"] == "InternalServerError"
 
 
+def test_rpc_error_response_is_a_neutral_json_500():
+    response = errors.rpc_error_response(RuntimeError("rpc unavailable"), "chat")
+    assert response.status_code == 500
+    assert json.loads(response.body) == {"error": {
+        "message": "rpc unavailable", "type": "RuntimeError", "code": 500, "param": None,
+    }}
+
+
+@pytest.mark.parametrize("stage", ["build", "await"])
+def test_backend_response_contains_rpc_failures(stage):
+    if stage == "build":
+        def start():
+            raise RuntimeError("rpc unavailable")
+    else:
+        async def start():
+            raise RuntimeError("rpc unavailable")
+
+    response = run(errors.backend_response(start, "chat"))
+    assert response.status_code == 500
+    assert json.loads(response.body) == {"error": {
+        "message": "rpc unavailable", "type": "RuntimeError", "code": 500, "param": None,
+    }}
+
+
+def test_backend_response_renders_the_wire_envelope():
+    async def start():
+        return errors.wire_response({"ok": True}, 202)
+
+    response = run(errors.backend_response(start, "chat"))
+    assert response.status_code == 202
+    assert json.loads(response.body) == {"ok": True}
+
+
+@pytest.mark.parametrize("midstream", [False, True])
+def test_to_wire_stream_frames_chunks_and_contains_failures(midstream):
+    async def chunks():
+        if midstream:
+            yield 'data: native\n\n'
+        yield {"value": 1}
+        raise RuntimeError("stream died")
+
+    frames = run(collect(errors.to_wire_stream(chunks())))
+    offset = 1 if midstream else 0
+    assert frames[offset] == 'data: {"value": 1}\n\n'
+    assert json.loads(frames[offset + 1].removeprefix("data:")) == {"error": {
+        "message": "stream died", "type": "RuntimeError", "code": 500, "param": None,
+    }}
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+def test_to_wire_stream_serialization_failure_ends_the_stream():
+    async def chunks():
+        yield {"value": object()}
+
+    frames = run(collect(errors.to_wire_stream(chunks())))
+    assert json.loads(frames[0].removeprefix("data:"))["error"]["type"] == "TypeError"
+    assert frames.count("data: [DONE]\n\n") == 1
+
+
 def stream_of(*frames):
     async def iterator():
         for frame in frames:
@@ -211,7 +311,7 @@ async def collect_body(response):
 def test_open_stream_replays_success_frames():
     async def scenario():
         response = await errors.open_stream(
-            lambda: stream_of("data: first\n\n", "data: [DONE]\n\n"), message="Failed",
+            lambda: stream_of("data: first\n\n", "data: [DONE]\n\n"), where="stream",
         )
         assert response.status_code == 200
         return await collect_body(response)
@@ -220,7 +320,7 @@ def test_open_stream_replays_success_frames():
 
 def test_open_stream_returns_first_error_frame_as_http_error():
     frame = "data: " + json.dumps(error_payload()) + "\n\n"
-    response = run(errors.open_stream(lambda: stream_of(frame), message="Failed"))
+    response = run(errors.open_stream(lambda: stream_of(frame), where="stream"))
     assert response.status_code == 400
     assert json.loads(response.body) == error_payload()
 
@@ -231,22 +331,23 @@ def test_open_stream_failure_after_first_frame_becomes_in_band_error():
         raise RuntimeError("replica died")
 
     async def scenario():
-        response = await errors.open_stream(lambda: failing(), message="Failed")
+        response = await errors.open_stream(lambda: failing(), where="stream")
         assert response.status_code == 200
         return await collect_body(response)
 
     body = run(scenario())
     assert body.startswith("data: first\n\n")
-    assert '"message": "Internal server error"' in body
+    assert '"message": "replica died"' in body
+    assert '"type": "RuntimeError"' in body
     assert body.endswith("data: [DONE]\n\n")
 
 
-def test_open_stream_start_failure_is_server_error():
+def test_open_stream_start_failure_names_the_exception():
     def start():
         raise RuntimeError("private details")
 
-    response = run(errors.open_stream(start, message="Failed to initialize stream"))
+    response = run(errors.open_stream(start, where="stream"))
     assert response.status_code == 500
     assert json.loads(response.body) == {"error": {
-        "message": "Failed to initialize stream", "type": "InternalServerError", "code": 500, "param": None,
+        "message": "private details", "type": "RuntimeError", "code": 500, "param": None,
     }}

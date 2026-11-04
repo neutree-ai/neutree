@@ -35,17 +35,13 @@ from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_errors import (
     backend_error,
+    backend_response,
     error_stream,
     json_safe,
     open_stream,
-    wire_http_response,
+    to_wire_response,
 )
-from serve.sglang.v0_5_10.wire import (
-    _error_response,
-    _extract_serializable,
-    _flatten_http_error,
-    _handle_request,
-)
+from serve.sglang.v0_5_10.wire import _handle_request
 
 logger = logging.getLogger("ray.serve")
 
@@ -112,29 +108,12 @@ async def _iter_response_body(result) -> AsyncGenerator[str, None]:
                 chunk = f"data: {json.dumps(json_safe(chunk), allow_nan=False)}\n\n"
             yield chunk
         return
-    content = _extract_serializable(result)["content"]
+    content = to_wire_response(result)["content"]
     if isinstance(content, dict) and content.get("object") == "error":
         # Error frames keep SGLang's nested shape; only HTTP responses are flat.
         content = {"error": content}
     async for frame in error_stream(content):
         yield frame
-
-
-def _flat_error_response(response: JSONResponse) -> JSONResponse:
-    """Render SGLang's flat HTTP error body for Controller-owned responses."""
-    return JSONResponse(
-        content=_flatten_http_error(json.loads(response.body)),
-        status_code=response.status_code,
-    )
-
-
-def _to_json_response(result) -> JSONResponse:
-    """Wrap a backend-returned serialisable value in a JSONResponse."""
-    # SGLang's HTTP clients see errors flat, while some Backend paths (for
-    # example the engine's own streaming error bodies) stay nested; flatten
-    # only on the non-stream path.
-    response = wire_http_response(result, error_builder=_error_response)
-    return _flat_error_response(response) if response.status_code >= 400 else response
 
 
 @serve.deployment(
@@ -321,9 +300,9 @@ class Backend:
             result = await _handle_request(
                 self._ensure_chat, ChatCompletionRequest, {**payload, "stream": False}
             )
-            return _extract_serializable(result)
+            return to_wire_response(result)
         except Exception as exc:
-            return _extract_serializable(backend_error(exc, "chat_completion"))
+            return to_wire_response(backend_error(exc, "chat_completion"))
 
     async def chat_completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         try:
@@ -343,9 +322,9 @@ class Backend:
             result = await _handle_request(
                 self._ensure_completion, CompletionRequest, {**payload, "stream": False}
             )
-            return _extract_serializable(result)
+            return to_wire_response(result)
         except Exception as exc:
-            return _extract_serializable(backend_error(exc, "completion"))
+            return to_wire_response(backend_error(exc, "completion"))
 
     async def completion_stream(self, payload: Dict[str, Any]) -> AsyncGenerator[str, None]:
         try:
@@ -363,15 +342,15 @@ class Backend:
         try:
             from sglang.srt.entrypoints.openai.protocol import EmbeddingRequest
             result = await _handle_request(self._ensure_embedding, EmbeddingRequest, payload)
-            return _extract_serializable(result)
+            return to_wire_response(result)
         except Exception as exc:
-            return _extract_serializable(backend_error(exc, "embedding"))
+            return to_wire_response(backend_error(exc, "embedding"))
 
     def get_model_info(self) -> Dict[str, Any]:
         try:
             tm = self.engine.tokenizer_manager
             model_config = getattr(tm, "model_config", None)
-            return _extract_serializable({
+            return to_wire_response({
                 "model_path": self.model_path,
                 "served_model_name": self.served_model_name,
                 "model_task": self.model_task,
@@ -379,7 +358,7 @@ class Backend:
                 "is_generation": getattr(tm, "is_generation", True),
             })
         except Exception as exc:
-            return _extract_serializable(backend_error(exc, "get_model_info"))
+            return to_wire_response(backend_error(exc, "get_model_info"))
 
 
 app = FastAPI()
@@ -407,36 +386,33 @@ class Controller:
             """Build the Backend stream when open_stream starts it."""
             return getattr(self.backend.options(stream=True), method).remote(payload)
 
-        response = await open_stream(
+        return await open_stream(
             start,
-            message="Failed to initialize completion stream",
-            error_builder=_error_response,
+            where="completion stream",
         )
-        return _flat_error_response(response) if isinstance(response, JSONResponse) else response
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         payload = await request.json()
         if payload.get("stream", False):
             return await self._stream("chat_completion_stream", payload)
-        return _to_json_response(await self.backend.options(stream=False).chat_completion.remote(payload))
+        return await backend_response(lambda: self.backend.options(stream=False).chat_completion.remote(payload), "chat")
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
         payload = await request.json()
         if payload.get("stream", False):
             return await self._stream("completion_stream", payload)
-        return _to_json_response(await self.backend.options(stream=False).completion.remote(payload))
+        return await backend_response(lambda: self.backend.options(stream=False).completion.remote(payload), "completions")
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         payload = await request.json()
-        return _to_json_response(await self.backend.options(stream=False).embedding.remote(payload))
+        return await backend_response(lambda: self.backend.options(stream=False).embedding.remote(payload), "embeddings")
 
     @app.get("/v1/models")
     async def models(self, request: Request):
-        result = await self.backend.get_model_info.remote()
-        response = _to_json_response(result)
+        response = await backend_response(lambda: self.backend.get_model_info.remote(), "models")
         if response.status_code >= 400:
             return response
         info = json.loads(response.body)

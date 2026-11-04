@@ -25,15 +25,12 @@ from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_errors import (
     backend_error,
+    backend_response,
     error_stream,
     open_stream,
-    wire_http_response,
+    to_wire_response,
 )
-from serve.llama_cpp.v0_3_7.wire import (
-    _native_error_response,
-    _stream_chunks,
-    _to_wire_response,
-)
+from serve.llama_cpp.v0_3_7.wire import _stream_chunks
 
 
 class SchedulerType(str, enum.Enum):
@@ -208,31 +205,28 @@ class Backend:
                 params = _filter_supported(payload, _COMPLETION_PARAMS)
                 response = llama.create_completion(**params)
             if stream:
-                return _stream_chunks(response, payload, "generate")
-            return _to_wire_response(response)
+                return _stream_chunks(response)
+            return to_wire_response(response)
         except Exception as exc:
-            content, status_code = _native_error_response(exc, payload, "generate")
+            error = backend_error(exc, "generate")
             if stream:
-                # HTTPException bodies carry no status field, so send both
-                # explicitly for the Controller's first-frame check.
-                return error_stream(_to_wire_response(content, status_code))
-            return _to_wire_response(content, status_code)
+                return error_stream(error)
+            return to_wire_response(error)
 
     async def generate_embeddings(self, payload: Any):
         try:
             llama = LlamaProxy.load_llama_from_model_settings(self.model_settings)
             response = llama.create_embedding(**_filter_supported(payload, _EMBEDDING_PARAMS))
-            return _to_wire_response(response)
+            return to_wire_response(response)
         except Exception as exc:
-            content, status_code = _native_error_response(exc, payload, "generate_embeddings")
-            return _to_wire_response(content, status_code)
+            return to_wire_response(backend_error(exc, "generate_embeddings"))
 
     async def show_available_models(self) -> Dict[str, Any]:
         """Return a list of available models"""
         # Model metadata comes from the loaded engine; a failure here must stay a
         # rendered 500 rather than escaping the actor as a RayTaskError.
         try:
-            return _to_wire_response({
+            return to_wire_response({
                 "object": "list",
                 "data": [{
                     "id": self.model_id,
@@ -242,7 +236,7 @@ class Backend:
                 }]
             })
         except Exception as exc:
-            return _to_wire_response(backend_error(exc, "show_available_models"))
+            return to_wire_response(backend_error(exc, "show_available_models"))
 
 
 app = FastAPI()
@@ -280,11 +274,10 @@ class Controller:
 
             return await open_stream(
                 start,
-                message="Failed to initialize completion stream",
+                where="completion stream",
             )
         # Non-streaming responses are rendered from the Backend's wire envelope.
-        result = await self.backend.options(stream=False).generate.remote(req_obj)
-        return wire_http_response(result)
+        return await backend_response(lambda: self.backend.options(stream=False).generate.remote(req_obj), "chat")
 
     @app.post("/v1/completions")
     async def completions(self, request: Request):
@@ -295,15 +288,13 @@ class Controller:
     @app.get("/v1/models")
     async def models(self, request: Request):
         """Available models endpoint"""
-        result = await self.backend.show_available_models.remote()
-        return wire_http_response(result)
+        return await backend_response(lambda: self.backend.show_available_models.remote(), "models")
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint"""
         req_obj = await request.json()
-        result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
-        return wire_http_response(result)
+        return await backend_response(lambda: self.backend.options(stream=False).generate_embeddings.remote(req_obj), "embeddings")
 
     @app.get("/health")
     async def health(self):
