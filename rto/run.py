@@ -1,6 +1,6 @@
 import argparse, concurrent.futures, datetime, http.client, json, os, re, shutil, subprocess, threading, time
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--image',default='registry.smtx.io/neutree-ai-smtx/kong/kong:3.9');args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--image',default='registry.smtx.io/neutree-ai-smtx/kong/kong:3.9');p.add_argument('--cases');p.add_argument('--no-observer',action='store_true');args=p.parse_args()
 root=Path(args.root);root.mkdir(parents=True,exist_ok=False);root.chmod(0o755)
 repo=Path(__file__).resolve().parents[1];name='neutree-rto-'+root.name[-12:];lock=threading.Lock()
 def event(e):
@@ -9,6 +9,7 @@ def event(e):
         with (root/'client.jsonl').open('a') as f:f.write(json.dumps(e)+'\n')
     print(json.dumps(e),flush=True)
 configs=[('http503',503,60000,60000,5,8,False),('http429',429,60000,60000,5,8,False),('refused','refused',60000,60000,5,5,False),('read1000','read',1000,60000,5,3,False),('read60000','read',60000,60000,5,1,False),('blackhole3000','blackhole',60000,3000,5,2,False),('blackhole3000-r0','blackhole',60000,3000,0,2,False),('blackhole60000','blackhole',60000,60000,5,1,False),('stream503',503,60000,60000,5,5,True),('stream-read1000','read',1000,60000,5,2,True),('stream-blackhole3000','blackhole',60000,3000,5,1,True),('baseline','healthy',60000,60000,5,40,False)]
+if args.cases:configs=[c for c in configs if c[0] in args.cases.split(',')]
 modes={c[0]:c[1] for c in configs};(root/'modes.json').write_text(json.dumps(modes))
 observer=root/'kong/plugins/rto-observer';observer.mkdir(parents=True)
 shutil.copy2(Path(__file__).with_name('observer.lua'),observer/'handler.lua');(observer/'schema.lua').write_text('return {name="rto-observer",fields={{config={type="record",fields={}}}}}')
@@ -16,9 +17,9 @@ services=[]
 for case,mode,read,connect,retries,n,stream in configs:
     targets=[{'name':role,'host':'172.17.0.1','port':19093 if role=='A' and mode=='blackhole' else 19094 if role=='A' and mode=='refused' else 19092,'scheme':'http','path':'/'+case+'/'+role+'/v1'} for role in ['A','B']]
     routes=[{'model':'trial-'+str(i),'targets':[{'upstream':role,'upstream_model':'test-'+str(i),'priority':j} for j,role in enumerate(['A','B'])]} for i in range(n)]
-    services.append({'name':case,'host':'172.17.0.1','port':19092,'protocol':'http','read_timeout':read,'connect_timeout':connect,'retries':retries,'routes':[{'name':case,'paths':['/'+case],'strip_path':True,'response_buffering':False}], 'plugins':[{'name':'rto-observer','config':{}},{'name':'neutree-ai-gateway','config':{'route_prefix':'/'+case,'upstreams':targets,'model_routes':routes}}]})
+    services.append({'name':case,'host':'172.17.0.1','port':19092,'protocol':'http','read_timeout':read,'connect_timeout':connect,'retries':retries,'routes':[{'name':case,'paths':['/'+case],'strip_path':True,'response_buffering':False}], 'plugins':([] if args.no_observer else [{'name':'rto-observer','config':{}}])+[{'name':'neutree-ai-gateway','config':{'route_prefix':'/'+case,'upstreams':targets,'model_routes':routes}}]})
 (root/'kong.json').write_text(json.dumps({'_format_version':'3.0','services':services}))
-(root/'metadata.json').write_text(json.dumps({'source':subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip(),'image':args.image,'scenarios':configs,'clock':'CLOCK_MONOTONIC on the same Linux host; UTC labels retained separately'},indent=2))
+(root/'metadata.json').write_text(json.dumps({'source':subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip(),'image':args.image,'scenarios':configs,'observer':not args.no_observer,'clock':'CLOCK_MONOTONIC on the same Linux host; UTC labels retained separately'},indent=2))
 backend_log=(root/'backend-process.log').open('w');backend=subprocess.Popen(['python3',str(Path(__file__).with_name('backend.py')),'--root',str(root)],stdout=backend_log,stderr=backend_log)
 cmd=['docker','run','-d','--name',name,'--memory','768m','--cpus','2','-p','127.0.0.1:19100:8000','-p','127.0.0.1:19101:8001','-v',str(repo/'gateway')+':/gateway:ro','-v',str(root)+':/rto:ro']
 for k,v in {'KONG_DATABASE':'off','KONG_DECLARATIVE_CONFIG':'/rto/kong.json','KONG_NGINX_WORKER_PROCESSES':'4','KONG_ADMIN_LISTEN':'0.0.0.0:8001','KONG_ADMIN_GUI_LISTEN':'off','KONG_STATUS_LISTEN':'off','KONG_PLUGINS':'bundled,neutree-ai-gateway,rto-observer','KONG_LUA_PACKAGE_PATH':'/gateway/?.lua;/rto/?.lua;;','KONG_NGINX_HTTP_LUA_SHARED_DICT':'neutree_ai_gateway_inflight 10m'}.items():cmd+=['-e',k+'='+v]
