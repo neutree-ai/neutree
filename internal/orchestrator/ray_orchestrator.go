@@ -985,16 +985,9 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 		modelArgs["serve_name"] = endpointModelServeName(endpoint, modelRegistry)
 	}
 
-	modelCacheRelativePath := v1.DefaultModelCacheRelativePath
-
 	modelCaches, err := util.GetClusterModelCache(*deployedCluster)
 	if err != nil {
 		return dashboard.RayServeApplication{}, errors.Wrap(err, "failed to get cluster model cache")
-	}
-
-	// TODO: Now we only use the first model cache for simplicity, In the future, we may support specific model cache.
-	if len(modelCaches) > 0 {
-		modelCacheRelativePath = modelCaches[0].Name
 	}
 
 	// With no registry there is nothing to place from: modelArgs keeps the bare
@@ -1014,7 +1007,13 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 			// bentoml model registry path: <BENTOML_HOME>/models/<model_name>/<model_version>
 			// so we need to append "models" to the path
 			modelArgs["registry_path"] = filepath.Join(nfsMountPath, "models", endpoint.Spec.Model.Name, modelRealVersion)
-			modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+			modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultSSHClusterModelCacheMountPath)
+			if err != nil {
+				return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+			}
+
+			modelArgs["path"] = modelPath
 		}
 	case string(v1.HuggingFaceModelRegistryType):
 		applicationEnv[v1.HFEndpoint] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
@@ -1029,7 +1028,13 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 		modelArgs["version"] = modelRealVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
-		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+		modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultSSHClusterModelCacheMountPath)
+		if err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+		}
+
+		modelArgs["path"] = modelPath
 	case v1.ModelScopeModelRegistryType:
 		applicationEnv[v1.ModelScopeEndpointEnv] = strings.TrimSuffix(modelRegistry.Spec.Url, "/")
 		if modelRegistry.Spec.Credentials != "" {
@@ -1043,7 +1048,13 @@ func EndpointToApplication(endpoint *v1.Endpoint, deployedCluster *v1.Cluster,
 
 		modelArgs["version"] = modelRealVersion
 		modelArgs["registry_path"] = endpoint.Spec.Model.Name
-		modelArgs["path"] = filepath.Join(v1.DefaultSSHClusterModelCacheMountPath, modelCacheRelativePath, endpoint.Spec.Model.Name, modelRealVersion)
+
+		modelPath, err := util.ModelCachePath(*deployedCluster, endpoint.Spec.Model.Name, modelRealVersion, v1.DefaultSSHClusterModelCacheMountPath)
+		if err != nil {
+			return dashboard.RayServeApplication{}, errors.Wrapf(err, "failed to get model cache path for model %s", endpoint.Spec.Model.Name)
+		}
+
+		modelArgs["path"] = modelPath
 	}
 
 	app.Args["model"] = modelArgs

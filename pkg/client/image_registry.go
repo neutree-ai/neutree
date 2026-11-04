@@ -1,8 +1,6 @@
 package client
 
 import (
-	"fmt"
-
 	v1 "github.com/neutree-ai/neutree/api/v1"
 )
 
@@ -31,11 +29,7 @@ func (s *ImageRegistriesService) List(opts ImageRegistryListOptions) ([]v1.Image
 
 	// Use credentials endpoint if WithCreds is true
 	if opts.WithCreds {
-		credService := &resourceService{
-			client:       s.client,
-			baseUrl:      fmt.Sprintf("%s/api/v1/credentials/image_registries", s.client.baseURL),
-			resourceName: s.resourceName,
-		}
+		credService := newCredentialsService(s.client, "image_registries", s.resourceName)
 		params := buildListParams(ListOptions{Workspace: opts.Workspace, Name: opts.Name})
 
 		if err := credService.list(params, &imageRegistries); err != nil {
