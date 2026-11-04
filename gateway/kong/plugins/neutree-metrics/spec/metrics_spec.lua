@@ -78,6 +78,16 @@ describe("independent metrics plugin", function()
         assert.is_nil(collectors[1].source.request())
     end)
 
+    it("seeds and retains committed cooldown counters across scrapes and request logs", function()
+        metrics.collect()
+        local name = "neutree_route_target_cooldowns_total"
+        assert.are.equal(0, series[name]["/ee|chat|node-1|a|real"])
+        collectors[1].collector.cooldown(table.concat({"/ee", "chat", "a", "real"}, "\0"), "node-1")
+        request("chat", 503, conf.model_routes[1].targets[1]); metrics.log()
+        metrics.collect(); metrics.collect()
+        assert.are.equal(1, series[name]["/ee|chat|node-1|a|real"])
+    end)
+
     it("records final client failure once without success duration", function()
         request("chat", 503)
         metrics.log(); metrics.log()

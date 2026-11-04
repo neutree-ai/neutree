@@ -63,9 +63,19 @@ local function update(shared, admission, outcome)
             return true -- Ignore results belonging to a different active cooldown/probe.
         end
         if outcome == "failure" then
-            return write(shared, admission.key, {
+            local ok, err = write(shared, admission.key, {
                 generation = token(), retry_at = ngx.now() + COOLDOWN,
             })
+            if ok then
+                -- Record the committed transition, including deferred updates.
+                -- Metrics failure must not change an admission decision.
+                local recorded, record_err = pcall(function()
+                    require("kong.plugins.neutree-metrics.collectors.model_routing")
+                        .cooldown(admission.key, kong.node.get_id())
+                end)
+                if not recorded then kong.log.err("unable to count model target cooldown: ", record_err) end
+            end
+            return ok, err
         end
         if admission.probe then
             current.probe, current.probe_until = nil, nil

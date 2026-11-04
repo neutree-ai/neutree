@@ -2,7 +2,7 @@ local spec_dir = (debug.getinfo(1, "S").source:sub(2)):match("(.*/)") or "./"
 local routing = assert(loadfile(spec_dir .. "../routing.lua"))()
 
 describe("passive target failover", function()
-    local now, data, expires, dict, conf, original_ngx, original_kong, original_uuid, serial, timers
+    local now, data, expires, dict, conf, original_ngx, original_kong, original_uuid, serial, timers, original_collector, cooldowns
 
     local function start()
         local request = assert(routing.begin(conf, "chat", { shared = dict }))
@@ -18,6 +18,11 @@ describe("passive target failover", function()
     before_each(function()
         original_ngx, original_kong = _G.ngx, _G.kong
         original_uuid = package.loaded["kong.tools.uuid"]
+        original_collector = package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"]
+        cooldowns = {}
+        package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = {
+            cooldown = function(key) cooldowns[key] = (cooldowns[key] or 0) + 1 end,
+        }
         now, data, expires, serial, timers = 0, {}, {}, 0, {}
         package.loaded["kong.tools.uuid"] = { uuid = function() serial = serial + 1; return tostring(serial) end }
         dict = {
@@ -44,7 +49,7 @@ describe("passive target failover", function()
         _G.ngx = { now = function() return now end, shared = { neutree_ai_gateway_inflight = dict },
             timer = { at = function(_, callback) timers[#timers + 1] = callback; return true end },
             sleep = function(delay) now = now + delay end }
-        _G.kong = { log = { err = function(...) error(table.concat({...}, "")) end } }
+        _G.kong = { node = { get_id = function() return "node-1" end }, log = { err = function(...) error(table.concat({...}, "")) end } }
         conf = { route_prefix = "/ee", model_routes = {{ model = "chat", targets = {
             { upstream = "A", upstream_model = "a", priority = 0 },
             { upstream = "B", upstream_model = "b", priority = 1 },
@@ -52,6 +57,7 @@ describe("passive target failover", function()
     end)
 
     after_each(function()
+        package.loaded["kong.plugins.neutree-metrics.collectors.model_routing"] = original_collector
         _G.ngx, _G.kong = original_ngx, original_kong
         package.loaded["kong.tools.uuid"] = original_uuid
     end)
@@ -66,6 +72,22 @@ describe("passive target failover", function()
         complete(concurrent, "success"); complete(probe, "success")
         local recovered; recovered, selected = start(); assert.are.equal("A", selected)
         complete(recovered, "success")
+    end)
+
+    it("counts committed cooldowns, not stale failures, fallback traffic or recovery", function()
+        local first, stale = start(), start()
+        complete(first, "failure")
+        complete(stale, "failure")
+        assert.are.equal(1, cooldowns[first.health.key])
+        complete(start(), "success")
+        assert.are.equal(1, cooldowns[first.health.key])
+        now = 15
+        complete(start(), "failure")
+        assert.are.equal(2, cooldowns[first.health.key])
+        now = 30
+        complete(start(), "success")
+        complete(start(), "success")
+        assert.are.equal(2, cooldowns[first.health.key])
     end)
 
     it("preserves single-target routing when there is no alternate destination", function()
