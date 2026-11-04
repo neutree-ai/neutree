@@ -18,7 +18,8 @@
 --                        model, on any endpoint, is left to the rules above.
 --                        Model lists drop the denied models too.
 --   * concurrency     -> 429 concurrency_exceeded (in-flight counter)
---   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window)
+--   * rate_limits     -> 429 rate_limit_exceeded (fixed window per window;
+--                        shared by all pods when global_counter is on)
 -- Every key gets its own consumer-scoped instance, including an unrestricted
 -- one (all limits off). A global instance with `fallback` set runs for a
 -- consumer whose own instance Kong has not loaded yet: Kong rebuilds its plugin
@@ -29,6 +30,7 @@
 -- their own instance is first written.
 
 local cjson = require("cjson.safe")
+local global_counter = require("kong.plugins.neutree-ai-access.global_counter")
 
 local AccessHandler = {
     PRIORITY = 895,
@@ -242,6 +244,93 @@ local function rules_not_ready(conf)
     return false
 end
 
+-- deny_rate_limited releases the concurrency slot this request took and
+-- answers 429, retry_after being the seconds left in the exceeded window.
+local function deny_rate_limited(retry_after)
+    if kong.ctx.plugin.cc_key then
+        local dict = counter_dict()
+        if dict then
+            dict:incr(kong.ctx.plugin.cc_key, -1)
+        end
+        kong.ctx.plugin.cc_key = nil
+    end
+    kong.response.set_header("Retry-After", math.max(1, math.ceil(retry_after)))
+    return kong.response.exit(429, {
+        error = {
+            message = "Request rate limit exceeded for this API key",
+            type = "rate_limited",
+            code = "rate_limit_exceeded",
+        },
+    })
+end
+
+-- local_rate_limit counts in this pod's shared dict. It returns the seconds
+-- until the exceeded window ends, or false when the request is within limits.
+local function local_rate_limit(key, rate_limits)
+    local dict = counter_dict()
+    if not dict then
+        return false
+    end
+    local now = ngx.now()
+    for _, rl in ipairs(rate_limits) do
+        local limit = tonumber(rl.limit)
+        local wsec = WINDOW_SECONDS[rl.window]
+        if limit and wsec then
+            local window_start = math.floor(now / wsec) * wsec
+            local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
+            -- TTL = remaining time in this window so the counter expires
+            -- when the window ends rather than up to a full window later.
+            local rk_ttl = math.max(1, math.ceil(window_start + wsec - now))
+            -- Atomically initialize the window counter so two concurrent
+            -- first-requests don't both reset it to 1 (undercounting):
+            -- add() only succeeds for the first caller, then incr().
+            dict:add(rk, 0, rk_ttl)
+            local newval, err = dict:incr(rk, 1)
+            if not newval then
+                -- Counting unavailable (e.g. dict full) -> fail open.
+                if err then
+                    kong.log.warn("neutree-ai-access: counter incr: ", err)
+                end
+                newval = 0
+            end
+            if newval > limit then
+                return window_start + wsec - now
+            end
+        end
+    end
+    return false
+end
+
+-- global_rate_limit counts in PostgreSQL, shared by all Kong pods. It returns
+-- nil when the database cannot decide (disabled, unavailable, or a window it
+-- does not hold), so the caller counts per pod; otherwise like local_rate_limit.
+local function global_rate_limit(key, rate_limits)
+    if not global_counter.available() then
+        return nil
+    end
+    local windows, seen = {}, {}
+    for _, rl in ipairs(rate_limits) do
+        local limit = tonumber(rl.limit)
+        local wsec = global_counter.WINDOWS[rl.window]
+        if not limit or not wsec or seen[rl.window] then
+            return nil
+        end
+        seen[rl.window] = true
+        windows[#windows + 1] = { name = rl.window, seconds = wsec, limit = limit }
+    end
+    local results = global_counter.hit(key, windows)
+    if not results then
+        return nil
+    end
+    for i, w in ipairs(windows) do
+        local r = results[i]
+        if r and r.hits > w.limit then
+            return r.window_start + w.seconds - r.now
+        end
+    end
+    return false
+end
+
 function AccessHandler:access(conf)
     -- 0) Fallback instance: fail closed for a key whose rules are not loaded;
     --    otherwise it carries no limits to apply.
@@ -322,46 +411,12 @@ function AccessHandler:access(conf)
 
     -- 4) Rate limits: fixed window per window.
     if type(conf.rate_limits) == "table" and #conf.rate_limits > 0 then
-        local dict = counter_dict()
-        if dict then
-            local now = ngx.now()
-            for _, rl in ipairs(conf.rate_limits) do
-                local limit = tonumber(rl.limit)
-                local wsec = WINDOW_SECONDS[rl.window]
-                if limit and wsec then
-                    local window_start = math.floor(now / wsec) * wsec
-                    local rk = "neutree_rl:" .. key .. ":" .. rl.window .. ":" .. window_start
-                    -- TTL = remaining time in this window so the counter expires
-                    -- when the window ends rather than up to a full window later.
-                    local rk_ttl = math.max(1, math.ceil(window_start + wsec - now))
-                    -- Atomically initialize the window counter so two concurrent
-                    -- first-requests don't both reset it to 1 (undercounting):
-                    -- add() only succeeds for the first caller, then incr().
-                    dict:add(rk, 0, rk_ttl)
-                    local newval, err = dict:incr(rk, 1)
-                    if not newval then
-                        -- Counting unavailable (e.g. dict full) -> fail open.
-                        if err then
-                            kong.log.warn("neutree-ai-access: counter incr: ", err)
-                        end
-                        newval = 0
-                    end
-                    if newval > limit then
-                        if kong.ctx.plugin.cc_key then
-                            dict:incr(kong.ctx.plugin.cc_key, -1)
-                            kong.ctx.plugin.cc_key = nil
-                        end
-                        kong.response.set_header("Retry-After", math.max(1, math.ceil(window_start + wsec - now)))
-                        return kong.response.exit(429, {
-                            error = {
-                                message = "Request rate limit exceeded for this API key",
-                                type = "rate_limited",
-                                code = "rate_limit_exceeded",
-                            },
-                        })
-                    end
-                end
-            end
+        local verdict = global_rate_limit(key, conf.rate_limits)
+        if verdict == nil then
+            verdict = local_rate_limit(key, conf.rate_limits)
+        end
+        if verdict then
+            return deny_rate_limited(verdict)
         end
     end
 end
