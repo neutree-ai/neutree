@@ -3,6 +3,7 @@
 | Scenario | Expected behavior |
 | --- | --- |
 | Primary healthy | Existing priority, weight and concurrency admission apply. |
+| Only one configured target | Preserve direct routing; there is no alternative to fail over to. |
 | Primary returns 429/502/503/504 or fails before response headers | Subsequent selection skips it for 15 seconds; the failing request is not replayed. |
 | Cooldown expires | One request per target and Kong instance probes; concurrent requests use other eligible targets. |
 | Current probe receives 200 / retryable failure | Restore eligibility / start another cooldown. |

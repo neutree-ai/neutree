@@ -11,8 +11,10 @@ function M.configure(configs)
     local keys = {}
     for _, conf in ipairs(configs or {}) do
         for _, route in ipairs(conf.model_routes or {}) do
-            for _, target in ipairs(route.targets) do
-                keys[target_key({ scope = conf.route_prefix, route = route }, target)] = true
+            if #route.targets > 1 then
+                for _, target in ipairs(route.targets) do
+                    keys[target_key({ scope = conf.route_prefix, route = route }, target)] = true
+                end
             end
         end
     end
@@ -87,6 +89,7 @@ function M.begin(conf, model, env)
                 tried = {},
                 excluded = {},
                 attempts = 0,
+                health_enabled = #route.targets > 1,
             }
         end
     end
@@ -106,8 +109,9 @@ function M.next(state)
         local key = target_key(state, target)
         local lease, err, detail = capacity_lease(state, target)
         if lease then
-            local admission, health_err = health.acquire(state.env.shared, key)
-            if admission then
+            local admission, health_err
+            if state.health_enabled then admission, health_err = health.acquire(state.env.shared, key) end
+            if not state.health_enabled or admission then
                 state.current = target
                 state.lease = lease
                 state.health = admission

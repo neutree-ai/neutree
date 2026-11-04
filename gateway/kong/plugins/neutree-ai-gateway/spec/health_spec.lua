@@ -69,6 +69,15 @@ describe("passive target failover", function()
         complete(recovered, "success")
     end)
 
+    it("preserves single-target routing when there is no alternate destination", function()
+        conf.model_routes[1].targets[2] = nil
+        routing.configure({ conf })
+        complete(start(), "failure")
+        local next_request, selected = start()
+        assert.are.equal("A", selected)
+        complete(next_request, "success")
+    end)
+
     it("does not let old ordinary results erase a failure or reopen after recovery", function()
         local first, late_success, late_failure = start(), start(), start()
         complete(first, "failure"); complete(late_success, "success")
