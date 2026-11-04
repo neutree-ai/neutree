@@ -59,6 +59,18 @@ func StartCrons(ctx context.Context, storage storage.Storage) error {
 		return errors.Wrapf(err, "failed to add sync api key usage cron job")
 	}
 
+	_, err = s.NewJob(gocron.DurationJob(time.Minute), gocron.NewTask(func() {
+		klog.V(4).Infof("Start to cleanup gateway rate limit counters")
+
+		deleted, jobErr := cleanupRateLimitCounters(storage)
+		if jobErr != nil {
+			klog.Errorf("Failed to cleanup gateway rate limit counters after deleting %d: %v", deleted, jobErr)
+		}
+	}), gocron.WithSingletonMode(gocron.LimitModeWait))
+	if err != nil {
+		return errors.Wrapf(err, "failed to add cleanup gateway rate limit counters cron job")
+	}
+
 	s.Start()
 
 	go func() {
@@ -103,6 +115,40 @@ func cleanupAggregatedRecords(s storage.Storage) (int, error) {
 		total += deleted
 
 		if deleted < cleanupBatchSize {
+			break
+		}
+	}
+
+	return total, nil
+}
+
+const (
+	// Longer than the longest window the gateway counts in PostgreSQL (a
+	// minute), so a window is never deleted while it is still counting.
+	rateLimitCounterRetention = "2 minutes"
+	rateLimitCleanupBatchSize = 5000
+	rateLimitCleanupMaxBatch  = 100
+)
+
+// cleanupRateLimitCounters deletes the gateway's expired rate-limit windows
+// in short batches, like cleanupAggregatedRecords.
+func cleanupRateLimitCounters(s storage.Storage) (int, error) {
+	total := 0
+
+	for range rateLimitCleanupMaxBatch {
+		var deleted int
+
+		err := s.CallDatabaseFunction("cleanup_gateway_rate_limit_counters", map[string]interface{}{
+			"p_older_than": rateLimitCounterRetention,
+			"p_batch_size": rateLimitCleanupBatchSize,
+		}, &deleted)
+		if err != nil {
+			return total, err
+		}
+
+		total += deleted
+
+		if deleted < rateLimitCleanupBatchSize {
 			break
 		}
 	}
