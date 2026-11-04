@@ -55,6 +55,7 @@ describe("routing counter failures", function()
                 },
             }},
         }, "chat", { shared = {
+            get = function() return nil end,
             incr = function()
                 calls = calls + 1
                 return nil, "no memory"
