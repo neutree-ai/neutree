@@ -3,6 +3,7 @@ local routing = assert(loadfile(spec_dir .. "../routing.lua"))()
 
 local function shared(values)
     return {
+        get = function(_, key) return values[key] end,
         incr = function(_, key, amount, init)
             local current = values[key]
             if current == nil then current = init end
@@ -90,7 +91,7 @@ describe("routing scheduling", function()
                     { upstream = "a", upstream_model = "chat", priority = 0, weight = 1 },
                 },
             }},
-        }, "chat"))
+        }, "chat", { shared = shared({}) }))
         assert.are.equal("a", assert(routing.next(state)).upstream)
         routing.finish(state)
     end)
@@ -130,7 +131,7 @@ describe("routing scheduling", function()
                         { upstream = "b", upstream_model = "chat", priority = 0, weight = 3 },
                     },
                 }},
-            }, "chat"))
+            }, "chat", { shared = shared({}) }))
             assert.are.equal(sample.expected, assert(routing.next(state)).upstream)
             routing.finish(state)
         end)
@@ -203,7 +204,7 @@ describe("unlimited target observation", function()
 
     it("does not reject an unlimited target when observation storage fails", function()
         local state = assert(routing.begin({ model_routes = {{ model = "chat", targets = {{ upstream = "a", upstream_model = "real" }} }} }, "chat", {
-            shared = { incr = function() return nil, "no memory" end },
+            shared = { get = function() end, incr = function() return nil, "no memory" end },
         }))
         assert(routing.next(state))
         routing.finish(state)

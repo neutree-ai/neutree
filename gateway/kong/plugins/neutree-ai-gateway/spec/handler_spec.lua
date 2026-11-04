@@ -33,13 +33,15 @@ package.loaded["kong.tools.string"] = {
     strip = function(s) return s end,
 }
 package.loaded["kong.plugins.neutree-ai-gateway.routing"] = {
-    begin = function() return {}, nil end,
+    begin = function(_, _, env) return { env = env }, nil end,
+    configure = function() end,
+    observe = function() end,
     next = function() return nil, nil end,
     retry = function() return nil, nil end,
     finish = function() end,
 }
 
-_G.ngx = { now = function() return 0 end }
+_G.ngx = { now = function() return 0 end, shared = { neutree_ai_gateway_inflight = {} } }
 _G.kong = { log = { warn = function() end, err = function() end } }
 
 -- Load the handler by file path (relative to this spec) rather than by module
