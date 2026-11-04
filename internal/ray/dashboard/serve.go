@@ -53,6 +53,9 @@ type Replica struct {
 	ActorID     string `json:"actor_id"`
 	LogFilePath string `json:"log_file_path"`
 	ReplicaID   string `json:"replica_id"`
+	// State is Ray's replica state (STARTING, RUNNING, STOPPING). Ray omits
+	// it in older versions, so callers must treat an empty value as unknown.
+	State string `json:"state,omitempty"`
 }
 
 type ProxyStatus struct {

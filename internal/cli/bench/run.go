@@ -558,8 +558,10 @@ func resolveTarget(ctx context.Context, endpoint *v1.Endpoint, cluster, credenti
 	switch cluster.Spec.Type {
 	case v1.KubernetesClusterType:
 		return resolveKubernetesTarget(ctx, cluster, credentialCluster, endpoint)
+	case v1.SSHClusterType:
+		return resolveStaticTarget(ctx, cluster, credentialCluster, endpoint)
 	default:
-		return BenchTarget{}, fmt.Errorf("benchmark target for Cluster type %q is not implemented", cluster.Spec.Type)
+		return BenchTarget{}, fmt.Errorf("unsupported Cluster type %q", cluster.Spec.Type)
 	}
 }
 
