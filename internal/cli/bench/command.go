@@ -3,6 +3,7 @@ package bench
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -68,6 +69,29 @@ func buildBenchCommand(target BenchTarget, benchmarkCase Case, numPrompts int, r
 
 func benchmarkPreflightCommand() string {
 	return "vllm bench serve --help"
+}
+
+// benchmarkRenewCommand stamps the lease file. The monitor compares its mtime
+// with its own clock, so hosts never have to agree on wall-clock time.
+func benchmarkRenewCommand(renewPath string) string {
+	return "touch -- " + shellQuote(renewPath)
+}
+
+func benchmarkCancelCommand(cancelPath string) string {
+	return ": > " + shellQuote(cancelPath)
+}
+
+func benchmarkMonitorCommand(remoteDir, command string, lease time.Duration) string {
+	args := []string{
+		shellQuote(benchmarkRenewPath(remoteDir)),
+		shellQuote(benchmarkCancelPath(remoteDir)),
+		shellQuote(benchmarkLogPath(remoteDir)),
+		shellQuote(remoteDir),
+		strconv.Itoa(int(lease / time.Second)),
+		shellQuote(command),
+	}
+
+	return "python3 -c " + shellQuote(benchmarkMonitorScript) + " " + strings.Join(args, " ")
 }
 
 func remoteResultCommand(resultDir string) string {

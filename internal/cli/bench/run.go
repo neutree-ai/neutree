@@ -691,12 +691,15 @@ func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, optio
 		return err
 	}
 
-	// The benchmark's progress bar is the only live progress vllm bench
-	// reports, so it is relayed to stderr while also being recorded in
-	// stdout.log.
+	// The monitor relays the benchmark output on the stream this CLI already
+	// holds open, so the live log reaches stderr and stdout.log without a
+	// second remote process to clean up on interrupt.
 	logOutput := io.MultiWriter(stdout, os.Stderr)
 
-	if err := runner.Run(ctx, command, logOutput, logOutput); err != nil {
+	stopRenew := renewRemoteLease(ctx, runner, benchmarkRenewPath(remoteResultDir), remoteRenewInterval)
+	defer stopRenew()
+
+	if err := runControlledBenchmark(ctx, runner, remoteResultDir, command, logOutput); err != nil {
 		return err
 	}
 
