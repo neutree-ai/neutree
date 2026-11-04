@@ -1,4 +1,4 @@
-"""SGLang adapter for the shared Serve error boundary.
+"""SGLang adapter for the shared Serve response boundary.
 
 SGLang's serving handlers expect an HTTP request object and classify their own
 failures: ``handle_request`` converts HTTPException, ValueError and any other

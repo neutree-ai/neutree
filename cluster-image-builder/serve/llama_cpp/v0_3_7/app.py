@@ -23,7 +23,7 @@ from starlette_context.middleware import RawContextMiddleware
 from downloader import get_downloader, build_request_from_model_args, download_with_markers
 from serve._utils import coerce_args
 from serve._utils.runtime_env import build_backend_runtime_env
-from serve._utils.serve_errors import (
+from serve._utils.serve_response import (
     backend_error,
     backend_response,
     error_stream,

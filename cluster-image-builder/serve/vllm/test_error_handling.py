@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from serve._utils import serve_errors
+from serve._utils import serve_response
 
 
 class ErrorInfo(BaseModel):
@@ -46,7 +46,7 @@ def wrapper(request):
     app_path = Path(__file__).parent / request.param / "app.py"
     body = []
     for node in ast.parse(app_path.read_text()).body:
-        if isinstance(node, ast.ImportFrom) and node.module == "serve._utils.serve_errors":
+        if isinstance(node, ast.ImportFrom) and node.module == "serve._utils.serve_response":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "app" for target in node.targets
@@ -69,12 +69,12 @@ def wrapper(request):
         RerankRequest=request_model, json=json,
         # The module under test, not a stand-in: the wrappers now use the shared
         # boundary directly, so the tests exercise the real implementation.
-        backend_error=serve_errors.backend_error,
-        backend_response=serve_errors.backend_response,
-        error_stream=serve_errors.error_stream,
-        open_stream=serve_errors.open_stream,
-        to_wire_response=serve_errors.to_wire_response,
-        to_wire_stream=serve_errors.to_wire_stream,
+        backend_error=serve_response.backend_error,
+        backend_response=serve_response.backend_response,
+        error_stream=serve_response.error_stream,
+        open_stream=serve_response.open_stream,
+        to_wire_response=serve_response.to_wire_response,
+        to_wire_stream=serve_response.to_wire_stream,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(app_path), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
@@ -256,7 +256,7 @@ def test_stream_failures_are_framed_with_the_exception_name(wrapper):
 class Handle:
     def __init__(self, result=None):
         self.calls = []
-        self.result = result if result is not None else serve_errors.wire_response({"accepted": True})
+        self.result = result if result is not None else serve_response.wire_response({"accepted": True})
         self.generate = self.generate_embeddings = self.rerank = self
 
     def options(self, **kwargs):
