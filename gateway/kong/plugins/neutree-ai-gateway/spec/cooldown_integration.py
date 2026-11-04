@@ -114,6 +114,7 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="neutree-cooldown-") as temporary:
         root = Path(temporary)
+        root.chmod(0o755)  # The container's Kong user must read the fixture.
         plugin = root / "kong/plugins/local-reject"
         plugin.mkdir(parents=True)
         (plugin / "schema.lua").write_text('return {name="local-reject",fields={{config={type="record",fields={}}}}}')

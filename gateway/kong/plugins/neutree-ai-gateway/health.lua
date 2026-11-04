@@ -32,7 +32,10 @@ end
 
 function M.configure(shared, keys)
     configured = keys
-    if not shared then return end -- configure also runs before worker startup.
+    if not shared then
+        assert(next(keys) == nil, "multi-target routing requires neutree_ai_gateway_inflight")
+        return -- Internal-only gateways do not need model-routing storage.
+    end
     for _, key in ipairs(shared:get_keys(0)) do
         if key:sub(1, #STATE) == STATE and not keys[key:sub(#STATE + 1)] then
             shared:delete(key)

@@ -209,9 +209,6 @@ local function begin_routing(conf, model)
     if not state then
         return nil, err
     end
-    if state.health_enabled and not state.env.shared then
-        return nil, "health_unavailable", "routing shared dictionary is unavailable"
-    end
     local target, select_err, detail = routing.next(state)
     if not target then
         return nil, select_err, detail
