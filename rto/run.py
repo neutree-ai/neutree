@@ -66,7 +66,7 @@ try:
         except OSError:pass
         time.sleep(.2)
     else:raise RuntimeError('Kong not ready')
-    info=json.loads(subprocess.check_output(['docker','inspect',name],text=True))[0];ip=info['NetworkSettings']['IPAddress']
+    info=json.loads(subprocess.check_output(['docker','inspect',name],text=True))[0];network=next(iter(info['NetworkSettings']['Networks'].values()));ip=network['IPAddress'];assert network['Gateway']=='172.17.0.1',network['Gateway']
     rule=['INPUT','-s',ip,'-d','172.17.0.1','-p','tcp','--dport','19093','-m','comment','--comment',name,'-j','DROP']
     subprocess.run(['iptables','-I']+rule[:1]+['1']+rule[1:],check=True)
     event({'kind':'blackhole_rule','source':ip,'destination':'172.17.0.1:19093','action':'DROP'})
