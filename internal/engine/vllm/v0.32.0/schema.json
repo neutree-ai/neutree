@@ -6,8 +6,7 @@
   "properties": {
     "model": {
       "description": "Name or path of the Hugging Face model to use",
-      "type": "string",
-      "default": "Qwen/Qwen3-0.6B"
+      "type": "string"
     },
     "enable_return_routed_experts": {
       "default": false,
@@ -181,8 +180,7 @@
     },
     "ir_op_priority": {
       "type": "object",
-      "description": "Ir op priority",
-      "default": "IrOpPriorityConfig(rms_norm=[], fused_add_rms_norm=[], gelu_and_mul_sparse=[])"
+      "description": "Ir op priority"
     },
     "distributed_executor_backend": {
       "description": "Backend for distributed model workers",
@@ -485,8 +483,7 @@
     },
     "eplb_config": {
       "description": "Expert parallelism load balancing configuration",
-      "type": "object",
-      "default": "EPLBConfig(window_size=1000, step_interval=3000, num_redundant_experts=0, log_balancedness=False, log_balancedness_interval=1, use_async=True, policy='default', communicator=None, enable_migration_batching=False)"
+      "type": "object"
     },
     "enable_eplb": {
       "default": false,
@@ -560,8 +557,7 @@
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "default": "set()"
+      }
     },
     "offload_group_size": {
       "description": "Group size for weight offloading",
@@ -583,8 +579,7 @@
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "default": "set()"
+      }
     },
     "gpu_memory_utilization": {
       "minimum": 0,
@@ -996,13 +991,11 @@
     },
     "structured_outputs_config": {
       "description": "Structured outputs configuration",
-      "type": "object",
-      "default": "StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False)"
+      "type": "object"
     },
     "aux_output_config": {
       "description": "Execution auxiliary output configuration",
-      "type": "object",
-      "default": "AuxOutputConfig(enable_return_routed_experts=False, max_bytes=None)"
+      "type": "object"
     },
     "reasoning_parser": {
       "default": "",
@@ -1124,8 +1117,7 @@
     },
     "attention_config": {
       "description": "Attention configuration",
-      "type": "object",
-      "default": "AttentionConfig(backend=None, minimax_m3_msa_decode_backend='triton', backend_per_kind={}, flash_attn_version=None, flash_attn_max_num_splits_for_cuda_graph=32, tokenspeed_mla_min_split_kv=1, tq_max_kv_splits_for_cuda_graph=32, use_trtllm_attention=None, disable_flashinfer_q_quantization=False, mla_prefill_backend=None, use_prefill_query_quantization=False, indexer_kv_dtype='auto', indexer_sparse_logits=False, hisparse_config=None, use_non_causal=False, sparse_mla_force_mqa=False, sparse_mla_prefill_workspace_factor=None, flex_attn_block_m=None, flex_attn_block_n=None, flex_attn_q_block_size=None, flex_attn_kv_block_size=None)"
+      "type": "object"
     },
     "engram_config": {
       "description": "N-gram embedding storage and sharding settings",
@@ -1133,8 +1125,7 @@
     },
     "kernel_config": {
       "description": "Kernel configuration",
-      "type": "object",
-      "default": "KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=[], fused_add_rms_norm=[], gelu_and_mul_sparse=[]), enable_flashinfer_autotune=None, enable_rocm_segmented_attn_autotune=False, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)"
+      "type": "object"
     },
     "enable_flashinfer_autotune": {
       "description": "Enable FlashInfer auto-tuning",
@@ -1152,8 +1143,7 @@
     },
     "profiler_config": {
       "description": "Profiler configuration",
-      "type": "object",
-      "default": "ProfilerConfig(profiler=None, torch_profiler_dir='', torch_profiler_activities=None, proton_profiler_dir='', proton_context='shadow', proton_data='tree', proton_backend=None, proton_mode=None, proton_hook=None, proton_output_format=None, proton_graph_attribution=False, torch_profiler_with_stack=True, torch_profiler_with_flops=False, torch_profiler_use_gzip=True, torch_profiler_dump_cuda_time_total=True, torch_profiler_record_shapes=False, torch_profiler_with_memory=False, capture_torch_profiler=False, detailed_trace_annotation=False, ignore_frontend=False, delay_iterations=0, max_iterations=0, warmup_iterations=0, active_iterations=5, wait_iterations=0)"
+      "type": "object"
     },
     "logging_config": {
       "description": "Logging configuration",
@@ -1185,8 +1175,7 @@
     },
     "ec_manager_config": {
       "description": "The configurations for custom encoder cache manager",
-      "type": "object",
-      "default": "EncoderCacheManagerConfig(encoder_cache_manager_cls=None, manager_config={})"
+      "type": "object"
     },
     "reasoning_config": {
       "type": "object",
@@ -1302,8 +1291,7 @@
         "flashinfer",
         "cpu"
       ],
-      "description": "Mamba backend",
-      "default": "MambaBackendEnum.TRITON"
+      "description": "Mamba backend"
     },
     "mamba_ssu_algorithm": {
       "description": "Selective state update algorithm to use with the FlashInfer backend",
@@ -1389,8 +1377,7 @@
     },
     "fault_tolerance_config": {
       "description": "The configurations for fault tolerance",
-      "type": "object",
-      "default": "FaultToleranceConfig(engine_recovery_timeout_sec=120)"
+      "type": "object"
     },
     "enable_fault_tolerance": {
       "default": false,
