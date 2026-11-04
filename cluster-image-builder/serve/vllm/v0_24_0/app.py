@@ -33,7 +33,7 @@ from downloader import get_downloader, build_request_from_model_args, download_w
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
-from serve._utils.serve_errors import (
+from serve._utils.serve_response import (
     backend_error,
     backend_response,
     error_stream,

@@ -1,4 +1,4 @@
-"""llama.cpp adapter for the shared Serve error boundary.
+"""llama.cpp adapter for the shared Serve response boundary.
 
 The ``Llama`` API has no HTTP layer: context-length, model and formatting
 failures are raised as exceptions, and the native HTTP server classifies them
@@ -11,7 +11,7 @@ import json
 
 from starlette.concurrency import iterate_in_threadpool
 
-from serve._utils.serve_errors import backend_error, error_stream, json_safe
+from serve._utils.serve_response import backend_error, error_stream, json_safe
 
 
 async def _stream_chunks(chunks):

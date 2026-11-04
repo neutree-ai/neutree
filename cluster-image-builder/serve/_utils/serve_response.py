@@ -1,4 +1,4 @@
-"""Engine-neutral HTTP/SSE errors for Serve wrappers.
+"""Engine-neutral HTTP/SSE responses for Serve wrappers.
 
 Two paths exist here and nowhere else:
 

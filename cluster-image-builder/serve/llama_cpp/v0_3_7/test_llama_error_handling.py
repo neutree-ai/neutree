@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 from starlette.responses import JSONResponse, StreamingResponse
 
-from serve._utils import serve_errors
+from serve._utils import serve_response
 
 
 APP_PATH = Path(__file__).with_name("app.py")
@@ -66,9 +66,9 @@ def wrapper():
               FastAPI=FastAPI, HTTPException=HTTPException, DeploymentHandle=object, DeploymentResponseGenerator=object, json=json, iterate_in_threadpool=iterate_in_threadpool,
               CreateChatCompletionRequest=ChatRequest, CreateCompletionRequest=CompletionRequest, CreateEmbeddingRequest=EmbeddingRequest,
               LlamaProxy=SimpleNamespace(load_llama_from_model_settings=load), _CHAT_PARAMS={"messages", "model", "stream"}, _COMPLETION_PARAMS={"prompt", "model", "stream"}, _EMBEDDING_PARAMS={"input", "model"},
-              backend_error=serve_errors.backend_error, backend_response=serve_errors.backend_response,
-              error_stream=serve_errors.error_stream, open_stream=serve_errors.open_stream,
-              to_wire_response=serve_errors.to_wire_response)
+              backend_error=serve_response.backend_error, backend_response=serve_response.backend_response,
+              error_stream=serve_response.error_stream, open_stream=serve_response.open_stream,
+              to_wire_response=serve_response.to_wire_response)
     exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(WIRE_PATH), "exec"), ns)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(APP_PATH), "exec"), ns)
     backend = object.__new__(ns["Backend"])
@@ -203,7 +203,7 @@ class Handle:
         if self.streaming:
             return self.stream
         async def value():
-            return self.result if self.result is not None else serve_errors.wire_response({"choices": []})
+            return self.result if self.result is not None else serve_response.wire_response({"choices": []})
         return value()
 
 

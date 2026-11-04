@@ -33,7 +33,7 @@ from serve._metrics.prometheus_multiproc import install_stable_prometheus_multip
 from serve._metrics.sglang_ray_bridge import PromToRayBridge
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
-from serve._utils.serve_errors import (
+from serve._utils.serve_response import (
     backend_error,
     backend_response,
     error_stream,

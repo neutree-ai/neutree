@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from serve._utils import serve_errors
+from serve._utils import serve_response
 
 
 class Result(BaseModel):
@@ -73,12 +73,12 @@ def wrapper(monkeypatch):
         HTTPException=HTTPException, Request=Request, JSONResponse=JSONResponse,
         StreamingResponse=StreamingResponse, DeploymentResponseGenerator=object,
         logger=logging.getLogger("test.sglang"), json=json,
-        backend_error=serve_errors.backend_error,
-        backend_response=serve_errors.backend_response,
-        error_stream=serve_errors.error_stream,
-        json_safe=serve_errors.json_safe,
-        open_stream=serve_errors.open_stream,
-        to_wire_response=serve_errors.to_wire_response,
+        backend_error=serve_response.backend_error,
+        backend_response=serve_response.backend_response,
+        error_stream=serve_response.error_stream,
+        json_safe=serve_response.json_safe,
+        open_stream=serve_response.open_stream,
+        to_wire_response=serve_response.to_wire_response,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(wire_path), "exec"), namespace)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
@@ -135,7 +135,7 @@ def test_backend_preserves_returned_http_status(wrapper, method, handler, status
     wire = call(wrapper, method)
     assert wire["status_code"] == status
     assert wire["content"] == native
-    response = serve_errors.wire_http_response(wire)
+    response = serve_response.wire_http_response(wire)
     assert response.status_code == status
     assert json.loads(response.body) == native
 
@@ -169,7 +169,7 @@ def client(wrapper, result=None):
         def remote(self, payload=None):
             calls.append(payload)
             async def value():
-                return result if result is not None else serve_errors.wire_response({"ok": True})
+                return result if result is not None else serve_response.wire_response({"ok": True})
             return value()
     class Handle:
         chat_completion = completion = embedding = get_model_info = Remote()
@@ -203,7 +203,7 @@ def test_controller_passes_native_flat_errors_through(wrapper):
     # SGLang returns errors flat over HTTP; the Controller must not reshape a
     # body the engine returned.
     native = {"object": "error", "message": "native detail", "type": "503", "param": None, "code": 503}
-    http, _ = client(wrapper, serve_errors.wire_response(native, 503))
+    http, _ = client(wrapper, serve_response.wire_response(native, 503))
     response = http.post("/chat", json={})
     assert response.status_code == 503
     assert response.json() == native
@@ -328,7 +328,7 @@ def test_model_dump_failure_is_server_error(wrapper, method, handler):
 
 
 def test_response_http_status_is_authoritative():
-    wire = serve_errors.to_wire_response(JSONResponse({"object": "error", "code": 400}, status_code=429))
+    wire = serve_response.to_wire_response(JSONResponse({"object": "error", "code": 400}, status_code=429))
     assert wire["status_code"] == 429
 
 
