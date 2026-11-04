@@ -6,7 +6,8 @@ secrets=Path('/root/workspace/cooldown-deploy-20261104');key=(secrets/'review-ap
 API='http://127.0.0.1:3000/api/v1/'
 def api(path,body=None,token=None):
     req=urllib.request.Request(API+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json',**({'Authorization':'Bearer '+token} if token else {})})
-    with urllib.request.urlopen(req,timeout=30) as resp:return json.load(resp) if resp.status!=204 else None
+    with urllib.request.urlopen(req,timeout=30) as resp:
+        raw=resp.read();return json.loads(raw) if raw else None
 TOKEN=api('auth/token?grant_type=password',{'email':'admin@neutree.local','password':Path('/root/workspace/.neutree-test/credentials/admin-password').read_text().strip()})['access_token']
 def log(e):
     e['utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -14,7 +15,6 @@ def log(e):
     print(json.dumps(e),flush=True)
 def create(name,timeout,real=False):
     rows=api('external_endpoints?metadata->>name=eq.'+name,token=TOKEN)
-    assert not rows,'Preserve existing EE: '+name
     if real:
         upstreams=[{'name':'provider','upstream':{'url':'https://newapi.smartx.com/v1'},'auth':{'type':'bearer','credential':provider},'model_mapping':{}}]
         routes=[{'model':'failover-'+str(i),'strategy':'priority','targets':[{'upstream':'provider','upstream_model':m,'priority':j} for j,m in enumerate(['deepseek-v4.1-flash','gpt-6-luna'])]} for i in range(3)]
@@ -29,7 +29,10 @@ def create(name,timeout,real=False):
                 routes.append({'model':case+'-'+str(i),'strategy':'priority','targets':[{'upstream':case+role,'upstream_model':'test-'+str(i),'priority':j} for j,role in enumerate(['A','B'])]})
     spec={'upstreams':upstreams,'model_routes':routes}
     if timeout:spec['timeout']=timeout
-    api('external_endpoints',{'api_version':'v1','kind':'ExternalEndpoint','metadata':{'name':name,'workspace':'default'},'spec':spec},TOKEN)
+    if rows:
+        assert rows[0]['spec']['model_routes']==routes,'Existing routes differ; preserve '+name
+    else:
+        api('external_endpoints',{'api_version':'v1','kind':'ExternalEndpoint','metadata':{'name':name,'workspace':'default'},'spec':spec},TOKEN)
     for _ in range(90):
         row=api('external_endpoints?metadata->>name=eq.'+name,token=TOKEN)[0]
         if (row.get('status') or {}).get('phase')=='Running':break

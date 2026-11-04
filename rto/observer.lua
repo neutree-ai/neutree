@@ -1,8 +1,8 @@
 local json = require 'cjson.safe'
 local ffi = require 'ffi'
-ffi.cdef[[typedef struct { long tv_sec; long tv_nsec; } rto_timespec; int clock_gettime(int, rto_timespec *);]]
+ffi.cdef[[int clock_gettime(int, struct timespec *);]]
 local function now()
-    local t = ffi.new('rto_timespec[1]')
+    local t = ffi.new('struct timespec[1]')
     assert(ffi.C.clock_gettime(1, t) == 0)
     return tonumber(t[0].tv_sec) + tonumber(t[0].tv_nsec) / 1e9
 end
