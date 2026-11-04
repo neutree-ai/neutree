@@ -5,17 +5,16 @@ import asyncio
 import copy
 import json
 import logging
-from pathlib import Path
 from http import HTTPStatus
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from serve._utils import serve_errors
@@ -42,100 +41,21 @@ def request_model(**payload):
     return payload
 
 
-class NativeClientError(Exception):
-    native_code = 400
-
-
-class NativeNotFoundError(NativeClientError):
-    native_code = 404
-
-
-class NativeUnprocessableError(NativeClientError):
-    native_code = 422
-    parameter = "messages"
-
-
-class GenerationError(Exception):
-    status_code = HTTPStatus.INTERNAL_SERVER_ERROR
-
-
-class NativeGracefulHTTPError(Exception):
-    def __init__(self, message, http_status: HTTPStatus):
-        super().__init__(message)
-        self.http_status = http_status
-
-
-class QueueOverflowError(NativeGracefulHTTPError):
-    def __init__(self):
-        super().__init__("engine queue is full", HTTPStatus.SERVICE_UNAVAILABLE)
-
-
-class MaxQueuedTokensError(NativeGracefulHTTPError):
-    def __init__(self):
-        super().__init__("prefill token backlog exceeded", HTTPStatus.SERVICE_UNAVAILABLE)
-
-
-class TemplateError(Exception):
-    pass
-
-
-class TemplateSyntaxError(TemplateError):
-    pass
-
-
-def upstream_error(exc, err_type="BadRequestError", status_code=HTTPStatus.BAD_REQUEST):
-    if isinstance(exc, str):
-        return ErrorResponse(error=ErrorInfo(message=exc, type=err_type, code=status_code))
-    code = getattr(exc, "http_status", getattr(exc, "status_code", getattr(exc, "native_code", None)))
-    if code is None:
-        if isinstance(exc, (ValueError, TypeError, OverflowError, TemplateError)):
-            code = 400
-        elif isinstance(exc, NotImplementedError):
-            code = 501
-        else:
-            code = 500
-    return ErrorResponse(error=ErrorInfo(
-        message=str(exc), type=HTTPStatus(code).phrase, code=code, param=getattr(exc, "parameter", None),
-    ))
-
-
-
 @pytest.fixture(params=("v0_24_0", "v0_31_0"))
 def wrapper(request):
-    factory = Mock(side_effect=upstream_error)
-    validation_handler = AsyncMock()
     app_path = Path(__file__).parent / request.param / "app.py"
-    tree = ast.parse(app_path.read_text())
-    wire_path = Path(__file__).parent / request.param / "wire.py"
-    wire_body = []
-    for node in ast.parse(wire_path.read_text()).body:
-        if isinstance(node, ast.ImportFrom) and node.module == "serve._utils.serve_errors":
-            wire_body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "_backend_error", "_parse_request", "_to_wire_response", "_to_wire_stream",
-        }:
-            wire_body.append(copy.deepcopy(node))
-    names = {"generate", "generate_embeddings", "rerank", "show_available_models"}
-    validation_base = ValueError if request.param == "v0_24_0" else NativeClientError
-    validation_error = type("NativeValidationError", (validation_base,), {"parameter": "input_tokens"})
     body = []
-    for node in tree.body:
+    for node in ast.parse(app_path.read_text()).body:
         if isinstance(node, ast.ImportFrom) and node.module == "serve._utils.serve_errors":
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "app" for target in node.targets
         ):
             body.append(copy.deepcopy(node))
-        elif (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
-              and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler"):
-            body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-            "_backend_error", "_parse_request",
-        }:
-            body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
             cls = copy.deepcopy(node)
             cls.decorator_list = []
+            names = {"generate", "generate_embeddings", "rerank", "show_available_models"}
             cls.body = [method for method in cls.body if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
                         and (cls.name == "Controller" or method.name in names)]
             for method in cls.body:
@@ -143,16 +63,19 @@ def wrapper(request):
             body.append(cls)
     namespace = dict(
         Any=Any, Dict=Dict, Optional=Optional, Request=Request, Response=Response, FastAPI=FastAPI,
-        HTTPException=HTTPException, HTTPStatus=HTTPStatus, ValidationError=ValidationError,
-        RequestValidationError=RequestValidationError, SimpleNamespace=SimpleNamespace,
-        validation_exception_handler=validation_handler,
         JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, DeploymentHandle=object,
         DeploymentResponseGenerator=object,
-        ErrorResponse=ErrorResponse, ErrorInfo=ErrorInfo, ChatCompletionRequest=request_model,
-        EmbeddingCompletionRequest=request_model, RerankRequest=request_model,
-        json=json, logging=logging, GenerationError=GenerationError, create_error_response=factory,
+        ChatCompletionRequest=request_model, EmbeddingCompletionRequest=request_model,
+        RerankRequest=request_model, json=json,
+        # The module under test, not a stand-in: the wrappers now use the shared
+        # boundary directly, so the tests exercise the real implementation.
+        backend_error=serve_errors.backend_error,
+        backend_response=serve_errors.backend_response,
+        error_stream=serve_errors.error_stream,
+        open_stream=serve_errors.open_stream,
+        to_wire_response=serve_errors.to_wire_response,
+        to_wire_stream=serve_errors.to_wire_stream,
     )
-    exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(wire_path), "exec"), namespace)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(app_path), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
     backend._ensure_chat = AsyncMock()
@@ -162,12 +85,20 @@ def wrapper(request):
     backend.openai_serving_embedding = AsyncMock(return_value=Model())
     backend.openai_serving_score = AsyncMock(return_value=Model())
     backend._ensure_models = AsyncMock(return_value=SimpleNamespace(show_available_models=AsyncMock(return_value=Model())))
-    return SimpleNamespace(namespace=namespace, backend=backend, validation_error=validation_error, factory=factory, validation_handler=validation_handler, version=request.param)
+    return SimpleNamespace(namespace=namespace, backend=backend, version=request.param)
 
 
 def call_backend(wrapper, method, payload=None):
     args = () if method == "show_available_models" else (payload if payload is not None else {},)
     return asyncio.run(getattr(wrapper.backend, method)(*args))
+
+
+async def collect(chunks):
+    return [chunk async for chunk in chunks]
+
+
+def neutral_error(message, error_type="RuntimeError", code=500):
+    return {"error": {"message": message, "type": error_type, "code": code, "param": None}}
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
@@ -182,21 +113,32 @@ def test_backend_success_returns_plain_wire(wrapper, method):
     ("generate", "_ensure_chat"), ("generate_embeddings", "_ensure_embedding"),
     ("rerank", "_ensure_score"), ("show_available_models", "_ensure_models"),
 ))
-def test_lazy_initialization_exceptions_are_contained(wrapper, method, initializer):
+@pytest.mark.parametrize("stream", (False, True))
+def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, stream):
+    if stream and method != "generate":
+        pytest.skip("Only generation supports streaming")
     error = RuntimeError("initialization failed")
     getattr(wrapper.backend, initializer).side_effect = error
-    wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "initialization failed"
-    wrapper.factory.assert_called_once_with(error)
+    result = call_backend(wrapper, method, {"stream": True} if stream else None)
+    expected = neutral_error("initialization failed")
+    if stream:
+        frames = asyncio.run(collect(result))
+        assert json.loads(frames[0].removeprefix("data:")) == expected
+        assert frames[-1] == "data: [DONE]\n\n"
+    else:
+        assert result["status_code"] == 500
+        assert result["content"] == expected
 
 
 @pytest.mark.parametrize("method,attribute", (
     ("generate", "openai_serving_chat"), ("generate_embeddings", "openai_serving_embedding"),
     ("rerank", "openai_serving_score"), ("show_available_models", "_ensure_models"),
 ))
-def test_serving_exception_preserves_native_error(wrapper, method, attribute):
-    error = wrapper.validation_error("input too long")
+def test_serving_exceptions_keep_their_own_class_name(wrapper, method, attribute):
+    class EngineFailure(Exception):
+        pass
+
+    error = EngineFailure("engine details")
     if method == "generate":
         target = wrapper.backend.openai_serving_chat.create_chat_completion
     elif method == "show_available_models":
@@ -205,29 +147,47 @@ def test_serving_exception_preserves_native_error(wrapper, method, attribute):
         target = getattr(wrapper.backend, attribute)
     target.side_effect = error
     wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 400
-    assert wire["content"] == upstream_error(error).model_dump(mode="json")
-    wrapper.factory.assert_called_once_with(error)
+    assert wire["status_code"] == 500
+    assert wire["content"] == neutral_error("engine details", "EngineFailure")
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
-def test_request_model_exception_is_contained(wrapper, method):
+def test_plain_value_error_is_not_a_schema_error(wrapper, method):
+    # Only a pydantic ValidationError is reclassified as a client error; any
+    # other ValueError raised while building the request keeps the neutral 500.
     wire = call_backend(wrapper, method, {"invalid_model": True})
-    assert wire["status_code"] == 400
-    assert wire["content"]["error"]["message"] == "request model rejected"
+    assert wire["status_code"] == 500
+    assert wire["content"] == neutral_error("request model rejected", "ValueError")
 
 
-def test_engine_validation_error_is_not_reclassified_as_http_schema_error(wrapper):
-    class EngineResult(BaseModel):
-        count: int
-    with pytest.raises(ValidationError) as captured:
-        EngineResult(count="invalid")
-    error = captured.value
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    wire = call_backend(wrapper, "generate")
-    assert wire["content"] == upstream_error(error).model_dump(mode="json")
-    wrapper.factory.assert_called_once_with(error)
-    wrapper.validation_handler.assert_not_called()
+@pytest.mark.parametrize("method,request_type,target_name", [
+    ("generate", "ChatCompletionRequest", "openai_serving_chat"),
+    ("generate_embeddings", "EmbeddingCompletionRequest", "openai_serving_embedding"),
+    ("rerank", "RerankRequest", "openai_serving_score"),
+])
+@pytest.mark.parametrize("stream", (False, True))
+def test_request_schema_failure_is_a_client_error(wrapper, method, request_type, target_name, stream):
+    if stream and method != "generate":
+        pytest.skip("Only generation supports streaming")
+    class RequestModel(BaseModel):
+        messages: list[str]
+    wrapper.namespace[request_type] = RequestModel
+    result = call_backend(wrapper, method, {"messages": [17], "stream": stream})
+    if stream:
+        frames = asyncio.run(collect(result))
+        body = json.loads(frames[0].removeprefix("data:"))
+        assert frames[-1] == "data: [DONE]\n\n"
+    else:
+        assert result["status_code"] == 400
+        body = result["content"]
+    # A schema failure is a client error, but the body is ours: the engine's
+    # native validation handler is not part of the boundary any more.
+    assert body["error"]["type"] == "ValidationError"
+    assert body["error"]["code"] == 400
+    target = getattr(wrapper.backend, target_name)
+    if method == "generate":
+        target = target.create_chat_completion
+    target.assert_not_called()
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank", "show_available_models"))
@@ -246,8 +206,7 @@ def test_wire_serialization_failure_is_contained(wrapper, method):
     target.return_value = BrokenModel()
     wire = call_backend(wrapper, method)
     assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "Internal server error"
-    wrapper.factory.assert_not_called()
+    assert wire["content"] == neutral_error("serialization failed")
 
 
 @pytest.mark.parametrize("as_model", (False, True))
@@ -276,24 +235,21 @@ def test_cancellation_still_propagates(wrapper, method, initializer):
         call_backend(wrapper, method)
 
 
-def test_backend_streams_preserve_first_and_midstream_errors(wrapper):
-    async def collect(stream):
-        return [chunk async for chunk in stream]
+def test_stream_failures_are_framed_with_the_exception_name(wrapper):
     error = ValueError("before first chunk")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    stream = call_backend(wrapper, "generate", {"stream": True})
-    chunks = asyncio.run(collect(stream))
-    assert json.loads(chunks[0].removeprefix("data:"))["error"]["code"] == 400
+    chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
+    assert json.loads(chunks[0].removeprefix("data:")) == neutral_error("before first chunk", "ValueError")
     assert chunks[-1] == "data: [DONE]\n\n"
 
     async def broken_stream():
         yield "data: first\n\n"
-        raise ValueError("midstream")
+        raise RuntimeError("midstream")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = None
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = broken_stream()
     chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
     assert chunks[0] == "data: first\n\n"
-    assert json.loads(chunks[1].removeprefix("data:"))["error"]["message"] == "midstream"
+    assert json.loads(chunks[1].removeprefix("data:")) == neutral_error("midstream")
     assert chunks[2] == "data: [DONE]\n\n"
 
 
@@ -307,7 +263,7 @@ class Handle:
         self.stream = kwargs["stream"]
         return self
 
-    def remote(self, payload):
+    def remote(self, payload=None):
         self.calls.append(payload)
         if self.stream:
             return self.result
@@ -325,12 +281,41 @@ def client_for(wrapper, handle):
     return TestClient(app, raise_server_exceptions=False)
 
 
+@pytest.mark.parametrize("payload,streaming", [
+    ({"stream": True}, True),
+    ({"stream": 1}, True),
+    ({"stream": "false"}, True),
+    ({"stream": 0}, False),
+    ({"stream": None}, False),
+    ({}, False),
+])
+def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming):
+    async def stream_body():
+        yield "data: first\n\n"
+    handle = Handle(stream_body() if streaming else None)
+    with client_for(wrapper, handle) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 200, response.text
+    assert handle.calls == [payload]
+    assert handle.stream is streaming
+
+
 def test_controller_rejects_malformed_wire_response(wrapper):
     handle = Handle({"content": {"ok": True}, "status_code": 200})
     with client_for(wrapper, handle) as client:
         response = client.post("/v1/embeddings", json={})
     assert response.status_code == 500
     assert response.json()["error"]["type"] == "InternalServerError"
+
+
+def test_controller_non_stream_rpc_failure_is_a_neutral_error(wrapper):
+    class FailingHandle(Handle):
+        def remote(self, payload=None):
+            raise RuntimeError("RPC unavailable")
+    with client_for(wrapper, FailingHandle()) as client:
+        response = client.post("/v1/embeddings", json={})
+    assert response.status_code == 500
+    assert response.json() == neutral_error("RPC unavailable")
 
 
 def test_controller_stream_error_preserves_http_status_and_envelope(wrapper):
@@ -355,14 +340,14 @@ def test_controller_replays_first_success_chunk(wrapper):
 
 
 @pytest.mark.parametrize("stage", ("options", "remote", "first_chunk"))
-def test_stream_rpc_initialization_failure_has_error_envelope(wrapper, stage):
+def test_stream_rpc_initialization_failure_names_the_exception(wrapper, stage):
     class FailingHandle(Handle):
         def options(self, **kwargs):
             if stage == "options":
                 raise RuntimeError("RPC unavailable")
             return super().options(**kwargs)
 
-        def remote(self, payload):
+        def remote(self, payload=None):
             if stage == "remote":
                 raise RuntimeError("RPC unavailable")
             return super().remote(payload)
@@ -373,143 +358,35 @@ def test_stream_rpc_initialization_failure_has_error_envelope(wrapper, stage):
     with client_for(wrapper, FailingHandle(failed_stream())) as client:
         response = client.post("/v1/chat/completions", json={"stream": True})
     assert response.status_code == 500
-    assert set(response.json()["error"]) == {"message", "type", "code", "param"}
+    assert response.json() == neutral_error("RPC unavailable")
 
 
-def test_backend_in_band_error_keeps_upstream_details(wrapper):
+def test_returned_error_value_keeps_its_status_and_body(wrapper):
     error = ErrorResponse(error=ErrorInfo(message="unknown model", type="NotFoundError", code=404, param="model"))
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = error
     wire = call_backend(wrapper, "generate")
     assert wire["status_code"] == 404
     assert wire["content"] == error.model_dump(mode="json")
-    async def collect():
-        return [chunk async for chunk in await wrapper.backend.generate({"stream": True})]
-    chunks = asyncio.run(collect())
+    chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
     assert json.loads(chunks[0].removeprefix("data:")) == error.model_dump(mode="json")
     assert chunks[-1] == "data: [DONE]\n\n"
 
 
-@pytest.mark.parametrize("error,status,kind,param", [
-    pytest.param(ValueError("invalid argument"), 400, "BadRequestError", "argument", id="validation"),
-    pytest.param(NativeNotFoundError("missing model"), 404, "NotFoundError", "model", id="not-found"),
-    pytest.param(NativeUnprocessableError("invalid messages"), 422, "UnprocessableEntityError", "messages", id="unprocessable"),
-    pytest.param(NotImplementedError("unsupported operation"), 501, "NotImplementedError", None, id="not-implemented"),
-    pytest.param(QueueOverflowError(), 503, "Service Unavailable", None, id="queue"),
-    pytest.param(GenerationError("generation details"), 500, "InternalServerError", None, id="generation"),
-    pytest.param(RuntimeError("engine details"), 500, "InternalServerError", None, id="server"),
-])
-def test_backend_delegates_error_fields_to_native_factory(wrapper, error, status, kind, param):
-    if wrapper.version == "v0_24_0" and isinstance(error, (NativeUnprocessableError, QueueOverflowError)):
-        pytest.skip("Native 422 and admission-control exception types were introduced in v0.31")
-    expected = ErrorResponse(error=ErrorInfo(message=str(error), type=kind, code=status, param=param))
-    wrapper.factory.side_effect = None
-    wrapper.factory.return_value = expected
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    wire = call_backend(wrapper, "generate")
-    assert wire["status_code"] == status
-    assert wire["content"] == expected.model_dump(mode="json")
-    wrapper.factory.assert_called_once_with(error)
-
-
-@pytest.mark.parametrize("method", ("generate_embeddings", "rerank", "show_available_models"))
-def test_every_serving_method_delegates_errors_to_native_factory(wrapper, method):
-    error = RuntimeError("engine details")
-    expected = ErrorResponse(error=ErrorInfo(message=str(error), type="InternalServerError", code=500, param=None))
-    wrapper.factory.side_effect = None
-    wrapper.factory.return_value = expected
-    if method == "show_available_models":
-        target = wrapper.backend._ensure_models.return_value.show_available_models
-    else:
-        target = wrapper.backend.openai_serving_embedding if method == "generate_embeddings" else wrapper.backend.openai_serving_score
-    target.side_effect = error
-    wire = call_backend(wrapper, method)
-    assert wire["status_code"] == 500
-    assert wire["content"] == expected.model_dump(mode="json")
-    wrapper.factory.assert_called_once_with(error)
-
-
-@pytest.mark.parametrize("error", (ValueError("invalid input"), RuntimeError("engine details"), QueueOverflowError()))
-@pytest.mark.parametrize("stage", ("call", "first", "midstream"))
-def test_stream_exceptions_use_native_factory(wrapper, error, stage):
-    if wrapper.version == "v0_24_0" and isinstance(error, QueueOverflowError):
-        pytest.skip("Native admission-control exception types were introduced in v0.31")
-    async def chunks():
-        if stage == "midstream":
-            yield 'data: {"choices":[]}\n\n'
-        raise error
-        yield
-    target = wrapper.backend.openai_serving_chat.create_chat_completion
-    if stage == "call":
-        target.side_effect = error
-    else:
-        target.return_value = chunks()
-    async def collect():
-        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
-    frames = asyncio.run(collect())
-    assert json.loads(frames[-2].removeprefix("data:")) == upstream_error(error).model_dump(mode="json")
-    assert frames.count("data: [DONE]\n\n") == 1
-    if stage == "midstream":
-        assert frames[0] == 'data: {"choices":[]}\n\n'
-    wrapper.factory.assert_called_once_with(error)
-
-
-@pytest.mark.parametrize("status", (429, 503))
-@pytest.mark.parametrize("stream", (False, True))
-def test_http_exception_uses_native_http_error_fields(wrapper, status, stream):
-    error = HTTPException(status_code=status, detail="native HTTP detail")
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
-    result = call_backend(wrapper, "generate", {"stream": stream})
-    expected = {"error": {
-        "message": error.detail, "type": HTTPStatus(status).phrase, "code": status, "param": None,
-    }}
-    if stream:
-        async def collect():
-            return [frame async for frame in result]
-        frames = asyncio.run(collect())
-        assert json.loads(frames[0].removeprefix("data:")) == expected
-        assert frames[-1] == "data: [DONE]\n\n"
-    else:
-        assert result["status_code"] == status
-        assert result["content"] == expected
-    wrapper.factory.assert_called_once_with(error.detail, err_type=HTTPStatus(status).phrase, status_code=HTTPStatus(status))
-
-
-@pytest.mark.parametrize("stream", (False, True))
-def test_native_factory_failure_uses_neutree_fallback(wrapper, stream):
-    error = RuntimeError("native factory failed")
-    wrapper.factory.side_effect = error
-    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = ValueError("invalid input")
-    result = call_backend(wrapper, "generate", {"stream": stream})
-    if stream:
-        async def collect():
-            return [frame async for frame in result]
-        frames = asyncio.run(collect())
-        content = json.loads(frames[0].removeprefix("data:"))
-        assert frames[-1] == "data: [DONE]\n\n"
-    else:
-        assert result["status_code"] == 500
-        content = result["content"]
-    assert content == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
-
-
 @pytest.mark.parametrize("status", (400, 500, 503))
-def test_native_error_values_are_preserved_in_both_modes(wrapper, status):
+def test_returned_error_values_are_preserved_in_both_modes(wrapper, status):
     result = ErrorResponse(error=ErrorInfo(message="native error details", type="NativeError", code=status, param="model"))
     target = wrapper.backend.openai_serving_chat.create_chat_completion
     target.return_value = result
     wire = call_backend(wrapper, "generate")
     assert wire["status_code"] == status
     assert wire["content"] == result.model_dump(mode="json")
+
     async def chunks():
         yield f"data: {json.dumps(result.model_dump())}\n\n"
         yield "data: [DONE]\n\n"
-    expected = [f"data: {json.dumps(result.model_dump())}\n\n", "data: [DONE]\n\n"]
     target.return_value = chunks()
-    async def collect():
-        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
-    assert asyncio.run(collect()) == expected
+    expected = [f"data: {json.dumps(result.model_dump())}\n\n", "data: [DONE]\n\n"]
+    assert asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True}))) == expected
 
 
 @pytest.mark.parametrize("midstream", (False, True))
@@ -520,9 +397,7 @@ def test_nonfinite_stream_values_are_sanitized(wrapper, midstream):
             yield 'data: {"choices":[]}\n\n'
         yield {"value": value}
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
-    async def collect():
-        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
-    frames = asyncio.run(collect())
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
     assert frames[1 if midstream else 0] == 'data: {"value": null}\n\n'
 
 
@@ -533,20 +408,27 @@ def test_stream_serialization_failure_is_a_server_error(wrapper, midstream):
             yield 'data: {"choices":[]}\n\n'
         yield {"value": object()}
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
-    async def collect():
-        return [frame async for frame in await wrapper.backend.generate({"stream": True})]
-    frames = asyncio.run(collect())
-    assert json.loads(frames[1 if midstream else 0].removeprefix("data:")) == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
+    body = json.loads(frames[1 if midstream else 0].removeprefix("data:"))
+    assert body["error"]["code"] == 500
+    assert body["error"]["type"] == "TypeError"
     assert frames.count("data: [DONE]\n\n") == 1
 
 
-@pytest.mark.parametrize("error,has_stack", [(GenerationError("known generation failure"), False), (RuntimeError("unexpected failure"), True)])
-def test_generation_error_logging_matches_native_server(wrapper, caplog, error, has_stack):
+def test_raised_errors_are_logged_with_a_traceback(wrapper, caplog):
+    error = RuntimeError("unexpected failure")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
     with caplog.at_level(logging.ERROR):
         wire = call_backend(wrapper, "generate")
     assert wire["status_code"] == 500
-    assert any(record.exc_info and record.exc_info[1] is error for record in caplog.records) is has_stack
-    wrapper.factory.assert_called_once_with(error)
+    assert any(record.exc_info and record.exc_info[1] is error for record in caplog.records)
+
+
+def test_http_exception_is_not_reinterpreted(wrapper):
+    error = HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="native HTTP detail")
+    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
+    wire = call_backend(wrapper, "generate")
+    # The user-facing contract is the neutral body, not the status the engine
+    # exception happens to carry.
+    assert wire["status_code"] == 500
+    assert wire["content"] == neutral_error(f"{error.status_code}: {error.detail}", "HTTPException")

@@ -6,7 +6,6 @@ import copy
 import json
 import logging
 import sys
-from http import HTTPStatus
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, Optional
@@ -15,21 +14,14 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
+
+from serve._utils import serve_errors
 
 
 class Result(BaseModel):
     value: str = "ok"
-
-
-class ErrorResponse(BaseModel):
-    object: str = "error"
-    message: str
-    type: str
-    param: Optional[str] = None
-    code: int
 
 
 class RequestModel(BaseModel):
@@ -37,10 +29,13 @@ class RequestModel(BaseModel):
     max_tokens: int = Field(default=1, gt=0)
 
 
+def neutral_error(message, error_type="RuntimeError", code=500):
+    return {"error": {"message": message, "type": error_type, "code": code, "param": None}}
+
+
 @pytest.fixture
 def wrapper(monkeypatch):
     protocol = ModuleType("sglang.srt.entrypoints.openai.protocol")
-    protocol.ErrorResponse = ErrorResponse
     for name in ("ChatCompletionRequest", "CompletionRequest", "EmbeddingRequest"):
         setattr(protocol, name, RequestModel)
     monkeypatch.setitem(sys.modules, protocol.__name__, protocol)
@@ -51,13 +46,15 @@ def wrapper(monkeypatch):
     for node in ast.parse(wire_path.read_text()).body:
         if isinstance(node, ast.ImportFrom) and node.module.startswith("serve._utils."):
             wire_body.append(copy.deepcopy(node))
-        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_FakeRawRequest", "_handle_request", "_extract_serializable", "_error_content", "_error_response", "_input_error_handler", "_flatten_http_error"}:
+        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+            "_FakeRawRequest", "_handle_request",
+        }:
             wire_body.append(copy.deepcopy(node))
     body = []
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module.startswith("serve._utils.") and node.module != "serve._utils.runtime_env":
             body.append(copy.deepcopy(node))
-        elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller", "_FakeRawRequest"}:
+        elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
             cls = copy.deepcopy(node)
             cls.decorator_list = []
             cls.body = [n for n in cls.body if not (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in {"__init__", "__del__", "_ensure_chat", "_ensure_completion", "_ensure_embedding"})]
@@ -65,13 +62,24 @@ def wrapper(monkeypatch):
                 if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     method.decorator_list = []
             body.append(cls)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_extract_serializable", "_iter_response_body", "_to_json_response", "_flat_error_response", "_handle_request"}:
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {"_iter_response_body", "_handle_request"}:
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id == "app" for n in node.targets):
             body.append(copy.deepcopy(node))
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
             body.append(copy.deepcopy(node))
-    namespace = dict(Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI, HTTPException=HTTPException, Request=Request, RequestValidationError=RequestValidationError, ValidationError=ValidationError, JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, HTTPStatus=HTTPStatus, DeploymentResponseGenerator=object, logger=logging.getLogger("test.sglang"), json=json)
+    namespace = dict(
+        Any=Any, Dict=Dict, Optional=Optional, AsyncGenerator=AsyncGenerator, FastAPI=FastAPI,
+        HTTPException=HTTPException, Request=Request, JSONResponse=JSONResponse,
+        StreamingResponse=StreamingResponse, DeploymentResponseGenerator=object,
+        logger=logging.getLogger("test.sglang"), json=json,
+        backend_error=serve_errors.backend_error,
+        backend_response=serve_errors.backend_response,
+        error_stream=serve_errors.error_stream,
+        json_safe=serve_errors.json_safe,
+        open_stream=serve_errors.open_stream,
+        to_wire_response=serve_errors.to_wire_response,
+    )
     exec(compile(ast.fix_missing_locations(ast.Module(body=wire_body, type_ignores=[])), str(wire_path), "exec"), namespace)
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(source), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
@@ -100,23 +108,22 @@ def test_success_is_plain_wire(wrapper, method):
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
-@pytest.mark.parametrize("stage,exc", [
-    ("init", RuntimeError("init failed")),
-    ("serving", ValueError("too long")),
-    ("serving", HTTPException(503, "private server failure")),
-    ("serialization", None),
+@pytest.mark.parametrize("stage,exc,expected_type", [
+    ("init", RuntimeError("init failed"), "RuntimeError"),
+    ("serving", ValueError("too long"), "ValueError"),
+    ("serving", HTTPException(503, "server failure"), "HTTPException"),
 ])
-def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage, exc):
+def test_backend_contains_whole_request_boundary(wrapper, method, handler, stage, exc, expected_type):
     ensure, payload = getattr(wrapper.backend, "_ensure_" + handler), {}
     if stage == "init":
         ensure.side_effect = exc
-    elif stage == "serialization":
-        ensure.return_value.handle_request.return_value = {"value": object()}
     else:
         ensure.return_value.handle_request.side_effect = exc
     wire = call(wrapper, method, payload)
     assert wire["status_code"] == 500
-    assert wire["content"]["error"] == {"message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None}
+    assert wire["content"]["error"]["type"] == expected_type
+    assert wire["content"]["error"]["code"] == 500
+    assert wire["content"]["error"]["message"] == str(exc)
     json.dumps(wire)
 
 
@@ -128,7 +135,7 @@ def test_backend_preserves_returned_http_status(wrapper, method, handler, status
     wire = call(wrapper, method)
     assert wire["status_code"] == status
     assert wire["content"] == native
-    response = wrapper.namespace["_to_json_response"](wire)
+    response = serve_errors.wire_http_response(wire)
     assert response.status_code == status
     assert json.loads(response.body) == native
 
@@ -141,7 +148,7 @@ def test_cancellation_unwinds(wrapper):
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("when", ["before", "midstream"])
-@pytest.mark.parametrize("exc", [RuntimeError("private engine failure"), HTTPException(429, "private HTTP failure")])
+@pytest.mark.parametrize("exc", [RuntimeError("engine failure"), HTTPException(429, "HTTP failure")])
 def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, handler, when, exc):
     async def chunks():
         if when == "midstream":
@@ -150,9 +157,7 @@ def test_escaped_stream_exception_is_neutral_error_and_done(wrapper, method, han
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
     assert frames[-1] == "data: [DONE]\n\n"
-    assert json.loads(frames[-2].removeprefix("data:")) == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
+    assert json.loads(frames[-2].removeprefix("data:")) == neutral_error(str(exc), type(exc).__name__)
     assert frames.count("data: [DONE]\n\n") == 1
     if when == "midstream":
         assert frames[0] == 'data: {"choices":[]}\n\n'
@@ -164,7 +169,7 @@ def client(wrapper, result=None):
         def remote(self, payload=None):
             calls.append(payload)
             async def value():
-                return result if result is not None else wrapper.namespace["_extract_serializable"]({"ok": True})
+                return result if result is not None else serve_errors.wire_response({"ok": True})
             return value()
     class Handle:
         chat_completion = completion = embedding = get_model_info = Remote()
@@ -191,31 +196,15 @@ def test_models_malformed_wire_fails_closed(wrapper):
     http, _ = client(wrapper, {"status_code": 200})
     response = http.get("/models")
     assert response.status_code == 500
-    assert response.json()["object"] == "error"
-    assert response.json()["code"] == 500
+    assert response.json()["error"]["code"] == 500
 
 
-def test_controller_flattens_nested_error_body(wrapper):
-    wire = {"__neutree_wire_response__": True, "status_code": 500, "content": {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}}
-    response = wrapper.namespace["_to_json_response"](wire)
-    assert response.status_code == 500
-    assert json.loads(response.body) == {
-        "object": "error",
-        "message": "Internal server error",
-        "type": "InternalServerError",
-        "param": None,
-        "code": 500,
-    }
-
-
-def test_flat_sglang_error_first_frame_preserves_native_payload(wrapper):
-    native = {"object": "error", "code": 503, "message": "busy", "type": "InternalServerError", "param": None}
-    async def chunks():
-        yield f'data: {json.dumps(native)}\n\n'
-    http, _ = stream_client(wrapper, chunks())
-    response = http.post("/chat", json={"stream": True})
+def test_controller_passes_native_flat_errors_through(wrapper):
+    # SGLang returns errors flat over HTTP; the Controller must not reshape a
+    # body the engine returned.
+    native = {"object": "error", "message": "native detail", "type": "503", "param": None, "code": 503}
+    http, _ = client(wrapper, serve_errors.wire_response(native, 503))
+    response = http.post("/chat", json={})
     assert response.status_code == 503
     assert response.json() == native
 
@@ -255,46 +244,29 @@ def test_stream_first_frame_is_replayed(wrapper, route):
 
 @pytest.mark.parametrize("route", ["/chat", "/completion"])
 def test_first_stream_error_with_nonstandard_code_stays_json(wrapper, route):
-    code, error_type, expected_status, expected_type = 529, None, 529, "InternalServerError"
-    native = {"object": "error", "code": code, "message": "busy", "type": error_type, "param": None}
+    native = {"object": "error", "code": 529, "message": "busy", "type": "InternalServerError", "param": None}
     async def chunks():
         yield f'data: {json.dumps({"error": native})}\n\n'
         yield 'data: [DONE]\n\n'
     http, _ = stream_client(wrapper, chunks())
     response = http.post(route, json={"stream": True})
-    assert response.status_code == expected_status
-    assert response.json() == {
-        "object": "error", "message": "busy", "type": expected_type, "param": None, "code": expected_status,
-    }
-
-
-@pytest.mark.parametrize("route", ["/chat", "/completion"])
-def test_first_stream_error_has_native_http_shape_and_status(wrapper, route):
-    native = {"object": "error", "code": 503, "message": "busy", "type": "InternalServerError", "param": None}
-    async def chunks():
-        yield f'data: {json.dumps({"error": native})}\n\n'
-        yield 'data: [DONE]\n\n'
-    http, _ = stream_client(wrapper, chunks())
-    response = http.post(route, json={"stream": True})
-    assert response.status_code == 503
-    assert response.json() == native
+    assert response.status_code == 529
+    assert response.json() == {"error": native}
 
 
 @pytest.mark.parametrize("route", ["/chat", "/completion"])
 def test_stream_rpc_failure_is_json_500(wrapper, route):
-    http, _ = stream_client(wrapper, failure=RuntimeError("private failure detail"))
+    http, _ = stream_client(wrapper, failure=RuntimeError("failure detail"))
     response = http.post(route, json={"stream": True})
     assert response.status_code == 500
-    assert response.json()["object"] == "error"
-    assert response.json()["code"] == 500
-    assert "private failure detail" not in response.text
+    assert response.json() == neutral_error("failure detail")
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("stage,exc", [
     ("init", RuntimeError("init failed")),
     ("serving", ValueError("too long")),
-    ("serving", HTTPException(503, "private server failure")),
+    ("serving", HTTPException(503, "server failure")),
 ])
 def test_stream_start_failures_are_contained_before_iterator(wrapper, method, handler, stage, exc):
     ensure = getattr(wrapper.backend, "_ensure_" + handler)
@@ -303,9 +275,7 @@ def test_stream_start_failures_are_contained_before_iterator(wrapper, method, ha
     else:
         ensure.return_value.handle_request.side_effect = exc
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    assert json.loads(frames[0].removeprefix("data:")) == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
+    assert json.loads(frames[0].removeprefix("data:")) == neutral_error(str(exc), type(exc).__name__)
     assert frames[-1] == "data: [DONE]\n\n"
 
 
@@ -348,19 +318,17 @@ def test_nonfinite_stream_values_are_sanitized(wrapper, method, handler):
 
 @pytest.mark.parametrize("method,handler", [("chat_completion", "chat"), ("completion", "completion"), ("embedding", "embedding")])
 def test_model_dump_failure_is_server_error(wrapper, method, handler):
-    exc = ValueError("private serializer details")
+    exc = ValueError("serializer details")
     result = SimpleNamespace(model_dump=Mock(side_effect=exc))
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = result
     wire = call(wrapper, method)
     assert wire["status_code"] == 500
-    assert wire["content"] == {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
+    assert wire["content"] == neutral_error("serializer details", "ValueError")
     json.dumps(wire, allow_nan=False)
 
 
-def test_response_http_status_is_authoritative(wrapper):
-    wire = wrapper.namespace["_extract_serializable"](JSONResponse({"object": "error", "code": 400}, status_code=429))
+def test_response_http_status_is_authoritative():
+    wire = serve_errors.to_wire_response(JSONResponse({"object": "error", "code": 400}, status_code=429))
     assert wire["status_code"] == 429
 
 
@@ -383,7 +351,7 @@ def test_server_error_path_never_imports_engine(wrapper):
     with patch("builtins.__import__", side_effect=no_engine_import):
         wire = call(wrapper, "get_model_info")
     assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "Internal server error"
+    assert wire["content"]["error"]["type"] == "AttributeError"
 
 
 def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper):
@@ -396,27 +364,24 @@ def test_engine_import_failure_is_contained_without_more_engine_imports(wrapper)
     with patch("builtins.__import__", side_effect=missing_engine):
         wire = call(wrapper, "chat_completion")
     assert wire["status_code"] == 500
-    assert wire["content"]["error"]["message"] == "Internal server error"
+    assert wire["content"]["error"]["type"] == "ModuleNotFoundError"
     assert engine_imports == ["sglang.srt.entrypoints.openai.protocol"]
 
 
 @pytest.mark.parametrize("method,handler", [("chat_completion_stream", "chat"), ("completion_stream", "completion")])
 @pytest.mark.parametrize("when", ["before", "midstream"])
-@pytest.mark.parametrize("chunk", [
-    pytest.param({"value": object()}, id="unsupported-value"),
-    pytest.param(SimpleNamespace(model_dump=Mock(side_effect=ValueError("private serializer details"))), id="model-dump-value-error"),
+@pytest.mark.parametrize("chunk,expected_type", [
+    pytest.param({"value": object()}, "TypeError", id="unsupported-value"),
+    pytest.param(SimpleNamespace(model_dump=Mock(side_effect=ValueError("serializer details"))), "ValueError", id="model-dump-value-error"),
 ])
-def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler, when, chunk):
+def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler, when, chunk, expected_type):
     async def chunks():
         if when == "midstream":
             yield 'data: {"choices":[]}\n\n'
         yield chunk
     getattr(wrapper.backend, "_ensure_" + handler).return_value.handle_request.return_value = StreamingResponse(chunks())
     frames = asyncio.run(collect(getattr(wrapper.backend, method)({"stream": True})))
-    expected = {"error": {
-        "message": "Internal server error", "type": "InternalServerError", "code": 500, "param": None,
-    }}
-    assert json.loads(frames[-2].removeprefix("data:")) == expected
+    assert json.loads(frames[-2].removeprefix("data:"))["error"]["type"] == expected_type
     assert frames[-1] == "data: [DONE]\n\n"
     assert frames.count("data: [DONE]\n\n") == 1
     if when == "midstream":
@@ -426,7 +391,4 @@ def test_stream_serialization_failure_stays_in_backend(wrapper, method, handler,
         http, _ = stream_client(wrapper, getattr(wrapper.backend, method)({"stream": True}))
         response = http.post("/chat", json={"stream": True})
         assert response.status_code == 500
-        assert response.json() == {
-            "object": "error", "message": "Internal server error", "type": "InternalServerError",
-            "param": None, "code": 500,
-        }
+        assert response.json()["error"]["type"] == expected_type

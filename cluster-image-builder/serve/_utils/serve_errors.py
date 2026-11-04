@@ -1,10 +1,23 @@
-"""Engine-neutral HTTP/SSE errors for Serve wrappers."""
+"""Engine-neutral HTTP/SSE errors for Serve wrappers.
+
+Two paths exist here and nowhere else:
+
+* a result the engine returned is passed through with the status the engine put
+  on it (its own error objects included);
+* anything the engine raised becomes one neutral error body that names the
+  exception and carries its message.
+
+Keeping the second path engine-neutral is deliberate: the wrappers do not map
+per-version exception classes, so a new pinned engine version needs no new error
+table here.
+"""
 
 import json
 import logging
 import math
 from typing import Any, AsyncGenerator, Callable
 
+from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
 
@@ -13,27 +26,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 # bare body could not be told apart from an envelope. Both sides import this
 # module from the same engine image, so the key stays consistent per deployment.
 WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
-
-_CLIENT_ERROR_TYPES = {
-    "BadRequestError": 400,
-    "NotFoundError": 404,
-    "UnprocessableEntityError": 422,
-    "RateLimitError": 429,
-    "invalid_request_error": 400,
-    "not_found_error": 404,
-    "rate_limit_exceeded": 429,
-    "authentication_error": 401,
-    "permission_error": 403,
-}
-
-# llama.cpp's native formatter classifies model-not-found as
-# invalid_request_error (HTTP 400), not OpenAI's 404. A first-frame stream error
-# must restore the engine's native status, so the symbolic code follows it.
-_SYMBOLIC_ERROR_CODES = {
-    "context_length_exceeded": 400,
-    "model_not_found": 400,
-    "rate_limit_exceeded": 429,
-}
 
 
 def build_error(
@@ -67,9 +59,19 @@ def error_response(
 
 
 def backend_error(exc: Exception, where: str) -> dict:
-    """Turn a wrapper failure into a neutral error body and log its cause."""
+    """Turn a raised exception into the neutral error body.
+
+    Engines that handle a failure themselves return it instead of raising it, so
+    reaching this function means no engine classification exists. The body names
+    the exception instead of guessing an engine status; a request-model
+    ``ValidationError`` is the one exception, because every engine ships a
+    schema and a schema failure is always a client error.
+    """
+    if isinstance(exc, ValidationError):
+        logging.warning("%s rejected: %s", where, exc)
+        return build_error(str(exc), 400, type(exc).__name__)
     logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
-    return build_error("Internal server error", 500, "InternalServerError")
+    return build_error(str(exc), 500, type(exc).__name__)
 
 
 def json_safe(value: Any, *, strict: bool = False) -> Any:
@@ -110,10 +112,82 @@ def wire_response(content: Any, status_code: int = 200, *, sanitized: bool = Fal
     }
 
 
-def wire_http_response(
-    result: Any,
-    error_builder: Callable[..., JSONResponse] = error_response,
-) -> JSONResponse:
+def stream_error_status(error: Any) -> int:
+    """Read the HTTP status an error body carries, falling back to 500.
+
+    Only the numeric code is read. Body shape and type names differ per engine
+    and per version, so deriving a status from them would reintroduce the
+    per-version tables this boundary exists to avoid.
+    """
+    if isinstance(error, dict):
+        code = error.get("code")
+        if isinstance(code, bool):
+            return 500
+        if isinstance(code, int) and 400 <= code <= 599:
+            return code
+        if isinstance(code, str) and code.isdigit() and 400 <= int(code) <= 599:
+            return int(code)
+    return 500
+
+
+def returned_error_status(content: dict) -> int:
+    """Status carried by an error body the engine returned as a normal value."""
+    if content.get("object") == "error":
+        return stream_error_status(content)
+    error = content.get("error")
+    return stream_error_status(error) if isinstance(error, dict) else 200
+
+
+def to_wire_response(result: Any) -> dict:
+    """Convert a Backend result into the JSON-safe wire envelope.
+
+    A returned result is the response: a pydantic model is dumped, a ready
+    JSONResponse keeps its status, and an error body the engine returned as a
+    value keeps the code it carries. Serialization failures are contained here
+    so the Controller never receives an engine object or a bare exception.
+    """
+    try:
+        if isinstance(result, JSONResponse):
+            content, status_code = json.loads(result.body), result.status_code
+        elif hasattr(result, "model_dump"):
+            content, status_code = result.model_dump(mode="json"), 200
+        else:
+            content, status_code = result, 200
+        if status_code == 200 and isinstance(content, dict):
+            status_code = returned_error_status(content)
+        content = json_safe(content, strict=True)
+    except Exception as exc:
+        return wire_response(backend_error(exc, "response serialization"), 500)
+    return wire_response(content, status_code, sanitized=True)
+
+
+async def to_wire_stream(chunks):
+    """Frame Backend chunks as SSE and contain iteration errors in the Backend."""
+    try:
+        async for chunk in chunks:
+            if isinstance(chunk, (str, bytes)):
+                # Native SSE frames are already wire-formatted; re-encoding them
+                # would double-escape the payload.
+                yield chunk
+            else:
+                try:
+                    if hasattr(chunk, "model_dump"):
+                        chunk = chunk.model_dump(mode="json")
+                    frame = f"data: {json.dumps(json_safe(chunk), allow_nan=False)}\n\n"
+                except Exception as exc:
+                    async for frame in error_stream(backend_error(exc, "stream serialization")):
+                        yield frame
+                    return
+                yield frame
+    except Exception as exc:
+        # The Controller must never see a bare exception from the actor: turn it
+        # into an error frame whose body carries the status, so a failure before
+        # the first frame can still be rendered as an HTTP error.
+        async for frame in error_stream(backend_error(exc, "stream interrupted")):
+            yield frame
+
+
+def wire_http_response(result: Any) -> JSONResponse:
     """Render a Backend wire envelope, failing closed on a malformed one."""
     # Identity check, not truthiness: only the exact envelope is unpacked.
     # Anything else fails closed instead of leaking a Backend shape to clients.
@@ -126,14 +200,33 @@ def wire_http_response(
             logging.exception("Backend wire response could not be rendered")
     else:
         logging.error("Backend returned no wire response: %s", type(result).__name__)
-    return error_builder("Backend returned an invalid response", 500)
+    return error_response("Backend returned an invalid response", 500)
+
+
+def rpc_error_response(exc: Exception, where: str) -> JSONResponse:
+    """Render a Controller-side RPC failure as a neutral error response."""
+    body = backend_error(exc, where)
+    return JSONResponse(content=body, status_code=body["error"]["code"])
+
+
+async def backend_response(start, where: str) -> JSONResponse:
+    """Await a Backend RPC and render its envelope.
+
+    ``start`` builds the call on demand so a failure while constructing the RPC
+    (a dead actor, a dropped handle) is contained like any other interruption;
+    the Controller fails closed with a JSON 500 instead of a FastAPI error page.
+    """
+    try:
+        result = await start()
+    except Exception as exc:
+        return rpc_error_response(exc, where)
+    return wire_http_response(result)
 
 
 async def open_stream(
     start: Callable[[], Any],
     *,
-    message: str,
-    error_builder: Callable[..., JSONResponse] = error_response,
+    where: str,
 ) -> Any:
     """Commit to an SSE response only after the Backend's first frame is known.
 
@@ -141,16 +234,16 @@ async def open_stream(
     response rather than a 200 stream, and an empty stream becomes an empty body.
     Frames after the first are forwarded unchanged, so mid-stream errors stay in
     band. ``start`` builds the Backend stream on call so RPC construction failures
-    are caught by the same guard.
+    are caught by the same guard; ``where`` only names the step in logs, because
+    the response body carries the exception itself.
     """
     try:
         chunks = start()
         first = await chunks.__anext__()
     except StopAsyncIteration:
         return StreamingResponse(content=iter(()), media_type="text/event-stream")
-    except Exception:
-        logging.exception(message)
-        return error_builder(message, 500)
+    except Exception as exc:
+        return rpc_error_response(exc, where)
     failure = stream_error_response(first)
     if failure is not None:
         return failure
@@ -183,28 +276,6 @@ async def error_stream(error: Any) -> AsyncGenerator[str, None]:
     yield "data: [DONE]\n\n"
 
 
-def stream_error_status(error: Any) -> int:
-    """Recover an HTTP status from a native error body without inventing one."""
-    if isinstance(error, dict):
-        code = error.get("code")
-        if isinstance(code, int) and not isinstance(code, bool) and 400 <= code <= 599:
-            return code
-        if isinstance(code, str):
-            try:
-                status_code = int(code)
-            except ValueError:
-                status_code = None
-            if status_code is not None and 400 <= status_code <= 599:
-                return status_code
-            if code in _SYMBOLIC_ERROR_CODES:
-                return _SYMBOLIC_ERROR_CODES[code]
-        error_type = error.get("type")
-        if not isinstance(error_type, str):
-            return 500
-        return _CLIENT_ERROR_TYPES.get(error_type, 500)
-    return 500
-
-
 def stream_error_response(first_chunk: Any) -> JSONResponse | None:
     """Turn a first error frame into JSON, or return None to replay it as SSE."""
     if isinstance(first_chunk, bytes):
@@ -224,9 +295,6 @@ def stream_error_response(first_chunk: Any) -> JSONResponse | None:
     if not isinstance(data, dict):
         return None
     if data.get(WIRE_RESPONSE_MARKER) is True:
-        # Pre-first-frame failures can carry an explicit status. A native
-        # HTTPException body is only {"detail": ...}, so the status cannot be
-        # recovered from the error payload itself.
         return wire_http_response(data)
     if data.get("object") == "error":
         return JSONResponse(content=json_safe(data), status_code=stream_error_status(data))
