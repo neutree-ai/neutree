@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ type DashboardService interface {
 type Client struct {
 	dashboardURL string
 	client       *http.Client
+	ctx          context.Context
 }
 
 type NewDashboardServiceFunc func(dashboardURL string) DashboardService
@@ -45,6 +47,14 @@ func new(dashboardURL string) DashboardService {
 	}
 }
 
+// WithContext returns a client whose JSON dashboard requests use ctx, without changing the original client.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	clone := *c
+	clone.ctx = ctx
+
+	return &clone
+}
+
 func (c *Client) doRequest(method, path string, body, result interface{}) error {
 	var reqBody io.Reader
 
@@ -57,7 +67,12 @@ func (c *Client) doRequest(method, path string, body, result interface{}) error 
 		reqBody = bytes.NewBuffer(jsonData)
 	}
 
-	req, err := http.NewRequest(method, c.dashboardURL+path, reqBody)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.dashboardURL+path, reqBody)
 	if err != nil {
 		return err
 	}
