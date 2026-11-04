@@ -81,6 +81,8 @@ def wrapper(request):
             for method in cls.body:
                 method.decorator_list = []
             body.append(cls)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "add_exception_handler":
+            body.append(copy.deepcopy(node))
     factory = Mock(return_value=ErrorResponse(error=ErrorInfo(
         message="engine failure", type="InternalServerError", code=500,
     )))
@@ -89,6 +91,10 @@ def wrapper(request):
         DeploymentResponseGenerator=object, ChatCompletionRequest=ChatRequest,
         EmbeddingCompletionRequest=EmbeddingRequest, RerankRequest=RerankRequest,
         logging=logging, HTTPStatus=HTTPStatus, HTTPException=HTTPException,
+        RequestInputError=serve_response.RequestInputError,
+        input_error_handler=serve_response.input_error_handler,
+        is_streaming=serve_response.is_streaming,
+        read_json_object=serve_response.read_json_object,
         ValidationError=ValidationError, create_error_response=factory,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(app_path), "exec"), namespace)
@@ -167,6 +173,16 @@ def test_inference_errors_delegate_the_original_exception(wrapper, method, attri
     wrapper.factory.assert_called_once_with(error)
     assert wire["status_code"] == status
     assert wire["content"] == native.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("spelling", ("true", "yes", 1))
+def test_generate_follows_the_controller_stream_spelling(wrapper, spelling):
+    async def chunks():
+        yield "data: first\n\n"
+
+    wrapper.backend.openai_serving_chat.create_chat_completion.return_value = chunks()
+    frames = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": spelling})))
+    assert frames == ["data: first\n\n"]
 
 
 def test_model_listing_failure_stays_neutral(wrapper):
@@ -263,9 +279,14 @@ def client_for(wrapper, handle):
 
 @pytest.mark.parametrize("payload,streaming", [
     ({"stream": True}, True),
-    ({"stream": False}, False),
+    ({"stream": 1}, True),
+    ({"stream": "yes"}, True),
+    ({"stream": "false"}, False),
+    ({"stream": 0}, False),
+    ({"stream": None}, False),
+    ({}, False),
 ])
-def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming):
+def test_controller_dispatches_on_engine_boolean_semantics(wrapper, payload, streaming):
     async def stream_body():
         yield "data: first\n\n"
     payload = {**PAYLOADS["generate"], **payload}
@@ -275,6 +296,30 @@ def test_controller_dispatches_on_stream_truthiness(wrapper, payload, streaming)
     assert response.status_code == 200, response.text
     assert handle.calls == [payload]
     assert handle.stream is streaming
+
+
+@pytest.mark.parametrize("body,message", [
+    (b"[1, 2]", "Request body must be a JSON object"),
+    (b'"text"', "Request body must be a JSON object"),
+    (b"{not json", "Request body must be valid JSON"),
+])
+def test_controller_rejects_non_object_bodies_before_dispatch(wrapper, body, message):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        response = client.post("/v1/chat/completions", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": {"message": message, "type": "BadRequestError", "code": 400, "param": None}}
+    assert handle.calls == []
+
+
+@pytest.mark.parametrize("payload", [{"stream": 2}, {"stream": "maybe"}])
+def test_controller_rejects_uninterpretable_stream_values(wrapper, payload):
+    handle = Handle()
+    with client_for(wrapper, handle) as client:
+        response = client.post("/v1/chat/completions", json=payload)
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "stream must be a boolean"
+    assert handle.calls == []
 
 
 def test_controller_rejects_malformed_wire_response(wrapper):

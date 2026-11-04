@@ -38,10 +38,14 @@ from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
 from serve._utils.serve_response import (
+    RequestInputError,
     backend_error,
     backend_response,
     error_stream,
+    input_error_handler,
+    is_streaming,
     open_stream,
+    read_json_object,
     to_wire_response,
     to_wire_stream,
 )
@@ -369,8 +373,9 @@ class Backend:
         return self.openai_serving_score
 
     async def generate(self, payload: Any):
-        stream = isinstance(payload, dict) and payload.get("stream") is True
+        stream = False
         try:
+            stream = is_streaming(payload)
             await self._ensure_chat()
         except Exception as exc:
             error = backend_error(exc, "generate")
@@ -423,6 +428,7 @@ class Backend:
 
 
 app = FastAPI()
+app.add_exception_handler(RequestInputError, input_error_handler)
 app.add_middleware(RawContextMiddleware, plugins=(RequestIdPlugin(validate=False),))
 app.add_middleware(
     CORSMiddleware,
@@ -448,8 +454,8 @@ class Controller:
 
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
-        req_obj = await request.json()
-        if req_obj.get("stream", False):
+        req_obj = await read_json_object(request)
+        if is_streaming(req_obj):
             # A factory keeps RPC construction inside open_stream's first-frame guard.
             def start() -> DeploymentResponseGenerator:
                 """Build the Backend stream when open_stream starts it."""
@@ -465,13 +471,13 @@ class Controller:
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint for text-embedding models"""
-        req_obj = await request.json()
+        req_obj = await read_json_object(request)
         return await backend_response(lambda: self.backend.options(stream=False).generate_embeddings.remote(req_obj), "embeddings")
 
     @app.post("/v1/rerank")
     async def rerank(self, request: Request):
         """Rerank endpoint for cross-encoder/reranker models"""
-        req_obj = await request.json()
+        req_obj = await read_json_object(request)
         return await backend_response(lambda: self.backend.options(stream=False).rerank.remote(req_obj), "rerank")
 
     @app.get("/v1/models")
