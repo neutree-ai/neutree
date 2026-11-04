@@ -14,6 +14,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/util"
+	"github.com/neutree-ai/neutree/internal/utils"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -745,18 +746,18 @@ func (k *Kong) syncEndpointService(ep *v1.Endpoint) (*kong.Service, error) {
 		return nil, errors.New("cluster is never initialized")
 	}
 
-	scheme, host, port, err := util.GetClusterServeAddress(&clusters[0])
+	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get cluster serve url")
+		return nil, errors.Wrapf(err, "failed to get endpoint serve address")
 	}
 
 	gwServiceName := "neutree-endpoint-" + util.HashString(ep.Key())
 	gwService := &kong.Service{
 		Name:        &gwServiceName,
-		Host:        &host,
-		Port:        &port,
-		Protocol:    &scheme,
-		Path:        pointy.String(fmt.Sprintf("/%s/%s", ep.Metadata.Workspace, ep.Metadata.Name)),
+		Host:        &address.Host,
+		Port:        &address.Port,
+		Protocol:    &address.Scheme,
+		Path:        &address.Path,
 		ReadTimeout: pointy.Int(60000 * 60),
 	}
 
@@ -1009,14 +1010,12 @@ func (k *Kong) resolveEndpointRef(workspace, endpointName string) (scheme, host 
 		return "", "", 0, "", fmt.Errorf("cluster %s is never initialized", ep.Spec.Cluster)
 	}
 
-	scheme, host, port, err = util.GetClusterServeAddress(&clusters[0])
+	address, err := utils.GetEndpointServeAddress(&clusters[0], ep)
 	if err != nil {
-		return "", "", 0, "", errors.Wrapf(err, "failed to get cluster serve address")
+		return "", "", 0, "", errors.Wrapf(err, "failed to get endpoint serve address")
 	}
 
-	path = fmt.Sprintf("/%s/%s", workspace, endpointName)
-
-	return scheme, host, port, path, nil
+	return address.Scheme, address.Host, address.Port, address.Path, nil
 }
 
 // resolvedUpstream is the outcome of resolving one spec upstream entry into a

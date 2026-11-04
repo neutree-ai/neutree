@@ -8,7 +8,7 @@ metadata:
     {{ include "neutree.labels" . | nindent 4 }}
 data:
   vector.yml: |-
-    # Log sink disk buffers live on the data emptyDir, not the container filesystem.
+    # Log sink disk buffers live on the data volume, not the container filesystem.
     data_dir: /vector-data-dir
     secret:
       jwt_secret:
@@ -251,6 +251,11 @@ data:
         batch:
           max_events: 1
           timeout_secs: 1
+        # Disk buffers keep undelivered events across pod restarts; they live
+        # on the data volume.
+        buffer:
+          type: disk
+          max_size: 536870912
       {{- if $aiTraceStoreUrl }}
       ai_trace_victorialogs:
         type: http
@@ -269,6 +274,9 @@ data:
         batch:
           max_events: 100
           timeout_secs: 1
+        buffer:
+          type: disk
+          max_size: 1073741824
       {{- end }}
 ---
 apiVersion: v1
@@ -298,6 +306,10 @@ metadata:
   labels:
     {{ include "neutree.labels" . | nindent 4 }}
 spec:
+  # The disk buffers are locked by one Vector process and the volume may be
+  # ReadWriteOnce, so the old pod must stop before the new one starts.
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:
@@ -364,11 +376,28 @@ spec:
               mountPath: "/etc/vector/logsink-secrets/"
               readOnly: true
       terminationGracePeriodSeconds: 60
+      {{- with .Values.vector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vector.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: jwt-secret
           emptyDir: {}
         - name: data
+          {{- if .Values.vector.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "neutree.fullname" . }}-vector-pvc
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: logsink-secrets
           secret:
             secretName: {{ include "neutree.fullname" . }}-vector-logsink-secrets
@@ -384,3 +413,23 @@ spec:
                   items:
                     - key: logsinks.yaml
                       path: logsinks.yaml
+{{- if .Values.vector.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "neutree.fullname" . }}-vector-pvc
+  labels:
+    {{- include "neutree.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.vector.persistence.storageClassName }}
+  storageClassName: {{ .Values.vector.persistence.storageClassName }}
+  {{- end }}
+  accessModes:
+  {{- range .Values.vector.persistence.accessModes }}
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.vector.persistence.size | quote }}
+{{- end }}

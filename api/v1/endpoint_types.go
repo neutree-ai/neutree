@@ -76,6 +76,8 @@ const (
 )
 
 type EndpointStatus struct {
+	// ServedModels preserves the order reported by the inference instance's /v1/models API.
+	ServedModels       []string               `json:"served_models,omitempty"`
 	KVCache            *EndpointKVCacheStatus `json:"kv_cache,omitempty"`
 	Phase              EndpointPhase          `json:"phase,omitempty"`
 	ServiceURL         string                 `json:"service_url,omitempty"`

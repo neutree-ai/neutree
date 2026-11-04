@@ -1,6 +1,7 @@
 package version
 
 import (
+	"fmt"
 	"strings"
 
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -22,6 +23,9 @@ var KubeSchedulerVersionsByMinor = map[string]string{
 	"1.30": "v1.30.14",
 	"1.31": "v1.31.14",
 	"1.32": "v1.32.13",
+	"1.33": "v1.33.13",
+	"1.34": "v1.34.12",
+	"1.35": "v1.35.9",
 }
 
 var DefaultKubeSchedulerVersion = KubeSchedulerVersionsByMinor[defaultKubeMinor]
@@ -38,16 +42,56 @@ const (
 	SchedulerVersionDefault SchedulerVersionSource = "default"
 )
 
-func KubeSchedulerVersion(serverVersion *kubeversion.Info) (schedulerVersion string, source SchedulerVersionSource) {
-	if schedulerVersion, ok := KubeSchedulerVersionsByMinor[KubernetesServerMajorMinor(serverVersion)]; ok {
-		return schedulerVersion, SchedulerVersionPinned
+// KubeSchedulerVersionForClusterVersion selects the kube-scheduler image version
+// for a cluster. The bundled images depend on the Neutree cluster version:
+//
+//   - below v1.3.0: scheduler images for Kubernetes 1.26-1.32
+//   - v1.3.0 and above: scheduler images for Kubernetes 1.26-1.35
+//
+// A Kubernetes minor inside the cluster's range uses its pinned image. Anything
+// else keeps the detected server version, and an unusable detection falls back
+// to DefaultKubeSchedulerVersion. The returned error reports a cluster version
+// that could not be evaluated; the caller keeps the fallback version but should
+// surface why it was used.
+func KubeSchedulerVersionForClusterVersion(clusterVersion string, serverVersion *kubeversion.Info) (string, SchedulerVersionSource, error) {
+	detectedVersion := KubernetesServerVersion(serverVersion)
+	if detectedVersion == "" {
+		// The server version could not be detected; the chart and scheduler
+		// image fall back to the default pinned version.
+		return DefaultKubeSchedulerVersion, SchedulerVersionDefault, nil
 	}
 
-	if detectedVersion := KubernetesServerVersion(serverVersion); detectedVersion != "" {
-		return detectedVersion, SchedulerVersionDetected
+	baseClusterVersion, err := semver.BaseVersion(strings.TrimSpace(clusterVersion))
+	if err != nil {
+		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("parse cluster version %q: %w", clusterVersion, err)
 	}
 
-	return DefaultKubeSchedulerVersion, SchedulerVersionDefault
+	legacyCluster, err := semver.LessThan(baseClusterVersion, HAMiV210UpgradeGate)
+	if err != nil {
+		return detectedVersion, SchedulerVersionDetected, fmt.Errorf("compare cluster version %q: %w", clusterVersion, err)
+	}
+
+	minorVersion := KubernetesServerMajorMinor(serverVersion)
+
+	if legacyCluster {
+		// Clusters below v1.3.0 only bundle scheduler images up to Kubernetes
+		// 1.32. The pin table also holds the 1.33-1.35 entries that the v1.3.0
+		// profile adds, so a newer minor must keep the detected version
+		// instead of borrowing a pin those clusters cannot pull.
+		aboveLegacyRange, err := semver.LessThan("v1.32.0", minorVersion)
+		if err != nil || aboveLegacyRange {
+			return detectedVersion, SchedulerVersionDetected, nil
+		}
+	}
+
+	// Clusters on v1.3.0 or later may use any pinned minor in their range.
+	// Minors outside it (older than 1.26 or newer than the profile's last
+	// bundled minor) have no image, so the detected version is kept.
+	if pinnedVersion, ok := KubeSchedulerVersionsByMinor[minorVersion]; ok {
+		return pinnedVersion, SchedulerVersionPinned, nil
+	}
+
+	return detectedVersion, SchedulerVersionDetected, nil
 }
 
 func KubeVersionFromServerVersion(serverVersion *kubeversion.Info) chartutil.KubeVersion {

@@ -11,6 +11,12 @@ import (
 const (
 	StaticNodeClusterFlowVersionGate    = "v1.0.1"
 	MinimumSelectableClusterVersionGate = StaticNodeClusterFlowVersionGate
+
+	// HAMiV210UpgradeGate is the first Neutree cluster version in the v1.3
+	// component profile. The profile changes several component behaviors at
+	// this boundary, including HAMi v2.10.0 and scheduler images through
+	// Kubernetes 1.35; each selection function documents its own rule.
+	HAMiV210UpgradeGate = "v1.3.0"
 )
 
 func IsStaticNodeClusterFlowVersion(version string) (bool, error) {
