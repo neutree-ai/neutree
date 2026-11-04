@@ -107,11 +107,16 @@ function M.next(state)
         end
         local target = weighted_choice(available)
         local key = target_key(state, target)
-        local lease, err, detail = capacity_lease(state, target)
-        if lease then
-            local admission, health_err
-            if state.health_enabled then admission, health_err = health.acquire(state.env.shared, key) end
-            if not state.health_enabled or admission then
+        local admission, health_err
+        if state.health_enabled then admission, health_err = health.acquire(state.env.shared, key) end
+        if state.health_enabled and not admission then
+            if health_err ~= "unavailable" and health_err ~= "busy" then
+                return nil, "health_unavailable", health_err
+            end
+            health_unavailable = true
+        else
+            local lease, err, detail = capacity_lease(state, target)
+            if lease then
                 state.current = target
                 state.lease = lease
                 state.health = admission
@@ -119,17 +124,17 @@ function M.next(state)
                 state.attempts = state.attempts + 1
                 return target
             end
-            lease()
-            if health_err ~= "unavailable" and health_err ~= "busy" then
-                return nil, "health_unavailable", health_err
+            -- Capacity rejection must not leave a half-open probe occupied.
+            if admission then
+                local ok, record_err = health.record(state.env.shared, admission, "neutral")
+                if not ok then kong.log.err("unable to release model target probe: ", record_err) end
             end
-            health_unavailable = true
-        end
-        if err == "counter_unavailable" then
-            return nil, err, detail
-        end
-        if err == "capacity_exhausted" then
-            capacity_exhausted = true
+            if err == "counter_unavailable" then
+                return nil, err, detail
+            end
+            if err == "capacity_exhausted" then
+                capacity_exhausted = true
+            end
         end
         state.excluded[key] = true
     end

@@ -81,6 +81,8 @@ local function update(shared, admission, outcome)
         end
         if admission.probe then
             current.probe, current.probe_until = nil, nil
+            -- Retain the generation: deleting it would make requests admitted
+            -- before the first failure indistinguishable from new requests.
             if outcome == "success" then current.retry_at = nil end
             return write(shared, admission.key, current)
         end

@@ -70,3 +70,5 @@ jobs:
       - uses: actions/checkout@v2
       - name: Run the Kong plugin Lua unit tests
         run: make gateway-lua-test
+      - name: Run real Kong multi-worker failover acceptance
+        run: make gateway-integration-test

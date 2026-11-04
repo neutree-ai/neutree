@@ -118,7 +118,7 @@ describe("passive target failover", function()
         complete(other, "success"); complete(probe, "success")
     end)
 
-    it("does not claim a probe on a primary whose inference capacity is full", function()
+    it("releases probe admission when inference capacity is full", function()
         conf.model_routes[1].targets[1].max_inflight_requests = 1
         local first = start(); routing.observe(first, "failure"); now = 15
         local other, selected = start(); assert.are.equal("B", selected); complete(other, "success")
@@ -138,14 +138,44 @@ describe("passive target failover", function()
         assert.are.equal(0, data[routing.target_key(request, conf.model_routes[1].targets[1])])
     end)
 
-    it("records a contended response after the short state lock is released", function()
-        local request = start()
-        local lock = "health\0lock\0" .. request.health.key
-        dict:safe_add(lock, true, 5)
-        complete(request, "failure")
-        assert.are.equal(1, #timers)
-        dict:delete(lock); timers[1](false)
-        local other, selected = start(); assert.are.equal("B", selected); complete(other, "success")
+    it("preserves current recovery when an expired probe returns concurrently", function()
+        complete(start(), "failure"); now = 15
+        local old = start(); now = 76
+        local current = start()
+        local get = dict.get
+        local interrupted = false
+        dict.get = function(self, key)
+            local value = get(self, key)
+            -- Pause the old worker inside its state read while it owns the
+            -- lock, and deliver the current probe's success on another worker.
+            if not interrupted and key == "health\0state\0" .. old.health.key then
+                interrupted = true
+                complete(current, "success")
+            end
+            return value
+        end
+        complete(old, "success")
+        for _, callback in ipairs(timers) do callback(false) end
+        local recovered, selected = start()
+        assert.are.equal("A", selected); complete(recovered, "success")
+    end)
+
+    it("still allows only one recovery probe after a long idle cooldown", function()
+        complete(start(), "failure"); now = 136
+        local probe, selected = start(); assert.are.equal("A", selected)
+        local other; other, selected = start(); assert.are.equal("B", selected)
+        complete(other, "success"); complete(probe, "success")
+    end)
+
+    it("does not count cooling targets as inflight during fallback selection", function()
+        local failed = start(); complete(failed, "failure")
+        local incr = dict.incr
+        dict.incr = function(self, key, ...)
+            assert.are_not.equal(failed.health.key, key)
+            return incr(self, key, ...)
+        end
+        local other, selected = start(); assert.are.equal("B", selected)
+        complete(other, "success")
     end)
 
     it("cleans removed health state without deleting live concurrency leases", function()
