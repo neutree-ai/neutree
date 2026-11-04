@@ -1,7 +1,11 @@
 package bench
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -105,10 +109,28 @@ func runBench(cmd *cobra.Command, raw *benchOptions, endpoint string) error {
 		return err
 	}
 
-	output, runErr := internalbench.Run(cmd.Context(), api, options)
+	ctx, stop := benchmarkContext(cmd.Context())
+	defer stop()
+
+	output, runErr := internalbench.Run(ctx, api, options)
 	if output != "" {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "benchmark results: %s\n", output)
 	}
 
 	return runErr
+}
+
+func benchmarkContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+
+	// Stop intercepting signals as soon as the first one arrives. Teardown can
+	// take a while (the CLI waits for the remote monitor to confirm), and a
+	// second Ctrl-C must terminate the CLI instead of being swallowed by the
+	// notifier. Calling stop twice is safe.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	return ctx, stop
 }
