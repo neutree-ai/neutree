@@ -295,6 +295,16 @@ vector:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Holds Vector's disk buffers: 1.5Gi for the built-in usage and trace
+  # sinks, plus each log sink's spec.buffer.max_size and 128Mi. Vector does
+  # not check free space, so a full volume fails writes. Without persistence
+  # the buffers are lost whenever the pod is recreated.
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
 
 # VictoriaLogs — the AI inference trace store. Vector ships full
 # request/response trace records here, and neutree-api queries it via
