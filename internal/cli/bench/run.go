@@ -550,14 +550,17 @@ func validateCluster(cluster *v1.Cluster) error {
 // resolveTarget builds the transport for the Endpoint's Cluster. Each Cluster
 // type gets its own resolver; a type no resolver handles is reported rather
 // than silently skipped.
-//
-//nolint:unparam // the target is returned once cluster-specific resolvers land
-func resolveTarget(_ context.Context, _ *v1.Endpoint, cluster, _ *v1.Cluster) (BenchTarget, error) {
+func resolveTarget(ctx context.Context, endpoint *v1.Endpoint, cluster, credentialCluster *v1.Cluster) (BenchTarget, error) {
 	if cluster == nil || cluster.Spec == nil {
 		return BenchTarget{}, fmt.Errorf("Cluster spec is required")
 	}
 
-	return BenchTarget{}, fmt.Errorf("benchmark target for Cluster type %q is not implemented", cluster.Spec.Type)
+	switch cluster.Spec.Type {
+	case v1.KubernetesClusterType:
+		return resolveKubernetesTarget(ctx, cluster, credentialCluster, endpoint)
+	default:
+		return BenchTarget{}, fmt.Errorf("benchmark target for Cluster type %q is not implemented", cluster.Spec.Type)
+	}
 }
 
 func createOutputFile(path string) (*os.File, error) {
