@@ -49,7 +49,6 @@ describe("passive target failover", function()
             { upstream = "A", upstream_model = "a", priority = 0 },
             { upstream = "B", upstream_model = "b", priority = 1 },
         }}} }
-        routing.configure({ conf })
     end)
 
     after_each(function()
@@ -71,20 +70,23 @@ describe("passive target failover", function()
 
     it("preserves single-target routing when there is no alternate destination", function()
         conf.model_routes[1].targets[2] = nil
-        routing.configure({ conf })
         complete(start(), "failure")
         local next_request, selected = start()
         assert.are.equal("A", selected)
         complete(next_request, "success")
     end)
 
-    it("does not let old ordinary results erase a failure or reopen after recovery", function()
+    it("ignores old success during cooldown but accepts late failure after recovery", function()
         local first, late_success, late_failure = start(), start(), start()
         complete(first, "failure"); complete(late_success, "success")
         now = 15
         local probe, selected = start(); assert.are.equal("A", selected)
         local other; other, selected = start(); assert.are.equal("B", selected); complete(other, "success")
-        complete(probe, "success"); complete(late_failure, "failure")
+        complete(probe, "success")
+        assert.is_nil(dict:get("health\0state\0" .. probe.health.key))
+        complete(late_failure, "failure")
+        local fallback; fallback, selected = start(); assert.are.equal("B", selected); complete(fallback, "success")
+        now = 30
         local recovered; recovered, selected = start(); assert.are.equal("A", selected); complete(recovered, "success")
     end)
 
@@ -178,13 +180,20 @@ describe("passive target failover", function()
         complete(other, "success")
     end)
 
-    it("cleans removed health state without deleting live concurrency leases", function()
-        local request = start(); routing.observe(request, "failure")
-        local key = request.health.key
-        routing.configure({})
-        assert.is_nil(dict:get("health\0state\0" .. key))
-        assert.are.equal(1, dict:get(key))
-        routing.finish(request)
-        assert.are.equal(0, dict:get(key))
+    it("forgets inactive cooldown state after ten minutes", function()
+        local failed = start(); complete(failed, "failure")
+        now = 600
+        assert.is_nil(dict:get("health\0state\0" .. failed.health.key))
+        local first, selected = start(); assert.are.equal("A", selected)
+        local second; second, selected = start(); assert.are.equal("A", selected)
+        complete(first, "failure"); complete(second, "success")
+        local fallback; fallback, selected = start(); assert.are.equal("B", selected)
+        complete(fallback, "success")
+    end)
+
+    it("reports missing storage when a multi-target request is admitted", function()
+        dict = nil
+        local _, selected, reason = start()
+        assert.is_nil(selected); assert.are.equal("health_unavailable", reason)
     end)
 end)

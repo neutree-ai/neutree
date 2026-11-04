@@ -5,7 +5,7 @@ local STATE = "health\0state\0"
 local LOCK = "health\0lock\0"
 local COOLDOWN = 15
 local PROBE_LEASE = 60
-local configured = {}
+local STATE_TTL = 600
 
 local function read(shared, key)
     local value = shared:get(STATE .. key)
@@ -13,7 +13,7 @@ local function read(shared, key)
 end
 
 local function write(shared, key, value)
-    return shared:safe_set(STATE .. key, assert(json.encode(value)))
+    return shared:safe_set(STATE .. key, assert(json.encode(value)), STATE_TTL)
 end
 
 local function token()
@@ -30,23 +30,11 @@ local function change(shared, key, apply)
     return result, detail
 end
 
-function M.configure(shared, keys)
-    configured = keys
-    if not shared then
-        assert(next(keys) == nil, "multi-target routing requires neutree_ai_gateway_inflight")
-        return -- Internal-only gateways do not need model-routing storage.
-    end
-    for _, key in ipairs(shared:get_keys(0)) do
-        if key:sub(1, #STATE) == STATE and not keys[key:sub(#STATE + 1)] then
-            shared:delete(key)
-        end
-    end
-end
-
 function M.acquire(shared, key)
+    if not shared then return nil, "routing shared dictionary is unavailable" end
     local value = read(shared, key)
-    if not value or not value.retry_at then
-        return { key = key, generation = value and value.generation }
+    if not value then
+        return { key = key, generation = nil }
     end
     local now = ngx.now()
     if value.retry_at > now or (value.probe_until and value.probe_until > now) then
@@ -54,8 +42,8 @@ function M.acquire(shared, key)
     end
     return change(shared, key, function(current)
         -- Another worker may have restored/reopened it since the read above.
-        if not current or not current.retry_at then
-            return { key = key, generation = current and current.generation }
+        if not current then
+            return { key = key, generation = nil }
         end
         if current.retry_at > now or (current.probe_until and current.probe_until > now) then
             return nil, "unavailable"
@@ -72,7 +60,7 @@ local function update(shared, admission, outcome)
     return change(shared, admission.key, function(current)
         if (current and current.generation) ~= admission.generation
             or (current and current.probe) ~= admission.probe then
-            return true -- An earlier request cannot change a newer decision.
+            return true -- Ignore results belonging to a different active cooldown/probe.
         end
         if outcome == "failure" then
             return write(shared, admission.key, {
@@ -81,9 +69,10 @@ local function update(shared, admission, outcome)
         end
         if admission.probe then
             current.probe, current.probe_until = nil, nil
-            -- Retain the generation: deleting it would make requests admitted
-            -- before the first failure indistinguishable from new requests.
-            if outcome == "success" then current.retry_at = nil end
+            if outcome == "success" then
+                shared:delete(STATE .. admission.key)
+                return true
+            end
             return write(shared, admission.key, current)
         end
         return true
@@ -91,7 +80,6 @@ local function update(shared, admission, outcome)
 end
 
 function M.record(shared, admission, outcome)
-    if not configured[admission.key] then return true end
     if not admission.probe and outcome ~= "failure" then return true end
     local ok, err = update(shared, admission, outcome)
     if ok or err ~= "busy" then return ok, err end
@@ -102,7 +90,6 @@ function M.record(shared, admission, outcome)
         if premature then return end
         local deadline = ngx.now() + 0.1
         repeat
-            if not configured[admission.key] then return end
             ok, err = update(shared, admission, outcome)
             if ok then return end
             if err ~= "busy" then break end

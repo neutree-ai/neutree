@@ -1317,7 +1317,6 @@ end
 
 function AIGatewayHandler:configure(configs)
     observation.configure(configs)
-    routing.configure(configs)
 end
 
 function AIGatewayHandler:access(conf)

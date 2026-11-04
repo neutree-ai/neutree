@@ -7,20 +7,6 @@ end
 
 M.target_key = target_key
 
-function M.configure(configs)
-    local keys = {}
-    for _, conf in ipairs(configs or {}) do
-        for _, route in ipairs(conf.model_routes or {}) do
-            if #route.targets > 1 then
-                for _, target in ipairs(route.targets) do
-                    keys[target_key({ scope = conf.route_prefix, route = route }, target)] = true
-                end
-            end
-        end
-    end
-    health.configure(ngx.shared and ngx.shared.neutree_ai_gateway_inflight, keys)
-end
-
 local function candidates(state)
     local selected, priority
     for _, target in ipairs(state.route.targets or {}) do
