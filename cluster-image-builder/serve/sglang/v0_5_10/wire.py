@@ -1,7 +1,9 @@
 """Wire-format helpers shared by this engine version's Backend and Controller.
 
 Everything here runs inside the Backend actor. Errors are mapped to JSON inside
-the Backend so engine objects never cross the Ray actor boundary.
+the Backend so engine objects never cross the Ray actor boundary. SGLang reports
+errors flat over HTTP but nested inside SSE frames, so the two renderings are
+kept separate below instead of sharing one error builder.
 """
 
 import json
@@ -37,6 +39,9 @@ def _error_content(
     param: str | None = None,
 ) -> Dict[str, Any]:
     """Build SGLang's flat error body."""
+    # SGLang puts the error fields at the top level (object="error") instead of
+    # nesting them under "error", so the shared OpenAI-shaped builder cannot
+    # produce the native HTTP body.
     if not isinstance(error_type, str) or not error_type:
         # HTTPStatus only knows registered codes; engines may report
         # non-standard ones such as 529.
@@ -68,6 +73,8 @@ def _error_response(
 
 def _flatten_http_error(content: Any) -> Any:
     """SGLang reports errors flat over HTTP and nested inside SSE frames."""
+    # Frames keep the nested shape SGLang emits inside a stream; a client calling
+    # the HTTP endpoint sees the flat shape, so unwrap it before rendering.
     if isinstance(content, dict) and content.get("object") != "error":
         error = content.get("error")
         if isinstance(error, dict):
@@ -89,11 +96,17 @@ def _flatten_http_error(content: Any) -> Any:
 
 async def _handle_request(get_handler, request_type, payload):
     """Invoke SGLang's serving handler with the request model."""
+    # ``handle_request`` is the engine's public entry point: it owns validation
+    # and native error classification, so delegating to it keeps statuses and
+    # bodies native instead of re-deriving them here.
     return await get_handler().handle_request(request_type(**payload), _FakeRawRequest())
 
 
 def _extract_serializable(result) -> Dict[str, Any]:
     """Keep the HTTP status and JSON data inside this wrapper's wire envelope."""
+    # A JSONResponse already decided its status; other results encode it in an
+    # error body (flat for SGLang errors), so recover it here rather than
+    # defaulting every returned value to 200.
     status = 200
     if isinstance(result, JSONResponse):
         content, status = json.loads(result.body), result.status_code

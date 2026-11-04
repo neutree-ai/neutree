@@ -1,7 +1,10 @@
 """Wire-format helpers shared by this engine version's Backend and Controller.
 
 Everything here runs inside the Backend actor. Errors are mapped through the
-pinned engine version's own router formatter so clients see the native protocol.
+pinned engine version's own router formatter so clients see the native protocol:
+llama.cpp classifies failures per route (context and model errors are 400,
+unknown errors 500 with a null code), so the wrapper reuses that formatter
+instead of mapping exception types itself.
 """
 
 import json
@@ -27,8 +30,10 @@ def _native_error_response(exc: Exception, payload, where: str) -> Tuple[Dict[st
     """Map a Backend exception to the native router formatter's body and status."""
     try:
         if isinstance(exc, HTTPException):
-            # Only the body and status code cross the Ray actor boundary; HTTP
-            # headers set by the engine are not reproduced at the Controller.
+            # The native formatter only knows model errors, while an
+            # HTTPException already carries an explicit status and detail.
+            # Headers cannot cross the actor boundary, so only body and status
+            # are returned.
             return {"detail": exc.detail}, exc.status_code
         try:
             # Request parsing accepts lax stream spellings, including null, that
@@ -43,11 +48,16 @@ def _native_error_response(exc: Exception, payload, where: str) -> Tuple[Dict[st
                 body = CreateEmbeddingRequest(**body_payload)
         except Exception:
             body = None
+        # Chat and completion routes bind different wrappers (different
+        # context-length errors), so select the route that owns this endpoint
+        # instead of assuming one formatter for every request shape.
         endpoint = create_chat_completion if isinstance(body, CreateChatCompletionRequest) else create_completion
         route = next(route for route in native_router.routes if route.endpoint is endpoint)
         status_code, detail = route.error_message_wrapper(error=exc, body=body)
         return {"error": detail}, status_code
     except Exception as mapping_error:
+        # The native formatter failed too; stay neutral rather than leaking a
+        # RayTaskError to the Controller.
         return backend_error(mapping_error, f"{where} error formatting"), 500
 
 
@@ -70,6 +80,9 @@ async def _stream_chunks(chunks, payload, where: str):
         # cannot be recovered from the error payload. Pre-first failures carry
         # the status explicitly; mid-stream failures stay neutral in-band.
         if first:
+            # A pre-first failure can still choose the HTTP status, so carry the
+            # native status explicitly; after the first frame the Controller has
+            # already committed to 200 and the error can only be in band.
             content, status_code = _native_error_response(exc, payload, where)
             error = wire_response(content, status_code)
         else:
@@ -84,10 +97,13 @@ def _to_wire_response(result: Any, status_code: int | None = None) -> Dict[str, 
         if status_code is None:
             status_code = 200
             if isinstance(result, JSONResponse):
+                # A ready response carries its own status; the body is the payload.
                 content, status_code = json.loads(result.body), result.status_code
             else:
                 content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
             if status_code == 200 and isinstance(content, dict) and "error" in content:
+                # Errors can be returned as 200 values; recover the status the
+                # native formatter encoded in the body.
                 status_code = stream_error_status(content["error"])
         else:
             content = result.model_dump(mode="json") if hasattr(result, "model_dump") else result

@@ -8,6 +8,10 @@ from typing import Any, AsyncGenerator, Callable
 from starlette.responses import JSONResponse, StreamingResponse
 
 
+# The Ray actor boundary only carries JSON, so the Backend returns this envelope
+# instead of an HTTP response: the status code would otherwise be lost, and a
+# bare body could not be told apart from an envelope. Both sides import this
+# module from the same engine image, so the key stays consistent per deployment.
 WIRE_RESPONSE_MARKER = "__neutree_wire_response__"
 
 _CLIENT_ERROR_TYPES = {
@@ -97,6 +101,8 @@ def wire_response(content: Any, status_code: int = 200, *, sanitized: bool = Fal
     ``sanitized`` when the caller already ran ``json_safe`` and validated the
     body, so the same object graph is not walked twice.
     """
+    # The marker is what lets the Controller unpack the result without guessing:
+    # a body that happens to contain "content" or "status_code" is still content.
     return {
         WIRE_RESPONSE_MARKER: True,
         "content": content if sanitized else json_safe(content),
@@ -109,6 +115,8 @@ def wire_http_response(
     error_builder: Callable[..., JSONResponse] = error_response,
 ) -> JSONResponse:
     """Render a Backend wire envelope, failing closed on a malformed one."""
+    # Identity check, not truthiness: only the exact envelope is unpacked.
+    # Anything else fails closed instead of leaking a Backend shape to clients.
     if isinstance(result, dict) and result.get(WIRE_RESPONSE_MARKER) is True:
         try:
             content = result["content"]
