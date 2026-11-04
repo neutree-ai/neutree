@@ -114,6 +114,7 @@ async def _iter_response_body(result) -> AsyncGenerator[str, None]:
         return
     content = _extract_serializable(result)["content"]
     if isinstance(content, dict) and content.get("object") == "error":
+        # Error frames keep SGLang's nested shape; only HTTP responses are flat.
         content = {"error": content}
     async for frame in error_stream(content):
         yield frame
@@ -129,6 +130,9 @@ def _flat_error_response(response: JSONResponse) -> JSONResponse:
 
 def _to_json_response(result) -> JSONResponse:
     """Wrap a backend-returned serialisable value in a JSONResponse."""
+    # SGLang's HTTP clients see errors flat, while some Backend paths (for
+    # example the engine's own streaming error bodies) stay nested; flatten
+    # only on the non-stream path.
     response = wire_http_response(result, error_builder=_error_response)
     return _flat_error_response(response) if response.status_code >= 400 else response
 

@@ -356,6 +356,9 @@ class Backend:
                 return _to_wire_stream(result)
             return _to_wire_response(result)
         except Exception as exc:
+            # Map inside the Backend: the Controller receives a native error body
+            # instead of an escaping RayTaskError, and a streaming failure before
+            # the first frame can still restore its status over HTTP.
             error = _backend_error(exc, "generate")
             if stream:
                 return error_stream(error)
