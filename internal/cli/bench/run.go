@@ -3,7 +3,11 @@ package bench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -12,6 +16,53 @@ import (
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/client"
 )
+
+const (
+	manifestFileName         = "manifest.json"
+	preflightStdoutFileName  = "preflight.stdout.log"
+	preflightStderrFileName  = "preflight.stderr.log"
+	benchmarkResultFileName  = "result.json"
+	benchmarkCommandFileName = "command.sh"
+	benchmarkStdoutFileName  = "stdout.log"
+	measurementScopeRoute    = "endpoint-route"
+	benchmarkSucceededStatus = "Succeeded"
+	benchmarkFailedStatus    = "Failed"
+	benchmarkCanceledStatus  = "Canceled"
+	remoteCleanupTimeout     = 30 * time.Second
+)
+
+type manifest struct {
+	FormatVersion    string           `json:"format_version"`
+	CreatedAt        time.Time        `json:"created_at"`
+	MeasurementScope string           `json:"measurement_scope"`
+	Endpoint         manifestEndpoint `json:"endpoint"`
+	Target           manifestTarget   `json:"target"`
+	Cases            []manifestCase   `json:"cases"`
+	Error            string           `json:"error,omitempty"`
+}
+
+type manifestEndpoint struct {
+	Workspace string `json:"workspace"`
+	Name      string `json:"name"`
+	Cluster   string `json:"cluster"`
+}
+
+type manifestTarget struct {
+	Platform       string `json:"platform"`
+	RuntimeID      string `json:"runtime_id"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model,omitempty"`
+	Tokenizer      string `json:"tokenizer"`
+	ModelSelection string `json:"model_selection"`
+}
+
+type manifestCase struct {
+	Case        Case      `json:"case"`
+	Status      string    `json:"status"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
 
 // Run resolves an Endpoint and runs its benchmark cases. It does not perform
 // role checks: the existing resource and credentials APIs remain the only
@@ -55,9 +106,169 @@ func run(ctx context.Context, api *client.Client, options Options) (string, erro
 
 	klog.Infof("benchmark endpoint ready: %s/%s", endpoint.Metadata.Workspace, endpoint.Metadata.Name)
 
-	// Case execution and result collection are added separately; until then the
-	// command can resolve and validate its target but cannot run one.
-	return "", fmt.Errorf("benchmark execution is not implemented for %s targets", target.Platform)
+	output, err := createOutputDirectory(options.OutputDir)
+	if err != nil {
+		return "", err
+	}
+
+	klog.Infof("benchmark artifacts: %s", output)
+
+	if err := runBenchmark(runCtx, endpoint, target, options, benchmarkCases, output); err != nil {
+		return output, err
+	}
+
+	return output, nil
+}
+
+// runBenchmark executes the case matrix against an already resolved target,
+// writing every artifact under output.
+func runBenchmark(
+	ctx context.Context,
+	endpoint *v1.Endpoint,
+	target BenchTarget,
+	options Options,
+	benchmarkCases []Case,
+	output string,
+) error {
+	result := manifest{
+		FormatVersion:    "v1",
+		CreatedAt:        time.Now().UTC(),
+		MeasurementScope: measurementScopeRoute,
+		Endpoint: manifestEndpoint{
+			Workspace: endpoint.Metadata.Workspace,
+			Name:      endpoint.Metadata.Name,
+			Cluster:   endpoint.Spec.Cluster,
+		},
+		Target: manifestTarget{
+			Platform:       target.Platform,
+			RuntimeID:      target.RuntimeID,
+			BaseURL:        target.BaseURL,
+			Model:          target.Model,
+			Tokenizer:      target.Tokenizer,
+			ModelSelection: "first-served-model",
+		},
+		Cases: make([]manifestCase, 0, len(benchmarkCases)),
+	}
+	if err := writeManifest(output, result); err != nil {
+		return err
+	}
+
+	klog.Info("benchmark preflight started: checking vllm bench")
+
+	err := runPreflight(ctx, target.runner, output)
+	if err != nil {
+		result.Error = err.Error()
+		_ = writeManifest(output, result)
+
+		klog.Errorf("benchmark preflight failed: %v", err)
+
+		return err
+	}
+
+	klog.Info("benchmark preflight completed")
+
+	remoteRoot := filepath.ToSlash(filepath.Join("/tmp", "neutree-bench-"+filepath.Base(output)))
+	if err := prepareRemoteRoot(ctx, target.runner, remoteRoot); err != nil {
+		err = contextOrError(ctx, err)
+		result.Error = err.Error()
+		_ = writeManifest(output, result)
+
+		return err
+	}
+
+	preserveRoot := true
+
+	defer func() {
+		if preserveRoot {
+			klog.Warningf("remote benchmark directory retained: %s on %s", remoteRoot, target.RuntimeID)
+			return
+		}
+
+		cleanupRemoteDirectory(target.runner, remoteRoot)
+	}()
+
+	for caseIndex, benchmarkCase := range benchmarkCases {
+		if err := ctx.Err(); err != nil {
+			result.Error = err.Error()
+			_ = writeManifest(output, result)
+
+			return err
+		}
+
+		caseNumber := caseIndex + 1
+		command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
+		klog.Infof(
+			"benchmark case %d/%d started: input_len=%d output_len=%d concurrency=%d num_prompts=%d request_rate=%s",
+			caseNumber,
+			len(benchmarkCases),
+			benchmarkCase.InputLen,
+			benchmarkCase.OutputLen,
+			benchmarkCase.Concurrency,
+			options.NumPrompts,
+			options.RequestRate,
+		)
+		klog.Infof("benchmark case %d/%d command: %s", caseNumber, len(benchmarkCases), command)
+
+		entry := manifestCase{Case: benchmarkCase, StartedAt: time.Now().UTC()}
+		result.Cases = append(result.Cases, entry)
+
+		if err := writeManifest(output, result); err != nil {
+			return err
+		}
+
+		err := runCase(ctx, target.runner, target, options, benchmarkCase, output, remoteRoot)
+		completedAt := time.Now().UTC()
+		manifestCaseIndex := len(result.Cases) - 1
+		result.Cases[manifestCaseIndex].CompletedAt = completedAt
+
+		if err != nil {
+			result.Cases[manifestCaseIndex].Status = benchmarkCaseErrorStatus(err)
+			result.Cases[manifestCaseIndex].Error = err.Error()
+			result.Error = err.Error()
+			_ = writeManifest(output, result)
+
+			if errors.Is(err, context.Canceled) {
+				klog.Infof("benchmark case %d/%d canceled: %v", caseNumber, len(benchmarkCases), err)
+			} else {
+				klog.Errorf("benchmark case %d/%d failed: %v", caseNumber, len(benchmarkCases), err)
+			}
+
+			return fmt.Errorf("benchmark case %s: %w", benchmarkCase.Name(), err)
+		}
+
+		result.Cases[manifestCaseIndex].Status = benchmarkSucceededStatus
+		if err := writeManifest(output, result); err != nil {
+			return err
+		}
+
+		resultPath := benchmarkCaseResultPath(output, benchmarkCase)
+
+		summaryText := benchmarkResultSummaryText(resultPath)
+		if summaryText == "" {
+			klog.Infof(
+				"benchmark case %d/%d completed: result=%s summary=unavailable",
+				caseNumber,
+				len(benchmarkCases),
+				resultPath,
+			)
+
+			continue
+		}
+
+		klog.Infof(
+			"benchmark case %d/%d completed: result=%s %s",
+			caseNumber,
+			len(benchmarkCases),
+			resultPath,
+			summaryText,
+		)
+	}
+
+	preserveRoot = false
+
+	klog.Infof("benchmark completed: cases=%d result_dir=%s", len(benchmarkCases), output)
+
+	return nil
 }
 
 func resolveRunTarget(ctx context.Context, api *client.Client, options Options) (*v1.Endpoint, BenchTarget, error) {
@@ -349,6 +560,57 @@ func resolveTarget(_ context.Context, _ *v1.Endpoint, cluster, _ *v1.Cluster) (B
 	return BenchTarget{}, fmt.Errorf("benchmark target for Cluster type %q is not implemented", cluster.Spec.Type)
 }
 
+func createOutputFile(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", filepath.Base(path), err)
+	}
+
+	return file, nil
+}
+
+func writeCommandFile(path, command string) error {
+	if err := os.WriteFile(path, []byte(command+"\n"), 0600); err != nil {
+		return fmt.Errorf("write benchmark command: %w", err)
+	}
+
+	return nil
+}
+
+func writeManifest(output string, value manifest) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode benchmark manifest: %w", err)
+	}
+
+	data = append(data, '\n')
+	target := filepath.Join(output, manifestFileName)
+	temporary := target + ".tmp"
+
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		return fmt.Errorf("write benchmark manifest: %w", err)
+	}
+
+	if err := os.Rename(temporary, target); err != nil {
+		return fmt.Errorf("publish benchmark manifest: %w", err)
+	}
+
+	return nil
+}
+
+func createOutputDirectory(base string) (string, error) {
+	if err := os.MkdirAll(base, 0700); err != nil {
+		return "", fmt.Errorf("create benchmark output directory: %w", err)
+	}
+
+	output, err := os.MkdirTemp(base, "neutree-bench-")
+	if err != nil {
+		return "", fmt.Errorf("create benchmark result directory: %w", err)
+	}
+
+	return output, nil
+}
+
 func benchmarkContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout == 0 {
 		return context.WithCancel(ctx)
@@ -363,4 +625,185 @@ func contextOrError(ctx context.Context, err error) error {
 	}
 
 	return err
+}
+
+func benchmarkCaseErrorStatus(err error) string {
+	// A benchmark stopped by the run deadline was stopped on purpose, exactly
+	// like one stopped by Ctrl-C.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return benchmarkCanceledStatus
+	}
+
+	return benchmarkFailedStatus
+}
+
+func runPreflight(ctx context.Context, runner remoteRunner, output string) error {
+	stdout, err := createOutputFile(filepath.Join(output, preflightStdoutFileName))
+	if err != nil {
+		return err
+	}
+	defer stdout.Close() //nolint:errcheck
+
+	stderr, err := createOutputFile(filepath.Join(output, preflightStderrFileName))
+	if err != nil {
+		return err
+	}
+	defer stderr.Close() //nolint:errcheck
+
+	if err := runner.Run(ctx, benchmarkPreflightCommand(), stdout, stderr); err != nil {
+		return fmt.Errorf("vllm benchmark preflight failed: %w", err)
+	}
+
+	return nil
+}
+
+// runCase runs one benchmark case. It removes the remote case directory only
+// after the case succeeds, so a failed or canceled run stays inspectable.
+func runCase(ctx context.Context, runner remoteRunner, target BenchTarget, options Options, benchmarkCase Case, output, remoteRoot string) (err error) {
+	caseOutput := filepath.Join(output, benchmarkCase.Name())
+	if err := os.MkdirAll(caseOutput, 0700); err != nil {
+		return fmt.Errorf("create case output directory: %w", err)
+	}
+
+	stdout, err := createOutputFile(filepath.Join(caseOutput, benchmarkStdoutFileName))
+	if err != nil {
+		return err
+	}
+	defer stdout.Close() //nolint:errcheck
+
+	remoteResultDir := benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase)
+
+	defer func() {
+		if err != nil {
+			klog.Warningf("remote benchmark directory retained: %s", remoteResultDir)
+			return
+		}
+
+		cleanupRemoteDirectory(runner, remoteResultDir)
+	}()
+
+	command := benchmarkCaseCommand(target, options, benchmarkCase, remoteRoot)
+	if err := writeCommandFile(filepath.Join(caseOutput, benchmarkCommandFileName), command); err != nil {
+		return err
+	}
+
+	if err := prepareBenchmarkControl(ctx, runner, remoteResultDir); err != nil {
+		return err
+	}
+
+	// The benchmark's progress bar is the only live progress vllm bench
+	// reports, so it is relayed to stderr while also being recorded in
+	// stdout.log.
+	logOutput := io.MultiWriter(stdout, os.Stderr)
+
+	if err := runner.Run(ctx, command, logOutput, logOutput); err != nil {
+		return err
+	}
+
+	if err := collectBenchmarkResult(ctx, runner, remoteResultDir, caseOutput, stdout); err != nil {
+		return err
+	}
+
+	return validateBenchmarkResult(caseOutput)
+}
+
+// validateBenchmarkResult rejects a result the serving route produced without
+// completing any request. vLLM exits successfully and writes result.json in
+// that case, so a non-empty file alone does not mean the case passed.
+func validateBenchmarkResult(caseOutput string) error {
+	summary, err := readBenchmarkResultSummary(filepath.Join(caseOutput, benchmarkResultFileName))
+	if err != nil {
+		return fmt.Errorf("read benchmark result summary: %w", err)
+	}
+
+	if summary.Completed != nil && *summary.Completed == 0 {
+		return fmt.Errorf("benchmark completed 0 requests")
+	}
+
+	return nil
+}
+
+func collectBenchmarkResult(ctx context.Context, runner remoteRunner, remoteResultDir, caseOutput string, stderr io.Writer) error {
+	resultPath := filepath.Join(caseOutput, benchmarkResultFileName)
+	partialPath := resultPath + ".partial"
+
+	result, err := createOutputFile(partialPath)
+	if err != nil {
+		return err
+	}
+
+	defer result.Close() //nolint:errcheck
+
+	err = runner.Run(ctx, remoteResultCommand(remoteResultDir), result, stderr)
+	if err := contextOrError(ctx, err); err != nil {
+		return fmt.Errorf("copy benchmark result: %w", err)
+	}
+
+	info, err := result.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect copied benchmark result: %w", err)
+	}
+
+	if info.Size() == 0 {
+		return fmt.Errorf("copied benchmark result is empty")
+	}
+
+	if err := result.Close(); err != nil {
+		return fmt.Errorf("close copied benchmark result: %w", err)
+	}
+
+	if err := os.Rename(partialPath, resultPath); err != nil {
+		return fmt.Errorf("publish benchmark result: %w", err)
+	}
+
+	return nil
+}
+
+func benchmarkCaseRemoteResultDirectory(remoteRoot string, benchmarkCase Case) string {
+	return filepath.ToSlash(filepath.Join(remoteRoot, benchmarkCase.Name()))
+}
+
+func benchmarkCaseResultPath(output string, benchmarkCase Case) string {
+	return filepath.Join(output, benchmarkCase.Name(), benchmarkResultFileName)
+}
+
+func benchmarkCaseCommand(target BenchTarget, options Options, benchmarkCase Case, remoteRoot string) string {
+	return buildBenchCommand(
+		target,
+		benchmarkCase,
+		options.NumPrompts,
+		options.RequestRate,
+		benchmarkCaseRemoteResultDirectory(remoteRoot, benchmarkCase),
+	)
+}
+
+func cleanupRemoteDirectory(runner remoteRunner, directory string) {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteCleanupTimeout)
+	defer cancel()
+
+	if err := runner.Run(ctx, remoteCleanupCommand(directory), io.Discard, io.Discard); err != nil {
+		klog.Warningf("failed to clean remote benchmark directory %s: %v", directory, err)
+	}
+}
+
+// prepareRemoteRoot creates the run's remote directory exclusively, so the
+// benchmark never writes into a directory it does not own.
+func prepareRemoteRoot(ctx context.Context, runner remoteRunner, remoteRoot string) error {
+	command := "umask 077 && mkdir -- " + shellQuote(remoteRoot)
+	if err := runner.Run(ctx, command, io.Discard, io.Discard); err != nil {
+		return fmt.Errorf("create exclusive remote benchmark directory: %w", err)
+	}
+
+	return nil
+}
+
+// prepareBenchmarkControl creates the case directory exclusively, so the
+// benchmark never writes into a directory it does not own.
+func prepareBenchmarkControl(ctx context.Context, runner remoteRunner, remoteDir string) error {
+	command := "umask 077 && mkdir -- " + shellQuote(remoteDir)
+	if err := runner.Run(ctx, command, io.Discard, io.Discard); err != nil {
+		return fmt.Errorf("prepare remote benchmark directory: %w", err)
+	}
+
+	return nil
 }
