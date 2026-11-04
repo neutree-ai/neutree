@@ -124,13 +124,20 @@ function _M.hit(key, windows)
         list[i] = { name = w.name, seconds = w.seconds, prev_limit = i > 1 and windows[i - 1].limit or nil }
     end
 
+    ngx.update_time()
+    local t0 = ngx.now()
     local pg, err = connect()
     if not pg then
         trip(err)
         return nil
     end
 
+    ngx.update_time()
+    local t1 = ngx.now()
     local res, qerr = pg:query(build_sql(pg, key, list))
+    ngx.update_time()
+    kong.log.debug("global rate limit: connect ", (t1 - t0) * 1000, "ms (reused ",
+        pg.sock:getreusedtimes(), "), query ", (ngx.now() - t1) * 1000, "ms")
     local rows = res and rows_of(res)
     if not rows then
         -- The connection may be inside an aborted transaction; never pool it.

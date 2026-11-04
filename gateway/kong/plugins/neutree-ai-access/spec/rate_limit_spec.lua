@@ -34,6 +34,7 @@ end
 
 _G.ngx = {
     now = function() return clock end,
+    update_time = function() end,
     shared = {},
 }
 
@@ -53,6 +54,7 @@ _G.kong = {
     log = {
         warn = function(...) warnings[#warnings + 1] = table.concat({ ... }) end,
         err = function() end,
+        debug = function() end,
     },
     configuration = {
         pg_host = "db", pg_port = 5432, pg_database = "neutree",
@@ -76,6 +78,7 @@ package.preload["pgmoon"] = function()
         new = function(config)
             db.config = config
             return {
+                sock = { getreusedtimes = function() return 0 end },
                 settimeout = function(_, ms) db.timeout = ms end,
                 connect = function()
                     db.connects = db.connects + 1
