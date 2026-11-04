@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from serve._utils import serve_response
@@ -35,6 +35,27 @@ class Model(BaseModel):
     value: str = "ok"
 
 
+def fake_create_error_response(message, err_type="BadRequestError",
+                               status_code=HTTPStatus.BAD_REQUEST, param=None):
+    """Stand-in for vLLM's exception classifier.
+
+    The real factory lives in the engine image and cannot be imported here, so
+    this mirrors its contract for the exception classes the wrappers can hand
+    it.
+    """
+    if isinstance(message, Exception):
+        exc = message
+        if isinstance(exc, (ValueError, TypeError, OverflowError)):
+            err_type, status_code, param = "BadRequestError", HTTPStatus.BAD_REQUEST, None
+        elif isinstance(exc, NotImplementedError):
+            err_type, status_code, param = "NotImplementedError", HTTPStatus.NOT_IMPLEMENTED, None
+        else:
+            err_type, status_code, param = "InternalServerError", HTTPStatus.INTERNAL_SERVER_ERROR, None
+        message = str(exc)
+    return ErrorResponse(error=ErrorInfo(message=message, type=err_type,
+                                         code=int(status_code), param=param))
+
+
 def request_model(**payload):
     if payload.get("invalid_model"):
         raise ValueError("request model rejected")
@@ -52,6 +73,8 @@ def wrapper(request):
             isinstance(target, ast.Name) and target.id == "app" for target in node.targets
         ):
             body.append(copy.deepcopy(node))
+        elif isinstance(node, ast.FunctionDef) and node.name == "_engine_error":
+            body.append(copy.deepcopy(node))
         elif isinstance(node, ast.ClassDef) and node.name in {"Backend", "Controller"}:
             cls = copy.deepcopy(node)
             cls.decorator_list = []
@@ -66,7 +89,8 @@ def wrapper(request):
         JSONResponse=JSONResponse, StreamingResponse=StreamingResponse, DeploymentHandle=object,
         DeploymentResponseGenerator=object,
         ChatCompletionRequest=request_model, EmbeddingCompletionRequest=request_model,
-        RerankRequest=request_model, json=json,
+        RerankRequest=request_model, json=json, logging=logging, HTTPStatus=HTTPStatus,
+        HTTPException=HTTPException, ValidationError=ValidationError,
         # The module under test, not a stand-in: the wrappers now use the shared
         # boundary directly, so the tests exercise the real implementation.
         backend_error=serve_response.backend_error,
@@ -75,6 +99,8 @@ def wrapper(request):
         open_stream=serve_response.open_stream,
         to_wire_response=serve_response.to_wire_response,
         to_wire_stream=serve_response.to_wire_stream,
+        # No vLLM in this environment, so the classifier is a stand-in.
+        create_error_response=fake_create_error_response,
     )
     exec(compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])), str(app_path), "exec"), namespace)
     backend = object.__new__(namespace["Backend"])
@@ -97,7 +123,7 @@ async def collect(chunks):
     return [chunk async for chunk in chunks]
 
 
-def neutral_error(message, error_type="RuntimeError", code=500):
+def error_body(message, error_type="RuntimeError", code=500):
     return {"error": {"message": message, "type": error_type, "code": code, "param": None}}
 
 
@@ -120,7 +146,7 @@ def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, s
     error = RuntimeError("initialization failed")
     getattr(wrapper.backend, initializer).side_effect = error
     result = call_backend(wrapper, method, {"stream": True} if stream else None)
-    expected = neutral_error("initialization failed")
+    expected = error_body("initialization failed")
     if stream:
         frames = asyncio.run(collect(result))
         assert json.loads(frames[0].removeprefix("data:")) == expected
@@ -134,7 +160,7 @@ def test_raised_exceptions_become_neutral_errors(wrapper, method, initializer, s
     ("generate", "openai_serving_chat"), ("generate_embeddings", "openai_serving_embedding"),
     ("rerank", "openai_serving_score"), ("show_available_models", "_ensure_models"),
 ))
-def test_serving_exceptions_keep_their_own_class_name(wrapper, method, attribute):
+def test_serving_exceptions_use_the_engine_classifier(wrapper, method, attribute):
     class EngineFailure(Exception):
         pass
 
@@ -148,16 +174,35 @@ def test_serving_exceptions_keep_their_own_class_name(wrapper, method, attribute
     target.side_effect = error
     wire = call_backend(wrapper, method)
     assert wire["status_code"] == 500
-    assert wire["content"] == neutral_error("engine details", "EngineFailure")
+    if method == "show_available_models":
+        # Model listing is not an inference call, so it keeps the neutral body
+        # instead of borrowing vLLM's request vocabulary.
+        assert wire["content"] == error_body("engine details", "EngineFailure")
+    else:
+        assert wire["content"] == error_body("engine details", "InternalServerError")
 
 
 @pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
-def test_plain_value_error_is_not_a_schema_error(wrapper, method):
-    # Only a pydantic ValidationError is reclassified as a client error; any
-    # other ValueError raised while building the request keeps the neutral 500.
+def test_engine_client_errors_keep_the_vllm_status(wrapper, method):
+    error = ValueError("input is too long")
+    if method == "generate":
+        wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
+    elif method == "generate_embeddings":
+        wrapper.backend.openai_serving_embedding.side_effect = error
+    else:
+        wrapper.backend.openai_serving_score.side_effect = error
+    wire = call_backend(wrapper, method)
+    assert wire["status_code"] == 400
+    assert wire["content"] == error_body("input is too long", "BadRequestError", 400)
+
+
+@pytest.mark.parametrize("method", ("generate", "generate_embeddings", "rerank"))
+def test_plain_value_error_follows_the_engine_classifier(wrapper, method):
+    # vLLM's own route maps a ValueError to 400; only a pydantic ValidationError
+    # keeps our body, because vLLM's table does not classify pydantic errors.
     wire = call_backend(wrapper, method, {"invalid_model": True})
-    assert wire["status_code"] == 500
-    assert wire["content"] == neutral_error("request model rejected", "ValueError")
+    assert wire["status_code"] == 400
+    assert wire["content"] == error_body("request model rejected", "BadRequestError", 400)
 
 
 @pytest.mark.parametrize("method,request_type,target_name", [
@@ -206,7 +251,7 @@ def test_wire_serialization_failure_is_contained(wrapper, method):
     target.return_value = BrokenModel()
     wire = call_backend(wrapper, method)
     assert wire["status_code"] == 500
-    assert wire["content"] == neutral_error("serialization failed")
+    assert wire["content"] == error_body("serialization failed")
 
 
 @pytest.mark.parametrize("as_model", (False, True))
@@ -235,11 +280,11 @@ def test_cancellation_still_propagates(wrapper, method, initializer):
         call_backend(wrapper, method)
 
 
-def test_stream_failures_are_framed_with_the_exception_name(wrapper):
+def test_stream_failures_use_the_engine_classifier(wrapper):
     error = ValueError("before first chunk")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
     chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
-    assert json.loads(chunks[0].removeprefix("data:")) == neutral_error("before first chunk", "ValueError")
+    assert json.loads(chunks[0].removeprefix("data:")) == error_body("before first chunk", "BadRequestError", 400)
     assert chunks[-1] == "data: [DONE]\n\n"
 
     async def broken_stream():
@@ -249,7 +294,9 @@ def test_stream_failures_are_framed_with_the_exception_name(wrapper):
     wrapper.backend.openai_serving_chat.create_chat_completion.return_value = broken_stream()
     chunks = asyncio.run(collect(call_backend(wrapper, "generate", {"stream": True})))
     assert chunks[0] == "data: first\n\n"
-    assert json.loads(chunks[1].removeprefix("data:")) == neutral_error("midstream")
+    # A mid-stream failure is already past the HTTP status, but the body still
+    # carries the engine's classification.
+    assert json.loads(chunks[1].removeprefix("data:")) == error_body("midstream", "InternalServerError")
     assert chunks[2] == "data: [DONE]\n\n"
 
 
@@ -315,7 +362,7 @@ def test_controller_non_stream_rpc_failure_is_a_neutral_error(wrapper):
     with client_for(wrapper, FailingHandle()) as client:
         response = client.post("/v1/embeddings", json={})
     assert response.status_code == 500
-    assert response.json() == neutral_error("RPC unavailable")
+    assert response.json() == error_body("RPC unavailable")
 
 
 def test_controller_stream_error_preserves_http_status_and_envelope(wrapper):
@@ -358,7 +405,7 @@ def test_stream_rpc_initialization_failure_names_the_exception(wrapper, stage):
     with client_for(wrapper, FailingHandle(failed_stream())) as client:
         response = client.post("/v1/chat/completions", json={"stream": True})
     assert response.status_code == 500
-    assert response.json() == neutral_error("RPC unavailable")
+    assert response.json() == error_body("RPC unavailable")
 
 
 def test_returned_error_value_keeps_its_status_and_body(wrapper):
@@ -424,11 +471,22 @@ def test_raised_errors_are_logged_with_a_traceback(wrapper, caplog):
     assert any(record.exc_info and record.exc_info[1] is error for record in caplog.records)
 
 
-def test_http_exception_is_not_reinterpreted(wrapper):
+def test_http_exception_is_rebuilt_with_its_native_status(wrapper):
     error = HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="native HTTP detail")
     wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = error
     wire = call_backend(wrapper, "generate")
-    # The user-facing contract is the neutral body, not the status the engine
-    # exception happens to carry.
+    # A bare HTTPException carries a status but not vLLM's error type, so the
+    # factory is called with the status phrase as the type.
+    assert wire["status_code"] == 503
+    assert wire["content"] == error_body("native HTTP detail", "Service Unavailable", 503)
+
+
+def test_engine_classifier_failure_falls_back_to_the_neutral_body(wrapper):
+    def broken_factory(*_args, **_kwargs):
+        raise RuntimeError("factory exploded")
+
+    wrapper.namespace["create_error_response"] = broken_factory
+    wrapper.backend.openai_serving_chat.create_chat_completion.side_effect = ValueError("engine failure")
+    wire = call_backend(wrapper, "generate")
     assert wire["status_code"] == 500
-    assert wire["content"] == neutral_error(f"{error.status_code}: {error.detail}", "HTTPException")
+    assert wire["content"] == error_body("factory exploded", "RuntimeError")

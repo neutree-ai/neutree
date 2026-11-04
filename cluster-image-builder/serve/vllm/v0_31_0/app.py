@@ -1,9 +1,12 @@
 import enum
 import json
+import logging
+from http import HTTPStatus
 from typing import Dict, Optional, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 from fastapi.middleware import Middleware
@@ -19,6 +22,7 @@ from vllm.v1.engine.async_llm import AsyncLLM
 # OpenAIServingRender was replaced by vllm.renderers.online_renderer.OnlineRenderer.
 from vllm.entrypoints.chat_utils import ChatTemplateConfig, load_chat_template
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
+from vllm.entrypoints.serve.exception_handling.error_response import create_error_response
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
 from vllm.entrypoints.serve.utils.fingerprint import set_default_fingerprint_mode
 from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
@@ -56,6 +60,36 @@ SCHEDULER_CLASS_PATHS = {
     SchedulerType.STATIC_HASH: "serve._replica_scheduler.static_hash_scheduler:StaticHashReplicaScheduler",
     SchedulerType.CONSISTENT_HASH: "serve._replica_scheduler.chwbl_scheduler:ConsistentHashReplicaScheduler",
 }
+
+
+def _engine_error(exc: Exception, where: str) -> Any:
+    """Classify an exception with the pinned vLLM's own error mapping.
+
+    Only inference calls use this: they are where vLLM owns the status
+    vocabulary (400 for rejected input, 404 for an unknown model, 422, 501) and
+    where OpenAI clients expect it. A request-model ``ValidationError`` is not a
+    vLLM error, so it keeps the neutral 400; a bare FastAPI ``HTTPException``
+    carries a status but not vLLM's error type, so it is rebuilt through the
+    factory.
+    """
+    if isinstance(exc, ValidationError):
+        return backend_error(exc, where)
+    try:
+        if isinstance(exc, HTTPException):
+            status = HTTPStatus(exc.status_code)
+            response = create_error_response(exc.detail, err_type=status.phrase, status_code=status)
+        else:
+            response = create_error_response(exc)
+        code = response.error.code
+    except Exception as mapping_error:
+        # The factory is upstream code; a failure inside it must still stay in
+        # the Backend instead of escaping the actor as a RayTaskError.
+        return backend_error(mapping_error, where)
+    if code >= 500:
+        logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
+    else:
+        logging.warning("%s rejected: %s", where, exc)
+    return response
 
 
 @serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
@@ -342,41 +376,50 @@ class Backend:
         return self.openai_serving_score
 
     async def generate(self, payload: Any):
-        stream = False
+        stream = isinstance(payload, dict) and payload.get("stream") is True
         try:
-            stream = payload.get("stream") is True
             await self._ensure_chat()
+        except Exception as exc:
+            error = backend_error(exc, "generate")
+            return error_stream(error) if stream else to_wire_response(error)
+        try:
             result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
-            if stream:
-                # A streaming call still returns a plain value when vLLM rejects
-                # the request before it builds a generator.
-                if not hasattr(result, "__aiter__"):
-                    return error_stream(result)
-                return to_wire_stream(result)
-            return to_wire_response(result)
         except Exception as exc:
             # Contain the failure inside the Backend: the Controller receives a
             # rendered error body instead of an escaping RayTaskError.
-            error = backend_error(exc, "generate")
-            if stream:
-                return error_stream(error)
-            return to_wire_response(error)
+            error = _engine_error(exc, "generate")
+            return error_stream(error) if stream else to_wire_response(error)
+        if stream:
+            # A streaming call still returns a plain value when vLLM rejects
+            # the request before it builds a generator.
+            if not hasattr(result, "__aiter__"):
+                return error_stream(result)
+            return to_wire_stream(result, _engine_error)
+        return to_wire_response(result)
 
     async def generate_embeddings(self, payload: Any):
         try:
-            request = EmbeddingCompletionRequest(**payload)
             await self._ensure_embedding()
-            return to_wire_response(await self.openai_serving_embedding(request, None))
         except Exception as exc:
             return to_wire_response(backend_error(exc, "generate_embeddings"))
+        try:
+            request = EmbeddingCompletionRequest(**payload)
+            result = await self.openai_serving_embedding(request, None)
+        except Exception as exc:
+            return to_wire_response(_engine_error(exc, "generate_embeddings"))
+        return to_wire_response(result)
 
     async def rerank(self, payload: Any):
         try:
-            request = RerankRequest(**payload)
             await self._ensure_score()
-            return to_wire_response(await self.openai_serving_score(request, None))
         except Exception as exc:
             return to_wire_response(backend_error(exc, "rerank"))
+        try:
+            request = RerankRequest(**payload)
+            result = await self.openai_serving_score(request, None)
+        except Exception as exc:
+            return to_wire_response(_engine_error(exc, "rerank"))
+        return to_wire_response(result)
 
     async def show_available_models(self):
         try:

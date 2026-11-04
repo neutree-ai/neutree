@@ -4,12 +4,13 @@ Two paths exist here and nowhere else:
 
 * a result the engine returned is passed through with the status the engine put
   on it (its own error objects included);
-* anything the engine raised becomes one neutral error body that names the
-  exception and carries its message.
+* a raised exception becomes an error body. A wrapper may hand the exception to
+  the engine's own classifier first (``to_wire_stream`` takes that mapper);
+  whatever is left reaches ``backend_error``, which names the exception and
+  carries its message.
 
-Keeping the second path engine-neutral is deliberate: the wrappers do not map
-per-version exception classes, so a new pinned engine version needs no new error
-table here.
+This module stays engine-neutral: it never maps per-version exception classes
+itself, so a new pinned engine version needs no new error table here.
 """
 
 import json
@@ -161,8 +162,13 @@ def to_wire_response(result: Any) -> dict:
     return wire_response(content, status_code, sanitized=True)
 
 
-async def to_wire_stream(chunks):
-    """Frame Backend chunks as SSE and contain iteration errors in the Backend."""
+async def to_wire_stream(chunks, error_mapper: Callable[[Exception, str], Any] | None = None):
+    """Frame Backend chunks as SSE and contain iteration errors in the Backend.
+
+    ``error_mapper`` lets a wrapper classify an engine failure with the engine's
+    own mapping. Serialization failures never use it: those are ours, not the
+    engine's.
+    """
     try:
         async for chunk in chunks:
             if isinstance(chunk, (str, bytes)):
@@ -183,7 +189,9 @@ async def to_wire_stream(chunks):
         # The Controller must never see a bare exception from the actor: turn it
         # into an error frame whose body carries the status, so a failure before
         # the first frame can still be rendered as an HTTP error.
-        async for frame in error_stream(backend_error(exc, "stream interrupted")):
+        error = backend_error(exc, "stream interrupted") if error_mapper is None \
+            else error_mapper(exc, "stream interrupted")
+        async for frame in error_stream(error):
             yield frame
 
 
