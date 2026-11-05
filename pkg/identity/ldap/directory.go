@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	goldap "github.com/go-ldap/ldap/v3"
 
@@ -58,10 +58,9 @@ type SyncConfig struct {
 	// UserListFilter selects every user to sync. Empty derives it from
 	// Config.UserFilter by replacing UsernamePlaceholder with "*".
 	UserListFilter string
-	// DisabledUserFilter selects the disabled users among those. Empty means
-	// no user is treated as disabled. For Active Directory use
-	// ADDisabledUserFilter; OpenLDAP has no standard flag, so name whatever
-	// the directory uses, e.g. "(pwdAccountLockedTime=*)" with ppolicy.
+	// DisabledUserFilter selects the disabled users among those; empty means
+	// none. OpenLDAP has no standard flag, e.g. "(pwdAccountLockedTime=*)"
+	// with ppolicy; for Active Directory use ADDisabledUserFilter.
 	DisabledUserFilter string
 
 	// PageSize is the paged-results page size; defaults to DefaultPageSize.
@@ -143,9 +142,9 @@ type Directory struct {
 	dial Dialer
 }
 
-// NewDirectory validates cfg (including cfg.Sync) and returns a Directory
-// using dial to reach the directory.
-func NewDirectory(cfg Config, dial Dialer) (*Directory, error) {
+// NewDirectory validates cfg and sync and returns a Directory using dial to
+// reach the directory.
+func NewDirectory(cfg Config, sync SyncConfig, dial Dialer) (*Directory, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -154,7 +153,7 @@ func NewDirectory(cfg Config, dial Dialer) (*Directory, error) {
 		return nil, fmt.Errorf("%w: dialer is required", ErrInvalidConfig)
 	}
 
-	sc := cfg.Sync.withDefaults(cfg.UserFilter)
+	sc := sync.withDefaults(cfg.UserFilter)
 	if err := sc.validate(); err != nil {
 		return nil, err
 	}
@@ -173,34 +172,15 @@ func NewDirectory(cfg Config, dial Dialer) (*Directory, error) {
 // group DNs are expanded recursively (cycles are tolerated), and DNs outside
 // the synced users and groups are ignored.
 func (d *Directory) Snapshot(ctx context.Context) (*orgsync.Snapshot, error) {
-	conn, err := d.dial(ctx)
+	conn, release, err := d.cfg.connectAndBind(ctx, d.dial)
 	if err != nil {
-		if errors.Is(err, ErrConnection) || errors.Is(err, ErrTLS) || errors.Is(err, ErrInvalidConfig) {
-			return nil, err
-		}
-
-		return nil, connectionError("dial", err)
+		return nil, err
 	}
-
-	var closeOnce sync.Once
-	closeConn := func() { closeOnce.Do(func() { _ = conn.Close() }) }
-
-	defer closeConn()
-
-	stop := context.AfterFunc(ctx, closeConn)
-	defer stop()
-
-	if err := conn.Bind(d.cfg.BindDN, d.cfg.BindPassword); err != nil {
-		return nil, d.opError(ctx, ErrServiceBindFailed, "service bind", err)
-	}
+	defer release()
 
 	r := &reader{d: d, ctx: ctx, conn: conn}
 
 	return r.read()
-}
-
-func (d *Directory) opError(ctx context.Context, sentinel error, op string, err error) error {
-	return (&Authenticator{cfg: d.cfg}).operationError(ctx, sentinel, op, err)
 }
 
 type reader struct {
@@ -209,21 +189,26 @@ type reader struct {
 	conn goldap.Client
 }
 
+// entryID is a parsed entry: its DN, the normalized DN (dnKey) and its external ID.
+type entryID struct {
+	dn  *goldap.DN
+	key string
+	id  string
+}
+
 type ouEntry struct {
-	key  string
-	dn   *goldap.DN
+	entryID
 	unit orgsync.OrgUnit
 }
 
 type groupEntry struct {
-	key     string
+	entryID
 	team    orgsync.Team
 	members []string // normalized member DNs
 }
 
 type userEntry struct {
-	key  string
-	dn   *goldap.DN
+	entryID
 	user orgsync.User
 }
 
@@ -248,10 +233,9 @@ func (r *reader) read() (*orgsync.Snapshot, error) {
 		return nil, err
 	}
 
-	ouByKey := make(map[string]*ouEntry, len(ous))
-	for _, ou := range ous {
-		ouByKey[ou.key] = ou
-	}
+	ouByKey := byKey(ous, func(e *ouEntry) string { return e.key })
+	groupByKey := byKey(groups, func(e *groupEntry) string { return e.key })
+	userByKey := byKey(users, func(e *userEntry) string { return e.key })
 
 	snap := &orgsync.Snapshot{
 		OrgUnits: make([]orgsync.OrgUnit, 0, len(ous)),
@@ -260,21 +244,11 @@ func (r *reader) read() (*orgsync.Snapshot, error) {
 	}
 
 	for _, ou := range ous {
-		if parent := nearestOrgUnit(ou.dn, ouByKey); parent != nil {
+		if parent := nearestOrgUnit(ou.entryID, ouByKey); parent != nil {
 			ou.unit.ParentExternalID = parent.unit.ExternalID
 		}
 
 		snap.OrgUnits = append(snap.OrgUnits, ou.unit)
-	}
-
-	userByKey := make(map[string]*userEntry, len(users))
-	for _, u := range users {
-		userByKey[u.key] = u
-	}
-
-	groupByKey := make(map[string]*groupEntry, len(groups))
-	for _, g := range groups {
-		groupByKey[g.key] = g
 	}
 
 	teamsOf := make(map[string][]string, len(users))
@@ -288,12 +262,12 @@ func (r *reader) read() (*orgsync.Snapshot, error) {
 	}
 
 	for _, u := range users {
-		if ou := nearestOrgUnit(u.dn, ouByKey); ou != nil {
+		if ou := nearestOrgUnit(u.entryID, ouByKey); ou != nil {
 			u.user.OrgUnitExternalID = ou.unit.ExternalID
 		}
 
 		teams := teamsOf[u.key]
-		sort.Strings(teams)
+		slices.Sort(teams)
 		u.user.TeamExternalIDs = teams
 		u.user.Disabled = disabled[u.key]
 		snap.Users = append(snap.Users, u.user)
@@ -317,22 +291,14 @@ func (r *reader) readOrgUnits() ([]*ouEntry, error) {
 	out := make([]*ouEntry, 0, len(entries))
 
 	for _, e := range entries {
-		dn, key, err := parseDN(e.DN)
+		ent, err := r.identify(e, seen)
 		if err != nil {
 			return nil, err
 		}
 
-		id, err := r.externalID(e, seen)
-		if err != nil {
-			return nil, err
-		}
-
-		name := e.GetEqualFoldAttributeValue(sc.OrgUnitNameAttribute)
-		if name == "" {
-			name = firstRDNValue(dn)
-		}
-
-		out = append(out, &ouEntry{key: key, dn: dn, unit: orgsync.OrgUnit{ExternalID: id, DisplayName: name, DN: e.DN}})
+		out = append(out, &ouEntry{entryID: ent, unit: orgsync.OrgUnit{
+			ExternalID: ent.id, DisplayName: nameOf(e, sc.OrgUnitNameAttribute, ent.dn), DN: e.DN,
+		}})
 	}
 
 	return out, nil
@@ -351,21 +317,13 @@ func (r *reader) readGroups() ([]*groupEntry, error) {
 
 	seen := map[string]bool{}
 	out := make([]*groupEntry, 0, len(entries))
+	// The same member DN usually appears in many groups.
+	memberKeys := map[string]string{}
 
 	for _, e := range entries {
-		dn, key, err := parseDN(e.DN)
+		ent, err := r.identify(e, seen)
 		if err != nil {
 			return nil, err
-		}
-
-		id, err := r.externalID(e, seen)
-		if err != nil {
-			return nil, err
-		}
-
-		name := e.GetEqualFoldAttributeValue(sc.GroupNameAttribute)
-		if name == "" {
-			name = firstRDNValue(dn)
 		}
 
 		values, err := r.memberValues(e)
@@ -376,15 +334,24 @@ func (r *reader) readGroups() ([]*groupEntry, error) {
 		members := make([]string, 0, len(values))
 
 		for _, v := range values {
-			_, memberKey, err := parseDN(v)
-			if err != nil {
-				return nil, err
+			memberKey, ok := memberKeys[v]
+			if !ok {
+				_, memberKey, err = parseDN(v)
+				if err != nil {
+					return nil, err
+				}
+
+				memberKeys[v] = memberKey
 			}
 
 			members = append(members, memberKey)
 		}
 
-		out = append(out, &groupEntry{key: key, team: orgsync.Team{ExternalID: id, DisplayName: name, DN: e.DN}, members: members})
+		out = append(out, &groupEntry{
+			entryID: ent,
+			team:    orgsync.Team{ExternalID: ent.id, DisplayName: nameOf(e, sc.GroupNameAttribute, ent.dn), DN: e.DN},
+			members: members,
+		})
 	}
 
 	return out, nil
@@ -397,10 +364,12 @@ func (r *reader) memberValues(e *goldap.Entry) ([]string, error) {
 	attr := r.d.sync.GroupMemberAttribute
 	values := e.GetEqualFoldAttributeValues(attr)
 
-	low, high, ranged, err := rangedValues(e, attr, &values)
+	more, low, high, ranged, err := rangedValues(e, attr)
 	if err != nil || !ranged {
 		return values, err
 	}
+
+	values = append(values, more...)
 
 	for high != "*" {
 		end, err := strconv.Atoi(high)
@@ -414,7 +383,7 @@ func (r *reader) memberValues(e *goldap.Entry) ([]string, error) {
 
 		res, err := r.conn.Search(req)
 		if err != nil {
-			return nil, r.d.opError(r.ctx, nil, "read group members", err)
+			return nil, operationError(r.ctx, nil, "read group members", err)
 		}
 
 		if len(res.Entries) != 1 {
@@ -423,7 +392,7 @@ func (r *reader) memberValues(e *goldap.Entry) ([]string, error) {
 
 		var ok bool
 
-		_, high, ok, err = rangedValues(res.Entries[0], attr, &values)
+		more, _, high, ok, err = rangedValues(res.Entries[0], attr)
 		if err != nil {
 			return nil, err
 		}
@@ -431,15 +400,17 @@ func (r *reader) memberValues(e *goldap.Entry) ([]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: group %q: range read returned no range", ErrIncompleteRead, e.DN)
 		}
+
+		values = append(values, more...)
 	}
 
 	return values, nil
 }
 
-// rangedValues appends the values of "<attr>;range=<low>-<high>" to values and
-// returns low and high ("*" for the last range). ranged is false when the entry
-// has no ranged attribute.
-func rangedValues(e *goldap.Entry, attr string, values *[]string) (low int, high string, ranged bool, err error) {
+// rangedValues returns the values of "<attr>;range=<low>-<high>", with low and
+// high ("*" for the last range). ranged is false when the entry has no ranged
+// attribute.
+func rangedValues(e *goldap.Entry, attr string) (values []string, low int, high string, ranged bool, err error) {
 	prefix := strings.ToLower(attr) + ";range="
 
 	for _, a := range e.Attributes {
@@ -450,20 +421,18 @@ func rangedValues(e *goldap.Entry, attr string, values *[]string) (low int, high
 
 		lowStr, highStr, ok := strings.Cut(strings.TrimPrefix(name, prefix), "-")
 		if !ok {
-			return 0, "", false, fmt.Errorf("%w: entry %q: bad range attribute %q", ErrIncompleteRead, e.DN, a.Name)
+			return nil, 0, "", false, fmt.Errorf("%w: entry %q: bad range attribute %q", ErrIncompleteRead, e.DN, a.Name)
 		}
 
 		low, err = strconv.Atoi(lowStr)
 		if err != nil {
-			return 0, "", false, fmt.Errorf("%w: entry %q: bad range attribute %q", ErrIncompleteRead, e.DN, a.Name)
+			return nil, 0, "", false, fmt.Errorf("%w: entry %q: bad range attribute %q", ErrIncompleteRead, e.DN, a.Name)
 		}
 
-		*values = append(*values, a.Values...)
-
-		return low, highStr, true, nil
+		return a.Values, low, highStr, true, nil
 	}
 
-	return 0, "", false, nil
+	return nil, 0, "", false, nil
 }
 
 func (r *reader) readUsers() ([]*userEntry, error) {
@@ -478,30 +447,23 @@ func (r *reader) readUsers() ([]*userEntry, error) {
 	out := make([]*userEntry, 0, len(entries))
 
 	for _, e := range entries {
-		dn, key, err := parseDN(e.DN)
+		ent, err := r.identify(e, seen)
 		if err != nil {
 			return nil, err
 		}
 
-		id, err := r.externalID(e, seen)
+		identity, err := m.mapEntry(e)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w (entry %q)", err, e.DN)
 		}
 
-		u := orgsync.User{ExternalID: id, DN: e.DN, Username: e.GetEqualFoldAttributeValue(m.Username)}
-		if u.Username == "" {
-			return nil, fmt.Errorf("%w: %s of %q", ErrMissingAttribute, m.Username, e.DN)
-		}
-
-		if m.Email != "" {
-			u.Email = e.GetEqualFoldAttributeValue(m.Email)
-		}
-
-		if m.DisplayName != "" {
-			u.DisplayName = e.GetEqualFoldAttributeValue(m.DisplayName)
-		}
-
-		out = append(out, &userEntry{key: key, dn: dn, user: u})
+		out = append(out, &userEntry{entryID: ent, user: orgsync.User{
+			ExternalID:  identity.ExternalID,
+			Username:    identity.Username,
+			Email:       identity.Email,
+			DisplayName: identity.DisplayName,
+			DN:          e.DN,
+		}})
 	}
 
 	return out, nil
@@ -551,7 +513,7 @@ func (r *reader) searchAll(op, baseDN, filter string, attrs []string) ([]*goldap
 
 		res, err := r.conn.Search(req)
 		if err != nil {
-			return nil, r.d.opError(r.ctx, nil, op, err)
+			return nil, operationError(r.ctx, nil, op, err)
 		}
 
 		entries = append(entries, res.Entries...)
@@ -571,43 +533,50 @@ func (r *reader) timeLimit() int {
 
 // attrs returns the ID attribute plus extra, without empties or duplicates.
 func (r *reader) attrs(extra ...string) []string {
-	out := []string{r.d.cfg.Attributes.ID}
-
-	for _, name := range extra {
-		if name == "" {
-			continue
-		}
-
-		duplicate := false
-
-		for _, existing := range out {
-			if strings.EqualFold(existing, name) {
-				duplicate = true
-				break
-			}
-		}
-
-		if !duplicate {
-			out = append(out, name)
-		}
-	}
-
-	return out
+	return uniqueAttributes(append([]string{r.d.cfg.Attributes.ID}, extra...)...)
 }
 
-func (r *reader) externalID(e *goldap.Entry, seen map[string]bool) (string, error) {
+// identify parses the DN of e and reads its external ID, which must not be in seen yet.
+func (r *reader) identify(e *goldap.Entry, seen map[string]bool) (entryID, error) {
+	dn, key, err := parseDN(e.DN)
+	if err != nil {
+		return entryID{}, err
+	}
+
 	id, err := externalID(e, r.d.cfg.Attributes.ID)
 	if err != nil {
-		return "", fmt.Errorf("%w (entry %q)", err, e.DN)
+		return entryID{}, fmt.Errorf("%w (entry %q)", err, e.DN)
 	}
 
 	if seen[id] {
-		return "", fmt.Errorf("%w: duplicate %s %q", ErrIncompleteRead, r.d.cfg.Attributes.ID, id)
+		return entryID{}, fmt.Errorf("%w: duplicate %s %q", ErrIncompleteRead, r.d.cfg.Attributes.ID, id)
 	}
 
 	seen[id] = true
 
-	return id, nil
+	return entryID{dn: dn, key: key, id: id}, nil
+}
+
+// nameOf returns the name attribute of e, or else the value of the first RDN.
+func nameOf(e *goldap.Entry, attr string, dn *goldap.DN) string {
+	if name := e.GetEqualFoldAttributeValue(attr); name != "" {
+		return name
+	}
+
+	if len(dn.RDNs) == 0 || len(dn.RDNs[0].Attributes) == 0 {
+		return ""
+	}
+
+	return dn.RDNs[0].Attributes[0].Value
+}
+
+func byKey[T any](items []T, key func(T) string) map[string]T {
+	out := make(map[string]T, len(items))
+	for _, item := range items {
+		out[key(item)] = item
+	}
+
+	return out
 }
 
 // expandMembers returns the normalized DNs of every synced user in g,
@@ -634,21 +603,21 @@ func expandMembers(g *groupEntry, groups map[string]*groupEntry, users map[strin
 		}
 	}
 
-	out := make([]string, 0, len(found))
-	for k := range found {
-		out = append(out, k)
-	}
-
-	sort.Strings(out)
-
-	return out
+	return slices.Collect(maps.Keys(found))
 }
 
-// nearestOrgUnit returns the closest proper ancestor of dn that is a department.
-func nearestOrgUnit(dn *goldap.DN, ous map[string]*ouEntry) *ouEntry {
-	for i := 1; i < len(dn.RDNs); i++ {
-		parent := &goldap.DN{RDNs: dn.RDNs[i:]}
-		if ou, ok := ous[dnKey(parent)]; ok {
+// nearestOrgUnit returns the closest proper ancestor of e that is a department.
+func nearestOrgUnit(e entryID, ous map[string]*ouEntry) *ouEntry {
+	if len(ous) == 0 {
+		return nil
+	}
+
+	// An ancestor's key is a suffix of e.key: dnKey joins the lowered RDNs with ",".
+	offset := 0
+
+	for _, rdn := range e.dn.RDNs[:max(len(e.dn.RDNs)-1, 0)] {
+		offset += len(strings.ToLower(rdn.String())) + 1
+		if ou, ok := ous[e.key[offset:]]; ok {
 			return ou
 		}
 	}
@@ -669,12 +638,4 @@ func parseDN(raw string) (*goldap.DN, string, error) {
 // compared case-insensitively, as for the usual naming attributes.
 func dnKey(dn *goldap.DN) string {
 	return strings.ToLower(dn.String())
-}
-
-func firstRDNValue(dn *goldap.DN) string {
-	if len(dn.RDNs) == 0 || len(dn.RDNs[0].Attributes) == 0 {
-		return ""
-	}
-
-	return dn.RDNs[0].Attributes[0].Value
 }

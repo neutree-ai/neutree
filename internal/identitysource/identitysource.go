@@ -50,22 +50,31 @@ func LDAPConfig(spec *v1.IdentitySourceLDAPSpec, bindPassword string) ldap.Confi
 		}
 	}
 
-	if sync := spec.Sync; sync != nil {
-		cfg.Sync = ldap.SyncConfig{
-			OrgUnitBaseDN:        strings.TrimSpace(sync.OrgUnitBaseDN),
-			OrgUnitFilter:        strings.TrimSpace(sync.OrgUnitFilter),
-			OrgUnitNameAttribute: strings.TrimSpace(sync.OrgUnitNameAttribute),
-			GroupBaseDN:          strings.TrimSpace(sync.GroupBaseDN),
-			GroupFilter:          strings.TrimSpace(sync.GroupFilter),
-			GroupNameAttribute:   strings.TrimSpace(sync.GroupNameAttribute),
-			GroupMemberAttribute: strings.TrimSpace(sync.GroupMemberAttribute),
-			UserListFilter:       strings.TrimSpace(sync.UserListFilter),
-			DisabledUserFilter:   strings.TrimSpace(sync.DisabledUserFilter),
-		}
+	return cfg
+}
 
-		if sync.PageSize > 0 {
-			cfg.Sync.PageSize = uint32(sync.PageSize) //nolint:gosec // positive and bounded by the column type
-		}
+// LDAPSyncConfig builds the organization sync configuration of an LDAP
+// identity source. The spec is a stored one: the database has trimmed it.
+func LDAPSyncConfig(spec *v1.IdentitySourceLDAPSpec) ldap.SyncConfig {
+	sync := spec.Sync
+	if sync == nil {
+		return ldap.SyncConfig{}
+	}
+
+	cfg := ldap.SyncConfig{
+		OrgUnitBaseDN:        sync.OrgUnitBaseDN,
+		OrgUnitFilter:        sync.OrgUnitFilter,
+		OrgUnitNameAttribute: sync.OrgUnitNameAttribute,
+		GroupBaseDN:          sync.GroupBaseDN,
+		GroupFilter:          sync.GroupFilter,
+		GroupNameAttribute:   sync.GroupNameAttribute,
+		GroupMemberAttribute: sync.GroupMemberAttribute,
+		UserListFilter:       sync.UserListFilter,
+		DisabledUserFilter:   sync.DisabledUserFilter,
+	}
+
+	if sync.PageSize > 0 {
+		cfg.PageSize = uint32(sync.PageSize) //nolint:gosec // positive and bounded by the column type
 	}
 
 	return cfg

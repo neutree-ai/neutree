@@ -224,14 +224,14 @@ func TestE2EDirectorySnapshot(t *testing.T) {
 	_, suffix, _ := strings.Cut(env.baseDN, ",")
 	cfg := env.config(env.ldapsURL, false, env.ca)
 	cfg.UserBaseDN = "ou=org-test," + suffix
-	cfg.Sync = SyncConfig{
+	sync := SyncConfig{
 		OrgUnitBaseDN:      "ou=org-test," + suffix,
 		GroupBaseDN:        "ou=org-test-groups," + suffix,
 		DisabledUserFilter: "(employeeType=disabled)",
 		PageSize:           2, // forces several pages per search
 	}
 
-	d, err := NewDirectory(cfg, NewDialer(cfg))
+	d, err := NewDirectory(cfg, sync, NewDialer(cfg))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

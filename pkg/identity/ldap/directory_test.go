@@ -95,8 +95,14 @@ func userE(dn, id, uid, name string) *goldap.Entry {
 	return goldap.NewEntry(dn, map[string][]string{"entryUUID": {id}, "uid": {uid}, "cn": {name}, "mail": {uid + "@example.org"}})
 }
 
-func dirConfig() Config {
-	cfg := openLDAPConfig()
+// dirSetup is the configuration NewDirectory takes.
+type dirSetup struct {
+	Config
+	Sync SyncConfig
+}
+
+func dirConfig() dirSetup {
+	cfg := dirSetup{Config: openLDAPConfig()}
 	cfg.UserBaseDN = dirUserBase
 	cfg.Sync = SyncConfig{
 		OrgUnitBaseDN:      dirOUBase,
@@ -146,10 +152,10 @@ func fixtureDir() *fakeDir {
 	}
 }
 
-func snapshot(t *testing.T, cfg Config, conn *fakeDir) (*orgsync.Snapshot, error) {
+func snapshot(t *testing.T, cfg dirSetup, conn *fakeDir) (*orgsync.Snapshot, error) {
 	t.Helper()
 
-	d, err := NewDirectory(cfg, func(context.Context) (goldap.Client, error) { return conn, nil })
+	d, err := NewDirectory(cfg.Config, cfg.Sync, func(context.Context) (goldap.Client, error) { return conn, nil })
 	require.NoError(t, err)
 
 	return d.Snapshot(context.Background())
@@ -324,7 +330,7 @@ func TestSnapshotErrorsReturnNothing(t *testing.T) {
 	})
 
 	t.Run("dial", func(t *testing.T) {
-		d, err := NewDirectory(dirConfig(), func(context.Context) (goldap.Client, error) { return nil, errors.New("refused") })
+		d, err := NewDirectory(dirConfig().Config, dirConfig().Sync, func(context.Context) (goldap.Client, error) { return nil, errors.New("refused") })
 		require.NoError(t, err)
 
 		snap, err := d.Snapshot(context.Background())
@@ -336,7 +342,7 @@ func TestSnapshotErrorsReturnNothing(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		d, err := NewDirectory(dirConfig(), func(context.Context) (goldap.Client, error) { return fixtureDir(), nil })
+		d, err := NewDirectory(dirConfig().Config, dirConfig().Sync, func(context.Context) (goldap.Client, error) { return fixtureDir(), nil })
 		require.NoError(t, err)
 
 		snap, err := d.Snapshot(ctx)
@@ -374,7 +380,7 @@ func TestSnapshotErrorsReturnNothing(t *testing.T) {
 }
 
 func TestSnapshotActiveDirectory(t *testing.T) {
-	cfg := adConfig()
+	cfg := dirSetup{Config: adConfig()}
 	cfg.UserBaseDN = dirBase
 	cfg.Sync = SyncConfig{OrgUnitBaseDN: dirBase, DisabledUserFilter: ADDisabledUserFilter}
 
@@ -407,13 +413,13 @@ func TestSnapshotActiveDirectory(t *testing.T) {
 func TestNewDirectoryValidation(t *testing.T) {
 	dial := func(context.Context) (goldap.Client, error) { return nil, nil }
 
-	cases := map[string]func(*Config){
-		"bad org unit base":    func(c *Config) { c.Sync.OrgUnitBaseDN = "not a dn" },
-		"bad group filter":     func(c *Config) { c.Sync.GroupFilter = "(cn=" },
-		"bad disabled filter":  func(c *Config) { c.Sync.DisabledUserFilter = "employeeType=disabled)" },
-		"list with username":   func(c *Config) { c.Sync.UserListFilter = "(uid={username})" },
-		"auth config invalid":  func(c *Config) { c.BindDN = "" },
-		"bad user list filter": func(c *Config) { c.Sync.UserListFilter = "((" },
+	cases := map[string]func(*dirSetup){
+		"bad org unit base":    func(c *dirSetup) { c.Sync.OrgUnitBaseDN = "not a dn" },
+		"bad group filter":     func(c *dirSetup) { c.Sync.GroupFilter = "(cn=" },
+		"bad disabled filter":  func(c *dirSetup) { c.Sync.DisabledUserFilter = "employeeType=disabled)" },
+		"list with username":   func(c *dirSetup) { c.Sync.UserListFilter = "(uid={username})" },
+		"auth config invalid":  func(c *dirSetup) { c.BindDN = "" },
+		"bad user list filter": func(c *dirSetup) { c.Sync.UserListFilter = "((" },
 	}
 
 	for name, mutate := range cases {
@@ -421,11 +427,35 @@ func TestNewDirectoryValidation(t *testing.T) {
 			cfg := dirConfig()
 			mutate(&cfg)
 
-			_, err := NewDirectory(cfg, dial)
+			_, err := NewDirectory(cfg.Config, cfg.Sync, dial)
 			assert.ErrorIs(t, err, ErrInvalidConfig)
 		})
 	}
 
-	_, err := NewDirectory(dirConfig(), nil)
+	_, err := NewDirectory(dirConfig().Config, dirConfig().Sync, nil)
 	assert.ErrorIs(t, err, ErrInvalidConfig)
+}
+
+func TestNearestOrgUnit(t *testing.T) {
+	entry := func(raw string) entryID {
+		dn, key, err := parseDN(raw)
+		require.NoError(t, err)
+
+		return entryID{dn: dn, key: key}
+	}
+
+	ous := map[string]*ouEntry{}
+	for _, raw := range []string{"ou=Ünits,dc=example,dc=org", `ou=a\,b,ou=Ünits,dc=example,dc=org`} {
+		e := entry(raw)
+		ous[e.key] = &ouEntry{entryID: e, unit: orgsync.OrgUnit{ExternalID: raw}}
+	}
+
+	assert.Equal(t, `ou=a\,b,ou=Ünits,dc=example,dc=org`,
+		nearestOrgUnit(entry(`UID=x,CN=Users,OU=A\,B,OU=ÜNITS,DC=Example,DC=org`), ous).unit.ExternalID,
+		"escaped comma and case")
+	assert.Equal(t, "ou=Ünits,dc=example,dc=org", nearestOrgUnit(entry(`ou=a\,b,ou=Ünits,dc=example,dc=org`), ous).unit.ExternalID,
+		"a proper ancestor only")
+	assert.Nil(t, nearestOrgUnit(entry("ou=Ünits,dc=example,dc=org"), ous))
+	assert.Nil(t, nearestOrgUnit(entry("uid=x,dc=other"), ous))
+	assert.Nil(t, nearestOrgUnit(entry("uid=x,ou=a\\,b,ou=Ünits,dc=example,dc=org"), nil))
 }
