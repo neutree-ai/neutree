@@ -272,6 +272,27 @@ func TestDiffInvalidInput(t *testing.T) {
 
 	_, err := Diff(nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidInput)
+
+	for parent, want := range map[string]string{
+		"root": "parent cycle: root", // its own parent; eng and plat are below it
+		"plat": "parent cycle: eng, plat, root",
+	} {
+		snap := baseSnapshot()
+		snap.OrgUnits[2].ParentExternalID = parent
+
+		_, err := Diff(snap, nil)
+		assert.ErrorContains(t, err, want, "root under "+parent)
+	}
+}
+
+func TestDiffTeamMembers(t *testing.T) {
+	assert.Nil(t, diffTeamMembers("u", []string{"a", "b"}, []string{"a", "b"}))
+	assert.Nil(t, diffTeamMembers("u", []string{"b", "a"}, []string{"a", "b"}), "order does not matter")
+	assert.Equal(t, []TeamMembershipChange{
+		{UserExternalID: "u", TeamExternalID: "a"},
+		{UserExternalID: "u", TeamExternalID: "d"},
+		{UserExternalID: "u", TeamExternalID: "c", Remove: true},
+	}, diffTeamMembers("u", []string{"c", "b"}, []string{"d", "b", "a"}))
 }
 
 // TestStdlibOnly keeps the package reusable outside neutree.

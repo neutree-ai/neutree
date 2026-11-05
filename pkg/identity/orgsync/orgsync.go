@@ -1,25 +1,15 @@
-// Package orgsync computes how to bring the organization stored by an
-// application (departments, teams, users and their memberships) in line with a
-// directory.
-//
-// A directory reader (for example pkg/identity/ldap) produces a Snapshot: the
-// whole directory, read in one pass. The caller loads the State it currently
-// stores for the same identity source. Diff compares the two and returns a
-// Plan of writes. Diff is a pure function; it does no I/O.
-//
-// Objects are matched only by their directory external ID, never by name,
-// username or email. Nothing is ever deleted: an object that is gone from the
-// directory is deactivated, and it is reactivated when it comes back.
-//
-// The package imports only the standard library, so it can be reused outside
-// neutree.
+// Package orgsync plans how to bring a stored organization (departments,
+// teams, users, memberships) in line with a directory Snapshot. Objects are
+// matched by external ID only, since names and emails change; nothing is
+// deleted, so a returning object keeps its grants. Standard library only.
 package orgsync
 
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
+	"strings"
 )
 
 // ErrInvalidInput means a Snapshot or a State is not consistent: an empty or
@@ -182,20 +172,9 @@ func (p *Plan) Empty() bool {
 		len(p.OrgUnitMemberships) == 0 && len(p.TeamMemberships) == 0
 }
 
-// Diff returns the writes that make state match snapshot.
-//
-// Rules:
-//   - Departments and teams: missing from the state → Create; changed name or
-//     parent → Update; inactive in the state → Reactivate; missing from the
-//     snapshot and active in the state → Deactivate.
-//   - Users: a user in the snapshot that is not in the state is created even
-//     though it never logged in, unless the directory disables it. A disabled
-//     user, or a user missing from the snapshot, is deactivated; an inactive
-//     user that is enabled in the directory is reactivated. Username, email and
-//     display name follow the directory.
-//   - Memberships follow the directory for every user in the snapshot that
-//     exists after the plan. A user missing from the snapshot loses its
-//     department and all its teams.
+// Diff returns the writes that make state match snapshot. It does no I/O.
+// Users are created before their first login, so grants and memberships can
+// be given ahead; a disabled user who never logged in is not created at all.
 func Diff(snapshot *Snapshot, state *State) (*Plan, error) {
 	if snapshot == nil {
 		return nil, fmt.Errorf("%w: nil snapshot", ErrInvalidInput)
@@ -239,10 +218,6 @@ func validateSnapshot(s *Snapshot) error {
 		if ou.ParentExternalID != "" && !orgUnits[ou.ParentExternalID] {
 			return fmt.Errorf("%w: snapshot org unit %q has unknown parent %q", ErrInvalidInput, ou.ExternalID, ou.ParentExternalID)
 		}
-
-		if ou.ParentExternalID == ou.ExternalID {
-			return fmt.Errorf("%w: snapshot org unit %q is its own parent", ErrInvalidInput, ou.ExternalID)
-		}
 	}
 
 	teams := make(map[string]bool, len(s.Teams))
@@ -273,24 +248,19 @@ func validateSnapshot(s *Snapshot) error {
 }
 
 func validateState(s *State) error {
-	seen := map[string]bool{}
-	for _, ou := range s.OrgUnits {
-		if err := addID(seen, "state org unit", ou.ExternalID); err != nil {
-			return err
-		}
-	}
-
-	seen = map[string]bool{}
-	for _, t := range s.Teams {
-		if err := addID(seen, "state team", t.ExternalID); err != nil {
-			return err
-		}
-	}
-
-	seen = map[string]bool{}
-	for _, u := range s.Users {
-		if err := addID(seen, "state user", u.ExternalID); err != nil {
-			return err
+	for _, kind := range []struct {
+		what string
+		ids  []string
+	}{
+		{"state org unit", externalIDs(s.OrgUnits)},
+		{"state team", externalIDs(s.Teams)},
+		{"state user", externalIDs(s.Users)},
+	} {
+		seen := make(map[string]bool, len(kind.ids))
+		for _, id := range kind.ids {
+			if err := addID(seen, kind.what, id); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -312,11 +282,6 @@ func addID(seen map[string]bool, what, id string) error {
 }
 
 func diffOrgUnits(desired []OrgUnit, current []OrgUnitState) ([]OrgUnitChange, error) {
-	stored := make(map[string]OrgUnitState, len(current))
-	for _, ou := range current {
-		stored[ou.ExternalID] = ou
-	}
-
 	ordered, err := parentsFirst(desired)
 	if err != nil {
 		return nil, err
@@ -324,45 +289,22 @@ func diffOrgUnits(desired []OrgUnit, current []OrgUnitState) ([]OrgUnitChange, e
 
 	var changes []OrgUnitChange
 
-	present := make(map[string]bool, len(desired))
-
-	for _, ou := range ordered {
-		present[ou.ExternalID] = true
-		change := OrgUnitChange{ExternalID: ou.ExternalID, ParentExternalID: ou.ParentExternalID, DisplayName: ou.DisplayName}
-
-		old, ok := stored[ou.ExternalID]
-
-		switch {
-		case !ok:
-			change.Action = ActionCreate
-		case !old.Active:
-			change.Action = ActionReactivate
-		case old.DisplayName != ou.DisplayName || old.ParentExternalID != ou.ParentExternalID:
-			change.Action = ActionUpdate
-		default:
-			continue
+	gone := match(ordered, current, func(ou OrgUnit, old OrgUnitState, exists bool) {
+		changed := old.DisplayName != ou.DisplayName || old.ParentExternalID != ou.ParentExternalID
+		if a := action(exists, old.Active, changed); a != "" {
+			changes = append(changes, OrgUnitChange{Action: a, ExternalID: ou.ExternalID, ParentExternalID: ou.ParentExternalID, DisplayName: ou.DisplayName})
 		}
-
-		changes = append(changes, change)
-	}
-
-	gone := make([]OrgUnitState, 0)
-
-	for _, ou := range current {
-		if !present[ou.ExternalID] && ou.Active {
-			gone = append(gone, ou)
-		}
-	}
-
-	sort.Slice(gone, func(i, j int) bool { return gone[i].ExternalID < gone[j].ExternalID })
+	})
 
 	for _, ou := range gone {
-		changes = append(changes, OrgUnitChange{
-			Action:           ActionDeactivate,
-			ExternalID:       ou.ExternalID,
-			ParentExternalID: ou.ParentExternalID,
-			DisplayName:      ou.DisplayName,
-		})
+		if ou.Active {
+			changes = append(changes, OrgUnitChange{
+				Action:           ActionDeactivate,
+				ExternalID:       ou.ExternalID,
+				ParentExternalID: ou.ParentExternalID,
+				DisplayName:      ou.DisplayName,
+			})
+		}
 	}
 
 	return changes, nil
@@ -374,12 +316,8 @@ func diffOrgUnits(desired []OrgUnit, current []OrgUnitState) ([]OrgUnitChange, e
 // every ancestor it gets is already in its final place.
 func parentsFirst(units []OrgUnit) ([]OrgUnit, error) {
 	children := make(map[string][]OrgUnit, len(units))
-	for _, ou := range units {
+	for _, ou := range byExternalID(units) {
 		children[ou.ParentExternalID] = append(children[ou.ParentExternalID], ou)
-	}
-
-	for _, list := range children {
-		sort.Slice(list, func(i, j int) bool { return list[i].ExternalID < list[j].ExternalID })
 	}
 
 	ordered := make([]OrgUnit, 0, len(units))
@@ -396,88 +334,79 @@ func parentsFirst(units []OrgUnit) ([]OrgUnit, error) {
 	}
 
 	if len(ordered) != len(units) {
-		return nil, fmt.Errorf("%w: snapshot org units contain a cycle", ErrInvalidInput)
+		return nil, cycleError(units, ordered)
 	}
 
 	return ordered, nil
 }
 
-func diffTeams(desired []Team, current []TeamState) []TeamChange {
-	stored := make(map[string]TeamState, len(current))
-	for _, t := range current {
-		stored[t.ExternalID] = t
+// cycleError names the units of one parent cycle. Every unit not reached
+// from a root is in a cycle or below one, and its parents all exist (see
+// validateSnapshot), so following them from such a unit ends in a cycle.
+func cycleError(units, reached []OrgUnit) error {
+	parent := make(map[string]string, len(units))
+	for _, ou := range units {
+		parent[ou.ExternalID] = ou.ParentExternalID
 	}
 
-	sorted := slices.Clone(desired)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ExternalID < sorted[j].ExternalID })
+	done := toSet(externalIDs(reached))
+	start := ""
 
+	for _, ou := range byExternalID(units) {
+		if !done[ou.ExternalID] {
+			start = ou.ExternalID
+			break
+		}
+	}
+
+	visited := map[string]bool{}
+	for !visited[start] {
+		visited[start] = true
+		start = parent[start]
+	}
+
+	cycle := []string{start}
+	for id := parent[start]; id != start; id = parent[id] {
+		cycle = append(cycle, id)
+	}
+
+	slices.Sort(cycle)
+
+	return fmt.Errorf("%w: snapshot org units form a parent cycle: %s", ErrInvalidInput, strings.Join(cycle, ", "))
+}
+
+func diffTeams(desired []Team, current []TeamState) []TeamChange {
 	var changes []TeamChange
 
-	present := make(map[string]bool, len(desired))
-
-	for _, t := range sorted {
-		present[t.ExternalID] = true
-		change := TeamChange{ExternalID: t.ExternalID, DisplayName: t.DisplayName}
-
-		old, ok := stored[t.ExternalID]
-
-		switch {
-		case !ok:
-			change.Action = ActionCreate
-		case !old.Active:
-			change.Action = ActionReactivate
-		case old.DisplayName != t.DisplayName:
-			change.Action = ActionUpdate
-		default:
-			continue
+	gone := match(byExternalID(desired), current, func(t Team, old TeamState, exists bool) {
+		if a := action(exists, old.Active, old.DisplayName != t.DisplayName); a != "" {
+			changes = append(changes, TeamChange{Action: a, ExternalID: t.ExternalID, DisplayName: t.DisplayName})
 		}
-
-		changes = append(changes, change)
-	}
-
-	gone := make([]TeamState, 0)
-
-	for _, t := range current {
-		if !present[t.ExternalID] && t.Active {
-			gone = append(gone, t)
-		}
-	}
-
-	sort.Slice(gone, func(i, j int) bool { return gone[i].ExternalID < gone[j].ExternalID })
+	})
 
 	for _, t := range gone {
-		changes = append(changes, TeamChange{Action: ActionDeactivate, ExternalID: t.ExternalID, DisplayName: t.DisplayName})
+		if t.Active {
+			changes = append(changes, TeamChange{Action: ActionDeactivate, ExternalID: t.ExternalID, DisplayName: t.DisplayName})
+		}
 	}
 
 	return changes
 }
 
 func diffUsers(desired []User, current []UserState) ([]UserChange, []OrgUnitMembershipChange, []TeamMembershipChange) {
-	stored := make(map[string]UserState, len(current))
-	for _, u := range current {
-		stored[u.ExternalID] = u
-	}
-
-	sorted := slices.Clone(desired)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ExternalID < sorted[j].ExternalID })
-
 	var (
-		users   []UserChange
-		orgs    []OrgUnitMembershipChange
-		teams   []TeamMembershipChange
-		present = make(map[string]bool, len(desired))
+		users []UserChange
+		orgs  []OrgUnitMembershipChange
+		teams []TeamMembershipChange
 	)
 
-	for _, u := range sorted {
-		present[u.ExternalID] = true
+	gone := match(byExternalID(desired), current, func(u User, old UserState, exists bool) {
 		change := UserChange{ExternalID: u.ExternalID, Username: u.Username, Email: u.Email, DisplayName: u.DisplayName}
-
-		old, exists := stored[u.ExternalID]
 
 		switch {
 		case !exists && u.Disabled:
 			// Never logged in and disabled: there is nothing to create or deactivate.
-			continue
+			return
 		case !exists:
 			change.Action = ActionCreate
 		case u.Disabled && old.Active:
@@ -497,17 +426,7 @@ func diffUsers(desired []User, current []UserState) ([]UserChange, []OrgUnitMemb
 		}
 
 		teams = append(teams, diffTeamMembers(u.ExternalID, old.TeamExternalIDs, u.TeamExternalIDs)...)
-	}
-
-	gone := make([]UserState, 0)
-
-	for _, u := range current {
-		if !present[u.ExternalID] {
-			gone = append(gone, u)
-		}
-	}
-
-	sort.Slice(gone, func(i, j int) bool { return gone[i].ExternalID < gone[j].ExternalID })
+	})
 
 	for _, u := range gone {
 		if u.Active {
@@ -530,19 +449,85 @@ func diffUsers(desired []User, current []UserState) ([]UserChange, []OrgUnitMemb
 	return users, orgs, teams
 }
 
+// action is the write for a department or team that is in the snapshot; empty
+// when there is none.
+func action(exists, active, changed bool) Action {
+	switch {
+	case !exists:
+		return ActionCreate
+	case !active:
+		return ActionReactivate
+	case changed:
+		return ActionUpdate
+	default:
+		return ""
+	}
+}
+
+// identified is an object matched by its external ID.
+type identified interface {
+	id() string
+}
+
+func (o OrgUnit) id() string      { return o.ExternalID }
+func (o OrgUnitState) id() string { return o.ExternalID }
+func (t Team) id() string         { return t.ExternalID }
+func (t TeamState) id() string    { return t.ExternalID }
+func (u User) id() string         { return u.ExternalID }
+func (u UserState) id() string    { return u.ExternalID }
+
+func externalIDs[T identified](items []T) []string {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.id()
+	}
+
+	return ids
+}
+
+// byExternalID returns a copy of items sorted by external ID.
+func byExternalID[T identified](items []T) []T {
+	return slices.SortedFunc(slices.Values(items), func(a, b T) int { return strings.Compare(a.id(), b.id()) })
+}
+
+// match calls visit for each desired object, in order, with the stored object
+// of the same external ID (exists is false when there is none). It returns the
+// stored objects missing from desired, by external ID.
+func match[D, S identified](desired []D, current []S, visit func(d D, old S, exists bool)) []S {
+	stored := make(map[string]S, len(current))
+	for _, s := range current {
+		stored[s.id()] = s
+	}
+
+	for _, d := range desired {
+		id := d.id()
+		old, exists := stored[id]
+		visit(d, old, exists)
+		delete(stored, id)
+	}
+
+	return byExternalID(slices.Collect(maps.Values(stored)))
+}
+
+// diffTeamMembers lists the team memberships to add, then to remove, each by
+// team ID.
 func diffTeamMembers(user string, have, want []string) []TeamMembershipChange {
+	if slices.Equal(have, want) {
+		return nil
+	}
+
 	haveSet := toSet(have)
 	wantSet := toSet(want)
 
 	var changes []TeamMembershipChange
 
-	for _, t := range sortedKeys(wantSet) {
+	for _, t := range slices.Sorted(maps.Keys(wantSet)) {
 		if !haveSet[t] {
 			changes = append(changes, TeamMembershipChange{UserExternalID: user, TeamExternalID: t})
 		}
 	}
 
-	for _, t := range sortedKeys(haveSet) {
+	for _, t := range slices.Sorted(maps.Keys(haveSet)) {
 		if !wantSet[t] {
 			changes = append(changes, TeamMembershipChange{UserExternalID: user, TeamExternalID: t, Remove: true})
 		}
@@ -558,15 +543,4 @@ func toSet(ids []string) map[string]bool {
 	}
 
 	return set
-}
-
-func sortedKeys(set map[string]bool) []string {
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	return keys
 }
