@@ -3,6 +3,7 @@ package proxies
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,6 +134,29 @@ func filterResponseBody(body io.ReadCloser, excludeFields map[string]struct{}) (
 	}
 
 	return filteredBytes, nil
+}
+
+// dropErrorDetails removes "details" from a PostgREST error body. PostgreSQL
+// puts row values there (e.g. "Failing row contains (...)" or the duplicate
+// key), which can include masked fields; code, message and hint do not.
+func dropErrorDetails(body []byte) []byte {
+	var errBody map[string]json.RawMessage
+	if err := json.Unmarshal(body, &errBody); err != nil {
+		return body
+	}
+
+	if _, ok := errBody["details"]; !ok {
+		return body
+	}
+
+	delete(errBody, "details")
+
+	filtered, err := json.Marshal(errBody)
+	if err != nil {
+		return body
+	}
+
+	return filtered
 }
 
 // responseCapture captures the response body and status code
@@ -480,26 +504,24 @@ func isEmptyValue(v interface{}) bool {
 	}
 }
 
+// maskedTopLevelColumns returns the top-level columns that hold excluded
+// fields, e.g. "spec" for "spec.credentials".
+func maskedTopLevelColumns(excludeFields map[string]struct{}) map[string]struct{} {
+	columns := make(map[string]struct{})
+	for fieldPath := range excludeFields {
+		columns[strings.SplitN(fieldPath, ".", 2)[0]] = struct{}{}
+	}
+
+	return columns
+}
+
 // buildSelectParam builds PostgREST select parameter for excluded fields
 // For example, if excludeFields contains "spec.credentials", it returns "spec"
 func buildSelectParam(excludeFields map[string]struct{}) string {
-	if len(excludeFields) == 0 {
-		return ""
-	}
+	columns := maskedTopLevelColumns(excludeFields)
 
-	// Collect top-level fields that contain excluded nested fields
-	fieldsMap := make(map[string]struct{})
-
-	for fieldPath := range excludeFields {
-		parts := strings.Split(fieldPath, ".")
-		if len(parts) > 0 {
-			fieldsMap[parts[0]] = struct{}{}
-		}
-	}
-
-	// Convert to slice
-	fields := make([]string, 0, len(fieldsMap))
-	for field := range fieldsMap {
+	fields := make([]string, 0, len(columns))
+	for field := range columns {
 		fields = append(fields, field)
 	}
 
@@ -563,21 +585,13 @@ func filterPatchPayloadToTopLevelFields(req *http.Request, topLevelFields []stri
 func queryParamsToFilters(queryParams url.Values) []storage.Filter {
 	filters := make([]storage.Filter, 0)
 
-	// PostgREST reserved parameters that should not be treated as filters
-	reservedParams := map[string]struct{}{
-		"select": {},
-		"order":  {},
-		"limit":  {},
-		"offset": {},
-	}
-
 	for key, values := range queryParams {
 		if len(values) == 0 {
 			continue
 		}
 
 		// Skip PostgREST reserved parameters
-		if _, isReserved := reservedParams[key]; isReserved {
+		if _, isReserved := postgrestReservedParams[key]; isReserved {
 			continue
 		}
 
@@ -603,42 +617,66 @@ func queryParamsToFilters(queryParams url.Values) []storage.Filter {
 	return filters
 }
 
-// fetchCurrentResource fetches current resource from storage with only excluded fields
-func fetchCurrentResource(
-	storage storage.Storage, tableName string, queryParams url.Values, excludeFields map[string]struct{},
-) (map[string]interface{}, error) {
-	// Build select parameter to only fetch fields that contain excluded nested fields
-	selectParam := buildSelectParam(excludeFields)
-	if selectParam == "" {
-		return nil, nil
-	}
+const ambiguousBackfillCode = "10313"
 
-	// Convert query params to filters
-	filters := queryParamsToFilters(queryParams)
+var errAmbiguousBackfill = errors.New("the filters match more than one resource")
+
+// maskedResource is what the PATCH backfill needs to know about a resource
+// with masked fields.
+type maskedResource struct {
+	table          string
+	excludeFields  map[string]struct{}
+	arrayMergeKeys map[string][]string
+	// columns are the top-level columns that hold masked fields.
+	columns map[string]struct{}
+	// columnsSelect selects columns, for the backfill lookup.
+	columnsSelect string
+}
+
+// fetchCurrentResource fetches the masked columns of the row a PATCH targets.
+// It reads with the caller's own token: a service-role lookup could match a
+// row the caller cannot see and copy its masked values into the caller's row.
+func fetchCurrentResource(c *gin.Context, storageURL string, r *maskedResource) (map[string]interface{}, error) {
+	// Without filters the PATCH may touch every row the caller can see.
+	filters := rowFilters(c.Request.URL.Query())
 	if len(filters) == 0 {
-		return nil, fmt.Errorf("no filters provided in query params")
+		return nil, errAmbiguousBackfill
 	}
 
-	klog.V(4).Infof("Fetching current resource from table: %s with filters: %+v, select: %s", tableName, filters, selectParam)
-
-	// Query using storage SDK (uses service_role token)
-	var resources []map[string]interface{}
-	if err := storage.GenericQuery(tableName, selectParam, filters, &resources); err != nil {
-		return nil, fmt.Errorf("failed to query resource: %w", err)
+	resources, err := lookupAsCaller[map[string]interface{}](c, storageURL, r.table, r.columnsSelect, filters)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(resources) == 0 {
-		return nil, fmt.Errorf("resource not found")
+	switch len(resources) {
+	case 0:
+		return nil, nil
+	case 1:
+		return resources[0], nil
+	default:
+		return nil, errAmbiguousBackfill
+	}
+}
+
+// writesMaskedColumn reports whether a PATCH body replaces a top-level column
+// that holds masked fields, the only case that needs a backfill.
+func (r *maskedResource) writesMaskedColumn(requestBody map[string]interface{}) bool {
+	for column := range r.columns {
+		if _, ok := requestBody[column]; ok {
+			return true
+		}
 	}
 
-	// Return first resource
-	return resources[0], nil
+	return false
 }
 
 // CreateStructProxyHandler creates a proxy handler that filters response based on struct api tags
 // The struct type T is used only for configuration extraction at initialization time
 // At runtime, responses are filtered using map-based JSON filtering for performance
-func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.HandlerFunc {
+//
+// For a resource with masked fields it also installs the query guard on group,
+// so the guard runs before any per-route validator registered afterwards.
+func CreateStructProxyHandler[T any](group gin.IRoutes, deps *Dependencies, tableName string) gin.HandlerFunc {
 	// Extract exclude fields from struct type at initialization time (compile-time type safety)
 	var zero T
 	structType := reflect.TypeOf(zero)
@@ -646,6 +684,18 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 	excludeFields := tagConfig.excludeFields
 	arrayMergeKeys := tagConfig.arrayMergeKeys
 	topLevelFields := extractTopLevelJSONFields(structType)
+
+	if guard := newSensitiveQueryGuard(excludeFields); guard != nil {
+		group.Use(guard.middleware)
+	}
+
+	masked := &maskedResource{
+		table:          tableName,
+		excludeFields:  excludeFields,
+		arrayMergeKeys: arrayMergeKeys,
+		columns:        maskedTopLevelColumns(excludeFields),
+		columnsSelect:  buildSelectParam(excludeFields),
+	}
 
 	return func(c *gin.Context) {
 		if c.Request.Method == "PATCH" {
@@ -660,7 +710,7 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 
 		// Handle PATCH requests with excluded fields backfilling
 		if c.Request.Method == "PATCH" && len(excludeFields) > 0 {
-			handlePatchWithBackfill(c, deps, tableName, excludeFields, arrayMergeKeys)
+			handlePatchWithBackfill(c, deps, masked)
 			return
 		}
 
@@ -673,46 +723,46 @@ func CreateStructProxyHandler[T any](deps *Dependencies, tableName string) gin.H
 			return
 		}
 
-		// Need to intercept response for field filtering
-		responseWriter := &responseCapture{
-			ResponseWriter: c.Writer,
-			body:           &bytes.Buffer{},
-			statusCode:     http.StatusOK,
-		}
-		c.Writer = responseWriter
-
-		// Execute proxy
-		proxyHandler(c)
-
-		// Filter the response body if it's a successful response
-		if responseWriter.statusCode >= 200 && responseWriter.statusCode < 300 {
-			filteredBody, err := filterResponseBody(io.NopCloser(responseWriter.body), excludeFields)
-			if err != nil {
-				c.Writer = responseWriter.ResponseWriter
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("Failed to filter response: %v", err),
-				})
-
-				return
-			}
-
-			// Write filtered response
-			c.Writer = responseWriter.ResponseWriter
-			// Let c.Data re-calculate Content-Length
-			c.Writer.Header().Del("Content-Length")
-			c.Data(responseWriter.statusCode, "application/json", filteredBody)
-		} else {
-			// For error responses, write as-is
-			c.Writer = responseWriter.ResponseWriter
-			c.Data(responseWriter.statusCode, c.Writer.Header().Get("Content-Type"), responseWriter.body.Bytes())
-		}
+		proxyWithMaskedResponse(c, proxyHandler, excludeFields)
 	}
 }
 
+// proxyWithMaskedResponse runs proxyHandler and masks excluded fields in a
+// successful response body, including write representations.
+func proxyWithMaskedResponse(c *gin.Context, proxyHandler gin.HandlerFunc, excludeFields map[string]struct{}) {
+	responseWriter := &responseCapture{
+		ResponseWriter: c.Writer,
+		body:           &bytes.Buffer{},
+		statusCode:     http.StatusOK,
+	}
+	c.Writer = responseWriter
+
+	proxyHandler(c)
+
+	c.Writer = responseWriter.ResponseWriter
+
+	if responseWriter.statusCode < 200 || responseWriter.statusCode >= 300 {
+		c.Writer.Header().Del("Content-Length")
+		c.Data(responseWriter.statusCode, c.Writer.Header().Get("Content-Type"), dropErrorDetails(responseWriter.body.Bytes()))
+		return
+	}
+
+	filteredBody, err := filterResponseBody(io.NopCloser(responseWriter.body), excludeFields)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to filter response: %v", err),
+		})
+
+		return
+	}
+
+	// Let c.Data re-calculate Content-Length
+	c.Writer.Header().Del("Content-Length")
+	c.Data(responseWriter.statusCode, "application/json", filteredBody)
+}
+
 // handlePatchWithBackfill handles PATCH requests with excluded fields backfilling
-func handlePatchWithBackfill(
-	c *gin.Context, deps *Dependencies, tableName string, excludeFields map[string]struct{}, arrayMergeKeys map[string][]string,
-) {
+func handlePatchWithBackfill(c *gin.Context, deps *Dependencies, r *maskedResource) {
 	// Read request body
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -742,26 +792,40 @@ func handlePatchWithBackfill(
 		c.Request.ContentLength = int64(len(bodyBytes))
 		c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
 
-		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
-		proxyHandler(c)
+		proxyHandler := CreateProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
+		proxyWithMaskedResponse(c, proxyHandler, r.excludeFields)
 
 		return
 	}
 
-	// Fetch current resource from storage (uses service_role token)
-	currentResource, err := fetchCurrentResource(
-		deps.Storage,
-		tableName,
-		c.Request.URL.Query(),
-		excludeFields,
-	)
-	if err != nil {
-		klog.Warningf("Failed to fetch current resource for backfill: %v", err)
-		// Continue without backfill if fetch fails (resource might not exist yet)
-	} else if currentResource != nil {
-		// Merge excluded fields from current resource into request body
-		mergeExcludedFields(requestBody, currentResource, excludeFields, arrayMergeKeys)
-		klog.V(4).Infof("Backfilled excluded fields for PATCH request")
+	if r.writesMaskedColumn(requestBody) {
+		currentResource, err := fetchCurrentResource(c, deps.StorageAccessURL, r)
+
+		switch {
+		case errors.Is(err, errAmbiguousBackfill):
+			c.JSON(http.StatusBadRequest, &validationError{
+				Code:    ambiguousBackfillCode,
+				Message: "cannot preserve masked fields",
+				Hint:    "a PATCH that writes fields holding secrets must target exactly one resource",
+			})
+
+			return
+		case err != nil:
+			// Forwarding without the stored row would erase its masked fields.
+			klog.Warningf("Failed to fetch current resource for backfill: %v", err)
+
+			var lookupErr *targetLookupError
+			if errors.As(err, &lookupErr) {
+				rejectValidation(c, lookupErr.validationError())
+			} else {
+				c.JSON(http.StatusInternalServerError, internalServerValidationError())
+			}
+
+			return
+		case currentResource != nil:
+			mergeExcludedFields(requestBody, currentResource, r.excludeFields, r.arrayMergeKeys)
+			klog.V(4).Infof("Backfilled excluded fields for PATCH request")
+		}
 	}
 
 	// Re-serialize request body
@@ -780,6 +844,6 @@ func handlePatchWithBackfill(
 	c.Request.Header.Set("Content-Length", fmt.Sprintf("%d", len(modifiedBodyBytes)))
 
 	// Forward to PostgREST
-	proxyHandler := CreateProxyHandler(deps.StorageAccessURL, tableName, CreatePostgrestAuthModifier(c))
-	proxyHandler(c)
+	proxyHandler := CreateProxyHandler(deps.StorageAccessURL, r.table, CreatePostgrestAuthModifier(c))
+	proxyWithMaskedResponse(c, proxyHandler, r.excludeFields)
 }

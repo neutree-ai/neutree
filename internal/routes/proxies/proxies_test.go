@@ -396,6 +396,17 @@ func TestCreatePostgrestAuthModifier(t *testing.T) {
 		assert.Equal(t, originalAuth, req.Header.Get("Authorization"))
 	})
 
+	t.Run("Copies the caller's bearer token onto a new request", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("PATCH", "/test", nil)
+		c.Request.Header.Set("Authorization", "Bearer session-jwt")
+
+		lookup := httptest.NewRequest("GET", "/lookup", nil)
+		CreatePostgrestAuthModifier(c)(lookup)
+
+		assert.Equal(t, "Bearer session-jwt", lookup.Header.Get("Authorization"))
+	})
+
 	t.Run("With empty postgrest_token", func(t *testing.T) {
 		// Create a test context with empty postgrest_token
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())

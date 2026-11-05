@@ -18,7 +18,7 @@ func RegisterEndpointRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFun
 	proxyGroup := group.Group("/endpoints")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.Endpoint](deps, storage.ENDPOINT_TABLE)
+	handler := CreateStructProxyHandler[v1.Endpoint](proxyGroup, deps, storage.ENDPOINT_TABLE)
 	endpointValidation := validateEndpoint(deps.Storage, deps.KVCacheProviders)
 
 	// Only register allowed methods
