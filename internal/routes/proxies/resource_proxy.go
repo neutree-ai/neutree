@@ -744,6 +744,7 @@ func proxyWithMaskedResponse(c *gin.Context, proxyHandler gin.HandlerFunc, exclu
 	if responseWriter.statusCode < 200 || responseWriter.statusCode >= 300 {
 		c.Writer.Header().Del("Content-Length")
 		c.Data(responseWriter.statusCode, c.Writer.Header().Get("Content-Type"), dropErrorDetails(responseWriter.body.Bytes()))
+
 		return
 	}
 
