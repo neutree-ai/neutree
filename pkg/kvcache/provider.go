@@ -58,29 +58,8 @@ func DecodeOptions(raw json.RawMessage, target interface{}) error {
 	return decoder.Decode(target)
 }
 
-// DependencyObserver tracks provider-owned resources still used by deployed Pods.
-type DependencyObserver interface {
-	ObserveDependencies(context.Context, client.Client, string, *v1.Endpoint) (*v1.EndpointKVCacheStatus, error)
-}
-
-func (p Providers) ObserveDependencies(ctx context.Context, c client.Client, namespace string, endpoint *v1.Endpoint) (*v1.EndpointKVCacheStatus, error) {
-	state := endpoint.Status.KVCache
-	provider, err := p.Get(state.Provider)
-
-	if err != nil {
-		return nil, err
-	}
-
-	observer, ok := provider.(DependencyObserver)
-	if !ok {
-		return state, nil
-	}
-
-	return observer.ObserveDependencies(ctx, c, namespace, endpoint)
-}
-
-// DeploymentGate delays applying a new template while a shared cache dependency
-// is being upgraded. Existing Pods keep running; deletion and pause remain usable.
+// DeploymentGate controls whether a provider permits creating or updating a
+// Deployment. It does not block pausing or deleting an endpoint.
 type DeploymentGate interface {
 	DeploymentReady(*v1.Endpoint, *v1.Cluster) (bool, error)
 }
@@ -109,31 +88,33 @@ func (p Providers) DeploymentReady(endpoint *v1.Endpoint, cluster *v1.Cluster) (
 	return true, nil
 }
 
-// DeploymentStatusObserver enriches the Endpoint's own observation of its
-// deployment. Cluster-level workflows consume the resulting status only.
-type DeploymentStatusObserver interface {
-	ObserveDeployment(*v1.Endpoint, *v1.Cluster, *appsv1.Deployment, *v1.EndpointStatus) error
+// StatusObserver observes provider-owned resources and enriches endpoint status.
+// dep is nil when the Deployment does not exist; Pods may still use the provider.
+// specPending reports whether the current endpoint spec has yet to be applied.
+// Observers must preserve deletion, pause and failure phases. They may still
+// update provider observations in those phases. DELETED endpoints are not observed.
+type StatusObserver interface {
+	ObserveStatus(ctx context.Context, c client.Client, namespace string, endpoint *v1.Endpoint, cluster *v1.Cluster,
+		dep *appsv1.Deployment, specPending bool, status *v1.EndpointStatus) error
 }
 
-func (p Providers) ObserveDeployment(endpoint *v1.Endpoint, cluster *v1.Cluster, dep *appsv1.Deployment, status *v1.EndpointStatus) error {
-	name := ""
-	if endpoint.Spec.KVCache != nil {
-		name = endpoint.Spec.KVCache.Provider
-	} else if endpoint.Status != nil && endpoint.Status.KVCache != nil {
-		name = endpoint.Status.KVCache.Provider
-	}
-
-	if name == "" {
+func (p Providers) ObserveStatus(ctx context.Context, c client.Client, namespace string, endpoint *v1.Endpoint, cluster *v1.Cluster,
+	dep *appsv1.Deployment, specPending bool, status *v1.EndpointStatus) error {
+	if endpoint.Status == nil || endpoint.Status.KVCache == nil {
 		return nil
 	}
 
-	provider, err := p.Get(name)
+	// Observe the provider that owns the recorded resources, even after the
+	// desired configuration disables or replaces it.
+	status.KVCache = endpoint.Status.KVCache
+
+	provider, err := p.Get(status.KVCache.Provider)
 	if err != nil {
 		return err
 	}
 
-	if observer, ok := provider.(DeploymentStatusObserver); ok {
-		return observer.ObserveDeployment(endpoint, cluster, dep, status)
+	if observer, ok := provider.(StatusObserver); ok {
+		return observer.ObserveStatus(ctx, c, namespace, endpoint, cluster, dep, specPending, status)
 	}
 
 	return nil
