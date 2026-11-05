@@ -3409,9 +3409,9 @@ func (_c *MockStorage_ListIdentitySource_Call) RunAndReturn(run func(storage.Lis
 	return _c
 }
 
-// ListIdentitySourceSyncUsers provides a mock function with given fields: identitySource, linkSource
-func (_m *MockStorage) ListIdentitySourceSyncUsers(identitySource string, linkSource string) ([]storage.IdentitySourceSyncUser, error) {
-	ret := _m.Called(identitySource, linkSource)
+// ListIdentitySourceSyncUsers provides a mock function with given fields: identitySource
+func (_m *MockStorage) ListIdentitySourceSyncUsers(identitySource string) ([]storage.IdentitySourceSyncUser, error) {
+	ret := _m.Called(identitySource)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListIdentitySourceSyncUsers")
@@ -3419,19 +3419,19 @@ func (_m *MockStorage) ListIdentitySourceSyncUsers(identitySource string, linkSo
 
 	var r0 []storage.IdentitySourceSyncUser
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) ([]storage.IdentitySourceSyncUser, error)); ok {
-		return rf(identitySource, linkSource)
+	if rf, ok := ret.Get(0).(func(string) ([]storage.IdentitySourceSyncUser, error)); ok {
+		return rf(identitySource)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) []storage.IdentitySourceSyncUser); ok {
-		r0 = rf(identitySource, linkSource)
+	if rf, ok := ret.Get(0).(func(string) []storage.IdentitySourceSyncUser); ok {
+		r0 = rf(identitySource)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]storage.IdentitySourceSyncUser)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(identitySource, linkSource)
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(identitySource)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3446,14 +3446,13 @@ type MockStorage_ListIdentitySourceSyncUsers_Call struct {
 
 // ListIdentitySourceSyncUsers is a helper method to define mock.On call
 //   - identitySource string
-//   - linkSource string
-func (_e *MockStorage_Expecter) ListIdentitySourceSyncUsers(identitySource interface{}, linkSource interface{}) *MockStorage_ListIdentitySourceSyncUsers_Call {
-	return &MockStorage_ListIdentitySourceSyncUsers_Call{Call: _e.mock.On("ListIdentitySourceSyncUsers", identitySource, linkSource)}
+func (_e *MockStorage_Expecter) ListIdentitySourceSyncUsers(identitySource interface{}) *MockStorage_ListIdentitySourceSyncUsers_Call {
+	return &MockStorage_ListIdentitySourceSyncUsers_Call{Call: _e.mock.On("ListIdentitySourceSyncUsers", identitySource)}
 }
 
-func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) Run(run func(identitySource string, linkSource string)) *MockStorage_ListIdentitySourceSyncUsers_Call {
+func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) Run(run func(identitySource string)) *MockStorage_ListIdentitySourceSyncUsers_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(string))
+		run(args[0].(string))
 	})
 	return _c
 }
@@ -3463,7 +3462,7 @@ func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) Return(_a0 []storage.Ide
 	return _c
 }
 
-func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) RunAndReturn(run func(string, string) ([]storage.IdentitySourceSyncUser, error)) *MockStorage_ListIdentitySourceSyncUsers_Call {
+func (_c *MockStorage_ListIdentitySourceSyncUsers_Call) RunAndReturn(run func(string) ([]storage.IdentitySourceSyncUser, error)) *MockStorage_ListIdentitySourceSyncUsers_Call {
 	_c.Call.Return(run)
 	return _c
 }

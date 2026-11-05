@@ -294,10 +294,10 @@ type ExternalIdentityStorage interface {
 	// UpdateExternalIdentitySync writes Username, Email and SyncDeactivated
 	// of the link (source, external ID); an empty value is stored as NULL.
 	UpdateExternalIdentitySync(data *ExternalIdentity) error
-	// ListIdentitySourceSyncUsers returns every user linked under linkSource
-	// (e.g. ldap:corp-ldap) with the department and teams the sync of the
-	// identity source named identitySource gave it.
-	ListIdentitySourceSyncUsers(identitySource, linkSource string) ([]IdentitySourceSyncUser, error)
+	// ListIdentitySourceSyncUsers returns every user linked to the LDAP
+	// identity source of the given name, with the department and teams its
+	// sync gave the user.
+	ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error)
 }
 
 // IdentitySourceSecrets are the decrypted secrets of an identity source. A

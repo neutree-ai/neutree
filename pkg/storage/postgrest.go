@@ -1217,11 +1217,10 @@ func (s *postgrestStorage) UpdateExternalIdentitySync(data *ExternalIdentity) er
 	return err
 }
 
-func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource, linkSource string) ([]IdentitySourceSyncUser, error) {
+func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource string) ([]IdentitySourceSyncUser, error) {
 	response := []IdentitySourceSyncUser{}
 	if err := s.CallDatabaseFunction("list_identity_source_sync_users", map[string]interface{}{
 		"p_identity_source": identitySource,
-		"p_link_source":     linkSource,
 	}, &response); err != nil {
 		return nil, err
 	}

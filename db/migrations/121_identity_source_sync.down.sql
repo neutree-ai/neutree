@@ -1,4 +1,4 @@
-DROP FUNCTION IF EXISTS api.list_identity_source_sync_users(TEXT, TEXT);
+DROP FUNCTION IF EXISTS api.list_identity_source_sync_users(TEXT);
 
 REVOKE UPDATE (username, email, sync_deactivated) ON api.external_identities FROM service_role;
 

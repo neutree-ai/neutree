@@ -257,7 +257,69 @@ func TestIdentitySourceSync_ExternalIdentityColumns(t *testing.T) {
 	// The sync state of users is not for users to read.
 	token := adminToken(t)
 	if code, raw := postgrestAs(t, token, http.MethodPost, "/rpc/list_identity_source_sync_users",
-		`{"p_identity_source":"cols","p_link_source":"ldap:cols"}`); code != http.StatusUnauthorized && code != http.StatusForbidden && code != http.StatusNotFound {
+		`{"p_identity_source":"cols"}`); code != http.StatusUnauthorized && code != http.StatusForbidden && code != http.StatusNotFound {
 		t.Errorf("list_identity_source_sync_users as admin = HTTP %d, want denied: %s", code, raw)
+	}
+}
+
+func TestIdentitySourceSync_ListSyncUsers(t *testing.T) {
+	f := newOrgFixture(t)
+	other := newOrgFixture(t)
+	unit := f.createOrgUnit("")
+	teamA, teamB, otherTeam := f.createTeam(), f.createTeam(), other.createTeam()
+
+	link := func(source, suffix string) (string, string) {
+		t.Helper()
+
+		extID := newExternalID() + "-" + suffix
+		userID := createLDAPShapedUser(t, extID)
+		t.Cleanup(func() { deleteGoTrueUser(t, userID) })
+
+		if err := f.st.CreateExternalIdentity(&storage.ExternalIdentity{Source: source, ExternalID: extID, UserID: userID}); err != nil {
+			t.Fatalf("link %s failed: %v", extID, err)
+		}
+
+		return extID, userID
+	}
+
+	memberExt, member := link("ldap:"+f.source, "member")
+	loneExt, _ := link("ldap:"+f.source, "lone")
+	link("ldap:"+other.source, "other")
+
+	if err := f.st.SetOrgUnitMember(&storage.OrgUnitMember{UserID: member, OrgUnitID: unit.ID, IdentitySource: f.source}); err != nil {
+		t.Fatalf("SetOrgUnitMember failed: %v", err)
+	}
+
+	for _, team := range []*v1.Team{teamB, otherTeam, teamA} {
+		if err := f.st.AddTeamMember(&storage.TeamMember{TeamID: team.ID, UserID: member}); err != nil {
+			t.Fatalf("AddTeamMember(%s) failed: %v", team.Metadata.Name, err)
+		}
+	}
+
+	users, err := f.st.ListIdentitySourceSyncUsers(f.source)
+	if err != nil {
+		t.Fatalf("ListIdentitySourceSyncUsers failed: %v", err)
+	}
+
+	got := map[string]storage.IdentitySourceSyncUser{}
+	for _, u := range users {
+		got[u.ExternalID] = u
+	}
+
+	if len(users) != 2 || got[memberExt].UserID != member || got[loneExt].ExternalID == "" {
+		t.Fatalf("users = %+v, want the two linked under ldap:%s", users, f.source)
+	}
+
+	wantTeams := []string{teamA.Spec.ExternalID, teamB.Spec.ExternalID}
+	if wantTeams[0] > wantTeams[1] {
+		wantTeams[0], wantTeams[1] = wantTeams[1], wantTeams[0]
+	}
+
+	if m := got[memberExt]; m.OrgUnitExternalID != unit.Spec.ExternalID || fmt.Sprint(m.TeamExternalIDs) != fmt.Sprint(wantTeams) {
+		t.Errorf("member = %+v, want org unit %s and teams %v of this source only", m, unit.Spec.ExternalID, wantTeams)
+	}
+
+	if l := got[loneExt]; l.OrgUnitExternalID != "" || l.TeamExternalIDs == nil || len(l.TeamExternalIDs) != 0 {
+		t.Errorf("lone user = %+v, want no org unit and an empty team list", l)
 	}
 }

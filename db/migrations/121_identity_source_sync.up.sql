@@ -1,24 +1,11 @@
 -- ----------------------
--- Organization sync of identity sources (NEU-837)
+-- Organization sync of identity sources (NEU-837): sync settings and status,
+-- the sync state of linked accounts, and the functions the sync uses.
 -- ----------------------
--- neutree-core reads an LDAP directory in full on a schedule and brings the
--- OrgUnits, Teams, users and memberships of the source in line with it
--- (pkg/identity/orgsync). This migration adds what it needs:
---
---   * spec.sync (enabled, interval, requested_at) and spec.ldap.sync (where to
---     find departments, groups and users), plus status.last_sync.
---   * The users' last synced username and email, and the sync deactivation
---     marker, on api.external_identities.
---   * api.list_identity_source_sync_users, the stored users of a source as the
---     sync compares them with the directory (service_role only).
---   * api.request_identity_source_sync, which asks for a sync now.
---
--- spec and status are composites that PostgREST replaces as a whole on PATCH.
--- A client written before this migration (or one that just leaves them out)
--- sends spec without sync, so the trigger below keeps the stored spec.sync and
--- spec.ldap.sync when a write has none (NEU-717). To turn sync off, write
--- spec.sync.enabled = false. status is written by neutree-core only, always
--- whole.
+-- PostgREST replaces the spec composite whole on PATCH, so a client that does
+-- not know spec.sync would erase it; the trigger below keeps the stored
+-- spec.sync and spec.ldap.sync when a write has none (NEU-717). Turn sync off
+-- with spec.sync.enabled = false.
 
 CREATE TYPE api.identity_source_sync_spec AS (
     enabled BOOLEAN,
@@ -94,8 +81,8 @@ BEGIN
     -- NOT (x IS NULL), not x IS NOT NULL: the latter is false for a composite
     -- with any NULL attribute.
     IF NOT (v_sync IS NULL) THEN
-        IF COALESCE(v_sync.interval, 0) < 0
-            OR (COALESCE(v_sync.interval, 0) > 0 AND v_sync.interval < 60) THEN
+        -- 0 or NULL means the default.
+        IF v_sync.interval <> 0 AND v_sync.interval < 60 THEN
             RAISE sqlstate 'PGRST'
                 USING message = '{"code": "10262","message": "spec.sync.interval must be at least 60 seconds","hint": "Every sync reads the whole directory; leave it empty for one hour"}',
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
@@ -110,7 +97,7 @@ BEGIN
         v_ldap := v_spec.ldap;
         v_ldap_sync := v_ldap.sync;
 
-        IF COALESCE(v_ldap_sync.page_size, 0) < 0 THEN
+        IF v_ldap_sync.page_size < 0 THEN
             RAISE sqlstate 'PGRST'
                 USING message = '{"code": "10262","message": "spec.ldap.sync.page_size must not be negative","hint": "Leave it empty for the default"}',
                 detail = '{"status": 400, "headers": {"X-Powered-By": "Neutree"}}';
@@ -197,13 +184,9 @@ $$;
 REVOKE ALL ON FUNCTION api.request_identity_source_sync(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION api.request_identity_source_sync(TEXT) TO api_user, service_role;
 
--- What the sync last applied to a linked account, and whether the sync
--- deactivated it. username and email are the directory values last written
--- (NULL for an account linked by a login before this migration, which the
--- next sync then updates). sync_deactivated is NULL for an active account,
--- 'banned' when the sync banned the GoTrue user, and 'kept' when the user was
--- already banned for another reason: a reactivation lifts only a ban the sync
--- set itself.
+-- username and email are the directory values last applied. sync_deactivated
+-- is 'kept' when the user was already banned for another reason, so a
+-- reactivation lifts only a ban the sync set itself ('banned').
 ALTER TABLE api.external_identities
     ADD COLUMN username TEXT,
     ADD COLUMN email TEXT,
@@ -211,13 +194,9 @@ ALTER TABLE api.external_identities
 
 GRANT UPDATE (username, email, sync_deactivated) ON api.external_identities TO service_role;
 
--- The stored users of one identity source as the sync compares them with the
--- directory: every account linked under p_link_source (e.g. ldap:corp-ldap),
--- its profile display name, and the department and teams the sync of
--- p_identity_source put it in. Department rows assigned by hand (no
--- identity_source) or by another source are not the sync's and are left out.
--- service_role only; it runs as the caller, which bypasses RLS.
-CREATE OR REPLACE FUNCTION api.list_identity_source_sync_users(p_identity_source TEXT, p_link_source TEXT)
+-- The stored users of an LDAP identity source as the sync compares them with
+-- the directory. Only memberships the sync of this source wrote are its own.
+CREATE OR REPLACE FUNCTION api.list_identity_source_sync_users(p_identity_source TEXT)
 RETURNS TABLE (
     external_id TEXT,
     user_id UUID,
@@ -232,6 +211,13 @@ LANGUAGE sql
 STABLE
 SET search_path = pg_catalog
 AS $$
+    WITH source_teams AS (
+        SELECT tm.user_id, array_agg((t.spec).external_id ORDER BY (t.spec).external_id) AS external_ids
+        FROM api.teams t
+        JOIN api.team_members tm ON tm.team_id = t.id
+        WHERE (t.spec).identity_source = p_identity_source
+        GROUP BY tm.user_id
+    )
     SELECT e.external_id,
            e.user_id,
            e.username,
@@ -239,20 +225,17 @@ AS $$
            (p.metadata).display_name,
            e.sync_deactivated,
            (ou.spec).external_id,
-           COALESCE(
-               (SELECT array_agg((t.spec).external_id ORDER BY (t.spec).external_id)
-                FROM api.team_members tm
-                JOIN api.teams t ON t.id = tm.team_id
-                WHERE tm.user_id = e.user_id
-                  AND (t.spec).identity_source = p_identity_source),
-               ARRAY[]::TEXT[])
+           COALESCE(st.external_ids, ARRAY[]::TEXT[])
     FROM api.external_identities e
     LEFT JOIN api.user_profiles p ON p.id = e.user_id
     LEFT JOIN api.org_unit_members m ON m.user_id = e.user_id AND m.identity_source = p_identity_source
     LEFT JOIN api.org_units ou ON ou.id = m.org_unit_id
-    WHERE e.source = p_link_source
+    LEFT JOIN source_teams st ON st.user_id = e.user_id
+    -- The link source of an LDAP source, as auth.LinkSource builds it.
+    WHERE e.source = 'ldap:' || p_identity_source
     ORDER BY e.external_id;
 $$;
 
-REVOKE ALL ON FUNCTION api.list_identity_source_sync_users(TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION api.list_identity_source_sync_users(TEXT, TEXT) TO service_role;
+-- service_role only; it bypasses RLS.
+REVOKE ALL ON FUNCTION api.list_identity_source_sync_users(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION api.list_identity_source_sync_users(TEXT) TO service_role;
