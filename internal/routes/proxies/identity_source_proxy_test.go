@@ -10,11 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-
-	"github.com/neutree-ai/neutree/pkg/storage"
-	storageMocks "github.com/neutree-ai/neutree/pkg/storage/mocks"
 )
 
 const validLDAPIdentitySource = `{
@@ -30,6 +26,8 @@ type identitySourceUpstream struct {
 	server *httptest.Server
 	called atomic.Bool
 	body   atomic.Value
+	// lookupRows, when set, answers the PATCH backfill lookup.
+	lookupRows []map[string]interface{}
 }
 
 func newIdentitySourceUpstream(t *testing.T, status int, response string) *identitySourceUpstream {
@@ -37,6 +35,10 @@ func newIdentitySourceUpstream(t *testing.T, status int, response string) *ident
 
 	u := &identitySourceUpstream{}
 	u.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if u.lookupRows != nil && serveBackfillLookup(w, r, u.lookupRows...) {
+			return
+		}
+
 		u.called.Store(true)
 		assert.Equal(t, "/identity_sources", r.URL.Path)
 
@@ -138,24 +140,16 @@ func TestIdentitySourceReadMasksSecrets(t *testing.T) {
 // null bind_password from the secret backfill; the database treats an
 // all-NULL sub-object as absent (dbtest covers that half).
 func TestIdentitySourcePatchWithoutSecretForwardsNoSecret(t *testing.T) {
-	store := storageMocks.NewMockStorage(t)
-	store.EXPECT().
-		GenericQuery(storage.IDENTITY_SOURCE_TABLE, "spec", mock.Anything, mock.Anything).
-		Run(func(_ string, _ string, _ []storage.Filter, result interface{}) {
-			resources := result.(*[]map[string]interface{}) //nolint:errcheck
-			*resources = []map[string]interface{}{{
-				"spec": map[string]interface{}{
-					"type": "ldap",
-					"ldap": map[string]interface{}{"url": "ldaps://old", "bind_password": nil},
-					"oidc": nil,
-				},
-			}}
-		}).
-		Return(nil)
-
 	upstream := newIdentitySourceUpstream(t, http.StatusNoContent, "")
+	upstream.lookupRows = []map[string]interface{}{{
+		"spec": map[string]interface{}{
+			"type": "ldap",
+			"ldap": map[string]interface{}{"url": "ldaps://old", "bind_password": nil},
+			"oidc": nil,
+		},
+	}}
 
-	rec := serveIdentitySource(t, &Dependencies{StorageAccessURL: upstream.server.URL, Storage: store},
+	rec := serveIdentitySource(t, &Dependencies{StorageAccessURL: upstream.server.URL},
 		http.MethodPatch, "/api/v1/identity_sources?id=eq.1", `{"spec":{"type":"oidc","enabled":true,"oidc":{
 			"issuer":"https://idp.example.org","client_id":"neutree",
 			"redirect_url":"https://neutree.example.org/api/v1/auth/oidc/callback",

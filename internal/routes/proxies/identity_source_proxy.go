@@ -25,7 +25,7 @@ func RegisterIdentitySourceRoutes(group *gin.RouterGroup, middlewares []gin.Hand
 	proxyGroup := group.Group("/identity_sources")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.IdentitySource](deps, storage.IDENTITY_SOURCE_TABLE)
+	handler := CreateStructProxyHandler[v1.IdentitySource](proxyGroup, deps, storage.IDENTITY_SOURCE_TABLE)
 	validation := validateIdentitySource()
 
 	proxyGroup.GET("", handler)

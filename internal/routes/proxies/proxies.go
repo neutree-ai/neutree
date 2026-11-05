@@ -309,10 +309,22 @@ func handleRayDashboardProxy(deps *Dependencies) gin.HandlerFunc {
 	}
 }
 
+// CreatePostgrestAuthModifier sets the Authorization PostgREST sees for the
+// caller: the token minted for an API key, otherwise the caller's own bearer
+// token as received. Requests built from scratch need it as much as proxied ones.
 func CreatePostgrestAuthModifier(c *gin.Context) func(*http.Request) {
 	return func(req *http.Request) {
 		if postgrestToken, exists := middleware.GetPostgrestToken(c); exists && postgrestToken != "" {
 			req.Header.Set("Authorization", "Bearer "+postgrestToken)
+			return
+		}
+
+		if c.Request == nil {
+			return
+		}
+
+		if auth := c.Request.Header.Get("Authorization"); auth != "" {
+			req.Header.Set("Authorization", auth)
 		}
 	}
 }

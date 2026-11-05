@@ -17,7 +17,7 @@ func RegisterLogSinkRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup := group.Group("/log_sinks")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.LogSink](deps, storage.LOG_SINK_TABLE)
+	handler := CreateStructProxyHandler[v1.LogSink](proxyGroup, deps, storage.LOG_SINK_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

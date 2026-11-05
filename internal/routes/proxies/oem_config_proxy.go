@@ -16,7 +16,7 @@ import (
 func RegisterOEMConfigRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, deps *Dependencies) {
 	proxyGroup := group.Group("/oem_configs")
 
-	handler := CreateStructProxyHandler[v1.OEMConfig](deps, "oem_configs")
+	handler := CreateStructProxyHandler[v1.OEMConfig](proxyGroup, deps, "oem_configs")
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)

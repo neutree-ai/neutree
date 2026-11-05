@@ -130,7 +130,7 @@ func RegisterWorkspaceRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFu
 		storage.WORKSPACE_TABLE,
 		validateWorkspaceDeletion(deps.Storage),
 	)
-	handler := CreateStructProxyHandler[v1.Workspace](deps, storage.WORKSPACE_TABLE)
+	handler := CreateStructProxyHandler[v1.Workspace](proxyGroup, deps, storage.WORKSPACE_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)
