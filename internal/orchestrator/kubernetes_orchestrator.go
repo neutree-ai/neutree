@@ -247,6 +247,15 @@ func computeEndpointSpecHash(endpoint *v1.Endpoint) (string, error) {
 }
 
 func (k *kubernetesOrchestrator) createEndpoint(ctx *OrchestratorContext) error {
+	ready, err := k.kvCacheProviders.DeploymentReady(ctx.Endpoint, ctx.Cluster)
+	if err != nil {
+		return err
+	}
+
+	if !ready {
+		return nil
+	}
+
 	namespace := util.ClusterNamespace(ctx.Cluster)
 
 	renderVars, err := k.buildManifestVariables(ctx.Endpoint, ctx.Cluster, ctx.ModelRegistry, ctx.Engine, ctx.ImageRegistry)
@@ -536,19 +545,7 @@ func (k *kubernetesOrchestrator) GetEndpointStatus(endpoint *v1.Endpoint) (*v1.E
 		return nil, errors.Wrapf(err, "failed to get kubernetes client for cluster %s", deployedCluster.Metadata.Name)
 	}
 
-	status, err := k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), deployedCluster, endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if endpoint.Status != nil && endpoint.Status.KVCache != nil {
-		status.KVCache, err = k.kvCacheProviders.ObserveDependencies(context.Background(), ctrlClient, util.ClusterNamespace(deployedCluster), endpoint)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return status, nil
+	return k.getEndpointStats(ctrlClient, util.ClusterNamespace(deployedCluster), deployedCluster, endpoint)
 }
 
 func (k *kubernetesOrchestrator) getEndpointStats(
@@ -557,8 +554,6 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 	cluster *v1.Cluster,
 	endpoint *v1.Endpoint,
 ) (*v1.EndpointStatus, error) {
-	var exists bool
-
 	// now we only use deployment to deploy endpoint,
 	// but in the future, we may support more deploy mode, like distribute inference or pd inference,
 	// and then, we may expand the status checking logic.
@@ -572,14 +567,49 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 	err := ctrlClient.Get(context.Background(), client.ObjectKeyFromObject(dep), dep)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			exists = false
+			dep = nil
 		} else {
 			return nil, errors.Wrapf(err, "failed to get deployment for endpoint %s", endpoint.Metadata.WorkspaceName())
 		}
-	} else {
-		exists = true
 	}
 
+	specPending := dep == nil
+
+	if dep != nil && dep.Annotations[annEndpointSpecHash] != "" {
+		current, err := computeEndpointSpecHash(endpoint)
+		if err != nil {
+			return nil, err
+		}
+
+		specPending = current != dep.Annotations[annEndpointSpecHash]
+	}
+
+	status, err := k.getDeploymentStatus(ctrlClient, namespace, cluster, endpoint, dep, specPending)
+	if err != nil {
+		return nil, err
+	}
+
+	// The deletion path has already established that no Pods remain. Historical
+	// provider state must not prevent the endpoint from completing deletion.
+	if status.Phase == v1.EndpointPhaseDELETED {
+		return status, nil
+	}
+
+	if err := k.kvCacheProviders.ObserveStatus(context.Background(), ctrlClient, namespace, endpoint, cluster, dep, specPending, status); err != nil {
+		return nil, err
+	}
+
+	return status, nil
+}
+
+func (k *kubernetesOrchestrator) getDeploymentStatus(
+	ctrlClient client.Client,
+	namespace string,
+	cluster *v1.Cluster,
+	endpoint *v1.Endpoint,
+	dep *appsv1.Deployment,
+	specPending bool,
+) (*v1.EndpointStatus, error) {
 	isDeleting := endpoint.GetDeletionTimestamp() != ""
 
 	if isDeleting {
@@ -607,18 +637,18 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 		}, nil
 	}
 
-	// Paused check goes BEFORE !exists: a paused-from-start endpoint
+	// Paused check goes BEFORE the missing Deployment check: a paused-from-start endpoint
 	// (replicas=0 on first apply) has no deployment by design — that is
 	// already the Paused steady state, not "deployment missing". Mirrors
 	// Ray.GetEndpointStatus which orders these checks the same way.
 	isPaused := IsEndpointPaused(endpoint)
-	if isPaused && !exists {
+	if isPaused && dep == nil {
 		return &v1.EndpointStatus{
 			Phase: v1.EndpointPhasePAUSED,
 		}, nil
 	}
 
-	if !exists {
+	if dep == nil {
 		return &v1.EndpointStatus{
 			Phase:        v1.EndpointPhaseDEPLOYING,
 			ErrorMessage: "Endpoint deploying in progress: Endpoint deployment not found in namespace " + namespace,
@@ -641,6 +671,20 @@ func (k *kubernetesOrchestrator) getEndpointStats(
 				Phase:        v1.EndpointPhaseDEPLOYING,
 				ErrorMessage: "Endpoint pausing in progress: waiting for all pods to terminate",
 			}, nil
+		}
+	}
+
+	if specPending {
+		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for the current endpoint configuration"}, nil
+	}
+
+	if dep.Status.ObservedGeneration < dep.Generation {
+		return &v1.EndpointStatus{Phase: v1.EndpointPhaseDEPLOYING, ErrorMessage: "Waiting for deployment observation"}, nil
+	}
+
+	for _, condition := range dep.Status.Conditions {
+		if condition.Type == appsv1.DeploymentProgressing && condition.Status == corev1.ConditionFalse && condition.Reason == "ProgressDeadlineExceeded" {
+			return &v1.EndpointStatus{Phase: v1.EndpointPhaseFAILED, ErrorMessage: condition.Message}, nil
 		}
 	}
 
