@@ -70,6 +70,8 @@ local function reset_db()
         connect_err = nil, query_err = nil,
         -- rows the counter statement returns
         rows = {},
+        -- runs while a statement is in flight, to stand in for concurrent requests
+        on_query = nil,
     }
 end
 
@@ -90,6 +92,11 @@ package.preload["pgmoon"] = function()
                 escape_literal = function(_, v) return "'" .. v:gsub("'", "''") .. "'" end,
                 query = function(_, sql)
                     db.queries[#db.queries + 1] = sql
+                    local hook = db.on_query
+                    db.on_query = nil
+                    if hook then
+                        hook()
+                    end
                     if db.query_err then
                         return nil, db.query_err
                     end
@@ -250,5 +257,66 @@ describe("neutree-ai-access rate limits with the global counter on", function()
         assert.is_nil(run({ { limit = 1, window = "hour" } }))
         assert_rate_limited(run({ { limit = 1, window = "hour" } }))
         assert.are.equal(0, db.connects)
+    end)
+    it("sends new requests per pod while a call has been pending past a third of the timeout", function()
+        db.rows = { { i = 1, hits = 1, window_start = 1000, now = 1000.25 } }
+        local RPS10 = { { limit = 10, window = "second" } }
+        local seen
+        db.on_query = function()
+            -- 10ms in: still healthy, a concurrent request goes to PG in parallel.
+            clock = clock + 0.01
+            db.on_query = function()
+                -- 50ms in, neither call answered: the next request does not wait.
+                clock = clock + 0.04
+                assert.is_nil(run(RPS10))
+                seen = { connects = db.connects, queries = #db.queries }
+                clock = clock + 0.07
+                db.query_err = "timeout"
+            end
+            assert.is_nil(run(RPS10))
+        end
+        assert.is_nil(run(RPS10))
+        assert.are.same({ connects = 2, queries = 2 }, seen)
+        assert.are.equal(3, ngx.shared.kong_rate_limiting_counters.data["neutree_rl:key-1:second:1000"])
+        -- The pending calls failed, so the breaker is open now.
+        assert.is_false(global_counter.available())
+        assert.are.equal(1, #warnings)
+    end)
+
+    it("lets one request per worker probe PG after the cooldown", function()
+        db.connect_err = "timeout"
+        run(RPS_RPM)
+        assert.are.equal(1, #warnings)
+
+        clock = 1005.3
+        db.connect_err = nil
+        db.rows = { { i = 1, hits = 1, window_start = 1005, now = 1005.3 } }
+        local connects_during_probe
+        db.on_query = function()
+            -- Requests that arrive while the probe is pending count per pod.
+            assert.is_nil(run(RPS_RPM))
+            assert.is_nil(run(RPS_RPM))
+            connects_during_probe = db.connects
+        end
+        assert.is_nil(run(RPS_RPM))
+        assert.are.equal(2, connects_during_probe)
+        assert.are.equal(2, ngx.shared.kong_rate_limiting_counters.data["neutree_rl:key-1:second:1005"])
+
+        -- The probe succeeded: requests go to PG again.
+        assert.is_nil(run(RPS_RPM))
+        assert.are.equal(3, db.connects)
+    end)
+
+    it("keeps probing with one request per cooldown while PG stays down", function()
+        db.connect_err = "timeout"
+        run(RPS_RPM)
+        clock = 1005.3
+        run(RPS_RPM)
+        assert.are.equal(2, db.connects)
+        assert.is_false(global_counter.available())
+        clock = 1010.4
+        run(RPS_RPM)
+        assert.are.equal(3, db.connects)
+        assert.are.equal(3, #warnings)
     end)
 end)

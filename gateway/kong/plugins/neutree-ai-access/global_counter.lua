@@ -36,8 +36,15 @@ local function load_settings()
     return settings
 end
 
--- Per worker: each worker pays at most one timeout per cooldown.
+-- Breaker state, per worker. After a trip the worker stays half-open: once
+-- the cooldown ends a single probe call decides whether PG is back.
 local open_until = 0
+local half_open = false
+local probing = false
+-- Calls in flight, and when PG last answered one of them (or when the first
+-- of them started). A stall shows as calls pending with no answer for a while.
+local inflight = 0
+local progress_at = 0
 
 function _M.available()
     return load_settings().enabled and ngx.now() >= open_until
@@ -45,9 +52,14 @@ end
 
 local function trip(err)
     local s = load_settings()
-    open_until = ngx.now() + s.cooldown
-    kong.log.warn("neutree-ai-access: global rate limit unavailable, counting per pod for ",
-        s.cooldown, "s: ", tostring(err))
+    local now = ngx.now()
+    -- Calls already in flight fail one after another; log the first only.
+    if now >= open_until then
+        kong.log.warn("neutree-ai-access: global rate limit unavailable, counting per pod for ",
+            s.cooldown, "s: ", tostring(err))
+    end
+    open_until = now + s.cooldown
+    half_open = true
 end
 
 -- build_sql increments the windows in order and stops at the first one over
@@ -113,23 +125,12 @@ local function rows_of(res)
     return nil
 end
 
--- hit counts one request in each window, in order. windows is a list of
--- { name, seconds, limit }. It returns one entry per window: { hits,
--- window_start, now } in epoch seconds, or false for a window not reached
--- because an earlier one was already over its limit. On any failure it returns
--- nil and the caller counts per pod.
-function _M.hit(key, windows)
-    local list = {}
-    for i, w in ipairs(windows) do
-        list[i] = { name = w.name, seconds = w.seconds, prev_limit = i > 1 and windows[i - 1].limit or nil }
-    end
-
+local function query(key, list)
     ngx.update_time()
     local t0 = ngx.now()
     local pg, err = connect()
     if not pg then
-        trip(err)
-        return nil
+        return nil, err
     end
 
     ngx.update_time()
@@ -142,10 +143,55 @@ function _M.hit(key, windows)
     if not rows then
         -- The connection may be inside an aborted transaction; never pool it.
         pg:disconnect()
-        trip(qerr or "unexpected result")
-        return nil
+        return nil, qerr or "unexpected result"
     end
     pg:keepalive(KEEPALIVE_MS, POOL_SIZE)
+    return rows
+end
+
+-- hit counts one request in each window, in order. windows is a list of
+-- { name, seconds, limit }. It returns one entry per window: { hits,
+-- window_start, now } in epoch seconds, or false for a window not reached
+-- because an earlier one was already over its limit. It returns nil when PG
+-- failed, looks stalled, or is being probed by another request; the caller
+-- then counts per pod.
+function _M.hit(key, windows)
+    local list = {}
+    for i, w in ipairs(windows) do
+        list[i] = { name = w.name, seconds = w.seconds, prev_limit = i > 1 and windows[i - 1].limit or nil }
+    end
+
+    ngx.update_time()
+    local now = ngx.now()
+    local probe = false
+    if half_open then
+        if probing then
+            return nil
+        end
+        probe = true
+        probing = true
+    elseif inflight > 0 and now - progress_at > load_settings().timeout_ms / 3000 then
+        -- Do not queue behind a call that is likely to time out.
+        return nil
+    end
+    if inflight == 0 then
+        progress_at = now
+    end
+
+    inflight = inflight + 1
+    -- pcall so a raised error cannot leave inflight or probing stuck.
+    local ok, rows, err = pcall(query, key, list)
+    inflight = inflight - 1
+    ngx.update_time()
+    progress_at = ngx.now()
+    if probe then
+        probing = false
+    end
+    if not ok or not rows then
+        trip(ok and err or rows)
+        return nil
+    end
+    half_open = false
 
     local out = {}
     for i = 1, #windows do
@@ -165,6 +211,10 @@ end
 function _M._reset()
     settings = nil
     open_until = 0
+    half_open = false
+    probing = false
+    inflight = 0
+    progress_at = 0
 end
 
 return _M
