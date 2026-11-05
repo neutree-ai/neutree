@@ -172,10 +172,8 @@ type IdentitySourceStatus struct {
 	LastSync           *IdentitySourceSyncStatus     `json:"last_sync,omitempty"`
 }
 
-// IdentitySourceSyncStatus is the outcome of the last organization sync.
-// The counts are the writes that were applied; a sync that failed part way
-// reports what it applied and, in Pending, what it did not get to. The next
-// sync picks up from the directory again.
+// IdentitySourceSyncStatus is the outcome of the last organization sync. The
+// counts are applied writes; a sync that failed part way puts the rest in Pending.
 type IdentitySourceSyncStatus struct {
 	// RequestedAt is the spec.sync.requested_at this sync handled.
 	RequestedAt string `json:"requested_at,omitempty"`

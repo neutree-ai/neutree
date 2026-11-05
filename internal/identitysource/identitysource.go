@@ -106,10 +106,25 @@ func OIDCConfig(spec *v1.IdentitySourceOIDCSpec, clientSecret string) oidc.Confi
 	return cfg
 }
 
-// Fingerprint identifies what a source's clients are built from: its spec and
-// its secrets. Two equal fingerprints build the same clients. It is kept in
-// memory only; it is a hash of the secrets, so it is never written anywhere.
+// Fingerprint identifies what a source's login clients are built from: its
+// spec without the sync settings, and its secrets. Two equal fingerprints build
+// the same clients, so a sync request or a sync setting change rebuilds nothing.
+// It is kept in memory only; it is a hash of the secrets, so it is never
+// written anywhere.
 func Fingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSecrets) [sha256.Size]byte {
+	if spec != nil {
+		login := *spec
+		login.Sync = nil
+
+		if spec.LDAP != nil {
+			ldapSpec := *spec.LDAP
+			ldapSpec.Sync = nil
+			login.LDAP = &ldapSpec
+		}
+
+		spec = &login
+	}
+
 	specJSON, _ := json.Marshal(spec)       //nolint:errcheck // plain structs always marshal
 	secretsJSON, _ := json.Marshal(secrets) //nolint:errcheck // plain structs always marshal
 
