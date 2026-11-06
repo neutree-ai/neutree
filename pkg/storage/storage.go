@@ -380,7 +380,8 @@ type OrgUnitStorage interface {
 	ListOrgUnitMember(option ListOption) ([]OrgUnitMember, error)
 }
 
-// TeamStorage reads and writes Teams and their members (sync only).
+// TeamStorage reads and writes Teams and their members; users write manual
+// Teams through the API.
 type TeamStorage interface {
 	// CreateTeam creates a Team.
 	CreateTeam(data *v1.Team) error
