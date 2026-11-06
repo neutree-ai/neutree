@@ -254,6 +254,17 @@ class Backend:
         coerce_args(args, ServerArgs)
         filter_engine_args(args, ServerArgs)
 
+        # The Engine is built from the merged `args`, so an
+        # `engine_args.served_model_name` override decides the name it actually
+        # serves. Resolve the effective name once and hand that same value to
+        # both the Engine and the model info below; a reported name the Engine
+        # does not answer to makes /v1/models lie about the model's identity to
+        # anything that discovers it there. An empty or null override means
+        # "not set" and falls back to the default, matching SGLang's own
+        # treatment of an unset name.
+        self.served_model_name = args.get("served_model_name") or self.served_model_name
+        args["served_model_name"] = self.served_model_name
+
         from sglang.srt.entrypoints import engine as sglang_engine
 
         if args.get("enable_metrics"):
