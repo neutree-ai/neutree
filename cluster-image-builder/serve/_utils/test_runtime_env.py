@@ -13,8 +13,9 @@ from serve._utils.runtime_env import build_backend_runtime_env  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _reset_ray_mock():
-    mock_ray.reset_mock()
+def _reset_ray_mock(monkeypatch):
+    mock_ray.reset_mock(return_value=True, side_effect=True)
+    monkeypatch.setitem(sys.modules, "ray", mock_ray)
 
 
 class TestBuildBackendRuntimeEnv:

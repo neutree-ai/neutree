@@ -1,13 +1,12 @@
-import os
 import enum
-import logging
-import time
 import json
-from typing import Dict, Optional, Any, AsyncGenerator, List
+import logging
+from http import HTTPStatus
+from typing import Dict, Optional, Any
 
-from fastapi import FastAPI, Request
-from starlette.responses import StreamingResponse, JSONResponse, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from starlette_context.plugins import RequestIdPlugin
 from starlette_context.middleware import RawContextMiddleware
 from fastapi.middleware import Middleware
@@ -23,8 +22,8 @@ from vllm.v1.engine.async_llm import AsyncLLM
 # OpenAIServingRender was replaced by vllm.renderers.online_renderer.OnlineRenderer.
 from vllm.entrypoints.chat_utils import ChatTemplateConfig, load_chat_template
 from vllm.entrypoints.serve.utils.request_logger import RequestLogger
+from vllm.entrypoints.serve.exception_handling.error_response import create_error_response
 from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
-from vllm.entrypoints.serve.engine.protocol import ErrorResponse, ErrorInfo
 from vllm.entrypoints.serve.utils.fingerprint import set_default_fingerprint_mode
 from vllm.entrypoints.openai.chat_completion.serving import OpenAIServingChat
 from vllm.entrypoints.openai.models.protocol import BaseModelPath
@@ -39,6 +38,14 @@ from downloader import get_downloader, build_request_from_model_args, download_w
 from serve._metrics.ray_stat_logger import NeutreeRayStatLogger
 from serve._utils import coerce_args, filter_engine_args
 from serve._utils.runtime_env import build_backend_runtime_env
+from serve._utils.serve_response import (
+    backend_error,
+    backend_response,
+    error_stream,
+    open_stream,
+    to_wire_response,
+    to_wire_stream,
+)
 from serve._utils.vllm_task_translate import task_kwargs as _task_kwargs
 
 
@@ -53,6 +60,36 @@ SCHEDULER_CLASS_PATHS = {
     SchedulerType.STATIC_HASH: "serve._replica_scheduler.static_hash_scheduler:StaticHashReplicaScheduler",
     SchedulerType.CONSISTENT_HASH: "serve._replica_scheduler.chwbl_scheduler:ConsistentHashReplicaScheduler",
 }
+
+
+def _engine_error(exc: Exception, where: str) -> Any:
+    """Classify an exception with the pinned vLLM's own error mapping.
+
+    Only inference calls use this: they are where vLLM owns the status
+    vocabulary (400 for rejected input, 404 for an unknown model, 422, 501) and
+    where OpenAI clients expect it. A request-model ``ValidationError`` is not a
+    vLLM error, so it keeps the neutral 400; a bare FastAPI ``HTTPException``
+    carries a status but not vLLM's error type, so it is rebuilt through the
+    factory.
+    """
+    if isinstance(exc, ValidationError):
+        return backend_error(exc, where)
+    try:
+        if isinstance(exc, HTTPException):
+            status = HTTPStatus(exc.status_code)
+            response = create_error_response(exc.detail, err_type=status.phrase, status_code=status)
+        else:
+            response = create_error_response(exc)
+        code = response.error.code
+    except Exception as mapping_error:
+        # The factory is upstream code; a failure inside it must still stay in
+        # the Backend instead of escaping the actor as a RayTaskError.
+        return backend_error(mapping_error, where)
+    if code >= 500:
+        logging.error("%s failed: %s", where, exc, exc_info=(type(exc), exc, exc.__traceback__))
+    else:
+        logging.warning("%s rejected: %s", where, exc)
+    return response
 
 
 @serve.deployment(ray_actor_options={"num_cpus": 1, "num_gpus": 1})
@@ -339,67 +376,57 @@ class Backend:
         return self.openai_serving_score
 
     async def generate(self, payload: Any):
-        await self._ensure_chat()
-        result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
-
-        is_stream = payload.get("stream") is True
-
-        if isinstance(result, ErrorResponse):
-            if is_stream:
-                logging.error(f"Error during chat completion: {result.error.message}")
-                async def error_generator():
-                    import json
-                    error_data = {
-                        "error": {
-                            "message": "Request processing failed",
-                            "type": "internal_server_error",
-                            "details": str(result.error.message)
-                        }
-                    }
-                    yield f"data: {json.dumps(error_data)}\n\n"
-                    yield "data: [DONE]\n\n"
-                return error_generator()
-
-        return result
+        stream = isinstance(payload, dict) and payload.get("stream") is True
+        try:
+            await self._ensure_chat()
+        except Exception as exc:
+            error = backend_error(exc, "generate")
+            return error_stream(error) if stream else to_wire_response(error)
+        try:
+            result = await self.openai_serving_chat.create_chat_completion(ChatCompletionRequest(**payload), None)
+        except Exception as exc:
+            # Contain the failure inside the Backend: the Controller receives a
+            # rendered error body instead of an escaping RayTaskError.
+            error = _engine_error(exc, "generate")
+            return error_stream(error) if stream else to_wire_response(error)
+        if stream:
+            # A streaming call still returns a plain value when vLLM rejects
+            # the request before it builds a generator.
+            if not hasattr(result, "__aiter__"):
+                return error_stream(result)
+            return to_wire_stream(result, _engine_error)
+        return to_wire_response(result)
 
     async def generate_embeddings(self, payload: Any):
-        await self._ensure_embedding()
         try:
-            # Validate and convert the payload to an EmbeddingCompletionRequest
+            await self._ensure_embedding()
+        except Exception as exc:
+            return to_wire_response(backend_error(exc, "generate_embeddings"))
+        try:
             request = EmbeddingCompletionRequest(**payload)
-        except (TypeError, ValueError) as e:
-            logging.error(f"Invalid payload for EmbeddingCompletionRequest: {e}")
-            return ErrorResponse(
-                error=ErrorInfo(
-                    message=f"Invalid payload for EmbeddingCompletionRequest: {e}",
-                    type="invalid_request_error",
-                    code=400,
-                )
-            )
-        return await self.openai_serving_embedding(request, None)
+            result = await self.openai_serving_embedding(request, None)
+        except Exception as exc:
+            return to_wire_response(_engine_error(exc, "generate_embeddings"))
+        return to_wire_response(result)
 
     async def rerank(self, payload: Any):
-        """
-        Rerank documents based on their relevance to a query.
-        Uses vLLM's native scoring serving callable for maximum compatibility and performance.
-        """
-        await self._ensure_score()
+        try:
+            await self._ensure_score()
+        except Exception as exc:
+            return to_wire_response(backend_error(exc, "rerank"))
         try:
             request = RerankRequest(**payload)
-        except (TypeError, ValueError) as e:
-            logging.error(f"Invalid payload for RerankRequest: {e}")
-            return ErrorResponse(
-                error=ErrorInfo(
-                    message=f"Invalid payload for RerankRequest: {e}",
-                    type="invalid_request_error",
-                    code=400,
-                )
-            )
-        return await self.openai_serving_score(request, None)
+            result = await self.openai_serving_score(request, None)
+        except Exception as exc:
+            return to_wire_response(_engine_error(exc, "rerank"))
+        return to_wire_response(result)
 
     async def show_available_models(self):
-        models = await self._ensure_models()
-        return await models.show_available_models()
+        try:
+            models = await self._ensure_models()
+            return to_wire_response(await models.show_available_models())
+        except Exception as exc:
+            return to_wire_response(backend_error(exc, "show_available_models"))
 
 
 app = FastAPI()
@@ -411,57 +438,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def _result_to_response(result: Any) -> Response:
-    if isinstance(result, Response):
-        return result
-    if isinstance(result, ErrorResponse):
-        return JSONResponse(content=result.model_dump(), status_code=result.error.code)
-    if hasattr(result, "model_dump"):
-        return JSONResponse(content=result.model_dump())
-    return JSONResponse(content=result)
-
-
-def _stream_error_status(error: Any) -> int:
-    if isinstance(error, dict):
-        code = error.get("code")
-        if isinstance(code, int) and not isinstance(code, bool) and 400 <= code <= 599:
-            return code
-        if isinstance(code, str):
-            try:
-                status_code = int(code)
-            except ValueError:
-                status_code = None
-            if status_code is not None and 400 <= status_code <= 599:
-                return status_code
-        if error.get("type") == "internal_server_error":
-            return 500
-
-    return 400
-
-
-def _stream_error_response(first_chunk: Any) -> Optional[JSONResponse]:
-    if not isinstance(first_chunk, str) or not first_chunk.startswith("data:"):
-        return None
-
-    payload = first_chunk.removeprefix("data:").strip()
-    if payload == "[DONE]":
-        return None
-
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        return None
-
-    if not isinstance(data, dict) or "error" not in data:
-        return None
-
-    error = data["error"]
-    return JSONResponse(
-        content=error,
-        status_code=_stream_error_status(error),
-    )
 
 
 @serve.deployment(ray_actor_options={"num_cpus": 0.1})
@@ -480,66 +456,34 @@ class Controller:
     @app.post("/v1/chat/completions")
     async def chat(self, request: Request):
         req_obj = await request.json()
-        stream = req_obj.get("stream", False)
+        if req_obj.get("stream", False):
+            # A factory keeps RPC construction inside open_stream's first-frame guard.
+            def start() -> DeploymentResponseGenerator:
+                """Build the Backend stream when open_stream starts it."""
+                return self.backend.options(stream=True).generate.remote(req_obj)
 
-        if stream:
-            # Get the streaming generator from the backend
-            r: DeploymentResponseGenerator = self.backend.options(stream=True).generate.remote(req_obj)
-
-            try:
-                first_chunk = await r.__anext__()
-            except StopAsyncIteration:
-                return StreamingResponse(
-                    content=iter(()),
-                    media_type="text/event-stream"
-                )
-            except Exception as e:
-                logging.exception("Failed to initialize chat completion stream")
-                return JSONResponse(
-                    content={
-                        "message": "Failed to initialize chat completion stream",
-                        "type": "internal_server_error",
-                        "details": str(e),
-                    },
-                    status_code=500
-                )
-
-            error_response = _stream_error_response(first_chunk)
-            if error_response is not None:
-                return error_response
-
-            async def stream_with_first_chunk():
-                yield first_chunk
-                async for chunk in r:
-                    yield chunk
-
-            return StreamingResponse(
-                content=stream_with_first_chunk(),
-                media_type="text/event-stream"
+            return await open_stream(
+                start,
+                where="chat stream",
             )
-        else:
-            # Handle non-streaming response as before
-            result = await self.backend.options(stream=False).generate.remote(req_obj)
-            return _result_to_response(result)
+        # Non-streaming responses are rendered from the Backend's wire envelope.
+        return await backend_response(lambda: self.backend.options(stream=False).generate.remote(req_obj), "chat")
 
     @app.post("/v1/embeddings")
     async def embeddings(self, request: Request):
         """Embeddings endpoint for text-embedding models"""
         req_obj = await request.json()
-        result = await self.backend.options(stream=False).generate_embeddings.remote(req_obj)
-        return _result_to_response(result)
+        return await backend_response(lambda: self.backend.options(stream=False).generate_embeddings.remote(req_obj), "embeddings")
 
     @app.post("/v1/rerank")
     async def rerank(self, request: Request):
         """Rerank endpoint for cross-encoder/reranker models"""
         req_obj = await request.json()
-        result = await self.backend.options(stream=False).rerank.remote(req_obj)
-        return _result_to_response(result)
+        return await backend_response(lambda: self.backend.options(stream=False).rerank.remote(req_obj), "rerank")
 
     @app.get("/v1/models")
     async def models(self, request: Request):
-        result = await self.backend.show_available_models.remote()
-        return _result_to_response(result)
+        return await backend_response(lambda: self.backend.show_available_models.remote(), "models")
 
     @app.get("/health")
     async def health(self):
