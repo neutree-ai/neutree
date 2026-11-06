@@ -13,6 +13,7 @@ import (
 // a virtualization monitor.
 type metricsScrapeTarget struct {
 	AcceleratorType string
+	JobNameOverride string
 	Namespace       string
 	PodSelector     map[string]string
 	Port            int
@@ -20,6 +21,10 @@ type metricsScrapeTarget struct {
 }
 
 func (t metricsScrapeTarget) JobName() string {
+	if t.JobNameOverride != "" {
+		return t.JobNameOverride
+	}
+
 	return acceleratorExporterJobName(t.AcceleratorType)
 }
 
