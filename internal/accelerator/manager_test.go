@@ -6,11 +6,70 @@ import (
 	"testing"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type testAcceleratorOperator struct{}
+
+func (testAcceleratorOperator) Name() string { return "test-operator" }
+
+func (testAcceleratorOperator) AcceleratorType() string { return "operator-test-gpu" }
+
+func (testAcceleratorOperator) Reconcile(context.Context, *operator.OperatorContext) (operator.OperatorResult, error) {
+	return operator.OperatorResult{}, nil
+}
+
+func (testAcceleratorOperator) Status(context.Context, *operator.OperatorContext) (*v1.ComponentStatus, error) {
+	return nil, nil
+}
+
+func (testAcceleratorOperator) Delete(context.Context, *operator.OperatorContext) error { return nil }
+
+func TestPluginDependencyDeployModeAndOperatorLookup(t *testing.T) {
+	const acceleratorType = "operator-test-gpu"
+	owner := &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: acceleratorType}
+	want := testAcceleratorOperator{}
+
+	require.NoError(t, plugin.RegisterPlugin(plugin.PluginRegistration{
+		Plugin: owner,
+		KubernetesOperatorFactory: func(cluster *v1.Cluster) (operator.AcceleratorOperator, error) {
+			return want, nil
+		},
+		StaticClusterOperatorFactory: func(cluster *v1.Cluster) (operator.AcceleratorOperator, error) {
+			return want, nil
+		},
+	}))
+
+	assert.Equal(t, DependencyDeployModeOperator, PluginDependencyDeployMode(acceleratorType, v1.KubernetesClusterType))
+	assert.Equal(t, DependencyDeployModeOperator, PluginDependencyDeployMode(acceleratorType, v1.SSHClusterType))
+	assert.Equal(t, DependencyDeployModeLegacy, PluginDependencyDeployMode("missing-operator-test-gpu", v1.KubernetesClusterType))
+
+	m := &manager{}
+	got, err := m.OperatorForKubernetesCluster(acceleratorType, &v1.Cluster{})
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
+func TestOperatorForKubernetesClusterDoesNotFallbackOnFactoryError(t *testing.T) {
+	const acceleratorType = "operator-error-test-gpu"
+	owner := &fakeStaticNodeAcceleratorPlugin{resourceSet: true, resource: acceleratorType}
+	require.NoError(t, plugin.RegisterPlugin(plugin.PluginRegistration{
+		Plugin: owner,
+		KubernetesOperatorFactory: func(*v1.Cluster) (operator.AcceleratorOperator, error) {
+			return nil, errors.New("factory failed")
+		},
+	}))
+
+	m := &manager{}
+	got, err := m.OperatorForKubernetesCluster(acceleratorType, &v1.Cluster{})
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "create kubernetes operator")
+}
 
 func TestManagerGetAcceleratorProfile(t *testing.T) {
 	m := &manager{}

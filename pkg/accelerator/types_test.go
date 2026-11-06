@@ -57,3 +57,35 @@ func (contractPlugin) ParseFromRay(map[string]float64) (*v1.ResourceInfo, error)
 func (contractPlugin) ParseFromKubernetes(map[corev1.ResourceName]resource.Quantity, map[string]string) (*v1.ResourceInfo, error) {
 	return nil, nil
 }
+
+func TestPluginMatchesClusterAssertsMatcherOnPlugin(t *testing.T) {
+	plugin := &matcherPlugin{}
+	cluster := &v1.Cluster{}
+	if !PluginMatchesCluster(plugin, cluster) {
+		t.Fatal("expected plugin matcher to be called on the Plugin object")
+	}
+}
+
+type matcherPlugin struct{}
+
+func (matcherPlugin) Resource() string              { return "matcher" }
+func (matcherPlugin) Type() string                  { return InternalPluginType }
+func (p matcherPlugin) Handle() PluginHandle        { return p }
+func (matcherPlugin) MatchCluster(*v1.Cluster) bool { return true }
+func (matcherPlugin) GetNodeAccelerator(context.Context, *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+func (matcherPlugin) GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error) {
+	return nil, nil
+}
+func (matcherPlugin) DetectStaticNodeAccelerator(context.Context, *v1.DetectStaticNodeAcceleratorRequest) (*v1.DetectStaticNodeAcceleratorResponse, error) {
+	return nil, nil
+}
+func (matcherPlugin) GetContainerRuntimeConfig() (v1.RuntimeConfig, error) {
+	return v1.RuntimeConfig{}, nil
+}
+func (matcherPlugin) GetAcceleratorProfile(context.Context) (*v1.AcceleratorProfile, error) {
+	return nil, nil
+}
+func (matcherPlugin) GetResourceConverter() ResourceConverter { return nil }
+func (matcherPlugin) GetResourceParser() ResourceParser       { return nil }

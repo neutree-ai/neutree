@@ -20,6 +20,41 @@ type Plugin interface {
 	Handle() PluginHandle
 }
 
+type AcceleratorExporter = v1.AcceleratorExporterProfile
+type NodeAgentRuntime = v1.NodeAgentRuntimeProfile
+type AcceleratorExporterRuntimeProfile = v1.AcceleratorExporterRuntimeProfile
+
+type PluginProvider interface {
+	SupportPlugins() []string
+	GetPlugin(string) (Plugin, bool)
+}
+
+type ProfileProvider interface {
+	PluginProvider
+	GetAcceleratorProfile(context.Context, string) (*v1.AcceleratorProfile, error)
+}
+
+// Matcher is an optional accelerator-plugin capability used to decide whether
+// the plugin applies to a Cluster before selecting a deployment path.
+type Matcher interface {
+	MatchCluster(*v1.Cluster) bool
+}
+
+// PluginMatchesCluster preserves compatibility for plugins that predate the
+// matcher contract: a plugin without a matcher remains eligible.
+func PluginMatchesCluster(plugin Plugin, cluster *v1.Cluster) bool {
+	if plugin == nil {
+		return false
+	}
+
+	matcher, ok := plugin.(Matcher)
+	if !ok {
+		return true
+	}
+
+	return matcher.MatchCluster(cluster)
+}
+
 type PluginHandle interface {
 	GetNodeAccelerator(context.Context, *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error)
 	GetNodeRuntimeConfig(context.Context, *v1.GetNodeRuntimeConfigRequest) (*v1.GetNodeRuntimeConfigResponse, error)

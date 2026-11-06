@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator"
 	"github.com/neutree-ai/neutree/internal/metricsconfig"
+	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 )
 
@@ -20,7 +20,10 @@ type MetricsComponent struct {
 	imagePrefix           string
 	metricsRemoteWriteURL string
 	imagePullSecret       string
-	acceleratorMgr        accelerator.Manager
+	acceleratorMgr        publicaccelerator.ProfileProvider
+	excludedAccelerators  map[string]struct{}
+	acceleratorOnly       string
+	metricsTargets        metricsconfig.Registry
 
 	config     v1.KubernetesClusterConfig
 	ctrlClient client.Client
@@ -28,7 +31,6 @@ type MetricsComponent struct {
 
 	inferenceScrapeRules InferenceScrapeRules
 	cacheProviders       *clustercache.Providers
-	metricsTargets       metricsconfig.Registry
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -47,8 +49,24 @@ func (m *MetricsComponent) WithCacheProviders(providers *clustercache.Providers)
 	return m
 }
 
-// WithMetricsTargets attaches the Kubernetes scrape target registry. Static
-// cluster metrics continue to use their existing configuration path.
+// WithExcludedAccelerators prevents the legacy profile renderer from
+// generating resources owned by an AcceleratorOperator. Operator-owned
+// accelerators are rendered and reconciled by their operator instead.
+func (m *MetricsComponent) WithExcludedAccelerators(accelerators map[string]struct{}) *MetricsComponent {
+	m.excludedAccelerators = accelerators
+
+	return m
+}
+
+// WithAcceleratorOnly restricts rendering to one accelerator's NodeAgent and
+// exporter resources. It is used by an AcceleratorOperator renderer; the
+// ordinary MetricsComponent path remains unchanged.
+func (m *MetricsComponent) WithAcceleratorOnly(acceleratorType string) *MetricsComponent {
+	m.acceleratorOnly = acceleratorType
+
+	return m
+}
+
 func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *MetricsComponent {
 	m.metricsTargets = registry
 
@@ -57,7 +75,7 @@ func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *
 
 func NewMetricsComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret, metricsRemoteWriteURL string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client,
-	acceleratorMgr accelerator.Manager) *MetricsComponent {
+	acceleratorMgr publicaccelerator.ProfileProvider) *MetricsComponent {
 	logger := klog.LoggerWithValues(klog.Background(),
 		"cluster", cluster.Metadata.WorkspaceName(),
 		"component", "metrics",

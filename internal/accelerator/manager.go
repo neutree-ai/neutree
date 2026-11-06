@@ -11,6 +11,7 @@ import (
 	"k8s.io/klog/v2"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
+	"github.com/neutree-ai/neutree/internal/accelerator/operator"
 	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	"github.com/neutree-ai/neutree/internal/accelerator/resourceparser"
 	publicaccelerator "github.com/neutree-ai/neutree/pkg/accelerator"
@@ -18,6 +19,9 @@ import (
 
 type Manager interface {
 	plugin.AcceleratorPluginProvider
+
+	PluginDependencyDeployMode(acceleratorType, clusterType string) DependencyDeployMode
+	OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (operator.AcceleratorOperator, error)
 
 	DetectAccelerator(ctx context.Context, nodeIP string, sshAuth v1.Auth) (*v1.StaticNodeAcceleratorStatus, error)
 	GetAcceleratorProfile(ctx context.Context, acceleratorType string) (*v1.AcceleratorProfile, error)
@@ -54,6 +58,17 @@ type Manager interface {
 	AddInternalPlugins(plugins ...publicaccelerator.Plugin) error
 }
 
+type DependencyDeployMode = plugin.DependencyDeployMode
+
+const (
+	DependencyDeployModeLegacy   = plugin.DependencyDeployModeLegacy
+	DependencyDeployModeOperator = plugin.DependencyDeployModeOperator
+)
+
+type KubernetesOperatorFactory = plugin.KubernetesOperatorFactory
+type StaticClusterOperatorFactory = plugin.StaticClusterOperatorFactory
+type PluginRegistration = plugin.PluginRegistration
+
 type registerPlugin struct {
 	resource string
 	plugin   plugin.AcceleratorPlugin
@@ -61,6 +76,10 @@ type registerPlugin struct {
 
 type manager struct {
 	acceleratorsMap sync.Map
+}
+
+func PluginDependencyDeployMode(acceleratorType, clusterType string) DependencyDeployMode {
+	return plugin.PluginDependencyDeployMode(acceleratorType, clusterType)
 }
 
 func NewManager() *manager {
@@ -129,6 +148,36 @@ func (a *manager) AddInternalPlugins(plugins ...publicaccelerator.Plugin) error 
 	}
 
 	return nil
+}
+
+// PluginDependencyDeployMode returns the static deployment mode selected by
+// the accelerator's registered factory. Provider readiness is intentionally
+// not consulted here.
+func (a *manager) PluginDependencyDeployMode(acceleratorType, clusterType string) DependencyDeployMode {
+	return PluginDependencyDeployMode(acceleratorType, clusterType)
+}
+
+// OperatorForKubernetesCluster constructs the registered Kubernetes operator
+// without falling back to the legacy profile path when construction fails.
+func (a *manager) OperatorForKubernetesCluster(
+	acceleratorType string,
+	cluster *v1.Cluster,
+) (operator.AcceleratorOperator, error) {
+	registration, ok := plugin.GetPluginRegistration(acceleratorType)
+	if !ok || registration.KubernetesOperatorFactory == nil {
+		return nil, errors.Errorf("kubernetes operator factory for accelerator %s is not registered", acceleratorType)
+	}
+
+	acceleratorOperator, err := registration.KubernetesOperatorFactory(cluster)
+	if err != nil {
+		return nil, errors.Wrapf(err, "create kubernetes operator for accelerator %s", acceleratorType)
+	}
+
+	if acceleratorOperator == nil {
+		return nil, errors.Errorf("kubernetes operator factory for accelerator %s returned nil operator", acceleratorType)
+	}
+
+	return acceleratorOperator, nil
 }
 
 func isNilPlugin(p publicaccelerator.Plugin) bool {

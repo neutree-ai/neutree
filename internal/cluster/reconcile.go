@@ -12,6 +12,7 @@ import (
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	"github.com/neutree-ai/neutree/internal/ray/dashboard"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 	"github.com/neutree-ai/neutree/pkg/command"
@@ -51,6 +52,7 @@ type ReconcileContext struct {
 
 	// native kubernetes cluster specific fields
 	kubernetesClusterConfig *v1.KubernetesClusterConfig
+	metricsTargets          metricsconfig.Registry
 
 	logger klog.Logger
 }

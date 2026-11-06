@@ -5,6 +5,8 @@ package mocks
 import (
 	context "context"
 
+	internalaccelerator "github.com/neutree-ai/neutree/internal/accelerator"
+	operator "github.com/neutree-ai/neutree/internal/accelerator/operator"
 	accelerator "github.com/neutree-ai/neutree/pkg/accelerator"
 
 	mock "github.com/stretchr/testify/mock"
@@ -19,6 +21,41 @@ type MockManager struct {
 
 type MockManager_Expecter struct {
 	mock *mock.Mock
+}
+
+// PluginDependencyDeployMode provides a mock function with given fields:
+// acceleratorType, clusterType.
+func (_m *MockManager) PluginDependencyDeployMode(acceleratorType string, clusterType string) internalaccelerator.DependencyDeployMode {
+	ret := _m.Called(acceleratorType, clusterType)
+	if len(ret) == 0 {
+		panic("no return value specified for PluginDependencyDeployMode")
+	}
+
+	if rf, ok := ret.Get(0).(func(string, string) internalaccelerator.DependencyDeployMode); ok {
+		return rf(acceleratorType, clusterType)
+	}
+
+	return ret.Get(0).(internalaccelerator.DependencyDeployMode)
+}
+
+// OperatorForKubernetesCluster provides a mock function with given fields:
+// acceleratorType, cluster.
+func (_m *MockManager) OperatorForKubernetesCluster(acceleratorType string, cluster *v1.Cluster) (operator.AcceleratorOperator, error) {
+	ret := _m.Called(acceleratorType, cluster)
+	if len(ret) == 0 {
+		panic("no return value specified for OperatorForKubernetesCluster")
+	}
+
+	var r0 operator.AcceleratorOperator
+	var r1 error
+	if ret.Get(0) != nil {
+		r0 = ret.Get(0).(operator.AcceleratorOperator)
+	}
+	if len(ret) > 1 {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 func (_m *MockManager) EXPECT() *MockManager_Expecter {

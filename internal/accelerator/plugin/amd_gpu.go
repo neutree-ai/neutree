@@ -45,6 +45,10 @@ func (p *AMDGPUAcceleratorPlugin) Type() string {
 	return InternalPluginType
 }
 
+func (p *AMDGPUAcceleratorPlugin) MatchCluster(cluster *v1.Cluster) bool {
+	return clusterMatchesAccelerator(cluster, p.Resource())
+}
+
 func (p *AMDGPUAcceleratorPlugin) GetNodeAccelerator(ctx context.Context,
 	request *v1.GetNodeAcceleratorRequest) (*v1.GetNodeAcceleratorResponse, error) {
 	resp := &v1.GetNodeAcceleratorResponse{}

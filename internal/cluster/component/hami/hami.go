@@ -10,25 +10,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
-	"github.com/neutree-ai/neutree/internal/accelerator/plugin"
 	clusterversion "github.com/neutree-ai/neutree/internal/cluster/version"
+	"github.com/neutree-ai/neutree/pkg/accelerator"
 )
 
 type HAMiComponent struct {
-	cluster         *v1.Cluster
-	namespace       string
-	imagePrefix     string
-	imagePullSecret string
-	config          v1.KubernetesClusterConfig
-	ctrlClient      client.Client
-	pluginProvider  plugin.AcceleratorPluginProvider
-	logger          klog.Logger
+	cluster              *v1.Cluster
+	namespace            string
+	imagePrefix          string
+	imagePullSecret      string
+	config               v1.KubernetesClusterConfig
+	ctrlClient           client.Client
+	pluginProvider       accelerator.PluginProvider
+	excludedAccelerators map[string]struct{}
+	externalDevicePlugin bool
+	logger               klog.Logger
 }
 
 func NewHAMiComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecret string,
 	config v1.KubernetesClusterConfig, ctrlClient client.Client,
-	providers ...plugin.AcceleratorPluginProvider) *HAMiComponent {
-	var pluginProvider plugin.AcceleratorPluginProvider
+	providers ...accelerator.PluginProvider) *HAMiComponent {
+	var pluginProvider accelerator.PluginProvider
 	if len(providers) > 0 {
 		pluginProvider = providers[0]
 	}
@@ -46,6 +48,22 @@ func NewHAMiComponent(cluster *v1.Cluster, namespace, imagePrefix, imagePullSecr
 			"component", ComponentName,
 		),
 	}
+}
+
+// WithExcludedAccelerators keeps the legacy HAMi path away from accelerator
+// types owned by an AcceleratorOperator.
+func (h *HAMiComponent) WithExcludedAccelerators(accelerators map[string]struct{}) *HAMiComponent {
+	h.excludedAccelerators = accelerators
+
+	return h
+}
+
+// WithExternalDevicePlugin keeps Hami's control plane while handing the
+// accelerator device-plugin DaemonSet to an AcceleratorOperator.
+func (h *HAMiComponent) WithExternalDevicePlugin() *HAMiComponent {
+	h.externalDevicePlugin = true
+
+	return h
 }
 
 func (h *HAMiComponent) Reconcile() error {
