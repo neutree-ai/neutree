@@ -31,6 +31,8 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/auth"
+	"github.com/neutree-ai/neutree/internal/identitysource"
+	"github.com/neutree-ai/neutree/pkg/identity/ldap"
 	"github.com/neutree-ai/neutree/pkg/identity/orgsync"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
@@ -72,7 +74,7 @@ type Store interface {
 
 	GetExternalIdentity(source, externalID string) (*storage.ExternalIdentity, error)
 	CreateExternalIdentity(data *storage.ExternalIdentity) error
-	UpdateExternalIdentitySync(data *storage.ExternalIdentity) error
+	SetExternalIdentityDeactivation(source, externalID, marker string) error
 	UpdateExternalIdentityAccount(data *storage.ExternalIdentity) error
 	ListIdentitySourceSyncUsers(identitySource string) ([]storage.IdentitySourceSyncUser, error)
 	RevokeUserSessions(userID string) error
@@ -114,6 +116,19 @@ func (r Result) Pending() int {
 func ObjectName(sourceName, externalID string) string {
 	sum := sha256.Sum256([]byte(externalID))
 	return sourceName + "-" + hex.EncodeToString(sum[:])[:12]
+}
+
+// RunSource syncs the LDAP identity source from its directory, read with the
+// source's spec and secrets.
+func (s *Syncer) RunSource(ctx context.Context, source *v1.IdentitySource, secrets *storage.IdentitySourceSecrets) (Result, error) {
+	cfg := identitysource.LDAPConfig(source.Spec.LDAP, secrets.LDAPBindPassword)
+
+	dir, err := ldap.NewDirectory(cfg, identitysource.LDAPSyncConfig(source.Spec.LDAP), ldap.NewDialer(cfg))
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrReadDirectory, err)
+	}
+
+	return s.Run(ctx, source.Metadata.Name, dir)
 }
 
 // Run syncs the LDAP identity source sourceName from dir.
@@ -394,6 +409,15 @@ func (r *run) count(action orgsync.Action) {
 	}
 }
 
+func (r *run) orgUnitSpec(change orgsync.OrgUnitChange) (*v1.OrgUnitSpec, error) {
+	parent, err := r.orgUnitName(change.ParentExternalID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &v1.OrgUnitSpec{IdentitySource: r.source, ExternalID: change.ExternalID, Parent: parent}, nil
+}
+
 func (r *run) orgUnitName(externalID string) (string, error) {
 	if externalID == "" {
 		return "", nil
@@ -408,31 +432,12 @@ func (r *run) orgUnitName(externalID string) (string, error) {
 }
 
 func (r *run) applyOrgUnit(change orgsync.OrgUnitChange) error {
-	if change.Action == orgsync.ActionDeactivate {
-		stored, ok := r.orgUnits[change.ExternalID]
-		if !ok {
-			return errors.New("not stored")
-		}
-
-		if err := r.Store.UpdateOrgUnit(strconv.Itoa(stored.ID), &v1.OrgUnit{
-			Status: &v1.OrgStatus{Phase: v1.OrgPhaseInactive},
-		}); err != nil {
+	if change.Action == orgsync.ActionCreate {
+		spec, err := r.orgUnitSpec(change)
+		if err != nil {
 			return err
 		}
 
-		r.count(change.Action)
-
-		return nil
-	}
-
-	parent, err := r.orgUnitName(change.ParentExternalID)
-	if err != nil {
-		return err
-	}
-
-	spec := &v1.OrgUnitSpec{IdentitySource: r.source, ExternalID: change.ExternalID, Parent: parent}
-
-	if change.Action == orgsync.ActionCreate {
 		ou := &v1.OrgUnit{
 			APIVersion: "v1",
 			Kind:       "OrgUnit",
@@ -458,22 +463,36 @@ func (r *run) applyOrgUnit(change orgsync.OrgUnitChange) error {
 		return errors.New("not stored")
 	}
 
-	// metadata and spec are composites PostgREST replaces whole: send the
-	// stored metadata with the new display name, and all of spec.
-	metadata := *stored.Metadata
-	metadata.DisplayName = change.DisplayName
-	update := &v1.OrgUnit{Metadata: &metadata, Spec: spec}
+	var update *v1.OrgUnit
 
-	if change.Action == orgsync.ActionReactivate {
-		update.Status = &v1.OrgStatus{Phase: v1.OrgPhaseActive}
+	switch change.Action {
+	case orgsync.ActionDeactivate:
+		update = &v1.OrgUnit{Status: &v1.OrgStatus{Phase: v1.OrgPhaseInactive}}
+	default:
+		spec, err := r.orgUnitSpec(change)
+		if err != nil {
+			return err
+		}
+
+		// metadata and spec are composites PostgREST replaces whole: send the
+		// stored metadata with the new display name, and all of spec.
+		metadata := *stored.Metadata
+		metadata.DisplayName = change.DisplayName
+		update = &v1.OrgUnit{Metadata: &metadata, Spec: spec}
+
+		if change.Action == orgsync.ActionReactivate {
+			update.Status = &v1.OrgStatus{Phase: v1.OrgPhaseActive}
+		}
 	}
 
 	if err := r.Store.UpdateOrgUnit(strconv.Itoa(stored.ID), update); err != nil {
 		return err
 	}
 
-	stored.Metadata = &metadata
-	stored.Spec = spec
+	if update.Metadata != nil {
+		stored.Metadata = update.Metadata
+		stored.Spec = update.Spec
+	}
 
 	r.count(change.Action)
 
@@ -561,7 +580,9 @@ func (r *run) createUser(change orgsync.UserChange) error {
 	users := &auth.ExternalUsers{Client: r.Auth, Links: r.Store}
 
 	link, created, err := users.Ensure(r.ctx,
-		auth.LDAPAccount(r.source, change.ExternalID, change.Username, change.DisplayName, change.Email))
+		auth.LDAPAccount(r.source, change.ExternalID, auth.ExternalProfile{
+			Username: change.Username, DisplayName: change.DisplayName, Email: change.Email,
+		}))
 	if err != nil {
 		return err
 	}
@@ -622,13 +643,7 @@ func (r *run) updateUser(stored storage.IdentitySourceSyncUser, change orgsync.U
 		return nil
 	}
 
-	if err := r.Store.UpdateExternalIdentitySync(&storage.ExternalIdentity{
-		Source:          r.linkSource,
-		ExternalID:      change.ExternalID,
-		Username:        link.Username,
-		Email:           link.Email,
-		SyncDeactivated: marker,
-	}); err != nil {
+	if err := r.Store.SetExternalIdentityDeactivation(r.linkSource, change.ExternalID, marker); err != nil {
 		return fmt.Errorf("update link: %w", err)
 	}
 
@@ -649,13 +664,9 @@ func (r *run) deactivateUser(change orgsync.UserChange) error {
 		return errors.New("not stored")
 	}
 
-	id, err := uuid.Parse(stored.UserID)
+	id, err := r.endSessions(stored.UserID)
 	if err != nil {
-		return fmt.Errorf("invalid user ID %q: %w", stored.UserID, err)
-	}
-
-	if err := r.Store.RevokeUserSessions(stored.UserID); err != nil {
-		return fmt.Errorf("end sessions: %w", err)
+		return err
 	}
 
 	user, err := r.Auth.AdminGetUser(types.AdminGetUserRequest{UserID: id})
@@ -674,13 +685,7 @@ func (r *run) deactivateUser(change orgsync.UserChange) error {
 		}
 	}
 
-	if err := r.Store.UpdateExternalIdentitySync(&storage.ExternalIdentity{
-		Source:          r.linkSource,
-		ExternalID:      change.ExternalID,
-		Username:        stored.Username,
-		Email:           stored.Email,
-		SyncDeactivated: marker,
-	}); err != nil {
+	if err := r.Store.SetExternalIdentityDeactivation(r.linkSource, change.ExternalID, marker); err != nil {
 		return fmt.Errorf("update link: %w", err)
 	}
 
@@ -698,13 +703,9 @@ func (r *run) reactivateUser(change orgsync.UserChange) error {
 	}
 
 	if stored.SyncDeactivated == storage.SyncDeactivatedBanned {
-		id, err := uuid.Parse(stored.UserID)
+		id, err := r.endSessions(stored.UserID)
 		if err != nil {
-			return fmt.Errorf("invalid user ID %q: %w", stored.UserID, err)
-		}
-
-		if err := r.Store.RevokeUserSessions(stored.UserID); err != nil {
-			return fmt.Errorf("end sessions: %w", err)
+			return err
 		}
 
 		none := types.BanDurationNone()
@@ -714,6 +715,21 @@ func (r *run) reactivateUser(change orgsync.UserChange) error {
 	}
 
 	return r.updateUser(stored, change, "")
+}
+
+// endSessions ends every session of the GoTrue user userID and returns its
+// parsed ID for the GoTrue calls that follow.
+func (r *run) endSessions(userID string) (uuid.UUID, error) {
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("invalid user ID %q: %w", userID, err)
+	}
+
+	if err := r.Store.RevokeUserSessions(userID); err != nil {
+		return uuid.UUID{}, fmt.Errorf("end sessions: %w", err)
+	}
+
+	return id, nil
 }
 
 func (r *run) userID(externalID string) (string, error) {

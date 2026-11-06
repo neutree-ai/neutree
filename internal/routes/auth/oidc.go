@@ -244,9 +244,7 @@ func (o *oidcSource) finishLogin(ctx context.Context, deps *Dependencies, code s
 		IdentitySource:     auth.OIDCSource,
 		IdentitySourceName: o.name,
 		Email:              oidcPlaceholderEmail(o.name, identity.Issuer, identity.Subject),
-		Username:           identity.Username,
-		DisplayName:        identity.DisplayName,
-		SourceEmail:        identity.Email,
+		Profile:            auth.ExternalProfile{Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email},
 		LogName:            logName,
 	}
 

@@ -1204,15 +1204,11 @@ func (s *postgrestStorage) CreateExternalIdentity(data *ExternalIdentity) error 
 	return err
 }
 
-func (s *postgrestStorage) UpdateExternalIdentitySync(data *ExternalIdentity) error {
-	update := map[string]interface{}{
-		"username":         nullIfEmpty(data.Username),
-		"email":            nullIfEmpty(data.Email),
-		"sync_deactivated": nullIfEmpty(data.SyncDeactivated),
-	}
+func (s *postgrestStorage) SetExternalIdentityDeactivation(source, externalID, marker string) error {
+	update := map[string]interface{}{"sync_deactivated": nullIfEmpty(marker)}
 
 	_, _, err := s.postgrestClient.From(EXTERNAL_IDENTITY_TABLE).Update(update, "minimal", "").
-		Filter("source", "eq", data.Source).Filter("external_id", "eq", data.ExternalID).Execute()
+		Filter("source", "eq", source).Filter("external_id", "eq", externalID).Execute()
 
 	return err
 }
@@ -1241,9 +1237,7 @@ func (s *postgrestStorage) ListIdentitySourceSyncUsers(identitySource string) ([
 }
 
 func (s *postgrestStorage) RevokeUserSessions(userID string) error {
-	var ended int
-
-	return s.CallDatabaseFunction("revoke_user_sessions", map[string]interface{}{"p_user_id": userID}, &ended)
+	return s.CallDatabaseFunction("revoke_user_sessions", map[string]interface{}{"p_user_id": userID}, nil)
 }
 
 func nullIfEmpty(v string) interface{} {

@@ -80,7 +80,7 @@ func refreshExternalUser(deps *Dependencies, account auth.ExternalAccount, link 
 	}
 
 	if err := auth.UpdateExternalUser(deps.AuthClient, deps.Storage, auth.ExternalUserUpdate{
-		Link: link, User: user, Profile: account.Profile(),
+		Link: link, User: user, Profile: account.Profile,
 	}); err != nil {
 		klog.Warningf("%s login of %q (user %s): refresh profile: %v", account.Source, account.LogName, user.ID, err)
 	}

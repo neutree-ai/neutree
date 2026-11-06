@@ -364,7 +364,7 @@ func TestIdentitySourceSync_SyncerEndToEnd(t *testing.T) {
 	t.Run("a login finds the pre-created user", func(t *testing.T) {
 		users := &auth.ExternalUsers{Client: goTrueAdmin(t), Links: f.st}
 
-		link, created, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), "lin", "Lin", "lin@example.org"))
+		link, created, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), auth.ExternalProfile{Username: "lin", DisplayName: "Lin", Email: "lin@example.org"}))
 		if err != nil || created || link.UserID != lin.UserID || link.Username != "lin" || link.Email != "lin@example.org" {
 			t.Errorf("Ensure = %+v, %v, %v; want the synced user %s", link, created, err, lin.UserID)
 		}
@@ -485,7 +485,7 @@ func TestIdentitySourceSync_SyncerEndToEnd(t *testing.T) {
 		admin := goTrueAdmin(t)
 		users := &auth.ExternalUsers{Client: admin, Links: f.st}
 
-		link, _, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), "lin", "Lin", "lin@example.org"))
+		link, _, err := users.Ensure(ctx, auth.LDAPAccount(f.source, id("lin"), auth.ExternalProfile{Username: "lin", DisplayName: "Lin", Email: "lin@example.org"}))
 		if err != nil {
 			t.Fatalf("Ensure failed: %v", err)
 		}
@@ -532,10 +532,12 @@ func TestIdentitySourceSync_ExternalIdentityColumns(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	if err := st.UpdateExternalIdentitySync(&storage.ExternalIdentity{
-		Source: "ldap:cols", ExternalID: extID, Username: "u2", SyncDeactivated: storage.SyncDeactivatedKept,
-	}); err != nil {
-		t.Fatalf("update failed: %v", err)
+	if err := st.UpdateExternalIdentityAccount(&storage.ExternalIdentity{Source: "ldap:cols", ExternalID: extID, Username: "u2"}); err != nil {
+		t.Fatalf("update account failed: %v", err)
+	}
+
+	if err := st.SetExternalIdentityDeactivation("ldap:cols", extID, storage.SyncDeactivatedKept); err != nil {
+		t.Fatalf("set deactivation failed: %v", err)
 	}
 
 	var username, marker string

@@ -49,35 +49,25 @@ type ExternalAccount struct {
 	// derived from ExternalID. The source's own email is never used for it: it
 	// may be missing, change, or already belong to a local user.
 	Email string
-	// Username, DisplayName and SourceEmail are what the source says about
-	// the account; they become the new user's user_metadata and are recorded
-	// on the link.
-	Username    string
-	DisplayName string
-	SourceEmail string
+	// Profile is what the source says about the account: it becomes the new
+	// user's user_metadata and is recorded on the link.
+	Profile ExternalProfile
 	// LogName names the account in logs.
 	LogName string
-}
-
-// Profile is what the source says about the account.
-func (a ExternalAccount) Profile() ExternalProfile {
-	return ExternalProfile{Username: a.Username, DisplayName: a.DisplayName, Email: a.SourceEmail}
 }
 
 // LDAPAccount describes a directory account of the LDAP identity source
 // sourceName. A login and the organization sync build it the same way, so a
 // user created by either is the same user to the other.
-func LDAPAccount(sourceName, externalID, username, displayName, email string) ExternalAccount {
+func LDAPAccount(sourceName, externalID string, profile ExternalProfile) ExternalAccount {
 	return ExternalAccount{
 		Source:             LinkSource(LDAPSource, sourceName),
 		ExternalID:         externalID,
 		IdentitySource:     LDAPSource,
 		IdentitySourceName: sourceName,
 		Email:              LDAPPlaceholderEmail(sourceName, externalID),
-		Username:           username,
-		DisplayName:        displayName,
-		SourceEmail:        email,
-		LogName:            username,
+		Profile:            profile,
+		LogName:            profile.Username,
 	}
 }
 
@@ -128,7 +118,7 @@ func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (*s
 	created, err := u.Client.AdminCreateUser(types.AdminCreateUserRequest{
 		Email:        account.Email,
 		EmailConfirm: true,
-		UserMetadata: ExternalUserMetadata(account.Username, account.DisplayName, account.SourceEmail),
+		UserMetadata: ExternalUserMetadata(account.Profile.Username, account.Profile.DisplayName, account.Profile.Email),
 		AppMetadata:  ExternalAppMetadata(account.IdentitySource, account.IdentitySourceName),
 	})
 	if err != nil {
@@ -147,8 +137,8 @@ func (u *ExternalUsers) create(ctx context.Context, account ExternalAccount) (*s
 		Source:     account.Source,
 		ExternalID: account.ExternalID,
 		UserID:     userID,
-		Username:   account.Username,
-		Email:      account.SourceEmail,
+		Username:   account.Profile.Username,
+		Email:      account.Profile.Email,
 	}
 
 	err = u.Links.CreateExternalIdentity(link)

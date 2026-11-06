@@ -68,7 +68,9 @@ func handleLDAPToken(deps *Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		account := ldapAccount(source.name, identity)
+		account := auth.LDAPAccount(source.name, identity.ExternalID, auth.ExternalProfile{
+			Username: identity.Username, DisplayName: identity.DisplayName, Email: identity.Email,
+		})
 
 		link, created, err := ensureExternalUser(ctx, deps, account)
 		if err != nil {
@@ -147,10 +149,4 @@ func ldapErrorResponse(source, username string, err error) (int, string) {
 		klog.Errorf("LDAP login of %q via %s failed: %v", username, source, err)
 		return http.StatusInternalServerError, msgInternalError
 	}
-}
-
-// ldapAccount describes the directory account of identity in the LDAP
-// identity source sourceName.
-func ldapAccount(sourceName string, identity *ldap.Identity) auth.ExternalAccount {
-	return auth.LDAPAccount(sourceName, identity.ExternalID, identity.Username, identity.DisplayName, identity.Email)
 }

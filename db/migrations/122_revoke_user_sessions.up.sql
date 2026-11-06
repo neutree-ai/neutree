@@ -9,27 +9,24 @@
 -- Deleting a user's auth.sessions rows also deletes their refresh tokens and
 -- MFA claims (ON DELETE CASCADE on session_id). Refresh tokens are deleted by
 -- user_id as well (kept as text in auth.refresh_tokens), which covers tokens
--- without a session from older GoTrue versions. Access tokens already issued
--- stay valid until they expire (GOTRUE_JWT_EXP).
---
--- Returns the number of sessions ended.
+-- without a session from older GoTrue versions. GoTrue indexes them by
+-- (instance_id, user_id) and writes the nil UUID as instance_id, so the
+-- delete names it to use that index. Access tokens already issued stay valid
+-- until they expire (GOTRUE_JWT_EXP).
 --
 -- service_role only: it can end anyone's sessions.
 CREATE OR REPLACE FUNCTION api.revoke_user_sessions(p_user_id UUID)
-RETURNS INTEGER
+RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
-DECLARE
-    v_sessions INTEGER;
 BEGIN
-    DELETE FROM auth.refresh_tokens WHERE user_id = p_user_id::text;
+    DELETE FROM auth.refresh_tokens
+    WHERE instance_id = '00000000-0000-0000-0000-000000000000'::uuid
+      AND user_id = p_user_id::text;
 
     DELETE FROM auth.sessions WHERE user_id = p_user_id;
-    GET DIAGNOSTICS v_sessions = ROW_COUNT;
-
-    RETURN v_sessions;
 END;
 $$;
 

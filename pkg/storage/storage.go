@@ -291,9 +291,9 @@ type ExternalIdentityStorage interface {
 	// CreateExternalIdentity links an external account to a user. It returns an
 	// error wrapping ErrResourceConflict when the account is already linked.
 	CreateExternalIdentity(data *ExternalIdentity) error
-	// UpdateExternalIdentitySync writes Username, Email and SyncDeactivated
-	// of the link (source, external ID); an empty value is stored as NULL.
-	UpdateExternalIdentitySync(data *ExternalIdentity) error
+	// SetExternalIdentityDeactivation writes the sync_deactivated marker of
+	// the link (source, external ID); an empty marker is stored as NULL.
+	SetExternalIdentityDeactivation(source, externalID, marker string) error
 	// UpdateExternalIdentityAccount writes Username and Email of the link
 	// (source, external ID) and leaves SyncDeactivated alone; an empty value
 	// is stored as NULL.

@@ -256,13 +256,12 @@ func (s *fakeStore) CreateExternalIdentity(data *storage.ExternalIdentity) error
 	return nil
 }
 
-func (s *fakeStore) UpdateExternalIdentitySync(data *storage.ExternalIdentity) error {
+func (s *fakeStore) SetExternalIdentityDeactivation(_, externalID, marker string) error {
 	if err := s.write(); err != nil {
 		return err
 	}
 
-	link := s.links[data.ExternalID]
-	link.Username, link.Email, link.SyncDeactivated = data.Username, data.Email, data.SyncDeactivated
+	s.links[externalID].SyncDeactivated = marker
 
 	return nil
 }
@@ -823,7 +822,7 @@ func TestRun_ClaimsUserCreatedByLogin(t *testing.T) {
 	h := newHarness()
 
 	users := &auth.ExternalUsers{Client: h.gotrue, Links: h.store}
-	link, created, err := users.Ensure(context.Background(), auth.LDAPAccount(testSource, "u-lin", "lin", "Lin", "lin@example.org"))
+	link, created, err := users.Ensure(context.Background(), auth.LDAPAccount(testSource, "u-lin", auth.ExternalProfile{Username: "lin", DisplayName: "Lin", Email: "lin@example.org"}))
 	require.NoError(t, err)
 	require.True(t, created)
 

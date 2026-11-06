@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -16,7 +15,6 @@ import (
 	"github.com/neutree-ai/neutree/internal/auth"
 	"github.com/neutree-ai/neutree/internal/identitysource"
 	"github.com/neutree-ai/neutree/internal/identitysync"
-	"github.com/neutree-ai/neutree/pkg/identity/ldap"
 	"github.com/neutree-ai/neutree/pkg/storage"
 )
 
@@ -37,22 +35,8 @@ const (
 type IdentitySourceTester func(ctx context.Context, source *v1.IdentitySource, secrets *storage.IdentitySourceSecrets) error
 
 // IdentitySourceSyncer runs one organization sync of an LDAP identity source;
-// LDAPSyncer is the real one.
+// (*identitysync.Syncer).RunSource is the real one.
 type IdentitySourceSyncer func(ctx context.Context, source *v1.IdentitySource, secrets *storage.IdentitySourceSecrets) (identitysync.Result, error)
-
-// LDAPSyncer reads the directory of an LDAP source and syncs it with syncer.
-func LDAPSyncer(syncer *identitysync.Syncer) IdentitySourceSyncer {
-	return func(ctx context.Context, source *v1.IdentitySource, secrets *storage.IdentitySourceSecrets) (identitysync.Result, error) {
-		cfg := identitysource.LDAPConfig(source.Spec.LDAP, secrets.LDAPBindPassword)
-
-		dir, err := ldap.NewDirectory(cfg, identitysource.LDAPSyncConfig(source.Spec.LDAP), ldap.NewDialer(cfg))
-		if err != nil {
-			return identitysync.Result{}, fmt.Errorf("%w: %w", identitysync.ErrReadDirectory, err)
-		}
-
-		return syncer.Run(ctx, source.Metadata.Name, dir)
-	}
-}
 
 // IdentitySourceController keeps the status of identity sources: it tests
 // each source's connection when its spec or secrets change and every
@@ -91,8 +75,8 @@ type IdentitySourceControllerOption struct {
 	Storage storage.Storage
 	// Tester defaults to identitysource.ConnectionTest.
 	Tester IdentitySourceTester
-	// Syncer defaults to LDAPSyncer writing to Storage and AuthClient. With
-	// neither Syncer nor AuthClient, sources are not synced.
+	// Syncer defaults to an identitysync.Syncer writing to Storage and
+	// AuthClient. With neither Syncer nor AuthClient, sources are not synced.
 	Syncer     IdentitySourceSyncer
 	AuthClient auth.Client
 	// RetestInterval defaults to DefaultIdentitySourceRetestInterval.
@@ -115,7 +99,7 @@ func NewIdentitySourceController(option *IdentitySourceControllerOption) (*Ident
 	}
 
 	if c.syncer == nil && option.AuthClient != nil {
-		c.syncer = LDAPSyncer(&identitysync.Syncer{Store: option.Storage, Auth: option.AuthClient})
+		c.syncer = (&identitysync.Syncer{Store: option.Storage, Auth: option.AuthClient}).RunSource
 	}
 
 	if c.retestInterval <= 0 {
@@ -171,23 +155,30 @@ func (c *IdentitySourceController) reconcile(obj *v1.IdentitySource) error {
 		}
 	}
 
-	syncPrint := syncFingerprint(obj.Spec, secrets)
-	if !c.syncDue(obj, status, syncPrint) {
+	if c.syncer == nil || !obj.Spec.SyncEnabled() {
 		return nil
 	}
 
-	next := &v1.IdentitySourceStatus{}
-
-	if status != nil {
-		copied := *status
-		next = &copied
-	}
-
-	next.LastSync = c.runSync(obj, secrets, status)
+	syncPrint := identitysource.SyncFingerprint(obj.Spec, secrets)
 
 	c.mu.Lock()
-	c.synced[obj.ID] = syncPrint
+	previous, seen := c.synced[obj.ID]
 	c.mu.Unlock()
+
+	if !c.syncDue(obj, status, syncPrint, previous, seen) {
+		if !seen {
+			// A fresh process has nothing to compare with; it remembers what
+			// it sees and waits for the interval.
+			c.rememberSync(obj.ID, syncPrint)
+		}
+
+		return nil
+	}
+
+	next := copyStatus(status)
+	next.LastSync = c.runSync(obj, secrets, status)
+
+	c.rememberSync(obj.ID, syncPrint)
 
 	if err := c.storage.UpdateIdentitySource(id, &v1.IdentitySource{Status: next}); err != nil {
 		return errors.Wrapf(err, "failed to update sync status of identity source %s", obj.Metadata.Name)
@@ -226,39 +217,18 @@ func (c *IdentitySourceController) runTest(
 	return status, nil
 }
 
-// syncFingerprint identifies what a sync reads the directory with: the
-// login fingerprint and the sync settings, but not the sync request, which
-// triggers a sync by itself.
-func syncFingerprint(spec *v1.IdentitySourceSpec, secrets *storage.IdentitySourceSecrets) [sha256.Size]byte {
-	login := identitysource.Fingerprint(spec, secrets)
-
-	var settings struct {
-		Sync     *v1.IdentitySourceSyncSpec     `json:"sync"`
-		LDAPSync *v1.IdentitySourceLDAPSyncSpec `json:"ldap_sync"`
-	}
-
-	if spec.Sync != nil {
-		syncCopy := *spec.Sync
-		syncCopy.RequestedAt = ""
-		settings.Sync = &syncCopy
-	}
-
-	if spec.LDAP != nil {
-		settings.LDAPSync = spec.LDAP.Sync
-	}
-
-	settingsJSON, _ := json.Marshal(settings) //nolint:errcheck // plain structs always marshal
-
-	return sha256.Sum256(append(login[:], settingsJSON...))
+func (c *IdentitySourceController) rememberSync(id int, fingerprint [sha256.Size]byte) {
+	c.mu.Lock()
+	c.synced[id] = fingerprint
+	c.mu.Unlock()
 }
 
-// syncDue reports whether the source needs an organization sync now; see
+// syncDue reports whether a source that enables the sync needs one now;
+// previous is the fingerprint of the last sync this process saw, if seen. See
 // IdentitySourceController.
-func (c *IdentitySourceController) syncDue(obj *v1.IdentitySource, status *v1.IdentitySourceStatus, fingerprint [sha256.Size]byte) bool {
-	if c.syncer == nil || !obj.Spec.SyncEnabled() {
-		return false
-	}
-
+func (c *IdentitySourceController) syncDue(
+	obj *v1.IdentitySource, status *v1.IdentitySourceStatus, fingerprint, previous [sha256.Size]byte, seen bool,
+) bool {
 	var last *v1.IdentitySourceSyncStatus
 	if status != nil {
 		last = status.LastSync
@@ -271,16 +241,6 @@ func (c *IdentitySourceController) syncDue(obj *v1.IdentitySource, status *v1.Id
 	if requestedAfter(obj.Spec.Sync.RequestedAt, last.RequestedAt) {
 		return true
 	}
-
-	c.mu.Lock()
-
-	previous, seen := c.synced[obj.ID]
-	if !seen {
-		// A fresh process has nothing to compare with; it remembers what it
-		// sees and waits for the interval.
-		c.synced[obj.ID] = fingerprint
-	}
-	c.mu.Unlock()
 
 	if seen && previous != fingerprint {
 		return true
@@ -394,11 +354,14 @@ func (c *IdentitySourceController) testedStatus(
 	obj *v1.IdentitySource, testedAt time.Time, testErr error, secrets *storage.IdentitySourceSecrets,
 ) *v1.IdentitySourceStatus {
 	now := testedAt.UTC().Format(time.RFC3339Nano)
-	status := &v1.IdentitySourceStatus{
-		Phase:              v1.IdentitySourcePhaseCONNECTED,
-		LastTransitionTime: now,
-		LastConnectionTest: &v1.IdentitySourceConnectionTest{Time: now, OK: true, Message: identitySourceConnectedMessage},
-	}
+
+	// The status is written whole; start from the stored one so that what
+	// the sync reported stays.
+	status := copyStatus(obj.Status)
+	status.Phase = v1.IdentitySourcePhaseCONNECTED
+	status.ErrorMessage = ""
+	status.LastTransitionTime = now
+	status.LastConnectionTest = &v1.IdentitySourceConnectionTest{Time: now, OK: true, Message: identitySourceConnectedMessage}
 
 	if testErr != nil {
 		message := identitysource.SafeMessage(testErr, secrets)
@@ -413,12 +376,18 @@ func (c *IdentitySourceController) testedStatus(
 		status.LastTransitionTime = obj.Status.LastTransitionTime
 	}
 
-	// The status is written whole; keep what the sync reported.
-	if obj.Status != nil {
-		status.LastSync = obj.Status.LastSync
+	return status
+}
+
+// copyStatus returns a copy of status to change, or an empty status.
+func copyStatus(status *v1.IdentitySourceStatus) *v1.IdentitySourceStatus {
+	if status == nil {
+		return &v1.IdentitySourceStatus{}
 	}
 
-	return status
+	copied := *status
+
+	return &copied
 }
 
 // syncDeletion finishes a soft delete. An identity source owns nothing outside
@@ -442,15 +411,10 @@ func (c *IdentitySourceController) syncDeletion(obj *v1.IdentitySource, id strin
 
 	klog.Infof("Deleting identity source %s", obj.Metadata.Name)
 
-	status := &v1.IdentitySourceStatus{
-		Phase:              v1.IdentitySourcePhaseDELETED,
-		LastTransitionTime: FormatStatusTime(),
-	}
-
-	if obj.Status != nil {
-		status.LastConnectionTest = obj.Status.LastConnectionTest
-		status.LastSync = obj.Status.LastSync
-	}
+	status := copyStatus(obj.Status)
+	status.Phase = v1.IdentitySourcePhaseDELETED
+	status.LastTransitionTime = FormatStatusTime()
+	status.ErrorMessage = ""
 
 	if err := c.storage.UpdateIdentitySource(id, &v1.IdentitySource{Status: status}); err != nil {
 		return errors.Wrapf(err, "failed to update status of identity source %s", obj.Metadata.Name)
