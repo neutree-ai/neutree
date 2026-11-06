@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/accelerator"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 )
 
@@ -27,6 +28,7 @@ type MetricsComponent struct {
 
 	inferenceScrapeRules InferenceScrapeRules
 	cacheProviders       *clustercache.Providers
+	metricsTargets       metricsconfig.Registry
 }
 
 // WithInferenceScrapeRules attaches the per-engine-version scrape adjustments
@@ -42,6 +44,14 @@ func (m *MetricsComponent) WithInferenceScrapeRules(rules InferenceScrapeRules) 
 // WithCacheProviders supplies distribution-owned cache metrics discovery.
 func (m *MetricsComponent) WithCacheProviders(providers *clustercache.Providers) *MetricsComponent {
 	m.cacheProviders = providers
+	return m
+}
+
+// WithMetricsTargets attaches the Kubernetes scrape target registry. Static
+// cluster metrics continue to use their existing configuration path.
+func (m *MetricsComponent) WithMetricsTargets(registry metricsconfig.Registry) *MetricsComponent {
+	m.metricsTargets = registry
+
 	return m
 }
 

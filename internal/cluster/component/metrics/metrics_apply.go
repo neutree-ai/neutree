@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/neutree-ai/neutree/api/v1"
 	"github.com/neutree-ai/neutree/internal/deploy"
+	"github.com/neutree-ai/neutree/internal/metricsconfig"
 	"github.com/neutree-ai/neutree/internal/util"
 	"github.com/neutree-ai/neutree/pkg/clustercache"
 
@@ -55,6 +56,12 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 		}
 	}
 
+	if m.metricsTargets != nil {
+		m.replaceLegacyTargetContributions(acceleratorExporterTargets, variables.VirtualizationMetricsScrapeTargets)
+		acceleratorExporterTargets, variables.VirtualizationMetricsScrapeTargets = m.registryTargets()
+		variables.AcceleratorExporterScrapeTargets = acceleratorExporterTargets
+	}
+
 	if variables.EnableNeutreeNodeAgentMetrics {
 		nodeAgent, err := selectedMetricsNodeAgent(m.cluster.GetVersion(), acceleratorPlans, acceleratorExporterTargets)
 		if err != nil {
@@ -95,6 +102,56 @@ func (m *MetricsComponent) GetMetricsResources(ctx context.Context) (*unstructur
 	}
 
 	return objs, nil
+}
+
+func (m *MetricsComponent) replaceLegacyTargetContributions(
+	exporterTargets []metricsScrapeTarget,
+	virtualizationTargets []metricsScrapeTarget,
+) {
+	for _, target := range exporterTargets {
+		m.metricsTargets.Replace("legacy/accelerator/"+target.AcceleratorType, []metricsconfig.Target{{
+			AcceleratorType: target.AcceleratorType,
+			JobName:         target.JobName(),
+			Kind:            metricsconfig.TargetKindAcceleratorExporter,
+			Namespace:       target.Namespace,
+			Selector:        cloneStringMap(target.PodSelector),
+			Port:            target.Port,
+			MetricsPath:     target.MetricsPath,
+		}})
+	}
+	for _, target := range virtualizationTargets {
+		m.metricsTargets.Replace("legacy/virtualization/"+target.AcceleratorType, []metricsconfig.Target{{
+			AcceleratorType: target.AcceleratorType,
+			JobName:         target.JobName(),
+			Kind:            metricsconfig.TargetKindVirtualizationMonitor,
+			Namespace:       target.Namespace,
+			Selector:        cloneStringMap(target.PodSelector),
+			Port:            target.Port,
+			MetricsPath:     target.MetricsPath,
+		}})
+	}
+}
+
+func (m *MetricsComponent) registryTargets() ([]metricsScrapeTarget, []metricsScrapeTarget) {
+	var exporters []metricsScrapeTarget
+	var virtualization []metricsScrapeTarget
+	for _, target := range m.metricsTargets.Snapshot().Targets {
+		resolved := metricsScrapeTarget{
+			AcceleratorType: target.AcceleratorType,
+			JobNameOverride: target.JobName,
+			Namespace:       target.Namespace,
+			PodSelector:     cloneStringMap(target.Selector),
+			Port:            target.Port,
+			MetricsPath:     metricsTargetPath(target.MetricsPath),
+		}
+		switch target.Kind {
+		case metricsconfig.TargetKindAcceleratorExporter:
+			exporters = append(exporters, resolved)
+		case metricsconfig.TargetKindVirtualizationMonitor:
+			virtualization = append(virtualization, resolved)
+		}
+	}
+	return exporters, virtualization
 }
 
 func (m *MetricsComponent) acceleratorExporterMode() v1.ClusterAcceleratorExporterMode {
