@@ -123,6 +123,8 @@ CREATE POLICY "user_profile delete policy" ON api.user_profiles
 
 DROP FUNCTION IF EXISTS api.has_permission_on_org_unit(UUID, api.permission_action, INTEGER);
 DROP FUNCTION IF EXISTS api.has_permission_on_subject(UUID, api.permission_action, UUID);
+DROP FUNCTION IF EXISTS api.has_org_scoped_permission_on_subject(UUID, api.permission_action, UUID);
+DROP FUNCTION IF EXISTS api.has_org_scoped_permission(UUID, api.permission_action, INTEGER);
 DROP FUNCTION IF EXISTS api.check_org_role_binding(UUID, api.permission_action, INTEGER);
 
 DROP INDEX IF EXISTS api.role_assignment_unique_user_org_unit_role;

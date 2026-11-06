@@ -154,7 +154,7 @@ RETURNS BOOLEAN AS $$
 BEGIN
     RETURN FALSE;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 COMMENT ON FUNCTION api.check_org_role_binding(UUID, api.permission_action, INTEGER) IS
     'Extension point of api.has_permission_on_subject / api.has_permission_on_org_unit (OrgUnit-scoped role binding). Default: never grants.';
@@ -163,11 +163,32 @@ COMMENT ON FUNCTION api.check_org_role_binding(UUID, api.permission_action, INTE
 -- Entry points. Only the hooks above are meant to be replaced.
 -- ----------------------
 
--- May user_uuid do required_permission on the user target_user? A global
--- role assignment always counts. Otherwise the OrgUnit-scoped hook decides on
--- the target's primary OrgUnit; a user in no OrgUnit is covered by global
--- assignments only. The API key scope hook runs last, as in api.has_permission.
-CREATE OR REPLACE FUNCTION api.has_permission_on_subject(
+-- The OrgUnit-scoped part of the entry points below, without the global
+-- check: the hook decides, then the API key scope hook runs, as in
+-- api.has_permission. RLS policies call it per row next to a global check
+-- that runs once per statement.
+CREATE OR REPLACE FUNCTION api.has_org_scoped_permission(
+    user_uuid UUID,
+    required_permission api.permission_action,
+    org_unit_id INTEGER
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+    IF user_uuid IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    IF api.check_org_role_binding(user_uuid, required_permission, org_unit_id) IS NOT TRUE THEN
+        RETURN FALSE;
+    END IF;
+
+    RETURN api.check_api_key_scope(required_permission, NULL) IS TRUE;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- The same on a user: decided on the target's primary OrgUnit. A user in no
+-- OrgUnit is covered by global assignments only.
+CREATE OR REPLACE FUNCTION api.has_org_scoped_permission_on_subject(
     user_uuid UUID,
     required_permission api.permission_action,
     target_user UUID
@@ -176,10 +197,6 @@ RETURNS BOOLEAN AS $$
 DECLARE
     v_org_unit_id INTEGER;
 BEGIN
-    IF api.has_permission(user_uuid, required_permission, NULL) THEN
-        RETURN TRUE;
-    END IF;
-
     IF user_uuid IS NULL OR target_user IS NULL THEN
         RETURN FALSE;
     END IF;
@@ -192,13 +209,24 @@ BEGIN
         RETURN FALSE;
     END IF;
 
-    IF api.check_org_role_binding(user_uuid, required_permission, v_org_unit_id) IS NOT TRUE THEN
-        RETURN FALSE;
-    END IF;
-
-    RETURN api.check_api_key_scope(required_permission, NULL) IS TRUE;
+    RETURN api.has_org_scoped_permission(user_uuid, required_permission, v_org_unit_id);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- May user_uuid do required_permission on the user target_user? A global
+-- role assignment always counts; otherwise the OrgUnit-scoped hook decides on
+-- the target's primary OrgUnit.
+CREATE OR REPLACE FUNCTION api.has_permission_on_subject(
+    user_uuid UUID,
+    required_permission api.permission_action,
+    target_user UUID
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN api.has_permission(user_uuid, required_permission, NULL) IS TRUE
+        OR api.has_org_scoped_permission_on_subject(user_uuid, required_permission, target_user);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 -- May user_uuid do required_permission on the OrgUnit org_unit_id? NULL
 -- org_unit_id: on any OrgUnit (used for role:read, which has no target).
@@ -209,25 +237,15 @@ CREATE OR REPLACE FUNCTION api.has_permission_on_org_unit(
 )
 RETURNS BOOLEAN AS $$
 BEGIN
-    IF api.has_permission(user_uuid, required_permission, NULL) THEN
-        RETURN TRUE;
-    END IF;
-
-    IF user_uuid IS NULL THEN
-        RETURN FALSE;
-    END IF;
-
-    IF api.check_org_role_binding(user_uuid, required_permission, org_unit_id) IS NOT TRUE THEN
-        RETURN FALSE;
-    END IF;
-
-    RETURN api.check_api_key_scope(required_permission, NULL) IS TRUE;
+    RETURN api.has_permission(user_uuid, required_permission, NULL) IS TRUE
+        OR api.has_org_scoped_permission(user_uuid, required_permission, org_unit_id);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 -- ----------------------
--- RLS: checks on a person or an OrgUnit go through the new entry points.
--- With only global assignments they decide exactly as before.
+-- RLS: checks on a person or an OrgUnit pass on a global assignment (checked
+-- once per statement) or an OrgUnit-scoped one (checked per row). With only
+-- global assignments they decide exactly as before.
 -- ----------------------
 
 -- User profiles. user_profile:delete is checked globally: deleting a user,
@@ -240,19 +258,19 @@ CREATE POLICY "user_profile read policy" ON api.user_profiles
     FOR SELECT
     USING (
         id = auth.uid()
-        OR
-        api.has_permission_on_subject(auth.uid(), 'user_profile:read', id)
+        OR (SELECT api.has_permission(auth.uid(), 'user_profile:read', NULL))
+        OR api.has_org_scoped_permission_on_subject(auth.uid(), 'user_profile:read', id)
     );
 
 CREATE POLICY "user_profile update policy" ON api.user_profiles
     FOR UPDATE
     USING (
         id = auth.uid()
-        OR
-        api.has_permission_on_subject(auth.uid(), 'user_profile:update', id)
+        OR (SELECT api.has_permission(auth.uid(), 'user_profile:update', NULL))
+        OR api.has_org_scoped_permission_on_subject(auth.uid(), 'user_profile:update', id)
         OR
         (
-            api.has_permission(auth.uid(), 'user_profile:delete', NULL)
+            (SELECT api.has_permission(auth.uid(), 'user_profile:delete', NULL))
             AND id != auth.uid()
         )
     )
@@ -263,12 +281,15 @@ CREATE POLICY "user_profile update policy" ON api.user_profiles
         )
         OR
         (
-            api.has_permission_on_subject(auth.uid(), 'user_profile:update', id)
+            (
+                (SELECT api.has_permission(auth.uid(), 'user_profile:update', NULL))
+                OR api.has_org_scoped_permission_on_subject(auth.uid(), 'user_profile:update', id)
+            )
             AND (metadata).deletion_timestamp IS NULL
         )
         OR
         (
-            api.has_permission(auth.uid(), 'user_profile:delete', NULL)
+            (SELECT api.has_permission(auth.uid(), 'user_profile:delete', NULL))
             AND (metadata).deletion_timestamp IS NOT NULL
             AND id != auth.uid()
             AND (metadata).name != 'admin'
@@ -278,7 +299,7 @@ CREATE POLICY "user_profile update policy" ON api.user_profiles
 CREATE POLICY "user_profile delete policy" ON api.user_profiles
     FOR DELETE
     USING (
-        api.has_permission(auth.uid(), 'user_profile:delete', NULL)
+        (SELECT api.has_permission(auth.uid(), 'user_profile:delete', NULL))
         AND id != auth.uid()
         AND (metadata).name != 'admin'
     );
@@ -292,13 +313,15 @@ DROP POLICY IF EXISTS "role assignment delete policy" ON api.role_assignments;
 CREATE POLICY "role assignment read policy" ON api.role_assignments
     FOR SELECT
     USING (
-        api.has_permission_on_subject(auth.uid(), 'role_assignment:read', (spec).user_id)
+        (SELECT api.has_permission(auth.uid(), 'role_assignment:read', NULL))
+        OR api.has_org_scoped_permission_on_subject(auth.uid(), 'role_assignment:read', (spec).user_id)
     );
 
 CREATE POLICY "role assignment create policy" ON api.role_assignments
     FOR INSERT
     WITH CHECK (
-        api.has_permission_on_subject(auth.uid(), 'role_assignment:create', (spec).user_id)
+        (SELECT api.has_permission(auth.uid(), 'role_assignment:create', NULL))
+        OR api.has_org_scoped_permission_on_subject(auth.uid(), 'role_assignment:create', (spec).user_id)
     );
 
 CREATE POLICY "role assignment update policy" ON api.role_assignments
@@ -306,13 +329,19 @@ CREATE POLICY "role assignment update policy" ON api.role_assignments
     USING (true)
     WITH CHECK (
         (
-            api.has_permission_on_subject(auth.uid(), 'role_assignment:update', (spec).user_id)
+            (
+                (SELECT api.has_permission(auth.uid(), 'role_assignment:update', NULL))
+                OR api.has_org_scoped_permission_on_subject(auth.uid(), 'role_assignment:update', (spec).user_id)
+            )
             AND (metadata).deletion_timestamp IS NULL
             AND (metadata).name != 'admin-global-role-assignment'
         )
         OR
         (
-            api.has_permission_on_subject(auth.uid(), 'role_assignment:delete', (spec).user_id)
+            (
+                (SELECT api.has_permission(auth.uid(), 'role_assignment:delete', NULL))
+                OR api.has_org_scoped_permission_on_subject(auth.uid(), 'role_assignment:delete', (spec).user_id)
+            )
             AND (metadata).deletion_timestamp IS NOT NULL
             AND (metadata).name != 'admin-global-role-assignment'
         )
@@ -321,7 +350,10 @@ CREATE POLICY "role assignment update policy" ON api.role_assignments
 CREATE POLICY "role assignment delete policy" ON api.role_assignments
     FOR DELETE
     USING (
-        api.has_permission_on_subject(auth.uid(), 'role_assignment:delete', (spec).user_id)
+        (
+            (SELECT api.has_permission(auth.uid(), 'role_assignment:delete', NULL))
+            OR api.has_org_scoped_permission_on_subject(auth.uid(), 'role_assignment:delete', (spec).user_id)
+        )
         AND (metadata).name != 'admin-global-role-assignment'
     );
 
@@ -332,7 +364,7 @@ DROP POLICY IF EXISTS "role read policy" ON api.roles;
 CREATE POLICY "role read policy" ON api.roles
     FOR SELECT
     USING (
-        api.has_permission_on_org_unit(auth.uid(), 'role:read', NULL)
+        (SELECT api.has_permission_on_org_unit(auth.uid(), 'role:read', NULL))
     );
 
 -- OrgUnits and their members
@@ -341,11 +373,17 @@ DROP POLICY IF EXISTS "org_unit_member read policy" ON api.org_unit_members;
 
 CREATE POLICY "org_unit read policy" ON api.org_units
     FOR SELECT
-    USING (api.has_permission_on_org_unit(auth.uid(), 'org_unit:read', id));
+    USING (
+        (SELECT api.has_permission(auth.uid(), 'org_unit:read', NULL))
+        OR api.has_org_scoped_permission(auth.uid(), 'org_unit:read', id)
+    );
 
 CREATE POLICY "org_unit_member read policy" ON api.org_unit_members
     FOR SELECT
-    USING (api.has_permission_on_org_unit(auth.uid(), 'org_unit:read', org_unit_id));
+    USING (
+        (SELECT api.has_permission(auth.uid(), 'org_unit:read', NULL))
+        OR api.has_org_scoped_permission(auth.uid(), 'org_unit:read', org_unit_id)
+    );
 
 -- ----------------------
 -- Preset role: department-admin
@@ -353,7 +391,8 @@ CREATE POLICY "org_unit_member read policy" ON api.org_unit_members
 -- Manages the people of an OrgUnit subtree when assigned with spec.org_unit.
 -- Nothing about it is special-cased: it is a role whose permissions all act on
 -- people or OrgUnits. Assigned globally it would act on everyone, like any
--- other role. Its preset_key protects it from changes.
+-- other role. Its preset_key protects it from changes. org_unit:assign-member
+-- acts on a subtree once the membership write policies check it there.
 CREATE OR REPLACE FUNCTION api.update_department_admin_permissions()
 RETURNS VOID AS $$
 BEGIN
@@ -366,7 +405,8 @@ BEGIN
         'role_assignment:update',
         'role_assignment:delete',
         'role:read',
-        'org_unit:read'
+        'org_unit:read',
+        'org_unit:assign-member'
     ]::api.permission_action[])::api.role_spec
     WHERE (metadata).name = 'department-admin';
 END;
