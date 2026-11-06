@@ -1,6 +1,10 @@
 package proxies
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
 
 type validationError struct {
 	Code       string `json:"code"`
@@ -19,4 +23,9 @@ func internalServerValidationError() *validationError {
 		Message:    "internal server error",
 		HTTPStatus: http.StatusInternalServerError,
 	}
+}
+
+func rejectValidation(c *gin.Context, validationErr *validationError) {
+	c.JSON(validationErrStatus(validationErr), validationErr)
+	c.Abort()
 }

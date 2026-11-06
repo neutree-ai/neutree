@@ -549,7 +549,7 @@ func TestCreateStructProxyHandlerFiltersUnknownTopLevelFieldsAndInfersColumns(t 
 	defer upstream.Close()
 
 	router := gin.New()
-	handler := CreateStructProxyHandler[v1.Endpoint](&Dependencies{
+	handler := CreateStructProxyHandler[v1.Endpoint](router, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	}, storage.ENDPOINT_TABLE)
 	router.PATCH("/api/v1/endpoints", handler)
@@ -591,7 +591,7 @@ func TestCreateStructProxyHandlerMasksClusterCredentials(t *testing.T) {
 	defer upstream.Close()
 
 	router := gin.New()
-	router.GET("/api/v1/clusters", CreateStructProxyHandler[v1.Cluster](&Dependencies{
+	router.GET("/api/v1/clusters", CreateStructProxyHandler[v1.Cluster](router, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	}, storage.CLUSTERS_TABLE))
 
@@ -623,7 +623,7 @@ func TestCreateStructProxyHandlerFiltersSoftDeletePayloadAndInfersColumns(t *tes
 	defer upstream.Close()
 
 	router := gin.New()
-	handler := CreateStructProxyHandler[v1.Endpoint](&Dependencies{
+	handler := CreateStructProxyHandler[v1.Endpoint](router, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	}, storage.ENDPOINT_TABLE)
 	router.PATCH("/api/v1/endpoints", handler)
@@ -661,7 +661,7 @@ func TestCreateStructProxyHandlerSkipsBackfillForSoftDeleteOnMaskedResource(t *t
 	defer upstream.Close()
 
 	router := gin.New()
-	handler := CreateStructProxyHandler[v1.ImageRegistry](&Dependencies{
+	handler := CreateStructProxyHandler[v1.ImageRegistry](router, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	}, storage.IMAGE_REGISTRY_TABLE)
 	router.PATCH("/api/v1/image_registries", handler)
@@ -699,7 +699,7 @@ func TestCreateStructProxyHandlerDoesNotApplyWriteColumnsToPost(t *testing.T) {
 	defer upstream.Close()
 
 	router := gin.New()
-	handler := CreateStructProxyHandler[v1.ImageRegistry](&Dependencies{
+	handler := CreateStructProxyHandler[v1.ImageRegistry](router, &Dependencies{
 		StorageAccessURL: upstream.URL,
 	}, storage.IMAGE_REGISTRY_TABLE)
 	router.POST("/api/v1/image_registries", handler)

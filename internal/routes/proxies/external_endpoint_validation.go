@@ -43,7 +43,7 @@ func validateExternalEndpoint() gin.HandlerFunc {
 
 		body, err := readAndRestoreBody(c.Request)
 		if err != nil {
-			rejectExternalEndpoint(c, invalidExternalEndpointPayloadError(err.Error()))
+			rejectValidation(c, invalidExternalEndpointPayloadError(err.Error()))
 
 			return
 		}
@@ -58,14 +58,14 @@ func validateExternalEndpoint() gin.HandlerFunc {
 
 		payloads, err := decodeResourcePayloads(body)
 		if err != nil {
-			rejectExternalEndpoint(c, invalidExternalEndpointPayloadError(err.Error()))
+			rejectValidation(c, invalidExternalEndpointPayloadError(err.Error()))
 
 			return
 		}
 
 		for _, payload := range payloads {
 			if validationErr := validateExternalEndpointName(payload, c.Request.Method); validationErr != nil {
-				rejectExternalEndpoint(c, validationErr)
+				rejectValidation(c, validationErr)
 
 				return
 			}
@@ -170,11 +170,6 @@ func readAndRestoreBody(r *http.Request) ([]byte, error) {
 	r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 
 	return body, nil
-}
-
-func rejectExternalEndpoint(c *gin.Context, validationErr *validationError) {
-	c.JSON(validationErrStatus(validationErr), validationErr)
-	c.Abort()
 }
 
 func invalidExternalEndpointPayloadError(hint string) *validationError {

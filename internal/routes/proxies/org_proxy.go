@@ -14,7 +14,7 @@ func RegisterOrgUnitRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc
 	proxyGroup := group.Group("/org_units")
 	proxyGroup.Use(middlewares...)
 
-	proxyGroup.GET("", CreateStructProxyHandler[v1.OrgUnit](deps, storage.ORG_UNIT_TABLE))
+	proxyGroup.GET("", CreateStructProxyHandler[v1.OrgUnit](proxyGroup, deps, storage.ORG_UNIT_TABLE))
 }
 
 // RegisterTeamRoutes registers Team routes (read-only; sync writes them).
@@ -24,7 +24,7 @@ func RegisterTeamRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc, d
 	proxyGroup := group.Group("/teams")
 	proxyGroup.Use(middlewares...)
 
-	proxyGroup.GET("", CreateStructProxyHandler[v1.Team](deps, storage.TEAM_TABLE))
+	proxyGroup.GET("", CreateStructProxyHandler[v1.Team](proxyGroup, deps, storage.TEAM_TABLE))
 }
 
 // RegisterTeamMemberRoutes registers Team membership routes.
@@ -34,7 +34,7 @@ func RegisterTeamMemberRoutes(group *gin.RouterGroup, middlewares []gin.HandlerF
 	proxyGroup := group.Group("/team_members")
 	proxyGroup.Use(middlewares...)
 
-	proxyGroup.GET("", CreateStructProxyHandler[storage.TeamMember](deps, storage.TEAM_MEMBER_TABLE))
+	proxyGroup.GET("", CreateStructProxyHandler[storage.TeamMember](proxyGroup, deps, storage.TEAM_MEMBER_TABLE))
 }
 
 // RegisterOrgUnitMemberRoutes registers OrgUnit membership routes; writes
@@ -45,7 +45,7 @@ func RegisterOrgUnitMemberRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 	proxyGroup := group.Group("/org_unit_members")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[storage.OrgUnitMember](deps, storage.ORG_UNIT_MEMBER_TABLE)
+	handler := CreateStructProxyHandler[storage.OrgUnitMember](proxyGroup, deps, storage.ORG_UNIT_MEMBER_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", handler)

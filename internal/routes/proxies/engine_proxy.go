@@ -18,7 +18,7 @@ func RegisterEngineRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	proxyGroup := group.Group("/engines")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.Engine](deps, storage.ENGINE_TABLE)
+	handler := CreateStructProxyHandler[v1.Engine](proxyGroup, deps, storage.ENGINE_TABLE)
 
 	// Only register allowed methods
 	proxyGroup.GET("", handler)

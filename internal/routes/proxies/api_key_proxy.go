@@ -10,7 +10,7 @@ func RegisterAPIKeyRoutes(group *gin.RouterGroup, middlewares []gin.HandlerFunc,
 	proxyGroup := group.Group("/api_keys")
 	proxyGroup.Use(middlewares...)
 
-	handler := CreateStructProxyHandler[v1.ApiKey](deps, "api_keys")
+	handler := CreateStructProxyHandler[v1.ApiKey](proxyGroup, deps, "api_keys")
 
 	proxyGroup.GET("", handler)
 	proxyGroup.PATCH("", rejectAPIKeyForceDelete(), handler)

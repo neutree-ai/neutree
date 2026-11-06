@@ -85,7 +85,7 @@ func RegisterImageRegistryRoutes(group *gin.RouterGroup, middlewares []gin.Handl
 		storage.IMAGE_REGISTRY_TABLE,
 		validateImageRegistryDeletion(deps.Storage),
 	)
-	handler := CreateStructProxyHandler[v1.ImageRegistry](deps, storage.IMAGE_REGISTRY_TABLE)
+	handler := CreateStructProxyHandler[v1.ImageRegistry](proxyGroup, deps, storage.IMAGE_REGISTRY_TABLE)
 
 	proxyGroup.GET("", handler)
 	proxyGroup.POST("", validateImageRegistryURL(), handler)
