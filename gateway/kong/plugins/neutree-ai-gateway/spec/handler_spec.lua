@@ -314,3 +314,73 @@ describe("routing trace metadata", function()
         assert.is_nil(values["ai.trace.routing"])
     end)
 end)
+
+describe("set_upstream_target()", function()
+    local previous_kong, previous_ngx, socket_loaded
+    local calls
+
+    before_each(function()
+        previous_kong, previous_ngx = _G.kong, _G.ngx
+        socket_loaded = package.loaded["socket"]
+        -- Any use of LuaSocket's blocking resolver fails the test.
+        package.loaded["socket"] = setmetatable({}, {
+            __index = function() error("blocking socket resolver used") end,
+        })
+        calls = { dns = {}, headers = {}, cleared = {} }
+        _G.ngx = { var = {} }
+        _G.kong = {
+            dns = {
+                toip = function(host)
+                    calls.dns[#calls.dns + 1] = host
+                    if host == "missing.example" then
+                        return nil, "name error"
+                    end
+                    return "10.0.0.7", 0
+                end,
+            },
+            service = {
+                set_target = function(host, port) calls.target = { host, port } end,
+                request = {
+                    set_scheme = function(scheme) calls.scheme = scheme end,
+                    set_header = function(k, v) calls.headers[k] = v end,
+                    clear_header = function(k) calls.cleared[k] = true end,
+                },
+            },
+            response = { exit = function(status, body) return { status = status, body = body } end },
+        }
+    end)
+
+    after_each(function()
+        _G.kong, _G.ngx = previous_kong, previous_ngx
+        package.loaded["socket"] = socket_loaded
+    end)
+
+    it("resolves a hostname with Kong's resolver and keeps the Host header", function()
+        local ip = T.set_upstream_target({ host = "svc.ns.svc.cluster.local", port = 8000, scheme = "http" })
+        assert.are.equal("10.0.0.7", ip)
+        assert.are.same({ "svc.ns.svc.cluster.local" }, calls.dns)
+        assert.are.same({ "10.0.0.7", 8000 }, calls.target)
+        assert.are.equal("http", calls.scheme)
+        assert.are.equal("svc.ns.svc.cluster.local", calls.headers["Host"])
+        assert.are.equal("svc.ns.svc.cluster.local", ngx.var.upstream_host)
+    end)
+
+    it("connects to an IP literal directly without a lookup or Host override", function()
+        local ip = T.set_upstream_target({ host = "192.0.2.10", port = 443, scheme = "https", auth_header = "Bearer k" })
+        assert.are.equal("192.0.2.10", ip)
+        assert.are.same({}, calls.dns)
+        assert.are.same({ "192.0.2.10", 443 }, calls.target)
+        assert.is_nil(calls.headers["Host"])
+        assert.is_nil(ngx.var.upstream_host)
+        assert.are.equal("Bearer k", calls.headers["Authorization"])
+        assert.is_true(calls.cleared["Accept-Encoding"])
+    end)
+
+    it("returns 502 when the hostname does not resolve", function()
+        local ip, response = T.set_upstream_target({ host = "missing.example", port = 80, scheme = "http" })
+        assert.is_nil(ip)
+        assert.are.equal(502, response.status)
+        assert.are.equal("DNS resolution failed for upstream: missing.example (name error)", response.body.error.message)
+        assert.is_nil(calls.target)
+    end)
+end)

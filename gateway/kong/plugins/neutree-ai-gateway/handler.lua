@@ -255,8 +255,9 @@ local function set_upstream_target(entry)
     local target_host = entry.host
     local connect_host = target_host
     if not target_host:match("^%d+%.%d+%.%d+%.%d+$") then
-        local toip = require("socket").dns.toip
-        local ip, err = toip(target_host)
+        -- Kong's resolver is non-blocking and cached; LuaSocket's glibc lookup
+        -- blocks the whole worker for the resolver timeout when a query is lost.
+        local ip, err = kong.dns.toip(target_host)
         if not ip then
             return nil, kong.response.exit(502, {
                 error = {
@@ -1678,6 +1679,7 @@ AIGatewayHandler._TEST = {
     make_message_start = make_message_start,
     anthropic_usage_from_openai = anthropic_usage_from_openai,
     handle_anthropic_stream_body = handle_anthropic_stream_body,
+    set_upstream_target = set_upstream_target,
 }
 
 return AIGatewayHandler
