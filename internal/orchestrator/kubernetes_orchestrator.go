@@ -35,6 +35,7 @@ const (
 	annNeutreeVersion                = "neutree.ai/neutree-version"
 	containerFailureRestartThreshold = 5
 	modelDownloaderInitContainerName = "model-downloader"
+	unexpectedAdmissionErrorReason   = "UnexpectedAdmissionError"
 )
 
 // podUnschedulableGracePeriod is how long a pod may stay Unschedulable before
@@ -661,6 +662,19 @@ func (k *kubernetesOrchestrator) getDeploymentStatus(
 		return nil, errors.Wrapf(err, "failed to get pods for deployment %s", dep.Name)
 	}
 
+	// Kubelet admission rejection is terminal for the Pod object. Once the
+	// device plugin recovers, the Deployment/ReplicaSet can create a
+	// replacement, but the rejected Pod itself will never become Running.
+	// Keep this cleanup narrowly scoped to current Neutree-owned endpoint Pods
+	// and the specific UnexpectedAdmissionError reason.
+	pods = k.cleanupUnexpectedAdmissionPods(
+		context.Background(),
+		ctrlClient,
+		dep,
+		endpoint.Metadata.Name,
+		pods,
+	)
+
 	if isPaused {
 		if len(pods) == 0 {
 			return &v1.EndpointStatus{
@@ -758,6 +772,95 @@ func (k *kubernetesOrchestrator) listPods(ctrlClient client.Client, namespace st
 	}
 
 	return podList.Items, nil
+}
+
+// cleanupUnexpectedAdmissionPods makes a best-effort pass over endpoint Pods
+// rejected by kubelet admission. Delete failures are logged and retained in
+// the returned list so a transient RBAC/API error does not hide the Pod from
+// normal status evaluation.
+func (k *kubernetesOrchestrator) cleanupUnexpectedAdmissionPods(
+	ctx context.Context,
+	ctrlClient client.Client,
+	deployment *appsv1.Deployment,
+	endpointName string,
+	pods []corev1.Pod,
+) []corev1.Pod {
+	remaining := make([]corev1.Pod, 0, len(pods))
+
+	for index := range pods {
+		pod := &pods[index]
+		if !isUnexpectedAdmissionErrorPod(pod) ||
+			!podOwnedByEndpointDeployment(ctx, ctrlClient, pod, deployment, endpointName) {
+			remaining = append(remaining, *pod)
+
+			continue
+		}
+
+		if err := ctrlClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			klog.Warningf("failed to delete GPU admission-rejected endpoint pod %s/%s: %v",
+				pod.Namespace, pod.Name, err)
+
+			remaining = append(remaining, *pod)
+		}
+	}
+
+	return remaining
+}
+
+func isUnexpectedAdmissionErrorPod(pod *corev1.Pod) bool {
+	return pod != nil &&
+		pod.Status.Phase == corev1.PodFailed &&
+		pod.Status.Reason == unexpectedAdmissionErrorReason
+}
+
+func podOwnedByEndpointDeployment(
+	ctx context.Context,
+	ctrlClient client.Client,
+	pod *corev1.Pod,
+	deployment *appsv1.Deployment,
+	endpointName string,
+) bool {
+	if pod == nil || deployment == nil || pod.Labels["endpoint"] != endpointName {
+		return false
+	}
+
+	owner := metav1.GetControllerOf(pod)
+	if owner == nil {
+		return false
+	}
+
+	switch owner.Kind {
+	case deploymentKind:
+		return ownerRefMatches(owner, deploymentKind, deployment.Name, deployment.UID)
+	case "ReplicaSet":
+		replicaSet := &appsv1.ReplicaSet{}
+		if err := ctrlClient.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: owner.Name}, replicaSet); err != nil {
+			if !apierrors.IsNotFound(err) {
+				klog.Warningf("failed to resolve ReplicaSet owner %s/%s for endpoint pod %s/%s: %v",
+					pod.Namespace, owner.Name, pod.Namespace, pod.Name, err)
+			}
+
+			return false
+		}
+
+		replicaSetOwner := metav1.GetControllerOf(replicaSet)
+
+		return replicaSetOwner != nil &&
+			ownerRefMatches(replicaSetOwner, deploymentKind, deployment.Name, deployment.UID)
+	default:
+		return false
+	}
+}
+
+func ownerRefMatches(owner *metav1.OwnerReference, kind, name string, uid types.UID) bool {
+	if owner == nil || owner.Kind != kind || owner.Name != name {
+		return false
+	}
+
+	// Unit tests and freshly-created objects can have no UID yet. When both
+	// sides have a UID, require it to match so a same-named object from an old
+	// generation cannot be mistaken for the current Endpoint deployment.
+	return owner.UID == "" || uid == "" || owner.UID == uid
 }
 
 func hasIncompleteModelDownloaderInitContainer(pods []corev1.Pod) (bool, string) {
